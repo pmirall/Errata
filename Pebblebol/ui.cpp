@@ -1971,14 +1971,11 @@ static void handle_lineage(Gesture g) {
 //  14. S8 SOCIAL - connectionless BLE mating
 // =============================================================================
 
-static void social_enter(void) {
-  s_soc_phase          = SOC_ENTER;
-  s_soc_err            = STR_EMPTY;
-  s_soc_ms             = now_ms();
-  s_soc_have_res       = 0;
-  s_cursor[SCR_SOCIAL] = 0;
-  s_soc_prev           = (uint8_t)net_mode();
-
+// Bring the BLE stack up and start advertising. net_request() no longer blocks
+// (net.cpp replaced delay(RADIO_SETTLE_MS) by the NPH_SETTLING phase), so the
+// stack may still be settling when it returns true: stay in SOC_ENTER and let
+// social_service() call this again on the next pump until net_mode() agrees.
+static void social_try_bringup(void) {
 #if FEATURE_BLE
   if (net_ble_sessions_left() == 0) { s_soc_phase = SOC_ERROR; s_soc_err = STR_SO_CAP; return; }
   if (!net_request(RADIO_BLE)) {
@@ -1986,6 +1983,9 @@ static void social_enter(void) {
     s_soc_err   = (net_last_err() == NERR_BLE_SESSION_CAP)
                     ? (uint16_t)STR_SO_CAP : (uint16_t)net_last_err_str();
     return;
+  }
+  if (net_mode() != RADIO_BLE) {
+    return;                       // settling; try again next pump
   }
   if (!ble_begin()) {
     s_soc_phase = SOC_ERROR;
@@ -2002,9 +2002,23 @@ static void social_enter(void) {
 #endif
 }
 
+static void social_enter(void) {
+  s_soc_phase          = SOC_ENTER;
+  s_soc_err            = STR_EMPTY;
+  s_soc_ms             = now_ms();
+  s_soc_have_res       = 0;
+  s_cursor[SCR_SOCIAL] = 0;
+  s_soc_prev           = (uint8_t)net_mode();
+
+  social_try_bringup();
+}
+
 static void social_leave(void) {
 #if FEATURE_BLE
   if (ble_is_up()) ble_end();
+  // The radio is screen-owned (plan section 2 row G4). S8 took the stack, so
+  // S8 gives it back - to whatever was resident on the way in, which with no
+  // policy left in the entry point is RADIO_OFF unless S15 QR is below us.
   if (net_mode() == RADIO_BLE) net_request((RadioMode)s_soc_prev);
 #endif
   s_soc_phase = SOC_ENTER;
@@ -2012,7 +2026,9 @@ static void social_leave(void) {
 
 static void social_service(void) {
 #if FEATURE_BLE
-  if (s_soc_phase == SOC_ERROR || !ble_is_up()) return;
+  if (s_soc_phase == SOC_ERROR) return;
+  if (s_soc_phase == SOC_ENTER && !ble_is_up()) { social_try_bringup(); return; }
+  if (!ble_is_up()) return;
 
   const PetSave* p = pet();
   uint8_t self = BLE_SELF_SEEKING;
@@ -2199,16 +2215,18 @@ static void handle_social(Gesture g) {
 // =============================================================================
 enum SetRow : uint8_t {
   SET_SOUND = 0, SET_WEB, SET_BRIGHT,
-  SET_LIGHT, SET_QR, SET_INFO, SET_RESET, SET_BACK, SET_ROWS
+  SET_LIGHT, SET_QR, SET_CLOCK, SET_INFO, SET_RESET, SET_BACK, SET_ROWS
 };
 
 static const uint16_t kSetLabel[SET_ROWS] = {
   STR_SET_SOUND,  STR_SET_WEB,   STR_SET_BRIGHT,
-  STR_MENU_LIGHT, STR_WEB_TITLE, STR_SET_INFO, STR_SET_RESET, STR_ITEM_BACK
+  STR_MENU_LIGHT, STR_WEB_TITLE, STR_SET_CLOCK, STR_SET_INFO, STR_SET_RESET,
+  STR_ITEM_BACK
 };
 static const uint16_t kSetHelp[SET_ROWS] = {
   STR_HLP_SOUND,  STR_HLP_WEB,   STR_HLP_BRIGHT,
-  STR_HLP_LIGHT,  STR_HLP_WEB,   STR_HLP_INFO, STR_HLP_RESET, STR_HLP_BACK
+  STR_HLP_LIGHT,  STR_HLP_WEB,   STR_HLP_CLOCK, STR_HLP_INFO, STR_HLP_RESET,
+  STR_HLP_BACK
 };
 static const uint8_t kBrightSteps[5] = {
   OLED_CONTRAST_DIM, 90, OLED_CONTRAST_DEFAULT, 200, 255
@@ -2269,6 +2287,7 @@ static void settings_select(void) {
     case SET_BACK:  nav_back();                              return;
     case SET_INFO:  s_set_page = 1; s_input_ms = now_ms();   return;
     case SET_QR:    nav_push(SCR_QR);                        return;
+    case SET_CLOCK: nav_push(SCR_CLOCK);                     return;
     case SET_LIGHT: do_action(ACT_LIGHT_TOGGLE);             return;
     case SET_RESET: confirm_open(CFM_WIPE1, STR_CF_WIPE);    return;
     default: break;
@@ -2387,6 +2406,177 @@ static void handle_qr(Gesture g) {
     s_qr_key[0]  = '\0';
     s_qr_manual  = now_ms();
     qr_build();
+  }
+}
+
+// =============================================================================
+//  16b. S16 TIME ENTRY  (section 26 "ask for the time")
+//      The device has no radio policy and no SNTP any more, so the only way a
+//      Pebblebol learns what day it is on its own is a human typing it here.
+//      Five fields, two buttons:
+//        TAP L / HOLD L (repeating)  next field
+//        TAP R                       +1 on the current field, wrapping
+//        HOLD R                      +1 auto-repeat (see below)
+//        BOTH                        leave without saving
+//        LONG BOTH                   HOME (invariant 2, untouched)
+//      HOLD R is BACK everywhere else, and ui_handle() exempts THIS screen and
+//      only this screen, because the recogniser deliberately never repeats
+//      HOLD_R (input.cpp note 2) and a date entered one tap at a time is
+//      unusable: the repeat is driven here from input_hold_ms(INPUT_BTN_R).
+//      Confirming is a HOLD, so a stray tap can never commit a wrong date.
+// =============================================================================
+enum ClkField : uint8_t {
+  CLK_YEAR = 0, CLK_MONTH, CLK_DAY, CLK_HOUR, CLK_MIN, CLK_FIELDS
+};
+
+#define CLK_YEAR_MIN  2020
+#define CLK_YEAR_MAX  2099
+
+static uint16_t s_clk[CLK_FIELDS];      // year, month, day, hour, minute
+static uint8_t  s_clk_field = 0;
+static uint32_t s_clk_rep_ms = 0;       // last auto-repeat increment
+
+static uint8_t clk_days_in_month(uint16_t year, uint16_t month) {
+  static const uint8_t kDays[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+  if (month < 1 || month > 12) return 31;
+  if (month == 2) {
+    const bool leap = ((year % 4u) == 0u && (year % 100u) != 0u) || ((year % 400u) == 0u);
+    return leap ? 29u : 28u;
+  }
+  return kDays[month - 1];
+}
+
+// Keep the day inside the month the user just selected, so 31 January -> March
+// never leaves an impossible 31 February on screen.
+static void clk_clamp_day(void) {
+  const uint8_t dim = clk_days_in_month(s_clk[CLK_YEAR], s_clk[CLK_MONTH]);
+  if (s_clk[CLK_DAY] > dim) s_clk[CLK_DAY] = dim;
+  if (s_clk[CLK_DAY] < 1u)  s_clk[CLK_DAY] = 1u;
+}
+
+static void clock_enter(void) {
+  struct tm lt;
+  const bool known = gt_local_tm(lt);
+  if (known && lt.tm_year + 1900 >= CLK_YEAR_MIN && lt.tm_year + 1900 <= CLK_YEAR_MAX) {
+    s_clk[CLK_YEAR]  = (uint16_t)(lt.tm_year + 1900);
+    s_clk[CLK_MONTH] = (uint16_t)(lt.tm_mon + 1);
+    s_clk[CLK_DAY]   = (uint16_t)lt.tm_mday;
+    s_clk[CLK_HOUR]  = (uint16_t)lt.tm_hour;
+    s_clk[CLK_MIN]   = (uint16_t)lt.tm_min;
+  } else {
+    // Nothing trustworthy to start from: a round, obviously-a-placeholder date.
+    s_clk[CLK_YEAR]  = CLK_YEAR_MIN;
+    s_clk[CLK_MONTH] = 1;
+    s_clk[CLK_DAY]   = 1;
+    s_clk[CLK_HOUR]  = 12;
+    s_clk[CLK_MIN]   = 0;
+  }
+  clk_clamp_day();
+  s_clk_field  = CLK_YEAR;
+  s_clk_rep_ms = 0;
+}
+
+static void clk_bump(void) {
+  switch (s_clk_field) {
+    case CLK_YEAR:
+      s_clk[CLK_YEAR] = (s_clk[CLK_YEAR] >= CLK_YEAR_MAX) ? CLK_YEAR_MIN
+                                                          : (uint16_t)(s_clk[CLK_YEAR] + 1);
+      clk_clamp_day();
+      break;
+    case CLK_MONTH:
+      s_clk[CLK_MONTH] = (uint16_t)((s_clk[CLK_MONTH] % 12u) + 1u);
+      clk_clamp_day();
+      break;
+    case CLK_DAY: {
+      const uint8_t dim = clk_days_in_month(s_clk[CLK_YEAR], s_clk[CLK_MONTH]);
+      s_clk[CLK_DAY] = (uint16_t)((s_clk[CLK_DAY] % dim) + 1u);
+      break;
+    }
+    case CLK_HOUR: s_clk[CLK_HOUR] = (uint16_t)((s_clk[CLK_HOUR] + 1u) % 24u); break;
+    case CLK_MIN:  s_clk[CLK_MIN]  = (uint16_t)((s_clk[CLK_MIN]  + 1u) % 60u); break;
+    default: break;
+  }
+  s_input_ms = now_ms();
+}
+
+// The whole point of the screen. gt_set_epoch() with CAL_USER is the one source
+// allowed to move the clock backwards, so a user correcting a wrong date is
+// never refused; store_touch_lastseen() then rewrites the persisted baseline so
+// the next boot measures its absence from the truth and not from an uptime.
+static void clock_commit(void) {
+  const uint32_t e = gt_epoch_from_local((int)s_clk[CLK_YEAR], (uint8_t)s_clk[CLK_MONTH],
+                                         (uint8_t)s_clk[CLK_DAY], (uint8_t)s_clk[CLK_HOUR],
+                                         (uint8_t)s_clk[CLK_MIN]);
+  if (e == 0 || !gt_set_epoch(e, CAL_USER)) {
+    ui_toast(STR_CLK_BAD);
+    input_flush();        // as on the success path: a held L must not re-commit
+    return;
+  }
+  store_touch_lastseen(gt_now());
+  ui_toast(STR_CLK_SAVED);
+  input_flush();          // the release of the confirming hold must not fire below
+  nav_back();
+}
+
+static void draw_clock(void) {
+  draw_header(S(STR_CLK_TITLE), nullptr);
+
+  static const uint16_t kClkLabel[CLK_FIELDS] = {
+    STR_CLK_YEAR, STR_CLK_MONTH, STR_CLK_DAY, STR_CLK_HOUR, STR_CLK_MIN
+  };
+  char val[8];
+  snprintf(val, sizeof(val), (s_clk_field == CLK_YEAR) ? "%u" : "%02u",
+           (unsigned)s_clk[s_clk_field]);
+
+  rd_text_fit(2, 22, 124, RD_FONT_BODY, S(kClkLabel[s_clk_field]));
+  rd_text(2, 42, RD_FONT_BIGNUM, val);
+
+  // The whole stamp, so the field being edited always has its context.
+  char stamp[32];
+  snprintf(stamp, sizeof(stamp), "%04u-%02u-%02u %02u:%02u",
+           (unsigned)s_clk[CLK_YEAR], (unsigned)s_clk[CLK_MONTH],
+           (unsigned)s_clk[CLK_DAY],  (unsigned)s_clk[CLK_HOUR],
+           (unsigned)s_clk[CLK_MIN]);
+  rd_text_fit(2, 51, 124, RD_FONT_TINY, stamp);
+  rd_text_fit(2, 58, 124, RD_FONT_TINY, S(STR_CLK_HOLD));
+
+  rd_affordance(S(STR_AF_NEXT), S(STR_AF_ADD));
+}
+
+// Auto-repeat for the right button. GST_HOLD_R fires once at HOLD_MS and the
+// recogniser never repeats it, so the sustained increment is timed here against
+// the debounced press instant the recogniser already owns.
+static void clock_service(void) {
+  if (!input_raw(INPUT_BTN_R)) { s_clk_rep_ms = 0; return; }
+  const uint32_t held = input_hold_ms(INPUT_BTN_R);
+  if (held < (uint32_t)REPEAT_START_MS) return;
+  const uint32_t t = now_ms();
+  if (s_clk_rep_ms != 0 && (uint32_t)(t - s_clk_rep_ms) < (uint32_t)REPEAT_RATE_MS) return;
+  s_clk_rep_ms = t;
+  clk_bump();
+}
+
+static void handle_clock(Gesture g) {
+  switch (g) {
+    case GST_TAP_R:
+      clk_bump();
+      break;
+    case GST_HOLD_R:                     // first increment of the auto-repeat
+      s_clk_rep_ms = now_ms();
+      clk_bump();
+      break;
+    case GST_TAP_L:
+    case GST_HOLD_L:
+      // HOLD_L confirms; a tap only moves on. Both are L so the thumb never
+      // leaves the button it is already on.
+      if (g == GST_HOLD_L) { clock_commit(); return; }
+      s_clk_field = (uint8_t)((s_clk_field + 1u) % (uint8_t)CLK_FIELDS);
+      break;
+    case GST_BOTH:
+      nav_back();
+      break;
+    default:
+      break;
   }
 }
 
@@ -3054,6 +3244,9 @@ static void screen_enter(uint8_t s) {
       break;
     case SCR_QR:
 #if FEATURE_WEB
+      // S15 is the screen that wants the station; there is no radio policy in
+      // the entry point any more (plan section 2 row G4). It is released again
+      // in screen_leave().
       if (net_mode() != RADIO_WIFI && cfg_flag(CF_WEB_ENABLED)) net_request(RADIO_WIFI);
 #endif
       s_qr_variant = net_is_ap_up() ? 1u : 0u;
@@ -3061,6 +3254,9 @@ static void screen_enter(uint8_t s) {
       s_qr_ms      = now_ms();
       s_qr_manual  = 0;
       qr_build();
+      break;
+    case SCR_CLOCK:
+      clock_enter();
       break;
     case SCR_EGG:
       s_rub_count = 0;
@@ -3079,6 +3275,12 @@ static void screen_leave(uint8_t s) {
   // petfx_hold() it took. See the enumeration in ui_service().
   if (s == SCR_HOME)   actfx_cancel();
   if (s == SCR_SOCIAL) social_leave();
+#if FEATURE_WEB
+  // Radio OFF by default: the QR screen is the only owner of RADIO_WIFI, so
+  // leaving it gives the ~50 KB and the largest current draw on the board back
+  // instead of holding the station powered until the next reboot.
+  if (s == SCR_QR && net_mode() == RADIO_WIFI) (void)net_request(RADIO_OFF);
+#endif
   if (s == SCR_GAME && s_g.phase == 1) {
     // Abandoning a game in any way at all is a loss.
     ActionResult r;
@@ -3310,8 +3512,11 @@ void ui_handle(Gesture g) {
     if (s_screen != SCR_HOME)     { nav_home(); return; }
   }
 
-  // --- invariant 1: BACK on every screen except S4 and S12 -----------------
-  if (g == GST_HOLD_R && s_screen != SCR_GAME && s_screen != SCR_MEMORIAL) {
+  // --- invariant 1: BACK on every screen except S4, S12 and S16 ------------
+  // S16 needs a repeating right button to enter a date (see handle_clock); it
+  // is left with BOTH (cancel), HOLD L (save) and LONG BOTH (HOME) instead.
+  if (g == GST_HOLD_R && s_screen != SCR_GAME && s_screen != SCR_MEMORIAL &&
+      s_screen != SCR_CLOCK) {
     if (s_screen == SCR_HOME) { s_wiggle_ms = now_ms(); return; }
     if (s_screen == SCR_SETTINGS && s_set_page == 1) { s_set_page = 0; return; }
     nav_back();
@@ -3331,6 +3536,7 @@ void ui_handle(Gesture g) {
     case SCR_SETTINGS:  handle_settings(g); break;
     case SCR_EGG:       handle_egg(g);      break;
     case SCR_QR:        handle_qr(g);       break;
+    case SCR_CLOCK:     handle_clock(g);    break;
     default:            break;              // S12: only the bury hold gets out
   }
 }
@@ -3396,6 +3602,7 @@ void ui_service(void) {
   if (hatch_active()) { hatch_service(); return; }
   if (s_screen == SCR_GAME)       game_service();
   if (s_screen == SCR_SOCIAL)     social_service();
+  if (s_screen == SCR_CLOCK)      clock_service();
 
   // The alert layer surfaces only when nothing else owns the screen.
   if (s_modal == MODAL_NONE && s_alert_n > 0 &&
@@ -3460,6 +3667,7 @@ void ui_draw(void) {
       draw_egg();
       break;
     case SCR_QR:       draw_qr();       break;
+    case SCR_CLOCK:    draw_clock();    break;
     case SCR_GOD:      god_draw();      rd_affordance_echo(); return;  // god owns the frame
     default:           draw_home();     break;
   }

@@ -52,6 +52,8 @@ $(BIN)/test_sim_golden: $(OBJ)/sim.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 $(BIN)/test_qr:         $(OBJ)/qr.o
 $(BIN)/test_clock:      $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o
+$(BIN)/test_overflow:   $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o \
+                        $(OBJ)/sim.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_fixtures:   $(OBJ)/crc16.o
 
 $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)

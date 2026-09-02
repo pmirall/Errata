@@ -87,6 +87,7 @@ enum ScreenId : uint8_t {
   SCR_EGG,           // S13
   SCR_GOD,           // S14
   SCR_QR,            // S15
+  SCR_CLOCK,         // S16 on-device time entry (section 26)
   SCR_COUNT
 };
 
@@ -131,7 +132,7 @@ enum AbsenceTier : uint8_t {
   ABS_ABANDONO,      // 1-3 d
   ABS_GRAVE,         // 3-7 d
   ABS_MUERTO,        // the offline sim reached health <= 0
-  ABS_UNKNOWN,       // no clock: apply ABS_LARGA as a floor, retro-fix later
+  ABS_UNKNOWN,       // no clock: charge nothing, retro-fix once one arrives
   ABS_COUNT
 };
 

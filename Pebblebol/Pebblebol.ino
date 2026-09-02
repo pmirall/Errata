@@ -45,14 +45,6 @@
 // index_html.h is deliberately NOT included: webui.cpp is its single translation
 // unit (AUDIT 10 - a second inclusion doubles 46 KB of .rodata).
 
-// -----------------------------------------------------------------------------
-//  Build-time policy: is there any reason at all to power the WiFi stack?
-// -----------------------------------------------------------------------------
-#define NT_WANT_WIFI (FEATURE_WEB)
-
-// How often the radio policy retries after the stack fell back to RADIO_OFF.
-#define NT_WIFI_RETRY_MS   30000UL
-
 // Guard rail for the 1 Hz scheduler: a stall longer than this (a long offline
 // catch-up, an NVS write storm) resynchronises instead of firing a burst of
 // catch-up ticks.
@@ -73,11 +65,10 @@ static PetSave  g_pet;
 static Config   g_cfg;
 
 static uint32_t g_tick_ms        = 0;      // scheduler cursor for the 1 Hz tick
-static uint32_t g_wifi_try_ms    = 0;      // last radio-policy attempt
 static uint32_t g_boot_last_seen = 0;      // store_last_seen() as found at boot
 static uint16_t g_cfg_crc        = 0;      // change detector for Config
 static uint8_t  g_absence_unknown = 0;     // boot took the ABS_UNKNOWN path
-static uint8_t  g_clock_was_valid = 0;     // edge detector for SNTP landing
+static uint8_t  g_clock_was_valid = 0;     // edge detector for a landing calibration
 static uint8_t  g_nvs_ok          = 0;
 
 // =============================================================================
@@ -139,53 +130,6 @@ static void build_env(SimEnv& env)
 }
 
 // =============================================================================
-//  RADIO POLICY
-//  net.cpp owns every WiFi/BLE lifecycle call; this decides only WHETHER we
-//  want the station up. ui.cpp owns RADIO_BLE for S8 SOCIAL and restores the
-//  previous mode when it leaves, so the policy never fights it: it acts only
-//  from RADIO_OFF and never while the social screen is open.
-// =============================================================================
-static bool wifi_wanted(void)
-{
-#if !NT_WANT_WIFI
-  return false;
-#else
-  if (FEATURE_WEB && (g_cfg.flags & CF_WEB_ENABLED)) {
-    return true;
-  }
-  return false;
-#endif
-}
-
-static void radio_policy(uint32_t ms)
-{
-  if (!wifi_wanted()) {
-    // PH3 #7: nothing wants the station any more (WEB off in S9). Give the
-    // ~50 KB and the radio back instead of holding
-    // them powered until the next reboot - on a battery-bound device the
-    // station is the single largest current draw. ui.cpp owns RADIO_BLE while
-    // S8 is open, so never fight it there; net.cpp restores the previous mode
-    // when S8 closes. Testing RADIO_WIFI (not != RADIO_OFF) is what keeps this
-    // off the BLE stack.
-    if (net_mode() == RADIO_WIFI && ui_screen() != SCR_SOCIAL) {
-      (void)net_request(RADIO_OFF);
-    }
-    return;
-  }
-  if (net_mode() != RADIO_OFF) {
-    return;                       // WIFI already up, or ui owns the BLE stack
-  }
-  if (ui_screen() == SCR_SOCIAL) {
-    return;                       // S8 is between two BLE sessions; keep out
-  }
-  if (g_wifi_try_ms != 0 && (uint32_t)(ms - g_wifi_try_ms) < NT_WIFI_RETRY_MS) {
-    return;
-  }
-  g_wifi_try_ms = ms;
-  (void)net_request(RADIO_WIFI);  // failure is reported through net_last_err()
-}
-
-// =============================================================================
 //  HOURLY-GAIN LEDGER SEAM  (PH3 finding 4 / PH4 section 6 item 1)
 //  Two modules, neither of which may know about the other: sim.cpp owns the
 //  anti-farm budget and does no I/O (BRIEF section 4), storage.cpp owns the NVS
@@ -200,8 +144,8 @@ static bool gain_source(uint8_t pts[NT_GAIN_SLOTS], uint32_t& epoch)
 {
   sim_gain_snapshot(pts);
   const uint32_t now = sim_now();
-  // No trustworthy wall clock: before SNTP lands gt_now() - and therefore
-  // sim_now() - is a seconds-since-boot counter, and a difference between two
+  // No trustworthy wall clock: before a calibration lands gt_now() - and
+  // therefore sim_now() - is a seconds-since-boot counter, and a difference between two
   // of those describes nothing (the same reasoning as findings 1 and 2). Stamp
   // 0 so the loader refuses it. Writing the snapshot anyway, rather than
   // skipping the write, is the load-bearing half: it retires the last TRUSTED
@@ -245,21 +189,17 @@ static void boot_pet(void)
 // =============================================================================
 //  BOOT: ABSENCE
 //  GAME_DESIGN 5.1-5.3. sim_catch_up_ex() reads SimEnv, so the environment must
-//  already be pushed in. With no trustworthy clock it takes the ABS_UNKNOWN
-//  path and we arm the retro-fix for the moment SNTP lands.
+//  already be pushed in. With no trustworthy clock (gt_cal_state() == CAL_UNSET)
+//  it takes the ABS_UNKNOWN path, which charges ZERO (plan section 1.7), and we
+//  arm the retro-fix for the moment gt_set_epoch() lands.
 //
-//  PH3 #1: "gt_is_valid() is false" alone is NOT evidence of an absence, and
-//  handing sim_catch_up_ex() a bare 0 there made it substitute the 6 h
-//  ABSENCE_LARGA_S floor - on the very first boot of a brand new device, and
-//  again on every reboot of any unit without a working clock, which is a fully
-//  supported configuration (CF_WEB_ENABLED is user-togglable). The
-//  crash-vs-abandonment discriminator storage.cpp
-//  already computes is the missing input: BOOT_FIRST_RUN has nobody to have
-//  abandoned, and BOOT_CRASH / BOOT_SOFT_RESET are explicitly not absences
-//  (the same reason the toast below says "dizzy" rather than "abandoned").
-//  On top of that the baseline itself has to be a real wall clock: on a
-//  never-synced device store_last_seen() returns the PREVIOUS boot's uptime,
-//  which cannot describe a gap at all.
+//  PH3 #1: "gt_is_valid() is false" alone is NOT evidence of an absence. The
+//  crash-vs-abandonment discriminator storage.cpp already computes is the
+//  missing input: BOOT_FIRST_RUN has nobody to have abandoned, and BOOT_CRASH /
+//  BOOT_SOFT_RESET are explicitly not absences (the same reason the toast below
+//  says "dizzy" rather than "abandoned"). On top of that the baseline itself
+//  has to be a real wall clock: on a never-calibrated device store_last_seen()
+//  returns the PREVIOUS boot's uptime, which cannot describe a gap at all.
 // =============================================================================
 static void boot_absence(void)
 {
@@ -268,16 +208,14 @@ static void boot_absence(void)
   sim_set_env(env);
 
   const uint32_t now  = env.now_epoch;
-  uint32_t absence_s  = 0;
-  if (g_boot_last_seen != 0 && now > g_boot_last_seen) {
-    absence_s = now - g_boot_last_seen;
-  }
+  uint32_t absence_s  = (g_boot_last_seen != 0u)
+                          ? gt_elapsed_since(g_boot_last_seen, now) : 0u;
 
-  uint8_t known = gt_is_valid() ? 1u : 0u;
+  uint8_t known = (gt_cal_state() != CAL_UNSET) ? 1u : 0u;
   if (!known) {
     const BootKind bk       = store_boot_kind();
     const bool     real_gap = (g_boot_last_seen >= (uint32_t)NT_EPOCH_SANE_MIN) &&
-                              (now > g_boot_last_seen);
+                              (absence_s != 0u);
     if (bk == BOOT_FIRST_RUN || bk == BOOT_CRASH || bk == BOOT_SOFT_RESET ||
         !real_gap) {
       known      = 1;     // nothing was abandoned: charge the true zero
@@ -361,8 +299,15 @@ void setup()
     ui_toast(STR_BOOT_DIZZY);     // a crash is not an abandonment
   }
 
+  // Section 26, first boot: with no SNTP and no radio policy the device learns
+  // the date from a human or not at all, so ask once, right here, before the
+  // pet's first day starts running on an estimate. Every later visit is through
+  // S9 SETTINGS. Backing out is allowed - CAL_UNSET simply charges no absence.
+  if (boot == BOOT_FIRST_RUN && gt_cal_state() == CAL_UNSET) {
+    ui_goto(SCR_CLOCK);
+  }
+
   g_tick_ms        = millis();
-  g_wifi_try_ms    = 0;
   g_clock_was_valid = gt_is_valid() ? 1u : 0u;
 
   Serial.printf("[nt] boot=%u nvs=%u stage=%u free=%u\r\n",
@@ -388,25 +333,25 @@ static void logic_tick(void)
   store_touch_lastseen(env.now_epoch);
   (void)store_save(g_pet, false); // rate-limited to SAVE_FULL_PERIOD_S inside
 
-  // SNTP landed after an ABS_UNKNOWN boot: charge the difference between the
-  // AUSENCIA_LARGA floor already applied and the truth (GAME_DESIGN 5.1).
+  // gt_set_epoch() landed after an ABS_UNKNOWN boot: the boot charged nothing,
+  // so charge the truth now (GAME_DESIGN 5.1). The edge is on gt_is_valid(),
+  // which is exactly "gt_cal_state() left CAL_UNSET".
   const uint8_t clock_now = gt_is_valid() ? 1u : 0u;
   if (clock_now && !g_clock_was_valid) {
     if (g_absence_unknown) {
       g_absence_unknown = 0;
       uint32_t truth = 0;
       // PH3 #2: g_boot_last_seen is only a wall clock if it reads like one.
-      // On a device that has never met NTP, gt_now() returns the uptime
+      // On a device that has never been calibrated, gt_now() returns the uptime
       // (gametime.cpp seeds its estimate only from a >= NT_EPOCH_SANE_MIN
       // value), and logic_tick writes that uptime into NVS "t" every second.
-      // Subtracting it from a freshly-landed SNTP epoch yields ~55 YEARS,
-      // which tier_for() resolves to ABS_GRAVE: -40 health on top of the
-      // LARGA floor plus the permanent, inheritable PF_SCAR, at the exact
-      // moment the owner finishes provisioning WiFi. Without a real baseline
-      // there is no truth to charge, so charge nothing.
-      if (g_boot_last_seen >= (uint32_t)NT_EPOCH_SANE_MIN &&
-          env.now_epoch > g_boot_last_seen) {
-        truth = env.now_epoch - g_boot_last_seen;
+      // Subtracting it from a freshly-set epoch yields ~55 YEARS, which
+      // tier_for() resolves to ABS_GRAVE: -40 health plus the permanent,
+      // inheritable PF_SCAR, at the exact moment the owner finishes typing the
+      // date. Without a real baseline there is no truth to charge, so charge
+      // nothing.
+      if (g_boot_last_seen >= (uint32_t)NT_EPOCH_SANE_MIN) {
+        truth = gt_elapsed_since(g_boot_last_seen, env.now_epoch);
       }
       sim_absence_retrofix(truth);
       ui_note_events(sim_take_events());
@@ -458,11 +403,12 @@ void loop()
   }
 
   // --- 5. radio ------------------------------------------------------------
-  radio_policy(ms);
+  // NO POLICY HERE. The radio is OFF at boot and stays off (plan section 2 row
+  // G4): the screen that needs it asks for it and releases it on the way out -
+  // S15 QR owns RADIO_WIFI, S8 SOCIAL owns RADIO_BLE. net_service() only pumps
+  // the state machine the screen put it in, including the settle timer that
+  // replaced the blocking delay between the two stacks.
   net_service();
-  if (net_is_sta_up()) {
-    gt_sync_start();              // idempotent + self-rate-limiting
-  }
   web_service();
   ble_scan_service();
 }

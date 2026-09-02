@@ -387,6 +387,20 @@ enum StrId : uint16_t {
   STR_UI_GOD_HOLD,
   STR_UI_NO_CLOCK,
 
+  // --- 33f. S16 time entry ------------------------ <= 16 chars --------------
+  STR_SET_CLOCK,
+  STR_CLK_TITLE,
+  STR_CLK_YEAR,
+  STR_CLK_MONTH,
+  STR_CLK_DAY,
+  STR_CLK_HOUR,
+  STR_CLK_MIN,
+  STR_CLK_HOLD,
+  STR_CLK_SAVED,
+  STR_CLK_BAD,
+  STR_HLP_CLOCK,
+  STR_AF_ADD,
+
   // ===========================================================================
   //  34. GOD MODE BLOCK - appended by godmode.cpp. APPEND ONLY, NEVER RENUMBER.
   //  The base block (section 30) carries the twelve GAME_DESIGN 10.1 command
@@ -786,6 +800,20 @@ inline constexpr const char* const ES[] = {
   /* STR_UI_GOD_HOLD */           "···",
   /* STR_UI_NO_CLOCK */           "Sin hora fiable.",
 
+  /* --- 33f. S16 time entry --- */
+  /* STR_SET_CLOCK */             "Poner hora",
+  /* STR_CLK_TITLE */             "PONER HORA",
+  /* STR_CLK_YEAR */              "Año",
+  /* STR_CLK_MONTH */             "Mes",
+  /* STR_CLK_DAY */               "Día",
+  /* STR_CLK_HOUR */              "Hora",
+  /* STR_CLK_MIN */               "Minuto",
+  /* STR_CLK_HOLD */              "Mantén IZQ: guardar",
+  /* STR_CLK_SAVED */             "Hora guardada.",
+  /* STR_CLK_BAD */               "Fecha imposible.",
+  /* STR_HLP_CLOCK */             "Pon la fecha y la hora.",
+  /* STR_AF_ADD */                "+1",
+
   /* --- 34a. god mode: list rows and panel titles --- */
   /* STR_GOD_SICK */              "ENFERMAR",
   /* STR_GOD_POOP */              "CACAS",
@@ -869,5 +897,6 @@ static_assert(STR_MENU_SETTINGS   - STR_MENU_FEED   + 1 == MENU_ITEM_COUNT,    "
 static_assert(STR_SYL_A11         - STR_SYL_A00     + 1 == 12,                 "name syllables A");
 static_assert(STR_SYL_B11         - STR_SYL_B00     + 1 == 12,                 "name syllables B");
 static_assert(STR_HLP_BACK        - STR_HLP_FEED    + 1 == 17,                 "ui help block");
+static_assert(STR_AF_ADD          - STR_SET_CLOCK   + 1 == 12,                 "S16 time entry block");
 
 #endif // NT_STRINGS_ES_H

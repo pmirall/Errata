@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - input.cpp
+//  PEBBLEBOL - input.cpp
 //  Two-button debounce + gesture recogniser (GAME_DESIGN 8.1).
 //
 //  DESIGN NOTES (the reasons this file looks the way it does)
@@ -13,8 +13,9 @@
 //
 //  2. Holds fire exactly ONCE when the threshold is crossed. HOLD_L then keeps
 //     repeating every REPEAT_RATE_MS because GAME_DESIGN 8.3 uses it as the
-//     fast-scroll of every list. HOLD_R is BACK on every screen and therefore
-//     never repeats.
+//     fast-scroll of every list. HOLD_R is BACK on almost every screen and
+//     therefore never repeats here; the one screen that needs a repeating right
+//     button (S16 time entry) times it itself from input_hold_ms().
 //
 //  3. Once an episode has produced its gesture, the remaining edges of that
 //     episode are swallowed (state ST_SWALLOW) until BOTH buttons are up. This
@@ -27,6 +28,16 @@
 //  5. Zero allocation, zero floating point, no Arduino header outside the shim
 //     block below, so the whole file compiles on a host compiler for the
 //     scripted-waveform test harness.
+//
+//  6. ON THE DEVICE the pins are sampled by a 5 ms esp_timer (INPUT_POLL_MS is
+//     finally real), not by loop(). Every level CHANGE is pushed into a 16-deep
+//     single-producer/single-consumer ring of {ms, levels} and input_poll()
+//     replays it into the FSM below at the instant each edge actually happened.
+//     A 300 ms stall in loop() - a flash write, an offline catch-up, the god
+//     `stall` command - therefore costs the player nothing: the press is still
+//     recognised, with its true duration, on the next poll. The FSM itself is
+//     UNCHANGED, and the host path (below, `#else`) still samples inline so the
+//     scripted-waveform test drives exactly the code that shipped.
 // =============================================================================
 #include "input.h"
 
@@ -38,6 +49,7 @@
 // -----------------------------------------------------------------------------
 #if defined(ARDUINO)
   #include <Arduino.h>
+  #include "esp_timer.h"
   static inline uint32_t in_now(void)          { return (uint32_t)millis(); }
   static inline int      in_level(uint8_t i)   { return digitalRead(i == INPUT_BTN_L ? PIN_BTN_L : PIN_BTN_R); }
   static inline void     in_pins_begin(void)   { pinMode(PIN_BTN_L, INPUT_PULLUP); pinMode(PIN_BTN_R, INPUT_PULLUP); }
@@ -217,11 +229,14 @@ static void in_on_release(uint8_t i, uint32_t t)
 
 // -----------------------------------------------------------------------------
 // 5. SAMPLER (debounce)
+//    `levels` is a bitmask of PRESSED buttons, bit i = INPUT_BTN_*. Splitting
+//    it out of the pin read is what lets the timer ring replay an old sample at
+//    the instant it was taken.
 // -----------------------------------------------------------------------------
-static void in_sample(uint32_t now)
+static void in_apply(uint32_t now, uint8_t levels)
 {
   for (uint8_t i = 0; i < INPUT_BTN_N; i++) {
-    const bool pressed = (in_level(i) == BTN_ACTIVE_LEVEL);
+    const bool pressed = ((levels >> i) & 1u) != 0u;
 
     if (pressed != s_raw[i]) {
       s_raw[i]           = pressed;
@@ -238,6 +253,105 @@ static void in_sample(uint32_t now)
     }
   }
 }
+
+// Read both pins right now, as a bitmask.
+static uint8_t in_read_levels(void)
+{
+  uint8_t lv = 0;
+  for (uint8_t i = 0; i < INPUT_BTN_N; i++) {
+    if (in_level(i) == BTN_ACTIVE_LEVEL) lv = (uint8_t)(lv | (1u << i));
+  }
+  return lv;
+}
+
+static void in_sample(uint32_t now)
+{
+  in_apply(now, in_read_levels());
+}
+
+#if defined(ARDUINO)
+// -----------------------------------------------------------------------------
+// 5b. TIMER SAMPLER + SPSC EDGE RING (device only)
+//     Producer: the esp_timer callback, every INPUT_POLL_MS. Consumer:
+//     input_poll(), from loop(). One producer and one consumer means the two
+//     indices need no lock - the producer only ever advances the tail, the
+//     consumer only ever advances the head - as long as each is written by
+//     exactly one side and read as a whole, which a byte is.
+//
+//     Only CHANGES are queued. A run of identical samples carries no
+//     information the FSM can use: what it needs is the instant of each edge,
+//     and input_poll() finishes with a live sample at the current time, which
+//     is what closes the debounce window of the last queued edge. Sixteen
+//     entries is therefore sixteen EDGES, far more than a human generates
+//     inside any stall the firmware can survive.
+// -----------------------------------------------------------------------------
+#define IN_RING_LEN 16                    // power of two
+#define IN_RING_MASK (IN_RING_LEN - 1)
+
+struct InSample {
+  uint32_t ms;
+  uint8_t  levels;
+};
+
+static volatile InSample s_ring[IN_RING_LEN];
+static volatile uint8_t  s_ring_head = 0;   // consumer cursor
+static volatile uint8_t  s_ring_tail = 0;   // producer cursor
+static uint8_t           s_ring_last = 0;   // last levels the producer queued
+static uint32_t          s_fsm_ms    = 0;   // newest instant already fed to the FSM
+static esp_timer_handle_t s_timer    = nullptr;
+
+static void in_timer_cb(void *)
+{
+  const uint8_t lv = in_read_levels();
+  if (lv == s_ring_last) {
+    return;                                 // no edge, nothing to record
+  }
+  s_ring_last = lv;
+
+  const uint8_t tail = s_ring_tail;
+  const uint8_t next = (uint8_t)((tail + 1u) & IN_RING_MASK);
+  if (next == s_ring_head) {
+    return;                                 // full: keep the oldest edges
+  }
+  s_ring[tail].ms     = (uint32_t)millis();
+  s_ring[tail].levels = lv;
+  s_ring_tail         = next;               // publish last
+}
+
+static bool in_ring_pop(InSample& out)
+{
+  const uint8_t head = s_ring_head;
+  if (head == s_ring_tail) {
+    return false;
+  }
+  out.ms     = s_ring[head].ms;
+  out.levels = s_ring[head].levels;
+  s_ring_head = (uint8_t)((head + 1u) & IN_RING_MASK);
+  return true;
+}
+
+static void in_timer_begin(void)
+{
+  s_ring_head = 0;
+  s_ring_tail = 0;
+  s_ring_last = in_read_levels();
+  s_fsm_ms    = (uint32_t)millis();
+  if (s_timer != nullptr) {
+    return;                                 // input_begin() is callable twice
+  }
+  esp_timer_create_args_t a = {};
+  a.callback = &in_timer_cb;
+  a.name     = "btn";
+  if (esp_timer_create(&a, &s_timer) != ESP_OK) {
+    s_timer = nullptr;                      // fall back to polling in loop()
+    return;
+  }
+  if (esp_timer_start_periodic(s_timer, (uint64_t)INPUT_POLL_MS * 1000ULL) != ESP_OK) {
+    esp_timer_delete(s_timer);
+    s_timer = nullptr;
+  }
+}
+#endif  // ARDUINO
 
 // -----------------------------------------------------------------------------
 // 6. TIME-DRIVEN TRANSITIONS
@@ -317,13 +431,35 @@ void input_begin(void)
   }
   // A button held through boot is ignored until it is released.
   s_state = any_down ? ST_SWALLOW : ST_IDLE;
+
+#if defined(ARDUINO)
+  in_timer_begin();
+#endif
 }
 
 Gesture input_poll(void)
 {
+#if defined(ARDUINO)
+  // Replay every edge the 5 ms sampler caught since the last call, each at its
+  // own instant, so a stalled loop() loses no press and no press DURATION.
+  // The clamp keeps the instants fed to the FSM monotonic: the live sample at
+  // the end of the previous call may have raced ahead of the timer, and every
+  // duration in in_tick() is a (uint32_t)(now - then) that would underflow into
+  // a phantom HOLD if time ever ran backwards.
+  InSample sm;
+  while (in_ring_pop(sm)) {
+    if ((int32_t)(sm.ms - s_fsm_ms) < 0) sm.ms = s_fsm_ms;
+    in_apply(sm.ms, sm.levels);
+    in_tick(sm.ms);
+    s_fsm_ms = sm.ms;
+  }
+#endif
   const uint32_t now = in_now();
   in_sample(now);
   in_tick(now);
+#if defined(ARDUINO)
+  s_fsm_ms = now;
+#endif
   return in_pop();
 }
 
@@ -345,6 +481,10 @@ uint32_t input_hold_ms(uint8_t which)
 
 void input_flush(void)
 {
+#if defined(ARDUINO)
+  // Drop the queued edges too: they belong to the episode being swallowed.
+  s_ring_head = s_ring_tail;
+#endif
   in_queue_clear();
   s_pending_tap = false;
   s_state = (s_down[INPUT_BTN_L] || s_down[INPUT_BTN_R]) ? ST_SWALLOW : ST_IDLE;

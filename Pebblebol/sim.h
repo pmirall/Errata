@@ -199,11 +199,13 @@ uint32_t sim_age_s(void);
 uint32_t sim_now(void);                 // sim's own epoch cursor (offline-aware)
 
 // Full absence report (tier, death, exact elapsed, sulk timer).
-// clock_known = 0 takes the ABS_UNKNOWN path.
+// clock_known = 0 takes the ABS_UNKNOWN path, which charges ZERO and arms
+// PF_ABS_UNKNOWN for sim_absence_retrofix() (plan section 1.7).
 void     sim_catch_up_ex(uint32_t absence_s, uint8_t clock_known,
                          AbsenceReport& rep);
 
-// Retro-applies the difference once SNTP lands after an ABS_UNKNOWN return.
+// Retro-applies the truth once gt_set_epoch() lands after an ABS_UNKNOWN
+// return. Nothing was charged at boot, so this charges the whole tier.
 void     sim_absence_retrofix(uint32_t true_absence_s);
 
 // -----------------------------------------------------------------------------

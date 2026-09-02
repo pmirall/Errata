@@ -97,3 +97,110 @@ TEST(clock_local_tm_is_filled_but_flagged_as_estimate) {
   CHECK(t.tm_mon >= 0 && t.tm_mon <= 11);
   CHECK(t.tm_mday >= 1 && t.tm_mday <= 31);
 }
+
+// =============================================================================
+//  Calibration (plan section 1.7). Every case starts from gt_test_reset() so it
+//  is independent of the order the registry runs the file in, and ends with the
+//  module back on the estimated path for whatever comes next.
+// =============================================================================
+#define SANE_EPOCH  1700000000u          // 2023-11-14, comfortably >= NT_EPOCH_SANE_MIN
+
+static void clock_fresh(uint32_t at_ms) {
+  gt_test_reset();
+  host_reset();
+  host_set_ms(at_ms);
+  gt_begin();
+}
+
+TEST(clock_starts_uncalibrated) {
+  clock_fresh(1000);
+  CHECK_EQ((int)gt_cal_state(), (int)CAL_UNSET);
+  CHECK(!gt_is_valid());
+  gt_test_reset();
+}
+
+TEST(clock_set_epoch_makes_the_clock_valid) {
+  clock_fresh(1000);
+  CHECK(gt_set_epoch(SANE_EPOCH, CAL_USER));
+  CHECK_EQ((int)gt_cal_state(), (int)CAL_USER);
+  CHECK(gt_is_valid());                                   // false until the set landed
+  CHECK_EQ(gt_now(), SANE_EPOCH);
+
+  host_advance_ms(90000);                                 // the clock keeps running
+  CHECK_EQ(gt_now(), SANE_EPOCH + 90);
+  gt_test_reset();
+}
+
+TEST(clock_set_epoch_refuses_an_uptime) {
+  clock_fresh(1000);
+  CHECK(!gt_set_epoch(0, CAL_USER));
+  CHECK(!gt_set_epoch(1483228799u, CAL_USER));            // NT_EPOCH_SANE_MIN - 1
+  CHECK(!gt_set_epoch(SANE_EPOCH, CAL_UNSET));            // not a source
+  CHECK_EQ((int)gt_cal_state(), (int)CAL_UNSET);
+  CHECK(!gt_is_valid());
+  CHECK(gt_set_epoch(1483228800u, CAL_PHONE));            // exactly the threshold: fine
+  gt_test_reset();
+}
+
+TEST(clock_rollback_beyond_five_minutes_is_refused) {
+  clock_fresh(1000);
+  CHECK(gt_set_epoch(SANE_EPOCH, CAL_PHONE));
+
+  // Inside the tolerance: accepted from any source.
+  CHECK(gt_set_epoch(SANE_EPOCH - 299u, CAL_PHONE));
+  CHECK_EQ(gt_now(), SANE_EPOCH - 299u);
+
+  // A whole day backwards from a phone is a bug, not a correction.
+  CHECK(!gt_set_epoch(SANE_EPOCH - 86400u, CAL_PHONE));
+  CHECK_EQ(gt_now(), SANE_EPOCH - 299u);                  // unchanged
+  CHECK_EQ((int)gt_cal_state(), (int)CAL_PHONE);
+
+  // The same rollback from the person holding the device is always allowed.
+  CHECK(gt_set_epoch(SANE_EPOCH - 86400u, CAL_USER));
+  CHECK_EQ(gt_now(), SANE_EPOCH - 86400u);
+  CHECK_EQ((int)gt_cal_state(), (int)CAL_USER);
+  gt_test_reset();
+}
+
+TEST(clock_forward_jumps_are_always_accepted) {
+  clock_fresh(1000);
+  CHECK(gt_set_epoch(SANE_EPOCH, CAL_PHONE));
+  CHECK(gt_set_epoch(SANE_EPOCH + 400u * 86400u, CAL_PHONE));   // 400 days ahead
+  CHECK_EQ(gt_now(), SANE_EPOCH + 400u * 86400u);
+  gt_test_reset();
+}
+
+TEST(clock_skew_survives_a_calibration) {
+  clock_fresh(1000);
+  CHECK(gt_set_epoch(SANE_EPOCH, CAL_USER));
+  gt_skew_add(3600);
+  CHECK_EQ(gt_now(), SANE_EPOCH + 3600u);
+  // The rollback guard compares the UNSKEWED clock, so this is a +10 s forward
+  // set and not a 3590 s rollback.
+  CHECK(gt_set_epoch(SANE_EPOCH + 10u, CAL_PHONE));
+  CHECK_EQ(gt_now(), SANE_EPOCH + 10u + 3600u);
+  gt_skew_add(-3600);
+  gt_test_reset();
+}
+
+TEST(clock_epoch_from_local_round_trips_and_rejects_impossible_dates) {
+  clock_fresh(1000);
+  const uint32_t e = gt_epoch_from_local(2024, 2, 29, 12, 30);   // leap day
+  CHECK(e != 0);
+  CHECK(gt_set_epoch(e, CAL_USER));
+
+  struct tm lt;
+  CHECK(gt_local_tm(lt));
+  CHECK_EQ(lt.tm_year + 1900, 2024);
+  CHECK_EQ(lt.tm_mon + 1, 2);
+  CHECK_EQ(lt.tm_mday, 29);
+  CHECK_EQ(lt.tm_hour, 12);
+  CHECK_EQ(lt.tm_min, 30);
+
+  CHECK_EQ(gt_epoch_from_local(2023, 2, 29, 12, 0), 0);          // not a leap year
+  CHECK_EQ(gt_epoch_from_local(2024, 13, 1, 0, 0), 0);
+  CHECK_EQ(gt_epoch_from_local(2024, 4, 31, 0, 0), 0);
+  CHECK_EQ(gt_epoch_from_local(2024, 1, 1, 24, 0), 0);
+  CHECK_EQ(gt_epoch_from_local(2024, 1, 1, 0, 60), 0);
+  gt_test_reset();
+}

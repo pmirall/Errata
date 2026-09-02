@@ -151,6 +151,16 @@ static uint8_t   g_sick_hours = 0;        // untreated sickness, for attribution
 // =============================================================================
 // 2. SMALL INTEGER PRIMITIVES
 // =============================================================================
+// Saturating u32 accumulate (plan section 1.7: "all u32 accumulators
+// saturate"). age_s is fed by a catch-up that can advance 400 days in one call
+// and by a god-mode time scale of up to x720, so the ceiling is reachable by
+// arithmetic even though no pet lives 136 years; wrapping it would rewind the
+// pet to an egg. Covered by tests/test_overflow.cpp.
+static inline uint32_t sat_add_u32(uint32_t a, uint32_t b)
+{
+  return (a > 0xFFFFFFFFu - b) ? 0xFFFFFFFFu : (uint32_t)(a + b);
+}
+
 // Every draw of the simulation comes from the RNG_CARE stream (rng.h).
 static inline uint32_t rnd(void)
 {
@@ -1193,12 +1203,12 @@ static void sub_step(uint32_t dt)
 
   // Eggs are immortal and never decay: they only age toward hatching.
   if (p.stage == STAGE_EGG) {
-    p.age_s += dt;
+    p.age_s = sat_add_u32(p.age_s, dt);
     if (p.age_s >= AGE_EGG_S) hatch_now();
     return;
   }
 
-  p.age_s += dt;
+  p.age_s = sat_add_u32(p.age_s, dt);
 
   // grudge timer
   if (g_sulk_left_s > 0) g_sulk_left_s = (dt >= g_sulk_left_s) ? 0 : (g_sulk_left_s - dt);
@@ -1812,23 +1822,23 @@ void sim_catch_up_ex(uint32_t absence_s, uint8_t clock_known, AbsenceReport& rep
   // context). "No trustworthy clock" is not the same as "abandoned". A
   // computed absence of exactly 0 is positive evidence that nothing elapsed -
   // a first run, or a boot whose baseline is not a real epoch and therefore
-  // cannot describe a gap at all. Charging the ABSENCE_LARGA_S floor there
-  // invents a 6 h abandonment out of nothing, on every clock-less boot, and
-  // the retro-fix that is supposed to correct it never arrives on a device
-  // that has no radio. Treat it as the true zero instead; GAME_DESIGN 5.1's
-  // floor still applies whenever there IS an unmeasurable but real gap.
+  // cannot describe a gap at all. There is nothing for a later calibration to
+  // retro-fix either, so report it as the true, known zero rather than arming
+  // PF_ABS_UNKNOWN on every clock-less boot.
   if (!clock_known && absence_s == 0u) {
     clock_known = 1u;
   }
 
   rep.clock_known = clock_known ? 1u : 0u;
 
-  // Nonsense clock or no clock at all: apply AUSENCIA_LARGA as a floor and
-  // flag the save so SNTP can retro-fix it later (GAME_DESIGN 5.1).
+  // Nonsense clock or no clock at all: AN UNKNOWN CLOCK CHARGES ZERO (plan
+  // section 1.7). The device cannot measure the gap, so it does not get to
+  // invent one; PF_ABS_UNKNOWN flags the save and the truth is charged in full
+  // by sim_absence_retrofix() the moment gt_set_epoch() lands.
   uint8_t unknown = 0;
   if (!clock_known || absence_s > ABSENCE_MAX_S) {
     unknown   = 1;
-    absence_s = ABSENCE_LARGA_S;
+    absence_s = 0;
     p.flags  |= PF_ABS_UNKNOWN;
     rep.clock_known = 0;
   } else {
@@ -1910,11 +1920,20 @@ void sim_catch_up_ex(uint32_t absence_s, uint8_t clock_known, AbsenceReport& rep
     return;
   }
 
-  // Alive: apply the escalation ladder on top of the integration.
-  uint8_t tier = unknown ? (uint8_t)ABS_LARGA : tier_for(absence_s);
-  if (unknown && tier < ABS_LARGA) tier = ABS_LARGA;    // never better than LARGA
+  // Alive: apply the escalation ladder on top of the integration - unless the
+  // clock is unknown, in which case there is no integration (absence_s is 0
+  // above) and no ladder either: charging ZERO means charging zero, not
+  // charging ABS_LARGA under another name.
+  //
+  // p.absence_tier is left at ABS_NONE, which is both true (nothing was
+  // charged) and load-bearing: sim_absence_retrofix() charges the DIFFERENCE
+  // against it and refuses any tier that is not strictly worse, so a stored
+  // ABS_UNKNOWN (6, above every real tier) would disable the retro-fix
+  // outright. rep.tier still reports ABS_UNKNOWN so the UI says "I do not know
+  // how long it has been" instead of "you were away for no time at all".
+  uint8_t tier = unknown ? (uint8_t)ABS_NONE : tier_for(absence_s);
   apply_tier(tier, rep);
-  rep.tier = tier;
+  rep.tier = unknown ? (uint8_t)ABS_UNKNOWN : tier;
 
   g_now = start_epoch + absence_s;
   g_sod = sod_now;
@@ -1933,7 +1952,8 @@ void sim_absence_retrofix(uint32_t true_absence_s)
   uint8_t now = tier_for(true_absence_s);
   if (now <= was) return;                 // never make it better retroactively
 
-  // Apply only the difference between the floor already charged and the truth.
+  // Apply only the difference between what was already charged (nothing, on an
+  // unknown clock) and the truth.
   // Indexed by AbsenceTier: NONE, CORTA, LARGA, ABANDONO, GRAVE, MUERTO, UNKNOWN
   const int32_t bond[ABS_COUNT] = { 0, ABS_CORTA_BOND, ABS_LARGA_BOND,
                                     ABS_ABANDONO_BOND, ABS_GRAVE_BOND, 0, 0 };

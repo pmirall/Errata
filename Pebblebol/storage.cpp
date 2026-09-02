@@ -769,12 +769,13 @@ void store_cfg_defaults(Config& c) {
   memset(c.reserved_b, 0, sizeof(c.reserved_b));
   c.reserved_c = 0;
 
+  // CF_WEB_ENABLED is DELIBERATELY CLEAR on a fresh device (plan section 2 row
+  // G4): the radio is off by default and the web server is opt-in from S9
+  // SETTINGS. CF_BLE_ENABLED stays on because S8 SOCIAL brings the stack up
+  // and down inside the screen.
   uint8_t f = 0;
 #if FEATURE_BLE
   f |= CF_BLE_ENABLED;
-#endif
-#if FEATURE_WEB
-  f |= CF_WEB_ENABLED;
 #endif
   c.flags = f;
 

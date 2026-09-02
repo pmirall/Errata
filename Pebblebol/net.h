@@ -46,6 +46,7 @@ enum NetPhase : uint8_t {
   NPH_STA_RETRY_WAIT,   // backoff between association attempts
   NPH_AP_PORTAL,        // softAP + captive DNS up (provisioning fallback)
   NPH_BLE_UP,           // Bluedroid initialised
+  NPH_SETTLING,         // one stack torn down, waiting RADIO_SETTLE_MS for the other
   NPH_COUNT
 };
 
@@ -98,12 +99,19 @@ RadioMode   net_mode(void);
 // stop scan, clearResults, deinit(false); WiFi: DNS stop, softAP
 // down, WIFI_MODE_NULL). Returns false and sets net_last_err() when the
 // request cannot be honoured (BLE session cap, feature disabled, ...).
-// RADIO_BLE is fully up on return. RADIO_WIFI only *starts* associating -
-// poll net_is_sta_up() / net_phase().
+//
+// NEVER BLOCKS, so the bring-up may be DEFERRED. When the other stack had to
+// be torn down first, the driver needs RADIO_SETTLE_MS to itself: the phase
+// becomes NPH_SETTLING, the request returns true, and net_service() finishes
+// the bring-up when the timer expires. A caller that needs the stack resident
+// (S8 SOCIAL before ble_begin(), god mode's GBS_RADIO) must therefore POLL
+// net_mode() rather than assume the call was enough. RADIO_WIFI has always
+// only *started* associating - poll net_is_sta_up() / net_phase().
+// RADIO_OFF is the exception: it is always immediate and always succeeds.
 bool        net_request(RadioMode want);
 
-// Pump. Call once per loop(). Never blocks: drives the association timeout,
-// the retry backoff and the AP provisioning fallback.
+// Pump. Call once per loop(). Never blocks: drives the settle timer, the
+// association timeout, the retry backoff and the AP provisioning fallback.
 void        net_service(void);
 
 // Dotted-quad of the active interface, "0.0.0.0" when down. Never NULL.
@@ -148,6 +156,7 @@ int8_t      net_rssi(void);
 
 // Compile-time sanity on the constants this module contracts against.
 static_assert(RADIO_COUNT == 3, "RadioMode must stay OFF/WIFI/BLE");
+static_assert(NPH_COUNT == 7, "NetPhase gained or lost a phase");
 static_assert(BLE_SESSION_CAP > 0 && BLE_SESSION_CAP <= 255, "BLE_SESSION_CAP must fit uint8_t");
 static_assert(SSID_MAX_LEN == 32 && PASS_MAX_LEN == 64, "WiFi credential caps drifted");
 

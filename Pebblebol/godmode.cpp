@@ -198,6 +198,10 @@ static char     s_hex[GOD_HEX_LINE_MAX + 1];
 static uint8_t  s_hexlen      = 0;
 static char     s_hex_show[33];           // last dumped/loaded genome, 32 + NUL
 
+// Serial bench console (the `stall` command).
+static char     s_cmd[24];
+static uint8_t  s_cmdlen      = 0;
+
 // Synthetic mating.
 static uint8_t  s_bs          = GBS_IDLE;
 static uint32_t s_bs_next_ms  = 0;
@@ -521,6 +525,70 @@ static void hex_paste_service(void)
 }
 
 // =============================================================================
+//  7b. SERIAL BENCH CONSOLE
+//      One command, `stall <ms>`, and it exists to be able to PROVE the
+//      timer-driven button sampler (input.cpp note 6) on real hardware: it
+//      busy-waits inside loop() for the requested number of milliseconds, so a
+//      press made during the stall must still be recognised - with its true
+//      duration - on the poll that follows. Without a way to create the stall
+//      on demand, the ring is untestable outside a debugger.
+//      The stall is bounded well under the 5 s task watchdog. This console runs
+//      whether or not the god screen is open, but never while the genome paste
+//      owns the serial line.
+// =============================================================================
+#define GOD_STALL_MAX_MS 3000UL
+
+static void do_stall(uint32_t ms)
+{
+  if (ms > GOD_STALL_MAX_MS) ms = GOD_STALL_MAX_MS;
+  GOD_LOGF("[god] stall %lu ms begin\r\n", (unsigned long)ms);
+  const uint32_t t0 = millis();
+  while ((uint32_t)(millis() - t0) < ms) {
+    // Deliberately busy. yield() here would defeat the whole point.
+  }
+  GOD_LOGF("[god] stall end after %lu ms\r\n", (unsigned long)(millis() - t0));
+}
+
+static void run_cmd(const char* line)
+{
+  if (strncmp(line, "stall", 5) == 0) {
+    const char* a = line + 5;
+    while (*a == ' ' || *a == '\t') ++a;
+    uint32_t ms = 0;
+    while (*a >= '0' && *a <= '9') {
+      ms = ms * 10u + (uint32_t)(*a - '0');
+      if (ms > GOD_STALL_MAX_MS) { ms = GOD_STALL_MAX_MS; break; }
+      ++a;
+    }
+    do_stall(ms);
+    return;
+  }
+  GOD_LOGF("[god] commands: stall <ms>\r\n");
+}
+
+static void cmd_service(void)
+{
+  // The genome paste owns the line while it is open; never fight it.
+  if (s_screen == GSC_HEX && s_hex_mode == GHX_LOAD) return;
+
+  while (Serial.available() > 0) {
+    const int c = Serial.read();
+    if (c < 0) break;
+    if (c == '\n' || c == '\r') {
+      if (s_cmdlen > 0) {
+        s_cmd[s_cmdlen] = '\0';
+        run_cmd(s_cmd);
+      }
+      s_cmdlen = 0;
+      s_cmd[0] = '\0';
+      continue;
+    }
+    if (s_cmdlen + 1u >= sizeof(s_cmd)) { s_cmdlen = 0; }   // overlong: restart
+    s_cmd[s_cmdlen++] = (char)c;
+  }
+}
+
+// =============================================================================
 //  8. THE SOAK LOG
 // =============================================================================
 static void dump_header(void)
@@ -707,6 +775,10 @@ uint8_t god_entry_progress(uint8_t screen_id)
 
 void god_service(void)
 {
+  // The bench console is not gated on god mode being ON: a stall has to be
+  // reachable from a plain serial terminal on a freshly flashed board.
+  cmd_service();
+
   if (!s_active) return;
 
   hex_paste_service();
@@ -1239,7 +1311,7 @@ static void draw_sys(void)
       draw_title(S(STR_GOD_CLOCK));
       struct tm lt;
       memset(&lt, 0, sizeof(lt));
-      const bool ok = gt_local_tm(lt);
+      (void)gt_local_tm(lt);      // always fills lt; the verdict is gt_cal_state()
       // Bounded operands: struct tm carries plain ints, so an unbounded %d (or
       // a signed modulo, whose result is -99..99 and becomes huge on the cast
       // to unsigned) makes GCC assume ten digits per field and fire
@@ -1253,7 +1325,12 @@ static void draw_sys(void)
                (unsigned)lt.tm_min           % 100u,
                (unsigned)lt.tm_sec           % 100u);
       rd_text(2, 27, RD_FONT_TINY, b);
-      snprintf(b, sizeof(b), "now=%lu %s", (unsigned long)gt_now(), ok ? "SNTP" : "EST");
+      // Calibration state, not "did SNTP land": UNSET / EST(imated) / USER /
+      // PHONE, in TimeCal order.
+      static const char* const kCal[CAL_COUNT] = { "UNSET", "EST", "USER", "PHONE" };
+      snprintf(b, sizeof(b), "now=%lu %s", (unsigned long)gt_now(),
+               kCal[(uint8_t)gt_cal_state() < (uint8_t)CAL_COUNT
+                      ? (uint8_t)gt_cal_state() : 0u]);
       rd_text(2, 35, RD_FONT_TINY, b);
       snprintf(b, sizeof(b), "seen=%lu", (unsigned long)store_last_seen());
       rd_text(2, 43, RD_FONT_TINY, b);

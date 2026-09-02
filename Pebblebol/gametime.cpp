@@ -1,6 +1,6 @@
 // =============================================================================
-//  NOTTAMAGOCHI - gametime.cpp
-//  Wall clock, SNTP bring-up, virtual skew, exact elapsed formatting.
+//  PEBBLEBOL - gametime.cpp
+//  Wall clock, calibration, virtual skew, exact elapsed formatting.
 //
 //  The whole file is deliberately host-compilable: everything that needs
 //  Arduino / ESP-IDF sits behind #if defined(ARDUINO), so gt_format_elapsed()
@@ -20,7 +20,8 @@
 #include "nt_types.h"   // struct Config, NT_CFG_MAGIC, CONFIG_CRC_BYTES, ...
 
 #if defined(ARDUINO)
-  #include <Arduino.h>        // millis(), configTzTime()
+  #include <Arduino.h>        // millis()
+  #include <sys/time.h>       // settimeofday()
   #include "esp_timer.h"      // esp_timer_get_time() - the exact 64-bit uptime
   #include "storage.h"        // store_last_seen(), store_load_cfg() - read only
 #else
@@ -37,8 +38,9 @@ static_assert(sizeof(CFG_TZ_STRING) <= TZ_MAX_LEN + 1, "CFG_TZ_STRING is longer 
 // A real clock reads at least 2017-01-01T00:00:00Z. This mirrors the core's own
 // heuristic in getLocalTime() (esp32-hal-time.c: `info->tm_year > (2016-1900)`),
 // which is the definition every other Arduino-ESP32 sketch agrees on. Before
-// SNTP lands, time() returns seconds-since-boot, i.e. a value near zero, so the
-// test is unambiguous - there is no plausible way to be wrong by 47 years.
+// anything calibrates the clock, time() returns seconds-since-boot, i.e. a
+// value near zero, so the test is unambiguous - there is no plausible way to be
+// wrong by 47 years.
 // -----------------------------------------------------------------------------
 // PH3 #2: this is now config.h's NT_EPOCH_SANE_MIN, so the .ino's absence
 // discriminator and this module cannot drift apart. The value is unchanged.
@@ -48,20 +50,10 @@ static_assert(sizeof(CFG_TZ_STRING) <= TZ_MAX_LEN + 1, "CFG_TZ_STRING is longer 
 // by more than one full wrap, which keeps the saturation in gt_now() honest.
 #define GT_SKEW_LIMIT_S     ((int64_t)0xFFFFFFFF)
 
-// One SNTP attempt per this window while the clock is still an estimate:
-// SNTP_GIVEUP_S (30 s, the budget a single attempt gets - SNTP's own random
-// startup delay is up to 5 s) plus SNTP_RETRY_S (300 s, GAME_DESIGN 5.1
-// "retry SNTP every 5 min"). Declaring the attempt dead at 30 s is the
-// ABSENCE_UNKNOWN trigger, and that decision belongs to the absence code
-// polling gt_is_valid() - here it is only a retry cadence.
-#define GT_SYNC_CYCLE_MS  (((uint64_t)SNTP_GIVEUP_S + (uint64_t)SNTP_RETRY_S) * 1000ULL)
-
-// ---- module state (~64 B of .bss) -------------------------------------------
+// ---- module state (~48 B of .bss) -------------------------------------------
 static char     s_tz[TZ_MAX_LEN + 1];   // active POSIX TZ string
 static bool     s_begun        = false;
-static bool     s_real         = false; // a real SNTP timestamp has been seen
-static bool     s_sntp_armed   = false; // configTzTime() issued at least once
-static uint64_t s_sync_ms      = 0;     // uptime at the last configTzTime()
+static uint8_t  s_cal          = (uint8_t)CAL_UNSET;   // TimeCal
 static uint32_t s_est_base_s   = 0;     // last persisted wall clock (NVS "t")
 static uint64_t s_est_base_ms  = 0;     // uptime when s_est_base_s was taken
 static int64_t  s_skew_s       = 0;     // god-mode virtual time travel
@@ -156,7 +148,7 @@ static void gt_apply_tz(void)
 // handle of our own (storage.cpp is the single owner of Preferences).
 //   store_last_seen() -> newest of NVS "t", PetSave.last_seen_epoch and the
 //                        RTC mirror. This is the base of the ESTIMATED clock,
-//                        so a device that never meets an NTP server still
+//                        so a device whose clock was never calibrated still
 //                        reports plausible, monotonically increasing epochs
 //                        and an absence of ~0 instead of inventing one.
 //   store_load_cfg()  -> Config.tz, so a timezone changed from S9 SETTINGS is
@@ -205,9 +197,7 @@ void gt_begin(void)
 
   s_ms32_last   = 0;
   s_ms32_wraps  = 0;
-  s_real        = false;
-  s_sntp_armed  = false;
-  s_sync_ms     = 0;
+  s_cal         = (uint8_t)CAL_UNSET;
   s_skew_s      = 0;
 
   gt_load_seed();
@@ -216,90 +206,151 @@ void gt_begin(void)
   s_est_base_ms = gt_mono_ms();
   s_begun       = true;
 
-  // If the RTC already holds a sane time (a soft reset does not clear it, and
-  // the SNTP fix from the previous run survives), adopt it immediately instead
-  // of pretending we are blind for the next 30 s.
+  // If the RTC timer already holds a sane time (a soft reset and a deep sleep
+  // both leave it running, so the previous run's calibration survives), adopt
+  // it as CAL_ESTIMATED immediately instead of pretending we are blind.
   (void)gt_is_valid();
 }
 
-void gt_sync_start(void)
+// -----------------------------------------------------------------------------
+// Is the C library's own clock a real wall clock right now? On the target that
+// is the RTC timer, which keeps running across a soft reset and a deep sleep,
+// so a calibration made in a previous run is still here. The host build under
+// GT_HOST_NEVER_VALID answers "no" unconditionally: the test machine's wall
+// clock is genuinely correct, and the module must stay on the estimated path
+// so the millis() wrap extension can be driven across 2^32.
+// -----------------------------------------------------------------------------
+static bool sys_clock_ok(void)
 {
-  const uint64_t now_ms = gt_mono_ms();
+#if !defined(ARDUINO) && defined(GT_HOST_NEVER_VALID)
+  return false;
+#else
+  // t > 0 first: time_t is signed (64-bit on IDF 5.3, 32-bit elsewhere) and a
+  // negative value cast to unsigned would sail past the threshold.
+  const time_t t = time(NULL);
+  return (t > 0) && ((uint64_t)t >= (uint64_t)GT_EPOCH_SANE_MIN);
+#endif
+}
 
-  if (s_sntp_armed) {
-    // Already on real time: lwIP re-polls by itself every SNTP_RESYNC_S
-    // (CONFIG_LWIP_SNTP_UPDATE_DELAY = 3 h). Nothing to do.
-    if (gt_is_valid()) {
-      return;
-    }
-    // Still an estimate: an attempt is either in flight or cooling down.
-    if ((now_ms - s_sync_ms) < GT_SYNC_CYCLE_MS) {
-      return;
+// The current epoch WITHOUT the god-mode skew - what a calibration is compared
+// against, because the skew is virtual time travel and must survive the set.
+static uint32_t gt_base_now(void)
+{
+  if (sys_clock_ok()) {
+    const time_t t = time(NULL);
+    return (t > 0) ? (uint32_t)t : 0u;
+  }
+  const uint64_t up_ms = gt_mono_ms() - s_est_base_ms;
+  const uint64_t v     = (uint64_t)s_est_base_s + (up_ms / 1000ULL);
+  return (v > 0xFFFFFFFFULL) ? 0xFFFFFFFFu : (uint32_t)v;
+}
+
+bool gt_set_epoch(uint32_t epoch, TimeCal src)
+{
+  if (src == CAL_UNSET || (uint8_t)src >= (uint8_t)CAL_COUNT) {
+    return false;
+  }
+  // An uptime counter is not a date. This is the same threshold the absence
+  // discriminator uses, so the two cannot drift apart.
+  if (epoch < (uint32_t)GT_EPOCH_SANE_MIN) {
+    return false;
+  }
+
+  // Rollback guard (plan section 1.7). Moving an already-calibrated clock
+  // backwards re-runs cooldowns, re-opens the sleep window and makes every
+  // persisted last_seen sit in the future, so it takes a human who is looking
+  // at the device. Forward jumps are always allowed: that is a correction.
+  if (s_cal != (uint8_t)CAL_UNSET && src != CAL_USER) {
+    const uint32_t cur = gt_base_now();
+    if (epoch < cur && (uint32_t)(cur - epoch) > GT_ROLLBACK_TOLERANCE_S) {
+      return false;
     }
   }
 
+  // The estimated base is updated too, so the two paths agree the instant the
+  // set lands and a host build with no settimeofday() still reads the new time.
+  s_est_base_s  = epoch;
+  s_est_base_ms = gt_mono_ms();
+
 #if defined(ARDUINO)
-  // Exactly three servers: CONFIG_LWIP_SNTP_MAX_SERVERS = 3 (BRIEF 1.7).
-  // Non-blocking - configTzTime() only does sntp_stop()/sntp_init() + setenv,
-  // and it is safe to re-issue (esp32-hal-time.c stops SNTP first).
-  configTzTime(s_tz, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
+  struct timeval tv;
+  tv.tv_sec  = (time_t)epoch;
+  tv.tv_usec = 0;
+  settimeofday(&tv, NULL);
 #endif
 
-  s_sntp_armed = true;
-  s_sync_ms    = now_ms;
+  s_cal = (uint8_t)src;
+  return true;
+}
+
+uint32_t gt_epoch_from_local(int year, uint8_t month, uint8_t day,
+                             uint8_t hour, uint8_t minute)
+{
+  if (year < 1970 || year > 2200 || month < 1 || month > 12 ||
+      day < 1 || day > 31 || hour > 23 || minute > 59) {
+    return 0;
+  }
+
+  struct tm t;
+  memset(&t, 0, sizeof(t));
+  t.tm_year  = year - 1900;
+  t.tm_mon   = (int)month - 1;
+  t.tm_mday  = (int)day;
+  t.tm_hour  = (int)hour;
+  t.tm_min   = (int)minute;
+  t.tm_sec   = 0;
+  t.tm_isdst = -1;              // let the TZ rule decide; the screen cannot
+
+  const time_t e = mktime(&t);
+  if (e <= 0 || (uint64_t)e > 0xFFFFFFFFULL) {
+    return 0;
+  }
+  // mktime() normalises out-of-range fields (31 April -> 1 May). Refuse that
+  // instead of silently accepting a date the user did not type.
+  if (t.tm_mday != (int)day || t.tm_mon != (int)month - 1) {
+    return 0;
+  }
+  return (uint32_t)e;
+}
+
+TimeCal gt_cal_state(void)
+{
+  return (TimeCal)s_cal;
 }
 
 bool gt_is_valid(void)
 {
   // Always sample the monotonic clock: this is what keeps the millis() wrap
   // counter honest on the host path, and it is a handful of nanoseconds.
-  const uint64_t now_ms = gt_mono_ms();
+  (void)gt_mono_ms();
 
-#if !defined(ARDUINO) && defined(GT_HOST_NEVER_VALID)
-  // Host unit-test hook only. ARDUINO is always defined by the Arduino build,
-  // so this cannot exist in shipped firmware. It pins the module on the
-  // estimated-clock path so the millis() wrap extension can be driven across
-  // the 2^32 ms boundary on a machine whose wall clock is genuinely correct.
-  (void)now_ms;
-  return false;
-#else
-
-  if (s_real) {
+  if (s_cal != (uint8_t)CAL_UNSET) {
     return true;
   }
 
+  // Nobody has calibrated us this run, but the RTC timer may still be carrying
+  // a previous run's calibration across the reset. Adopt it as CAL_ESTIMATED.
   // time() is cheap (a systimer read). No blocking poll loop, no getLocalTime()
   // with its internal delay(10) - loop() must never stall here.
-  // t > 0 first: time_t is signed (64-bit on IDF 5.3, 32-bit elsewhere) and a
-  // negative value cast to unsigned would sail past the threshold.
-  const time_t t = time(NULL);
-  if (t > 0 && (uint64_t)t >= (uint64_t)GT_EPOCH_SANE_MIN) {
-    s_real = true;
+  if (sys_clock_ok()) {
+    s_cal = (uint8_t)CAL_ESTIMATED;
     return true;
   }
-
-  (void)now_ms;   // sampled purely to advance the millis() wrap extension
   return false;
-#endif
 }
 
 uint32_t gt_now(void)
 {
-  int64_t base;
+  // Called for the calibration-state adoption and the wrap counter, not for
+  // the answer: gt_base_now() picks the source.
+  (void)gt_is_valid();
 
-  if (gt_is_valid()) {
-    const time_t t = time(NULL);
-    base = (t > 0) ? (int64_t)t : 0;
-  } else {
-    // Estimated clock: last persisted wall time + uptime. Monotonic by
-    // construction, and it starts exactly at last_seen_epoch so a device that
-    // has never met an NTP server reports an absence of ~0 rather than
-    // inventing one. gt_is_valid() is what tells the caller not to trust it.
-    const uint64_t up_ms = gt_mono_ms() - s_est_base_ms;
-    base = (int64_t)s_est_base_s + (int64_t)(up_ms / 1000ULL);
-  }
-
-  int64_t v = base + s_skew_s;
+  // Estimated clock (gt_base_now's second branch): last persisted wall time +
+  // uptime. Monotonic by construction, and it starts exactly at
+  // last_seen_epoch so a device that has never been calibrated reports an
+  // absence of ~0 rather than inventing one. gt_is_valid() is what tells the
+  // caller not to trust it.
+  int64_t v = (int64_t)gt_base_now() + s_skew_s;
   if (v < 0) {
     v = 0;
   } else if (v > (int64_t)0xFFFFFFFF) {
@@ -352,6 +403,15 @@ const char* gt_format_elapsed(uint32_t seconds, char* buf, size_t buflen)
   return buf;
 }
 
+uint32_t gt_elapsed_since(uint32_t then, uint32_t now)
+{
+  // Plan section 1.7: an epoch delta is clamped to [0, ...]. `now <= then` is
+  // never an elapsed time - it is a rollback, an uncalibrated baseline or a
+  // save written by a device whose clock was ahead - and subtracting would
+  // wrap into 136 years of "abandonment".
+  return (now > then) ? (uint32_t)(now - then) : 0u;
+}
+
 bool gt_local_tm(struct tm& out)
 {
   memset(&out, 0, sizeof(out));
@@ -365,3 +425,16 @@ bool gt_local_tm(struct tm& out)
 
   return gt_is_valid();
 }
+
+#if !defined(ARDUINO)
+void gt_test_reset(void)
+{
+  s_begun       = false;
+  s_cal         = (uint8_t)CAL_UNSET;
+  s_est_base_s  = 0;
+  s_est_base_ms = 0;
+  s_skew_s      = 0;
+  s_ms32_last   = 0;
+  s_ms32_wraps  = 0;
+}
+#endif

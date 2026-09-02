@@ -52,6 +52,7 @@ static NetPhase     s_phase          = NPH_OFF;
 static NetErr       s_err            = NERR_NONE;
 
 static uint32_t     s_phase_ms       = 0;    // millis() when the phase was entered
+static RadioMode    s_pending        = RADIO_OFF;  // NPH_SETTLING target
 static uint8_t      s_fails          = 0;    // consecutive association failures
 static uint8_t      s_ble_sessions   = 0;    // BLEDevice::init() calls this boot
 static bool         s_ap_up          = false;
@@ -135,11 +136,19 @@ static void set_mode(RadioMode m, NetPhase p, const char *tag) {
 }
 
 // A radio stack was just torn down: give the driver / controller a moment
-// before bringing the other one up. One-shot, on an explicit mode change only -
-// never inside the loop() pump.
-static inline void settle(void) {
-  delay(RADIO_SETTLE_MS);
+// before bringing the other one up. That moment used to be delay(250), a
+// quarter of a second in which no frame was drawn, no button was drained and
+// the 1 Hz tick slipped. It is now a PHASE: park in NPH_SETTLING with the
+// requested target remembered, return to the caller, and let net_service()
+// finish the bring-up once RADIO_SETTLE_MS have passed.
+// Only a build that can host BOTH stacks ever has something to settle between;
+// with NT_NET_WANT_WIFI off there is nothing to tear down before BLE comes up.
+#if NT_NET_WANT_WIFI
+static void begin_settle(RadioMode target) {
+  s_pending = target;
+  set_mode(RADIO_OFF, NPH_SETTLING, "-> SETTLING");
 }
+#endif
 
 // -----------------------------------------------------------------------------
 // Identity: AP SSID and BLE device name, derived from the station MAC.
@@ -390,6 +399,50 @@ NetErr net_last_err(void) {
   return s_err;
 }
 
+// Second half of a deferred bring-up: everything net_request() would have done
+// after settle(). Called either straight from net_request() (nothing had to be
+// torn down) or from net_service() when the settle timer expires.
+static bool bring_up(RadioMode want) {
+  s_pending = RADIO_OFF;
+
+  if (want == RADIO_BLE) {
+#if !FEATURE_BLE
+    s_err = NERR_BLE_DISABLED;
+    set_mode(RADIO_OFF, NPH_OFF, "-> OFF (no ble)");
+    return false;
+#else
+    if (!ble_up()) {
+      set_mode(RADIO_OFF, NPH_OFF, "-> OFF (ble fail)");
+      return false;
+    }
+    set_mode(RADIO_BLE, NPH_BLE_UP, "-> BLE");
+    return true;
+#endif
+  }
+
+#if !NT_NET_WANT_WIFI
+  s_err = NERR_WIFI_DISABLED;
+  set_mode(RADIO_OFF, NPH_OFF, "-> OFF (no wifi)");
+  return false;
+#else
+  s_fails = 0;
+  if (s_ssid[0] == '\0') {
+    s_err = NERR_NO_CREDENTIALS;
+#if NT_NET_HAVE_PORTAL
+    NET_LOGF("[net] no credentials -> provisioning portal\r\n");
+    return ap_start();
+#else
+    NET_LOGF("[net] no credentials and no portal available\r\n");
+    set_mode(RADIO_OFF, NPH_OFF, "-> OFF (no creds)");
+    return false;
+#endif
+  }
+  set_mode(RADIO_WIFI, NPH_STA_CONNECTING, "-> WIFI");
+  sta_start();
+  return true;
+#endif
+}
+
 bool net_request(RadioMode want) {
   if (!s_begun) {
     net_begin();
@@ -406,11 +459,31 @@ bool net_request(RadioMode want) {
 #if NT_NET_WANT_WIFI
     wifi_down();
 #endif
-    s_fails = 0;
+    s_fails   = 0;
+    s_pending = RADIO_OFF;          // cancels a settle that was in flight
     if (s_mode != RADIO_OFF || s_phase != NPH_OFF) {
       set_mode(RADIO_OFF, NPH_OFF, "-> OFF");
     }
     return true;
+  }
+
+  // A settle window is already running: the stack that was resident is down
+  // and NOTHING may come up until it expires (BRIEF 1.3 - that is the whole
+  // point of the window). Retarget it and keep waiting; net_service() brings
+  // up whichever stack was asked for last. Falling through to the branches
+  // below would test "did I have to tear anything down?", find the answer is
+  // no - because the teardown already happened - and bring the new stack up
+  // right on top of it.
+  if (s_phase == NPH_SETTLING) {
+    // The session cap is checked before anything is torn down everywhere else;
+    // here nothing is torn down at all, so check it before accepting a target
+    // that ble_up() would only refuse RADIO_SETTLE_MS later.
+    if (want == RADIO_BLE && !ble_resident() && s_ble_sessions >= BLE_SESSION_CAP) {
+      s_err = NERR_BLE_SESSION_CAP;
+      return false;
+    }
+    s_pending = want;
+    return true;                    // finished by net_service()
   }
 
   // ---------------------------------------------------------------- BLE ----
@@ -428,18 +501,14 @@ bool net_request(RadioMode want) {
       return false;
     }
 #if NT_NET_WANT_WIFI
-    bool tore_down = (WiFi.getMode() != WIFI_MODE_NULL);
+    const bool tore_down = (WiFi.getMode() != WIFI_MODE_NULL);
     wifi_down();
     if (tore_down) {
-      settle();
+      begin_settle(RADIO_BLE);
+      return true;                  // finished by net_service()
     }
 #endif
-    if (!ble_up()) {
-      set_mode(RADIO_OFF, NPH_OFF, "-> OFF (ble fail)");
-      return false;
-    }
-    set_mode(RADIO_BLE, NPH_BLE_UP, "-> BLE");
-    return true;
+    return bring_up(RADIO_BLE);
 #endif
   }
 
@@ -449,35 +518,23 @@ bool net_request(RadioMode want) {
   return false;
 #else
   {
-    bool tore_down = ble_resident();
+    const bool tore_down = ble_resident();
     ble_down();
-    if (tore_down) {
-      settle();
-    }
     // Binding precondition (BRIEF 1.3): Bluedroid must be gone before WiFi.
     if (ble_resident()) {
       s_err = NERR_BUSY;
       NET_LOGF("[net] refusing WIFI: Bluedroid still initialised\r\n");
       return false;
     }
+    if (tore_down) {
+      begin_settle(RADIO_WIFI);
+      return true;                  // finished by net_service()
+    }
   }
   if (s_mode == RADIO_WIFI && s_phase != NPH_OFF) {
     return true;   // already on the WiFi track (connecting, up, or portal)
   }
-  s_fails = 0;
-  if (s_ssid[0] == '\0') {
-    s_err = NERR_NO_CREDENTIALS;
-#if NT_NET_HAVE_PORTAL
-    NET_LOGF("[net] no credentials -> provisioning portal\r\n");
-    return ap_start();
-#else
-    NET_LOGF("[net] no credentials and no portal available\r\n");
-    return false;
-#endif
-  }
-  set_mode(RADIO_WIFI, NPH_STA_CONNECTING, "-> WIFI");
-  sta_start();
-  return true;
+  return bring_up(RADIO_WIFI);
 #endif  // NT_NET_WANT_WIFI
 }
 
@@ -486,7 +543,16 @@ void net_service(void) {
     return;
   }
   const uint32_t now = millis();
-  (void)now;   // only the WiFi state machine needs it
+
+  // The settle timer that replaced delay(RADIO_SETTLE_MS). One stack is down,
+  // the other is not up yet, and the radio is genuinely OFF meanwhile.
+  if (s_phase == NPH_SETTLING) {
+    if ((uint32_t)(now - s_phase_ms) < (uint32_t)RADIO_SETTLE_MS) {
+      return;
+    }
+    (void)bring_up(s_pending);
+    return;
+  }
 
 #if FEATURE_BLE
   if (s_mode == RADIO_BLE && !BLEDevice::getInitialized()) {
@@ -540,21 +606,9 @@ void net_service(void) {
       }
       break;
 
-#if NT_NET_HAVE_PORTAL
-    case NPH_AP_PORTAL:
-      // Periodically re-try the station, but never kick a phone that is
-      // currently associated to the portal.
-      if (s_ssid[0] != '\0' &&
-          (uint32_t)(now - s_phase_ms) >= (WIFI_RETRY_PERIOD_S * 1000UL) &&
-          WiFi.softAPgetStationNum() == 0) {
-        NET_LOGF("[net] leaving portal, retrying STA\r\n");
-        ap_down();
-        s_fails = 0;
-        set_mode(RADIO_WIFI, NPH_STA_CONNECTING, "portal -> STA");
-        sta_start();
-      }
-      break;
-#endif
+    // NPH_AP_PORTAL has no timer of its own. The portal is not a fallback the
+    // firmware retries out of any more (plan section 2 row G4): the screen that
+    // asked for RADIO_WIFI owns it, and leaving that screen releases it.
 
     default:
       break;

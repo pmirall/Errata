@@ -390,8 +390,8 @@
 // every module that has to tell a Unix epoch apart from an uptime counter.
 // 2017-01-01T00:00:00Z - the same constant gametime.cpp uses internally
 // (GT_EPOCH_SANE_MIN) and the same heuristic as the core's getLocalTime().
-// Before SNTP lands, time()/gt_now() return seconds-since-boot, i.e. a value
-// near zero, so the test is unambiguous by ~47 years.
+// Before the clock is calibrated, time()/gt_now() return seconds-since-boot,
+// i.e. a value near zero, so the test is unambiguous by ~47 years.
 #define NT_EPOCH_SANE_MIN       1483228800UL // 2017-01-01T00:00:00Z
 #define ABSENCE_CORTA_S         3600UL       // 1 h
 #define ABSENCE_LARGA_S         21600UL      // 6 h
@@ -425,14 +425,6 @@
 // Cold egg
 #define EGG_COLD_AFTER_S        259200UL     // 72 h
 #define EGG_COLD_HEALTH_PCT     90
-
-// SNTP / unknown clock
-#define SNTP_GIVEUP_S           30
-#define SNTP_RETRY_S            300
-#define SNTP_RESYNC_S           10800UL      // 3 h
-#define NTP_SERVER_1            "pool.ntp.org"
-#define NTP_SERVER_2            "time.google.com"
-#define NTP_SERVER_3            "time.cloudflare.com"
 
 // =============================================================================
 // 10. PERSISTENCE  (BRIEF 6.4) - NVS keys are max 15 chars
