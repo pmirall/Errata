@@ -6,7 +6,6 @@
 #include "render.h"
 
 #include <Wire.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -37,7 +36,7 @@ static bool     s_web_busy_armed  = false;   // millis()==0 rollover safety
 
 // Scratch used by the text helpers. Single-threaded: everything that draws runs
 // on the Arduino loop task.
-#define RD_SCRATCH  96   // rd_textf / rd_text_fit
+#define RD_SCRATCH  96   // rd_text_fit
 #define RD_LINE_BUF 64   // one wrapped line: 26 chars of 5x8 across 128 px
 static char s_scratch[RD_SCRATCH];
 
@@ -392,8 +391,6 @@ bool rd_begin(void) {
   return s_display_ok;
 }
 
-bool rd_display_ok(void) { return s_display_ok; }
-
 U8G2& rd_u8g2(void) { return s_u8g2; }
 
 void rd_power(bool on) {
@@ -669,17 +666,6 @@ uint8_t rd_text_wrap(int16_t x, int16_t y, int16_t w, uint8_t line_h,
     drawn++;
   }
   return drawn;
-}
-
-uint16_t rd_textf(int16_t x, int16_t y, const uint8_t* font, const char* fmt, ...) {
-  if (fmt == NULL) return 0;
-  char buf[RD_SCRATCH];
-  va_list ap;
-  va_start(ap, fmt);
-  vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  buf[sizeof(buf) - 1] = '\0';
-  return rd_text(x, y, font, buf);
 }
 
 // =============================================================================

@@ -181,9 +181,9 @@ static uint32_t s_rub_ms      = 0;
 
 // ---- S13 birth staging ------------------------------------------------------
 // The mirror image of DP_*. It lives on S13 rather than on a new ScreenId
-// because adding one would shift ScreenId for webui and for s_cursor[SCR_COUNT],
-// and the death staging already proves that a phase enum riding on an existing
-// screen is enough.
+// because adding one would shift ScreenId for s_cursor[SCR_COUNT], and the
+// death staging already proves that a phase enum riding on an existing screen
+// is enough.
 enum HatchPhase : uint8_t {
   HP_NONE = 0,
   HP_WOBBLE,   //    0 .. 1200   the egg rocks, accelerating
@@ -340,8 +340,8 @@ static void lineage_tag(uint32_t lineage_id, char* out, size_t cap) {
 }
 
 // GAME_DESIGN 6.3's score -> face table, via webui's copy rather than a second
-// one here: /api/state reports the same number, and two independent ladders
-// would eventually disagree about the pet's face on the phone and the panel.
+// one here: two independent ladders would eventually disagree about the pet's
+// face. The policy moves into the render layer with the PetView struct.
 static uint8_t mood_of(void) { return web_mood_index(sim_mood_score()); }
 
 // ---- displayed stat smoothing ----------------------------------------------
@@ -466,6 +466,9 @@ static uint8_t s_egg_cache = 0;
 
 static void egg_cache_invalidate(void) { s_egg_cache = 0; }
 
+// Only the BLE mating path asks; with FEATURE_BLE off nothing can create a
+// pending egg, so the query has no caller and is not compiled.
+#if FEATURE_BLE
 static bool egg_pending(void) {
   if (s_egg_cache == 0) {
     PendingEgg pe;
@@ -475,6 +478,7 @@ static bool egg_pending(void) {
   }
   return s_egg_cache == 2u;
 }
+#endif
 
 // =============================================================================
 //  4. TOASTS, ALERTS, MODALS
@@ -672,8 +676,6 @@ static bool act_and_show(ActionId a) {
   // which is the normal case for all three: the player pressed a button and the
   // screen fell apart. In the firmware the user has flashed, that gesture did
   // not navigate and there was no dissolve.
-  //
-  // ui_note_web_action() already guards exactly this. Same guard, same reason.
   if (ok && actfx_active() && s_screen != (uint8_t)SCR_HOME) nav_home();
   return ok;
 }
@@ -2084,7 +2086,6 @@ static void social_court(void) {
 }
 
 static void draw_social(void) {
-  U8G2& u = rd_u8g2();
   char tag[10];
 #if FEATURE_BLE
   snprintf(tag, sizeof(tag), "%u", (unsigned)ble_peer_count());
@@ -2134,6 +2135,7 @@ static void draw_social(void) {
   }
 
 #if FEATURE_BLE
+  U8G2& u = rd_u8g2();
   const uint8_t n = ble_peer_count();
   if (n == 0) {
     rd_text_center((int16_t)(UI_CONTENT_Y + 14), RD_FONT_NARR, S(STR_SO_SEARCHING));
@@ -2368,8 +2370,6 @@ static void draw_qr(void) {
     char pin[8];
     snprintf(pin, sizeof(pin), "%04u", (unsigned)(web_pin() % 10000u));
     rd_text(rx, 40, RD_FONT_BIGNUM, pin);    // 9x19 digits: unmissable at arm's length
-    rd_text(rx, 47, RD_FONT_TINY, "nottamagochi");
-    rd_text(rx, 53, RD_FONT_TINY, ".local");
   } else {
     rd_text_fit(rx, 8, rw, RD_FONT_BODY, S(STR_WEB_TITLE));
     rd_text_wrap(rx, 20, rw, RD_LINE_BODY, 3, RD_FONT_BODY, S(STR_WEB_CONNECTING));
@@ -3024,7 +3024,6 @@ static void alert_act(void) {
     case AL_SICK:       confirm_open(CFM_MEDICINE, STR_CF_SURE); break;
     case AL_LOW_HEALTH: nav_push(SCR_STATUS_A);  break;
     case AL_MATE_FOUND: nav_push(SCR_SOCIAL);    break;
-    case AL_WEB_CLIENT: nav_push(SCR_QR);        break;
     default: break;
   }
 }
@@ -3229,27 +3228,6 @@ void ui_note_events(uint32_t ev) {
     const uint8_t a = sim_alert();
     if (a != AL_NONE) ui_alert((AlertId)a);
   }
-}
-
-void ui_note_web_action(uint8_t action, const PetSave& before) {
-  if (action == (uint8_t)ACT_NONE) return;
-  // Screens that own their own frame or their own staging are not interrupted.
-  // A ceremony, the memorial, god mode and a running minigame all have a claim
-  // on the panel that a button pressed on a phone in another room does not
-  // outrank. The sim change has already happened either way; only the film is
-  // dropped.
-  if (ui_input_locked() || s_screen == SCR_GOD || s_screen == SCR_MEMORIAL ||
-      s_screen == SCR_GAME) return;
-
-  s_last_action = action;
-  if (action == (uint8_t)ACT_PET) s_mimo_ms = now_ms();
-  // HOME first, THEN the film: nav_home() runs screen_leave() on the screen we
-  // are leaving, and screen_leave(SCR_HOME) cancels choreographies. Starting the
-  // film first would work today (we are not on HOME) and would break the day
-  // someone routes this through HOME.
-  if (s_screen != (uint8_t)SCR_HOME) nav_home();
-  actfx_begin(action, before);
-  rd_request_frame();
 }
 
 void ui_note_absence(const AbsenceReport& rep) {

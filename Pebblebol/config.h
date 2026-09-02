@@ -63,8 +63,6 @@
 // =============================================================================
 #define FW_NAME                 "Pebblebol"
 #define FW_VERSION              "0.2.0-dev"
-#define FW_BUILD_PROTO          1           // BLE + save wire protocol version
-#define WEB_API_SCHEMA_VER      1           // /api/state "v" field
 
 // =============================================================================
 // 2. GPIO ASSIGNMENT  (BRIEF 1.1 - binding)
@@ -81,7 +79,6 @@
 // LED polarity. Clone-to-clone difference: validate on the physical board.
 // LED_ON/LED_OFF are the numeric values of Arduino's LOW/HIGH so that this
 // header stays includable from a host compiler with no Arduino.h.
-#define LED_ACTIVE_LOW          1
 #define LED_ON                  0           // == LOW
 #define LED_OFF                 1           // == HIGH
 
@@ -93,7 +90,6 @@
 #define OLED_W                  128
 #define OLED_H                  64
 #define OLED_I2C_ADDR_7BIT      0x3C
-#define OLED_I2C_ADDR_8BIT      0x78        // u8g2 setI2CAddress() wants this form
 #define OLED_BUS_CLOCK_HZ       400000UL    // u8g2 default; 800k only after HW validation
 #define OLED_CONTRAST_DEFAULT   140
 #define OLED_CONTRAST_DIM       40
@@ -142,7 +138,6 @@
 #define DEBOUNCE_MS             25
 #define DOUBLE_TAP_WINDOW_MS    280
 #define HOLD_MS                 600
-#define TAP_MAX_MS              599
 #define LONG_BOTH_MS            1500
 #define BOTH_SYNC_MS            80
 #define REPEAT_START_MS         600
@@ -170,12 +165,9 @@
 // Death staging (GAME_DESIGN 9.2) - milliseconds from T+0
 #define DEATH_HEARTBEAT_MS      12000UL
 #define DEATH_COLLAPSE_MS       1200UL
-#define DEATH_BLACK_MS          3000UL
 #define DEATH_TEXT_START_MS     16200UL
 #define DEATH_TEXT_LINE_MS      1200UL
 #define DEATH_INPUT_LOCK_MS     22000UL
-#define DEATH_HEARTBEAT_BPM_HI  60
-#define DEATH_BUZZ_MS           40
 
 // Memorial -> lineage -> egg
 #define MEMORIAL_LINEAGE_MS     4000UL
@@ -210,7 +202,6 @@
 //    Stats are int32 milli-points 0..100000. Rates are in milli-points/hour.
 //    per_tick = rate_mph / 3600, remainder carried in PetSave.stat_rem[].
 // =============================================================================
-#define SIM_TICK_HZ             1
 #define STAT_MILLI_MAX          100000L
 #define STAT_MILLI_MIN          0L
 #define SEC_PER_HOUR            3600L
@@ -319,7 +310,6 @@
 #define ACT_CLEAN_HYGIENE       25
 #define ACT_MED_HAPPINESS       (-10)
 #define ACT_MED_SECOND_DOSE_PCT 30           // if health < 25
-#define ACT_MED_SECOND_HEALTH   25
 #define ACT_PLAY_HAPPINESS_MAX  6
 #define ACT_PLAY_ENERGY         (-8)
 #define ACT_PLAY_WEIGHT_DG      (-10)
@@ -331,7 +321,6 @@
 #define ACT_SCOLD_UNJUST_BOND   (-10)
 #define ACT_SCOLD_UNJUST_HAP    (-12)
 #define ACT_SCOLD_UNJUST_CQ     (-8)
-#define ACT_PET_BOND            4
 #define ACT_PET_HAPPINESS       3
 #define ACT_FORCE_FEED_BOND     (-2)         // after 3 forced refusals
 #define ACT_FORCE_FEED_LIMIT    3
@@ -440,7 +429,6 @@
 // SNTP / unknown clock
 #define SNTP_GIVEUP_S           30
 #define SNTP_RETRY_S            300
-#define SNTP_WAIT_MS            10000UL      // getLocalTime budget; SNTP start delay is 5 s
 #define SNTP_RESYNC_S           10800UL      // 3 h
 #define NTP_SERVER_1            "pool.ntp.org"
 #define NTP_SERVER_2            "time.google.com"
@@ -484,7 +472,6 @@
 #define AP_IP_B                 168
 #define AP_IP_C                 4
 #define AP_IP_D                 1
-#define MDNS_HOSTNAME           "nottamagochi"
 
 #define RADIO_SETTLE_MS         250
 
@@ -508,56 +495,35 @@
 #define BLE_MATE_MIN_ENERGY_PCT 30
 #define BLE_MATE_P_MIN_PCT      25
 #define BLE_MATE_P_MAX_PCT      90
-#define BLE_MATE_ENERGY_COST    (-30)
-#define BLE_MATE_WIN_HAPPINESS  25
-#define BLE_MATE_LOSE_HAPPINESS (-15)
 #define BLE_QUEUE_CAP           8            // onResult runs on the BTC task: post, never draw
 
 // =============================================================================
-// 12. WEB UI  (BRIEF 1.6 + amendment A2)
+// 12. CREATOR SERVER + ACTION COOLDOWNS
+//    The web half is the server shell only: page budget, response buffer, PIN
+//    and rate limiter. The Phase 8 creator API grows back on top of it.
 // =============================================================================
 #define WEB_PORT                80
 #define WEB_HTML_MAX            49152        // A2: 48 KB cap on index_html.h
 #define WEB_JSON_BUF            320
 #define WEB_PIN_MAX             10000        // rng_below(RNG_MISC, 10000)
-#define WEB_CLIENT_ACTIVE_MS    10000UL
 #define WEB_RATE_TOKENS         10
 #define WEB_RATE_REFILL_PER_S   4
 #define WEB_COST_READ           1
 #define WEB_COST_MUTATE         2
-#define WEB_ACTION_GLOBAL_CD_S  2
-#define WEB_CD_FEED_S           20
-#define WEB_CD_CLEAN_S          15
-#define WEB_CD_SLEEP_S          10
-#define WEB_CD_PLAY_S           25
-#define WEB_CD_MED_S            30
 
-// Browser minigames (amendment A1: IN SCOPE for v1)
-#define MG_COUNT_WEB            3
-#define MG1_DURATION_S          35
-#define MG2_DURATION_S          30
-#define MG3_DURATION_S          40
-#define MG1_SCORE_MAX           200
-#define MG2_SCORE_MAX           120
-#define MG3_SCORE_MAX           160
+// Per-action cooldowns, seconds. These are the DEVICE action cooldowns: they
+// were named WEB_CD_* when the phone was the only surface that could hit them,
+// but sim.cpp has always applied them to the S1/S2/S3 menu actions too.
+#define ACT_CD_GLOBAL_S         2
+#define ACT_CD_FEED_S           20
+#define ACT_CD_CLEAN_S          15
+#define ACT_CD_SLEEP_S          10
+#define ACT_CD_PLAY_S           25
+#define ACT_CD_MED_S            30
+
+// Shared cooldown for the on-device (S4) minigames.
 #define MG_COOLDOWN_S           120
-#define MG_TOKEN_GRACE_S        20           // max overrun past dur
-#define MG_MIN_ELAPSED_PERMILLE 800          // >= 80 % of the real duration
-// Score -> stat, fixed point: delta = (score * NUM) >> 8. No floats.
-#define MG1_HUN_NUM             77           // ~ x0.30
-#define MG1_HAP_NUM             15           // ~ x0.06
-#define MG1_HUN_CAP             30
-#define MG1_HAP_CAP             6
-#define MG1_NRG_COST            (-4)
-#define MG2_HYG_NUM             154          // ~ x0.60
-#define MG2_HAP_NUM             20           // ~ x0.08
-#define MG2_HYG_CAP             60
-#define MG2_HAP_CAP             8
-#define MG2_NRG_COST            (-3)
-#define MG3_NRG_NUM             90           // ~ x0.35
-#define MG3_HAP_NUM             26           // ~ x0.10
-#define MG3_NRG_CAP             45
-#define MG3_HAP_CAP             12
+
 // Per-stat hourly gain budget (whole points). The real anti-farm ceiling.
 #define GAIN_CAP_HUNGER_H       60
 #define GAIN_CAP_HYGIENE_H      80
@@ -572,7 +538,6 @@
 #define QR_MAX_MODULES          33           // v4 = 17 + 4*4
 #define QR_STRIDE_BYTES         5            // (33 + 7) >> 3
 #define QR_BUF_BYTES            (QR_MAX_MODULES * QR_STRIDE_BYTES)   // 165
-#define QR_MAX_PAYLOAD          32           // v2-L byte mode capacity we design for
 #define QR_TEXT_MAX             40
 #define QR_PX_PER_MODULE        2
 #define QR_QUIET_MODULES        3
@@ -580,7 +545,6 @@
 #define QR_BOX_Y                1
 #define QR_BOX_SIZE             62           // white box: 25 modules * 2 px + 2*3*2 px
 #define QR_GF_POLY              0x11D
-#define QR_ECC_LEVEL_L          0
 
 // =============================================================================
 // 14. SIZE CAPS / BUILD GATES  (BRIEF 5)

@@ -111,7 +111,7 @@ enum EmoteId : uint8_t {
   EMO_COUNT
 };
 
-// Wire ids for GET /api/sprites?id=N. Order is a contract - see SPRITE_REV.
+// Sprite set ids. Order is a contract - see SPRITE_REV.
 enum SpriteSetId : uint8_t {
   SPR_EGG_IDLE = 0,
   SPR_EGG_CRACK = 1,
@@ -1190,7 +1190,7 @@ static_assert(SPRITE_DATA_BYTES <= 14336, "sprite art over the flash budget");
 //  Reading adult_form for a CHILD or a TEEN is the trap: FORM_UNSET is 0xFF,
 //  and 0xFF picks variant 1, so every child and teen would render the
 //  "descuidado" body for the pet's whole minor life. Always feed
-//  sprite_lookup() / sprite_lookup_pose() from here.
+//  sprite_lookup_pose() from here.
 // -----------------------------------------------------------------------------
 inline uint8_t sprite_form_of(const PetSave& p, Stage stage) {
   if (stage >= STAGE_ADULT) return p.adult_form;                  // clamped below
@@ -1252,18 +1252,6 @@ inline SpriteSet sprite_set(uint8_t id) {
   return SPRITE_SETS[id];
 }
 
-// Bytes one frame of a set occupies (== the per-frame chunk in /api/sprites).
-inline uint16_t sprite_frame_bytes(uint8_t id) {
-  const SpriteSet s = sprite_set(id);
-  return (uint16_t)(((s.w + 7u) >> 3) * s.h);
-}
-
-// Whole payload of a set: frames * frame_bytes.
-inline uint16_t sprite_set_bytes(uint8_t id) {
-  const SpriteSet s = sprite_set(id);
-  return (uint16_t)(((s.w + 7u) >> 3) * s.h * s.frames);
-}
-
 inline SpriteRef sprite_frame(uint8_t id, uint8_t frame) {
   const SpriteSet s = sprite_set(id);
   const uint16_t stride = (uint16_t)(((s.w + 7u) >> 3) * s.h);
@@ -1278,18 +1266,10 @@ inline SpriteRef sprite_lookup_pose(uint8_t species, uint8_t stage, uint8_t form
   return sprite_frame(sprite_set_id(species, stage, form, pose), frame);
 }
 
-// The BRIEF 4 interface: idle body of the pet described by (species, stage, form).
-inline SpriteRef sprite_lookup(uint8_t species, uint8_t stage, uint8_t form, uint8_t frame) {
-  return sprite_frame(sprite_set_id(species, stage, form, POSE_IDLE), frame);
-}
-
 // Egg: phase 0 = intact (wobble), phase 1 = cracking.
 inline SpriteRef sprite_egg(uint8_t phase, uint8_t frame) {
   return sprite_frame(phase ? SPR_EGG_CRACK : SPR_EGG_IDLE, frame);
 }
-
-inline SpriteRef sprite_ghost(uint8_t frame) { return sprite_frame(SPR_GHOST, frame); }
-inline SpriteRef sprite_tomb(void)           { return sprite_frame(SPR_TOMB, 0); }
 
 inline SpriteRef sprite_icon(uint8_t id) {
   if (id >= ICO_COUNT) id = 0;

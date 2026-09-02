@@ -3,7 +3,7 @@
 //
 //  THE ONLY MODULE ALLOWED TO TOUCH RADIO LIFECYCLE (BRIEF 1.3 / 4).
 //  Nothing else in the firmware may call WiFi.mode(), WiFi.begin(),
-//  WiFi.softAP(), MDNS.begin(), DNSServer::start(), BLEDevice::init() or
+//  WiFi.softAP(), DNSServer::start(), BLEDevice::init() or
 //  BLEDevice::deinit(). Consumers ask for a RadioMode and poll the accessors.
 //
 //  INVARIANT (binding, BRIEF 1.3): exactly one radio stack is resident.
@@ -42,7 +42,7 @@ enum StrId : uint16_t;
 enum NetPhase : uint8_t {
   NPH_OFF = 0,          // RADIO_OFF, nothing resident
   NPH_STA_CONNECTING,   // WiFi.begin() issued, waiting for association
-  NPH_STA_UP,           // WL_CONNECTED, IP valid, mDNS published
+  NPH_STA_UP,           // WL_CONNECTED, IP valid
   NPH_STA_RETRY_WAIT,   // backoff between association attempts
   NPH_AP_PORTAL,        // softAP + captive DNS up (provisioning fallback)
   NPH_BLE_UP,           // Bluedroid initialised
@@ -95,7 +95,7 @@ void        net_begin(void);
 RadioMode   net_mode(void);
 
 // Ask for a stack. Tears the other one down first (BLE: stop advertising,
-// stop scan, clearResults, deinit(false); WiFi: mDNS end, DNS stop, softAP
+// stop scan, clearResults, deinit(false); WiFi: DNS stop, softAP
 // down, WIFI_MODE_NULL). Returns false and sets net_last_err() when the
 // request cannot be honoured (BLE session cap, feature disabled, ...).
 // RADIO_BLE is fully up on return. RADIO_WIFI only *starts* associating -
@@ -103,7 +103,7 @@ RadioMode   net_mode(void);
 bool        net_request(RadioMode want);
 
 // Pump. Call once per loop(). Never blocks: drives the association timeout,
-// the retry backoff, the AP provisioning fallback and mDNS publication.
+// the retry backoff and the AP provisioning fallback.
 void        net_service(void);
 
 // Dotted-quad of the active interface, "0.0.0.0" when down. Never NULL.
@@ -117,7 +117,6 @@ bool        net_is_sta_up(void);
 // -----------------------------------------------------------------------------
 NetPhase    net_phase(void);
 bool        net_is_ap_up(void);          // provisioning portal is serving
-bool        net_mdns_up(void);           // nottamagochi.local is published
 NetErr      net_last_err(void);
 StrId       net_last_err_str(void);      // Spanish line for the UI
 
@@ -125,7 +124,7 @@ StrId       net_last_err_str(void);      // Spanish line for the UI
 const char *net_ap_ssid(void);
 
 // Builds "http://<ip>/?k=NNNN" for the QR screen (BRIEF 1.4: IP only, never
-// the mDNS name - it would push the payload past 32 B / QR version 2).
+// a hostname - it would push the payload past 32 B / QR version 2).
 // Returns the number of characters written, 0 if it did not fit or no IP.
 size_t      net_url(char *out, size_t cap, uint16_t pin);
 

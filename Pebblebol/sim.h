@@ -88,10 +88,6 @@ void     sim_tick(uint32_t seconds);
 // carries the ActionErr and out.cooldown_s the seconds remaining.
 bool     sim_apply_action(ActionId action, ActionResult& out);
 
-// Runs the GAME_DESIGN 5.2 offline integration for an absence of absence_s
-// seconds, then applies the 5.3 escalation ladder. Writes the resulting tier.
-void     sim_catch_up(uint32_t absence_s, AbsenceTier& tier);
-
 // Simulated seconds per logic tick: 1 normally, the god-mode time scale
 // otherwise. The ONLY time source game logic is allowed to read.
 uint32_t sim_step_seconds(void);
@@ -99,7 +95,7 @@ uint32_t sim_step_seconds(void);
 // 0..100 displayed mood score (GAME_DESIGN 6.3).
 uint8_t  sim_mood_score(void);
 
-// 0..100 whole-point projection of a stat. Used by the UI and /api/state.
+// 0..100 whole-point projection of a stat.
 uint8_t  sim_stat_pct(StatId id);
 
 // -----------------------------------------------------------------------------
@@ -109,7 +105,6 @@ void     sim_seed(uint32_t seed);            // reseeds RNG_CARE (wrapper on rng
 void     sim_set_env(const SimEnv& env);     // once per logic tick
 const SimEnv& sim_env(void);
 void     sim_set_time_scale(uint32_t scale); // god mode: 1/6/60/360/3600
-uint32_t sim_time_scale(void);
 
 // -----------------------------------------------------------------------------
 // 5. LIFE CYCLE
@@ -132,9 +127,9 @@ uint8_t  sim_care_grade(void);
 
 // -----------------------------------------------------------------------------
 // 6. SHARED COOLDOWN / HOURLY-GAIN LEDGER
-//    ONE ledger for the on-device minigames, the S1/S2/S3 menu actions and the
-//    web actions and browser minigames. Everything that can raise a stat goes
-//    through it, so no surface can be farmed.
+//    ONE ledger for the on-device minigames and the S1/S2/S3 menu actions.
+//    Everything that can raise a stat goes through it, so no surface can be
+//    farmed.
 // -----------------------------------------------------------------------------
 // Seconds left before `action` may be used again. 0 = ready now.
 uint16_t sim_action_cooldown_s(ActionId action);
@@ -176,7 +171,7 @@ void     sim_gain_snapshot(uint8_t out_pts[ST_COUNT]);
 uint8_t  sim_gain_restore(const uint8_t* pts, uint8_t n,
                           uint32_t saved_epoch, uint32_t now_epoch);
 
-// Seconds left before any minigame (device or browser) may be played again.
+// Seconds left before a minigame may be played again.
 uint16_t sim_minigame_cooldown_s(void);
 
 // Number of plays inside the rolling PLAY_DECAY_WINDOW_S window, 0..5.
@@ -186,10 +181,6 @@ uint8_t  sim_play_window_count(void);
 // Rolling-window happiness payout scale, permille (1000 / 700 / 450 / ...).
 uint16_t sim_play_decay_permille(void);
 
-// A browser minigame finished. mg_id is MinigameId (1..3), score is the raw
-// game score; it is clamped to MGx_SCORE_MAX before the fixed-point mapping.
-bool     sim_apply_minigame(uint8_t mg_id, uint16_t score, ActionResult& out);
-
 // An on-device (S4) minigame finished. win_permille 0..1000 is how well the
 // player did; >= 500 counts as a win for minigames_won and the branch score.
 bool     sim_apply_play_result(uint16_t win_permille, ActionResult& out);
@@ -197,7 +188,7 @@ bool     sim_apply_play_result(uint16_t win_permille, ActionResult& out);
 // -----------------------------------------------------------------------------
 // 7. QUERIES
 // -----------------------------------------------------------------------------
-const PetSave* sim_save(void);          // read-only view for ui/webui
+const PetSave* sim_save(void);          // read-only view for ui
 uint32_t sim_take_events(void);         // returns and CLEARS the event bitmask
 uint8_t  sim_alert(void);               // AlertId currently demanding attention
 uint16_t sim_sulk_left_s(void);         // post-absence refusal timer, 0 = none
@@ -207,8 +198,8 @@ uint8_t  sim_is_dead(void);
 uint32_t sim_age_s(void);
 uint32_t sim_now(void);                 // sim's own epoch cursor (offline-aware)
 
-// Full absence report (tier, death, exact elapsed, sulk timer). sim_catch_up()
-// is a thin wrapper over this. clock_known = 0 takes the ABS_UNKNOWN path.
+// Full absence report (tier, death, exact elapsed, sulk timer).
+// clock_known = 0 takes the ABS_UNKNOWN path.
 void     sim_catch_up_ex(uint32_t absence_s, uint8_t clock_known,
                          AbsenceReport& rep);
 
@@ -222,7 +213,6 @@ void     sim_god_set_stat(StatId id, uint8_t pct);
 void     sim_god_set_stage(uint8_t stage);      // Stage; recomputes forms
 void     sim_god_set_form(uint8_t form);        // AdultForm
 void     sim_god_kill(uint8_t cause);           // DeathCause; never resurrects
-void     sim_god_set_cq(int16_t cq);
 
 // Installs `g` into the live pet in place (genesis roll, pasted 32-hex genome,
 // per-gene editor, synthetic BLE child). The genome is RESEALED and the

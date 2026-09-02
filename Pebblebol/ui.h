@@ -113,7 +113,7 @@ void     ui_bind_config(Config* cfg);
 // The entry point's apply_config() routes the user brightness through here
 // instead of calling rd_set_contrast() directly. render.h:264 makes
 // rd_set_contrast() cancel any ramp in flight, so an unrelated Config write
-// (a mute toggle, a POST /api/cfg) would otherwise snap the sleeping panel
+// (a mute toggle, a captive-portal write) would otherwise snap the sleeping panel
 // back to full brightness and leave it there until the pet woke up.
 void     ui_note_brightness(uint8_t contrast);
 
@@ -121,19 +121,6 @@ void     ui_note_brightness(uint8_t contrast);
 // freeze, hatch, alerts, poop/sick toasts.
 // Call every logic tick with the value sim_take_events() returned.
 void     ui_note_events(uint32_t sim_events);
-
-// An action the WEB applied. webui.cpp calls sim_apply_action() directly, so
-// without this hook feeding the pet from the phone moved seven bars and
-// animated nothing at all on the panel. The entry point drains
-// web_take_action() once per loop() and hands the result here; `before` is the
-// pet as it was BEFORE the action landed, which ACT_CLEAN needs because
-// poop_count is already 0 by the time anyone can look.
-//
-// The UI navigates to HOME so the choreography can be seen, EXCEPT while a
-// ceremony, the memorial, god mode or a running minigame owns the panel - a
-// remote button press does not outrank those. The sim change stands either way;
-// only the film is dropped.
-void     ui_note_web_action(uint8_t action, const PetSave& before);
 
 // Hand over the AbsenceReport that sim_catch_up_ex() produced at boot. The UI
 // turns it into the tier line with the EXACT elapsed time substituted for {t}

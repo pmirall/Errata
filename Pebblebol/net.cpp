@@ -30,7 +30,6 @@
 
 #if NT_NET_WANT_WIFI
 #include <WiFi.h>
-#include <ESPmDNS.h>
 #include <DNSServer.h>
 #endif
 
@@ -55,7 +54,6 @@ static NetErr       s_err            = NERR_NONE;
 static uint32_t     s_phase_ms       = 0;    // millis() when the phase was entered
 static uint8_t      s_fails          = 0;    // consecutive association failures
 static uint8_t      s_ble_sessions   = 0;    // BLEDevice::init() calls this boot
-static bool         s_mdns_up        = false;
 static bool         s_ap_up          = false;
 
 #if NT_NET_WANT_WIFI
@@ -229,29 +227,6 @@ static inline bool ble_resident(void) {
 // =============================================================================
 #if NT_NET_WANT_WIFI
 
-static void mdns_down(void) {
-  if (!s_mdns_up) {
-    return;
-  }
-  MDNS.end();
-  s_mdns_up = false;
-}
-
-static void mdns_up(void) {
-  if (s_mdns_up) {
-    return;
-  }
-  // There is NO MDNS.update() in this core - the responder is task driven.
-  // The header comment claiming otherwise is stale ESP8266 copy-paste.
-  if (MDNS.begin(MDNS_HOSTNAME)) {
-    MDNS.addService("http", "tcp", (uint16_t)WEB_PORT);
-    s_mdns_up = true;
-    NET_LOGF("[net] mDNS %s.local -> %s\r\n", MDNS_HOSTNAME, s_ip);
-  } else {
-    NET_LOGF("[net] mDNS begin failed\r\n");
-  }
-}
-
 static void ap_down(void) {
 #if NT_NET_HAVE_PORTAL
   if (s_dns_up) {
@@ -266,7 +241,6 @@ static void ap_down(void) {
 }
 
 static void wifi_down(void) {
-  mdns_down();
   ap_down();
   wifi_mode_t m = WiFi.getMode();
   if (m & WIFI_MODE_STA) {
@@ -290,7 +264,7 @@ static void refresh_sta_ip(void) {
 
 static void sta_start(void) {
   WiFi.persistent(false);                 // do not burn NVS on every begin()
-  WiFi.setHostname(MDNS_HOSTNAME);        // before the netif exists
+  WiFi.setHostname(FW_NAME);              // before the netif exists
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.setSleep(true);                    // modem sleep; we are battery bound
@@ -304,7 +278,6 @@ static void sta_start(void) {
 
 #if NT_NET_HAVE_PORTAL
 static bool ap_start(void) {
-  mdns_down();
   if (WiFi.getMode() & WIFI_MODE_STA) {
     WiFi.disconnect(false, false, 100);
   }
@@ -531,7 +504,6 @@ void net_service(void) {
         s_fails = 0;
         s_err   = NERR_NONE;
         refresh_sta_ip();
-        mdns_up();
         set_phase(NPH_STA_UP);
         net_heap_log("STA UP");
         NET_LOGF("[net] STA up: %s rssi=%d\r\n", s_ip, (int)WiFi.RSSI());
@@ -552,7 +524,6 @@ void net_service(void) {
           s_link_lost_ms = now;
           NET_LOGF("[net] STA link lost, waiting for auto-reconnect\r\n");
         } else if ((uint32_t)(now - s_link_lost_ms) >= WIFI_CONNECT_TIMEOUT_MS) {
-          mdns_down();
           clear_ip();
           s_link_lost_ms = 0;
           s_fails        = 0;
@@ -562,7 +533,6 @@ void net_service(void) {
         if (s_link_lost_ms != 0) {
           s_link_lost_ms = 0;
           refresh_sta_ip();
-          mdns_up();
           NET_LOGF("[net] STA re-associated: %s\r\n", s_ip);
         } else if ((uint32_t)(now - s_ip_refresh_ms) >= 5000UL) {
           refresh_sta_ip();   // DHCP renew can move us
@@ -609,10 +579,6 @@ bool net_is_ap_up(void) {
   return s_ap_up;
 }
 
-bool net_mdns_up(void) {
-  return s_mdns_up;
-}
-
 StrId net_last_err_str(void) {
   switch (s_err) {
     case NERR_NONE:            return STR_EMPTY;
@@ -645,8 +611,8 @@ size_t net_url(char *out, size_t cap, uint16_t pin) {
   if (s_ip[0] == '\0' || strcmp(s_ip, "0.0.0.0") == 0) {
     return 0;
   }
-  // BRIEF 1.4: IP only, never nottamagochi.local - the mDNS form is 33 B and
-  // would force QR version 3. Worst case here is
+  // BRIEF 1.4: IP only. A hostname form would be 33 B and would force QR
+  // version 3. Worst case here is
   // "http://255.255.255.255/?k=9999" = 30 B, inside the 32 B v2-L budget.
   int n = snprintf(out, cap, "http://%s/?k=%04u",
                    s_ip, (unsigned)(pin % (unsigned)WEB_PIN_MAX));
@@ -689,7 +655,6 @@ void net_set_credentials(const char *ssid, const char *pass) {
 #if NT_NET_WANT_WIFI
   // Re-associate immediately if we are already on the WiFi track.
   if (s_mode == RADIO_WIFI && s_ssid[0] != '\0') {
-    mdns_down();
     ap_down();
     s_fails = 0;
     set_phase(NPH_STA_CONNECTING);

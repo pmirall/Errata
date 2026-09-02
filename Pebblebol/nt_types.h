@@ -204,7 +204,6 @@ enum AlertId : uint8_t {
   AL_BIRTHDAY,
   AL_STORM,
   AL_MATE_FOUND,
-  AL_WEB_CLIENT,
   AL_COUNT
 };
 
@@ -226,15 +225,6 @@ enum WishId : uint8_t {
   WISH_CLEAN,
   WISH_PET3,
   WISH_COUNT
-};
-
-// Browser minigames (amendment A1). Wire ids are 1..3, matching /api/game?id=.
-enum MinigameId : uint8_t {
-  MG_NONE = 0,
-  MG_SNACK_RUSH = 1,
-  MG_BUBBLE_SCRUB = 2,
-  MG_LULLABY = 3,
-  MG_ID_COUNT = 4
 };
 
 // On-device 2-button minigames (screen S4). Canonical for minigames_won.
@@ -479,7 +469,7 @@ static_assert(sizeof(AncestorRecord) == 12, "AncestorRecord must be exactly 12 b
 // -----------------------------------------------------------------------------
 // 6. CONFIG - NVS key "cfg", 256 B.
 //    Seeded from the CFG_* defaults in config.h on first boot; editable at
-//    runtime from S9 SETTINGS, the captive portal and POST /api/cfg.
+//    runtime from S9 SETTINGS and the captive portal.
 //    reserved_a[] holds the retired Telegram token and chat id, reserved_b[]
 //    the retired weather coordinates and reserved_c the retired Telegram mode:
 //    the offsets of every field after them are frozen by the asserts below, so
@@ -560,7 +550,7 @@ struct BlePeerInfo {
   uint32_t last_seen_ms;
 };
 
-// The absence report handed from sim_catch_up() to the UI.
+// The absence report handed from sim_catch_up_ex() to the UI.
 struct AbsenceReport {
   uint8_t  tier;           // AbsenceTier
   uint8_t  died;           // 1 = the offline sim reached health <= 0

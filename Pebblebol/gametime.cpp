@@ -159,8 +159,8 @@ static void gt_apply_tz(void)
 //                        so a device that never meets an NTP server still
 //                        reports plausible, monotonically increasing epochs
 //                        and an absence of ~0 instead of inventing one.
-//   store_load_cfg()  -> Config.tz, so a timezone changed from S9 SETTINGS or
-//                        POST /api/cfg is honoured on the next boot with no
+//   store_load_cfg()  -> Config.tz, so a timezone changed from S9 SETTINGS is
+//                        honoured on the next boot with no
 //                        network at all. Returns false (and fills the
 //                        CFG_TZ_STRING defaults) when nothing is persisted.
 //

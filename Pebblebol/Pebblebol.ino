@@ -82,8 +82,9 @@ static uint8_t  g_nvs_ok          = 0;
 
 // =============================================================================
 //  CONFIG SIDE EFFECTS
-//  Config is shared by pointer with ui (S9 SETTINGS) and webui (POST /api/cfg),
-//  so it can change under us from two directions. Rather than have both of them
+//  Config is shared by pointer with ui (S9 SETTINGS) and webui (the
+//  CF_WEB_ENABLED toggle), so it can change under us from two directions.
+//  Rather than have both of them
 //  call back, the tick watches the struct's own CRC and re-applies the two
 //  settings that live outside the struct: OLED contrast and the WiFi
 //  credentials. Everything else is read straight from g_cfg by its owner.
@@ -464,25 +465,4 @@ void loop()
   }
   web_service();
   ble_scan_service();
-
-  // --- 6. cross-module notifications ---------------------------------------
-  // An action taken on the phone. webui.cpp mutates the pet through
-  // sim_apply_action() directly, so before this drain existed a remote feed
-  // moved the bars and the panel showed nothing at all - the QR feature's
-  // natural ending (feed it from your phone, watch it eat on the device) was
-  // simply missing. Same shape as the web_cfg_dirty() drain below it, and the
-  // "before" copy is what ACT_CLEAN needs to have anything left to dissolve.
-  {
-    PetSave       before;
-    const uint8_t web_act = web_take_action(&before);
-    if (web_act != ACT_NONE) ui_note_web_action(web_act, before);
-  }
-
-  if (web_cfg_dirty()) {
-    web_cfg_clear_dirty();
-    if (config_changed()) {
-      apply_config();
-    }
-    ui_toast(STR_SET_SAVED);
-  }
 }

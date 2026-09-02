@@ -320,20 +320,6 @@ uint16_t gene_hardiness_mult(const Genome& g) {
   return (uint16_t)(GENE_HARDY_BASE + (int32_t)v * GENE_HARDY_STEP);
 }
 
-uint16_t gene_luck_permille(const Genome& g) {
-  uint8_t v = rare_step(g, gene_luck(g), +1, 0, 7);
-  return (uint16_t)(20 + (int32_t)v * 15);          // 2% + v*1.5%
-}
-
-uint16_t gene_tantrum_permille(const Genome& g) {
-  return (uint16_t)((int32_t)gene_temperament(g) * 12);   // v * 1.2%
-}
-
-uint16_t gene_mate_success_permille(const Genome& g) {
-  uint8_t v = rare_step(g, gene_sociability(g), +1, 0, 15);
-  return (uint16_t)(400 + (int32_t)v * 30);         // 40% + v*3%
-}
-
 uint16_t gene_weight_ideal_dg(const Genome& g) {
   return (uint16_t)(300 + (int32_t)gene_body_size(g) * 50);
 }

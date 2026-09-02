@@ -441,16 +441,6 @@ uint32_t store_boot_count(void) {
   return s_rtc.boot_count;
 }
 
-void store_rtc_service(uint32_t epoch) {
-  if (epoch != 0) {
-    s_rtc.last_seen_epoch = epoch;
-    if (epoch > s_cached_last_seen) {
-      s_cached_last_seen = epoch;
-    }
-  }
-  s_rtc.uptime_s = millis() / 1000UL;
-}
-
 void store_rtc_mark_god(void) {
   s_rtc.god_taint = (uint32_t)RTC_NONCE_MAGIC;
 }

@@ -35,9 +35,6 @@ enum StrId : uint16_t {
 
   // --- 1. boot / system --------------------------- <= 25 chars @ 5x8 --------
   STR_APP_NAME,
-  STR_BOOTING,
-  STR_BOOT_CLOCK,
-  STR_BOOT_NOCLOCK,
   STR_BOOT_DIZZY,
   STR_BOOT_FIRST,
 
@@ -61,9 +58,7 @@ enum StrId : uint16_t {
   STR_AF_PREV,
   STR_AF_FWD,
   STR_AF_MORE,
-  STR_AF_LESS,
   STR_AF_BURY,
-  STR_AF_HOME,
   STR_YES,
   STR_NO,
   STR_ON,
@@ -184,25 +179,16 @@ enum StrId : uint16_t {
   STR_ABS_GRAVE,
   STR_ABS_MUERTO,
   STR_ABS_UNKNOWN,
-  STR_ABS_SULK,                          // the visible refusal counter
-  STR_ABS_FORGIVE,
-  STR_ABS_BACK_SHORT,                    // status-bar tag
 
   // --- 17. memorial, S12 -------------------------- <= 21 chars @ 6x10 -------
   STR_MEM_DIED,
   STR_MEM_SLEPT,
   STR_MEM_ALONE,
-  STR_MEM_WHEN,
   STR_MEM_LIVED,
   STR_MEM_CAUSE,
-  STR_MEM_LINEAGE,
-  STR_MEM_AWAY,
-  STR_MEM_EGG_LEFT,
   STR_MEM_EGG_LEFT_3P,
-  STR_MEM_EGG_WAIT,
   STR_MEM_EGG_COLD,
   STR_MEM_BURY_HINT,
-  STR_MEM_BURIED,
 
   // --- 18. egg, S13 ------------------------------- <= 25 chars @ 5x8 --------
   STR_EGG_TITLE,
@@ -210,7 +196,6 @@ enum StrId : uint16_t {
   STR_EGG_MOURN,
   STR_EGG_RUB,
   STR_EGG_KIN,
-  STR_EGG_NEW_LINEAGE,
   STR_EGG_HATCHING,
   STR_EGG_HATCHED,
   STR_EGG_NAMED,
@@ -231,7 +216,6 @@ enum StrId : uint16_t {
   STR_AL_BIRTHDAY,
   STR_AL_STORM,
   STR_AL_MATE_FOUND,
-  STR_AL_WEB_CLIENT,
 
   // --- 20. daily wish, parallel to WishId --------- <= 25 chars @ 5x8 --------
   STR_WISH_NONE,
@@ -241,18 +225,15 @@ enum StrId : uint16_t {
   STR_WISH_PET3,
   STR_WISH_OK,
   STR_WISH_FAIL,
-  STR_WISH_TITLE,
 
   // --- 21. scheduled events ----------------------- <= 25 chars @ 5x8 --------
   STR_EV_VISITA,
   STR_EV_STORM,
   STR_EV_BIRTHDAY,
-  STR_EV_UMBRELLA,
   STR_EV_SCARE,
 
   // --- 22. lineage, S7 ---------------------------- <= 12 chars @ 4x6/5x8 ----
   STR_LIN_TITLE,
-  STR_LIN_GEN,
   STR_LIN_LIVED,
   STR_LIN_DIED_OF,
   STR_LIN_GRADE,
@@ -266,8 +247,6 @@ enum StrId : uint16_t {
   // --- 24. status screens S5/S6 ------------------- <= 12 chars --------------
   STR_ST_TITLE_A,
   STR_ST_TITLE_B,
-  STR_ST_AGE,
-  STR_ST_WEIGHT,
   STR_ST_GEN,
   STR_ST_SEX,
   STR_ST_LUCK,
@@ -280,7 +259,6 @@ enum StrId : uint16_t {
   STR_SO_TITLE,
   STR_SO_SEARCHING,
   STR_SO_NOBODY,
-  STR_SO_FOUND,
   STR_SO_ASK,
   STR_SO_WIN,
   STR_SO_LOSE,
@@ -293,24 +271,16 @@ enum StrId : uint16_t {
 
   // --- 26. web / QR, S15 -------------------------- <= 25 chars @ 5x8 --------
   STR_WEB_TITLE,
-  STR_WEB_SCAN,
   STR_WEB_PIN,
   STR_WEB_CONNECTING,
   STR_WEB_NOWIFI,
   STR_WEB_AP_HINT,
-  STR_WEB_AP_URL,
-  STR_WEB_READY,
-  STR_WEB_LOCAL,
-  STR_WEB_CLIENT,
 
   // --- 27. settings, S9 --------------------------- <= 16 chars --------------
   STR_SET_TITLE,
-  STR_SET_WIFI,
   STR_SET_SOUND,
   STR_SET_BRIGHT,
-  STR_SET_CLOCK,
   STR_SET_WEB,
-  STR_SET_NAME,
   STR_SET_INFO,
   STR_SET_RESET,
   STR_SET_SAVED,
@@ -328,9 +298,6 @@ enum StrId : uint16_t {
   STR_DG_REFLEX,
   STR_DG_MEMORY,
   STR_DG_JUMP,
-  STR_MG_SNACK,
-  STR_MG_SCRUB,
-  STR_MG_LULLABY,
   STR_GM_READY,
   STR_GM_GO,
   STR_GM_WIN,
@@ -339,7 +306,6 @@ enum StrId : uint16_t {
   STR_GM_COOLDOWN,
 
   // --- 30. god mode, S14 -------------------------- <= 16 chars --------------
-  STR_GOD_TITLE,
   STR_GOD_SPEED,
   STR_GOD_ABSENCE,
   STR_GOD_SETSTAT,
@@ -361,9 +327,6 @@ enum StrId : uint16_t {
   // --- 31. errors --------------------------------- <= 25 chars @ 5x8 --------
   STR_ERR_NO_WIFI,
   STR_ERR_NO_NET,
-  STR_ERR_NO_TIME,
-  STR_ERR_PIN,
-  STR_ERR_TOO_FAST,
   STR_ERR_BUSY,
   STR_ERR_MEM,
   STR_ERR_NVS,
@@ -378,7 +341,6 @@ enum StrId : uint16_t {
   // --- 33a. affordance labels the base set did not carry -- <= 9 ch @ 5x8 ---
   STR_AF_MENU,
   STR_AF_VIEW,
-  STR_AF_PET,
   STR_AF_QUIT,
   STR_AF_RUB,
   STR_AF_MATE,
@@ -421,12 +383,9 @@ enum StrId : uint16_t {
   STR_SYL_B08, STR_SYL_B09, STR_SYL_B10, STR_SYL_B11,
 
   // --- 33e. misc ui lines --------------------------------------------------
-  STR_UI_ASLEEP,
   STR_UI_NOBODY,
-  STR_UI_SAVING,
   STR_UI_GOD_HOLD,
   STR_UI_NO_CLOCK,
-  STR_UI_PEERS,
 
   // ===========================================================================
   //  34. GOD MODE BLOCK - appended by godmode.cpp. APPEND ONLY, NEVER RENUMBER.
@@ -446,7 +405,6 @@ enum StrId : uint16_t {
   STR_GOD_PASTE,
   STR_GOD_DONE,
   STR_GOD_FAILED,
-  STR_GOD_WORKING,
   STR_GOD_MATING,
   STR_GOD_CHILD_OK,
   STR_GOD_CHILD_NO,
@@ -489,9 +447,6 @@ inline constexpr const char* const ES[] = {
 
   /* --- 1. boot / system --- */
   /* STR_APP_NAME */              "NOTTAMAGOCHI",
-  /* STR_BOOTING */               "Despertando...",
-  /* STR_BOOT_CLOCK */            "Buscando la hora...",
-  /* STR_BOOT_NOCLOCK */          "Sin hora. Me da igual.",
   /* STR_BOOT_DIZZY */            "Me he mareado un momento.",
   /* STR_BOOT_FIRST */            "Hola. Soy nuevo aquí.",
 
@@ -515,9 +470,7 @@ inline constexpr const char* const ES[] = {
   /* STR_AF_PREV */               "ANTES",
   /* STR_AF_FWD */                "DESPUÉS",
   /* STR_AF_MORE */               "MÁS",
-  /* STR_AF_LESS */               "MENOS",
   /* STR_AF_BURY */               "ENTERRAR",
-  /* STR_AF_HOME */               "INICIO",
   /* STR_YES */                   "SÍ",
   /* STR_NO */                    "NO",
   /* STR_ON */                    "ON",
@@ -637,25 +590,16 @@ inline constexpr const char* const ES[] = {
   /* STR_ABS_GRAVE */             "{t}. Ya no sé si esto lo arreglas.",
   /* STR_ABS_MUERTO */            "{t}. Llegas tarde.",
   /* STR_ABS_UNKNOWN */           "No sé cuánto tiempo ha pasado. Sé que fue mucho. Y sé que fuiste tú.",
-  /* STR_ABS_SULK */              "...",
-  /* STR_ABS_FORGIVE */           "Un mimo más. Puede.",
-  /* STR_ABS_BACK_SHORT */        "AUSENCIA",
 
   /* --- 17. memorial --- */
   /* STR_MEM_DIED */              "{n} murió.",
   /* STR_MEM_SLEPT */             "{n} se durmió.",
   /* STR_MEM_ALONE */             "Moriste solo.",
-  /* STR_MEM_WHEN */              "{f}, {h}",
   /* STR_MEM_LIVED */             "Vivió {t}.",
   /* STR_MEM_CAUSE */             "Causa: {c}.",
-  /* STR_MEM_LINEAGE */           "Generación {g} · Estirpe {l}",
-  /* STR_MEM_AWAY */              "Estuviste {t} sin mí.",
-  /* STR_MEM_EGG_LEFT */          "Te dejé un huevo.",
   /* STR_MEM_EGG_LEFT_3P */       "Dejó un huevo.",
-  /* STR_MEM_EGG_WAIT */          "El huevo lleva {t} esperando.",
   /* STR_MEM_EGG_COLD */          "Se enfrió. Ha cambiado.",
   /* STR_MEM_BURY_HINT */         "Mantén DCHA: enterrar",
-  /* STR_MEM_BURIED */            "Ya está.",
 
   /* --- 18. egg --- */
   /* STR_EGG_TITLE */             "HUEVO",
@@ -663,7 +607,6 @@ inline constexpr const char* const ES[] = {
   /* STR_EGG_MOURN */             "Todavía no. Dale un momento.",
   /* STR_EGG_RUB */               "Frótalo. Con ganas.",
   /* STR_EGG_KIN */               "Parientes. Ya veremos.",
-  /* STR_EGG_NEW_LINEAGE */       "NUEVA ESTIRPE",
   /* STR_EGG_HATCHING */          "Se está abriendo...",
   /* STR_EGG_HATCHED */           "¡Ha salido!",
   /* STR_EGG_NAMED */             "Se llama {n}.",
@@ -684,7 +627,6 @@ inline constexpr const char* const ES[] = {
   /* STR_AL_BIRTHDAY */           "¡Es mi cumpleaños!",
   /* STR_AL_STORM */              "Va a caer una buena.",
   /* STR_AL_MATE_FOUND */         "Hay alguien cerca.",
-  /* STR_AL_WEB_CLIENT */         "Te veo en el móvil.",
 
   /* --- 20. daily wish --- */
   /* STR_WISH_NONE */             "",
@@ -694,18 +636,15 @@ inline constexpr const char* const ES[] = {
   /* STR_WISH_PET3 */             "Hoy quiero tres mimos.",
   /* STR_WISH_OK */               "Era eso. Justo eso.",
   /* STR_WISH_FAIL */             "Se te ha pasado. Otra vez.",
-  /* STR_WISH_TITLE */            "DESEO",
 
   /* --- 21. scheduled events --- */
   /* STR_EV_VISITA */             "Ha venido alguien. Se ha ido.",
   /* STR_EV_STORM */              "Esta noche truena.",
   /* STR_EV_BIRTHDAY */           "¡Feliz cumpleaños!",
-  /* STR_EV_UMBRELLA */           "Traigo paraguas. De nada.",
   /* STR_EV_SCARE */              "¡AY! Eso ha dolido.",
 
   /* --- 22. lineage --- */
   /* STR_LIN_TITLE */             "ESTIRPE",
-  /* STR_LIN_GEN */               "gen",
   /* STR_LIN_LIVED */             "vivió",
   /* STR_LIN_DIED_OF */           "murió de",
   /* STR_LIN_GRADE */             "nota",
@@ -719,8 +658,6 @@ inline constexpr const char* const ES[] = {
   /* --- 24. status screens --- */
   /* STR_ST_TITLE_A */            "ESTADO",
   /* STR_ST_TITLE_B */            "ADN",
-  /* STR_ST_AGE */                "Edad",
-  /* STR_ST_WEIGHT */             "Peso",
   /* STR_ST_GEN */                "Gen.",
   /* STR_ST_SEX */                "Sexo",
   /* STR_ST_LUCK */               "Suerte",
@@ -733,7 +670,6 @@ inline constexpr const char* const ES[] = {
   /* STR_SO_TITLE */              "SOCIAL",
   /* STR_SO_SEARCHING */          "Buscando...",
   /* STR_SO_NOBODY */             "Nadie cerca. Como siempre.",
-  /* STR_SO_FOUND */              "Encontrado:",
   /* STR_SO_ASK */                "¿Emparejar?",
   /* STR_SO_WIN */                "Ha salido bien.",
   /* STR_SO_LOSE */               "No ha cuajado.",
@@ -746,24 +682,16 @@ inline constexpr const char* const ES[] = {
 
   /* --- 26. web / QR --- */
   /* STR_WEB_TITLE */             "MÓVIL",
-  /* STR_WEB_SCAN */              "Escanea esto:",
   /* STR_WEB_PIN */               "PIN",
   /* STR_WEB_CONNECTING */        "Conectando...",
   /* STR_WEB_NOWIFI */            "Sin WiFi. Modo directo.",
   /* STR_WEB_AP_HINT */           "Conéctate a la red:",
-  /* STR_WEB_AP_URL */            "y abre 192.168.4.1",
-  /* STR_WEB_READY */             "Listo. Abre el enlace.",
-  /* STR_WEB_LOCAL */             "nottamagochi.local",
-  /* STR_WEB_CLIENT */            "Alguien está mirando.",
 
   /* --- 27. settings --- */
   /* STR_SET_TITLE */             "AJUSTES",
-  /* STR_SET_WIFI */              "WiFi",
   /* STR_SET_SOUND */             "Sonido",
   /* STR_SET_BRIGHT */            "Brillo",
-  /* STR_SET_CLOCK */             "Hora",
   /* STR_SET_WEB */               "Web y QR",
-  /* STR_SET_NAME */              "Nombre",
   /* STR_SET_INFO */              "Acerca de",
   /* STR_SET_RESET */             "Empezar de cero",
   /* STR_SET_SAVED */             "Guardado.",
@@ -781,9 +709,6 @@ inline constexpr const char* const ES[] = {
   /* STR_DG_REFLEX */             "REFLEJOS",
   /* STR_DG_MEMORY */             "MEMORIA",
   /* STR_DG_JUMP */               "SALTO",
-  /* STR_MG_SNACK */              "ZAMPADA",
-  /* STR_MG_SCRUB */              "BURBUJAS",
-  /* STR_MG_LULLABY */            "NANA",
   /* STR_GM_READY */              "¿Listo?",
   /* STR_GM_GO */                 "¡YA!",
   /* STR_GM_WIN */                "¡Ganaste!",
@@ -792,7 +717,6 @@ inline constexpr const char* const ES[] = {
   /* STR_GM_COOLDOWN */           "Descansa un poco.",
 
   /* --- 30. god mode --- */
-  /* STR_GOD_TITLE */             "GOD",
   /* STR_GOD_SPEED */             "VELOCIDAD",
   /* STR_GOD_ABSENCE */           "SALTAR AUSENCIA",
   /* STR_GOD_SETSTAT */           "FIJAR STAT",
@@ -814,9 +738,6 @@ inline constexpr const char* const ES[] = {
   /* --- 31. errors --- */
   /* STR_ERR_NO_WIFI */           "Sin WiFi.",
   /* STR_ERR_NO_NET */            "No hay red.",
-  /* STR_ERR_NO_TIME */           "Sin hora.",
-  /* STR_ERR_PIN */               "PIN incorrecto.",
-  /* STR_ERR_TOO_FAST */          "Más despacio.",
   /* STR_ERR_BUSY */              "Ocupado. Espera.",
   /* STR_ERR_MEM */               "Sin memoria libre.",
   /* STR_ERR_NVS */               "No consigo recordar nada.",
@@ -826,7 +747,6 @@ inline constexpr const char* const ES[] = {
   /* --- 33a. affordance labels --- */
   /* STR_AF_MENU */               "MENÚ",
   /* STR_AF_VIEW */               "VISTA",
-  /* STR_AF_PET */                "MIMO",
   /* STR_AF_QUIT */               "SALIR",
   /* STR_AF_RUB */                "FROTAR",
   /* STR_AF_MATE */               "CORTEJAR",
@@ -862,12 +782,9 @@ inline constexpr const char* const ES[] = {
   /* B */ "ri", "po", "tán", "fu", "sco", "lín", "ma", "zo", "que", "nel", "bi", "rrón",
 
   /* --- 33e. misc ui --- */
-  /* STR_UI_ASLEEP */             "Durmiendo.",
   /* STR_UI_NOBODY */             "Aquí no hay nadie.",
-  /* STR_UI_SAVING */             "Guardando...",
   /* STR_UI_GOD_HOLD */           "···",
   /* STR_UI_NO_CLOCK */           "Sin hora fiable.",
-  /* STR_UI_PEERS */              "Cerca:",
 
   /* --- 34a. god mode: list rows and panel titles --- */
   /* STR_GOD_SICK */              "ENFERMAR",
@@ -881,7 +798,6 @@ inline constexpr const char* const ES[] = {
   /* STR_GOD_PASTE */             "Pega 32 hex y ENTER.",
   /* STR_GOD_DONE */              "Hecho.",
   /* STR_GOD_FAILED */            "No se pudo.",
-  /* STR_GOD_WORKING */           "Trabajando...",
   /* STR_GOD_MATING */            "Buscando pareja...",
   /* STR_GOD_CHILD_OK */          "Cría lista. SEL la pone.",
   /* STR_GOD_CHILD_NO */          "Sin cría.",
@@ -946,7 +862,7 @@ static_assert(STR_CAUSE_ACCIDENT  - STR_CAUSE_NONE  + 1 == (int)DEATH_COUNT,   "
 static_assert(STR_ACT_SLEEP       - STR_ACT_NONE    + 1 == (int)ACT_COUNT,     "action names");
 static_assert(STR_AERR_BAD_ARG    - STR_AERR_NONE   + 1 == (int)AERR_COUNT,    "action errors");
 static_assert(STR_ABS_UNKNOWN     - STR_ABS_NONE    + 1 == (int)ABS_COUNT,     "absence lines");
-static_assert(STR_AL_WEB_CLIENT   - STR_AL_NONE     + 1 == (int)AL_COUNT,      "alert lines");
+static_assert(STR_AL_MATE_FOUND   - STR_AL_NONE     + 1 == (int)AL_COUNT,      "alert lines");
 static_assert(STR_WISH_PET3       - STR_WISH_NONE   + 1 == (int)WISH_COUNT,    "wish lines");
 static_assert(STR_GRADE_F         - STR_GRADE_A     + 1 == (int)GRADE_COUNT,   "care grades");
 static_assert(STR_MENU_SETTINGS   - STR_MENU_FEED   + 1 == MENU_ITEM_COUNT,    "menu labels");

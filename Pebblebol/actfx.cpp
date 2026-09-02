@@ -618,9 +618,9 @@ void actfx_begin(uint8_t action, const PetSave& before) {
   //
   // s_now is only ever written by actfx_service(), which runs in section 3 of
   // loop(). This function is called from section 1 (a button, through
-  // do_action()) and from section 6 (a phone, through ui_note_web_action()) -
-  // and section 5 sits between them, where the radio pumps run, on top of a
-  // ~24 ms sendBuffer() and an NVS write. Stamped from a clock that stale, the
+  // do_action()), and section 5 - where the radio pumps run, on top of a
+  // ~24 ms sendBuffer() and an NVS write - sits after it. Stamped from a clock
+  // that stale, the
   // very first tick measures t >= s_dur and cancels the film before one frame
   // of it is drawn: the action works, the toast appears, the screen jumps to
   // HOME and NOTHING HAPPENS. With smaller delays the bowl teleports to its

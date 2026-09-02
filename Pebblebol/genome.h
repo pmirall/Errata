@@ -183,9 +183,6 @@ uint16_t gene_metabolism_mult(const Genome& g);     // 600..1500 (energy/weight 
 uint16_t gene_sociability_mult(const Genome& g);    // 700..1300 (x1000)
 uint16_t gene_hardiness_mult(const Genome& g);      // 1300..700 (damage x1000, lower=tougher)
 
-uint16_t gene_luck_permille(const Genome& g);       // 20 + v*15  -> rare-event chance
-uint16_t gene_tantrum_permille(const Genome& g);    // temperament * 12
-uint16_t gene_mate_success_permille(const Genome& g); // 400 + sociability*30 (single unit)
 uint16_t gene_weight_ideal_dg(const Genome& g);     // 300 + body_size*50, decigrams
 
 // -----------------------------------------------------------------------------

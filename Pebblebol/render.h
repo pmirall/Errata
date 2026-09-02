@@ -114,9 +114,6 @@ static_assert(OLED_W == 128 && OLED_H == 64, "render.cpp fast paths assume a 128
 // return is harmless (the buffer is written, the panel just never answers).
 bool  rd_begin(void);
 
-// True when rd_begin() found a panel.
-bool  rd_display_ok(void);
-
 // The one and only U8G2 instance. Use it for primitives this header does not
 // wrap (drawXBM, drawDisc, drawLine, setDrawColor, ...). Do NOT call drawStr()
 // on Spanish text and do NOT construct another U8G2 anywhere.
@@ -216,13 +213,6 @@ uint16_t rd_text_fit(int16_t x, int16_t y, int16_t max_w, const uint8_t* font, c
 // Returns the number of lines drawn (<= max_lines).
 uint8_t  rd_text_wrap(int16_t x, int16_t y, int16_t w, uint8_t line_h,
                       uint8_t max_lines, const uint8_t* font, const char* s);
-
-// printf into a 96 B stack buffer, then rd_text(). No String, no heap.
-uint16_t rd_textf(int16_t x, int16_t y, const uint8_t* font, const char* fmt, ...)
-#if defined(__GNUC__)
-    __attribute__((format(printf, 4, 5)))
-#endif
-    ;
 
 // =============================================================================
 //  SHADING / WIDGETS

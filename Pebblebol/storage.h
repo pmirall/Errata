@@ -159,8 +159,8 @@ bool     store_load_cfg(Config& out);
 // .ino watches g_cfg.crc16 to decide when to re-apply the two settings that
 // live outside the struct (OLED contrast, WiFi credentials).
 // Sealing into a private copy left the caller's crc16 frozen forever, so that
-// detector could never fire and e.g. POST /api/cfg?br=N never reached the panel
-// until the next reboot. The seal happens even when NVS is closed, so a
+// detector could never fire and e.g. a brightness change never reached the
+// panel until the next reboot. The seal happens even when NVS is closed, so a
 // RAM-only unit still applies its settings for the current session.
 bool     store_save_cfg(Config& c);
 
@@ -193,9 +193,6 @@ uint32_t store_rtc_last_seen(void);
 // true when the RTC_NOINIT nonce survived, i.e. this was NOT a power loss.
 bool     store_rtc_intact(void);
 
-// RTC bookkeeping. store_rtc_service() is the cheap per-tick mirror; it is also
-// done inside store_touch_lastseen(), so calling it is optional.
-void     store_rtc_service(uint32_t epoch);
 uint32_t store_boot_count(void);
 void     store_rtc_mark_god(void);    // god mode was entered this power cycle
 bool     store_rtc_god_tainted(void);

@@ -395,11 +395,11 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 - Acceptance: gate; matrix shows the 9 telegram warnings gone; flash ≈ 1,981,714 B.
 
 **P2-C5 Remove browser minigames, page body, `/api/cfg`, mDNS; prune dead macros/StrIds/exports (G3)** — M
-- [ ] `index_html.h`: keep the container (:1-25, :75-80) with a 1 KB placeholder ("Pebblebol creator — Phase 8"); webui.cpp keeps `web_begin/web_service/web_stop/pin_ok/rate_take/send_P` and the `NPH_STA_UP||NPH_AP_PORTAL` bind gate (webui.cpp:1035-1098, :270-285, :352-364); `h_root` (webui.cpp:573-581) still serves `INDEX_HTML/INDEX_HTML_LEN`.
-- [ ] sim.cpp: delete `sim_apply_minigame` (:1754-1814) and `MG*` consumers (:411-416); rename `WEB_CD_*`/`WEB_ACTION_GLOBAL_CD_S` (config.h:582-587) → `ACT_CD_*`.
-- [ ] Delete `MinigameId`, `AL_WEB_CLIENT`, `MG1..3_*`, `/api/cfg`, `/api/sprites`, `web_take_action` drain, mDNS (net.cpp:232-253, :612-614; config.h:507; ui.cpp:2427-2428).
-- [ ] Prune dead macros (config.h:84, :102, :114, :163, :191, :195-196, :231, :342, :354, :463, :565-567, :629, :637, :651; **keep** `PIN_VBAT_ADC` :97 as reserved, `INPUT_POLL_MS` :168 and `GATE_*` :642-643 which become live), the 39 dead `StrId`s and the dead exports of audit §13.2 (keep `rd_frame_time_us`, `rd_power`, `rd_set_contrast`, `rd_breathe` for P6/P10).
-- [ ] ui.cpp: fence the 3 functions that warn under `FEATURE_WEB=0`/`FEATURE_BLE=0`.
+- [x] `index_html.h`: keep the container (:1-25, :75-80) with a 1 KB placeholder ("Pebblebol creator — Phase 8"); webui.cpp keeps `web_begin/web_service/web_stop/pin_ok/rate_take/send_P` and the `NPH_STA_UP||NPH_AP_PORTAL` bind gate (webui.cpp:1035-1098, :270-285, :352-364); `h_root` (webui.cpp:573-581) still serves `INDEX_HTML/INDEX_HTML_LEN`.
+- [x] sim.cpp: delete `sim_apply_minigame` (:1754-1814) and `MG*` consumers (:411-416); rename `WEB_CD_*`/`WEB_ACTION_GLOBAL_CD_S` (config.h:582-587) → `ACT_CD_*`.
+- [x] Delete `MinigameId`, `AL_WEB_CLIENT`, `MG1..3_*`, `/api/cfg`, `/api/sprites`, `web_take_action` drain, mDNS (net.cpp:232-253, :612-614; config.h:507; ui.cpp:2427-2428).
+- [x] Prune dead macros (config.h:84, :102, :114, :163, :191, :195-196, :231, :342, :354, :463, :565-567, :629, :637, :651; **keep** `PIN_VBAT_ADC` :97 as reserved, `INPUT_POLL_MS` :168 and `GATE_*` :642-643 which become live), the 39 dead `StrId`s and the dead exports of audit §13.2 (keep `rd_frame_time_us`, `rd_power`, `rd_set_contrast`, `rd_breathe` for P6/P10).
+- [x] ui.cpp: fence the 3 functions that warn under `FEATURE_WEB=0`/`FEATURE_BLE=0`.
 - Acceptance: gate; `build_matrix.sh` all-off = 0 warnings; flash ≈ 1.85 MB with BLE on.
 
 **P2-C6 Radio OFF by default; clock calibration without SNTP; non-blocking settle; timer-driven buttons; overflow tests (G4)** — M

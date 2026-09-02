@@ -121,7 +121,7 @@ GodEvt   god_handle(Gesture g);
 void     god_draw(void);
 
 // Simulated seconds per logic tick: 1, 6, 60, 360 or 3600. Always 1 when god
-// mode is off. This is a MIRROR of sim_time_scale(); the authority is sim,
+// mode is off. This is a MIRROR of the sim time scale; the authority is sim,
 // because sim_step_seconds() is what the tick actually reads.
 uint32_t god_time_scale(void);
 

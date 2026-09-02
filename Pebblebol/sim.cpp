@@ -317,12 +317,12 @@ static uint16_t cd_for(uint8_t action)
 {
   switch (action) {
     case ACT_FEED_MEAL:
-    case ACT_FEED_SNACK:   return WEB_CD_FEED_S;
-    case ACT_CLEAN:        return WEB_CD_CLEAN_S;
-    case ACT_MEDICINE:     return WEB_CD_MED_S;
-    case ACT_PLAY:         return WEB_CD_PLAY_S;
+    case ACT_FEED_SNACK:   return ACT_CD_FEED_S;
+    case ACT_CLEAN:        return ACT_CD_CLEAN_S;
+    case ACT_MEDICINE:     return ACT_CD_MED_S;
+    case ACT_PLAY:         return ACT_CD_PLAY_S;
     case ACT_SLEEP_TOGGLE:
-    case ACT_LIGHT_TOGGLE: return WEB_CD_SLEEP_S;
+    case ACT_LIGHT_TOGGLE: return ACT_CD_SLEEP_S;
     default:               return 0;
   }
 }
@@ -339,8 +339,8 @@ uint16_t sim_action_cooldown_s(ActionId action)
   }
   if (g_any_act_seen) {
     uint32_t gone = g_uptime_s - g_last_any_act_s;
-    if (gone < (uint32_t)WEB_ACTION_GLOBAL_CD_S) {
-      uint32_t g = (uint32_t)WEB_ACTION_GLOBAL_CD_S - gone;
+    if (gone < (uint32_t)ACT_CD_GLOBAL_S) {
+      uint32_t g = (uint32_t)ACT_CD_GLOBAL_S - gone;
       if (g > left) left = g;
     }
   }
@@ -498,7 +498,6 @@ void sim_set_time_scale(uint32_t scale)
   g_scale = (scale == 0u) ? 1u : scale;
 }
 
-uint32_t sim_time_scale(void)  { return g_scale; }
 uint32_t sim_step_seconds(void){ return g_scale; }
 
 // =============================================================================
@@ -1324,7 +1323,7 @@ static void reset_ram_state(uint8_t fresh)
   g_absence_ctx_s = 0;
   // Cooldowns: "seen at g_uptime_s == 0". On a reload that means the residual
   // cooldown is (cd - elapsed), clamped at 0 by sim_action_cooldown_s(), so a
-  // reboot buys nothing and costs at most WEB_CD_MED_S (30 s) of friction.
+  // reboot buys nothing and costs at most ACT_CD_MED_S (30 s) of friction.
   memset(g_act_last, 0, sizeof(g_act_last));
   memset(g_act_seen, fresh ? 0 : 1, sizeof(g_act_seen));
   g_last_any_act_s = 0;
@@ -1691,7 +1690,7 @@ bool sim_apply_action(ActionId action, ActionResult& out)
 }
 
 // =============================================================================
-// 12. MINIGAMES - device and browser share this ledger
+// 12. MINIGAMES - the on-device (S4) games and their shared ledger
 // =============================================================================
 static bool minigame_guard(ActionResult& out)
 {
@@ -1718,68 +1717,6 @@ static void minigame_commit(uint8_t won)
   g_mg_last_s = g_uptime_s;
   g_mg_seen   = 1;
   note_interaction((uint8_t)ACT_PLAY);
-}
-
-bool sim_apply_minigame(uint8_t mg_id, uint16_t score, ActionResult& out)
-{
-  if (!minigame_guard(out)) return false;
-  if (mg_id == MG_NONE || mg_id >= MG_ID_COUNT) { fail(out, AERR_BAD_ARG, 0); return false; }
-
-  int32_t snap[ST_COUNT];
-  int32_t w_before  = g_pet->weight_dg;
-  int16_t cq_before = g_pet->cq;
-  result_begin(out, snap);
-
-  uint16_t decay = sim_play_decay_permille();
-  int32_t  s     = (int32_t)score;
-  int32_t  smax  = 1;
-  int32_t  hap   = 0;
-  uint16_t str_id = STR_RX_PLAY;
-
-  switch (mg_id) {
-    case MG_SNACK_RUSH: {
-      smax = MG1_SCORE_MAX;
-      if (s > smax) s = smax;
-      int32_t hun = NT_MIN((s * MG1_HUN_NUM) >> 8, (int32_t)MG1_HUN_CAP);
-      hap = NT_MIN((s * MG1_HAP_NUM) >> 8, (int32_t)MG1_HAP_CAP);
-      stat_add(ST_HUNGER, hun);
-      stat_add(ST_ENERGY, MG1_NRG_COST);
-      str_id = STR_MG_SNACK;
-      break;
-    }
-    case MG_BUBBLE_SCRUB: {
-      smax = MG2_SCORE_MAX;
-      if (s > smax) s = smax;
-      int32_t hyg = NT_MIN((s * MG2_HYG_NUM) >> 8, (int32_t)MG2_HYG_CAP);
-      hap = NT_MIN((s * MG2_HAP_NUM) >> 8, (int32_t)MG2_HAP_CAP);
-      stat_add(ST_HYGIENE, hyg);
-      stat_add(ST_ENERGY, MG2_NRG_COST);
-      if (g_pet->poop_count > 0 && hyg >= (MG2_HYG_CAP / 2)) g_pet->poop_count--;
-      str_id = STR_MG_SCRUB;
-      break;
-    }
-    case MG_LULLABY: {
-      smax = MG3_SCORE_MAX;
-      if (s > smax) s = smax;
-      int32_t nrg = NT_MIN((s * MG3_NRG_NUM) >> 8, (int32_t)MG3_NRG_CAP);
-      hap = NT_MIN((s * MG3_HAP_NUM) >> 8, (int32_t)MG3_HAP_CAP);
-      stat_add(ST_ENERGY, nrg);
-      str_id = STR_MG_LULLABY;
-      break;
-    }
-    default:
-      fail(out, AERR_BAD_ARG, 0);
-      return false;
-  }
-
-  // Happiness is the farmable currency: it alone carries the 3 h decay.
-  stat_add(ST_HAPPINESS, (hap * (int32_t)decay) / 1000);
-
-  uint8_t won = (s * 2 >= smax) ? 1u : 0u;
-  minigame_commit(won);
-  result_end(out, snap, w_before, cq_before, str_id);
-  wish_check((uint8_t)ACT_PLAY);
-  return true;
 }
 
 bool sim_apply_play_result(uint16_t win_permille, ActionResult& out)
@@ -1985,13 +1922,6 @@ void sim_catch_up_ex(uint32_t absence_s, uint8_t clock_known, AbsenceReport& rep
   g_absence_ctx_s = 0;
 }
 
-void sim_catch_up(uint32_t absence_s, AbsenceTier& tier)
-{
-  AbsenceReport rep;
-  sim_catch_up_ex(absence_s, 1u, rep);
-  tier = (AbsenceTier)rep.tier;
-}
-
 void sim_absence_retrofix(uint32_t true_absence_s)
 {
   if (!g_pet) return;
@@ -2070,13 +2000,6 @@ void sim_god_kill(uint8_t cause)
   if (cause >= DEATH_COUNT) cause = DEATH_ACCIDENT;
   g_pet->flags |= PF_GOD_TAINTED;
   do_death(cause);
-}
-
-void sim_god_set_cq(int16_t cq)
-{
-  if (!g_pet) return;
-  g_pet->cq = (int16_t)NT_CLAMP((int32_t)cq, (int32_t)CQ_MIN, (int32_t)CQ_MAX);
-  g_pet->flags |= PF_GOD_TAINTED;
 }
 
 void sim_god_set_genome(const Genome& g)
