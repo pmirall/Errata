@@ -24,7 +24,7 @@
 #include <esp_mac.h>
 
 // WiFi is only linked in when something actually consumes it.
-#define NT_NET_WANT_WIFI (FEATURE_WEB || FEATURE_WEATHER || FEATURE_TELEGRAM)
+#define NT_NET_WANT_WIFI (FEATURE_WEB || FEATURE_TELEGRAM)
 // The captive provisioning portal needs an HTTP server to be worth starting.
 #define NT_NET_HAVE_PORTAL (NT_NET_WANT_WIFI && FEATURE_WEB)
 

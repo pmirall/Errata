@@ -127,8 +127,11 @@ static Config config_v1(void) {
   copy_str(c.tg_token,  sizeof c.tg_token,  "");
   copy_str(c.tg_chat,   sizeof c.tg_chat,   "");
   copy_str(c.tz,        sizeof c.tz,        CFG_TZ_STRING);
-  copy_str(c.lat,       sizeof c.lat,       "41.3874");
-  copy_str(c.lon,       sizeof c.lon,       "2.1686");
+  // The v1 layout had lat[12] and lon[12] where reserved_b[24] now sits. The
+  // fixture is a byte image of THAT layout, so the coordinates are written at
+  // their original offsets and the file stays identical to the committed one.
+  copy_str((char*)c.reserved_b,      12, "41.3874");
+  copy_str((char*)c.reserved_b + 12, 12, "2.1686");
   c.tg_mode        = 0;
   c.brightness     = 128;
   c.statusbar_mode = 0;

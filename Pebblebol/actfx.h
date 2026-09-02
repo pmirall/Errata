@@ -21,8 +21,8 @@
 //  THE TWO DRAWING LAYERS, and why there are exactly two. draw_home()'s
 //  composition order is a contract (see the long comment there):
 //
-//      weather backdrop -> floor -> poops -> BODY -> emotes -> HUD badges ->
-//      weather particles -> banner / toast -> affordance strip
+//      floor -> poops -> BODY -> emotes -> HUD badge ->
+//      banner / toast -> affordance strip
 //
 //  A choreography has things that belong on the GROUND, in front of the
 //  scenery but BEHIND the animal (the bowl it eats from, the bubbles that sweep
@@ -30,7 +30,7 @@
 //  belong ON the animal (the pill, the germ, the hearts, the sparks). Those are
 //  two different slots in that order, so this module has two entry points and
 //  ui.cpp calls them in the two places they belong. There is deliberately no
-//  third: anything that wanted to be drawn after the HUD badges would be
+//  third: anything that wanted to be drawn after the HUD badge would be
 //  writing in the HUD's columns, and this module cannot do that (see below).
 //
 //    actfx_draw_props()  goes with the poops, BEFORE the body. Whatever it puts

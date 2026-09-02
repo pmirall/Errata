@@ -123,22 +123,6 @@ enum StrId : uint16_t {
   STR_TEMPER_NERVIOSO,
   STR_TEMPER_GOTICO,
 
-  // --- 11. weather groups, parallel to WeatherGroup <= 12 chars --------------
-  STR_WX_UNKNOWN,
-  STR_WX_CLEAR_DAY,
-  STR_WX_CLEAR_NIGHT,
-  STR_WX_PARTLY,
-  STR_WX_CLOUDY,
-  STR_WX_FOG,
-  STR_WX_DRIZZLE,
-  STR_WX_RAIN,
-  STR_WX_SNOW,
-  STR_WX_SHOWERS,
-  STR_WX_SNOW_SHOWERS,
-  STR_WX_STORM,
-  STR_WX_STORM_HAIL,
-  STR_WX_NODATA_LINE,                    // wraps to 2 lines, ui wraps it
-
   // --- 12. death causes, parallel to DeathCause --- <= 11 chars --------------
   STR_CAUSE_NONE,
   STR_CAUSE_HUNGER,
@@ -256,7 +240,6 @@ enum StrId : uint16_t {
   STR_WISH_SNACK,
   STR_WISH_CLEAN,
   STR_WISH_PET3,
-  STR_WISH_SUN,
   STR_WISH_OK,
   STR_WISH_FAIL,
   STR_WISH_TITLE,
@@ -325,7 +308,6 @@ enum StrId : uint16_t {
   STR_SET_TITLE,
   STR_SET_WIFI,
   STR_SET_TELEGRAM,
-  STR_SET_WEATHER,
   STR_SET_SOUND,
   STR_SET_BRIGHT,
   STR_SET_CLOCK,
@@ -367,7 +349,6 @@ enum StrId : uint16_t {
   STR_GOD_FORM,
   STR_GOD_KILL,
   STR_GOD_GENOME,
-  STR_GOD_WEATHER,
   STR_GOD_TELEGRAM,
   STR_GOD_BLE,
   STR_GOD_CLOCK,
@@ -391,7 +372,6 @@ enum StrId : uint16_t {
   STR_ERR_NVS,
   STR_ERR_OLED,
   STR_ERR_TG,
-  STR_ERR_WX,
   STR_ERR_GENOME,
 
   // --- 32. Telegram pool, parallel to MsgId (T01..T15, P01..P05) -------------
@@ -430,7 +410,6 @@ enum StrId : uint16_t {
   STR_HLP_SETTINGS,
   STR_HLP_TELEGRAM,
   STR_HLP_SOUND,
-  STR_HLP_WEATHER,
   STR_HLP_WEB,
   STR_HLP_BRIGHT,
   STR_HLP_INFO,
@@ -612,22 +591,6 @@ inline constexpr const char* const ES[] = {
   /* STR_TEMPER_NERVIOSO */       "NERVIOSO",
   /* STR_TEMPER_GOTICO */         "GÓTICO",
 
-  /* --- 11. weather groups --- */
-  /* STR_WX_UNKNOWN */            "SIN DATOS",
-  /* STR_WX_CLEAR_DAY */          "DESPEJADO",
-  /* STR_WX_CLEAR_NIGHT */        "NOCHE CLARA",
-  /* STR_WX_PARTLY */             "POCO NUBOSO",
-  /* STR_WX_CLOUDY */             "NUBLADO",
-  /* STR_WX_FOG */                "NIEBLA",
-  /* STR_WX_DRIZZLE */            "LLOVIZNA",
-  /* STR_WX_RAIN */               "LLUVIA",
-  /* STR_WX_SNOW */               "NIEVE",
-  /* STR_WX_SHOWERS */            "CHUBASCOS",
-  /* STR_WX_SNOW_SHOWERS */       "AGUANIEVE",
-  /* STR_WX_STORM */              "TORMENTA",
-  /* STR_WX_STORM_HAIL */         "GRANIZO",
-  /* STR_WX_NODATA_LINE */        "No sé qué tiempo hace. No me hablo con el cielo.",
-
   /* --- 12. death causes --- */
   /* STR_CAUSE_NONE */            "-",
   /* STR_CAUSE_HUNGER */          "HAMBRE",
@@ -744,7 +707,6 @@ inline constexpr const char* const ES[] = {
   /* STR_WISH_SNACK */            "Hoy quiero una chuche.",
   /* STR_WISH_CLEAN */            "Hoy quiero estar limpio.",
   /* STR_WISH_PET3 */             "Hoy quiero tres mimos.",
-  /* STR_WISH_SUN */              "Hoy quiero ver el sol.",
   /* STR_WISH_OK */               "Era eso. Justo eso.",
   /* STR_WISH_FAIL */             "Se te ha pasado. Otra vez.",
   /* STR_WISH_TITLE */            "DESEO",
@@ -813,7 +775,6 @@ inline constexpr const char* const ES[] = {
   /* STR_SET_TITLE */             "AJUSTES",
   /* STR_SET_WIFI */              "WiFi",
   /* STR_SET_TELEGRAM */          "Telegram",
-  /* STR_SET_WEATHER */           "Clima",
   /* STR_SET_SOUND */             "Sonido",
   /* STR_SET_BRIGHT */            "Brillo",
   /* STR_SET_CLOCK */             "Hora",
@@ -855,7 +816,6 @@ inline constexpr const char* const ES[] = {
   /* STR_GOD_FORM */              "FORZAR FORMA",
   /* STR_GOD_KILL */              "MATAR",
   /* STR_GOD_GENOME */            "GENOMA",
-  /* STR_GOD_WEATHER */           "CLIMA",
   /* STR_GOD_TELEGRAM */          "TELEGRAM",
   /* STR_GOD_BLE */               "BLE FALSO",
   /* STR_GOD_CLOCK */             "RELOJ",
@@ -879,7 +839,6 @@ inline constexpr const char* const ES[] = {
   /* STR_ERR_NVS */               "No consigo recordar nada.",
   /* STR_ERR_OLED */              "Nada en 0x3C. Mira los cables.",
   /* STR_ERR_TG */                "Telegram no contesta.",
-  /* STR_ERR_WX */                "El cielo no contesta.",
   /* STR_ERR_GENOME */            "Genoma corrupto. Ignorado.",
 
   /* --- 32. Telegram pool --- */
@@ -947,7 +906,6 @@ inline constexpr const char* const ES[] = {
   /* STR_HLP_SETTINGS */          "Cosas de mayores.",
   /* STR_HLP_TELEGRAM */          "Quejas a tu móvil.",
   /* STR_HLP_SOUND */             "Zumbido al avisar.",
-  /* STR_HLP_WEATHER */           "El cielo me afecta.",
   /* STR_HLP_WEB */               "Página y QR en el móvil.",
   /* STR_HLP_BRIGHT */            "Brillo de la pantalla.",
   /* STR_HLP_INFO */              "Versión, red y memoria.",
@@ -1023,7 +981,6 @@ inline constexpr const char* const ES[] = {
 #define S_SPECIES(v)   (ES[STR_SPECIES_00     + (uint16_t)((v) & 0x0F)])
 #define S_PATTERN(v)   (ES[STR_PATTERN_00     + (uint16_t)((v) & 0x0F)])
 #define S_TEMPER(c)    (ES[STR_TEMPER_SOLAR   + (uint16_t)(c)])   // Temperament class
-#define S_WX(g)        (ES[STR_WX_UNKNOWN     + (uint16_t)(g)])   // WeatherGroup
 #define S_CAUSE(c)     (ES[STR_CAUSE_NONE     + (uint16_t)(c)])   // DeathCause
 #define S_ACTION(a)    (ES[STR_ACT_NONE       + (uint16_t)(a)])   // ActionId
 #define S_AERR(e)      (ES[STR_AERR_NONE      + (uint16_t)(e)])   // ActionErr
@@ -1049,18 +1006,17 @@ static_assert(STR_FORM_QUIMERA    - STR_FORM_BOLOTA + 1 == (int)FORM_COUNT,    "
 static_assert(STR_SPECIES_15      - STR_SPECIES_00  + 1 == SPECIES_COUNT,      "species names");
 static_assert(STR_PATTERN_15      - STR_PATTERN_00  + 1 == PATTERN_COUNT,      "pattern names");
 static_assert(STR_TEMPER_GOTICO   - STR_TEMPER_SOLAR+ 1 == (int)TEMPER_COUNT,  "temperament names");
-static_assert(STR_WX_STORM_HAIL   - STR_WX_UNKNOWN  + 1 == (int)WX_COUNT,      "weather names");
 static_assert(STR_CAUSE_ACCIDENT  - STR_CAUSE_NONE  + 1 == (int)DEATH_COUNT,   "cause names");
 static_assert(STR_ACT_SLEEP       - STR_ACT_NONE    + 1 == (int)ACT_COUNT,     "action names");
 static_assert(STR_AERR_BAD_ARG    - STR_AERR_NONE   + 1 == (int)AERR_COUNT,    "action errors");
 static_assert(STR_ABS_UNKNOWN     - STR_ABS_NONE    + 1 == (int)ABS_COUNT,     "absence lines");
 static_assert(STR_AL_WEB_CLIENT   - STR_AL_NONE     + 1 == (int)AL_COUNT,      "alert lines");
-static_assert(STR_WISH_SUN        - STR_WISH_NONE   + 1 == (int)WISH_COUNT,    "wish lines");
+static_assert(STR_WISH_PET3       - STR_WISH_NONE   + 1 == (int)WISH_COUNT,    "wish lines");
 static_assert(STR_GRADE_F         - STR_GRADE_A     + 1 == (int)GRADE_COUNT,   "care grades");
 static_assert(STR_MENU_SETTINGS   - STR_MENU_FEED   + 1 == MENU_ITEM_COUNT,    "menu labels");
 static_assert(STR_TG_P05          - STR_TG_T01      + 1 == (int)MSG_COUNT - 1, "telegram pool");
 static_assert(STR_SYL_A11         - STR_SYL_A00     + 1 == 12,                 "name syllables A");
 static_assert(STR_SYL_B11         - STR_SYL_B00     + 1 == 12,                 "name syllables B");
-static_assert(STR_HLP_BACK        - STR_HLP_FEED    + 1 == 19,                 "ui help block");
+static_assert(STR_HLP_BACK        - STR_HLP_FEED    + 1 == 18,                 "ui help block");
 
 #endif // NT_STRINGS_ES_H

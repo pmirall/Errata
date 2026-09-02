@@ -51,11 +51,11 @@ static_assert(PETFX_FLOOR_Y - 40 >= SPRITE_AREA_Y,
 // THE STAGE.  Read this before moving anything horizontally.
 //
 // The sprite band is 128 columns wide but the ACTOR only owns the middle of it.
-// Columns 0..PETFX_STAGE_L-1 and PETFX_STAGE_R+1..OLED_W-1 are HUD: draw_home()
-// puts an opaque 12x12 weather badge at UI_HUD_L_X (columns 2..13) and an
-// opaque 12x12 mood face at UI_HUD_R_X (columns 115..126). Both are drawn AFTER
-// the body and both must stay readable at all times. config.h owns those
-// numbers; the assert below is what ties this stage to them.
+// Columns 0..PETFX_STAGE_L-1 and PETFX_STAGE_R+1..OLED_W-1 are HUD: the left
+// band is reserved at UI_HUD_L_X (columns 2..13) and draw_home() puts an opaque
+// 12x12 mood face at UI_HUD_R_X (columns 115..126). The badge is drawn AFTER
+// the body and must stay readable at all times. config.h owns those numbers;
+// the assert below is what ties this stage to them.
 //
 // A 1-bit framebuffer cannot deliver "the badge is always legible" AND "the body
 // is never damaged" while the two share pixels: whoever draws second wins and

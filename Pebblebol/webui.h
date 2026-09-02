@@ -91,9 +91,9 @@ bool     web_begin(uint16_t port = WEB_PORT);
 // is not killed by its own success.
 //
 // Also owns both edges of CF_WEB_ENABLED. The S9 toggle only fed the entry
-// point's wifi_wanted(), so whenever the radio was kept up for weather or
-// Telegram the server went on answering /api/action and /api/cfg after the user
-// had switched web access off. Turning the flag off here calls web_stop();
+// point's wifi_wanted(), so whenever the radio was kept up for Telegram the
+// server went on answering /api/action and /api/cfg after the user had
+// switched web access off. Turning the flag off here calls web_stop();
 // turning it back on re-opens the socket on the port web_begin() was given.
 void     web_service(void);
 

@@ -287,7 +287,7 @@ enum TgTrigger : uint8_t {
   TRG_ENERGY,    // T05
   TRG_SICK,      // T07
   TRG_HEALTH,    // T11 T13
-  TRG_WEATHER,   // T09
+  TRG_NEVER,     // T09: its trigger (a storm) went with the weather module
   TRG_EVENT,     // T14 T15 P01..P05
   TRG_COUNT
 };
@@ -303,7 +303,7 @@ static const uint8_t TG_LEVEL[MSG_COUNT] = {
 static const uint8_t TG_TRG[MSG_COUNT] = {
   /* MSG_NONE */ TRG_NONE,
   /* T01..T05 */ TRG_SILENCE, TRG_HUNGER,  TRG_POOP,    TRG_SAD,     TRG_ENERGY,
-  /* T06..T10 */ TRG_SILENCE, TRG_SICK,    TRG_SILENCE, TRG_WEATHER, TRG_SILENCE,
+  /* T06..T10 */ TRG_SILENCE, TRG_SICK,    TRG_SILENCE, TRG_NEVER,   TRG_SILENCE,
   /* T11..T15 */ TRG_HEALTH,  TRG_SILENCE, TRG_HEALTH,  TRG_EVENT,   TRG_EVENT,
   /* P01..P05 */ TRG_EVENT,   TRG_EVENT,   TRG_EVENT,   TRG_EVENT,   TRG_EVENT
 };
@@ -311,7 +311,7 @@ static const uint8_t TG_TRG[MSG_COUNT] = {
 static_assert(NT_ARRAY_LEN(TG_LEVEL) == (size_t)MSG_COUNT, "TG_LEVEL vs MsgId");
 static_assert(NT_ARRAY_LEN(TG_TRG)   == (size_t)MSG_COUNT, "TG_TRG vs MsgId");
 
-// State-derived triggers (GAME_DESIGN 7.2). T09 needs the weather module and
+// State-derived triggers (GAME_DESIGN 7.2). T09 has no source left and
 // T14/P01..P05 are events, so they read false here and arrive via tg_queue().
 static bool tg_trigger_true(MsgId id, const PetSave* p, uint32_t now, uint32_t silence_s)
 {

@@ -45,13 +45,6 @@
 #define CFG_TG_TOKEN        ""
 #define CFG_TG_CHAT         ""
 
-// --- Dónde vives (para el tiempo) -------------------------------------------
-// Latitud y longitud en grados, con punto decimal, entre comillas.
-// Ejemplo Barcelona: "41.3874" y "2.1686".
-// Si los dejas vacíos, el bicho lo adivina solo a partir de tu conexión.
-#define CFG_LATITUDE        ""
-#define CFG_LONGITUDE       ""
-
 // --- Hora -------------------------------------------------------------------
 // Zona horaria en formato POSIX. La de España peninsular ya está puesta.
 // Canarias:  "WET0WEST,M3.5.0/1,M10.5.0"    México DF: "CST6"
@@ -65,7 +58,6 @@
 
 // --- Interruptores generales ------------------------------------------------
 // Pon un 0 en cualquiera de estos si quieres apagar esa parte del juego.
-#define FEATURE_WEATHER     1   // El tiempo real afecta al humor del bicho
 #define FEATURE_TELEGRAM    1   // Mensajes pasivo-agresivos al móvil
 #define FEATURE_BLE         1   // Emparejarse con otros bichos por Bluetooth
 #define FEATURE_WEB         1   // Página web + QR + minijuegos en el móvil
@@ -122,24 +114,24 @@
 #define SPRITE_AREA_H           (OLED_H - STATUS_BAR_H - AFFORDANCE_BAR_H)
 
 // -----------------------------------------------------------------------------
-// THE HUD KEEP-OUT.  draw_home() stamps two OPAQUE 12x12 badges on top of the
-// whole pet layer: the weather badge on the left and the mood face on the
-// right. On a 1-bit panel whoever draws second wins, so the actor is kept out
-// of their columns altogether (PETFX_STAGE_L / PETFX_STAGE_R, petfx.h) and
-// ui.cpp pushes emotes out of them too.
+// THE HUD KEEP-OUT.  draw_home() stamps an OPAQUE 12x12 mood badge on top of
+// the whole pet layer, on the right; the left band is reserved for the badge
+// that goes there. On a 1-bit panel whoever draws second wins, so the actor is
+// kept out of both bands altogether (PETFX_STAGE_L / PETFX_STAGE_R, petfx.h)
+// and ui.cpp pushes emotes out of them too.
 //
 // These five numbers are the ONE definition of that keep-out, and everything
-// that has to agree about it now derives from them: the two px_spr() calls that
-// place the badges, emote_x(), and the static_assert in petfx.h that pins the
+// that has to agree about it now derives from them: the px_spr() call that
+// places the badge, emote_x(), and the static_assert in petfx.h that pins the
 // stage to them. Before this the badges were placed with raw literals and the
 // stage asserts only checked the stage against itself, so moving a badge,
 // widening one to 14 px or adding a third compiled clean and silently re-created
 // the whole "the badge ate the pet" class of defects. Now it breaks the BUILD.
-//   left  HUD : columns 0 .. UI_HUD_L_END-1        (badge drawn at 2..13)
+//   left  HUD : columns 0 .. UI_HUD_L_END-1        (reserved, nothing drawn)
 //   right HUD : columns UI_HUD_R_BEGIN .. OLED_W-1 (badge drawn at 115..126)
 // -----------------------------------------------------------------------------
 #define UI_HUD_BADGE_W          12          // both badges are 12x12 icon art
-#define UI_HUD_L_X              2           // weather badge origin
+#define UI_HUD_L_X              2           // left badge origin
 #define UI_HUD_L_END            (UI_HUD_L_X + UI_HUD_BADGE_W)      // 14
 #define UI_HUD_R_X              (OLED_W - 1 - UI_HUD_BADGE_W)      // 115
 #define UI_HUD_R_BEGIN          UI_HUD_R_X                         // 115
@@ -233,7 +225,7 @@
 #define STAT_MILLI_MIN          0L
 #define SEC_PER_HOUR            3600L
 
-// Base decay rates, ADULT, awake, neutral weather, all genes = 8.
+// Base decay rates, ADULT, awake, all genes = 8.
 // Negative = decays. Units: milli-points per hour.
 #define RATE_HUNGER_MPH         (-12000L)
 #define RATE_HAPPINESS_MPH      (-8000L)
@@ -254,9 +246,7 @@
 #define DMG_HAPPINESS_ZERO_MPH  (1000L)
 #define DMG_SICK_MPH            (1500L)
 #define DMG_OBESE_MPH           (800L)
-#define DMG_HEAT_MPH            (1000L)      // apparent temp > HEAT_DANGER_DC
 #define OBESE_WEIGHT_DG         700
-#define HEAT_DANGER_DC          350          // 35.0 C in deci-celsius
 
 // Stage multipliers, x1000 (integer). Index by Stage.
 #define STAGE_MULT_EGG          0
@@ -512,19 +502,6 @@
 #define TLS_MIN_MAXALLOC_HEAP   (48 * 1024)  // hard gate before any TLS attempt
 #define RADIO_SETTLE_MS         250
 
-// Weather (Open-Meteo, plain HTTP)
-#define WX_HOST                 "api.open-meteo.com"
-#define WX_PATH                 "/v1/forecast"
-#define WX_FIELDS               "temperature_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m"
-#define WX_POLL_S               1800UL       // 30 min
-#define WX_POLL_JITTER_S        240UL        // +/- 4 min
-#define WX_STALE_S              21600UL      // data older than 6 h = WX_UNKNOWN
-#define WX_MAX_FAILS            3
-#define WX_BODY_MAX             1024
-#define GEO_HOST                "ip-api.com"
-#define GEO_PATH                "/line/?fields=status,city,lat,lon,timezone"
-#define GEO_BODY_MAX            192
-
 // Telegram (TLS mandatory)
 #define TG_HOST                 "api.telegram.org"
 #define TG_MAX_PER_DAY          4            // P1+P2 only
@@ -647,8 +624,6 @@
 #define TG_TOKEN_MAX_LEN        47
 #define TG_CHAT_MAX_LEN         16
 #define TZ_MAX_LEN              39
-#define COORD_MAX_LEN           11
-#define CITY_MAX_LEN            23
 
 // =============================================================================
 // 15. GOD MODE
@@ -660,7 +635,7 @@
 #define GOD_SCALE_4             3600
 #define GOD_SCALE_COUNT         5
 #define GOD_ABSENCE_COUNT       6            // 1 h, 6 h, 24 h, 72 h, 168 h, 720 h
-#define GOD_CMD_COUNT           12
+#define GOD_CMD_COUNT           11
 #define GOD_BAR_H               9
 
 // =============================================================================

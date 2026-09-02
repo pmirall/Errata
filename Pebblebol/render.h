@@ -385,7 +385,7 @@ void rd_shake(uint8_t amp_px, uint16_t ms);
 // THE PRICE, stated plainly: because step 5 runs every loop(), a flash or a
 // shake now lasts exactly the one frame that applied it - the ~24 ms of
 // sendBuffer() between fx_apply() and this call - whatever duration the caller
-// asked for. UI_WX_SHAKE_MS and HATCH_JOLT_MS no longer set anything but the
+// asked for. HATCH_JOLT_MS no longer sets anything but the
 // frame-rate floor. An 80 ms flash cut to 24 ms is a worse flash; three seconds
 // of inverted panel is a broken device.
 //

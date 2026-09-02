@@ -3,7 +3,7 @@
 //  The debug console (GAME_DESIGN 10). See godmode.h for the contract.
 //
 //  Everything the console mutates goes through the owning module's own API:
-//  sim_god_*() for the pet, gt_skew_add() for time, wx_force() for weather,
+//  sim_god_*() for the pet, gt_skew_add() for time,
 //  tg_queue() for Telegram, ble_debug_inject_*() for the fake partner,
 //  store_*() for NVS. This file mutates NOTHING directly - which is exactly
 //  why a test run through it exercises the real code paths.
@@ -28,7 +28,6 @@
 #include "gametime.h"
 #include "input.h"
 #include "net.h"
-#include "weather.h"
 #include "telegram.h"      // tg_set_mode / tg_queue + the nt_cfg_view() seam
 #include "ble_social.h"
 
@@ -57,7 +56,7 @@ static_assert((int)STR_GN_RARE - (int)STR_GN_SPECIES + 1 == GOD_GENE_COUNT,
 //  2. CONSOLE SCREENS
 // =============================================================================
 enum GodScreen : uint8_t {
-  GSC_MENU = 0,   // the 12 commands + the exit row
+  GSC_MENU = 0,   // the 11 commands + the exit row
   GSC_SPEED,      // 1  VELOCIDAD
   GSC_ABSENCE,    // 2  SALTAR AUSENCIA
   GSC_STATPICK,   // 3  FIJAR STAT  (+ ENFERMAR / CACAS)
@@ -68,10 +67,9 @@ enum GodScreen : uint8_t {
   GSC_GENOME,     // 7  GENOMA root
   GSC_GENE,       // 7  GENOMA / EDITAR
   GSC_HEX,        // 7  GENOMA / VOLCAR + CARGAR
-  GSC_WEATHER,    // 8  CLIMA
-  GSC_TELEGRAM,   // 9  TELEGRAM
-  GSC_BLE,        // 10 BLE FALSO
-  GSC_SYS,        // 11 RELOJ + the heap / radio / storage panels
+  GSC_TELEGRAM,   // 8  TELEGRAM
+  GSC_BLE,        // 9  BLE FALSO
+  GSC_SYS,        // 10 RELOJ + the heap / radio / storage panels
   GSC_CONFIRM,    // shared modal, cursor defaults to NO
   GSC_COUNT
 };
@@ -118,11 +116,11 @@ static const uint32_t GD_ABSENCES[GOD_ABSENCE_COUNT] = {
 
 static const uint8_t GD_STATVALS[GOD_STATVAL_COUNT] = { 0, 25, 50, 100 };
 
-// The root list. Twelve commands, then the explicit exit row.
+// The root list. Eleven commands, then the explicit exit row.
 static const uint16_t GD_MENU_STR[GOD_MENU_ROWS] = {
   (uint16_t)STR_GOD_SPEED,    (uint16_t)STR_GOD_ABSENCE, (uint16_t)STR_GOD_SETSTAT,
   (uint16_t)STR_GOD_STAGE,    (uint16_t)STR_GOD_FORM,    (uint16_t)STR_GOD_KILL,
-  (uint16_t)STR_GOD_GENOME,   (uint16_t)STR_GOD_WEATHER, (uint16_t)STR_GOD_TELEGRAM,
+  (uint16_t)STR_GOD_GENOME,   (uint16_t)STR_GOD_TELEGRAM,
   (uint16_t)STR_GOD_BLE,      (uint16_t)STR_GOD_CLOCK,   (uint16_t)STR_GOD_WIPE,
   (uint16_t)STR_AF_QUIT
 };
@@ -541,7 +539,7 @@ static void dump_header(void)
     "GOD#,epoch,stage,hun,hap,ene,hyg,hea,cq,gen,genome,"
     "age_s,bond,disc,weight_dg,poop,sick,asleep,dead,cause,form,minor,"
     "alert,tier,guilt,scale,clock_ok,skew_s,"
-    "heap_free,heap_min,heap_maxalloc,radio,phase,wx,temp_dc"));
+    "heap_free,heap_min,heap_maxalloc,radio,phase"));
 }
 
 void god_dump_line(void)
@@ -551,7 +549,6 @@ void god_dump_line(void)
 
   char hex[33];
   genome_to_hex32(p->genome, hex);
-  const WeatherState& wx = wx_state();
 
   // Columns 1..11 are the GAME_DESIGN 10.2 format, byte for byte.
   Serial.printf("GOD,%lu,%u,%u,%u,%u,%u,%u,%d,%u,%s",
@@ -580,7 +577,7 @@ void god_dump_line(void)
                 (unsigned)p->adult_form,
                 (unsigned)p->minor_form);
 
-  Serial.printf(",%u,%u,%d,%lu,%u,%ld,%lu,%lu,%lu,%u,%u,%u,%d\n",
+  Serial.printf(",%u,%u,%d,%lu,%u,%ld,%lu,%lu,%lu,%u,%u\n",
                 (unsigned)sim_alert(),
                 (unsigned)p->absence_tier,
                 (int)p->guilt_level,
@@ -591,9 +588,7 @@ void god_dump_line(void)
                 (unsigned long)ESP.getMinFreeHeap(),
                 (unsigned long)ESP.getMaxAllocHeap(),
                 (unsigned)net_mode(),
-                (unsigned)net_phase(),
-                (unsigned)wx.group,
-                (int)wx.temp_dc);
+                (unsigned)net_phase());
 }
 
 // =============================================================================
@@ -799,12 +794,11 @@ static GodEvt open_command(uint8_t row)
     case  4: s_screen = GSC_FORM;     break;
     case  5: s_screen = GSC_KILL;     break;
     case  6: s_screen = GSC_GENOME;   break;
-    case  7: s_screen = GSC_WEATHER;  break;
-    case  8: s_screen = GSC_TELEGRAM; break;
-    case  9: s_screen = GSC_BLE;      s_bs = GBS_IDLE; s_bs_child_ok = false;
+    case  7: s_screen = GSC_TELEGRAM; break;
+    case  8: s_screen = GSC_BLE;      s_bs = GBS_IDLE; s_bs_child_ok = false;
              s_bs_str = (uint16_t)STR_EMPTY; break;
-    case 10: s_screen = GSC_SYS;      s_sys_page = GD_SYS_CLOCK; break;
-    case 11: open_confirm((uint16_t)STR_CF_WIPE, GCF_WIPE1); break;
+    case  9: s_screen = GSC_SYS;      s_sys_page = GD_SYS_CLOCK; break;
+    case 10: open_confirm((uint16_t)STR_CF_WIPE, GCF_WIPE1); break;
     default:
       god_exit();
       return GOD_EVT_LEAVE;
@@ -828,7 +822,6 @@ static uint8_t sub_count(void)
     case GSC_KILL:     return (uint8_t)(DEATH_COUNT - 1);   // DEATH_NONE excluded
     case GSC_GENOME:   return GD_GEN_ROWS;
     case GSC_GENE:     return (uint8_t)GOD_GENE_COUNT;
-    case GSC_WEATHER:  return (uint8_t)(WX_COUNT + 1);      // row 0 = AUTO
     case GSC_TELEGRAM: return GD_MSG_COUNT;
     default:           return 0;
   }
@@ -932,12 +925,6 @@ static GodEvt select_sub(void)
 
     case GSC_HEX:
       if (s_hex_mode == GHX_DUMP && s_hex_show[0]) GOD_LOGF("GENOME,%s\n", s_hex_show);
-      return GOD_EVT_NONE;
-
-    case GSC_WEATHER:
-      // Row 0 releases the override; rows 1..WX_COUNT pin a group.
-      wx_force(s_sub_cur == 0 ? (uint8_t)0xFF : (uint8_t)(s_sub_cur - 1));
-      toast((uint16_t)STR_GOD_DONE);
       return GOD_EVT_NONE;
 
     case GSC_TELEGRAM: {
@@ -1131,12 +1118,7 @@ static void draw_menu(void)
     val[0] = '\0';
     switch (i) {
       case 0: snprintf(val, sizeof(val), "x%lu", (unsigned long)god_time_scale()); break;
-      case 7: {
-        const WeatherState& wx = wx_state();
-        snprintf(val, sizeof(val), "%s", wx.forced ? "FIX" : "AUT");
-        break;
-      }
-      case 10: snprintf(val, sizeof(val), "%s", gt_is_valid() ? "OK" : "??"); break;
+      case 9: snprintf(val, sizeof(val), "%s", gt_is_valid() ? "OK" : "??"); break;
       default: break;
     }
     draw_row(GD_ROOT_Y0, r, (i == s_menu_cur), S(GD_MENU_STR[i]), val);
@@ -1190,11 +1172,6 @@ static void lbl_form(uint8_t i, char* b, size_t n)    { snprintf(b, n, "%s", S_F
 static void lbl_kill(uint8_t i, char* b, size_t n)
 {
   snprintf(b, n, "%s", S_CAUSE((uint8_t)(DEATH_HUNGER + i)));
-}
-static void lbl_weather(uint8_t i, char* b, size_t n)
-{
-  if (i == 0) snprintf(b, n, "%s", S(STR_GOD_AUTO));
-  else        snprintf(b, n, "%s", S_WX((uint8_t)(i - 1)));
 }
 static void lbl_genome(uint8_t i, char* b, size_t n)
 {
@@ -1405,10 +1382,6 @@ static void draw_sys(void)
       snprintf(b, sizeof(b), "rssi %d  ble %u/%u", (int)net_rssi(),
                (unsigned)net_ble_sessions_used(), (unsigned)BLE_SESSION_CAP);
       rd_text(2, 43, RD_FONT_TINY, b);
-      const WeatherState& wx = wx_state();
-      snprintf(b, sizeof(b), "wx %u %s t%d", (unsigned)wx.group,
-               wx.forced ? "FIX" : (wx.valid ? "OK" : "--"), (int)wx.temp_dc);
-      rd_text(2, 51, RD_FONT_TINY, b);
       break;
     }
     default: {
@@ -1461,7 +1434,6 @@ void god_draw(void)
     case GSC_GENOME:   draw_simple_list(S(STR_GOD_GENOME),  GD_GEN_ROWS,               lbl_genome);   break;
     case GSC_GENE:     draw_gene(); break;
     case GSC_HEX:      draw_hex(); break;
-    case GSC_WEATHER:  draw_simple_list(S(STR_GOD_WEATHER), (uint8_t)(WX_COUNT + 1),   lbl_weather);  break;
     case GSC_TELEGRAM: draw_telegram(); break;
     case GSC_BLE:      draw_ble(); break;
     case GSC_SYS:      draw_sys(); break;

@@ -777,24 +777,15 @@ void store_cfg_defaults(Config& c) {
   nt_setstr(c.tg_token, sizeof(c.tg_token), CFG_TG_TOKEN);
   nt_setstr(c.tg_chat, sizeof(c.tg_chat), CFG_TG_CHAT);
   nt_setstr(c.tz, sizeof(c.tz), CFG_TZ_STRING);
-  nt_setstr(c.lat, sizeof(c.lat), CFG_LATITUDE);
-  nt_setstr(c.lon, sizeof(c.lon), CFG_LONGITUDE);
+  memset(c.reserved_b, 0, sizeof(c.reserved_b));
 
   uint8_t f = 0;
-#if FEATURE_WEATHER
-  f |= CF_WX_ENABLED;
-#endif
 #if FEATURE_BLE
   f |= CF_BLE_ENABLED;
 #endif
 #if FEATURE_WEB
   f |= CF_WEB_ENABLED;
 #endif
-  // Empty coordinates mean "work it out from the IP" (ip-api), and the result
-  // is refreshable, so the auto flag rides along.
-  if (c.lat[0] == '\0' || c.lon[0] == '\0') {
-    f |= CF_GEO_AUTO;
-  }
   c.flags = f;
 
   c.tg_mode = (uint8_t)TG_OFF;
@@ -832,7 +823,7 @@ bool store_load_cfg(Config& out) {
 
 bool store_save_cfg(Config& c) {
   // Seal IN PLACE, before the s_open test. 'c' is the caller's live object -
-  // usually the entry point's g_cfg, which ui, webui and weather all hold a
+  // usually the entry point's g_cfg, which ui and webui both hold a
   // pointer to - and the .ino's config_changed() compares c.crc16 against the
   // value apply_config() latched. Sealing into a local copy (as this function
   // used to) left that CRC frozen for the whole session, so config_changed()
@@ -846,6 +837,9 @@ bool store_save_cfg(Config& c) {
   c.reserved[0] = 0;
   c.reserved[1] = 0;
   c.reserved[2] = 0;
+  // Retired weather coordinates: zeroed on every save so a v1 blob loses them
+  // the first time the user changes anything.
+  memset(c.reserved_b, 0, sizeof(c.reserved_b));
   // Every fixed char field must be NUL terminated before it is hashed or used.
   c.wifi_ssid[sizeof(c.wifi_ssid) - 1] = '\0';
   c.wifi_pass[sizeof(c.wifi_pass) - 1] = '\0';
@@ -853,8 +847,6 @@ bool store_save_cfg(Config& c) {
   c.tg_token[sizeof(c.tg_token) - 1] = '\0';
   c.tg_chat[sizeof(c.tg_chat) - 1] = '\0';
   c.tz[sizeof(c.tz) - 1] = '\0';
-  c.lat[sizeof(c.lat) - 1] = '\0';
-  c.lon[sizeof(c.lon) - 1] = '\0';
   c.crc16 = store_crc16(&c, CONFIG_CRC_BYTES);
 
   if (!s_open) {

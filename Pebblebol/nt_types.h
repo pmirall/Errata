@@ -116,25 +116,6 @@ enum Mood : uint8_t {
   MOOD_COUNT
 };
 
-// WMO code groups (GAME_DESIGN 6.1). WX_UNKNOWN is index 0 so a zeroed
-// WeatherState is correctly "no idea".
-enum WeatherGroup : uint8_t {
-  WX_UNKNOWN = 0,
-  WX_CLEAR_DAY,      // 0 + is_day
-  WX_CLEAR_NIGHT,    // 0 + !is_day
-  WX_PARTLY,         // 1,2
-  WX_CLOUDY,         // 3
-  WX_FOG,            // 45,48
-  WX_DRIZZLE,        // 51,53,55,56,57
-  WX_RAIN,           // 61,63,65,66,67
-  WX_SNOW,           // 71,73,75,77
-  WX_SHOWERS,        // 80,81,82
-  WX_SNOW_SHOWERS,   // 85,86
-  WX_STORM,          // 95
-  WX_STORM_HAIL,     // 96,99
-  WX_COUNT
-};
-
 // Exactly one radio stack may be resident (BRIEF 1.3).
 enum RadioMode : uint8_t {
   RADIO_OFF = 0,
@@ -273,7 +254,6 @@ enum WishId : uint8_t {
   WISH_SNACK,
   WISH_CLEAN,
   WISH_PET3,
-  WISH_SUN,
   WISH_COUNT
 };
 
@@ -529,15 +509,14 @@ static_assert(sizeof(AncestorRecord) == 12, "AncestorRecord must be exactly 12 b
 // 6. CONFIG - NVS key "cfg", 256 B.
 //    Seeded from the CFG_* defaults in config.h on first boot; editable at
 //    runtime from S9 SETTINGS, the captive portal and POST /api/cfg.
-//    Coordinates are kept as TEXT so no float ever enters the firmware.
+//    reserved_b[] holds the retired weather coordinates: the offsets of every
+//    field after it are frozen by the asserts below, so the bytes stay put.
 // -----------------------------------------------------------------------------
 #define NT_CFG_MAGIC     0x4643u   // 'C','F'
 #define NT_CFG_VERSION   1
 #define CF_PROVISIONED   0x01u     // WiFi credentials confirmed working at least once
-#define CF_WX_ENABLED    0x02u
 #define CF_BLE_ENABLED   0x04u
 #define CF_WEB_ENABLED   0x08u
-#define CF_GEO_AUTO      0x10u     // lat/lon were auto-detected, refresh on demand
 #define CF_MUTE          0x20u
 
 struct Config {
@@ -551,8 +530,7 @@ struct Config {
   char     tg_token[TG_TOKEN_MAX_LEN+1]; // 119  48
   char     tg_chat[TG_CHAT_MAX_LEN + 1]; // 167  17
   char     tz[TZ_MAX_LEN + 1];           // 184  40
-  char     lat[COORD_MAX_LEN + 1];       // 224  12  e.g. "41.3874"
-  char     lon[COORD_MAX_LEN + 1];       // 236  12  e.g. "2.1686"
+  uint8_t  reserved_b[24];               // 224  24  was lat[12]+lon[12], now 0
   uint8_t  tg_mode;                      // 248  TgMode
   uint8_t  brightness;                   // 249  OLED contrast
   uint8_t  statusbar_mode;               // 250  StatusBarMode
@@ -563,6 +541,7 @@ struct Config {
 static_assert(sizeof(Config) == 256, "Config layout drifted");
 static_assert(offsetof(Config, wifi_ssid) ==   8, "Config.wifi_ssid moved");
 static_assert(offsetof(Config, tz)        == 184, "Config.tz moved");
+static_assert(offsetof(Config, reserved_b)== 224, "Config.reserved_b moved");
 static_assert(offsetof(Config, crc16)     == 254, "Config.crc16 moved");
 #define CONFIG_CRC_BYTES 254
 
@@ -594,21 +573,6 @@ struct ActionResult {
   int16_t  d_weight_dg;
   int16_t  d_cq;
   uint16_t str_id;         // StrId of the reaction line, 0 = none
-};
-
-// wx_state(). Temperatures in deci-celsius, wind in deci-km/h: no floats.
-struct WeatherState {
-  uint8_t  group;          // WeatherGroup
-  uint8_t  is_day;         // 0/1
-  uint8_t  valid;          // 0 = never fetched / stale -> treat as WX_UNKNOWN
-  uint8_t  forced;         // 1 = overridden by god mode
-  uint16_t code;           // raw WMO code
-  int16_t  temp_dc;        // temperature_2m      * 10
-  int16_t  app_dc;         // apparent_temperature* 10
-  uint16_t wind_dkmh;      // wind_speed_10m      * 10
-  uint16_t precip_dmm;     // precipitation       * 10
-  uint32_t fetched_epoch;
-  uint32_t age_s;
 };
 
 // One BLE peer seen in the last BLE_PEER_TTL_S seconds.

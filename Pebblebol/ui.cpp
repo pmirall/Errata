@@ -45,7 +45,6 @@
 #include "gametime.h"
 #include "qr.h"
 #include "net.h"
-#include "weather.h"
 #include "telegram.h"
 #include "ble_social.h"
 #include "webui.h"      // web_pin() only - no network header comes with it
@@ -139,7 +138,6 @@ static uint32_t s_toast_ms    = 0;
 
 // ---- home -------------------------------------------------------------------
 static uint8_t  s_bar_mode    = SBAR_ICONS;
-static uint8_t  s_wx_overlay  = 1;
 static uint32_t s_mimo_ms     = 0;
 static uint32_t s_evolve_ms   = 0;
 
@@ -930,12 +928,12 @@ static uint8_t home_pose(const PetSave* p) {
 // condition, so an emote that vanishes is a message that never arrives.
 //
 // FALLING OFF THE PANEL IS NOT THE ONLY WAY TO VANISH, and that was the hole in
-// the first version of this helper. draw_home() stamps the two OPAQUE 12x12 HUD
-// badges AFTER the entire pet layer, so an emote that lands in their columns is
+// the first version of this helper. draw_home() stamps the OPAQUE 12x12 HUD
+// badge AFTER the entire pet layer, so an emote that lands in the HUD columns is
 // erased just as completely as one that fell off the edge - only later, and only
 // sometimes, which is harder to see and no better. Measured: EMO_EXCLAM with the
 // pet at x = 14..17 asks for x = 6..9 and loses 10 of its 11 rows under the
-// weather badge; EMO_NOTE with the pet at x = 74 asks for 115 and keeps one row.
+// left HUD band; EMO_NOTE with the pet at x = 74 asks for 115 and keeps one row.
 // The "an emote is never lost" promise this module makes was false for exactly
 // the alert that says feed me / clean me / I am ill.
 //
@@ -1174,9 +1172,8 @@ static void draw_home(void) {
   // =========================================================================
   //  THE COMPOSITION ORDER OF THE HOME SCREEN. It is a contract, not a taste.
   //
-  //      weather backdrop -> floor -> poops -> ACTION PROPS -> BODY ->
-  //      EMOTES -> ACTION EMOTES -> HUD badges -> weather particles ->
-  //      banner / toast -> affordance strip
+  //      floor -> poops -> ACTION PROPS -> BODY -> EMOTES -> ACTION EMOTES ->
+  //      HUD badge -> banner / toast -> affordance strip
   //
   //  The actor lives on the STAGE, columns PETFX_STAGE_L..PETFX_STAGE_R
   //  (petfx.h); the HUD lives in the margins outside it, at the columns config.h
@@ -1188,20 +1185,19 @@ static void draw_home(void) {
   //  WHAT EACH LAYER PROMISES, because "draw order" alone does not say it:
   //   * the BODY is opaque against the scenery and transparent against itself.
   //     petfx_draw_body() clears its own INK BOX with colour 0 and then blits
-  //     into the hole, so the backdrop cannot be seen through the eye sockets,
-  //     the mouth or the gap between the legs - under fx_fog(), where body and
-  //     background are the same 50 % texture, a transparent body simply could
-  //     not be found on the panel. The clear stops at PETFX_FLOOR_Y - 1, so the
-  //     floor line and both shadow rows survive it; it does erase whatever poop
-  //     is directly under the body, which is the correct reading now that the
-  //     pet treats a poop as a wall and only ever passes in front of one.
+  //     into the hole, so nothing behind it can be seen through the eye
+  //     sockets, the mouth or the gap between the legs. The clear stops at
+  //     PETFX_FLOOR_Y - 1, so the floor line and both shadow rows survive it;
+  //     it does erase whatever poop is directly under the body, which is the
+  //     correct reading now that the pet treats a poop as a wall and only ever
+  //     passes in front of one.
   //   * EMOTES are transparent and go AFTER the body on purpose - they belong
   //     to the pet, not to the HUD - so a heart that the band clamp pushes onto
   //     the head lands on it instead of through it. emote_x() also keeps them
   //     out of the HUD columns, because a badge drawn on top of an emote and a
   //     panel edge delete it equally well.
-  //   * the HUD BADGES are opaque and last of the pet layer. Nothing of the
-  //     actor can reach their columns, so there is nothing of it to stamp over.
+  //   * the HUD BADGE is opaque and last of the pet layer. Nothing of the
+  //     actor can reach its columns, so there is nothing of it to stamp over.
   //   * the ACTION layers (actfx.cpp) slot into the two places that already
   //     exist rather than adding a third. Its GROUND props - the bowl, the
   //     bubbles, the ball, the crumbs, the poops ACT_CLEAN is dissolving - go
@@ -1216,19 +1212,7 @@ static void draw_home(void) {
   //  opaque halo - simply traded one destroyed thing for another, and those two
   //  are what this contract replaces. If two things fight over pixels, move one
   //  of them out of the other's pixels; do not re-shuffle the stack.
-  //
-  //  The weather overlay is split for exactly the same reason. wx_draw_backdrop()
-  //  is scenery (sun, moon, stars, clouds, fog band, puddle, settled snow) and
-  //  goes BEHIND the body, because fx_night() carves its crescent with a
-  //  colour-0 drawDisc and used to bite a 15 px hole out of any body standing in
-  //  columns 97..111, and fx_fog() XORs the whole band. wx_draw_particles() is
-  //  rain, snow, hail and the lightning scheduler, only ever ADDS ink, and stays
-  //  in FRONT: rain falls between the player and the pet.
   // =========================================================================
-  const WeatherState& w  = wx_state();
-  const bool          fx = (s_wx_overlay != 0) && cfg_flag(CF_WX_ENABLED);
-
-  if (fx) wx_draw_backdrop(rd_u8g2());
 
   // The floor goes down before anything stands on it: poop and body both sit
   // ON the ground line, and drawing it afterwards would cut through them.
@@ -1237,38 +1221,18 @@ static void draw_home(void) {
   actfx_draw_props();
   draw_pet_body(dy, dx, frame);
 
-  // BOTH 12x12 badges go down AFTER the body, opaque, and that is now safe:
-  // render.cpp leaves the panel in setBitmapMode(0), where drawXBM paints the
-  // WHOLE box - the 1 bits in the draw colour and the 0 bits in the inverse -
-  // so a badge is a 12x12 rectangle stamped over whatever was there. The body
+  // The 12x12 mood badge goes down AFTER the body, opaque, and that is now
+  // safe: render.cpp leaves the panel in setBitmapMode(0), where drawXBM paints
+  // the WHOLE box - the 1 bits in the draw colour and the 0 bits in the inverse
+  // - so a badge is a 12x12 rectangle stamped over whatever was there. The body
   // cannot reach columns 0..13 or 114..127, so there is nothing of it to stamp
-  // over. They are HUD: they go on top and they always read.
-  // Both origins come from config.h, and so does the width they assume. The art
-  // is a 12x12 atlas (sprite_icon() / sprite_mood_face() both hand back 12x12),
-  // so if that ever changes this stops compiling here rather than quietly
-  // pushing a badge into the stage.
+  // over. It is HUD: it goes on top and it always reads.
+  // The origin comes from config.h, and so does the width it assumes. The art
+  // is a 12x12 atlas (sprite_mood_face() hands back 12x12), so if that ever
+  // changes this stops compiling here rather than quietly pushing the badge
+  // into the stage.
   static_assert(UI_HUD_BADGE_W == 12, "the HUD keep-out assumes 12 px badge art");
-  if (!fx && w.valid && w.group != WX_UNKNOWN && w.group < WX_COUNT) {
-    static const uint8_t kWxIcon[WX_COUNT] = {
-      ICO_CLOUD, ICO_SUN, ICO_SUN, ICO_CLOUD, ICO_CLOUD, ICO_FOG,
-      ICO_RAIN,  ICO_RAIN, ICO_SNOW, ICO_RAIN, ICO_SNOW, ICO_STORM, ICO_STORM
-    };
-    px_spr(UI_HUD_L_X, (int16_t)(SPRITE_AREA_Y + 1), sprite_icon(kWxIcon[w.group]));
-  }
   px_spr(UI_HUD_R_X, (int16_t)(SPRITE_AREA_Y + 1), sprite_mood_face(mood_of()));
-
-  if (fx) {
-    wx_draw_particles(rd_u8g2());
-    // The bolt is a WEATHER event; the reaction is a PANEL event. 0xA7 + 0xD3
-    // are 2 bytes each on the wire against the 1024 B software XOR they replace,
-    // and consuming the edge HERE - in the very frame weather generated it -
-    // is what keeps the flash, the shake and the thunder from drifting apart.
-    if (wx_lightning_edge()) {
-      rd_flash(UI_WX_FLASH_MS);
-      rd_shake(UI_WX_SHAKE_PX, UI_WX_SHAKE_MS);
-      petfx_startle(UI_WX_STARTLE_MS);
-    }
-  }
 
   draw_absence_banner();
   rd_affordance(S(STR_AF_MENU), S(STR_AF_VIEW));
@@ -1281,7 +1245,6 @@ static void handle_home(Gesture g) {
       s_bar_mode = ring_next(s_bar_mode, SBAR_COUNT);
       if (s_cfg) s_cfg->statusbar_mode = s_bar_mode;   // persisted on the next save
       break;
-    case GST_DBL_L: s_wx_overlay = (uint8_t)!s_wx_overlay; break;
     case GST_DBL_R: act_and_show(ACT_PET); break;   // already HOME: no jump
     case GST_HOLD_L: nav_push(SCR_STATUS_A); break;
     case GST_HOLD_R: s_wiggle_ms = now_ms(); break;    // already home: "nope"
@@ -2236,17 +2199,17 @@ static void handle_social(Gesture g) {
 //      entry (SSID, password, Telegram token, pet name) belongs on the phone.
 // =============================================================================
 enum SetRow : uint8_t {
-  SET_TELEGRAM = 0, SET_SOUND, SET_WEATHER, SET_WEB, SET_BRIGHT,
+  SET_TELEGRAM = 0, SET_SOUND, SET_WEB, SET_BRIGHT,
   SET_LIGHT, SET_QR, SET_INFO, SET_RESET, SET_BACK, SET_ROWS
 };
 
 static const uint16_t kSetLabel[SET_ROWS] = {
-  STR_SET_TELEGRAM, STR_SET_SOUND, STR_SET_WEATHER, STR_SET_WEB, STR_SET_BRIGHT,
-  STR_MENU_LIGHT,   STR_WEB_TITLE, STR_SET_INFO,    STR_SET_RESET, STR_ITEM_BACK
+  STR_SET_TELEGRAM, STR_SET_SOUND, STR_SET_WEB,  STR_SET_BRIGHT,
+  STR_MENU_LIGHT,   STR_WEB_TITLE, STR_SET_INFO, STR_SET_RESET, STR_ITEM_BACK
 };
 static const uint16_t kSetHelp[SET_ROWS] = {
-  STR_HLP_TELEGRAM, STR_HLP_SOUND, STR_HLP_WEATHER, STR_HLP_WEB, STR_HLP_BRIGHT,
-  STR_HLP_LIGHT,    STR_HLP_WEB,   STR_HLP_INFO,    STR_HLP_RESET, STR_HLP_BACK
+  STR_HLP_TELEGRAM, STR_HLP_SOUND, STR_HLP_WEB,  STR_HLP_BRIGHT,
+  STR_HLP_LIGHT,    STR_HLP_WEB,   STR_HLP_INFO, STR_HLP_RESET, STR_HLP_BACK
 };
 static const uint8_t kBrightSteps[5] = {
   OLED_CONTRAST_DIM, 90, OLED_CONTRAST_DEFAULT, 200, 255
@@ -2261,7 +2224,6 @@ static const char* set_value(uint8_t row) {
            : (s_cfg->tg_mode == TG_ONLY_SEVERE) ? S(STR_ONLY_SEVERE)
                                                 : S(STR_ON);
     case SET_SOUND:   return cfg_flag(CF_MUTE)        ? S(STR_OFF) : S(STR_ON);
-    case SET_WEATHER: return cfg_flag(CF_WX_ENABLED)  ? S(STR_ON)  : S(STR_OFF);
     case SET_WEB:     return cfg_flag(CF_WEB_ENABLED) ? S(STR_ON)  : S(STR_OFF);
     case SET_LIGHT:   return (p && (p->flags & PF_LIGHT_ON)) ? S(STR_ON) : S(STR_OFF);
     default:          return nullptr;
@@ -2324,7 +2286,6 @@ static void settings_select(void) {
       tg_set_mode((TgMode)s_cfg->tg_mode);
       break;
     case SET_SOUND:   s_cfg->flags = (uint8_t)(s_cfg->flags ^ CF_MUTE);        break;
-    case SET_WEATHER: s_cfg->flags = (uint8_t)(s_cfg->flags ^ CF_WX_ENABLED);  break;
     case SET_WEB:     s_cfg->flags = (uint8_t)(s_cfg->flags ^ CF_WEB_ENABLED); break;
     case SET_BRIGHT: {
       uint8_t i = 0;
@@ -3180,7 +3141,6 @@ void ui_begin(void) {
   s_lin_detail  = 0;
   s_menu_idx    = 0;
   s_last_action = ACT_NONE;
-  s_wx_overlay  = 1;
   s_absence_ms  = 0;
   s_soc_phase   = SOC_ENTER;
   s_stat_ok     = 0;                 // boot: show the truth, do not animate to it
@@ -3358,7 +3318,6 @@ void ui_handle(Gesture g) {
         egg_cache_invalidate();      // god mode ran store_wipe() behind us
         if (s_cfg) store_load_cfg(*s_cfg);
         tg_begin();
-        wx_begin();
         const PetSave* np = pet();
         if (np) petfx_reset(*np);    // god handed us a different animal entirely
         s_stat_ok = 0;

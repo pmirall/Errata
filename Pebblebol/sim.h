@@ -27,8 +27,7 @@
 // -----------------------------------------------------------------------------
 // 1. SIM ENVIRONMENT
 //    Everything the simulation needs from the outside world, pushed in once per
-//    logic tick by the .ino main loop. All weather multipliers are x1000
-//    integers; 1000 == neutral. A zeroed SimEnv is NOT valid - use
+//    logic tick by the .ino main loop. A zeroed SimEnv is NOT valid - use
 //    sim_env_defaults() and then fill in what you know.
 // -----------------------------------------------------------------------------
 struct SimEnv {
@@ -37,18 +36,11 @@ struct SimEnv {
   uint8_t  local_hour;        //  6  0..23 local time
   uint8_t  local_min;         //  7  0..59 local time
   uint8_t  clock_valid;       //  8  0 = no SNTP yet: no sleep window, no wish
-  uint8_t  wx_group;          //  9  WeatherGroup (WISH_SUN needs it)
-  uint16_t wx_hunger_x1000;   // 10  weather multiplier on hunger decay
-  uint16_t wx_happy_x1000;    // 12  weather multiplier on happiness decay
-  uint16_t wx_energy_x1000;   // 14  weather multiplier on energy decay
-  uint16_t wx_sick_pph;       // 16  additive sickness bonus, permille per hour
-  int16_t  wx_app_dc;         // 18  apparent temperature, deci-celsius
-  int8_t   wx_mood_off;       // 20  flat offset on the DISPLAYED mood score
-  uint8_t  reserved;          // 21
+  uint8_t  reserved[15];      //  9  was the weather block; holds sizeof at 24
 };
 static_assert(sizeof(SimEnv) == 24, "SimEnv layout drifted");
 
-// Fills env with the neutral, clock-less defaults (all multipliers 1000).
+// Fills env with the neutral, clock-less defaults.
 void sim_env_defaults(SimEnv& env);
 
 // -----------------------------------------------------------------------------
@@ -104,7 +96,7 @@ void     sim_catch_up(uint32_t absence_s, AbsenceTier& tier);
 // otherwise. The ONLY time source game logic is allowed to read.
 uint32_t sim_step_seconds(void);
 
-// 0..100 displayed mood score (GAME_DESIGN 6.3), weather offset included.
+// 0..100 displayed mood score (GAME_DESIGN 6.3).
 uint8_t  sim_mood_score(void);
 
 // 0..100 whole-point projection of a stat. Used by the UI and /api/state.

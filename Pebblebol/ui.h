@@ -7,7 +7,7 @@
 //  LAYERING
 //  --------
 //  ui owns NO game state. Everything it shows comes from sim_save() /
-//  sim_*() / wx_state() / ble_peer() / store_ancestor(); everything it changes
+//  sim_*() / ble_peer() / store_ancestor(); everything it changes
 //  goes through sim_apply_action(), store_save_cfg() or net_request().
 //  It never includes WiFi.h / BLEDevice.h / WebServer.h (net.h and
 //  ble_social.h are deliberately network-header-free) and it never constructs
@@ -62,10 +62,6 @@
 #define UI_STAT_SNAP_GAP_MS 1000UL  // a gap this long means "we were away": snap
 #define UI_SLEEP_DIM_MS    2000     // contrast ramp down when the pet falls asleep
 #define UI_WAKE_RAMP_MS    1200     // and back up when it wakes
-#define UI_WX_FLASH_MS       40     // lightning: 0xA7 invert
-#define UI_WX_SHAKE_MS      250     // lightning: 0xD3 decaying shake
-#define UI_WX_SHAKE_PX        2
-#define UI_WX_STARTLE_MS    600     // how long the pet stays spooked afterwards
 
 // =============================================================================
 //  MANDATORY PUBLIC INTERFACE (BRIEF 4, row 11)

@@ -387,7 +387,7 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 - Acceptance: `make -C tests check` green (≥ 8 binaries); golden recorded and matching after the CRC/RNG switch; device build unchanged in behaviour.
 
 **P2-C3 Remove weather (G1)** — M
-- [ ] Execute §2 G1 row by row; `SimEnv` keeps `sizeof == 24` with `reserved[]`; `Config.lat/lon` → `reserved_b[24]` in place; delete `FEATURE_WEATHER`, `WISH_SUN`, `CF_WX_ENABLED`, `CF_GEO_AUTO`, weather icons/particles.
+- [x] Execute §2 G1 row by row; `SimEnv` keeps `sizeof == 24` with `reserved[]`; `Config.lat/lon` → `reserved_b[24]` in place; delete `FEATURE_WEATHER`, `WISH_SUN`, `CF_WX_ENABLED`, `CF_GEO_AUTO`, weather icons/particles.
 - Acceptance: gate; golden unchanged; flash drops (part of the 123,834 B weather+telegram dividend, audit §14).
 
 **P2-C4 Remove Telegram (G2)** — M

@@ -477,22 +477,12 @@ static void pet_window_push(void)
 void sim_env_defaults(SimEnv& env)
 {
   memset(&env, 0, sizeof(env));
-  env.wx_group        = WX_UNKNOWN;
-  env.wx_hunger_x1000 = MULT_ONE;
-  env.wx_happy_x1000  = MULT_ONE;
-  env.wx_energy_x1000 = MULT_ONE;
-  env.wx_sick_pph     = 0;
-  env.wx_app_dc       = 200;      // 20.0 C, the neutral band
-  env.wx_mood_off     = 0;
-  env.clock_valid     = 0;
+  env.clock_valid = 0;
 }
 
 void sim_set_env(const SimEnv& env)
 {
   g_env = env;
-  if (g_env.wx_hunger_x1000 == 0) g_env.wx_hunger_x1000 = MULT_ONE;
-  if (g_env.wx_happy_x1000  == 0) g_env.wx_happy_x1000  = MULT_ONE;
-  if (g_env.wx_energy_x1000 == 0) g_env.wx_energy_x1000 = MULT_ONE;
   if (!g_offline) {
     if (g_env.now_epoch != 0) g_now = g_env.now_epoch;
     g_sod = ((uint32_t)g_env.local_hour * 3600u) + ((uint32_t)g_env.local_min * 60u);
@@ -804,29 +794,15 @@ static void decay_stats(uint32_t dt)
                             ? (g_now - p.last_interact_epoch) : 0u;
   if (idle_s >= LONELY_AFTER_S) m_lonely = (uint16_t)MULT_LONELY;
 
-  // Temperature overlay (GAME_DESIGN 6.2), integer bands on deci-celsius.
-  uint16_t t_hun = MULT_ONE, t_nrg = MULT_ONE;
-  int16_t  ta = g_offline ? (int16_t)200 : g_env.wx_app_dc;
-  if      (ta <  -20) { t_nrg = 1350; t_hun = 1250; }
-  else if (ta <   80) { t_hun = 1150; }
-  else if (ta <  240) { /* neutral */ }
-  else if (ta <  300) { t_nrg = 1150; }
-  else if (ta <  350) { t_nrg = 1300; t_hun = 850; }
-  else                { t_nrg = 1300; t_hun = 850; }
-
-  uint16_t wx_hun = g_offline ? (uint16_t)MULT_ONE : g_env.wx_hunger_x1000;
-  uint16_t wx_hap = g_offline ? (uint16_t)MULT_ONE : g_env.wx_happy_x1000;
-  uint16_t wx_nrg = g_offline ? (uint16_t)MULT_ONE : g_env.wx_energy_x1000;
-
   // --- hunger (satiety) ---
   {
-    const uint16_t m[7] = { m_stage, m_app, wx_hun, t_hun, m_sleep, fm->hun, m_off };
-    accum_stat(ST_HUNGER, rate_chain(RATE_HUNGER_MPH, m, 7), dt);
+    const uint16_t m[5] = { m_stage, m_app, m_sleep, fm->hun, m_off };
+    accum_stat(ST_HUNGER, rate_chain(RATE_HUNGER_MPH, m, 5), dt);
   }
   // --- happiness ---
   {
-    const uint16_t m[7] = { m_stage, m_lonely, m_soc, wx_hap, m_sleep, fm->hap, m_off };
-    accum_stat(ST_HAPPINESS, rate_chain(RATE_HAPPINESS_MPH, m, 7), dt);
+    const uint16_t m[6] = { m_stage, m_lonely, m_soc, m_sleep, fm->hap, m_off };
+    accum_stat(ST_HAPPINESS, rate_chain(RATE_HAPPINESS_MPH, m, 6), dt);
   }
   // --- energy ---
   if (p.flags & PF_ASLEEP) {
@@ -835,8 +811,8 @@ static void decay_stats(uint32_t dt)
     const uint16_t m[2] = { m_light, m_off };
     accum_stat(ST_ENERGY, rate_chain(RATE_ENERGY_ASLEEP_MPH, m, 2), dt);
   } else {
-    const uint16_t m[6] = { m_stage, m_met, wx_nrg, t_nrg, fm->nrg, m_off };
-    accum_stat(ST_ENERGY, rate_chain(RATE_ENERGY_AWAKE_MPH, m, 6), dt);
+    const uint16_t m[4] = { m_stage, m_met, fm->nrg, m_off };
+    accum_stat(ST_ENERGY, rate_chain(RATE_ENERGY_AWAKE_MPH, m, 4), dt);
   }
   // --- hygiene (base + per-poop) ---
   {
@@ -897,10 +873,6 @@ static void health_step(uint32_t dt)
     src[DMG_OTHER] += DMG_OBESE_MPH;
     g_events |= SIM_EV_WEIGHT_OBESE;
   }
-  if (!g_offline && g_env.wx_app_dc > (int16_t)HEAT_DANGER_DC) {
-    src[DMG_OTHER] += DMG_HEAT_MPH;
-  }
-
   const uint16_t md[3] = { m_hardy, fm->dmg, m_off };
   int32_t total = 0;
   for (uint8_t i = 0; i < DMG_COUNT; ++i) {
@@ -994,7 +966,6 @@ static void sickness_step(uint32_t dt)
                 + (int32_t)p.poop_count * SICK_PER_POOP_PPH
                 + ((pct_milli(ST_HUNGER) < 15) ? SICK_HUNGRY_PPH : 0)
                 + ((pct_milli(ST_HEALTH) < 50) ? SICK_LOWHEALTH_PPH : 0);
-    if (!g_offline) pph += (int32_t)g_env.wx_sick_pph;
     if (g_uptime_s < g_overfeed_until_s) pph += SICK_OVERFEED_PPH;
     if (g_uptime_s < g_suppress_until_s) pph += POOP_SUPPRESSED_SICK_PCT * 10;
 
@@ -1305,7 +1276,6 @@ uint8_t sim_mood_score(void)
              + 25 * pct_milli(ST_HEALTH)
              + 20 * pct_milli(ST_BOND)
              + 15 * pct_milli(ST_HUNGER)) / 100;
-  s += (int32_t)g_env.wx_mood_off;
   return (uint8_t)NT_CLAMP(s, (int32_t)0, (int32_t)100);
 }
 
@@ -1518,7 +1488,6 @@ static void wish_check(uint8_t action)
                             pct_milli(ST_HYGIENE) >= 80); break;
     case WISH_PET3:  if (action == ACT_PET) { if (g_wish_pets < 255) g_wish_pets++; }
                      hit = (g_wish_pets >= 3); break;
-    case WISH_SUN:   hit = (g_env.wx_group == WX_CLEAR_DAY); break;
     default: break;
   }
   if (!hit) return;

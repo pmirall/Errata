@@ -155,7 +155,7 @@ bool     store_load_cfg(Config& out);
 // CALLER'S STRUCT, then writes key "cfg". Call on settings change only.
 //
 // The reference is deliberately non-const (PH3 finding 5). 'c' is normally the
-// entry point's live g_cfg, shared by pointer with ui, webui and weather; the
+// entry point's live g_cfg, shared by pointer with ui and webui; the
 // .ino watches g_cfg.crc16 to decide when to re-apply the three settings that
 // live outside the struct (OLED contrast, Telegram mode, WiFi credentials).
 // Sealing into a private copy left the caller's crc16 frozen forever, so that

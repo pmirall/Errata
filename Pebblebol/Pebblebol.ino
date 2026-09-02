@@ -38,7 +38,6 @@
 #include "input.h"
 #include "render.h"
 #include "net.h"
-#include "weather.h"
 #include "telegram.h"
 #include "ble_social.h"
 #include "ui.h"
@@ -50,7 +49,7 @@
 // -----------------------------------------------------------------------------
 //  Build-time policy: is there any reason at all to power the WiFi stack?
 // -----------------------------------------------------------------------------
-#define NT_WANT_WIFI (FEATURE_WEB || FEATURE_WEATHER || FEATURE_TELEGRAM)
+#define NT_WANT_WIFI (FEATURE_WEB || FEATURE_TELEGRAM)
 
 // How often the radio policy retries after the stack fell back to RADIO_OFF.
 #define NT_WIFI_RETRY_MS   30000UL
@@ -135,7 +134,7 @@ static bool config_changed(void)
 
 // =============================================================================
 //  SIM ENVIRONMENT
-//  sim owns no clock, no RNG and no weather (sim.h:13-17): the entry point
+//  sim owns no clock and no RNG (sim.h:13-17): the entry point
 //  feeds it a complete SimEnv once per logic tick. Building it is the only
 //  cross-module arithmetic in this file, and it is all integer.
 // =============================================================================
@@ -160,17 +159,6 @@ static void build_env(SimEnv& env)
     env.local_hour = fh;
     env.local_min  = fm;
   }
-
-  const WeatherState& w = wx_state();
-  const uint8_t temper  = gene_temperament(g_pet.genome);
-
-  env.wx_group        = w.group;
-  env.wx_app_dc       = w.app_dc;
-  env.wx_hunger_x1000 = wx_mult_hunger();
-  env.wx_happy_x1000  = wx_mult_hap(temper, sim_stat_pct(ST_BOND));
-  env.wx_energy_x1000 = wx_mult_en();
-  env.wx_sick_pph     = wx_sick_bonus_pph();
-  env.wx_mood_off     = wx_mood_offset(temper);
 }
 
 // =============================================================================
@@ -188,9 +176,6 @@ static bool wifi_wanted(void)
   if (FEATURE_WEB && (g_cfg.flags & CF_WEB_ENABLED)) {
     return true;
   }
-  if (FEATURE_WEATHER && (g_cfg.flags & CF_WX_ENABLED)) {
-    return true;
-  }
   if (FEATURE_TELEGRAM && g_cfg.tg_mode != (uint8_t)TG_OFF) {
     return true;
   }
@@ -201,8 +186,8 @@ static bool wifi_wanted(void)
 static void radio_policy(uint32_t ms)
 {
   if (!wifi_wanted()) {
-    // PH3 #7: nothing wants the station any more (WEB and WEATHER off in S9,
-    // Telegram OFF). Give the ~50 KB and the radio back instead of holding
+    // PH3 #7: nothing wants the station any more (WEB off in S9, Telegram
+    // OFF). Give the ~50 KB and the radio back instead of holding
     // them powered until the next reboot - on a battery-bound device the
     // station is the single largest current draw. ui.cpp owns RADIO_BLE while
     // S8 is open, so never fight it there; net.cpp restores the previous mode
@@ -293,8 +278,8 @@ static void boot_pet(void)
 //  handing sim_catch_up_ex() a bare 0 there made it substitute the 6 h
 //  ABSENCE_LARGA_S floor - on the very first boot of a brand new device, and
 //  again on every reboot of any unit without a working clock, which is a fully
-//  supported configuration (CF_WEB_ENABLED / CF_WX_ENABLED are user-togglable
-//  and Telegram can be off). The crash-vs-abandonment discriminator storage.cpp
+//  supported configuration (CF_WEB_ENABLED is user-togglable and Telegram can
+//  be off). The crash-vs-abandonment discriminator storage.cpp
 //  already computes is the missing input: BOOT_FIRST_RUN has nobody to have
 //  abandoned, and BOOT_CRASH / BOOT_SOFT_RESET are explicitly not absences
 //  (the same reason the toast below says "dizzy" rather than "abandoned").
@@ -381,8 +366,6 @@ void setup()
   // --- everything that reads Config or the pet ------------------------------
   input_begin();
   net_begin();
-  wx_bind_config(&g_cfg);         // PH3 #9: one Config object, one writer.
-  wx_begin();                     // must follow the bind: it seeds the coords
   tg_begin();
   god_begin();
 
@@ -521,7 +504,6 @@ void loop()
   }
   web_service();
   tg_service();
-  wx_poll();
   ble_scan_service();
 
   // --- 6. cross-module notifications ---------------------------------------

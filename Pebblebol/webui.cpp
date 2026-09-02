@@ -7,12 +7,11 @@
 //
 //   1. /api/state field names. The client reads
 //        v t name stage gen age st{hun,hyg,nrg,hap,hea} mood sick poop asleep
-//        spr{id,rev} wx{c,t} cd{a,"1","2","3"} busy ip
-//      `mood` and `wx.c` are emitted as NUMBERS: the client carries both a
-//      numeric table (st[] / ht[]) and a string table (ot[] / rt[]) and picks
-//      by typeof. The numeric tables are 1:1 with enum Mood and enum
-//      WeatherGroup - ht[] is exactly WX_UNKNOWN..WX_STORM_HAIL in order - so
-//      the ordinal is both smaller on the wire and impossible to mistype.
+//        spr{id,rev} cd{a,"1","2","3"} busy ip
+//      `mood` is emitted as a NUMBER: the client carries both a numeric table
+//      (st[]) and a string table (ot[]) and picks by typeof. The numeric table
+//      is 1:1 with enum Mood, so the ordinal is both smaller on the wire and
+//      impossible to mistype.
 //
 //   2. The sprite header is SIX bytes, not seven. The client's bit accessor is
 //        m(t,frame,x,y,stride,frameBytes) =
@@ -33,8 +32,7 @@
 //      empty pixels.
 //    - String concatenation anywhere on a per-request path. Every response is
 //      snprintf'd into a fixed static buffer.
-//    - floating point. Weather arrives as deci-degrees and leaves as integer
-//      degrees via integer division with explicit negative-half rounding.
+//    - floating point. Every number on the wire is an integer.
 //
 //  index_html.h is included from THIS TRANSLATION UNIT AND NO OTHER: both
 //  INDEX_HTML and INDEX_HTML_LEN have internal linkage, so a second includer
@@ -56,7 +54,6 @@
 #include "render.h"
 #include "net.h"
 #include "storage.h"
-#include "weather.h"
 #include "genome.h"
 #include "rng.h"
 #include "telegram.h"     // tg_set_mode() when POST /api/cfg changes tg
@@ -110,8 +107,8 @@ static bool     s_cfg_apply_net  = false;   // deferred: credentials changed
 
 // Response scratch. BRIEF 1.6: "static char[320], never String +=".
 static char     s_json[WEB_JSON_BUF];
-// /api/cfg carries free-form user text (SSID 32 + TZ 39 + name 12 + two
-// coordinates) and cannot share the 320 B state buffer.
+// /api/cfg carries free-form user text (SSID 32 + TZ 39 + name 12) and cannot
+// share the 320 B state buffer.
 static char     s_cfgjson[448];
 
 // =============================================================================
@@ -149,13 +146,6 @@ static void json_str_sanitised(char* dst, size_t cap, const char* src, size_t ma
     }
   }
   dst[n] = '\0';
-}
-
-// deci-celsius -> celsius, integer, rounded to nearest, away from zero.
-static int16_t dc_to_c(int16_t dc)
-{
-  int32_t v = (dc >= 0) ? ((int32_t)dc + 5) / 10 : ((int32_t)dc - 5) / 10;
-  return (int16_t)NT_CLAMP(v, -99, 99);
 }
 
 // Non-negative decimal parse with an explicit ceiling. Returns `def` when the
@@ -248,9 +238,9 @@ void web_bind_config(Config* cfg)
 
 // Does the user still want the HTTP server? CF_WEB_ENABLED is the S9 "WEB"
 // toggle. It used to feed only wifi_wanted() in the entry point, so with the
-// radio kept up for weather or Telegram the listening socket survived the
-// toggle and /api/action and /api/cfg went on serving after the user had
-// switched web access off (PH3 finding 7).
+// radio kept up for Telegram the listening socket survived the toggle and
+// /api/action and /api/cfg went on serving after the user had switched web
+// access off (PH3 finding 7).
 //
 // An UNBOUND module (webui.h "unbound" mode, no entry point) has no user
 // preference to consult and must keep working exactly as before.
@@ -399,7 +389,7 @@ uint8_t web_mood_index(uint8_t score)
 //
 //  Worst case, measured field by field against the widest legal value of every
 //  member (t 7 digits, age 10 digits, name 12 sanitised bytes, every cooldown
-//  clamped to 999, wx.t clamped to -99..99, ip 15 chars): 300 bytes. It still
+//  clamped to 999, ip 15 chars): 300 bytes. It still
 //  cannot overrun, because snprintf returns the length it WANTED and the
 //  builder falls back to a shorter form rather than shipping a truncated -
 //  and therefore unparseable - JSON document.
@@ -445,19 +435,6 @@ static void build_state(char* buf, size_t cap)
     sw = set.w; sh = set.h; sn = set.frames;
   }
 
-  // Weather. WeatherState stores DECI-units (nt_types.h:606) - integer maths
-  // only, and a stale/never-fetched reading collapses to WX_UNKNOWN, which is
-  // index 0 in the browser's own table ("Sin datos").
-  uint8_t  wxc = WX_UNKNOWN;
-  int16_t  wxt = 0;
-  {
-    const WeatherState& w = wx_state();
-    if (w.valid) {
-      wxc = (uint8_t)NT_MIN(w.group, (uint8_t)(WX_COUNT - 1));
-      wxt = dc_to_c(w.temp_dc);
-    }
-  }
-
   // Cooldowns. `a` is the floor the client puts under EVERY action button, so
   // it must be the SMALLEST of the six - reporting the largest would grey out
   // buttons that are actually ready. Anything the client lets through that the
@@ -487,7 +464,6 @@ static void build_state(char* buf, size_t cap)
     "\"st\":{\"hun\":%u,\"hyg\":%u,\"nrg\":%u,\"hap\":%u,\"hea\":%u},"
     "\"mood\":%u,\"sick\":%u,\"poop\":%u,\"asleep\":%u,"
     "\"spr\":{\"id\":%u,\"w\":%u,\"h\":%u,\"n\":%u,\"rev\":%u},"
-    "\"wx\":{\"c\":%u,\"t\":%d},"
     "\"cd\":{\"a\":%u,\"1\":%u,\"2\":%u,\"3\":%u},"
     "\"busy\":%u,\"ip\":\"%s\"}",
     (unsigned)WEB_API_SCHEMA_VER, (unsigned long)up_s, name,
@@ -495,7 +471,6 @@ static void build_state(char* buf, size_t cap)
     (unsigned)hun, (unsigned)hyg, (unsigned)nrg, (unsigned)hap, (unsigned)hea,
     (unsigned)mood, (unsigned)sick, (unsigned)poop, (unsigned)asleep,
     (unsigned)sid, (unsigned)sw, (unsigned)sh, (unsigned)sn, (unsigned)SPRITE_REV,
-    (unsigned)wxc, (int)wxt,
     (unsigned)cd_a, (unsigned)cd_g, (unsigned)cd_g, (unsigned)cd_g,
     (unsigned)busy, ip ? ip : "0.0.0.0");
 
@@ -508,14 +483,12 @@ static void build_state(char* buf, size_t cap)
       "\"st\":{\"hun\":%u,\"hyg\":%u,\"nrg\":%u,\"hap\":%u,\"hea\":%u},"
       "\"mood\":%u,\"sick\":%u,\"poop\":%u,\"asleep\":%u,"
       "\"spr\":{\"id\":%u,\"w\":%u,\"h\":%u,\"n\":%u,\"rev\":%u},"
-      "\"wx\":{\"c\":%u,\"t\":%d},"
       "\"cd\":{\"a\":%u,\"1\":%u,\"2\":%u,\"3\":%u},\"busy\":%u}",
       (unsigned)WEB_API_SCHEMA_VER, (unsigned long)up_s,
       (unsigned)stage, (unsigned)gen, (unsigned long)age_s,
       (unsigned)hun, (unsigned)hyg, (unsigned)nrg, (unsigned)hap, (unsigned)hea,
       (unsigned)mood, (unsigned)sick, (unsigned)poop, (unsigned)asleep,
       (unsigned)sid, (unsigned)sw, (unsigned)sh, (unsigned)sn, (unsigned)SPRITE_REV,
-      (unsigned)wxc, (int)wxt,
       (unsigned)cd_a, (unsigned)cd_g, (unsigned)cd_g, (unsigned)cd_g,
       (unsigned)busy);
   }
@@ -828,25 +801,20 @@ static void build_cfg(char* buf, size_t cap)
 
   char ssid[SSID_MAX_LEN + 1];
   char tz  [TZ_MAX_LEN + 1];
-  char lat [COORD_MAX_LEN + 1];
-  char lon [COORD_MAX_LEN + 1];
   char name[NAME_MAX_LEN + 1];
 
   json_str_sanitised(ssid, sizeof(ssid), c->wifi_ssid, SSID_MAX_LEN);
   json_str_sanitised(tz,   sizeof(tz),   c->tz,        TZ_MAX_LEN);
-  json_str_sanitised(lat,  sizeof(lat),  c->lat,       COORD_MAX_LEN);
-  json_str_sanitised(lon,  sizeof(lon),  c->lon,       COORD_MAX_LEN);
   json_str_sanitised(name, sizeof(name), c->pet_name,  NAME_MAX_LEN);
 
   snprintf(buf, cap,
     "{\"v\":%u,\"ssid\":\"%s\",\"pass\":%u,\"name\":\"%s\",\"tz\":\"%s\","
-    "\"lat\":\"%s\",\"lon\":\"%s\",\"tg\":%u,\"mute\":%u,\"br\":%u,\"sb\":%u,"
-    "\"wx\":%u,\"ble\":%u,\"prov\":%u}",
+    "\"tg\":%u,\"mute\":%u,\"br\":%u,\"sb\":%u,"
+    "\"ble\":%u,\"prov\":%u}",
     (unsigned)WEB_API_SCHEMA_VER, ssid, (unsigned)(c->wifi_pass[0] ? 1u : 0u),
-    name, tz, lat, lon,
+    name, tz,
     (unsigned)c->tg_mode, (unsigned)((c->flags & CF_MUTE) ? 1u : 0u),
     (unsigned)c->brightness, (unsigned)c->statusbar_mode,
-    (unsigned)((c->flags & CF_WX_ENABLED)  ? 1u : 0u),
     (unsigned)((c->flags & CF_BLE_ENABLED) ? 1u : 0u),
     (unsigned)((c->flags & CF_PROVISIONED) ? 1u : 0u));
 }
@@ -863,21 +831,6 @@ static bool cfg_set_str(char* dst, size_t cap, const char* src)
   if (!strcmp(dst, tmp)) return false;
   memcpy(dst, tmp, n + 1u);
   return true;
-}
-
-static bool coord_valid(const char* s)
-{
-  if (!s) return false;
-  if (!*s) return true;                       // empty clears it
-  uint8_t dots = 0, digits = 0;
-  for (const char* p = s; *p; ++p) {
-    if (*p == '-' && p != s) return false;
-    if (*p == '.') { if (++dots > 1) return false; continue; }
-    if (*p == '-') continue;
-    if (*p < '0' || *p > '9') return false;
-    digits++;
-  }
-  return digits > 0;
 }
 
 static void h_cfg(void)
@@ -913,16 +866,6 @@ static void h_cfg(void)
   if (s_srv.hasArg("tz")) {
     const String v = s_srv.arg("tz");
     if (cfg_set_str(c->tz, sizeof(c->tz), v.c_str())) changed = true;
-  }
-  if (s_srv.hasArg("lat")) {
-    const String v = s_srv.arg("lat");
-    if (!coord_valid(v.c_str())) { send_err(400, "arg"); return; }
-    if (cfg_set_str(c->lat, sizeof(c->lat), v.c_str())) changed = true;
-  }
-  if (s_srv.hasArg("lon")) {
-    const String v = s_srv.arg("lon");
-    if (!coord_valid(v.c_str())) { send_err(400, "arg"); return; }
-    if (cfg_set_str(c->lon, sizeof(c->lon), v.c_str())) changed = true;
   }
   if (s_srv.hasArg("tg")) {
     const String v = s_srv.arg("tg");

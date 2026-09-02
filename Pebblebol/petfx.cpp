@@ -43,7 +43,7 @@ static_assert(SPRITE_REV == 1, "petfx eyelid table was measured against SPRITE_R
 // at a time. The four that were still guarded against the PANEL - the dilation
 // copy, the contact shadow, the gene_rare spark and the gene_mutations pixel -
 // all reached columns 13 or 114 on a body standing against a wall, and the
-// dilation copy was destroying real pixels of the weather badge while it did it.
+// dilation copy was destroying real pixels of the HUD while it did it.
 // If you add a write to this file, route its x through pf_stage_lo() /
 // pf_stage_hi() or through the PETFX_STAGE_* constants; there is no other
 // correct answer, and the host sweep in the scratchpad checks it.
@@ -1185,7 +1185,7 @@ void petfx_draw_body(const PetSave& p, uint8_t pose, uint8_t frame, int16_t dy,
   // two reasons. The clear below has to cover it, and - this was the last x
   // limit in the file that did not come from the stage - it used to be guarded
   // against the PANEL (x2 + w <= OLED_W), not against the scenario. At x = 14
-  // the copy landed in column 13, inside the weather badge: measured over the
+  // the copy landed in column 13, inside the left HUD band: measured over the
   // real atlas, a mirrored squashing ADULT_BUHO at x = 14 lost 3 px, ADULT_MOHO
   // 4, and those 112 px were every single destroyed body pixel in the sweep.
   // Against a wall the offset is FLIPPED rather than dropped, so a fat pet stays
@@ -1209,14 +1209,12 @@ void petfx_draw_body(const PetSave& p, uint8_t pose, uint8_t frame, int16_t dy,
 
   // OPAQUE AGAINST THE SCENERY, TRANSPARENT AGAINST ITSELF.
   //
-  // The weather backdrop (moon, sun, clouds, fog band, puddle) is drawn BEFORE
-  // the body so that fx_night()'s colour-0 crescent and fx_fog()'s XOR cannot
-  // bite holes out of it. The price of that, with a transparent blit, is that
-  // the backdrop shows through every hole in the silhouette - eye sockets,
-  // mouth, the gap between the legs, the notch between an owl's ears - and
-  // under fx_fog(), where body and background are the same 50 % texture, the
-  // animal cannot be found on the panel at all. Trading a bite out of the body
-  // for a body with no inside is not a trade.
+  // Scenery (the floor line, the poops, the action props) is drawn BEFORE the
+  // body. The price of that, with a transparent blit, would be that the scenery
+  // shows through every hole in the silhouette - eye sockets, mouth, the gap
+  // between the legs, the notch between an owl's ears - and a body you can see
+  // the ground through is not a body. So the blit clears its own ink box first
+  // and paints into the hole.
   //
   // So clear the body's INK BOX first and blit into the hole. Deliberately the
   // INK box and not the sprite box: the sprite box of a 40 px body reaches row

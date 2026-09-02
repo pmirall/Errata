@@ -2,7 +2,7 @@
 //  NOTTAMAGOCHI - godmode.h
 //  The debug console. Screen S14 (GAME_DESIGN 10) plus the persistent state
 //  that makes the rest of the firmware testable in minutes instead of a week:
-//  the time-scale multiplier, forced absences, forced stage/form/death/weather,
+//  the time-scale multiplier, forced absences, forced stage/form/death,
 //  a genome editor with hex dump and paste-in, a synthetic BLE partner, a live
 //  heap panel and a CSV soak log over Serial.
 //
@@ -90,8 +90,8 @@
 // "FIJAR STAT" offers 0 / 25 / 50 / 100 (GAME_DESIGN 10.1 command 3).
 #define GOD_STATVAL_COUNT      4
 
-// The root list is the twelve GAME_DESIGN 10.1 commands plus an explicit exit
-// row. HOLD_R leaves the SCREEN (god mode stays on, and stays visible); the
+// The root list is the eleven surviving GAME_DESIGN 10.1 commands plus an
+// explicit exit row. HOLD_R leaves the SCREEN (god mode stays on, and stays visible); the
 // exit row leaves the MODE.
 #define GOD_MENU_ROWS          (GOD_CMD_COUNT + 1)
 
@@ -105,7 +105,7 @@ enum GodEvt : uint8_t {
   GOD_EVT_LEAVE,      // leave SCR_GOD for SCR_HOME. god_active() may still be 1.
   GOD_EVT_DIED,       // the pet was killed: run the full GAME_DESIGN 9.2 staging
   GOD_EVT_WIPED,      // NVS erased and a fresh gen-0 egg installed: reload cfg,
-                      // re-run tg_begin()/wx_begin() and go to SCR_EGG
+                      // re-run tg_begin() and go to SCR_EGG
   GOD_EVT_COUNT
 };
 
@@ -197,7 +197,7 @@ bool     god_dump_enabled(void);
 static_assert(GOD_SCALE_COUNT == 5, "godmode.h: the speed ring is five wide");
 static_assert(GOD_SCALE_0 == 1, "godmode.h: index 0 must be real time");
 static_assert(GOD_ABSENCE_COUNT == 6, "godmode.h: absence ladder is six wide");
-static_assert(GOD_CMD_COUNT == 12, "godmode.h: GAME_DESIGN 10.1 has 12 commands");
+static_assert(GOD_CMD_COUNT == 11, "godmode.h: 11 commands after CLIMA went");
 static_assert(GOD_BAR_H <= STATUS_BAR_H, "god marker must fit the status bar rows");
 
 #endif // NT_GODMODE_H

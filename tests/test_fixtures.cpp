@@ -88,7 +88,9 @@ TEST(fixture_config_v1) {
   CHECK_STR_EQ(c.wifi_ssid, "legacy-ssid");
   CHECK_STR_EQ(c.pet_name, "Pebble");
   CHECK_STR_EQ(c.tz, CFG_TZ_STRING);
-  CHECK_STR_EQ(c.lat, "41.3874");
+  // v1 kept lat[12] at offset 224; reserved_b[] holds those retired bytes.
+  CHECK_STR_EQ((const char*)c.reserved_b, "41.3874");
+  CHECK_STR_EQ((const char*)c.reserved_b + 12, "2.1686");
   CHECK_EQ(c.brightness, 128);
   CHECK_EQ(c.crc16, crc16_ccitt(&c, CONFIG_CRC_BYTES));
   CHECK_EQ(u16_at(offsetof(Config, crc16)), 0xB153);

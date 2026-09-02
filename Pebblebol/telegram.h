@@ -33,9 +33,9 @@ void tg_begin(void);
 //  of lower priority can be evicted.
 //
 //  The module raises the state-derived guilt messages on its own (T01..T08,
-//  T10..T13, T15 - see GAME_DESIGN 7.2). Callers only need to queue the
-//  event-driven ones, which this module cannot observe:
-//      MSG_T09  storm + bond < 40         PRIO_P2   (weather.cpp)
+//  T10..T13, T15 - see GAME_DESIGN 7.2). T09 lost its only source when weather
+//  was removed and can no longer be raised at all. Callers only need to queue
+//  the event-driven ones, which this module cannot observe:
 //      MSG_T14  death                     PRIO_P0   (whoever stages the death)
 //      MSG_P01  evolution                 PRIO_P1
 //      MSG_P02  wish granted              PRIO_P1
