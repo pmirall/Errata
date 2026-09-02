@@ -9,16 +9,16 @@
 //  --------------------------------------------------------
 //  1. arduino-cli runs ctags over the .ino and injects the prototypes of every
 //     function defined here ABOVE the first function definition. If any
-//     #include sat below a function, `const PetSave* nt_pet_view();` would be
-//     emitted before nt_types.h and the build would die with
-//     "'PetSave' does not name a type". EVERY #include is therefore at the very
-//     top of the file, before the first definition. Do not move them.
+//     #include sat below a function, a prototype naming a project type - say
+//     `static void fill_env(SimEnv&);` - would be emitted before nt_types.h and
+//     the build would die with "'SimEnv' does not name a type". EVERY #include
+//     is therefore at the very top of the file, before the first definition.
+//     Do not move them.
 //  2. ctags mis-tags a function whose opening brace shares a line with a
 //     `static` local: it hoists a `static` prototype, silently giving the
-//     definition INTERNAL linkage. For nt_pet_view()/nt_cfg_view() that would
-//     leave telegram.cpp bound to its weak nullptr stubs with no diagnostic
-//     whatsoever. No function below opens its body on the same line as any
-//     declaration, and this file uses no function-local statics at all.
+//     definition INTERNAL linkage. No function below opens its body on the same
+//     line as any declaration, and this file uses no function-local statics at
+//     all.
 //
 //  Identifiers and comments English; every user-facing byte comes from
 //  strings_es.h.
@@ -38,7 +38,6 @@
 #include "input.h"
 #include "render.h"
 #include "net.h"
-#include "telegram.h"
 #include "ble_social.h"
 #include "ui.h"
 #include "webui.h"
@@ -49,13 +48,13 @@
 // -----------------------------------------------------------------------------
 //  Build-time policy: is there any reason at all to power the WiFi stack?
 // -----------------------------------------------------------------------------
-#define NT_WANT_WIFI (FEATURE_WEB || FEATURE_TELEGRAM)
+#define NT_WANT_WIFI (FEATURE_WEB)
 
 // How often the radio policy retries after the stack fell back to RADIO_OFF.
 #define NT_WIFI_RETRY_MS   30000UL
 
-// Guard rail for the 1 Hz scheduler: a stall longer than this (a blocking TLS
-// send, a long offline catch-up) resynchronises instead of firing a burst of
+// Guard rail for the 1 Hz scheduler: a stall longer than this (a long offline
+// catch-up, an NVS write storm) resynchronises instead of firing a burst of
 // catch-up ticks.
 #define NT_TICK_RESYNC_MS   4000UL
 
@@ -82,39 +81,16 @@ static uint8_t  g_clock_was_valid = 0;     // edge detector for SNTP landing
 static uint8_t  g_nvs_ok          = 0;
 
 // =============================================================================
-//  INTEGRATION SEAM (telegram.h:97-98)
-//  telegram.cpp ships __attribute__((weak)) definitions returning nullptr so it
-//  links standalone. These strong definitions override them. The signatures are
-//  copied verbatim from the header on purpose: any drift is a hard error there,
-//  never a silently mute Telegram module.
-// =============================================================================
-const PetSave* nt_pet_view(void)
-{
-  return sim_save();
-}
-
-const Config* nt_cfg_view(void)
-{
-  return &g_cfg;
-}
-
-// =============================================================================
 //  CONFIG SIDE EFFECTS
 //  Config is shared by pointer with ui (S9 SETTINGS) and webui (POST /api/cfg),
 //  so it can change under us from two directions. Rather than have both of them
-//  call back, the tick watches the struct's own CRC and re-applies the three
-//  settings that live outside the struct: OLED contrast, Telegram mode and the
-//  WiFi credentials. Everything else is read straight from g_cfg by its owner.
+//  call back, the tick watches the struct's own CRC and re-applies the two
+//  settings that live outside the struct: OLED contrast and the WiFi
+//  credentials. Everything else is read straight from g_cfg by its owner.
 // =============================================================================
 static void apply_config(void)
 {
   ui_note_brightness(g_cfg.brightness);
-
-  TgMode tg = TG_OFF;
-  if (g_cfg.tg_mode < (uint8_t)TG_MODE_COUNT) {
-    tg = (TgMode)g_cfg.tg_mode;
-  }
-  tg_set_mode(tg);
 
   net_set_credentials(g_cfg.wifi_ssid, g_cfg.wifi_pass);
 
@@ -176,9 +152,6 @@ static bool wifi_wanted(void)
   if (FEATURE_WEB && (g_cfg.flags & CF_WEB_ENABLED)) {
     return true;
   }
-  if (FEATURE_TELEGRAM && g_cfg.tg_mode != (uint8_t)TG_OFF) {
-    return true;
-  }
   return false;
 #endif
 }
@@ -186,8 +159,8 @@ static bool wifi_wanted(void)
 static void radio_policy(uint32_t ms)
 {
   if (!wifi_wanted()) {
-    // PH3 #7: nothing wants the station any more (WEB off in S9, Telegram
-    // OFF). Give the ~50 KB and the radio back instead of holding
+    // PH3 #7: nothing wants the station any more (WEB off in S9). Give the
+    // ~50 KB and the radio back instead of holding
     // them powered until the next reboot - on a battery-bound device the
     // station is the single largest current draw. ui.cpp owns RADIO_BLE while
     // S8 is open, so never fight it there; net.cpp restores the previous mode
@@ -278,8 +251,8 @@ static void boot_pet(void)
 //  handing sim_catch_up_ex() a bare 0 there made it substitute the 6 h
 //  ABSENCE_LARGA_S floor - on the very first boot of a brand new device, and
 //  again on every reboot of any unit without a working clock, which is a fully
-//  supported configuration (CF_WEB_ENABLED is user-togglable and Telegram can
-//  be off). The crash-vs-abandonment discriminator storage.cpp
+//  supported configuration (CF_WEB_ENABLED is user-togglable). The
+//  crash-vs-abandonment discriminator storage.cpp
 //  already computes is the missing input: BOOT_FIRST_RUN has nobody to have
 //  abandoned, and BOOT_CRASH / BOOT_SOFT_RESET are explicitly not absences
 //  (the same reason the toast below says "dizzy" rather than "abandoned").
@@ -366,7 +339,6 @@ void setup()
   // --- everything that reads Config or the pet ------------------------------
   input_begin();
   net_begin();
-  tg_begin();
   god_begin();
 
   ui_bind_config(&g_cfg);
@@ -374,7 +346,7 @@ void setup()
   ui_begin();
   (void)web_begin(WEB_PORT);
 
-  apply_config();                 // contrast, Telegram mode, WiFi credentials
+  apply_config();                 // contrast and WiFi credentials
 
   // --- splash, then the absence verdict over HOME ---------------------------
   rd_splash();
@@ -449,8 +421,7 @@ static void logic_tick(void)
 // =============================================================================
 //  LOOP
 //  Non-blocking throughout. Nothing below may stall the frame budget
-//  (FRAME_BUDGET_US, 50 ms at 20 fps); the one call that can legitimately take
-//  seconds is tg_service(), which gates itself behind an idle window.
+//  (FRAME_BUDGET_US, 50 ms at 20 fps).
 // =============================================================================
 void loop()
 {
@@ -486,24 +457,12 @@ void loop()
   }
 
   // --- 5. radio ------------------------------------------------------------
-  // Everything below this line may block for seconds (tg_service() owns a TLS
-  // handshake worth 1-3 s, up to 8 s on timeouts), and a register effect can
-  // normally only be cleared by the next rd_end_frame(). So KILL the transients
-  // here, live ones included, not just the expired ones: at every hatch the
-  // ceremony arms rd_flash() and rd_shake() one frame before the MSG_P04 that
-  // the same hatch queued at PRIO_P0 blocks the loop, and an expired-only sweep
-  // runs microseconds after the arm, when nothing has expired yet. The cost is
-  // that a flash or a shake lasts the one frame that applied it; the bug it
-  // replaces is a panel left inverted or shifted for seconds.
-  rd_fx_settle_now();
-
   radio_policy(ms);
   net_service();
   if (net_is_sta_up()) {
     gt_sync_start();              // idempotent + self-rate-limiting
   }
   web_service();
-  tg_service();
   ble_scan_service();
 
   // --- 6. cross-module notifications ---------------------------------------

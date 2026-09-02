@@ -118,7 +118,7 @@ void     ui_bind_config(Config* cfg);
 void     ui_note_brightness(uint8_t contrast);
 
 // Drain one sim_take_events() bitmask into the UI: death staging, evolution
-// freeze, hatch, alerts, poop/sick toasts, telegram P1 events.
+// freeze, hatch, alerts, poop/sick toasts.
 // Call every logic tick with the value sim_take_events() returned.
 void     ui_note_events(uint32_t sim_events);
 

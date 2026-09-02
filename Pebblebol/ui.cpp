@@ -45,7 +45,6 @@
 #include "gametime.h"
 #include "qr.h"
 #include "net.h"
-#include "telegram.h"
 #include "ble_social.h"
 #include "webui.h"      // web_pin() only - no network header comes with it
 #include "godmode.h"    // GodEvt, god_active/handle/draw/entry_progress/marker
@@ -176,7 +175,6 @@ static uint8_t  s_set_page    = 0;      // 0 = list, 1 = "Acerca de"
 static uint8_t  s_death_phase = DP_HEARTBEAT;
 static uint32_t s_death_ms    = 0;
 static uint32_t s_stage_ms    = 0;
-static uint8_t  s_death_sent  = 0;
 static uint8_t  s_rub_count   = 0;
 static uint8_t  s_rub_last    = 0xFF;
 static uint32_t s_rub_ms      = 0;
@@ -2046,7 +2044,6 @@ static void social_service(void) {
       pe.created_epoch = gt_now();
       store_save_egg(pe);
       egg_cache_invalidate();
-      tg_queue(MSG_P03, PRIO_P1);
       ui_toast(STR_SO_EGG_MADE);
     } else {
       ui_toast(ev.str_id ? ev.str_id : (uint16_t)STR_SO_LOSE);
@@ -2196,20 +2193,20 @@ static void handle_social(Gesture g) {
 // =============================================================================
 //  15. S9 SETTINGS
 //      Everything a two-button UI can honestly edit. Anything needing text
-//      entry (SSID, password, Telegram token, pet name) belongs on the phone.
+//      entry (SSID, password, pet name) belongs on the phone.
 // =============================================================================
 enum SetRow : uint8_t {
-  SET_TELEGRAM = 0, SET_SOUND, SET_WEB, SET_BRIGHT,
+  SET_SOUND = 0, SET_WEB, SET_BRIGHT,
   SET_LIGHT, SET_QR, SET_INFO, SET_RESET, SET_BACK, SET_ROWS
 };
 
 static const uint16_t kSetLabel[SET_ROWS] = {
-  STR_SET_TELEGRAM, STR_SET_SOUND, STR_SET_WEB,  STR_SET_BRIGHT,
-  STR_MENU_LIGHT,   STR_WEB_TITLE, STR_SET_INFO, STR_SET_RESET, STR_ITEM_BACK
+  STR_SET_SOUND,  STR_SET_WEB,   STR_SET_BRIGHT,
+  STR_MENU_LIGHT, STR_WEB_TITLE, STR_SET_INFO, STR_SET_RESET, STR_ITEM_BACK
 };
 static const uint16_t kSetHelp[SET_ROWS] = {
-  STR_HLP_TELEGRAM, STR_HLP_SOUND, STR_HLP_WEB,  STR_HLP_BRIGHT,
-  STR_HLP_LIGHT,    STR_HLP_WEB,   STR_HLP_INFO, STR_HLP_RESET, STR_HLP_BACK
+  STR_HLP_SOUND,  STR_HLP_WEB,   STR_HLP_BRIGHT,
+  STR_HLP_LIGHT,  STR_HLP_WEB,   STR_HLP_INFO, STR_HLP_RESET, STR_HLP_BACK
 };
 static const uint8_t kBrightSteps[5] = {
   OLED_CONTRAST_DIM, 90, OLED_CONTRAST_DEFAULT, 200, 255
@@ -2218,11 +2215,6 @@ static const uint8_t kBrightSteps[5] = {
 static const char* set_value(uint8_t row) {
   const PetSave* p = pet();
   switch (row) {
-    case SET_TELEGRAM:
-      if (!s_cfg) return S(STR_OFF);
-      return (s_cfg->tg_mode == TG_OFF)         ? S(STR_OFF)
-           : (s_cfg->tg_mode == TG_ONLY_SEVERE) ? S(STR_ONLY_SEVERE)
-                                                : S(STR_ON);
     case SET_SOUND:   return cfg_flag(CF_MUTE)        ? S(STR_OFF) : S(STR_ON);
     case SET_WEB:     return cfg_flag(CF_WEB_ENABLED) ? S(STR_ON)  : S(STR_OFF);
     case SET_LIGHT:   return (p && (p->flags & PF_LIGHT_ON)) ? S(STR_ON) : S(STR_OFF);
@@ -2281,10 +2273,6 @@ static void settings_select(void) {
   }
   if (!s_cfg) { ui_toast(STR_ERR_BUSY); return; }
   switch (row) {
-    case SET_TELEGRAM:
-      s_cfg->tg_mode = (uint8_t)((s_cfg->tg_mode + 1u) % (uint8_t)TG_MODE_COUNT);
-      tg_set_mode((TgMode)s_cfg->tg_mode);
-      break;
     case SET_SOUND:   s_cfg->flags = (uint8_t)(s_cfg->flags ^ CF_MUTE);        break;
     case SET_WEB:     s_cfg->flags = (uint8_t)(s_cfg->flags ^ CF_WEB_ENABLED); break;
     case SET_BRIGHT: {
@@ -2412,7 +2400,6 @@ static void death_begin(void) {
   screen_leave(s_screen);                 // drops BLE / an in-flight minigame
   s_death_phase = DP_HEARTBEAT;
   s_death_ms    = now_ms();
-  s_death_sent  = 0;
   s_sp          = 0;
   s_modal       = MODAL_NONE;
   s_alert_n     = 0;
@@ -2501,7 +2488,6 @@ static void death_service(void) {
     case DP_BLACK:
       if (el >= DEATH_TEXT_START_MS) {
         s_death_phase = DP_TEXT;
-        if (!s_death_sent) { tg_queue(MSG_T14, PRIO_P0); s_death_sent = 1; }
         s_fps_want = 0xFF;
         rd_set_fps(FPS_LOW);
         s_fps_want = FPS_LOW;
@@ -2937,10 +2923,9 @@ static void handle_egg(Gesture g) {
   if (++s_rub_count >= EGG_RUB_TAPS) {
     sim_hatch();
     s_rub_count = 0;
-    // Neither the save, nor the telegram, nor the toast happen here any more.
-    // hatch_begin() owns the save; sim_hatch() raises SIM_EV_HATCHED and
-    // ui_note_events() owns the other two - queueing MSG_P04 in both places
-    // sent TWO telegrams for one birth.
+    // Neither the save nor the toast happen here any more: hatch_begin() owns
+    // the save, and sim_hatch() raises SIM_EV_HATCHED so ui_note_events() owns
+    // the toast.
     hatch_begin();
   }
 }
@@ -3115,7 +3100,6 @@ void ui_bind_config(Config* cfg) {
   s_bright_base  = s_cfg->brightness ? s_cfg->brightness : (uint8_t)OLED_CONTRAST_DEFAULT;
   s_bright_valid = 0;             // force the first write, whatever the value
   bright_service();
-  tg_set_mode((TgMode)((s_cfg->tg_mode < TG_MODE_COUNT) ? s_cfg->tg_mode : (uint8_t)TG_OFF));
 }
 
 void ui_note_brightness(uint8_t contrast) {
@@ -3186,7 +3170,6 @@ void ui_note_events(uint32_t ev) {
   if (ev & SIM_EV_DIED) { death_begin(); return; }
 
   if (ev & SIM_EV_HATCHED) {
-    tg_queue(MSG_P04, PRIO_P0);
     ui_toast(STR_EGG_HATCHED);
     // Replaces the bare nav_home(). Reached from BOTH the age-driven hatch and
     // (one tick late) from the manual rub, so hatch_begin() is idempotent. When
@@ -3224,13 +3207,12 @@ void ui_note_events(uint32_t ev) {
       fmt_apply(buf, sizeof(buf), S(STR_RX_NOW_FORM), fa, 1);
       toast_text(buf);
     }
-    tg_queue(MSG_P01, PRIO_P1);
   }
   if (ev & SIM_EV_POOP)        ui_alert(AL_POOP);
   if (ev & SIM_EV_SICK_START)  ui_alert(AL_SICK);
   if (ev & SIM_EV_SICK_END)    ui_toast(STR_RX_MED);
   if (ev & SIM_EV_WISH_START)  ui_alert(AL_WISH);
-  if (ev & SIM_EV_WISH_OK)   { ui_toast(STR_WISH_OK); tg_queue(MSG_P02, PRIO_P1); }
+  if (ev & SIM_EV_WISH_OK)     ui_toast(STR_WISH_OK);
   if (ev & SIM_EV_WISH_FAIL)   ui_toast(STR_WISH_FAIL);
   if (ev & SIM_EV_BIRTHDAY)  { ui_alert(AL_BIRTHDAY); ui_toast(STR_EV_BIRTHDAY); }
   if (ev & SIM_EV_VISITA)      ui_toast(STR_EV_VISITA);
@@ -3317,7 +3299,6 @@ void ui_handle(Gesture g) {
       case GOD_EVT_WIPED: {
         egg_cache_invalidate();      // god mode ran store_wipe() behind us
         if (s_cfg) store_load_cfg(*s_cfg);
-        tg_begin();
         const PetSave* np = pet();
         if (np) petfx_reset(*np);    // god handed us a different animal entirely
         s_stat_ok = 0;

@@ -56,7 +56,6 @@
 #include "storage.h"
 #include "genome.h"
 #include "rng.h"
-#include "telegram.h"     // tg_set_mode() when POST /api/cfg changes tg
 #include "index_html.h"   // EXACTLY ONE TU. See the file header.
 
 #if FEATURE_WEB
@@ -237,8 +236,8 @@ void web_bind_config(Config* cfg)
 }
 
 // Does the user still want the HTTP server? CF_WEB_ENABLED is the S9 "WEB"
-// toggle. It used to feed only wifi_wanted() in the entry point, so with the
-// radio kept up for Telegram the listening socket survived the toggle and
+// toggle. It used to feed only wifi_wanted() in the entry point, so whenever
+// anything else kept the radio up the listening socket survived the toggle and
 // /api/action and /api/cfg went on serving after the user had switched web
 // access off (PH3 finding 7).
 //
@@ -809,11 +808,11 @@ static void build_cfg(char* buf, size_t cap)
 
   snprintf(buf, cap,
     "{\"v\":%u,\"ssid\":\"%s\",\"pass\":%u,\"name\":\"%s\",\"tz\":\"%s\","
-    "\"tg\":%u,\"mute\":%u,\"br\":%u,\"sb\":%u,"
+    "\"mute\":%u,\"br\":%u,\"sb\":%u,"
     "\"ble\":%u,\"prov\":%u}",
     (unsigned)WEB_API_SCHEMA_VER, ssid, (unsigned)(c->wifi_pass[0] ? 1u : 0u),
     name, tz,
-    (unsigned)c->tg_mode, (unsigned)((c->flags & CF_MUTE) ? 1u : 0u),
+    (unsigned)((c->flags & CF_MUTE) ? 1u : 0u),
     (unsigned)c->brightness, (unsigned)c->statusbar_mode,
     (unsigned)((c->flags & CF_BLE_ENABLED) ? 1u : 0u),
     (unsigned)((c->flags & CF_PROVISIONED) ? 1u : 0u));
@@ -866,13 +865,6 @@ static void h_cfg(void)
   if (s_srv.hasArg("tz")) {
     const String v = s_srv.arg("tz");
     if (cfg_set_str(c->tz, sizeof(c->tz), v.c_str())) changed = true;
-  }
-  if (s_srv.hasArg("tg")) {
-    const String v = s_srv.arg("tg");
-    const uint32_t m = arg_u32(v.c_str(), 0xFFu, 0xFFu);
-    if (m >= TG_MODE_COUNT) { send_err(400, "arg"); return; }
-    if (c->tg_mode != (uint8_t)m) { c->tg_mode = (uint8_t)m; changed = true; }
-    tg_set_mode((TgMode)m);   // no-op stub when FEATURE_TELEGRAM == 0
   }
   if (s_srv.hasArg("mute")) {
     const String v = s_srv.arg("mute");

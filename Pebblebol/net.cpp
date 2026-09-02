@@ -2,9 +2,9 @@
 //  net.cpp - Nottamagochi radio state machine (BRIEF 1.3).
 //
 //  Strict time-multiplex: exactly one radio stack resident at a time.
-//  All-three-resident was rejected on the measured heap arithmetic
-//  (179,836 - 70,000 Bluedroid - 50,000 WiFi - 45,000 TLS ~= 14,836 B free at
-//  the handshake peak, below the fragmentation floor).
+//  Both-resident was rejected on the measured heap arithmetic
+//  (179,836 - 70,000 Bluedroid - 50,000 WiFi leaves too little for the HTTP
+//  server's working set, below the fragmentation floor).
 //
 //  millis() note: the layering rule forbids reading millis() for GAME logic.
 //  Association timeouts and retry backoff are wall-clock plumbing, not game
@@ -24,7 +24,7 @@
 #include <esp_mac.h>
 
 // WiFi is only linked in when something actually consumes it.
-#define NT_NET_WANT_WIFI (FEATURE_WEB || FEATURE_TELEGRAM)
+#define NT_NET_WANT_WIFI (FEATURE_WEB)
 // The captive provisioning portal needs an HTTP server to be worth starting.
 #define NT_NET_HAVE_PORTAL (NT_NET_WANT_WIFI && FEATURE_WEB)
 
@@ -613,25 +613,12 @@ bool net_mdns_up(void) {
   return s_mdns_up;
 }
 
-bool net_heap_ok_for_tls(void) {
-  // The hard gate from BRIEF 1.3 / risk 3. One TLS session needs two 16 KiB
-  // mbedTLS record buffers out of INTERNAL DRAM with no PSRAM fallback, plus
-  // the X.509/ECDHE working set.
-  uint32_t max_alloc = ESP.getMaxAllocHeap();
-  if (max_alloc < (uint32_t)TLS_MIN_MAXALLOC_HEAP) {
-    s_err = NERR_LOW_HEAP;
-    return false;
-  }
-  return true;
-}
-
 StrId net_last_err_str(void) {
   switch (s_err) {
     case NERR_NONE:            return STR_EMPTY;
     case NERR_BUSY:            return STR_ERR_BUSY;
     case NERR_BLE_SESSION_CAP: return STR_SO_CAP;
     case NERR_BLE_INIT_FAILED: return STR_ERR_MEM;
-    case NERR_LOW_HEAP:        return STR_ERR_MEM;
     case NERR_NO_CREDENTIALS:  return STR_ERR_NO_WIFI;
     case NERR_STA_TIMEOUT:     return STR_ERR_NO_WIFI;
     case NERR_WIFI_DISABLED:   return STR_ERR_NO_WIFI;

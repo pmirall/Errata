@@ -45,8 +45,8 @@ void sim_env_defaults(SimEnv& env);
 
 // -----------------------------------------------------------------------------
 // 2. EVENT BITMASK - sim_take_events() returns and clears these.
-//    One call drains everything the UI, telegram and render layers need to
-//    react to; the simulation never calls into them.
+//    One call drains everything the UI and render layers need to react to;
+//    the simulation never calls into them.
 // -----------------------------------------------------------------------------
 #define SIM_EV_HATCHED      0x00000001u  // egg -> BABY
 #define SIM_EV_STAGE_UP     0x00000002u  // any stage transition (freeze + anim)
@@ -197,7 +197,7 @@ bool     sim_apply_play_result(uint16_t win_permille, ActionResult& out);
 // -----------------------------------------------------------------------------
 // 7. QUERIES
 // -----------------------------------------------------------------------------
-const PetSave* sim_save(void);          // read-only view for ui/webui/telegram
+const PetSave* sim_save(void);          // read-only view for ui/webui
 uint32_t sim_take_events(void);         // returns and CLEARS the event bitmask
 uint8_t  sim_alert(void);               // AlertId currently demanding attention
 uint16_t sim_sulk_left_s(void);         // post-absence refusal timer, 0 = none

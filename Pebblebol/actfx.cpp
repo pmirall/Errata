@@ -619,12 +619,12 @@ void actfx_begin(uint8_t action, const PetSave& before) {
   // s_now is only ever written by actfx_service(), which runs in section 3 of
   // loop(). This function is called from section 1 (a button, through
   // do_action()) and from section 6 (a phone, through ui_note_web_action()) -
-  // and section 5 sits between them, where tg_service()'s TLS handshake blocks
-  // for 1-3 s and up to 8 s on a timeout, on top of a ~24 ms sendBuffer() and
-  // an NVS write. Stamped from a clock that stale, the very first tick measures
-  // t >= s_dur and cancels the film before one frame of it is drawn: the action
-  // works, the toast appears, the screen jumps to HOME and NOTHING HAPPENS. With
-  // smaller delays the bowl teleports to its parking spot instead of sliding in.
+  // and section 5 sits between them, where the radio pumps run, on top of a
+  // ~24 ms sendBuffer() and an NVS write. Stamped from a clock that stale, the
+  // very first tick measures t >= s_dur and cancels the film before one frame
+  // of it is drawn: the action works, the toast appears, the screen jumps to
+  // HOME and NOTHING HAPPENS. With smaller delays the bowl teleports to its
+  // parking spot instead of sliding in.
   //
   // ui_begin() already primes s_now to patch the BOOT case of exactly this bug.
   // The steady-state case is the same bug, and reading the clock here is the fix

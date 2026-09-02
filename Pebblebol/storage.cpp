@@ -774,10 +774,10 @@ void store_cfg_defaults(Config& c) {
   nt_setstr(c.wifi_ssid, sizeof(c.wifi_ssid), CFG_WIFI_SSID);
   nt_setstr(c.wifi_pass, sizeof(c.wifi_pass), CFG_WIFI_PASS);
   nt_setstr(c.pet_name, sizeof(c.pet_name), CFG_PET_NAME);
-  nt_setstr(c.tg_token, sizeof(c.tg_token), CFG_TG_TOKEN);
-  nt_setstr(c.tg_chat, sizeof(c.tg_chat), CFG_TG_CHAT);
   nt_setstr(c.tz, sizeof(c.tz), CFG_TZ_STRING);
+  memset(c.reserved_a, 0, sizeof(c.reserved_a));
   memset(c.reserved_b, 0, sizeof(c.reserved_b));
+  c.reserved_c = 0;
 
   uint8_t f = 0;
 #if FEATURE_BLE
@@ -787,13 +787,6 @@ void store_cfg_defaults(Config& c) {
   f |= CF_WEB_ENABLED;
 #endif
   c.flags = f;
-
-  c.tg_mode = (uint8_t)TG_OFF;
-#if FEATURE_TELEGRAM
-  if (c.tg_token[0] != '\0' && c.tg_chat[0] != '\0') {
-    c.tg_mode = (uint8_t)TG_ON;
-  }
-#endif
 
   c.brightness = (uint8_t)OLED_CONTRAST_DEFAULT;
   c.statusbar_mode = (uint8_t)SBAR_ICONS;
@@ -837,15 +830,16 @@ bool store_save_cfg(Config& c) {
   c.reserved[0] = 0;
   c.reserved[1] = 0;
   c.reserved[2] = 0;
-  // Retired weather coordinates: zeroed on every save so a v1 blob loses them
-  // the first time the user changes anything.
+  // Retired fields - the Telegram token/chat id, the weather coordinates and
+  // the Telegram mode - keep their offsets but are zeroed on every save, so a
+  // v1 blob loses them the first time the user changes anything.
+  memset(c.reserved_a, 0, sizeof(c.reserved_a));
   memset(c.reserved_b, 0, sizeof(c.reserved_b));
+  c.reserved_c = 0;
   // Every fixed char field must be NUL terminated before it is hashed or used.
   c.wifi_ssid[sizeof(c.wifi_ssid) - 1] = '\0';
   c.wifi_pass[sizeof(c.wifi_pass) - 1] = '\0';
   c.pet_name[sizeof(c.pet_name) - 1] = '\0';
-  c.tg_token[sizeof(c.tg_token) - 1] = '\0';
-  c.tg_chat[sizeof(c.tg_chat) - 1] = '\0';
   c.tz[sizeof(c.tz) - 1] = '\0';
   c.crc16 = store_crc16(&c, CONFIG_CRC_BYTES);
 

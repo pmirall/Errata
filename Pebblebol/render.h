@@ -342,8 +342,7 @@ void rd_affordance_echo(void);
 // Longest a single rd_hold_fps() call can pin the frame rate. A choreography is
 // 2.6 s at worst and renews the hold every tick, so this only ever bounds the
 // tail after the LAST renewal; it is capped for rd_shake()'s reason, so that no
-// caller can pin the panel at 20 fps with web_service() and tg_service()
-// starving behind it.
+// caller can pin the panel at 20 fps with web_service() starving behind it.
 #define RD_FPS_HOLD_MAX_MS      3000
 #define RD_FX_BREATHE_MAX_AMP     64    // more than this is a strobe, not breathing
 #define RD_FX_BREATHE_MIN_MS     100    // below one frame period it just flickers
@@ -366,34 +365,6 @@ void rd_flash(uint16_t ms);
 // a static offset, or for anything slow enough to be looked at: there the
 // wrapped band is plainly a bug. Keep ms short and amp_px small.
 void rd_shake(uint8_t amp_px, uint16_t ms);
-
-// KILL the two TRANSIENTS (flash, shake) - live ones included - and put their
-// registers back. Not "settle what expired": this cancels, unconditionally.
-//
-// Why it has to be unconditional. fx_apply() runs inside rd_end_frame() and
-// nowhere else, so a transient can otherwise only be cleared by drawing another
-// frame. Step 5 of loop() calls tg_service(), whose TLS handshake blocks for
-// 1-3 s and up to 8 s on timeouts, and at every BIRTH the two coincide BY
-// CONSTRUCTION: hatch_service() arms rd_flash(80 ms) and rd_shake(3, 180 ms) in
-// step 3, step 4 renders and sends 0xA7 / 0xD3, and the send that the hatch
-// itself queued (MSG_P04 at PRIO_P0, which skips the idle wait) then blocks in
-// step 5 with the effect still live. The old expired-only version ran a few
-// microseconds after the arm, when nothing had expired yet, so it closed a
-// window that was never the one producing the symptom - the panel stayed
-// inverted, or shifted, for the whole handshake.
-//
-// THE PRICE, stated plainly: because step 5 runs every loop(), a flash or a
-// shake now lasts exactly the one frame that applied it - the ~24 ms of
-// sendBuffer() between fx_apply() and this call - whatever duration the caller
-// asked for. HATCH_JOLT_MS no longer sets anything but the
-// frame-rate floor. An 80 ms flash cut to 24 ms is a worse flash; three seconds
-// of inverted panel is a broken device.
-//
-// Call it before anything that may block. Same panel-asleep / panel-absent guard
-// as fx_apply(): the software state is cleared either way, so the trackers keep
-// telling the truth about the controller and the first frame after a wake still
-// fixes the registers.
-void rd_fx_settle_now(void);
 
 // Ramp the panel contrast to target over ms. ms == 0 applies immediately.
 // Moves the BASE (see the ownership note above), so when the ramp finishes the

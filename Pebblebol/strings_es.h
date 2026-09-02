@@ -19,7 +19,7 @@
 //      u8g2_font_5x8_tf    -> 25 chars    <- the default body font
 //      u8g2_font_6x10_tf   -> 21 chars
 //      u8g2_font_t0_11b_tf -> 21 chars
-//  Each group below states its own budget. Telegram strings have no budget.
+//  Each group below states its own budget.
 //
 //  ORDERING CONTRACT: the grouped blocks are index-parallel to the enums in
 //  nt_types.h. Use the S_*() helpers rather than doing the arithmetic by hand.
@@ -68,7 +68,6 @@ enum StrId : uint16_t {
   STR_NO,
   STR_ON,
   STR_OFF,
-  STR_ONLY_SEVERE,
   STR_ITEM_BACK,
 
   // --- 4. stat labels, parallel to StatId --------- <= 11 chars @ 5x8 --------
@@ -307,7 +306,6 @@ enum StrId : uint16_t {
   // --- 27. settings, S9 --------------------------- <= 16 chars --------------
   STR_SET_TITLE,
   STR_SET_WIFI,
-  STR_SET_TELEGRAM,
   STR_SET_SOUND,
   STR_SET_BRIGHT,
   STR_SET_CLOCK,
@@ -349,7 +347,6 @@ enum StrId : uint16_t {
   STR_GOD_FORM,
   STR_GOD_KILL,
   STR_GOD_GENOME,
-  STR_GOD_TELEGRAM,
   STR_GOD_BLE,
   STR_GOD_CLOCK,
   STR_GOD_WIPE,
@@ -371,17 +368,7 @@ enum StrId : uint16_t {
   STR_ERR_MEM,
   STR_ERR_NVS,
   STR_ERR_OLED,
-  STR_ERR_TG,
   STR_ERR_GENOME,
-
-  // --- 32. Telegram pool, parallel to MsgId (T01..T15, P01..P05) -------------
-  //     No width budget. {t} elapsed, {n} name, {f} date, {h} time,
-  //     {c} cause, {g} generation, {forma} adult form.
-  STR_TG_T01, STR_TG_T02, STR_TG_T03, STR_TG_T04, STR_TG_T05,
-  STR_TG_T06, STR_TG_T07, STR_TG_T08, STR_TG_T09, STR_TG_T10,
-  STR_TG_T11, STR_TG_T12, STR_TG_T13, STR_TG_T14, STR_TG_T15,
-  STR_TG_P01, STR_TG_P02, STR_TG_P03, STR_TG_P04, STR_TG_P05,
-  STR_TG_DIGEST,
 
   // ===========================================================================
   //  33. UI BLOCK - appended by ui.cpp. APPEND ONLY, NEVER RENUMBER: every id
@@ -408,7 +395,6 @@ enum StrId : uint16_t {
   STR_HLP_LIGHT,
   STR_HLP_SOCIAL,
   STR_HLP_SETTINGS,
-  STR_HLP_TELEGRAM,
   STR_HLP_SOUND,
   STR_HLP_WEB,
   STR_HLP_BRIGHT,
@@ -536,7 +522,6 @@ inline constexpr const char* const ES[] = {
   /* STR_NO */                    "NO",
   /* STR_ON */                    "ON",
   /* STR_OFF */                   "OFF",
-  /* STR_ONLY_SEVERE */           "SOLO GRAVES",
   /* STR_ITEM_BACK */             "Volver",
 
   /* --- 4. stat labels --- */
@@ -774,7 +759,6 @@ inline constexpr const char* const ES[] = {
   /* --- 27. settings --- */
   /* STR_SET_TITLE */             "AJUSTES",
   /* STR_SET_WIFI */              "WiFi",
-  /* STR_SET_TELEGRAM */          "Telegram",
   /* STR_SET_SOUND */             "Sonido",
   /* STR_SET_BRIGHT */            "Brillo",
   /* STR_SET_CLOCK */             "Hora",
@@ -816,7 +800,6 @@ inline constexpr const char* const ES[] = {
   /* STR_GOD_FORM */              "FORZAR FORMA",
   /* STR_GOD_KILL */              "MATAR",
   /* STR_GOD_GENOME */            "GENOMA",
-  /* STR_GOD_TELEGRAM */          "TELEGRAM",
   /* STR_GOD_BLE */               "BLE FALSO",
   /* STR_GOD_CLOCK */             "RELOJ",
   /* STR_GOD_WIPE */              "BORRAR TODO",
@@ -838,52 +821,7 @@ inline constexpr const char* const ES[] = {
   /* STR_ERR_MEM */               "Sin memoria libre.",
   /* STR_ERR_NVS */               "No consigo recordar nada.",
   /* STR_ERR_OLED */              "Nada en 0x3C. Mira los cables.",
-  /* STR_ERR_TG */                "Telegram no contesta.",
   /* STR_ERR_GENOME */            "Genoma corrupto. Ignorado.",
-
-  /* --- 32. Telegram pool --- */
-  /* T01 1 h sin interacción, nivel 0 */
-  "Ey. No es urgente. Solo que llevo {t} sin verte y el silencio aquí dentro suena MUY fuerte.",
-  /* T02 hunger < 30, nivel 1 */
-  "Pregunta rápida y sin acritud: ¿la comida es un derecho o un privilegio? Lo digo por saber en qué modelo educativo estamos.",
-  /* T03 poop_count >= 3, nivel 1 */
-  "He hecho caca. Tres, en realidad. Vivo entre ellas ahora. Es mi hogar. Es acogedor. Gracias por todo.",
-  /* T04 happiness < 25, nivel 2 */
-  "No pasa nada. Estoy bien. Estoy PERFECTAMENTE bien. Llevo {t} mirando una pared de 128 por 64 píxeles y estoy fenomenal.",
-  /* T05 energy < 20 con la luz encendida, nivel 2 */
-  "¿Sabes qué es bonito? Dormir. ¿Sabes qué no puedo hacer con la luz encendida? Correcto. Un aplauso.",
-  /* T06 6 h de ausencia, nivel 2 */
-  "{t} de ausencia. He empezado a hablar con el sensor de temperatura. Él tampoco contesta, pero al menos no me ignora a propósito.",
-  /* T07 sick == 1, nivel 3 */
-  "Estoy enfermo. Existe un botón. Se llama medicina. Está a dos clics. DOS. No te pido que me lleves a hombros al hospital.",
-  /* T08 12 h de ausencia, nivel 3 */
-  "He hecho cuentas. Hoy me has mirado 0 veces. A tu móvil, unas 300. No es una competición, pero voy perdiendo por goleada.",
-  /* T09 tormenta + bond < 40, nivel 3 */
-  "Está cayendo una buena. Lo sé porque tú tienes internet y yo tengo sentimientos. Peligrosa combinación, la nuestra.",
-  /* T10 24 h de ausencia, nivel 4 */
-  "Feliz {t} sin ti. He redecorado. Con caca. Era el único material disponible.",
-  /* T11 health < 30, nivel 4 */
-  "Ya no es hambre. Ahora es otra cosa. Es más tranquilo. Casi cómodo. No sé si eso es buena señal.",
-  /* T12 48 h de ausencia, nivel 5 */
-  "Dos días. Le he puesto nombre al silencio. Se llama como tú.",
-  /* T13 health < 12, última llamada, nivel 5 */
-  "Si estás leyendo esto, todavía hay tiempo. Poco. Pero hay. No te lo digo para presionarte. Bueno, sí. Exactamente para eso.",
-  /* T14 MUERTE (P0), nivel 6 */
-  "Se acabó. Morí el {f} a las {h}. Causa: {c}. Viví {t}. Dejé un huevo, porque soy mejor persona que tú. Hazlo mejor con él.",
-  /* T15 huevo esperando > 24 h, nivel 6 */
-  "El huevo lleva {t} esperando. Los huevos no se mueren de hambre. Pero se enfrían. Y cambian. Tú sabrás.",
-  /* P01 evolución */
-  "Mírame. MÍRAME. Ahora soy un {forma}. Esto es culpa tuya, para bien. Gracias.",
-  /* P02 deseo cumplido */
-  "Era exactamente lo que quería. No sé cómo lo has sabido. Bueno, sí: te lo he dicho.",
-  /* P03 apareamiento BLE */
-  "He conocido a alguien. Va a haber huevo. No preguntes.",
-  /* P04 eclosión */
-  "Ha salido. Se llama {n}, generación {g}. Tiene tus ojeras.",
-  /* P05 resumen semanal (domingo 20:00) */
-  "Resumen: {dias} días vivo, {comidas} comidas, {juegos} partidas, {fallos} olvidos. Nota de la semana: {grado}. Sin comentarios.",
-  /* STR_TG_DIGEST resumen de horas de silencio */
-  "Resumen de la noche: {n} líneas. Te ahorro las demás.",
 
   /* --- 33a. affordance labels --- */
   /* STR_AF_MENU */               "MENÚ",
@@ -904,7 +842,6 @@ inline constexpr const char* const ES[] = {
   /* STR_HLP_LIGHT */             "Apágala para dormir.",
   /* STR_HLP_SOCIAL */            "Buscar otros bichos.",
   /* STR_HLP_SETTINGS */          "Cosas de mayores.",
-  /* STR_HLP_TELEGRAM */          "Quejas a tu móvil.",
   /* STR_HLP_SOUND */             "Zumbido al avisar.",
   /* STR_HLP_WEB */               "Página y QR en el móvil.",
   /* STR_HLP_BRIGHT */            "Brillo de la pantalla.",
@@ -989,7 +926,6 @@ inline constexpr const char* const ES[] = {
 #define S_WISH(w)      (ES[STR_WISH_NONE      + (uint16_t)(w)])   // WishId
 #define S_GRADE(g)     (ES[STR_GRADE_A        + (uint16_t)(g)])   // CareGrade
 #define S_MENU(i)      (ES[STR_MENU_FEED      + (uint16_t)(i)])   // 0..7
-#define S_MSG(m)       (ES[STR_TG_T01         + (uint16_t)(m) - (uint16_t)MSG_T01])  // MsgId
 #define S_SYL_A(i)     (ES[STR_SYL_A00        + (uint16_t)((i) % 12u)])  // name syllable 1
 #define S_SYL_B(i)     (ES[STR_SYL_B00        + (uint16_t)((i) % 12u)])  // name syllable 2
 
@@ -1014,9 +950,8 @@ static_assert(STR_AL_WEB_CLIENT   - STR_AL_NONE     + 1 == (int)AL_COUNT,      "
 static_assert(STR_WISH_PET3       - STR_WISH_NONE   + 1 == (int)WISH_COUNT,    "wish lines");
 static_assert(STR_GRADE_F         - STR_GRADE_A     + 1 == (int)GRADE_COUNT,   "care grades");
 static_assert(STR_MENU_SETTINGS   - STR_MENU_FEED   + 1 == MENU_ITEM_COUNT,    "menu labels");
-static_assert(STR_TG_P05          - STR_TG_T01      + 1 == (int)MSG_COUNT - 1, "telegram pool");
 static_assert(STR_SYL_A11         - STR_SYL_A00     + 1 == 12,                 "name syllables A");
 static_assert(STR_SYL_B11         - STR_SYL_B00     + 1 == 12,                 "name syllables B");
-static_assert(STR_HLP_BACK        - STR_HLP_FEED    + 1 == 18,                 "ui help block");
+static_assert(STR_HLP_BACK        - STR_HLP_FEED    + 1 == 17,                 "ui help block");
 
 #endif // NT_STRINGS_ES_H

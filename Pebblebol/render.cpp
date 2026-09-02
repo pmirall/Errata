@@ -927,21 +927,13 @@ void rd_shake(uint8_t amp_px, uint16_t ms) {
   // Capped for rd_flash()'s reason plus one of its own: rd_fps() now holds the
   // frame rate at RD_FX_MIN_FPS for as long as this is armed, and an uncapped
   // uint16 would let a caller pin the panel at 20 fps for 65 seconds with
-  // web_service() and tg_service() starving behind it.
+  // web_service() starving behind it.
   if (ms > RD_FX_SHAKE_MAX_MS) ms = RD_FX_SHAKE_MAX_MS;
   s_shake_amp    = amp_px;
   s_shake_ms     = ms;
   s_shake_t0     = millis();
   s_shake_active = true;
   rd_request_frame();
-}
-
-void rd_fx_settle_now(void) {
-  // Deliberately the SAME code path rd_power(false) uses. There is no deadline
-  // test here on purpose: a transient that is still live is precisely the one
-  // that would survive into a multi-second blocking call, so it is the one that
-  // has to go. See the header for what that costs the effects themselves.
-  fx_settle_transients();
 }
 
 void rd_contrast_ramp(uint8_t target, uint16_t ms) {

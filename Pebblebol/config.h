@@ -36,15 +36,6 @@
 // solo a partir de su genética (y será siempre el mismo para esa estirpe).
 #define CFG_PET_NAME        ""
 
-// --- Telegram (opcional, para que te dé la brasa al móvil) ------------------
-// 1) En Telegram habla con @BotFather, manda /newbot y copia aquí el token.
-// 2) Escríbele algo a tu bot y abre en el navegador
-//    https://api.telegram.org/bot<TU_TOKEN>/getUpdates
-//    Copia el número que aparece en   "chat":{"id": AQUÍ }
-// Si dejas cualquiera de los dos vacío, Telegram se queda apagado.
-#define CFG_TG_TOKEN        ""
-#define CFG_TG_CHAT         ""
-
 // --- Hora -------------------------------------------------------------------
 // Zona horaria en formato POSIX. La de España peninsular ya está puesta.
 // Canarias:  "WET0WEST,M3.5.0/1,M10.5.0"    México DF: "CST6"
@@ -58,7 +49,6 @@
 
 // --- Interruptores generales ------------------------------------------------
 // Pon un 0 en cualquiera de estos si quieres apagar esa parte del juego.
-#define FEATURE_TELEGRAM    1   // Mensajes pasivo-agresivos al móvil
 #define FEATURE_BLE         1   // Emparejarse con otros bichos por Bluetooth
 #define FEATURE_WEB         1   // Página web + QR + minijuegos en el móvil
 #define GOD_MODE_ENABLED    1   // Menú de trampas escondido (para probar cosas)
@@ -496,28 +486,7 @@
 #define AP_IP_D                 1
 #define MDNS_HOSTNAME           "nottamagochi"
 
-#define HTTP_CONNECT_TIMEOUT_MS 8000         // HTTPClient::setConnectTimeout - MILLISECONDS
-#define HTTP_READ_TIMEOUT_MS    8000         // HTTPClient::setTimeout      - MILLISECONDS (uint16!)
-#define TLS_HANDSHAKE_TIMEOUT_S 10           // NetworkClientSecure         - SECONDS
-#define TLS_MIN_MAXALLOC_HEAP   (48 * 1024)  // hard gate before any TLS attempt
 #define RADIO_SETTLE_MS         250
-
-// Telegram (TLS mandatory)
-#define TG_HOST                 "api.telegram.org"
-#define TG_MAX_PER_DAY          4            // P1+P2 only
-#define TG_MIN_GAP_S            6000UL       // 100 min
-#define TG_QUIET_START_MIN      (23*60+30)   // 23:30 local
-#define TG_QUIET_END_MIN        (8*60)       // 08:00 local
-#define TG_DIGEST_MIN           (8*60+5)     // 08:05 local
-#define TG_SAME_ID_COOLDOWN_S   172800UL     // 48 h
-#define TG_TRIGGER_COOLDOWN_S   21600UL      // 6 h
-#define TG_RETRY_1_S            60UL
-#define TG_RETRY_2_S            300UL
-#define TG_RETRY_3_S            1500UL
-#define TG_QUEUE_CAP            8
-#define TG_DROP_P2_OLDER_S      21600UL      // on boot
-#define TG_TEXT_MAX             320
-#define TG_URL_MAX              640
 
 // BLE (connectionless, advertisement only)
 #define BLE_COMPANY_ID          0xFFFF
@@ -621,8 +590,6 @@
 #define NAME_MAX_LEN            12           // + NUL = 13
 #define SSID_MAX_LEN            32
 #define PASS_MAX_LEN            64
-#define TG_TOKEN_MAX_LEN        47
-#define TG_CHAT_MAX_LEN         16
 #define TZ_MAX_LEN              39
 
 // =============================================================================
@@ -635,7 +602,7 @@
 #define GOD_SCALE_4             3600
 #define GOD_SCALE_COUNT         5
 #define GOD_ABSENCE_COUNT       6            // 1 h, 6 h, 24 h, 72 h, 168 h, 720 h
-#define GOD_CMD_COUNT           11
+#define GOD_CMD_COUNT           10
 #define GOD_BAR_H               9
 
 // =============================================================================

@@ -124,15 +124,16 @@ static Config config_v1(void) {
   copy_str(c.wifi_ssid, sizeof c.wifi_ssid, "legacy-ssid");
   copy_str(c.wifi_pass, sizeof c.wifi_pass, "legacy-pass");
   copy_str(c.pet_name,  sizeof c.pet_name,  "Pebble");
-  copy_str(c.tg_token,  sizeof c.tg_token,  "");
-  copy_str(c.tg_chat,   sizeof c.tg_chat,   "");
+  // The v1 layout had tg_token[48]@119 and tg_chat[17]@167 where reserved_a[65]
+  // now sits, and tg_mode@248 where reserved_c does. This fixture left all three
+  // empty/zero, and memset() above already wrote those bytes, so the file stays
+  // identical to the committed one.
   copy_str(c.tz,        sizeof c.tz,        CFG_TZ_STRING);
   // The v1 layout had lat[12] and lon[12] where reserved_b[24] now sits. The
   // fixture is a byte image of THAT layout, so the coordinates are written at
   // their original offsets and the file stays identical to the committed one.
   copy_str((char*)c.reserved_b,      12, "41.3874");
   copy_str((char*)c.reserved_b + 12, 12, "2.1686");
-  c.tg_mode        = 0;
   c.brightness     = 128;
   c.statusbar_mode = 0;
   c.crc16 = crc16_ccitt(&c, CONFIG_CRC_BYTES);

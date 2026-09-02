@@ -156,8 +156,8 @@ bool     store_load_cfg(Config& out);
 //
 // The reference is deliberately non-const (PH3 finding 5). 'c' is normally the
 // entry point's live g_cfg, shared by pointer with ui and webui; the
-// .ino watches g_cfg.crc16 to decide when to re-apply the three settings that
-// live outside the struct (OLED contrast, Telegram mode, WiFi credentials).
+// .ino watches g_cfg.crc16 to decide when to re-apply the two settings that
+// live outside the struct (OLED contrast, WiFi credentials).
 // Sealing into a private copy left the caller's crc16 frozen forever, so that
 // detector could never fire and e.g. POST /api/cfg?br=N never reached the panel
 // until the next reboot. The seal happens even when NVS is closed, so a

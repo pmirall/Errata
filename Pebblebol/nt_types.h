@@ -218,35 +218,6 @@ enum BootKind : uint8_t {
   BOOT_COUNT
 };
 
-enum TgMode : uint8_t {
-  TG_OFF = 0,
-  TG_ONLY_SEVERE,      // P0 only
-  TG_ON,
-  TG_MODE_COUNT
-};
-
-// Telegram message pool (GAME_DESIGN 7.2). Values are stable: they are
-// persisted in the same-id cooldown table and used by god mode command 9.
-enum MsgId : uint8_t {
-  MSG_NONE = 0,
-  MSG_T01, MSG_T02, MSG_T03, MSG_T04, MSG_T05,
-  MSG_T06, MSG_T07, MSG_T08, MSG_T09, MSG_T10,
-  MSG_T11, MSG_T12, MSG_T13, MSG_T14, MSG_T15,
-  MSG_P01, MSG_P02, MSG_P03, MSG_P04, MSG_P05,
-  MSG_COUNT
-};
-#define MSG_GUILT_FIRST  MSG_T01
-#define MSG_GUILT_LAST   MSG_T15
-#define MSG_BONUS_FIRST  MSG_P01
-#define MSG_BONUS_LAST   MSG_P05
-
-enum Priority : uint8_t {
-  PRIO_P0 = 0,   // death / hatch: bypasses the daily cap AND quiet hours
-  PRIO_P1,       // evolution / mating / wish: bypasses the daily cap only
-  PRIO_P2,       // guilt: full anti-spam rules
-  PRIO_COUNT
-};
-
 // Daily wish (GAME_DESIGN 0.2).
 enum WishId : uint8_t {
   WISH_NONE = 0,
@@ -509,8 +480,10 @@ static_assert(sizeof(AncestorRecord) == 12, "AncestorRecord must be exactly 12 b
 // 6. CONFIG - NVS key "cfg", 256 B.
 //    Seeded from the CFG_* defaults in config.h on first boot; editable at
 //    runtime from S9 SETTINGS, the captive portal and POST /api/cfg.
-//    reserved_b[] holds the retired weather coordinates: the offsets of every
-//    field after it are frozen by the asserts below, so the bytes stay put.
+//    reserved_a[] holds the retired Telegram token and chat id, reserved_b[]
+//    the retired weather coordinates and reserved_c the retired Telegram mode:
+//    the offsets of every field after them are frozen by the asserts below, so
+//    the bytes stay put and a v1 blob still loads.
 // -----------------------------------------------------------------------------
 #define NT_CFG_MAGIC     0x4643u   // 'C','F'
 #define NT_CFG_VERSION   1
@@ -527,11 +500,10 @@ struct Config {
   char     wifi_ssid[SSID_MAX_LEN + 1];  //   8  33
   char     wifi_pass[PASS_MAX_LEN + 1];  //  41  65
   char     pet_name[NAME_MAX_LEN + 1];   // 106  13
-  char     tg_token[TG_TOKEN_MAX_LEN+1]; // 119  48
-  char     tg_chat[TG_CHAT_MAX_LEN + 1]; // 167  17
+  uint8_t  reserved_a[65];               // 119  65  was tg_token[48]+tg_chat[17]
   char     tz[TZ_MAX_LEN + 1];           // 184  40
   uint8_t  reserved_b[24];               // 224  24  was lat[12]+lon[12], now 0
-  uint8_t  tg_mode;                      // 248  TgMode
+  uint8_t  reserved_c;                   // 248  was tg_mode, now 0
   uint8_t  brightness;                   // 249  OLED contrast
   uint8_t  statusbar_mode;               // 250  StatusBarMode
   uint8_t  reserved[3];                  // 251  must be 0
@@ -540,8 +512,10 @@ struct Config {
 
 static_assert(sizeof(Config) == 256, "Config layout drifted");
 static_assert(offsetof(Config, wifi_ssid) ==   8, "Config.wifi_ssid moved");
+static_assert(offsetof(Config, reserved_a)== 119, "Config.reserved_a moved");
 static_assert(offsetof(Config, tz)        == 184, "Config.tz moved");
 static_assert(offsetof(Config, reserved_b)== 224, "Config.reserved_b moved");
+static_assert(offsetof(Config, reserved_c)== 248, "Config.reserved_c moved");
 static_assert(offsetof(Config, crc16)     == 254, "Config.crc16 moved");
 #define CONFIG_CRC_BYTES 254
 

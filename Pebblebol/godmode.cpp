@@ -4,8 +4,7 @@
 //
 //  Everything the console mutates goes through the owning module's own API:
 //  sim_god_*() for the pet, gt_skew_add() for time,
-//  tg_queue() for Telegram, ble_debug_inject_*() for the fake partner,
-//  store_*() for NVS. This file mutates NOTHING directly - which is exactly
+//  ble_debug_inject_*() for the fake partner, store_*() for NVS. This file mutates NOTHING directly - which is exactly
 //  why a test run through it exercises the real code paths.
 //
 //  ZERO floating point. Every number rendered here is an integer formatted
@@ -28,7 +27,6 @@
 #include "gametime.h"
 #include "input.h"
 #include "net.h"
-#include "telegram.h"      // tg_set_mode / tg_queue + the nt_cfg_view() seam
 #include "ble_social.h"
 
 // The gene-name block in strings_es.h 34c must stay index-parallel to GENES[].
@@ -56,7 +54,7 @@ static_assert((int)STR_GN_RARE - (int)STR_GN_SPECIES + 1 == GOD_GENE_COUNT,
 //  2. CONSOLE SCREENS
 // =============================================================================
 enum GodScreen : uint8_t {
-  GSC_MENU = 0,   // the 11 commands + the exit row
+  GSC_MENU = 0,   // the 10 commands + the exit row
   GSC_SPEED,      // 1  VELOCIDAD
   GSC_ABSENCE,    // 2  SALTAR AUSENCIA
   GSC_STATPICK,   // 3  FIJAR STAT  (+ ENFERMAR / CACAS)
@@ -67,9 +65,8 @@ enum GodScreen : uint8_t {
   GSC_GENOME,     // 7  GENOMA root
   GSC_GENE,       // 7  GENOMA / EDITAR
   GSC_HEX,        // 7  GENOMA / VOLCAR + CARGAR
-  GSC_TELEGRAM,   // 8  TELEGRAM
-  GSC_BLE,        // 9  BLE FALSO
-  GSC_SYS,        // 10 RELOJ + the heap / radio / storage panels
+  GSC_BLE,        // 8  BLE FALSO
+  GSC_SYS,        // 9  RELOJ + the heap / radio / storage panels
   GSC_CONFIRM,    // shared modal, cursor defaults to NO
   GSC_COUNT
 };
@@ -90,7 +87,7 @@ enum GodHexMode : uint8_t { GHX_DUMP = 0, GHX_LOAD };
 #define GD_PICK_POOP    ((uint8_t)(ST_COUNT + 1))
 #define GD_PICK_COUNT   ((uint8_t)(ST_COUNT + 2))
 
-// Synthetic-mating sub-machine (command 10).
+// Synthetic-mating sub-machine (command 8).
 enum GodBleStep : uint8_t {
   GBS_IDLE = 0,
   GBS_RADIO,      // asking net for RADIO_BLE, then ble_begin()
@@ -116,13 +113,12 @@ static const uint32_t GD_ABSENCES[GOD_ABSENCE_COUNT] = {
 
 static const uint8_t GD_STATVALS[GOD_STATVAL_COUNT] = { 0, 25, 50, 100 };
 
-// The root list. Eleven commands, then the explicit exit row.
+// The root list. Ten commands, then the explicit exit row.
 static const uint16_t GD_MENU_STR[GOD_MENU_ROWS] = {
   (uint16_t)STR_GOD_SPEED,    (uint16_t)STR_GOD_ABSENCE, (uint16_t)STR_GOD_SETSTAT,
   (uint16_t)STR_GOD_STAGE,    (uint16_t)STR_GOD_FORM,    (uint16_t)STR_GOD_KILL,
-  (uint16_t)STR_GOD_GENOME,   (uint16_t)STR_GOD_TELEGRAM,
-  (uint16_t)STR_GOD_BLE,      (uint16_t)STR_GOD_CLOCK,   (uint16_t)STR_GOD_WIPE,
-  (uint16_t)STR_AF_QUIT
+  (uint16_t)STR_GOD_GENOME,   (uint16_t)STR_GOD_BLE,     (uint16_t)STR_GOD_CLOCK,
+  (uint16_t)STR_GOD_WIPE,     (uint16_t)STR_AF_QUIT
 };
 
 // The gene editor. Index-parallel to strings_es.h block 34c.
@@ -165,9 +161,6 @@ static const GodGene GD_GENES[GOD_GENE_COUNT] = {
 #define GD_SYS_STORE    4
 #define GD_SYS_PAGES    5
 
-// The Telegram pool is MSG_T01..MSG_P05.
-#define GD_MSG_COUNT    ((uint8_t)(MSG_COUNT - 1))
-
 // =============================================================================
 //  4. MODULE STATE
 // =============================================================================
@@ -189,9 +182,6 @@ static uint32_t s_toast_until = 0;
 
 static bool     s_dump_on     = true;
 static uint32_t s_dump_last   = 0;
-
-static uint8_t  s_tg_saved    = (uint8_t)TG_ON;
-static uint32_t s_tg_until    = 0;        // 0 = window closed
 
 static bool     s_frozen      = false;
 static uint8_t  s_frozen_h    = 0;
@@ -335,7 +325,7 @@ static void run_absence(uint32_t secs)
 }
 
 // -----------------------------------------------------------------------------
-// Command 12: factory reset, then a brand new gen-0 egg so the caller never
+// Command 10: factory reset, then a brand new gen-0 egg so the caller never
 // sees a firmware with no pet in it.
 // -----------------------------------------------------------------------------
 static bool run_wipe(void)
@@ -367,7 +357,7 @@ static void install_genome(const Genome& g)
 }
 
 // =============================================================================
-//  6. SYNTHETIC BLE MATING (command 10)
+//  6. SYNTHETIC BLE MATING (command 8)
 //     One board, the whole three-frame handshake. Everything below drives the
 //     real ble_social state machine; only the packets are fabricated.
 // =============================================================================
@@ -611,7 +601,6 @@ void god_begin(void)
   s_toast_until = 0;
   s_dump_on     = true;
   s_dump_last   = millis();
-  s_tg_until    = 0;
   s_frozen      = false;
   s_skew_total  = 0;
   s_abs_done    = false;
@@ -653,12 +642,6 @@ void god_enter(void)
     genome_to_hex32(g, s_hex_show);
   }
 
-  // GAME_DESIGN 10.2: Telegram is muted for the whole session except command 9.
-  const Config* c = nt_cfg_view();
-  s_tg_saved = (c && c->tg_mode < (uint8_t)TG_MODE_COUNT) ? c->tg_mode : (uint8_t)TG_ON;
-  tg_set_mode(TG_OFF);
-  s_tg_until = 0;
-
   GOD_LOGF("[god] ENTER (tainted forever)\n");
   dump_header();
   changed();
@@ -680,8 +663,6 @@ void god_exit(void)
   ble_flow_abort();
   set_scale(0);
   s_frozen = false;
-  tg_set_mode((TgMode)s_tg_saved);
-  s_tg_until = 0;
   s_active   = false;
   s_screen   = GSC_MENU;
 
@@ -732,12 +713,6 @@ void god_service(void)
   ble_flow_service();
 
   const uint32_t now = millis();
-
-  // Close the command-9 Telegram window.
-  if (s_tg_until != 0 && (int32_t)(now - s_tg_until) >= 0) {
-    tg_set_mode(TG_OFF);
-    s_tg_until = 0;
-  }
 
   if (s_dump_on && (uint32_t)(now - s_dump_last) >= (uint32_t)GOD_DUMP_PERIOD_MS) {
     s_dump_last = now;
@@ -794,11 +769,10 @@ static GodEvt open_command(uint8_t row)
     case  4: s_screen = GSC_FORM;     break;
     case  5: s_screen = GSC_KILL;     break;
     case  6: s_screen = GSC_GENOME;   break;
-    case  7: s_screen = GSC_TELEGRAM; break;
-    case  8: s_screen = GSC_BLE;      s_bs = GBS_IDLE; s_bs_child_ok = false;
+    case  7: s_screen = GSC_BLE;      s_bs = GBS_IDLE; s_bs_child_ok = false;
              s_bs_str = (uint16_t)STR_EMPTY; break;
-    case  9: s_screen = GSC_SYS;      s_sys_page = GD_SYS_CLOCK; break;
-    case 10: open_confirm((uint16_t)STR_CF_WIPE, GCF_WIPE1); break;
+    case  8: s_screen = GSC_SYS;      s_sys_page = GD_SYS_CLOCK; break;
+    case  9: open_confirm((uint16_t)STR_CF_WIPE, GCF_WIPE1); break;
     default:
       god_exit();
       return GOD_EVT_LEAVE;
@@ -822,7 +796,6 @@ static uint8_t sub_count(void)
     case GSC_KILL:     return (uint8_t)(DEATH_COUNT - 1);   // DEATH_NONE excluded
     case GSC_GENOME:   return GD_GEN_ROWS;
     case GSC_GENE:     return (uint8_t)GOD_GENE_COUNT;
-    case GSC_TELEGRAM: return GD_MSG_COUNT;
     default:           return 0;
   }
 }
@@ -926,18 +899,6 @@ static GodEvt select_sub(void)
     case GSC_HEX:
       if (s_hex_mode == GHX_DUMP && s_hex_show[0]) GOD_LOGF("GENOME,%s\n", s_hex_show);
       return GOD_EVT_NONE;
-
-    case GSC_TELEGRAM: {
-      // Command 9 is the ONE thing allowed past the mute. PRIO_P0 bypasses the
-      // daily cap, the quiet-hours hold, the idle gate and the 48 h same-id
-      // cooldown - "bypassing all anti-spam", exactly as specified.
-      const MsgId id = (MsgId)((uint8_t)MSG_T01 + s_sub_cur);
-      tg_set_mode(TG_ONLY_SEVERE);
-      s_tg_until = millis() + GOD_TG_WINDOW_MS;
-      const bool ok = tg_queue(id, PRIO_P0);
-      toast((uint16_t)(ok ? STR_GOD_DONE : STR_GOD_FAILED));
-      return GOD_EVT_NONE;
-    }
 
     case GSC_BLE:
       if (s_bs == GBS_DONE && s_bs_child_ok) {
@@ -1118,7 +1079,7 @@ static void draw_menu(void)
     val[0] = '\0';
     switch (i) {
       case 0: snprintf(val, sizeof(val), "x%lu", (unsigned long)god_time_scale()); break;
-      case 9: snprintf(val, sizeof(val), "%s", gt_is_valid() ? "OK" : "??"); break;
+      case 8: snprintf(val, sizeof(val), "%s", gt_is_valid() ? "OK" : "??"); break;
       default: break;
     }
     draw_row(GD_ROOT_Y0, r, (i == s_menu_cur), S(GD_MENU_STR[i]), val);
@@ -1181,18 +1142,6 @@ static void lbl_genome(uint8_t i, char* b, size_t n)
   };
   snprintf(b, n, "%s", S(rows[i % GD_GEN_ROWS]));
 }
-static void lbl_telegram(uint8_t i, char* b, size_t n)
-{
-  const uint8_t id = (uint8_t)((uint8_t)MSG_T01 + i);
-  // The subtractions promote to int and GCC cannot prove they stay small, so
-  // the operand is bounded explicitly - otherwise -Wformat-truncation assumes
-  // ten digits per %02u.
-  if (id <= (uint8_t)MSG_T15)
-    snprintf(b, n, "T%02u", (unsigned)(id - (uint8_t)MSG_T01 + 1) % 100u);
-  else
-    snprintf(b, n, "P%02u", (unsigned)(id - (uint8_t)MSG_P01 + 1) % 100u);
-}
-
 static void draw_absence(void)
 {
   if (!s_abs_done) { draw_simple_list(S(STR_GOD_ABSENCE), (uint8_t)GOD_ABSENCE_COUNT, lbl_absence); return; }
@@ -1247,30 +1196,6 @@ static void draw_hex(void)
   } else {
     rd_affordance(0, S(STR_AF_SEL));
   }
-}
-
-static void draw_telegram(void)
-{
-  const uint8_t id = (uint8_t)((uint8_t)MSG_T01 + (s_sub_cur % GD_MSG_COUNT));
-  // The pool is Spanish prose: it MUST be a _tf font (BRIEF 1.5). The 4x6_tr
-  // used elsewhere on this screen is legal only for the "T01"/"P03" codes.
-  rd_text_fit(2, GD_TITLE_BASE, OLED_W - 4, RD_FONT_BODY, S_MSG(id));
-  rd_u8g2().setDrawColor(1);
-  rd_u8g2().drawHLine(0, GD_SEP_Y, OLED_W);
-
-  const uint8_t top = win_top(s_sub_cur, GD_MSG_COUNT, GD_SUB_ROWS);
-  // 16, not 8: GCC does not propagate lbl_telegram's `% 100u` through the
-  // inline, so it costs a -Wformat-truncation warning on a buffer that is
-  // provably 4 bytes of output. Stack is free here; the warning gate is not.
-  char b[16];
-  for (uint8_t r = 0; r < GD_SUB_ROWS; ++r) {
-    const uint8_t i = (uint8_t)(top + r);
-    if (i >= GD_MSG_COUNT) break;
-    lbl_telegram(i, b, sizeof(b));
-    draw_row(GD_SUB_Y0, r, (i == s_sub_cur), b, 0);
-  }
-  draw_scrollbar(GD_SUB_Y0, GD_SUB_ROWS, GD_MSG_COUNT, top);
-  rd_affordance(S(STR_AF_NEXT), S(STR_AF_SEL));
 }
 
 static void draw_ble(void)
@@ -1363,8 +1288,7 @@ static void draw_sys(void)
       rd_text(2, 27, RD_FONT_TINY, b);
       snprintf(b, sizeof(b), "min    %lu", (unsigned long)ESP.getMinFreeHeap());
       rd_text(2, 35, RD_FONT_TINY, b);
-      snprintf(b, sizeof(b), "maxblk %lu %s", (unsigned long)ESP.getMaxAllocHeap(),
-               net_heap_ok_for_tls() ? "TLS" : "-");
+      snprintf(b, sizeof(b), "maxblk %lu", (unsigned long)ESP.getMaxAllocHeap());
       rd_text(2, 43, RD_FONT_TINY, b);
       const NetHeapStats& h = net_heap_last();
       snprintf(b, sizeof(b), "%u>%u f%lu m%lu", (unsigned)h.from_mode, (unsigned)h.to_mode,
@@ -1434,7 +1358,6 @@ void god_draw(void)
     case GSC_GENOME:   draw_simple_list(S(STR_GOD_GENOME),  GD_GEN_ROWS,               lbl_genome);   break;
     case GSC_GENE:     draw_gene(); break;
     case GSC_HEX:      draw_hex(); break;
-    case GSC_TELEGRAM: draw_telegram(); break;
     case GSC_BLE:      draw_ble(); break;
     case GSC_SYS:      draw_sys(); break;
     case GSC_CONFIRM:  draw_confirm(); break;

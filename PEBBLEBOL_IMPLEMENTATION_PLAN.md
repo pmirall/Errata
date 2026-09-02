@@ -391,7 +391,7 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 - Acceptance: gate; golden unchanged; flash drops (part of the 123,834 B weather+telegram dividend, audit §14).
 
 **P2-C4 Remove Telegram (G2)** — M
-- [ ] Execute §2 G2; fix godmode.cpp:662 (`nt_cfg_view`) first; `Config` reserved fields in place; `GOD_CMD_COUNT` recount; remove `rd_fx_settle_now()` from the loop (.ino:513); delete `FEATURE_TELEGRAM`.
+- [x] Execute §2 G2; fix godmode.cpp:662 (`nt_cfg_view`) first; `Config` reserved fields in place; `GOD_CMD_COUNT` recount; remove `rd_fx_settle_now()` from the loop (.ino:513); delete `FEATURE_TELEGRAM`.
 - Acceptance: gate; matrix shows the 9 telegram warnings gone; flash ≈ 1,981,714 B.
 
 **P2-C5 Remove browser minigames, page body, `/api/cfg`, mDNS; prune dead macros/StrIds/exports (G3)** — M

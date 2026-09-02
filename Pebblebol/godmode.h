@@ -59,12 +59,6 @@
 #define GOD_TOAST_MS           1600UL
 #endif
 
-// Telegram is muted for the whole of god mode except command 9, which opens a
-// window this long during which PRIO_P0 traffic may leave the device.
-#ifndef GOD_TG_WINDOW_MS
-#define GOD_TG_WINDOW_MS       180000UL
-#endif
-
 // Serial paste buffer for "GENOMA / CARGAR". 32 hex chars + slack for spaces
 // and a CR/LF; anything longer is discarded and the line restarts.
 #ifndef GOD_HEX_LINE_MAX
@@ -90,7 +84,7 @@
 // "FIJAR STAT" offers 0 / 25 / 50 / 100 (GAME_DESIGN 10.1 command 3).
 #define GOD_STATVAL_COUNT      4
 
-// The root list is the eleven surviving GAME_DESIGN 10.1 commands plus an
+// The root list is the ten surviving GAME_DESIGN 10.1 commands plus an
 // explicit exit row. HOLD_R leaves the SCREEN (god mode stays on, and stays visible); the
 // exit row leaves the MODE.
 #define GOD_MENU_ROWS          (GOD_CMD_COUNT + 1)
@@ -104,8 +98,8 @@ enum GodEvt : uint8_t {
   GOD_EVT_NONE = 0,   // handled internally, stay on SCR_GOD
   GOD_EVT_LEAVE,      // leave SCR_GOD for SCR_HOME. god_active() may still be 1.
   GOD_EVT_DIED,       // the pet was killed: run the full GAME_DESIGN 9.2 staging
-  GOD_EVT_WIPED,      // NVS erased and a fresh gen-0 egg installed: reload cfg,
-                      // re-run tg_begin() and go to SCR_EGG
+  GOD_EVT_WIPED,      // NVS erased and a fresh gen-0 egg installed: reload cfg
+                      // and go to SCR_EGG
   GOD_EVT_COUNT
 };
 
@@ -150,8 +144,8 @@ void     god_dump_line(void);
 void     god_begin(void);
 
 // Pump. Call once per loop(), on every screen, whether or not god mode is on:
-// it drives the soak log, the Serial genome paste, the synthetic BLE handshake
-// and the Telegram window. Cheap and non-blocking.
+// it drives the soak log, the Serial genome paste and the synthetic BLE
+// handshake. Cheap and non-blocking.
 void     god_service(void);
 
 // The undocumented entry gesture. Call every loop() with the id of the screen
@@ -172,9 +166,8 @@ void     god_service(void);
 uint8_t  god_entry_progress(uint8_t screen_id);
 
 // Enter / leave god mode explicitly. god_enter() taints the genome forever,
-// marks the RTC, mutes Telegram and prints the CSV header. god_exit() puts the
-// time scale back to x1, restores the Telegram mode, drops any BLE session the
-// console opened and forces a save.
+// marks the RTC and prints the CSV header. god_exit() puts the time scale back
+// to x1, drops any BLE session the console opened and forces a save.
 void     god_enter(void);
 void     god_exit(void);
 
@@ -197,7 +190,7 @@ bool     god_dump_enabled(void);
 static_assert(GOD_SCALE_COUNT == 5, "godmode.h: the speed ring is five wide");
 static_assert(GOD_SCALE_0 == 1, "godmode.h: index 0 must be real time");
 static_assert(GOD_ABSENCE_COUNT == 6, "godmode.h: absence ladder is six wide");
-static_assert(GOD_CMD_COUNT == 11, "godmode.h: 11 commands after CLIMA went");
+static_assert(GOD_CMD_COUNT == 10, "godmode.h: 10 commands after TELEGRAM went");
 static_assert(GOD_BAR_H <= STATUS_BAR_H, "god marker must fit the status bar rows");
 
 #endif // NT_GODMODE_H
