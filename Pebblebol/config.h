@@ -79,8 +79,8 @@
 // =============================================================================
 // 1. IDENTITY / VERSION
 // =============================================================================
-#define FW_NAME                 "Nottamagochi"
-#define FW_VERSION              "1.0.0"
+#define FW_NAME                 "Pebblebol"
+#define FW_VERSION              "0.2.0-dev"
 #define FW_BUILD_PROTO          1           // BLE + save wire protocol version
 #define WEB_API_SCHEMA_VER      1           // /api/state "v" field
 

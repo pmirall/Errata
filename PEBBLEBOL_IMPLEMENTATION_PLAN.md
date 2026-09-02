@@ -370,10 +370,10 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 - Acceptance: the device boots to the legacy HOME with the pin map in `config.h`; no invented pins (§68 r3).
 
 **P2-C1 Build gate, sketch rename, CI compile job** — S
-- [ ] `tools/build.sh` (FQBN, `--warnings all`, parses "Sketch uses"/"Global variables use", fails on any project `warning:` line), `tools/check.sh` (build + `make -C tests check` + `GATE_FLASH_MAX`/`GATE_GLOBALS_MAX` from config.h:642-643 + grep gates as they land), `tools/build_matrix.sh` (variants of §1.1).
-- [ ] `git mv sketch_aug30b Pebblebol && git mv Pebblebol/sketch_aug30b.ino Pebblebol/Pebblebol.ino` (D3; folder == basename rule README.md:131-134).
-- [ ] `FW_NAME "Pebblebol"`, `FW_VERSION "0.2.0-dev"` (config.h:82-83); nothing else in config.h.
-- [ ] CI: add the `arduino-cli compile` job (core 3.1.1 + U8g2 2.35.30 cached) calling `tools/check.sh`.
+- [x] `tools/build.sh` (FQBN, `--warnings all`, parses "Sketch uses"/"Global variables use", fails on any project `warning:` line), `tools/check.sh` (build + `make -C tests check` + `GATE_FLASH_MAX`/`GATE_GLOBALS_MAX` from config.h:642-643 + grep gates as they land), `tools/build_matrix.sh` (variants of §1.1).
+- [x] `git mv sketch_aug30b Pebblebol && git mv Pebblebol/sketch_aug30b.ino Pebblebol/Pebblebol.ino` (D3; folder == basename rule README.md:131-134).
+- [x] `FW_NAME "Pebblebol"`, `FW_VERSION "0.2.0-dev"` (config.h:82-83); nothing else in config.h.
+- [x] CI: add the `arduino-cli compile` job (core 3.1.1 + U8g2 2.35.30 cached) calling `tools/check.sh`.
 - Acceptance: gate passes; flash/RAM within a few bytes of 2,105,548 / 72,748 (string change only).
 
 **P2-C2 Host test tree over the modules as they are** — M

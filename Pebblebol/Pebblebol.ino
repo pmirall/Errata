@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - sketch_aug30b.ino
+//  PEBBLEBOL - Pebblebol.ino (formerly Nottamagochi sketch_aug30b.ino)
 //  ENTRY POINT ONLY (BRIEF section 4, row 1). setup() wires the modules in
 //  dependency order; loop() pumps them. There is NO game logic in this file:
 //  every rule lives in sim.cpp, every pixel in render.cpp/ui.cpp, every socket
