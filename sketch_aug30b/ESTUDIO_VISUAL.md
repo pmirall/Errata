@@ -63,8 +63,8 @@ simplemente empujará el siguiente frame y además le robará tiempo a
 
 | Recurso | Usado | Libre |
 |---|---|---|
-| Flash (huge_app) | 2.084.592 B (66 %) | **~1,01 MB** |
-| RAM (globales) | 71.708 B (21 %) | ~250 KB |
+| Flash (huge_app) | 2.105.548 B (66 %, medido 2026-09-02) | **~1,04 MB** |
+| RAM (globales) | 72.748 B (22 %, medido 2026-09-02) | ~249 KB |
 | Arte de sprites | 10.893 B | 3.443 B antes de tocar el `static_assert` |
 
 Flash y RAM no son la restricción de nada de lo que viene. Si hace falta más
@@ -452,7 +452,7 @@ prueba que duplican el margen de todo lo demás.
 ## 12. Estado de implementación (1 sep 2026)
 
 Los **niveles 0 y 1 completos**, más la parte barata del nivel 2, están implementados y
-compilan limpio: **2.098.076 B de flash (66 %)**, **72.564 B de RAM (22 %)**, exit 0, sin
+compilan limpio: **2.105.548 B de flash (66 %)**, **72.748 B de RAM (22 %)** (medido 2026-09-02 en `b53cfe4`), exit 0, sin
 avisos en ficheros del proyecto.
 
 | Fichero | Antes | Ahora |

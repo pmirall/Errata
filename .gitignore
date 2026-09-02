@@ -1,1 +1,11 @@
+# build outputs
+build/
+tests/bin/
+*.o
+*.bin
+*.elf
+*.map
 *.bak
+# tooling
+.arduino-cli/
+.vscode/

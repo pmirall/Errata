@@ -128,12 +128,12 @@ region `iram0_0_seg' overflowed / text section exceeds available space
 Para referencia, la compilación por línea de comandos es:
 
 ```
-arduino-cli compile \
-  --fqbn esp32:esp32:nologo_esp32c3_super_mini:PartitionScheme=huge_app \
+arduino-cli compile --warnings all \
+  --fqbn esp32:esp32:esp32c3:PartitionScheme=huge_app,CDCOnBoot=cdc \
   sketch_aug30b
 ```
 
-Uso actual: **2.066.680 B de flash (65 %)** y **70.788 B de RAM global (21 %)**.
+Uso medido el 2026-09-02 (commit `b53cfe4`, con `petfx`/`actfx`): **2.105.548 B de flash (66 %)** y **72.748 B de RAM global (22 %)**.
 
 ### USB CDC on boot, y por qué importa
 
