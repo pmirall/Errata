@@ -572,7 +572,7 @@ static_assert(offsetof(Config, crc16)     == 254, "Config.crc16 moved");
 // -----------------------------------------------------------------------------
 struct RtcKeep {
   uint32_t magic;             // RTC_NONCE_MAGIC
-  uint32_t nonce;             // esp_random() at first boot, echoed forever
+  uint32_t nonce;             // rng_u32(RNG_MISC) at first boot, echoed forever
   uint32_t last_seen_epoch;
   uint32_t boot_count;
   uint32_t uptime_s;

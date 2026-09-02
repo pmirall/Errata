@@ -218,8 +218,8 @@ bool     store_wipe(void);
 // settings "reset" path.
 void     store_cfg_defaults(Config& c);
 
-// CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF, no reflection, no final xor).
-// The same function guards PetSave, Config, Genome and any blob that needs it.
+// CRC-16/CCITT-FALSE over a blob: a thin wrapper on crc16_ccitt() (crc16.h),
+// the one CRC that guards PetSave, Config, GainSave, Genome and the BLE frames.
 uint16_t store_crc16(const void* data, size_t len);
 
 // CQ (0..1000) -> CareGrade, used to stamp AncestorRecord.form_grade.

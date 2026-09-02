@@ -19,10 +19,11 @@
 #include <Preferences.h>
 #include <esp_system.h>
 #include <esp_attr.h>
-#include <esp_random.h>
 #include <string.h>
 
 #include "storage.h"
+#include "crc16.h"
+#include "rng.h"
 
 // -----------------------------------------------------------------------------
 // Contract guards
@@ -138,19 +139,7 @@ static void nt_setstr(char* dst, size_t cap, const char* src) {
 }
 
 uint16_t store_crc16(const void* data, size_t len) {
-  const uint8_t* p = (const uint8_t*)data;
-  uint16_t crc = GENOME_CRC_INIT;
-  for (size_t i = 0; i < len; i++) {
-    crc = (uint16_t)(crc ^ ((uint16_t)p[i] << 8));
-    for (uint8_t b = 0; b < 8; b++) {
-      if (crc & 0x8000u) {
-        crc = (uint16_t)((uint16_t)(crc << 1) ^ (uint16_t)GENOME_CRC_POLY);
-      } else {
-        crc = (uint16_t)(crc << 1);
-      }
-    }
-  }
-  return crc;
+  return crc16_ccitt(data, len);
 }
 
 // Six even bands over CQ_MIN..CQ_MAX, arranged so CQ_START (500, the neutral
@@ -334,7 +323,7 @@ bool store_selftest(void) {
   }
   // A fresh value every boot: NVS skips writes of an identical value, so a
   // constant pattern would pass without ever exercising the flash path.
-  uint32_t pattern = esp_random();
+  uint32_t pattern = rng_u32(RNG_MISC);
   if (pattern == 0) {
     pattern = (uint32_t)RTC_NONCE_MAGIC;
   }
@@ -373,7 +362,7 @@ bool store_begin(void) {
     memset(&s_rtc, 0, sizeof(s_rtc));
     s_rtc.magic = (uint32_t)RTC_NONCE_MAGIC;
     do {
-      s_rtc.nonce = esp_random();
+      s_rtc.nonce = rng_u32(RNG_MISC);
     } while (s_rtc.nonce == 0);
   }
   s_rtc.boot_count++;
@@ -980,7 +969,7 @@ bool store_wipe(void) {
   memset(&s_rtc, 0, sizeof(s_rtc));
   s_rtc.magic = (uint32_t)RTC_NONCE_MAGIC;
   do {
-    s_rtc.nonce = esp_random();
+    s_rtc.nonce = rng_u32(RNG_MISC);
   } while (s_rtc.nonce == 0);
   s_rtc.boot_count = 1;
 

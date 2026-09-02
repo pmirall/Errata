@@ -4,37 +4,27 @@
 //  Pure C++: <stdint.h> / <string.h> only. No Arduino, no I/O, no float.
 // =============================================================================
 #include "genome.h"
+#include "rng.h"
+#include "crc16.h"
 
 #include <string.h>
 
 // =============================================================================
-// 0. RANDOMNESS - xorshift32, overridable
+// 0. RANDOMNESS - the RNG_BREEDING stream of rng.h, overridable for tests
 // =============================================================================
 
-#define GN_DEFAULT_SEED 0x2545F491u
-
-static uint32_t     s_xs_state = GN_DEFAULT_SEED;
-static GenomeRngFn  s_rng      = nullptr;   // nullptr => built-in xorshift32
-
-static uint32_t xorshift32(void) {
-  uint32_t x = s_xs_state;
-  x ^= x << 13;
-  x ^= x >> 17;
-  x ^= x << 5;
-  s_xs_state = x;
-  return x;
-}
+static GenomeRngFn  s_rng = nullptr;   // nullptr => rng_u32(RNG_BREEDING)
 
 void genome_set_rng(GenomeRngFn fn) {
   s_rng = fn;
 }
 
 void genome_seed(uint32_t seed) {
-  s_xs_state = seed ? seed : GN_DEFAULT_SEED;
+  rng_seed(RNG_BREEDING, seed);
 }
 
 uint32_t genome_rand(void) {
-  return s_rng ? s_rng() : xorshift32();
+  return s_rng ? s_rng() : rng_u32(RNG_BREEDING);
 }
 
 // Uniform in [0, n). Multiply-high instead of modulo: no division, and the
@@ -234,18 +224,8 @@ uint8_t genome_hybrid_species(uint8_t a, uint8_t b) {
 // =============================================================================
 
 uint16_t genome_crc16(const Genome& g) {
-  // CRC-16/CCITT-FALSE: poly 0x1021, init 0xFFFF, MSB-first, no reflection,
-  // no final xor. Covers bytes 0..13 (everything except crc16 itself).
-  const uint8_t* p = reinterpret_cast<const uint8_t*>(&g);
-  uint16_t crc = GENOME_CRC_INIT;
-  for (uint8_t i = 0; i < GENOME_CRC_BYTES; ++i) {
-    crc ^= (uint16_t)((uint16_t)p[i] << 8);
-    for (uint8_t b = 0; b < 8; ++b) {
-      crc = (uint16_t)((crc & 0x8000u) ? (uint16_t)((crc << 1) ^ GENOME_CRC_POLY)
-                                       : (uint16_t)(crc << 1));
-    }
-  }
-  return crc;
+  // Covers bytes 0..13 (everything except crc16 itself).
+  return crc16_ccitt(&g, GENOME_CRC_BYTES);
 }
 
 void genome_seal(Genome& g) {

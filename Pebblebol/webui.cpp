@@ -43,7 +43,6 @@
 
 #include <Arduino.h>
 #include <WebServer.h>
-#include <esp_random.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -59,6 +58,7 @@
 #include "storage.h"
 #include "weather.h"
 #include "genome.h"
+#include "rng.h"
 #include "telegram.h"     // tg_set_mode() when POST /api/cfg changes tg
 #include "index_html.h"   // EXACTLY ONE TU. See the file header.
 
@@ -667,8 +667,8 @@ static void h_game_start(void)
   const uint16_t cd = sim_minigame_cooldown_s();
   if (cd > 0) { send_cool(cd); return; }
 
-  // esp_random() can legitimately return 0; 0 is our "empty slot" sentinel.
-  uint32_t tok = esp_random();
+  // 0 is our "empty slot" sentinel, so a zero draw is never used as a token.
+  uint32_t tok = rng_u32(RNG_MISC);
   if (tok == 0) tok = 0xA5A5A5A5u;
 
   s_game_tok      = tok;
@@ -1010,13 +1010,13 @@ static void h_notfound(void)
 
 uint16_t web_pin(void)
 {
-  if (s_pin == 0xFFFFu) s_pin = (uint16_t)(esp_random() % (uint32_t)WEB_PIN_MAX);
+  if (s_pin == 0xFFFFu) s_pin = (uint16_t)rng_below(RNG_MISC, (uint32_t)WEB_PIN_MAX);
   return s_pin;
 }
 
 void web_pin_regenerate(void)
 {
-  s_pin = (uint16_t)(esp_random() % (uint32_t)WEB_PIN_MAX);
+  s_pin = (uint16_t)rng_below(RNG_MISC, (uint32_t)WEB_PIN_MAX);
 }
 
 uint32_t web_client_seen_ms(void) { return s_last_client_ms; }

@@ -573,7 +573,7 @@
 #define WEB_PORT                80
 #define WEB_HTML_MAX            49152        // A2: 48 KB cap on index_html.h
 #define WEB_JSON_BUF            320
-#define WEB_PIN_MAX             10000        // esp_random() % 10000
+#define WEB_PIN_MAX             10000        // rng_below(RNG_MISC, 10000)
 #define WEB_CLIENT_ACTIVE_MS    10000UL
 #define WEB_RATE_TOKENS         10
 #define WEB_RATE_REFILL_PER_S   4

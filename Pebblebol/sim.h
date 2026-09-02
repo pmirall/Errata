@@ -12,7 +12,8 @@
 //   - Every stat is clamped at BOTH ends after every operation.
 //   - No Arduino headers, no WiFi.h / BLEDevice.h / WebServer.h / U8g2lib.h.
 //     The module has no clock and no RNG of its own: the caller feeds it a
-//     SimEnv once per logic tick and seeds it once at boot.
+//     SimEnv once per logic tick, and every draw comes from the RNG_CARE
+//     stream of rng.h (seeded by the .ino at boot, by the tests explicitly).
 //   - Nothing here reads millis(). Game logic time comes from
 //     sim_step_seconds() only.
 // =============================================================================
@@ -112,7 +113,7 @@ uint8_t  sim_stat_pct(StatId id);
 // -----------------------------------------------------------------------------
 // 4. ENVIRONMENT FEED  (sim owns no clock and no RNG)
 // -----------------------------------------------------------------------------
-void     sim_seed(uint32_t seed);            // esp_random() at boot; never 0
+void     sim_seed(uint32_t seed);            // reseeds RNG_CARE (wrapper on rng_seed)
 void     sim_set_env(const SimEnv& env);     // once per logic tick
 const SimEnv& sim_env(void);
 void     sim_set_time_scale(uint32_t scale); // god mode: 1/6/60/360/3600

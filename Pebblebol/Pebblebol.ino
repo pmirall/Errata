@@ -31,6 +31,7 @@
 #include "nt_types.h"
 #include "strings_es.h"
 #include "genome.h"
+#include "rng.h"
 #include "sim.h"
 #include "storage.h"
 #include "gametime.h"
@@ -352,6 +353,12 @@ void setup()
     rd_fatal(S(STR_ERR_OLED));    // noreturn: draws, logs and blinks forever
   }
 
+  // --- entropy --------------------------------------------------------------
+  // The ONE esp_random() call of the firmware (plan §1.4): it seeds every
+  // rng.h stream before storage draws its RTC nonce and canary pattern.
+  // Without it every unit would hatch a bit-identical pet.
+  rng_seed_all(esp_random());
+
   // --- persistence ----------------------------------------------------------
   g_nvs_ok = store_begin() ? 1u : 0u;
   if (g_nvs_ok && !store_selftest()) {
@@ -359,11 +366,6 @@ void setup()
   }
   const BootKind boot = store_boot_kind();
   g_boot_last_seen    = store_last_seen();
-
-  // --- entropy --------------------------------------------------------------
-  // AUDIT 15: without this every unit hatches a bit-identical pet.
-  genome_set_rng(&esp_random);
-  sim_seed(esp_random());
 
   // --- settings + clock -----------------------------------------------------
   (void)store_load_cfg(g_cfg);    // false only means "compiled-in defaults"

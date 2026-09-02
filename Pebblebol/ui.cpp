@@ -40,6 +40,7 @@
 #include "input.h"
 #include "sim.h"
 #include "genome.h"
+#include "rng.h"
 #include "storage.h"
 #include "gametime.h"
 #include "qr.h"
@@ -1512,9 +1513,9 @@ static void game_finish(void) {
 
 // ---- REFLEX -----------------------------------------------------------------
 static void reflex_arm(void) {
-  s_g.target = (uint8_t)(genome_rand() & 1u);
+  s_g.target = (uint8_t)(rng_u32(RNG_MINIGAME) & 1u);
   s_g.t0     = now_ms();
-  s_g.arm_ms = 700UL + (genome_rand() % 1500UL);     // dead time before the light
+  s_g.arm_ms = 700UL + rng_below(RNG_MINIGAME, 1500u);   // dead time before the light
 }
 
 static void reflex_step(void) {
@@ -1568,7 +1569,7 @@ static void reflex_draw(void) {
 static void memory_new_round(void) {
   s_g.seq_len = (uint8_t)(3u + s_g.round);
   if (s_g.seq_len > 8u) s_g.seq_len = 8u;
-  for (uint8_t i = 0; i < s_g.seq_len; ++i) s_g.seq[i] = (uint8_t)(genome_rand() & 1u);
+  for (uint8_t i = 0; i < s_g.seq_len; ++i) s_g.seq[i] = (uint8_t)(rng_u32(RNG_MINIGAME) & 1u);
   s_g.play_idx = 0;
   s_g.seq_pos  = 0;
   s_g.t0       = now_ms();
@@ -1627,7 +1628,7 @@ static void memory_draw(void) {
 // ---- JUMP -------------------------------------------------------------------
 static void jump_spawn(void) {
   if (s_g.obs_n >= 3) return;
-  int16_t x = (int16_t)(OLED_W + (int16_t)(genome_rand() % 40u));
+  int16_t x = (int16_t)(OLED_W + (int16_t)rng_below(RNG_MINIGAME, 40u));
   for (uint8_t i = 0; i < s_g.obs_n; ++i)
     if (x - s_g.obs_x[i] < 36) x = (int16_t)(s_g.obs_x[i] + 36);
   s_g.obs_x[s_g.obs_n++] = x;

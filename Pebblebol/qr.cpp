@@ -4,8 +4,8 @@
 //
 //  PART 1 (lines below, up to the "#ifdef ARDUINO" fence) is PORTABLE C++:
 //         <stdint.h>/<string.h> only, zero floating point, no dynamic memory.
-//         It is compiled on the host by scratchpad/test_qr.cpp and diffed
-//         module-by-module against Python `qrcode` 8.2.
+//         It is compiled on the host by tests/test_qr.cpp and diffed
+//         module-by-module against Python `qrcode` 8.x.
 //  PART 2 (after the fence) is the U8g2 renderer and only exists on-target.
 //
 //  Algorithm source: research/QR_SPEC.md (validated 96/96 against qrcode 8.2).

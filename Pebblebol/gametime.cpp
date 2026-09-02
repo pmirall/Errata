@@ -4,8 +4,9 @@
 //
 //  The whole file is deliberately host-compilable: everything that needs
 //  Arduino / ESP-IDF sits behind #if defined(ARDUINO), so gt_format_elapsed()
-//  and the millis() wrap extension can be unit-tested with MSVC before they
-//  ever touch the board (TOOLING.md 2).
+//  and the millis() wrap extension are unit-tested on the host by
+//  tests/test_clock.cpp (built with -DGT_HOST_NEVER_VALID) before they ever
+//  touch the board.
 //
 //  Zero floating point. Zero String. Zero blocking calls.
 // =============================================================================

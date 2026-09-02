@@ -6,14 +6,14 @@
 //
 //  LAYERING (BRIEF 4): this module includes NO Arduino, WiFi, BLE, WebServer or
 //  U8g2 header. It performs no I/O and touches no global game state. It is
-//  compiled and unit-tested on the host (MSVC) by scratchpad/test_genome.cpp.
+//  compiled and unit-tested on the host by tests/test_genome.cpp.
 //
 //  ZERO FLOATING POINT. Every multiplier is an integer per-mille value (x1000).
 //
-//  RANDOMNESS: the module never calls esp_random() itself. It owns a xorshift32
-//  that makes every function deterministic under a fixed seed. On the device,
-//  call genome_set_rng(&esp_random) once in setup() (the signatures match
-//  exactly: uint32_t (*)(void)), or genome_seed(esp_random()) to keep xorshift.
+//  RANDOMNESS: the module never calls esp_random() itself. Every draw comes
+//  from the RNG_BREEDING stream of rng.h, which the .ino seeds once at boot
+//  through rng_seed_all(); genome_seed() reseeds that stream so every function
+//  here is deterministic under a fixed seed (host tests, goldens).
 //
 //  ENDIANNESS: Genome is serialised (BLE, NVS, hex) in struct memory order.
 //  Both the ESP32-C3 (RISC-V) and the host test (x86-64) are little-endian.
@@ -30,17 +30,16 @@ static_assert(sizeof(Genome) == 16, "genome.h: Genome wire size is contractual")
 // 1. RANDOMNESS
 // -----------------------------------------------------------------------------
 
-// Signature-compatible with esp_random().
+// Test hook: a scripted 32-bit source, uint32_t (*)(void).
 typedef uint32_t (*GenomeRngFn)(void);
 
-// Install an external entropy source. Passing nullptr restores the built-in
-// xorshift32. Not thread-safe; call once during boot.
+// Install a scripted source (host tests that need an exact gene roll). Passing
+// nullptr restores the RNG_BREEDING stream. Not thread-safe.
 void     genome_set_rng(GenomeRngFn fn);
 
-// Reseed the built-in xorshift32. seed == 0 is remapped to the default seed
-// (0 is an absorbing state for xorshift). Has no effect while an external RNG
-// is installed, but is still recorded so a later genome_set_rng(nullptr)
-// resumes from it.
+// Reseed the RNG_BREEDING stream (wrapper on rng_seed()). seed == 0 is
+// remapped to RNG_DEFAULT_SEED (0 is an absorbing state for xorshift). Has no
+// effect on draws while a scripted source is installed.
 void     genome_seed(uint32_t seed);
 
 // Current 32-bit random draw from whichever source is installed.

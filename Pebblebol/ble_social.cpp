@@ -43,7 +43,8 @@
 
 #include <Arduino.h>
 #include <string.h>
-#include <esp_random.h>
+#include "crc16.h"
+#include "rng.h"
 #include <esp_bt_device.h>
 #include <BLEDevice.h>
 #include <BLEUtils.h>
@@ -168,28 +169,15 @@ static uint32_t s_last_service_ms = 0;
 // 2. SMALL PURE HELPERS
 // -----------------------------------------------------------------------------
 
-// CRC-16/CCITT-FALSE, poly 0x1021, init 0xFFFF. Deliberately a private copy:
-// this file must not depend on genome.cpp being linked, and a duplicated
-// 10-line CRC is cheaper than a cross-module dependency on the wire path.
-static uint16_t nt_crc16(const uint8_t *p, uint8_t n) {
-  uint16_t c = GENOME_CRC_INIT;
-  for (uint8_t i = 0; i < n; ++i) {
-    c ^= (uint16_t)((uint16_t)p[i] << 8);
-    for (uint8_t b = 0; b < 8; ++b) {
-      c = (c & 0x8000u) ? (uint16_t)(((uint16_t)(c << 1)) ^ GENOME_CRC_POLY) : (uint16_t)(c << 1);
-    }
-  }
-  return c;
-}
-
-// A genome arriving from the air is hostile until proven otherwise.
+// A genome arriving from the air is hostile until proven otherwise. The CRC is
+// crc16_ccitt() from crc16.h, the same function genome.cpp seals with.
 static bool genome_wire_ok(const Genome &g) {
   if ((uint16_t)(g.magic_ver & GENOME_SIG_MASK) != (uint16_t)GENOME_SIG) return false;
   if ((uint16_t)(g.magic_ver & 0x000Fu) != (uint16_t)GENOME_PROTO_VER) return false;
   if (g.lineage_id == 0) return false;               // 0 is reserved for "invalid"
   uint8_t tmp[16];
   memcpy(tmp, &g, sizeof(tmp));                      // packed -> aligned copy
-  return nt_crc16(tmp, GENOME_CRC_BYTES) == g.crc16;
+  return crc16_ccitt(tmp, GENOME_CRC_BYTES) == g.crc16;
 }
 
 static inline bool elapsed_since(uint32_t t0, uint32_t span_ms) {
@@ -601,7 +589,7 @@ static void contagion_service(uint32_t dt_ms) {
       pv.exposure_ms    = 0;
       pv.infect_armed   = 1;
       pv.last_infect_ms = now;
-      if ((uint8_t)(esp_random() % 100u) < (uint8_t)BLE_CONTAGION_P_PCT) {
+      if (rng_below(RNG_ENCOUNTER, 100u) < (uint32_t)BLE_CONTAGION_P_PCT) {
         s_contagion = true;
       }
     }
@@ -765,7 +753,7 @@ void ble_advertise_offer(const Genome &child, const uint8_t mac3[3]) {
   const uint8_t soc_b = GN_GET(p.genome.g1,      GN_SOCIAB_SH, GN_SOCIAB_MK);
   const int32_t p_pct = NT_CLAMP((int32_t)35 + (int32_t)soc_a + (int32_t)soc_b,
                                  (int32_t)BLE_MATE_P_MIN_PCT, (int32_t)BLE_MATE_P_MAX_PCT);
-  if ((int32_t)(esp_random() % 100u) >= p_pct) {
+  if ((int32_t)rng_below(RNG_BREEDING, 100u) >= p_pct) {
     fail_courted((uint16_t)STR_SO_LOSE, p.mac, p.stage);
     return;
   }

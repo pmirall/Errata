@@ -14,6 +14,7 @@
 // =============================================================================
 #include "sim.h"
 #include "genome.h"
+#include "rng.h"
 #include "strings_es.h"
 
 #include <string.h>
@@ -89,7 +90,6 @@
 static PetSave*  g_pet   = 0;
 static SimEnv    g_env;
 static uint32_t  g_scale = 1;             // god-mode time scale
-static uint32_t  g_rng   = 0x2545F491u;   // xorshift32, never 0
 static uint32_t  g_events = 0;
 
 static uint32_t  g_now   = 0;             // sim's epoch cursor (offline-aware)
@@ -151,14 +151,14 @@ static uint8_t   g_sick_hours = 0;        // untreated sickness, for attribution
 // =============================================================================
 // 2. SMALL INTEGER PRIMITIVES
 // =============================================================================
+// Every draw of the simulation comes from the RNG_CARE stream (rng.h).
 static inline uint32_t rnd(void)
 {
-  g_rng ^= g_rng << 13;
-  g_rng ^= g_rng >> 17;
-  g_rng ^= g_rng << 5;
-  return g_rng;
+  return rng_u32(RNG_CARE);
 }
 
+// Modulo on purpose: the legacy sim reduced its draws this way, and the care
+// golden (tests/golden/sim_v1.txt) pins that exact sequence of outcomes.
 static inline uint32_t rnd_below(uint32_t n)
 {
   return (n == 0u) ? 0u : (rnd() % n);
@@ -501,7 +501,7 @@ void sim_set_env(const SimEnv& env)
 
 const SimEnv& sim_env(void) { return g_env; }
 
-void sim_seed(uint32_t seed) { g_rng = (seed != 0u) ? seed : 0x2545F491u; }
+void sim_seed(uint32_t seed) { rng_seed(RNG_CARE, seed); }
 
 void sim_set_time_scale(uint32_t scale)
 {

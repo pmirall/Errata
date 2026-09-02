@@ -6,8 +6,8 @@
 //  LAYERING
 //  --------
 //  The ENCODER half of qr.cpp is portable C++: <stdint.h> + <string.h> only.
-//  It host-compiles with MSVC and is validated module-by-module against the
-//  Python `qrcode` reference (see scratchpad/qr_compare.py).
+//  It host-compiles and is validated module-by-module against the Python
+//  `qrcode` reference by tests/test_qr.cpp.
 //  The RENDERER half of qr.cpp is fenced behind #ifdef ARDUINO and is the only
 //  place U8g2 is touched. This header only FORWARD-DECLARES U8G2, so including
 //  qr.h never drags U8g2lib.h into a consumer's translation unit.
