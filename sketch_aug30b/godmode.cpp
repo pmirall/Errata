@@ -1,0 +1,1494 @@
+// =============================================================================
+//  NOTTAMAGOCHI - godmode.cpp
+//  The debug console (GAME_DESIGN 10). See godmode.h for the contract.
+//
+//  Everything the console mutates goes through the owning module's own API:
+//  sim_god_*() for the pet, gt_skew_add() for time, wx_force() for weather,
+//  tg_queue() for Telegram, ble_debug_inject_*() for the fake partner,
+//  store_*() for NVS. This file mutates NOTHING directly - which is exactly
+//  why a test run through it exercises the real code paths.
+//
+//  ZERO floating point. Every number rendered here is an integer formatted
+//  with snprintf into a fixed stack buffer. No String, no heap.
+// =============================================================================
+#include "godmode.h"
+
+#if GOD_MODE_ENABLED
+
+#include <Arduino.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+
+#include "render.h"        // the only U8G2 owner; never construct another one
+#include "strings_es.h"
+#include "sim.h"
+#include "genome.h"
+#include "storage.h"
+#include "gametime.h"
+#include "input.h"
+#include "net.h"
+#include "weather.h"
+#include "telegram.h"      // tg_set_mode / tg_queue + the nt_cfg_view() seam
+#include "ble_social.h"
+
+// The gene-name block in strings_es.h 34c must stay index-parallel to GENES[].
+static_assert((int)STR_GN_RARE - (int)STR_GN_SPECIES + 1 == GOD_GENE_COUNT,
+              "strings_es.h 34c drifted from GOD_GENE_COUNT");
+
+#define GOD_LOGF(...) do { Serial.printf(__VA_ARGS__); } while (0)
+
+// =============================================================================
+//  1. LAYOUT
+//     Rows 0..GOD_BAR_H-1  : the inverted marker bar (drawn last, always wins)
+//     Rows GOD_BAR_H..55   : content
+//     Rows 56..63          : the affordance strip (rd_affordance owns it)
+// =============================================================================
+#define GD_ROW_H        9
+#define GD_ROOT_Y0      10
+#define GD_ROOT_ROWS    5
+#define GD_SUB_Y0       19
+#define GD_SUB_ROWS     4
+#define GD_TITLE_BASE   16
+#define GD_SEP_Y        17
+#define GD_SCROLL_X     125
+
+// =============================================================================
+//  2. CONSOLE SCREENS
+// =============================================================================
+enum GodScreen : uint8_t {
+  GSC_MENU = 0,   // the 12 commands + the exit row
+  GSC_SPEED,      // 1  VELOCIDAD
+  GSC_ABSENCE,    // 2  SALTAR AUSENCIA
+  GSC_STATPICK,   // 3  FIJAR STAT  (+ ENFERMAR / CACAS)
+  GSC_STATVAL,    // 3  the value ring for the pick above
+  GSC_STAGE,      // 4  FORZAR ETAPA
+  GSC_FORM,       // 5  FORZAR FORMA
+  GSC_KILL,       // 6  MATAR
+  GSC_GENOME,     // 7  GENOMA root
+  GSC_GENE,       // 7  GENOMA / EDITAR
+  GSC_HEX,        // 7  GENOMA / VOLCAR + CARGAR
+  GSC_WEATHER,    // 8  CLIMA
+  GSC_TELEGRAM,   // 9  TELEGRAM
+  GSC_BLE,        // 10 BLE FALSO
+  GSC_SYS,        // 11 RELOJ + the heap / radio / storage panels
+  GSC_CONFIRM,    // shared modal, cursor defaults to NO
+  GSC_COUNT
+};
+
+// What a GSC_CONFIRM "YES" commits to.
+enum GodConfirm : uint8_t {
+  GCF_NONE = 0,
+  GCF_KILL,
+  GCF_WIPE1,
+  GCF_WIPE2
+};
+
+// GSC_HEX has two jobs.
+enum GodHexMode : uint8_t { GHX_DUMP = 0, GHX_LOAD };
+
+// GSC_STATPICK rows past the real stats.
+#define GD_PICK_SICK    ((uint8_t)ST_COUNT)
+#define GD_PICK_POOP    ((uint8_t)(ST_COUNT + 1))
+#define GD_PICK_COUNT   ((uint8_t)(ST_COUNT + 2))
+
+// Synthetic-mating sub-machine (command 10).
+enum GodBleStep : uint8_t {
+  GBS_IDLE = 0,
+  GBS_RADIO,      // asking net for RADIO_BLE, then ble_begin()
+  GBS_SEED,       // injecting BLE_PEER_MIN_HITS synthetic BEACON frames
+  GBS_OFFER,      // child bred, MATE_OFFER on air
+  GBS_ACK,        // synthetic MATE_ACK injected, waiting for the latch
+  GBS_DONE,
+  GBS_ERROR
+};
+
+// =============================================================================
+//  3. STATIC TABLES
+// =============================================================================
+static const uint32_t GD_SCALES[GOD_SCALE_COUNT] = {
+  (uint32_t)GOD_SCALE_0, (uint32_t)GOD_SCALE_1, (uint32_t)GOD_SCALE_2,
+  (uint32_t)GOD_SCALE_3, (uint32_t)GOD_SCALE_4
+};
+
+// GAME_DESIGN 10.1 command 2: 1 h, 6 h, 24 h, 72 h, 168 h, 720 h.
+static const uint32_t GD_ABSENCES[GOD_ABSENCE_COUNT] = {
+  3600UL, 21600UL, 86400UL, 259200UL, 604800UL, 2592000UL
+};
+
+static const uint8_t GD_STATVALS[GOD_STATVAL_COUNT] = { 0, 25, 50, 100 };
+
+// The root list. Twelve commands, then the explicit exit row.
+static const uint16_t GD_MENU_STR[GOD_MENU_ROWS] = {
+  (uint16_t)STR_GOD_SPEED,    (uint16_t)STR_GOD_ABSENCE, (uint16_t)STR_GOD_SETSTAT,
+  (uint16_t)STR_GOD_STAGE,    (uint16_t)STR_GOD_FORM,    (uint16_t)STR_GOD_KILL,
+  (uint16_t)STR_GOD_GENOME,   (uint16_t)STR_GOD_WEATHER, (uint16_t)STR_GOD_TELEGRAM,
+  (uint16_t)STR_GOD_BLE,      (uint16_t)STR_GOD_CLOCK,   (uint16_t)STR_GOD_WIPE,
+  (uint16_t)STR_AF_QUIT
+};
+
+// The gene editor. Index-parallel to strings_es.h block 34c.
+struct GodGene {
+  uint16_t label;                        // StrId
+  uint8_t  vmax;                         // inclusive
+  uint8_t  (*get)(const Genome&);
+  void     (*set)(Genome&, uint8_t);
+};
+static const GodGene GD_GENES[GOD_GENE_COUNT] = {
+  { (uint16_t)STR_GN_SPECIES,  15, gene_species,     gene_set_species     },
+  { (uint16_t)STR_GN_PATTERN,  15, gene_pattern,     gene_set_pattern     },
+  { (uint16_t)STR_GN_PALETTE,   7, gene_palette,     gene_set_palette     },
+  { (uint16_t)STR_GN_BODYSIZE,  7, gene_body_size,   gene_set_body_size   },
+  { (uint16_t)STR_GN_EARHORN,   3, gene_ear_horn,    gene_set_ear_horn    },
+  { (uint16_t)STR_GN_APPETITE, 15, gene_appetite,    gene_set_appetite    },
+  { (uint16_t)STR_GN_METAB,    15, gene_metabolism,  gene_set_metabolism  },
+  { (uint16_t)STR_GN_SOCIAB,   15, gene_sociability, gene_set_sociability },
+  { (uint16_t)STR_GN_TEMPER,   15, gene_temperament, gene_set_temperament },
+  { (uint16_t)STR_GN_HARDY,    15, gene_hardiness,   gene_set_hardiness   },
+  { (uint16_t)STR_GN_LUCK,      7, gene_luck,        gene_set_luck        },
+  { (uint16_t)STR_GN_SEX,       1, gene_sex,         gene_set_sex         },
+  { (uint16_t)STR_GN_RARE,      1, gene_rare,        gene_set_rare        }
+};
+
+// GSC_GENOME rows.
+#define GD_GEN_RANDOM   0
+#define GD_GEN_EDIT     1
+#define GD_GEN_DUMP     2
+#define GD_GEN_LOAD     3
+#define GD_GEN_ROWS     4
+
+// GSC_SYS pages. GD_SYS_PET is the watch panel for an accelerated run: at
+// GOD_SCALE_4 a whole life goes past in minutes and the operator needs to see
+// the stats move without leaving S14.
+#define GD_SYS_CLOCK    0
+#define GD_SYS_PET      1
+#define GD_SYS_HEAP     2
+#define GD_SYS_RADIO    3
+#define GD_SYS_STORE    4
+#define GD_SYS_PAGES    5
+
+// The Telegram pool is MSG_T01..MSG_P05.
+#define GD_MSG_COUNT    ((uint8_t)(MSG_COUNT - 1))
+
+// =============================================================================
+//  4. MODULE STATE
+// =============================================================================
+static bool     s_active      = false;
+static uint8_t  s_screen      = GSC_MENU;
+static uint8_t  s_menu_cur    = 0;        // root list cursor, survives sub-screens
+static uint8_t  s_sub_cur     = 0;        // cursor inside the current sub-screen
+static uint8_t  s_scale_idx   = 0;
+static uint8_t  s_pick        = 0;        // GSC_STATVAL: which stat/condition
+static uint8_t  s_gene_idx    = 0;
+static uint8_t  s_sys_page    = 0;
+static uint8_t  s_hex_mode    = GHX_DUMP;
+static uint8_t  s_confirm_act = GCF_NONE;
+static bool     s_confirm_yes = false;    // GAME_DESIGN 8.2: defaults to NO
+static uint16_t s_confirm_str = (uint16_t)STR_EMPTY;
+
+static uint16_t s_toast_str   = (uint16_t)STR_EMPTY;
+static uint32_t s_toast_until = 0;
+
+static bool     s_dump_on     = true;
+static uint32_t s_dump_last   = 0;
+
+static uint8_t  s_tg_saved    = (uint8_t)TG_ON;
+static uint32_t s_tg_until    = 0;        // 0 = window closed
+
+static bool     s_frozen      = false;
+static uint8_t  s_frozen_h    = 0;
+static uint8_t  s_frozen_m    = 0;
+
+static int32_t  s_skew_total  = 0;        // what god mode has handed gt_skew_add
+
+// Absence result panel.
+static AbsenceReport s_abs_rep;
+static bool     s_abs_done    = false;
+
+// Serial genome paste.
+static char     s_hex[GOD_HEX_LINE_MAX + 1];
+static uint8_t  s_hexlen      = 0;
+static char     s_hex_show[33];           // last dumped/loaded genome, 32 + NUL
+
+// Synthetic mating.
+static uint8_t  s_bs          = GBS_IDLE;
+static uint32_t s_bs_next_ms  = 0;
+static uint32_t s_bs_deadline = 0;
+static uint8_t  s_bs_hits     = 0;
+static Genome   s_bs_partner;
+static Genome   s_bs_child;
+static bool     s_bs_child_ok = false;
+static uint16_t s_bs_str      = (uint16_t)STR_EMPTY;
+
+// =============================================================================
+//  5. SMALL HELPERS
+// =============================================================================
+static inline const PetSave* pet(void) { return sim_save(); }
+
+static void toast(uint16_t str_id)
+{
+  s_toast_str   = str_id;
+  s_toast_until = millis() + GOD_TOAST_MS;
+}
+
+static void list_step(uint8_t& cur, uint8_t count, int8_t d)
+{
+  if (count == 0) { cur = 0; return; }
+  int v = (int)cur + (int)d;
+  while (v < 0)            v += (int)count;
+  while (v >= (int)count)  v -= (int)count;
+  cur = (uint8_t)v;
+}
+
+// Top row of a scrolling window that keeps `cur` roughly centred.
+static uint8_t win_top(uint8_t cur, uint8_t count, uint8_t rows)
+{
+  if (count <= rows) return 0;
+  int top = (int)cur - (int)(rows / 2);
+  if (top < 0) top = 0;
+  if (top > (int)count - (int)rows) top = (int)count - (int)rows;
+  return (uint8_t)top;
+}
+
+// One CSV line after every state change, plus a forced save (GAME_DESIGN 10.2).
+static void changed(void)
+{
+  const PetSave* p = pet();
+  if (p) store_save(*p, true);
+  god_dump_line();
+}
+
+static void open_confirm(uint16_t question, uint8_t act)
+{
+  s_confirm_str = question;
+  s_confirm_act = act;
+  s_confirm_yes = false;          // NO, always
+  s_screen      = GSC_CONFIRM;
+}
+
+// -----------------------------------------------------------------------------
+// Time scale. The ONLY way acceleration reaches the game is sim_step_seconds(),
+// which returns whatever sim_set_time_scale() was last given.
+// -----------------------------------------------------------------------------
+static void set_scale(uint8_t idx)
+{
+  if (idx >= GOD_SCALE_COUNT) idx = 0;
+  s_scale_idx = idx;
+  const uint32_t sc = GD_SCALES[idx];
+  sim_set_time_scale(sc);
+
+  if (sc > 1u) {
+    if (!s_frozen) {
+      // GAME_DESIGN 10.2: freeze the sleep window at the hour we left reality.
+      const SimEnv& e = sim_env();
+      s_frozen_h = e.local_hour;
+      s_frozen_m = e.local_min;
+      s_frozen   = true;
+    }
+  } else {
+    s_frozen = false;
+  }
+  GOD_LOGF("[god] scale=x%lu frozen=%u %02u:%02u\n", (unsigned long)sc,
+           (unsigned)s_frozen, (unsigned)s_frozen_h, (unsigned)s_frozen_m);
+}
+
+// -----------------------------------------------------------------------------
+// Push a SimEnv that matches the clock right now. Used before the forced
+// absence, which needs sim to agree with gametime about what "now" is.
+// -----------------------------------------------------------------------------
+static void push_env_now(void)
+{
+  SimEnv e = sim_env();
+  struct tm lt;
+  memset(&lt, 0, sizeof(lt));
+  const bool ok = gt_local_tm(lt);
+
+  e.now_epoch   = gt_now();
+  e.local_hour  = (uint8_t)((lt.tm_hour >= 0 && lt.tm_hour < 24) ? lt.tm_hour : 0);
+  e.local_min   = (uint8_t)((lt.tm_min  >= 0 && lt.tm_min  < 60) ? lt.tm_min  : 0);
+  e.day_of_year = (uint16_t)((lt.tm_yday >= 0 && lt.tm_yday < 366) ? lt.tm_yday : 0);
+  e.clock_valid = ok ? 1u : 0u;
+  sim_set_env(e);
+}
+
+// -----------------------------------------------------------------------------
+// Command 2: inject a real absence. The clock genuinely moves forward (skew,
+// never the system clock) and sim runs the GAME_DESIGN 5.2 offline path,
+// including its death branch.
+// -----------------------------------------------------------------------------
+static void run_absence(uint32_t secs)
+{
+  if (!pet()) { toast((uint16_t)STR_GOD_NOPET); return; }
+
+  gt_skew_add((int64_t)secs);
+  if (s_skew_total <= (int32_t)(0x7FFFFFFF - (int32_t)secs)) s_skew_total += (int32_t)secs;
+
+  push_env_now();
+
+  memset(&s_abs_rep, 0, sizeof(s_abs_rep));
+  sim_catch_up_ex(secs, 1u, s_abs_rep);
+  s_abs_done = true;
+
+  store_touch_lastseen(gt_now());
+  changed();
+  GOD_LOGF("[god] absence %lus tier=%u died=%u steps=%u\n",
+           (unsigned long)secs, (unsigned)s_abs_rep.tier,
+           (unsigned)s_abs_rep.died, (unsigned)s_abs_rep.steps);
+}
+
+// -----------------------------------------------------------------------------
+// Command 12: factory reset, then a brand new gen-0 egg so the caller never
+// sees a firmware with no pet in it.
+// -----------------------------------------------------------------------------
+static bool run_wipe(void)
+{
+  const bool ok = store_wipe();
+  Genome g = genome_genesis();
+  sim_new_pet(g, gt_now(), 0);
+  // GAME_DESIGN 10.2: everything god mode produces carries the taint, and this
+  // egg was produced inside god mode. A factory reset resets the save, not the
+  // honesty of the dynasty ribbon.
+  sim_god_set_genome(g);
+  const PetSave* p = pet();
+  if (p) store_save(*p, true);
+  GOD_LOGF("[god] wipe ok=%u\n", (unsigned)ok);
+  return ok;
+}
+
+// -----------------------------------------------------------------------------
+// Command 7: install a genome on the living pet. sim_god_set_genome() reseals
+// it and forces the taint bit, so nothing here can produce a clean genome.
+// -----------------------------------------------------------------------------
+static void install_genome(const Genome& g)
+{
+  sim_god_set_genome(g);
+  const PetSave* p = pet();
+  if (p) genome_to_hex32(p->genome, s_hex_show);
+  changed();
+  toast((uint16_t)STR_GOD_DONE);
+}
+
+// =============================================================================
+//  6. SYNTHETIC BLE MATING (command 10)
+//     One board, the whole three-frame handshake. Everything below drives the
+//     real ble_social state machine; only the packets are fabricated.
+// =============================================================================
+static void ble_flow_abort(void)
+{
+  if (s_bs != GBS_IDLE) {
+    if (ble_is_up()) ble_end();
+    if (net_mode() == RADIO_BLE) net_request(RADIO_OFF);
+  }
+  s_bs = GBS_IDLE;
+}
+
+static void ble_flow_start(void)
+{
+  const PetSave* p = pet();
+  if (!p) { toast((uint16_t)STR_GOD_NOPET); return; }
+
+  s_bs_child_ok = false;
+  s_bs_hits     = 0;
+  s_bs_str      = (uint16_t)STR_GOD_MATING;
+  s_bs_next_ms  = millis();
+  s_bs_deadline = millis() + GOD_BLE_TIMEOUT_MS;
+
+  // A partner that is guaranteed to be genetically legal: opposite sex, high
+  // sociability so the success roll is worth watching rather than a coin flip.
+  s_bs_partner = genome_genesis();
+  gene_set_sex(s_bs_partner, (uint8_t)(gene_sex(p->genome) ^ 1u));
+  gene_set_sociability(s_bs_partner, 14);
+
+  s_bs = GBS_RADIO;
+}
+
+static void ble_flow_service(void)
+{
+  if (s_bs == GBS_IDLE || s_bs == GBS_DONE || s_bs == GBS_ERROR) return;
+
+  const uint32_t now = millis();
+  if ((int32_t)(now - s_bs_deadline) >= 0) {
+    ble_flow_abort();                      // parks s_bs at GBS_IDLE...
+    s_bs     = GBS_ERROR;                  // ...so the verdict is set AFTER it
+    s_bs_str = (uint16_t)STR_GOD_CHILD_NO;
+    return;
+  }
+  if ((int32_t)(now - s_bs_next_ms) < 0) return;
+  s_bs_next_ms = now + GOD_BLE_STEP_MS;
+
+  const PetSave* p = pet();
+  if (!p) { s_bs = GBS_ERROR; s_bs_str = (uint16_t)STR_GOD_NOPET; return; }
+
+  switch (s_bs) {
+    case GBS_RADIO: {
+      if (net_mode() != RADIO_BLE) {
+        if (!net_request(RADIO_BLE)) {
+          s_bs = GBS_ERROR; s_bs_str = (uint16_t)STR_GOD_NEED_BLE;
+          return;
+        }
+        return;                                  // give the stack one step
+      }
+      if (!ble_is_up() && !ble_begin()) {
+        s_bs = GBS_ERROR; s_bs_str = (uint16_t)STR_GOD_NEED_BLE;
+        return;
+      }
+      ble_set_self((uint8_t)sim_stat_pct(ST_ENERGY),
+                   (uint8_t)(BLE_SELF_SEEKING | BLE_SELF_GOD));
+      ble_advertise_beacon(p->genome, p->stage, (uint8_t)(p->cq >> 2));
+      s_bs = GBS_SEED;
+      return;
+    }
+
+    case GBS_SEED: {
+      // One injection is one packet: a peer must be heard BLE_PEER_MIN_HITS
+      // times before ble_social will court it, exactly like a real one.
+      ble_debug_inject_beacon(s_bs_partner, (uint8_t)STAGE_ADULT,
+                              (uint8_t)200, (uint8_t)BLE_BF_SEEKING, (int8_t)-45);
+      ble_scan_service();
+      if (++s_bs_hits < (uint8_t)BLE_PEER_MIN_HITS) return;
+
+      const BlePeerInfo* peer = (ble_peer_count() > 0) ? ble_peer(0) : 0;
+      if (!peer) { s_bs = GBS_ERROR; s_bs_str = (uint16_t)STR_GOD_CHILD_NO; return; }
+
+      uint8_t eflags = 0;
+      s_bs_child = genome_breed(p->genome, peer->genome,
+                                (uint8_t)(p->cq >> 2), peer->cq_hi, &eflags);
+      GOD_LOGF("[god] bred child eflags=%02X\n", (unsigned)eflags);
+      ble_advertise_offer(s_bs_child, peer->mac + 3);
+      s_bs = GBS_OFFER;
+      return;
+    }
+
+    case GBS_OFFER: {
+      ble_scan_service();
+      BleMateEvent ev;
+      if (ble_mate_take(ev)) {                   // instant refusal, or done
+        s_bs_child_ok = (ev.ok != 0);
+        if (ev.ok) {
+          s_bs_child = ev.child;
+          genome_to_hex32(s_bs_child, s_hex_show);
+        }
+        s_bs_str = ev.str_id ? ev.str_id
+                             : (uint16_t)(ev.ok ? STR_GOD_CHILD_OK : STR_GOD_CHILD_NO);
+        s_bs     = GBS_DONE;
+        return;
+      }
+      if (ble_mate_state() == (uint8_t)BLE_MATE_OFFERING && ble_debug_inject_ack()) {
+        s_bs = GBS_ACK;
+      }
+      return;
+    }
+
+    case GBS_ACK: {
+      ble_scan_service();
+      BleMateEvent ev;
+      if (ble_mate_take(ev)) {
+        s_bs_child_ok = (ev.ok != 0);
+        if (ev.ok) {
+          s_bs_child = ev.child;
+          genome_to_hex32(s_bs_child, s_hex_show);
+          GOD_LOGF("[god] fake mate child=%s\n", s_hex_show);
+        }
+        s_bs_str = ev.str_id ? ev.str_id
+                             : (uint16_t)(ev.ok ? STR_GOD_CHILD_OK : STR_GOD_CHILD_NO);
+        s_bs     = GBS_DONE;
+      }
+      return;
+    }
+
+    default: return;
+  }
+}
+
+// =============================================================================
+//  7. SERIAL GENOME PASTE (command 7 "CARGAR")
+// =============================================================================
+static void hex_paste_service(void)
+{
+  if (!(s_screen == GSC_HEX && s_hex_mode == GHX_LOAD)) return;
+
+  while (Serial.available() > 0) {
+    const int c = Serial.read();
+    if (c < 0) break;
+
+    if (c == '\n' || c == '\r') {
+      if (s_hexlen == 0) continue;
+      s_hex[s_hexlen] = '\0';
+      Genome g;
+      if (genome_from_hex32(s_hex, g)) {
+        install_genome(g);
+        s_screen = GSC_GENOME;
+      } else {
+        toast((uint16_t)STR_ERR_GENOME);
+      }
+      s_hexlen = 0;
+      s_hex[0] = '\0';
+      continue;
+    }
+    if (c == ' ' || c == '\t') continue;
+    if (s_hexlen >= GOD_HEX_LINE_MAX) { s_hexlen = 0; s_hex[0] = '\0'; }   // restart
+    s_hex[s_hexlen++] = (char)c;
+    s_hex[s_hexlen]   = '\0';
+  }
+}
+
+// =============================================================================
+//  8. THE SOAK LOG
+// =============================================================================
+static void dump_header(void)
+{
+  Serial.println(F(
+    "GOD#,epoch,stage,hun,hap,ene,hyg,hea,cq,gen,genome,"
+    "age_s,bond,disc,weight_dg,poop,sick,asleep,dead,cause,form,minor,"
+    "alert,tier,guilt,scale,clock_ok,skew_s,"
+    "heap_free,heap_min,heap_maxalloc,radio,phase,wx,temp_dc"));
+}
+
+void god_dump_line(void)
+{
+  const PetSave* p = pet();
+  if (!p) { Serial.println(F("GOD,0,,,,,,,,,")); return; }
+
+  char hex[33];
+  genome_to_hex32(p->genome, hex);
+  const WeatherState& wx = wx_state();
+
+  // Columns 1..11 are the GAME_DESIGN 10.2 format, byte for byte.
+  Serial.printf("GOD,%lu,%u,%u,%u,%u,%u,%u,%d,%u,%s",
+                (unsigned long)sim_now(),
+                (unsigned)p->stage,
+                (unsigned)sim_stat_pct(ST_HUNGER),
+                (unsigned)sim_stat_pct(ST_HAPPINESS),
+                (unsigned)sim_stat_pct(ST_ENERGY),
+                (unsigned)sim_stat_pct(ST_HYGIENE),
+                (unsigned)sim_stat_pct(ST_HEALTH),
+                (int)p->cq,
+                (unsigned)p->genome.generation,
+                hex);
+
+  // Everything below is APPENDED, so an eleven-column parser keeps working.
+  Serial.printf(",%lu,%u,%u,%d,%u,%u,%u,%u,%u,%u,%u",
+                (unsigned long)sim_age_s(),
+                (unsigned)sim_stat_pct(ST_BOND),
+                (unsigned)sim_stat_pct(ST_DISCIPLINE),
+                (int)p->weight_dg,
+                (unsigned)p->poop_count,
+                (unsigned)sim_is_sick(),
+                (unsigned)sim_is_asleep(),
+                (unsigned)sim_is_dead(),
+                (unsigned)p->death_cause,
+                (unsigned)p->adult_form,
+                (unsigned)p->minor_form);
+
+  Serial.printf(",%u,%u,%d,%lu,%u,%ld,%lu,%lu,%lu,%u,%u,%u,%d\n",
+                (unsigned)sim_alert(),
+                (unsigned)p->absence_tier,
+                (int)p->guilt_level,
+                (unsigned long)god_time_scale(),
+                (unsigned)(gt_is_valid() ? 1u : 0u),
+                (long)s_skew_total,
+                (unsigned long)ESP.getFreeHeap(),
+                (unsigned long)ESP.getMinFreeHeap(),
+                (unsigned long)ESP.getMaxAllocHeap(),
+                (unsigned)net_mode(),
+                (unsigned)net_phase(),
+                (unsigned)wx.group,
+                (int)wx.temp_dc);
+}
+
+// =============================================================================
+//  9. LIFECYCLE
+// =============================================================================
+void god_begin(void)
+{
+  s_active      = false;
+  s_screen      = GSC_MENU;
+  s_menu_cur    = 0;
+  s_sub_cur     = 0;
+  s_scale_idx   = 0;
+  s_pick        = 0;
+  s_gene_idx    = 0;
+  s_sys_page    = 0;
+  s_hex_mode    = GHX_DUMP;
+  s_confirm_act = GCF_NONE;
+  s_confirm_yes = false;
+  s_toast_str   = (uint16_t)STR_EMPTY;
+  s_toast_until = 0;
+  s_dump_on     = true;
+  s_dump_last   = millis();
+  s_tg_until    = 0;
+  s_frozen      = false;
+  s_skew_total  = 0;
+  s_abs_done    = false;
+  s_hexlen      = 0;
+  s_hex[0]      = '\0';
+  s_hex_show[0] = '\0';
+  s_bs          = GBS_IDLE;
+  s_bs_child_ok = false;
+  s_bs_str      = (uint16_t)STR_EMPTY;
+
+  sim_set_time_scale(1u);
+
+  if (store_rtc_god_tainted()) {
+    // The RTC nonce survived a soft reset that happened inside god mode. Do NOT
+    // silently resume acceleration - say so and start at x1.
+    GOD_LOGF("[god] previous boot was tainted\n");
+  }
+}
+
+void god_enter(void)
+{
+  if (s_active) return;
+  s_active   = true;
+  s_screen   = GSC_MENU;
+  s_menu_cur = 0;
+  s_sub_cur  = 0;
+  s_abs_done = false;
+  s_dump_last = millis();
+
+  store_rtc_mark_god();
+  set_scale(0);                                  // acceleration is opt-in
+
+  // The taint is permanent, on the living pet and on everything it produces.
+  const PetSave* p = pet();
+  if (p) {
+    Genome g = p->genome;
+    gene_set_tainted(g, 1);
+    sim_god_set_genome(g);
+    genome_to_hex32(g, s_hex_show);
+  }
+
+  // GAME_DESIGN 10.2: Telegram is muted for the whole session except command 9.
+  const Config* c = nt_cfg_view();
+  s_tg_saved = (c && c->tg_mode < (uint8_t)TG_MODE_COUNT) ? c->tg_mode : (uint8_t)TG_ON;
+  tg_set_mode(TG_OFF);
+  s_tg_until = 0;
+
+  GOD_LOGF("[god] ENTER (tainted forever)\n");
+  dump_header();
+  changed();
+  toast((uint16_t)STR_GOD_TAINTED);
+}
+
+void god_exit(void)
+{
+  if (!s_active) return;
+
+  // The accumulated skew is deliberately NOT undone. gametime.h offers the
+  // undo, but every timestamp the forced absences wrote into PetSave is in
+  // skewed time; rewinding gt_now() would leave last_seen_epoch in the future
+  // and the next absence computation would underflow. The skew is reported on
+  // the RELOJ panel and in the CSV instead, so a soak log stays interpretable.
+  // (It is RAM-only: a reboot does drop it, and the pet then looks like it was
+  //  saved in the future until the next real absence catches up. Known, and the
+  //  reason the wipe command exists.)
+  ble_flow_abort();
+  set_scale(0);
+  s_frozen = false;
+  tg_set_mode((TgMode)s_tg_saved);
+  s_tg_until = 0;
+  s_active   = false;
+  s_screen   = GSC_MENU;
+
+  const PetSave* p = pet();
+  if (p) store_save(*p, true);
+  god_dump_line();
+  GOD_LOGF("[god] EXIT %s\n", S(STR_GOD_EXIT));
+}
+
+bool     god_active(void)       { return s_active; }
+bool     god_dump_enabled(void) { return s_dump_on; }
+uint32_t god_time_scale(void)   { return s_active ? GD_SCALES[s_scale_idx] : 1u; }
+
+bool god_freeze_clock(uint8_t& hour, uint8_t& minute)
+{
+  if (!s_active || !s_frozen) return false;
+  hour   = s_frozen_h;
+  minute = s_frozen_m;
+  return true;
+}
+
+uint8_t god_entry_progress(uint8_t screen_id)
+{
+  if (screen_id != (uint8_t)SCR_STATUS_B) return 0;
+
+  const uint32_t l = input_hold_ms(INPUT_BTN_L);
+  const uint32_t r = input_hold_ms(INPUT_BTN_R);
+  if (l == 0 || r == 0) return 0;
+
+  const uint32_t held = (l < r) ? l : r;
+  if (held >= (uint32_t)GOD_ENTER_HOLD_MS) {
+    // The same hold RE-OPENS the console when god mode is already on. Without
+    // this the user who left S14 with GOD_EVT_LEAVE to watch an accelerated
+    // life would be stranded: the only off switch is the console's exit row.
+    if (!s_active) god_enter();
+    else           s_screen = GSC_MENU;
+    input_flush();          // the eventual release must not fire on SCR_GOD
+    return 100;
+  }
+  return (uint8_t)((held * 100UL) / (uint32_t)GOD_ENTER_HOLD_MS);
+}
+
+void god_service(void)
+{
+  if (!s_active) return;
+
+  hex_paste_service();
+  ble_flow_service();
+
+  const uint32_t now = millis();
+
+  // Close the command-9 Telegram window.
+  if (s_tg_until != 0 && (int32_t)(now - s_tg_until) >= 0) {
+    tg_set_mode(TG_OFF);
+    s_tg_until = 0;
+  }
+
+  if (s_dump_on && (uint32_t)(now - s_dump_last) >= (uint32_t)GOD_DUMP_PERIOD_MS) {
+    s_dump_last = now;
+    god_dump_line();
+  }
+}
+
+// =============================================================================
+//  10. INPUT
+// =============================================================================
+
+// Commit a GSC_CONFIRM "YES". Returns what ui must do next.
+static GodEvt commit_confirm(void)
+{
+  const uint8_t act = s_confirm_act;
+  s_confirm_act = GCF_NONE;
+
+  switch (act) {
+    case GCF_KILL: {
+      const uint8_t cause = (uint8_t)(DEATH_HUNGER + s_sub_cur);
+      sim_god_kill(cause);
+      changed();
+      s_screen = GSC_MENU;
+      toast((uint16_t)STR_GOD_NO_REVIVE);
+      return GOD_EVT_DIED;
+    }
+    case GCF_WIPE1:
+      open_confirm((uint16_t)STR_CF_WIPE2, GCF_WIPE2);
+      return GOD_EVT_NONE;
+
+    case GCF_WIPE2: {
+      const bool ok = run_wipe();
+      s_screen = GSC_MENU;
+      toast((uint16_t)(ok ? STR_GOD_DONE : STR_ERR_NVS));
+      return GOD_EVT_WIPED;
+    }
+    default:
+      s_screen = GSC_MENU;
+      return GOD_EVT_NONE;
+  }
+}
+
+// The root list: open the sub-screen for the selected command.
+static GodEvt open_command(uint8_t row)
+{
+  s_sub_cur  = 0;
+  s_abs_done = false;
+
+  switch (row) {
+    case  0: s_screen = GSC_SPEED;    s_sub_cur = s_scale_idx; break;
+    case  1: s_screen = GSC_ABSENCE;  break;
+    case  2: s_screen = GSC_STATPICK; break;
+    case  3: s_screen = GSC_STAGE;    break;
+    case  4: s_screen = GSC_FORM;     break;
+    case  5: s_screen = GSC_KILL;     break;
+    case  6: s_screen = GSC_GENOME;   break;
+    case  7: s_screen = GSC_WEATHER;  break;
+    case  8: s_screen = GSC_TELEGRAM; break;
+    case  9: s_screen = GSC_BLE;      s_bs = GBS_IDLE; s_bs_child_ok = false;
+             s_bs_str = (uint16_t)STR_EMPTY; break;
+    case 10: s_screen = GSC_SYS;      s_sys_page = GD_SYS_CLOCK; break;
+    case 11: open_confirm((uint16_t)STR_CF_WIPE, GCF_WIPE1); break;
+    default:
+      god_exit();
+      return GOD_EVT_LEAVE;
+  }
+  return GOD_EVT_NONE;
+}
+
+// How many rows the current sub-screen has.
+static uint8_t sub_count(void)
+{
+  switch (s_screen) {
+    case GSC_SPEED:    return (uint8_t)GOD_SCALE_COUNT;
+    case GSC_ABSENCE:  return (uint8_t)GOD_ABSENCE_COUNT;
+    case GSC_STATPICK: return GD_PICK_COUNT;
+    case GSC_STATVAL:
+      if (s_pick == GD_PICK_SICK) return 2;
+      if (s_pick == GD_PICK_POOP) return (uint8_t)(POOP_MAX + 1);
+      return (uint8_t)GOD_STATVAL_COUNT;
+    case GSC_STAGE:    return (uint8_t)STAGE_COUNT;
+    case GSC_FORM:     return (uint8_t)FORM_COUNT;
+    case GSC_KILL:     return (uint8_t)(DEATH_COUNT - 1);   // DEATH_NONE excluded
+    case GSC_GENOME:   return GD_GEN_ROWS;
+    case GSC_GENE:     return (uint8_t)GOD_GENE_COUNT;
+    case GSC_WEATHER:  return (uint8_t)(WX_COUNT + 1);      // row 0 = AUTO
+    case GSC_TELEGRAM: return GD_MSG_COUNT;
+    default:           return 0;
+  }
+}
+
+// TAP_R / select inside a sub-screen.
+static GodEvt select_sub(void)
+{
+  switch (s_screen) {
+    case GSC_SPEED:
+      set_scale(s_sub_cur);
+      toast((uint16_t)STR_GOD_DONE);
+      return GOD_EVT_NONE;
+
+    case GSC_ABSENCE:
+      run_absence(GD_ABSENCES[s_sub_cur % GOD_ABSENCE_COUNT]);
+      return s_abs_rep.died ? GOD_EVT_DIED : GOD_EVT_NONE;
+
+    case GSC_STATPICK:
+      s_pick    = s_sub_cur;
+      s_sub_cur = 0;
+      s_screen  = GSC_STATVAL;
+      return GOD_EVT_NONE;
+
+    case GSC_STATVAL:
+      if (s_pick == GD_PICK_SICK)      sim_god_set_sick((uint8_t)(s_sub_cur ? 1u : 0u));
+      else if (s_pick == GD_PICK_POOP) sim_god_set_poop(s_sub_cur);
+      else                             sim_god_set_stat((StatId)s_pick,
+                                            GD_STATVALS[s_sub_cur % GOD_STATVAL_COUNT]);
+      changed();
+      toast((uint16_t)STR_GOD_DONE);
+      return GOD_EVT_NONE;
+
+    case GSC_STAGE: {
+      const uint8_t st = s_sub_cur;
+      // "No revive. No undo. God mode cannot resurrect - it can only kill."
+      // (GAME_DESIGN 9, rule 10.) sim_god_set_stage() clears PF_DEAD for any
+      // living stage, so the refusal has to live here, at the only caller.
+      if (sim_is_dead() && st != (uint8_t)STAGE_DEAD) {
+        toast((uint16_t)STR_GOD_NO_REVIVE);
+        return GOD_EVT_NONE;
+      }
+      sim_god_set_stage(st);
+      changed();
+      toast((uint16_t)STR_GOD_DONE);
+      return (st == (uint8_t)STAGE_DEAD) ? GOD_EVT_DIED : GOD_EVT_NONE;
+    }
+
+    case GSC_FORM:
+      sim_god_set_form(s_sub_cur);
+      changed();
+      toast((uint16_t)STR_GOD_DONE);
+      return GOD_EVT_NONE;
+
+    case GSC_KILL:
+      open_confirm((uint16_t)STR_CF_KILL, GCF_KILL);
+      return GOD_EVT_NONE;
+
+    case GSC_GENOME:
+      switch (s_sub_cur) {
+        case GD_GEN_RANDOM: {
+          Genome g = genome_genesis();
+          install_genome(g);
+          break;
+        }
+        case GD_GEN_EDIT:
+          s_gene_idx = 0;
+          s_screen   = GSC_GENE;
+          break;
+        case GD_GEN_DUMP: {
+          const PetSave* p = pet();
+          if (p) {
+            genome_to_hex32(p->genome, s_hex_show);
+            GOD_LOGF("GENOME,%s\n", s_hex_show);
+          }
+          s_hex_mode = GHX_DUMP;
+          s_screen   = GSC_HEX;
+          break;
+        }
+        default:
+          s_hex_mode = GHX_LOAD;
+          s_hexlen   = 0;
+          s_hex[0]   = '\0';
+          s_screen   = GSC_HEX;
+          GOD_LOGF("[god] %s\n", S(STR_GOD_PASTE));
+          break;
+      }
+      return GOD_EVT_NONE;
+
+    case GSC_GENE: {
+      const PetSave* p = pet();
+      if (!p) { toast((uint16_t)STR_GOD_NOPET); return GOD_EVT_NONE; }
+      const GodGene& gg = GD_GENES[s_gene_idx % GOD_GENE_COUNT];
+      Genome g = p->genome;
+      uint8_t v = gg.get(g);
+      v = (uint8_t)((v >= gg.vmax) ? 0u : (v + 1u));
+      gg.set(g, v);
+      install_genome(g);
+      return GOD_EVT_NONE;
+    }
+
+    case GSC_HEX:
+      if (s_hex_mode == GHX_DUMP && s_hex_show[0]) GOD_LOGF("GENOME,%s\n", s_hex_show);
+      return GOD_EVT_NONE;
+
+    case GSC_WEATHER:
+      // Row 0 releases the override; rows 1..WX_COUNT pin a group.
+      wx_force(s_sub_cur == 0 ? (uint8_t)0xFF : (uint8_t)(s_sub_cur - 1));
+      toast((uint16_t)STR_GOD_DONE);
+      return GOD_EVT_NONE;
+
+    case GSC_TELEGRAM: {
+      // Command 9 is the ONE thing allowed past the mute. PRIO_P0 bypasses the
+      // daily cap, the quiet-hours hold, the idle gate and the 48 h same-id
+      // cooldown - "bypassing all anti-spam", exactly as specified.
+      const MsgId id = (MsgId)((uint8_t)MSG_T01 + s_sub_cur);
+      tg_set_mode(TG_ONLY_SEVERE);
+      s_tg_until = millis() + GOD_TG_WINDOW_MS;
+      const bool ok = tg_queue(id, PRIO_P0);
+      toast((uint16_t)(ok ? STR_GOD_DONE : STR_GOD_FAILED));
+      return GOD_EVT_NONE;
+    }
+
+    case GSC_BLE:
+      if (s_bs == GBS_DONE && s_bs_child_ok) {
+        install_genome(s_bs_child);              // test inheritance on one board
+        s_bs_child_ok = false;
+      } else if (s_bs == GBS_IDLE || s_bs == GBS_DONE || s_bs == GBS_ERROR) {
+        ble_flow_start();
+      }
+      return GOD_EVT_NONE;
+
+    default:
+      return GOD_EVT_NONE;
+  }
+}
+
+GodEvt god_handle(Gesture g)
+{
+  if (!s_active) return GOD_EVT_NONE;
+
+  // GAME_DESIGN 8.2 invariant 2: HOME from anywhere. God mode STAYS ON - the
+  // marker bar guarantees the user knows - and the exit row turns it off.
+  if (g == GST_LONG_BOTH) { s_screen = GSC_MENU; return GOD_EVT_LEAVE; }
+
+  // ---- the shared confirm modal -------------------------------------------
+  if (s_screen == GSC_CONFIRM) {
+    switch (g) {
+      case GST_TAP_L:  s_confirm_yes = !s_confirm_yes;      return GOD_EVT_NONE;
+      case GST_TAP_R:  if (s_confirm_yes) return commit_confirm();
+                       s_confirm_act = GCF_NONE; s_screen = GSC_MENU;
+                       return GOD_EVT_NONE;
+      case GST_HOLD_R: s_confirm_act = GCF_NONE; s_screen = GSC_MENU;
+                       return GOD_EVT_NONE;
+      default:         return GOD_EVT_NONE;
+    }
+  }
+
+  // ---- the root list -------------------------------------------------------
+  if (s_screen == GSC_MENU) {
+    switch (g) {
+      case GST_TAP_L:
+      case GST_HOLD_L: list_step(s_menu_cur, (uint8_t)GOD_MENU_ROWS, +1); return GOD_EVT_NONE;
+      case GST_TAP_R:  return open_command(s_menu_cur);
+      case GST_DBL_L:  s_menu_cur = 0;                                    return GOD_EVT_NONE;
+      case GST_DBL_R:  s_menu_cur = (uint8_t)(GOD_MENU_ROWS - 1);         return GOD_EVT_NONE;
+      case GST_BOTH:   s_dump_on = !s_dump_on;
+                       toast((uint16_t)(s_dump_on ? STR_GOD_DUMP_ON : STR_GOD_DUMP_OFF));
+                       if (s_dump_on) god_dump_line();
+                       return GOD_EVT_NONE;
+      case GST_HOLD_R: return GOD_EVT_LEAVE;      // leave the screen, not the mode
+      default:         return GOD_EVT_NONE;
+    }
+  }
+
+  // ---- every sub-screen ----------------------------------------------------
+  switch (g) {
+    case GST_HOLD_R:
+      if (s_screen == GSC_BLE)   ble_flow_abort();
+      if (s_screen == GSC_STATVAL) { s_screen = GSC_STATPICK; s_sub_cur = s_pick; }
+      else if (s_screen == GSC_GENE || s_screen == GSC_HEX) { s_screen = GSC_GENOME; s_sub_cur = 0; }
+      else                       { s_screen = GSC_MENU; }
+      return GOD_EVT_NONE;
+
+    case GST_TAP_L:
+    case GST_HOLD_L:
+      if (s_screen == GSC_SYS)      { s_sys_page = (uint8_t)((s_sys_page + 1u) % GD_SYS_PAGES); }
+      else if (s_screen == GSC_GENE){ list_step(s_gene_idx, (uint8_t)GOD_GENE_COUNT, +1); }
+      else                          { list_step(s_sub_cur, sub_count(), +1); }
+      return GOD_EVT_NONE;
+
+    case GST_DBL_L:
+      if (s_screen == GSC_GENE) s_gene_idx = 0; else s_sub_cur = 0;
+      return GOD_EVT_NONE;
+
+    case GST_DBL_R:
+      // On the gene editor this is the decrement; everywhere else it is the
+      // vertical-list "jump to last item" of GAME_DESIGN 8.3.
+      if (s_screen == GSC_GENE) {
+        const PetSave* p = pet();
+        if (p) {
+          const GodGene& gg = GD_GENES[s_gene_idx % GOD_GENE_COUNT];
+          Genome gn = p->genome;
+          uint8_t v = gg.get(gn);
+          v = (uint8_t)((v == 0) ? gg.vmax : (v - 1u));
+          gg.set(gn, v);
+          install_genome(gn);
+        }
+      } else {
+        const uint8_t n = sub_count();
+        s_sub_cur = (uint8_t)((n > 0) ? (n - 1) : 0);
+      }
+      return GOD_EVT_NONE;
+
+    case GST_TAP_R:
+      return select_sub();
+
+    default:
+      return GOD_EVT_NONE;
+  }
+}
+
+// =============================================================================
+//  11. DRAWING
+// =============================================================================
+static void draw_row(int16_t y0, uint8_t row, bool sel, const char* label, const char* value)
+{
+  const int16_t top  = (int16_t)(y0 + (int16_t)row * GD_ROW_H);
+  const int16_t base = (int16_t)(top + 7);
+  if (label) rd_text_fit(3, base, 96, RD_FONT_BODY, label);
+  if (value && value[0]) rd_text_right(OLED_W - 5, base, RD_FONT_BODY, value);
+  if (sel) rd_invert_rect(0, top, OLED_W, GD_ROW_H);   // XOR last: black on white
+}
+
+static void draw_scrollbar(int16_t y0, uint8_t rows, uint8_t count, uint8_t top)
+{
+  if (count <= rows) return;
+  const int16_t h = (int16_t)(rows * GD_ROW_H);
+  U8G2& u = rd_u8g2();
+  u.setDrawColor(1);
+  int16_t th = (int16_t)((int32_t)h * rows / count);
+  if (th < 3) th = 3;
+  const int16_t ty = (int16_t)(y0 + (int32_t)(h - th) * top / (count - rows));
+  u.drawBox(GD_SCROLL_X, ty, 2, th);
+}
+
+static void draw_title(const char* s)
+{
+  rd_text_fit(2, GD_TITLE_BASE, OLED_W - 4, RD_FONT_BODY, s);
+  U8G2& u = rd_u8g2();
+  u.setDrawColor(1);
+  u.drawHLine(0, GD_SEP_Y, OLED_W);
+}
+
+static void draw_toast(void)
+{
+  if (s_toast_str == (uint16_t)STR_EMPTY) return;
+  if ((int32_t)(millis() - s_toast_until) >= 0) { s_toast_str = (uint16_t)STR_EMPTY; return; }
+
+  U8G2& u = rd_u8g2();
+  u.setDrawColor(0);
+  u.drawBox(0, 44, OLED_W, 11);
+  u.setDrawColor(1);
+  u.drawFrame(0, 44, OLED_W, 11);
+  rd_text_fit(3, 52, OLED_W - 6, RD_FONT_BODY, S(s_toast_str));
+}
+
+void god_draw_marker(void)
+{
+  if (!s_active) return;
+
+  U8G2& u = rd_u8g2();
+  u.setDrawColor(1);
+  u.drawBox(0, 0, OLED_W, GOD_BAR_H);
+  u.setDrawColor(0);                       // solid font mode -> black on white
+
+  char b[24];
+  snprintf(b, sizeof(b), "GOD x%lu", (unsigned long)god_time_scale());
+  rd_text(2, GOD_BAR_H - 2, RD_FONT_BODY, b);
+
+  // ASCII only, so the _tr tiny font is legal here (BRIEF 1.5).
+  snprintf(b, sizeof(b), "%luk%s", (unsigned long)(ESP.getFreeHeap() >> 10),
+           s_frozen ? " F" : "");
+  rd_text_right(OLED_W - 2, GOD_BAR_H - 2, RD_FONT_TINY, b);
+
+  u.setDrawColor(1);
+}
+
+// -----------------------------------------------------------------------------
+// Per-screen bodies
+// -----------------------------------------------------------------------------
+static void draw_menu(void)
+{
+  const uint8_t top = win_top(s_menu_cur, (uint8_t)GOD_MENU_ROWS, GD_ROOT_ROWS);
+  char val[16];
+
+  for (uint8_t r = 0; r < GD_ROOT_ROWS; ++r) {
+    const uint8_t i = (uint8_t)(top + r);
+    if (i >= (uint8_t)GOD_MENU_ROWS) break;
+    val[0] = '\0';
+    switch (i) {
+      case 0: snprintf(val, sizeof(val), "x%lu", (unsigned long)god_time_scale()); break;
+      case 7: {
+        const WeatherState& wx = wx_state();
+        snprintf(val, sizeof(val), "%s", wx.forced ? "FIX" : "AUT");
+        break;
+      }
+      case 10: snprintf(val, sizeof(val), "%s", gt_is_valid() ? "OK" : "??"); break;
+      default: break;
+    }
+    draw_row(GD_ROOT_Y0, r, (i == s_menu_cur), S(GD_MENU_STR[i]), val);
+  }
+  draw_scrollbar(GD_ROOT_Y0, GD_ROOT_ROWS, (uint8_t)GOD_MENU_ROWS, top);
+  rd_affordance(S(STR_AF_NEXT), S(STR_AF_SEL));
+}
+
+static void draw_simple_list(const char* title, uint8_t count,
+                             void (*label)(uint8_t, char*, size_t))
+{
+  draw_title(title);
+  const uint8_t top = win_top(s_sub_cur, count, GD_SUB_ROWS);
+  char b[26];
+  for (uint8_t r = 0; r < GD_SUB_ROWS; ++r) {
+    const uint8_t i = (uint8_t)(top + r);
+    if (i >= count) break;
+    b[0] = '\0';
+    label(i, b, sizeof(b));
+    draw_row(GD_SUB_Y0, r, (i == s_sub_cur), b, 0);
+  }
+  draw_scrollbar(GD_SUB_Y0, GD_SUB_ROWS, count, top);
+  rd_affordance(S(STR_AF_NEXT), S(STR_AF_SEL));
+}
+
+static void lbl_speed(uint8_t i, char* b, size_t n)
+{
+  snprintf(b, n, "x%lu", (unsigned long)GD_SCALES[i % GOD_SCALE_COUNT]);
+}
+static void lbl_absence(uint8_t i, char* b, size_t n)
+{
+  char t[GT_ELAPSED_BUF];
+  gt_format_elapsed(GD_ABSENCES[i % GOD_ABSENCE_COUNT], t, sizeof(t));
+  snprintf(b, n, "%s", t);
+}
+static void lbl_statpick(uint8_t i, char* b, size_t n)
+{
+  if (i == GD_PICK_SICK)      snprintf(b, n, "%s", S(STR_GOD_SICK));
+  else if (i == GD_PICK_POOP) snprintf(b, n, "%s", S(STR_GOD_POOP));
+  else                        snprintf(b, n, "%s", S_STAT(i));
+}
+static void lbl_statval(uint8_t i, char* b, size_t n)
+{
+  if (s_pick == GD_PICK_SICK)      snprintf(b, n, "%s", S(i ? STR_ON : STR_OFF));
+  else if (s_pick == GD_PICK_POOP) snprintf(b, n, "%u", (unsigned)i);
+  else                             snprintf(b, n, "%u %%",
+                                            (unsigned)GD_STATVALS[i % GOD_STATVAL_COUNT]);
+}
+static void lbl_stage(uint8_t i, char* b, size_t n)   { snprintf(b, n, "%s", S_STAGE(i)); }
+static void lbl_form(uint8_t i, char* b, size_t n)    { snprintf(b, n, "%s", S_FORM(i)); }
+static void lbl_kill(uint8_t i, char* b, size_t n)
+{
+  snprintf(b, n, "%s", S_CAUSE((uint8_t)(DEATH_HUNGER + i)));
+}
+static void lbl_weather(uint8_t i, char* b, size_t n)
+{
+  if (i == 0) snprintf(b, n, "%s", S(STR_GOD_AUTO));
+  else        snprintf(b, n, "%s", S_WX((uint8_t)(i - 1)));
+}
+static void lbl_genome(uint8_t i, char* b, size_t n)
+{
+  static const uint16_t rows[GD_GEN_ROWS] = {
+    (uint16_t)STR_GOD_RANDOM, (uint16_t)STR_GOD_EDIT,
+    (uint16_t)STR_GOD_DUMP,   (uint16_t)STR_GOD_LOAD
+  };
+  snprintf(b, n, "%s", S(rows[i % GD_GEN_ROWS]));
+}
+static void lbl_telegram(uint8_t i, char* b, size_t n)
+{
+  const uint8_t id = (uint8_t)((uint8_t)MSG_T01 + i);
+  // The subtractions promote to int and GCC cannot prove they stay small, so
+  // the operand is bounded explicitly - otherwise -Wformat-truncation assumes
+  // ten digits per %02u.
+  if (id <= (uint8_t)MSG_T15)
+    snprintf(b, n, "T%02u", (unsigned)(id - (uint8_t)MSG_T01 + 1) % 100u);
+  else
+    snprintf(b, n, "P%02u", (unsigned)(id - (uint8_t)MSG_P01 + 1) % 100u);
+}
+
+static void draw_absence(void)
+{
+  if (!s_abs_done) { draw_simple_list(S(STR_GOD_ABSENCE), (uint8_t)GOD_ABSENCE_COUNT, lbl_absence); return; }
+
+  draw_title(S(STR_GOD_ABSENCE));
+  char t[GT_ELAPSED_BUF];
+  char b[30];
+  gt_format_elapsed(s_abs_rep.absence_s, t, sizeof(t));
+  rd_text(3, 27, RD_FONT_BODY, t);
+  rd_text_fit(3, 36, OLED_W - 6, RD_FONT_BODY, S_ABSENCE(s_abs_rep.tier));
+  snprintf(b, sizeof(b), "n=%u sulk=%u %s", (unsigned)s_abs_rep.steps,
+           (unsigned)s_abs_rep.sulk_s, s_abs_rep.died ? "DEAD" : "");
+  rd_text(3, 45, RD_FONT_TINY, b);
+  if (s_abs_rep.died) rd_text_fit(3, 53, OLED_W - 6, RD_FONT_BODY, S_CAUSE(s_abs_rep.cause));
+  rd_affordance(0, S(STR_AF_BACK));
+}
+
+static void draw_gene(void)
+{
+  const PetSave* p = pet();
+  draw_title(S(STR_GOD_GENOME));
+  if (!p) { rd_text_fit(3, 32, OLED_W - 6, RD_FONT_BODY, S(STR_GOD_NOPET)); rd_affordance(0, S(STR_AF_BACK)); return; }
+
+  const uint8_t top = win_top(s_gene_idx, (uint8_t)GOD_GENE_COUNT, GD_SUB_ROWS);
+  char v[8];
+  for (uint8_t r = 0; r < GD_SUB_ROWS; ++r) {
+    const uint8_t i = (uint8_t)(top + r);
+    if (i >= (uint8_t)GOD_GENE_COUNT) break;
+    snprintf(v, sizeof(v), "%u", (unsigned)GD_GENES[i].get(p->genome));
+    draw_row(GD_SUB_Y0, r, (i == s_gene_idx), S(GD_GENES[i].label), v);
+  }
+  draw_scrollbar(GD_SUB_Y0, GD_SUB_ROWS, (uint8_t)GOD_GENE_COUNT, top);
+  rd_affordance(S(STR_AF_NEXT), S(STR_AF_MORE));
+}
+
+static void draw_hex(void)
+{
+  draw_title(S(s_hex_mode == GHX_DUMP ? STR_GOD_DUMP : STR_GOD_LOAD));
+
+  char half[17];
+  if (s_hex_show[0]) {
+    memcpy(half, s_hex_show, 16); half[16] = '\0';
+    rd_text_center_in(0, OLED_W, 28, RD_FONT_TINY, half);
+    memcpy(half, s_hex_show + 16, 16); half[16] = '\0';
+    rd_text_center_in(0, OLED_W, 36, RD_FONT_TINY, half);
+  }
+
+  if (s_hex_mode == GHX_LOAD) {
+    rd_text_fit(2, 46, OLED_W - 4, RD_FONT_BODY, S(STR_GOD_PASTE));
+    rd_text_fit(2, 54, OLED_W - 4, RD_FONT_TINY, s_hex);
+    rd_affordance(0, S(STR_AF_BACK));
+  } else {
+    rd_affordance(0, S(STR_AF_SEL));
+  }
+}
+
+static void draw_telegram(void)
+{
+  const uint8_t id = (uint8_t)((uint8_t)MSG_T01 + (s_sub_cur % GD_MSG_COUNT));
+  // The pool is Spanish prose: it MUST be a _tf font (BRIEF 1.5). The 4x6_tr
+  // used elsewhere on this screen is legal only for the "T01"/"P03" codes.
+  rd_text_fit(2, GD_TITLE_BASE, OLED_W - 4, RD_FONT_BODY, S_MSG(id));
+  rd_u8g2().setDrawColor(1);
+  rd_u8g2().drawHLine(0, GD_SEP_Y, OLED_W);
+
+  const uint8_t top = win_top(s_sub_cur, GD_MSG_COUNT, GD_SUB_ROWS);
+  // 16, not 8: GCC does not propagate lbl_telegram's `% 100u` through the
+  // inline, so it costs a -Wformat-truncation warning on a buffer that is
+  // provably 4 bytes of output. Stack is free here; the warning gate is not.
+  char b[16];
+  for (uint8_t r = 0; r < GD_SUB_ROWS; ++r) {
+    const uint8_t i = (uint8_t)(top + r);
+    if (i >= GD_MSG_COUNT) break;
+    lbl_telegram(i, b, sizeof(b));
+    draw_row(GD_SUB_Y0, r, (i == s_sub_cur), b, 0);
+  }
+  draw_scrollbar(GD_SUB_Y0, GD_SUB_ROWS, GD_MSG_COUNT, top);
+  rd_affordance(S(STR_AF_NEXT), S(STR_AF_SEL));
+}
+
+static void draw_ble(void)
+{
+  draw_title(S(STR_GOD_BLE));
+  char b[32];
+
+  const char* phase = "-";
+  switch (s_bs) {
+    case GBS_RADIO: phase = "RADIO"; break;
+    case GBS_SEED:  phase = "BEACON"; break;
+    case GBS_OFFER: phase = "OFFER"; break;
+    case GBS_ACK:   phase = "ACK"; break;
+    case GBS_DONE:  phase = "DONE"; break;
+    case GBS_ERROR: phase = "ERR"; break;
+    default: break;
+  }
+  snprintf(b, sizeof(b), "%s  peers=%u  ses=%u", phase,
+           (unsigned)ble_peer_count(), (unsigned)net_ble_sessions_used());
+  rd_text(3, 27, RD_FONT_TINY, b);
+
+  if (s_bs_str != (uint16_t)STR_EMPTY)
+    rd_text_fit(3, 37, OLED_W - 6, RD_FONT_BODY, S(s_bs_str));
+
+  if (s_bs == GBS_DONE && s_bs_child_ok && s_hex_show[0]) {
+    char half[17];
+    memcpy(half, s_hex_show, 16); half[16] = '\0';
+    rd_text_center_in(0, OLED_W, 46, RD_FONT_TINY, half);
+    memcpy(half, s_hex_show + 16, 16); half[16] = '\0';
+    rd_text_center_in(0, OLED_W, 54, RD_FONT_TINY, half);
+  }
+  rd_affordance(0, S(STR_AF_SEL));
+}
+
+static void draw_sys(void)
+{
+  char b[34];
+
+  switch (s_sys_page) {
+    case GD_SYS_CLOCK: {
+      draw_title(S(STR_GOD_CLOCK));
+      struct tm lt;
+      memset(&lt, 0, sizeof(lt));
+      const bool ok = gt_local_tm(lt);
+      // Bounded operands: struct tm carries plain ints, so an unbounded %d (or
+      // a signed modulo, whose result is -99..99 and becomes huge on the cast
+      // to unsigned) makes GCC assume ten digits per field and fire
+      // -Wformat-truncation. Cast FIRST, then take the modulo, so every
+      // directive is provably 2-4 digits. Lossless for any real date.
+      snprintf(b, sizeof(b), "%04u-%02u-%02u %02u:%02u:%02u",
+               (unsigned)(lt.tm_year + 1900) % 10000u,
+               (unsigned)(lt.tm_mon + 1)     % 100u,
+               (unsigned)lt.tm_mday          % 100u,
+               (unsigned)lt.tm_hour          % 100u,
+               (unsigned)lt.tm_min           % 100u,
+               (unsigned)lt.tm_sec           % 100u);
+      rd_text(2, 27, RD_FONT_TINY, b);
+      snprintf(b, sizeof(b), "now=%lu %s", (unsigned long)gt_now(), ok ? "SNTP" : "EST");
+      rd_text(2, 35, RD_FONT_TINY, b);
+      snprintf(b, sizeof(b), "seen=%lu", (unsigned long)store_last_seen());
+      rd_text(2, 43, RD_FONT_TINY, b);
+      snprintf(b, sizeof(b), "skew=%lds frz=%02u:%02u", (long)s_skew_total,
+               (unsigned)s_frozen_h, (unsigned)s_frozen_m);
+      rd_text(2, 51, RD_FONT_TINY, b);
+      break;
+    }
+    case GD_SYS_PET: {
+      draw_title(S(STR_MENU_STATUS));
+      const PetSave* p = pet();
+      if (!p) { rd_text_fit(2, 32, OLED_W - 4, RD_FONT_BODY, S(STR_GOD_NOPET)); break; }
+      snprintf(b, sizeof(b), "%u/%u/%u/%u/%u hp",
+               (unsigned)sim_stat_pct(ST_HUNGER),   (unsigned)sim_stat_pct(ST_HAPPINESS),
+               (unsigned)sim_stat_pct(ST_ENERGY),   (unsigned)sim_stat_pct(ST_HYGIENE),
+               (unsigned)sim_stat_pct(ST_HEALTH));
+      rd_text(2, 27, RD_FONT_TINY, b);
+      char el[GT_ELAPSED_BUF];
+      gt_format_elapsed(sim_age_s(), el, sizeof(el));
+      snprintf(b, sizeof(b), "%u %s", (unsigned)p->stage, el);
+      rd_text(2, 35, RD_FONT_TINY, b);
+      snprintf(b, sizeof(b), "cq%d w%d p%u s%u a%u", (int)p->cq, (int)p->weight_dg,
+               (unsigned)p->poop_count, (unsigned)sim_is_sick(),
+               (unsigned)sim_alert());
+      rd_text(2, 43, RD_FONT_TINY, b);
+      rd_text_fit(2, 52, OLED_W - 4, RD_FONT_BODY, S_STAGE(p->stage % STAGE_COUNT));
+      break;
+    }
+    case GD_SYS_HEAP: {
+      draw_title(S(STR_GOD_HEAP));
+      snprintf(b, sizeof(b), "free   %lu", (unsigned long)ESP.getFreeHeap());
+      rd_text(2, 27, RD_FONT_TINY, b);
+      snprintf(b, sizeof(b), "min    %lu", (unsigned long)ESP.getMinFreeHeap());
+      rd_text(2, 35, RD_FONT_TINY, b);
+      snprintf(b, sizeof(b), "maxblk %lu %s", (unsigned long)ESP.getMaxAllocHeap(),
+               net_heap_ok_for_tls() ? "TLS" : "-");
+      rd_text(2, 43, RD_FONT_TINY, b);
+      const NetHeapStats& h = net_heap_last();
+      snprintf(b, sizeof(b), "%u>%u f%lu m%lu", (unsigned)h.from_mode, (unsigned)h.to_mode,
+               (unsigned long)h.free_b, (unsigned long)h.max_alloc_b);
+      rd_text(2, 51, RD_FONT_TINY, b);
+      break;
+    }
+    case GD_SYS_RADIO: {
+      draw_title(S(STR_GOD_RADIO));
+      snprintf(b, sizeof(b), "mode=%u phase=%u err=%u", (unsigned)net_mode(),
+               (unsigned)net_phase(), (unsigned)net_last_err());
+      rd_text(2, 27, RD_FONT_TINY, b);
+      snprintf(b, sizeof(b), "ip %s", net_ip());
+      rd_text(2, 35, RD_FONT_TINY, b);
+      snprintf(b, sizeof(b), "rssi %d  ble %u/%u", (int)net_rssi(),
+               (unsigned)net_ble_sessions_used(), (unsigned)BLE_SESSION_CAP);
+      rd_text(2, 43, RD_FONT_TINY, b);
+      const WeatherState& wx = wx_state();
+      snprintf(b, sizeof(b), "wx %u %s t%d", (unsigned)wx.group,
+               wx.forced ? "FIX" : (wx.valid ? "OK" : "--"), (int)wx.temp_dc);
+      rd_text(2, 51, RD_FONT_TINY, b);
+      break;
+    }
+    default: {
+      draw_title(S(STR_GOD_STORE));
+      snprintf(b, sizeof(b), "nvs %s err=%02X", store_healthy() ? "OK" : "BAD",
+               (unsigned)store_error());
+      rd_text(2, 27, RD_FONT_TINY, b);
+      snprintf(b, sizeof(b), "boot=%u rst=%u n=%lu", (unsigned)store_boot_kind(),
+               (unsigned)store_reset_reason(), (unsigned long)store_boot_count());
+      rd_text(2, 35, RD_FONT_TINY, b);
+      snprintf(b, sizeof(b), "anc=%u fails=%u rtc=%u", (unsigned)store_ancestor_count(),
+               (unsigned)store_write_fails(), (unsigned)(store_rtc_intact() ? 1u : 0u));
+      rd_text(2, 43, RD_FONT_TINY, b);
+      snprintf(b, sizeof(b), "%s  %s", FW_VERSION, s_dump_on ? "LOG" : "---");
+      rd_text(2, 51, RD_FONT_TINY, b);
+      break;
+    }
+  }
+  rd_affordance(S(STR_AF_NEXT), 0);
+}
+
+static void draw_confirm(void)
+{
+  U8G2& u = rd_u8g2();
+  u.setDrawColor(1);
+  u.drawFrame(2, 12, OLED_W - 4, 40);
+  rd_text_wrap(6, 22, OLED_W - 12, 9, 2, RD_FONT_BODY, S(s_confirm_str));
+
+  const int16_t yes_x = 20, no_x = 74, box_w = 34, box_y = 40, box_h = 11;
+  rd_text_center_in(yes_x, box_w, box_y + 8, RD_FONT_BODY, S(STR_YES));
+  rd_text_center_in(no_x,  box_w, box_y + 8, RD_FONT_BODY, S(STR_NO));
+  rd_invert_rect(s_confirm_yes ? yes_x : no_x, box_y, box_w, box_h);
+
+  rd_affordance(S(STR_AF_NEXT), S(STR_AF_OK));
+}
+
+void god_draw(void)
+{
+  if (!s_active) return;
+
+  switch (s_screen) {
+    case GSC_MENU:     draw_menu(); break;
+    case GSC_SPEED:    draw_simple_list(S(STR_GOD_SPEED),   (uint8_t)GOD_SCALE_COUNT,  lbl_speed);    break;
+    case GSC_ABSENCE:  draw_absence(); break;
+    case GSC_STATPICK: draw_simple_list(S(STR_GOD_SETSTAT), GD_PICK_COUNT,             lbl_statpick); break;
+    case GSC_STATVAL:  draw_simple_list(S(STR_GOD_SETSTAT), sub_count(),               lbl_statval);  break;
+    case GSC_STAGE:    draw_simple_list(S(STR_GOD_STAGE),   (uint8_t)STAGE_COUNT,      lbl_stage);    break;
+    case GSC_FORM:     draw_simple_list(S(STR_GOD_FORM),    (uint8_t)FORM_COUNT,       lbl_form);     break;
+    case GSC_KILL:     draw_simple_list(S(STR_GOD_KILL),    (uint8_t)(DEATH_COUNT - 1), lbl_kill);    break;
+    case GSC_GENOME:   draw_simple_list(S(STR_GOD_GENOME),  GD_GEN_ROWS,               lbl_genome);   break;
+    case GSC_GENE:     draw_gene(); break;
+    case GSC_HEX:      draw_hex(); break;
+    case GSC_WEATHER:  draw_simple_list(S(STR_GOD_WEATHER), (uint8_t)(WX_COUNT + 1),   lbl_weather);  break;
+    case GSC_TELEGRAM: draw_telegram(); break;
+    case GSC_BLE:      draw_ble(); break;
+    case GSC_SYS:      draw_sys(); break;
+    case GSC_CONFIRM:  draw_confirm(); break;
+    default:           draw_menu(); break;
+  }
+
+  god_draw_marker();     // always last: nothing may cover the top nine rows
+  draw_toast();
+}
+
+#else  // ---------------------------------------------------------------------
+// GOD_MODE_ENABLED == 0. The API still links so no caller needs an #if, and
+// none of the console reaches flash.
+// -----------------------------------------------------------------------------
+bool     god_active(void)                       { return false; }
+GodEvt   god_handle(Gesture g)                  { (void)g; return GOD_EVT_NONE; }
+void     god_draw(void)                         { }
+uint32_t god_time_scale(void)                   { return 1u; }
+void     god_dump_line(void)                    { }
+void     god_begin(void)                        { }
+void     god_service(void)                      { }
+uint8_t  god_entry_progress(uint8_t screen_id)  { (void)screen_id; return 0; }
+void     god_enter(void)                        { }
+void     god_exit(void)                         { }
+void     god_draw_marker(void)                  { }
+bool     god_freeze_clock(uint8_t& h, uint8_t& m) { (void)h; (void)m; return false; }
+bool     god_dump_enabled(void)                 { return false; }
+
+#endif // GOD_MODE_ENABLED
