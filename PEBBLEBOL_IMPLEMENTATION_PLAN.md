@@ -583,6 +583,7 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 - Acceptance: gate; loopback tests unchanged (transport-agnostic, §59); bench: two boards see each other's beacon in LINK.
 
 **P7-C2 LINK screen, consent, BOX → LINK entry points** — M
+- [ ] Fold or drop `STR_SO_LINK_SOON` ("LINK - Fase 7"), the P2-C7b placeholder: it shows an internal plan phase number to the player.
 - [ ] `LINK` state: peer list → "¡PEBBLEBOL ENCONTRADO! [COMBATE][INTERCAMBIO][CRIAR][CANCELAR]" (§42) → `SESSION_REQUEST/ACCEPT` requires A on **both** devices; both show peer name + operation + state; every wait has a timeout → "CONEXIÓN PERDIDA / A: Reintentar / B: Salir" (§47).
 - [ ] BOX inspect menu gains "INTERCAMBIAR" and "CRIAR" (§9 "initiate breeding; initiate trade"): pre-selects the Pebble and enters LINK with that intent.
 - [ ] `test_screens` snapshots for LINK states.
@@ -596,6 +597,7 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 - Acceptance: §67 "Trade is atomic".
 
 **P7-C5 Breeding** — M
+- [ ] **Re-implement the god-taint gate in the game layer.** P2-C7b deleted `peer_block_reason()` along with the rest of the mating protocol, and with it the rule that a god-tainted unit must not pollute a real dynasty (it refused `BLE_BF_DEBUG` peers unless the local unit was itself tainted). The flag is still received and stored in `BlePeerInfo.peer_flags`, but **nothing reads it any more**. Correct for a transport-only module, wrong as a permanent state: without this gate a tainted genome can enter a real lineage through breeding or trade. Enforce it here and in `game/trade` (`GN_TAINT` in the incoming genome vs the local one), not in the transport.
 - [ ] `game/breeding.{h,cpp}` over `genome_breed` (genome.cpp:420-511): compatibility = same `compat_group`, both stage ≥ 1, distinct ids (§17); offspring species = base stage of the family of the parent chosen by the shared seed; genome variation clamped to the built-in budget (§17 "hard balance ceiling"); one inherited move from each parent if legal; `lineage_id = hash(A,B)`, `generation = max+1`; both devices compute the same child from the shared seed; result goes to the Box only with a free slot and A-confirm on both sides (fixes audit risk 5: no auto-accepted egg); `breed_link.cpp`.
 - [ ] `test_breeding.cpp` (compat matrix; offspring passes `validate_pebble`; budget ceiling holds over 10k random pairs; determinism; genome CRC valid).
 - Acceptance: §67 "Breeding compatibility works", "Generated Pebbles remain balanced".
