@@ -2629,17 +2629,31 @@ static void draw_error(void) {
   const uint16_t body = (s_err_kind == ERRK_SAVE_NEWER) ? STR_SAVE_ERR_NEWER
                                                         : STR_SAVE_ERR_BODY;
   rd_text_wrap(2, 22, OLED_W - 4, RD_LINE_BODY, 2, RD_FONT_BODY, S(body));
-  rd_text(2, 42, RD_FONT_BODY, S(STR_SAVE_ERR_A));
-  // No factory reset is offered for a newer save: the bytes are fine and the
-  // fix is a firmware update, not a wipe.
-  rd_text(2, 52, RD_FONT_BODY,
-          (s_err_kind == ERRK_SAVE_NEWER) ? S(STR_SAVE_UPDATE_FW) : S(STR_SAVE_ERR_B));
+  if (s_err_kind == ERRK_SAVE_NEWER) {
+    // A newer save is GOOD data, so NEITHER button may write and neither is
+    // offered. "Recuperar" was the dangerous one: restoring an older nvs2
+    // checkpoint over a save this firmware merely cannot READ would destroy
+    // the collection the newer firmware wrote (spec 48, 60). The fix is a
+    // firmware update, not a wipe and not a rollback.
+    rd_text(2, 42, RD_FONT_BODY, S(STR_SAVE_UPDATE_FW));
+  } else {
+    rd_text(2, 42, RD_FONT_BODY, S(STR_SAVE_ERR_A));
+    rd_text(2, 52, RD_FONT_BODY, S(STR_SAVE_ERR_B));
+  }
   rd_affordance(S(STR_AF_OK), S(STR_AF_SEL));
 }
 
 // "Recuperar": restore the nvs2 checkpoint, through the entry point, because
 // only it can rebind the simulation to the pet that comes back.
 static void error_recover(void) {
+  // Defence in depth, not a redundant check: this is the only path on the
+  // device that can write an OLD checkpoint over a save it could not read.
+  // handle_error() already refuses to route here for ERRK_SAVE_NEWER, but a
+  // future re-route must not be able to reopen a data-loss hole silently.
+  if (s_err_kind == ERRK_SAVE_NEWER) {
+    ui_toast(STR_SAVE_UPDATE_FW);
+    return;
+  }
   if (!s_recover || !s_recover()) {
     ui_toast(STR_SAVE_NO_BACKUP);       // nothing was written; still read-only
     return;
@@ -2654,16 +2668,22 @@ static void error_recover(void) {
 }
 
 static void handle_error(Gesture g) {
+  // A save from a newer firmware is intact data this build cannot parse, so no
+  // gesture here may write: not the wipe (B already refused it) and not the
+  // checkpoint restore (A used to accept it, which silently overwrote the very
+  // save the screen was warning about). Both buttons say the same true thing.
+  if (s_err_kind == ERRK_SAVE_NEWER) {
+    if (g == GST_TAP_L || g == GST_TAP_R) {
+      ui_toast(STR_SAVE_UPDATE_FW);
+    }
+    return;
+  }
   switch (g) {
     case GST_TAP_L:
       error_recover();
       break;
     case GST_TAP_R:
-      if (s_err_kind == ERRK_SAVE_NEWER) {
-        ui_toast(STR_SAVE_UPDATE_FW);   // never a wipe: the save is good data
-      } else {
-        confirm_open(CFM_WIPE1, STR_CF_WIPE);   // two dialogs, then the reset
-      }
+      confirm_open(CFM_WIPE1, STR_CF_WIPE);   // two dialogs, then the reset
       break;
     default:
       break;
