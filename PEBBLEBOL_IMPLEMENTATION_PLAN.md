@@ -480,6 +480,9 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 - Acceptance: gate; §67 "Care works", "Stored Pebbles recover".
 
 **P3-C2 XP and levels** — M
+> **Trap from P3-C1's retune.** A meal is refused above `ACT_MEAL_REFUSE_PCT` (90 % satiety), and at the new `-4,200` mph hunger rate satiety stays above that for about **2.4 hours** after eating. So `FEED_MEAL` is only available roughly once every 2.4 h, and "+2 XP per care action with an hourly cap" will rarely be able to spend that hourly budget on feeding. Either source XP from the other care actions too (clean, play, pet), or size the cap to what the cooldowns actually permit — do not assume one feed per hour.
+> Also: `CARE_DECAY_MPH[CARE_HEALTH]` is NOT a decay rate like its four neighbours. It is consumed sign-flipped inside `health_step()` as a damage rate, so a future "loop over all five and accumulate" refactor would apply health twice with the wrong sign. Give it its own named constant when you next touch `balance.h`.
+
 - [ ] `game/xp.{h,cpp}`; `XP_TABLE[31]` in `balance.h` (`static_assert` sum < 65535); sources: care action +2 (hourly cap), minigame `permille*8/1000`, carried time +1/10 min awake (daily cap 48), later battle +25 / capture +10 / items; ledger snapshot/restore semantics from `GainSave`; `SIM_EV_LEVEL_UP` event → toast + `rd_flash`; HOME shows level + XP bar (§8); on level-up `hp_cur` rescales with `hp_max`.
 - [ ] `test_xp.cpp` (curve monotonic, multi-level carry-over, cap 30, caps, ledger under-reports never over-reports).
 - Acceptance: gate; §67 "XP and leveling work".
@@ -498,6 +501,8 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 - Acceptance: gate; §67 "At least 5 minigames", "playable with two buttons", "transition cleanly" (6 games: ping, sequence, packet_flood, firewall, buffer, delete).
 
 **P3-C5 Phase-3 exit** — S
+- [ ] Strengthen `care_one_hour_of_catch_up_is_the_same_however_it_is_chunked`: as written it **cannot fail**, because `sim_tick()` already splits any dt into 60 s substeps, so 3600, 60x60 and 6x600 are the identical substep sequence. Add the 1 s chunking (3600 calls of `sim_tick(1)`), which is the case that actually probes below the grid — the P3-C1 verifier ran it by hand and it does match byte for byte.
+- [ ] Restate or fix the soak criterion. "No stat pinned at 0 for more than 6 simulated hours of neglect" **cannot hold while decision D13 stands**: under total neglect energy pins at 0 and stays there, by design. Health is what the floor protects, not energy.
 - [ ] Matrix + tag `v0.3.0-pet`; `test_sim_golden` renamed `test_care_golden`; bench: god-mode x3600 soak (godmode.cpp:538-597 CSV) shows no stat pinned at 0 for > 6 simulated hours of neglect.
 - Commit message: `phase-3: virtual pet — hours-scale care, XP/levels, data-driven evolution, minigame framework with 6 two-button games, 25 ms tap latency`
 
