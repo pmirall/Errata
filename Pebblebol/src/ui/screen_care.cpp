@@ -25,11 +25,15 @@ static const uint16_t kCareHelp[CARE_ROWS] = {
   STR_HLP_HEALTH, STR_HLP_BACK
 };
 
+// The row order IS MgId order, which is what lets play_input() start game
+// number `s_play` without a lookup table. P3-C4b appends four more rows here
+// and the static_assert in screen_care.h is what makes a mismatch a build
+// error rather than a game that launches its neighbour.
 static const uint16_t kPlayItem[PLAY_ROWS] = {
-  STR_DG_REFLEX, STR_DG_MEMORY, STR_DG_JUMP, STR_ITEM_BACK
+  STR_MG_PING, STR_MG_SEQ, STR_ITEM_BACK
 };
 static const uint16_t kPlayHelp[PLAY_ROWS] = {
-  STR_DG_REFLEX_HINT, STR_DG_MEMORY_HINT, STR_DG_JUMP_HINT, STR_HLP_BACK
+  STR_MG_PING_HINT, STR_MG_SEQ_HINT, STR_HLP_BACK
 };
 
 static uint8_t s_care = 0;

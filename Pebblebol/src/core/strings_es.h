@@ -240,9 +240,8 @@ enum StrId : uint16_t {
   STR_CF_EVOLVE,
 
   // --- 29. minigames ------------------------------ <= 12 chars --------------
-  STR_DG_REFLEX,
-  STR_DG_MEMORY,
-  STR_DG_JUMP,
+  STR_MG_PING,
+  STR_MG_SEQ,
   STR_GM_READY,
   STR_GM_GO,
   STR_GM_WIN,
@@ -310,10 +309,10 @@ enum StrId : uint16_t {
   STR_HLP_BACK,
 
   // --- 33c. on-device minigames --------------------------- <= 25 @ 5x8 ---
-  STR_DG_REFLEX_HINT,
-  STR_DG_MEMORY_HINT,
-  STR_DG_JUMP_HINT,
+  STR_MG_PING_HINT,
+  STR_MG_SEQ_HINT,
   STR_GM_ROUND,
+  STR_GM_NEXT,
   STR_GM_TOOSOON,
 
   // --- 33d. deterministic dynasty names ------------------
@@ -685,9 +684,8 @@ inline constexpr const char* const ES[] = {
   /* STR_CF_EVOLVE */             "¿Evolucionar ahora?",
 
   /* --- 29. minigames --- */
-  /* STR_DG_REFLEX */             "REFLEJOS",
-  /* STR_DG_MEMORY */             "MEMORIA",
-  /* STR_DG_JUMP */               "SALTO",
+  /* STR_MG_PING */               "PING",
+  /* STR_MG_SEQ */                "SECUENCIA",
   /* STR_GM_READY */              "¿Listo?",
   /* STR_GM_GO */                 "¡YA!",
   /* STR_GM_WIN */                "¡Ganaste!",
@@ -747,10 +745,10 @@ inline constexpr const char* const ES[] = {
   /* STR_HLP_BACK */              "Volver sin tocar nada.",
 
   /* --- 33c. on-device minigames --- */
-  /* STR_DG_REFLEX_HINT */        "Pulsa el lado que brille.",
-  /* STR_DG_MEMORY_HINT */        "Repite la secuencia.",
-  /* STR_DG_JUMP_HINT */          "Pulsa para saltar.",
+  /* STR_MG_PING_HINT */          "Pulsa el lado que brille.",
+  /* STR_MG_SEQ_HINT */           "Repite la secuencia.",
   /* STR_GM_ROUND */              "Ronda",
+  /* STR_GM_NEXT */               "¿Otra?",
   /* STR_GM_TOOSOON */            "Demasiado pronto.",
 
   /* --- 33d. dynasty name syllables --- */

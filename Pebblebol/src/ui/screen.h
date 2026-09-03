@@ -93,6 +93,10 @@ inline const ScreenDef* screen_def(uint8_t s) {
 #define UI_HDR_H            11                        // inverted title bar
 #define UI_HDR_BASE          9                        // its text baseline
 #define UI_AFFORD_Y         (OLED_H - AFFORDANCE_BAR_H)   // 56
+// The content band: below the header bar, above the affordance strip. Both
+// ends live here now - UI_CONTENT_Y was private to ui.cpp until P3-C4a, and
+// the minigame draw halves are outside ui.cpp by design.
+#define UI_CONTENT_Y        UI_HDR_H                      // 11
 #define UI_CONTENT_BOTTOM   (UI_AFFORD_Y - 1)             // 55
 
 #endif  // NT_SCREEN_H

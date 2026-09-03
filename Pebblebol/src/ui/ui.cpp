@@ -45,6 +45,8 @@
 #include "../data/balance.h"   // ACT_PLAY_MIN_ENERGY_PCT for the PLAY entry
 #include "render.h"
 #include "../hardware/input.h"
+#include "../minigames/manager.h"
+#include "../minigames/registry.h"
 #include "../game/sim.h"
 #include "../game/genome.h"
 #include "../core/rng.h"
@@ -92,7 +94,7 @@
 // UI_HDR_H, UI_HDR_BASE, UI_AFFORD_Y and UI_CONTENT_BOTTOM moved to screen.h:
 // a migrated screen may not include render.h, so the shared geometry has to
 // live where both sides can see it.
-#define UI_CONTENT_Y        UI_HDR_H                  // 11
+// UI_CONTENT_Y moved to ui/screen.h (P3-C4a): the minigame draw halves need it
 #define UI_CONTENT_H        (RD_AFFORD_Y - UI_CONTENT_Y)   // 45
 
 static_assert(UI_AFFORD_Y == RD_AFFORD_Y,
@@ -173,43 +175,12 @@ static Config*  s_cfg         = nullptr;
 // ceremony_start().
 
 // ---- GAME -------------------------------------------------------------------
-// MinigameState, not GameState: SaveSchema v2 owns that name for the whole
-// persisted world (persistence/save_schema.h section 8). This is the transient
-// state of the minigame currently on screen and never reaches flash.
-struct MinigameState {
-  uint8_t  id;
-  uint8_t  phase;        // 0 = ready, 1 = running, 2 = result
-  uint8_t  round;
-  uint8_t  target;       // reflex: the lit side
-  uint8_t  seq[10];
-  uint8_t  seq_len;
-  uint8_t  seq_pos;
-  uint8_t  play_idx;
-  uint8_t  passed;
-  uint8_t  obs_n;
-  uint16_t score;        // per-mille, 0..1000
-  uint16_t last_ms;
-  uint32_t arm_ms;       // reflex: dead time before the light
-  int16_t  obs_x[3];
-  int16_t  pet_dy;
-  uint32_t t0;
-  uint32_t step_ms;
-  uint32_t jump_ms;      // jump: 0 = grounded, else takeoff timestamp
-};
-static MinigameState s_g;
-
-#define GAME_STEP_MS       25UL
-#define GAME_INTRO_MS    1600UL
-#define GAME_RESULT_MS   2200UL
-#define REFLEX_ROUNDS       5
-#define REFLEX_WINDOW_MS  900UL
-#define MEMORY_LEVELS       6      // sequences of 3 .. 8
-#define MEMORY_FLASH_MS   380UL
-#define MEMORY_GAP_MS     170UL
-#define JUMP_TARGET        12
-#define JUMP_GROUND_Y      50
-#define JUMP_RISE_MS      700UL
-#define JUMP_HEIGHT        18
+// The games moved out to src/minigames/ (P3-C4a). What used to be here - a
+// MinigameState struct, three games and their drawing, all interleaved with
+// this file's chrome - is now minigames/minigame.{h,cpp} (the contract),
+// minigames/manager.{h,cpp} (the sequence, PURE so the "one report per game"
+// property is testable), minigames/games/*_logic.cpp (pure) and
+// minigames/games/*_draw.cpp (device). ui.cpp keeps only the SCREEN.
 
 // =============================================================================
 //  3. SMALL HELPERS
@@ -248,12 +219,7 @@ static void px_frame(int16_t x, int16_t y, int16_t w, int16_t h) {
   rd_u8g2().drawFrame((u8g2_uint_t)x, (u8g2_uint_t)y, (u8g2_uint_t)w, (u8g2_uint_t)h);
 }
 
-static void px_hline(int16_t x, int16_t y, int16_t w) {
-  if (w <= 0 || y < 0) return;
-  if (x < 0) { w = (int16_t)(w + x); x = 0; }
-  if (w <= 0) return;
-  rd_u8g2().drawHLine((u8g2_uint_t)x, (u8g2_uint_t)y, (u8g2_uint_t)w);
-}
+// px_hline() went with the SALTO minigame it drew the ground line for.
 
 // drawXBM cannot clip a negative origin, so an off-screen sprite is dropped.
 static void px_spr(int16_t x, int16_t y, const SpriteRef& r) {
@@ -985,303 +951,109 @@ static void home_leave_layer(void) { actfx_cancel(); }
 //        reached through the ui.h seams in section 19.
 // =============================================================================
 
-static void game_start(uint8_t dev_id);
 
 // =============================================================================
-//  11. GAME - the three on-device 2-button minigames
+//  11. GAME - the screen. The games themselves live in src/minigames/.
 //
-//  Canonical for minigames_won (BRIEF 1.6): every result goes through
+//  This section used to be three games, their drawing, their scoring and their
+//  chrome, all in one place. P3-C4a moved everything but the SCREEN out:
+//  minigames/manager.cpp runs the sequence and reports each result exactly
+//  once, minigames/registry.cpp draws whichever game is live. What is left
+//  here is the frame around it and the two ways out.
+//
+//  Canonical for minigames_won (BRIEF 1.6): every result still goes through
 //  sim_apply_play_result(), which owns the shared cooldown and hourly ledger,
-//  so no surface can be farmed.
+//  so no surface can be farmed. It is reached through the manager's ONE report
+//  callback, bound below - which is the point of the extraction: there is now
+//  exactly one line in the firmware that can report a minigame result.
 //
 //  INPUT: a game is judged on the PRESS, not on the gesture the press turns
-//  into, so the games read input_pressed_edge() - the debounced press edge,
-//  consumed once - and ignore the GST_TAP_* that arrives at release. Since
-//  P3-C4a that release is only ~25 ms behind the press rather than 280 ms,
-//  but the distinction still matters: "press A as the indicator crosses the
-//  zone" must be timed from the button going DOWN. GST_HOLD_R (pause) and
-//  GST_LONG_BOTH (force quit) still arrive as gestures.
+//  into, so the run loop reads input_pressed_edge() - the debounced press
+//  edge, consumed once - and ignores the GST_TAP_* that arrives at release.
+//  Since P3-C4a that release is only ~25 ms behind the press rather than
+//  280 ms, but the distinction still matters: "press A as the indicator
+//  crosses the zone" is timed from the button going DOWN.
 // =============================================================================
 
-static void game_start(uint8_t dev_id) {
-  memset(&s_g, 0, sizeof(s_g));
-  s_g.id      = (dev_id < DG_COUNT) ? dev_id : (uint8_t)DG_REFLEX;
-  s_g.t0      = now_ms();
-  s_g.step_ms = s_g.t0;
-  s_g.seq_len = 3;
-  (void)input_pressed_edge(INPUT_BTN_L);   // drop the press that opened the game
-  (void)input_pressed_edge(INPUT_BTN_R);
-  nav_push(SCR_GAME);
-}
-
-static void game_finish(void) {
+// THE one reporting path. Bound into the manager by ui_begin().
+static void game_report(uint8_t /* game_id */, uint16_t permille) {
   ActionResult r;
-  const uint16_t permille = (s_g.score > 1000u) ? 1000u : s_g.score;
+  if (permille > MG_SCORE_MAX) permille = MG_SCORE_MAX;
   sim_apply_play_result(permille, r);
   (void)app_award_xp(xp_minigame_amount(permille), XP_SRC_MINIGAME);
-  const SimView* p = pet();
-  if (p) gs_save_active(true);
-  s_g.phase = 2;
-  s_g.t0    = now_ms();
-  ui_toast(permille >= 500u ? STR_GM_WIN : STR_GM_LOSE);
+  if (pet()) gs_save_active(true);
 }
 
-// ---- REFLEX -----------------------------------------------------------------
-static void reflex_arm(void) {
-  s_g.target = (uint8_t)(rng_u32(RNG_MINIGAME) & 1u);
-  s_g.t0     = now_ms();
-  s_g.arm_ms = 700UL + rng_below(RNG_MINIGAME, 1500u);   // dead time before the light
-}
-
-static void reflex_step(void) {
-  if (since(s_g.t0) > s_g.arm_ms + REFLEX_WINDOW_MS) {
-    s_g.last_ms = 0;                                 // missed the window
-    if (++s_g.round >= REFLEX_ROUNDS) { game_finish(); return; }
-    reflex_arm();
-  }
-}
-
-static void reflex_press(uint8_t side) {
-  const uint32_t el = since(s_g.t0);
-  if (el < s_g.arm_ms) {
-    ui_toast(STR_GM_TOOSOON);
-    s_g.last_ms = 0;
-  } else {
-    const uint32_t rt = el - s_g.arm_ms;
-    if (side == s_g.target && rt <= REFLEX_WINDOW_MS) {
-      s_g.last_ms = (uint16_t)rt;
-      s_g.score = (uint16_t)(s_g.score +
-                  (REFLEX_WINDOW_MS - rt) * 200UL / REFLEX_WINDOW_MS);  // 5 x 200
-    } else {
-      s_g.last_ms = 0;
-    }
-  }
-  if (++s_g.round >= REFLEX_ROUNDS) { game_finish(); return; }
-  reflex_arm();
-}
-
-static void reflex_draw(void) {
-  U8G2& u = rd_u8g2();
-  const uint32_t el = since(s_g.t0);
-  const bool lit = (el >= s_g.arm_ms) && (el <= s_g.arm_ms + REFLEX_WINDOW_MS);
-  if (lit) {
-    const int16_t x = s_g.target ? (int16_t)(OLED_W / 2) : (int16_t)0;
-    px_box(x, UI_CONTENT_Y, OLED_W / 2, 32);
-    u.setDrawColor(0);
-    px_spr((int16_t)(x + OLED_W / 4 - 4), (int16_t)(UI_CONTENT_Y + 12),
-           sprite_mini(s_g.target ? MIC_ARROW_R : MIC_ARROW_L));
-    u.setDrawColor(1);
-  } else {
-    rd_text_center((int16_t)(UI_CONTENT_Y + 20), RD_FONT_HEAD, S(STR_GM_READY));
-  }
-  char buf[16];
-  if (s_g.last_ms) snprintf(buf, sizeof(buf), "%u ms", (unsigned)s_g.last_ms);
-  else             snprintf(buf, sizeof(buf), "--");
-  rd_text_center(UI_CONTENT_BOTTOM, RD_FONT_TINY, buf);
-}
-
-// ---- MEMORY -----------------------------------------------------------------
-static void memory_new_round(void) {
-  s_g.seq_len = (uint8_t)(3u + s_g.round);
-  if (s_g.seq_len > 8u) s_g.seq_len = 8u;
-  for (uint8_t i = 0; i < s_g.seq_len; ++i) s_g.seq[i] = (uint8_t)(rng_u32(RNG_MINIGAME) & 1u);
-  s_g.play_idx = 0;
-  s_g.seq_pos  = 0;
-  s_g.t0       = now_ms();
-}
-
-static void memory_step(void) {
-  if (s_g.play_idx >= s_g.seq_len) return;
-  const uint32_t slot = MEMORY_FLASH_MS + MEMORY_GAP_MS;
-  const uint32_t idx  = since(s_g.t0) / slot;
-  s_g.play_idx = (idx > s_g.seq_len) ? s_g.seq_len : (uint8_t)idx;
-}
-
-static void memory_press(uint8_t side) {
-  if (s_g.play_idx < s_g.seq_len) return;             // still showing the sequence
-  if (side != s_g.seq[s_g.seq_pos]) {
-    s_g.score = (uint16_t)((uint32_t)s_g.round * 1000UL / MEMORY_LEVELS);
-    game_finish();
-    return;
-  }
-  if (++s_g.seq_pos >= s_g.seq_len) {
-    if (++s_g.round >= MEMORY_LEVELS) { s_g.score = 1000; game_finish(); return; }
-    memory_new_round();
-  }
-}
-
-static void memory_draw(void) {
-  U8G2& u = rd_u8g2();
-  const uint32_t slot = MEMORY_FLASH_MS + MEMORY_GAP_MS;
-  const bool showing  = (s_g.play_idx < s_g.seq_len);
-  int8_t lit = -1;
-  if (showing && (since(s_g.t0) % slot) < MEMORY_FLASH_MS)
-    lit = (int8_t)s_g.seq[s_g.play_idx];
-
-  for (uint8_t side = 0; side < 2; ++side) {
-    const int16_t x = (int16_t)(side ? 66 : 2);
-    if (lit == (int8_t)side) px_box(x, (int16_t)(UI_CONTENT_Y + 2), 60, 24);
-    else                     px_frame(x, (int16_t)(UI_CONTENT_Y + 2), 60, 24);
-    u.setDrawColor(lit == (int8_t)side ? 0 : 1);
-    px_spr((int16_t)(x + 26), (int16_t)(UI_CONTENT_Y + 10),
-           sprite_mini(side ? MIC_ARROW_R : MIC_ARROW_L));
-    u.setDrawColor(1);
-  }
-
-  for (uint8_t i = 0; i < s_g.seq_len; ++i) {
-    const int16_t x = (int16_t)(OLED_W / 2 - s_g.seq_len * 3 + i * 6);
-    if (i < s_g.seq_pos) px_box(x, (int16_t)(UI_CONTENT_Y + 30), 5, 4);
-    else                 px_frame(x, (int16_t)(UI_CONTENT_Y + 30), 5, 4);
-  }
-
-  char buf[24];
-  snprintf(buf, sizeof(buf), "%s %u/%u", S(STR_GM_ROUND),
-           (unsigned)(s_g.round + 1u), (unsigned)MEMORY_LEVELS);
-  rd_text_center(UI_CONTENT_BOTTOM, RD_FONT_BODY, buf);
-}
-
-// ---- JUMP -------------------------------------------------------------------
-static void jump_spawn(void) {
-  if (s_g.obs_n >= 3) return;
-  int16_t x = (int16_t)(OLED_W + (int16_t)rng_below(RNG_MINIGAME, 40u));
-  for (uint8_t i = 0; i < s_g.obs_n; ++i)
-    if (x - s_g.obs_x[i] < 36) x = (int16_t)(s_g.obs_x[i] + 36);
-  s_g.obs_x[s_g.obs_n++] = x;
-}
-
-static void jump_press(void) { if (s_g.jump_ms == 0) s_g.jump_ms = now_ms(); }
-
-static void jump_step(void) {
-  if (s_g.jump_ms) {
-    const uint32_t t = since(s_g.jump_ms);
-    if (t >= JUMP_RISE_MS) { s_g.jump_ms = 0; s_g.pet_dy = 0; }
-    else {
-      const int32_t half = (int32_t)(JUMP_RISE_MS / 2u);
-      const int32_t d    = (int32_t)t - half;
-      s_g.pet_dy = (int16_t)(-(JUMP_HEIGHT - (d * d * JUMP_HEIGHT) / (half * half)));
-    }
-  }
-
-  for (uint8_t i = 0; i < s_g.obs_n; ) {
-    s_g.obs_x[i] = (int16_t)(s_g.obs_x[i] - 3);
-    if (s_g.obs_x[i] < 30 && s_g.obs_x[i] + 6 > 14 && s_g.pet_dy > -9) {
-      s_g.score = (uint16_t)((uint32_t)s_g.passed * 1000UL / JUMP_TARGET);
-      game_finish();
-      return;
-    }
-    if (s_g.obs_x[i] < -6) {
-      ++s_g.passed;
-      for (uint8_t k = (uint8_t)(i + 1u); k < s_g.obs_n; ++k) s_g.obs_x[k - 1] = s_g.obs_x[k];
-      --s_g.obs_n;
-      if (s_g.passed >= JUMP_TARGET) { s_g.score = 1000; game_finish(); return; }
-      continue;
-    }
-    ++i;
-  }
-  if (s_g.obs_n == 0 || s_g.obs_x[s_g.obs_n - 1] < 72) jump_spawn();
-}
-
-static void jump_draw(void) {
-  px_hline(0, JUMP_GROUND_Y + 2, OLED_W);
-  const SimView* p = pet();
-  const uint8_t fr = (uint8_t)((now_ms() / 150u) & 1u);
-  SpriteRef r = sprite_frame(SPR_BABY_BLOB, fr);
-  if (p) {
-    const Stage st = (Stage)((p->stage == STAGE_EGG) ? (uint8_t)STAGE_BABY
-                                                     : p->stage);
-    r = sprite_lookup_pose(gene_species(p->genome), (uint8_t)st,
-                           sprite_form_of(p->genome, p->minor_form, st), POSE_IDLE, fr);
-  }
-  int16_t py = (int16_t)(JUMP_GROUND_Y + 2 - (int16_t)r.h + s_g.pet_dy);
-  if (py < UI_CONTENT_Y) py = UI_CONTENT_Y;
-  px_spr(14, py, r);
-
-  for (uint8_t i = 0; i < s_g.obs_n; ++i)
-    px_box(s_g.obs_x[i], (int16_t)(JUMP_GROUND_Y - 8), 6, 10);
-
-  char buf[16];
-  snprintf(buf, sizeof(buf), "%u/%u", (unsigned)s_g.passed, (unsigned)JUMP_TARGET);
-  rd_text_right(OLED_W - 2, (int16_t)(UI_CONTENT_Y + 6), RD_FONT_TINY, buf);
-}
-
-// ---- shared -----------------------------------------------------------------
-static void game_press(uint8_t side) {
-  if (s_g.phase != 1) return;
-  switch (s_g.id) {
-    case DG_REFLEX: reflex_press(side); break;
-    case DG_MEMORY: memory_press(side); break;
-    default:        jump_press();       break;
-  }
-}
+static uint32_t s_game_ms = 0;        // last service instant, for the real dt
 
 static void game_service(void) {
-  const uint32_t t = now_ms();
+  if (!mgr_active()) { if (sm_current() == SCR_GAME) nav_back(); return; }
 
-  if (s_g.phase == 0) {
-    if (since(s_g.t0) >= GAME_INTRO_MS) {
-      s_g.phase = 1;
-      s_g.round = 0;
-      s_g.score = 0;
-      if      (s_g.id == DG_REFLEX) reflex_arm();
-      else if (s_g.id == DG_MEMORY) memory_new_round();
-      else { s_g.t0 = t; s_g.step_ms = t; jump_spawn(); }
-    }
-    return;
-  }
-  if (s_g.phase == 2) {
-    if (since(s_g.t0) >= GAME_RESULT_MS) nav_back();
-    return;
+  const uint32_t t  = now_ms();
+  const uint32_t dt = s_game_ms ? (uint32_t)(t - s_game_ms) : 0u;
+  s_game_ms = t;
+
+  // Presses first, so a button pressed in the same frame the game ends still
+  // counts; mg_press() refuses once the game is over.
+  if (mgr_phase() == MGR_RUN || mgr_phase() == MGR_NEXT) {
+    if (input_pressed_edge(INPUT_BTN_L)) mgr_press(MG_SIDE_L);
+    if (input_pressed_edge(INPUT_BTN_R)) mgr_press(MG_SIDE_R);
   }
 
-  for (uint8_t b = 0; b < 2; ++b) {
-    // input_pressed_edge() consumes the edge, so one physical press is one
-    // game_press() however often this runs. It replaces the s_raw_prev[]
-    // sampling that lived here, which could MISS a press entirely: it compared
-    // input_raw() between frames, and a press shorter than one frame at
-    // FPS_LOW went down and up inside the gap.
-    if (input_pressed_edge(b)) game_press(b);
-    if (s_g.phase != 1) return;
-  }
+  // A note the pure logic left for us (PING's "too soon"): the presentation
+  // layer toasts it, because logic that could toast would not be pure.
+  const MgCtx& c = mgr_ctx();
+  if (c.note) { ui_toast(c.note); const_cast<MgCtx&>(c).note = 0u; }
 
-  // Fixed-step physics: the speed must not track the frame rate.
-  while ((uint32_t)(t - s_g.step_ms) >= GAME_STEP_MS) {
-    s_g.step_ms += GAME_STEP_MS;
-    switch (s_g.id) {
-      case DG_REFLEX: reflex_step(); break;
-      case DG_MEMORY: memory_step(); break;
-      default:        jump_step();   break;
-    }
-    if (s_g.phase != 1) return;
-  }
+  if (!mgr_tick(dt) && sm_current() == SCR_GAME) nav_back();
 }
 
 static void draw_game(void) {
-  const uint16_t title = (s_g.id == DG_REFLEX) ? STR_DG_REFLEX
-                       : (s_g.id == DG_MEMORY) ? STR_DG_MEMORY : STR_DG_JUMP;
-  const uint16_t sc = (s_g.score > 1000u) ? 1000u : s_g.score;
+  const MgLogic* g = mgr_logic();
+  if (g == nullptr) return;
+
+  const uint16_t sc = mgr_ctx().score;
   char tag[12];
   snprintf(tag, sizeof(tag), "%u", (unsigned)(sc / 10u));
-  draw_header(S(title), (s_g.phase == 1) ? tag : nullptr);
+  draw_header(S(g->name_idx), (mgr_phase() == MGR_RUN) ? tag : nullptr);
 
-  if (s_g.phase == 0) {
-    const bool go = since(s_g.t0) >= 1000UL;
-    rd_text_center((int16_t)(UI_CONTENT_Y + 16), RD_FONT_HEAD,
-                   S(go ? STR_GM_GO : STR_GM_READY));
-    const uint16_t hint = (s_g.id == DG_REFLEX) ? STR_DG_REFLEX_HINT
-                        : (s_g.id == DG_MEMORY) ? STR_DG_MEMORY_HINT : STR_DG_JUMP_HINT;
-    rd_text_center((int16_t)(UI_CONTENT_Y + 32), RD_FONT_BODY, S(hint));
-  } else if (s_g.phase == 2) {
-    rd_text_center((int16_t)(UI_CONTENT_Y + 16), RD_FONT_HEAD,
-                   S(sc >= 500u ? STR_GM_WIN : STR_GM_LOSE));
-    char buf[24];
-    snprintf(buf, sizeof(buf), "%s %u", S(STR_GM_SCORE), (unsigned)(sc / 10u));
-    rd_text_center((int16_t)(UI_CONTENT_Y + 32), RD_FONT_BODY, buf);
-  } else {
-    switch (s_g.id) {
-      case DG_REFLEX: reflex_draw(); break;
-      case DG_MEMORY: memory_draw(); break;
-      default:        jump_draw();   break;
+  switch (mgr_phase()) {
+    case MGR_INTRO: {
+      const bool go = mgr_phase_ms() >= MGR_GO_MS;
+      rd_text_center((int16_t)(UI_CONTENT_Y + 16), RD_FONT_HEAD,
+                     S(go ? STR_GM_GO : STR_GM_READY));
+      rd_text_center((int16_t)(UI_CONTENT_Y + 32), RD_FONT_BODY, S(g->hint_idx));
+      break;
     }
+    case MGR_RESULT: {
+      rd_text_center((int16_t)(UI_CONTENT_Y + 16), RD_FONT_HEAD,
+                     S(sc >= 500u ? STR_GM_WIN : STR_GM_LOSE));
+      char buf[24];
+      snprintf(buf, sizeof(buf), "%s %u", S(STR_GM_SCORE), (unsigned)(sc / 10u));
+      rd_text_center((int16_t)(UI_CONTENT_Y + 32), RD_FONT_BODY, buf);
+      break;
+    }
+    case MGR_NEXT: {
+      // The 1.2 s card between games. A continues, B stops - and it says so,
+      // because GAME_DESIGN 8.3 forbids hidden gestures.
+      rd_text_center((int16_t)(UI_CONTENT_Y + 20), RD_FONT_HEAD, S(STR_GM_NEXT));
+      char buf[24];
+      snprintf(buf, sizeof(buf), "%u/%u", (unsigned)(mgr_index() + 1u),
+               (unsigned)mgr_count());
+      rd_text_center((int16_t)(UI_CONTENT_Y + 36), RD_FONT_BODY, buf);
+      rd_affordance(S(STR_AF_OK), S(STR_AF_BACK));
+      return;
+    }
+    case MGR_TOTAL: {
+      char buf[24];
+      snprintf(buf, sizeof(buf), "%s %u", S(STR_GM_SCORE),
+               (unsigned)(mgr_total_score() / 10u));
+      rd_text_center((int16_t)(UI_CONTENT_Y + 24), RD_FONT_HEAD, buf);
+      break;
+    }
+    default:
+      mg_draw_current();      // the run frame, from minigames/registry.cpp
+      break;
   }
   rd_affordance(nullptr, S(STR_AF_PAUSE));
 }
@@ -1291,8 +1063,8 @@ static void draw_game(void) {
 // to be a 600 ms hold, which is the definition of a hidden one.
 static void handle_game(Gesture g) {
   if (g != GST_TAP_R) return;
-  if (s_g.phase == 1) dialog_open_confirm(CFM_QUIT_GAME, STR_CF_QUIT_GAME);
-  else                nav_back();
+  if (mgr_phase() == MGR_RUN) dialog_open_confirm(CFM_QUIT_GAME, STR_CF_QUIT_GAME);
+  else                        mgr_back();
 }
 
 // =============================================================================
@@ -1439,8 +1211,11 @@ void ui_note_recovered(void) {
 static void dialog_commit(uint8_t which) {
   switch (which) {
     case CFM_QUIT_GAME:
-      s_g.score = 0;
-      game_finish();                                   // counts as a loss
+      // Quitting is a result of whatever was earned so far, reported through
+      // the manager's ONE path like every other ending. It used to zero the
+      // score and call game_finish() here, which was a second place in the
+      // firmware that could report a minigame.
+      mgr_back();
       break;
     case CFM_MEDICINE: act_and_show(ACT_MEDICINE); break;   // BRIEF D
     // Spec section 18. app_evolve_active() performs the change and flushes it -
@@ -1509,12 +1284,13 @@ void ui_game_render(void)                  { draw_game(); }
 void ui_game_input(Gesture g)              { handle_game(g); }
 
 void ui_game_leave(void) {
-  // Abandoning a game in any way at all is a loss.
-  if (s_g.phase != 1) return;
-  ActionResult r;
-  s_g.score = 0;
-  sim_apply_play_result(0, r);
-  s_g.phase = 2;
+  // Leaving the screen by ANY route abandons the run. This used to call
+  // sim_apply_play_result() itself, which made it a second reporting path
+  // guarded only by a phase check - two exits, two chances to count a game
+  // twice in minigames_won and in the XP ledger. mgr_abort() reports the
+  // running game exactly once and is a no-op if it already has.
+  mgr_abort();
+  s_game_ms = 0;
 }
 
 // =============================================================================
@@ -1551,7 +1327,8 @@ void ui_note_brightness(uint8_t contrast) {
 static const PebbleView* ui_fill_view(void);
 
 void ui_begin(void) {
-  memset(&s_g,     0, sizeof(s_g));
+  mgr_bind_report(game_report);   // THE one path a minigame result can take
+  mgr_abort();                    // a wipe must not leave a run half-played
   // The screens P2-C11b migrated read the pet through this snapshot and draw
   // the animated stage through the bound layer. Both bindings are re-made on
   // every ui_begin(), which is also what a factory reset runs.
@@ -1918,7 +1695,15 @@ void ui_start_minigame(uint8_t idx) {
     return;
   }
   if (sim_stat_pct(ST_ENERGY) < ACT_PLAY_MIN_ENERGY_PCT) { ui_toast(STR_AERR_TIRED); return; }
-  game_start(idx);
+
+  // One seed for the whole sequence, drawn once from the minigame stream: the
+  // three games AND their layouts are reproducible from it, which is what
+  // makes a run replayable in a test and a bug report.
+  mgr_begin(idx, rng_u32(RNG_MINIGAME), MGR_SEQ_LEN);
+  s_game_ms = 0;
+  (void)input_pressed_edge(INPUT_BTN_L);   // drop the press that opened the game
+  (void)input_pressed_edge(INPUT_BTN_R);
+  nav_push(SCR_GAME);
 }
 
 uint8_t ui_god_progress(void) { return s_god_prog; }

@@ -29,7 +29,9 @@ enum CareRow : uint8_t {
   CARE_ROWS
 };
 
-#define PLAY_ROWS  4        // three minigames plus "Volver"
+#define PLAY_ROWS  3        // MG_ID_COUNT minigames plus "Volver"
+                            // SALTO was the third; P3-C4a deleted it (it is in
+                            // no spec 29 list) and P3-C4b brings the count to 7.
 
 void    care_enter(void);
 void    care_render(void);

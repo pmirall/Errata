@@ -197,13 +197,9 @@ enum WishId : uint8_t {
   WISH_COUNT
 };
 
-// On-device 2-button minigames (the GAME screen). Canonical for minigames_won.
-enum DevGameId : uint8_t {
-  DG_REFLEX = 0,
-  DG_MEMORY,
-  DG_JUMP,
-  DG_COUNT
-};
+// The minigame ids moved to minigames/minigame.h (P3-C4a): they belong with
+// the contract that defines them, and nt_types.h is included by translation
+// units that have no business knowing the games exist.
 
 // S0 TAP_R cycles this.
 enum StatusBarMode : uint8_t {

@@ -59,6 +59,14 @@ $(OBJ)/%.o: $(SRC_ROOT)/ui/%.cpp Makefile | $(OBJ)
 $(OBJ)/%.o: $(SRC_ROOT)/app/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
+$(OBJ)/%.o: $(SRC_ROOT)/minigames/%.cpp Makefile | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+# The PURE half of every game. games/*_draw.cpp is NOT buildable here on
+# purpose: it draws, so it belongs to the device.
+$(OBJ)/%.o: $(SRC_ROOT)/minigames/games/%.cpp Makefile | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
 $(OBJ)/%.o: $(SRC_ROOT)/persistence/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
@@ -101,6 +109,11 @@ $(BIN)/test_box_sim:    $(OBJ)/box_sim.o $(OBJ)/box.o $(OBJ)/sim.o \
                         $(OBJ)/daylight.o $(OBJ)/genome.o $(OBJ)/crc16.o \
                         $(OBJ)/rng.o
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
+# The minigame contract and the PURE logic of every game. No draw objects and
+# no ui/: if this link line ever needs one, a game has leaked drawing into its
+# logic and the determinism argument has gone with it.
+$(BIN)/test_minigames: $(OBJ)/minigame.o $(OBJ)/manager.o $(OBJ)/ping_logic.o \
+                        $(OBJ)/sequence_logic.o $(OBJ)/rng.o
 $(BIN)/test_qr:         $(OBJ)/qr.o
 $(BIN)/test_clock:      $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o
 $(BIN)/test_overflow:   $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o \
