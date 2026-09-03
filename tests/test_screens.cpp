@@ -1496,6 +1496,8 @@ TEST(the_help_strip_expires) {
 //  them at all. tests/test_minigames.cpp still links NO draw object, and must
 //  not: that binary is where the determinism argument lives.
 // =============================================================================
+void ping_draw(const MgCtx& c);
+void sequence_draw(const MgCtx& c);
 void packet_flood_draw(const MgCtx& c);
 void firewall_draw(const MgCtx& c);
 void buffer_draw(const MgCtx& c);
@@ -1588,4 +1590,31 @@ TEST(snapshot_delete_run) {
 // Part way through a triage: charges spent, the caret parked on its next target.
 TEST(snapshot_delete_purged) {
   mg_snapshot(MG_DELETE, delete_draw, 5u, 200u, snap_del_triage, "mg_delete_purged");
+}
+
+// PING, waiting: both halves dark, the round armed and nothing to press yet.
+// This is most of the game - the whole point of REFLEJOS is that the cue is
+// rare - so it is the frame a player looks at longest.
+TEST(snapshot_ping_wait) {
+  mg_snapshot(MG_PING, ping_draw, 1u, 20u, nullptr, "mg_ping_wait");
+}
+
+// PING, lit: seed 1 arms at step 25, so five steps later the cue is up and half
+// the screen is solid on the side the player must hit.
+TEST(snapshot_ping_lit) {
+  mg_snapshot(MG_PING, ping_draw, 1u, 30u, nullptr, "mg_ping_lit");
+}
+
+// SEQUENCE, showing: level 1 (three symbols), the first symbol lit. The half
+// of the game the player may not touch.
+TEST(snapshot_sequence_show) {
+  mg_snapshot(MG_SEQUENCE, sequence_draw, 1u, 5u, nullptr, "mg_sequence_show");
+}
+
+// SEQUENCE, answering: the demonstration ended at step 54 and no tape presses
+// anything, so the game sits waiting for the player with the progress at 0 of
+// 3. The two states have to look different or the game is unplayable, which is
+// exactly what a pair of goldens pins.
+TEST(snapshot_sequence_answer) {
+  mg_snapshot(MG_SEQUENCE, sequence_draw, 1u, 60u, nullptr, "mg_sequence_answer");
 }

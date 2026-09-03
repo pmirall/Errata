@@ -1,11 +1,11 @@
 // =============================================================================
-//  Pebblebol host tests - test_sim_golden.cpp
+//  Pebblebol host tests - test_care_golden.cpp
 //  Pins the care trajectory of the legacy simulation (plan P2-C2, §4.2).
 //
 //  Fixed seeds, a fixed SimEnv and a scripted six hours: a meal every hour,
 //  CLEAN at 2 h, PLAY at 3 h. Every simulated minute the test hashes the six
 //  stats in StatId order plus the legacy PF_* word and appends one line; the
-//  whole transcript must match tests/golden/sim_v1.txt byte for byte.
+//  whole transcript must match tests/golden/care_v2.txt byte for byte.
 //
 //  P2-C10 moved the sim onto PebbleInstance. The hash is re-derived THROUGH the
 //  field map (stat[] -> care[] under CareId, ST_BOND -> the sim's RAM copy,
@@ -27,7 +27,16 @@
 //  gated health bleed instead of four instant ones) and deleted the age-based
 //  STAGE_MULT_* multipliers, so every hashed minute after t=000 moved. Only a
 //  `retune:` commit - or one that changes what is HASHED, as P3-C2b did - may
-//  regenerate it:  make -C tests golden  (or ./bin/test_sim_golden --record).
+//  regenerate it:  make -C tests golden  (or ./bin/test_care_golden --record).
+//
+//  P3-C5 RENAMED IT, AND NOT ONE TRAJECTORY LINE MOVED. It was
+//  test_sim_golden.cpp over golden/sim_v1.txt, where the `v1` meant the
+//  legacy v1 SIMULATION this file was first recorded from. Two retunes later
+//  that is no longer what it pins - P3-C1 moved care onto the hours scale -
+//  so the plan's own name for it applies: test_care_golden.cpp over
+//  golden/care_v2.txt, the second care model. The rename touched the file's
+//  HEADER LINE and nothing else; every hashed minute is byte-identical, which
+//  is exactly what the diff and this test passing together prove.
 // =============================================================================
 #include "nt_test.h"
 
@@ -36,7 +45,7 @@
 #include "game/sim.h"
 #include "game/genome.h"
 
-#define GOLDEN_REL_PATH   "golden/sim_v1.txt"
+#define GOLDEN_REL_PATH   "golden/care_v2.txt"
 #define GOLDEN_SEED       0xC0FFEEu
 #define GOLDEN_EPOCH0     1700000000u     // any sane epoch (>= NT_EPOCH_SANE_MIN)
 #define GOLDEN_MINUTES    360u            // 6 h
@@ -107,7 +116,7 @@ static void golden_run(char* text, size_t cap) {
   char hex[33];
   genome_to_hex32(g, hex);
   char head[GOLDEN_LINE_MAX];
-  snprintf(head, sizeof head, "sim_v1 seed=%08X genome=%s\n", (unsigned)GOLDEN_SEED, hex);
+  snprintf(head, sizeof head, "care_v2 seed=%08X genome=%s\n", (unsigned)GOLDEN_SEED, hex);
   strcat(text, head);
 
   emit(text, cap, 0, sim_take_events(), 0, nullptr);
@@ -134,7 +143,7 @@ static void golden_run(char* text, size_t cap) {
 static char s_text[GOLDEN_TEXT_MAX];
 static char s_file[GOLDEN_TEXT_MAX];
 
-TEST(sim_golden_matches_recorded_trajectory) {
+TEST(care_golden_matches_recorded_trajectory) {
   golden_run(s_text, sizeof s_text);
   CHECK(strlen(s_text) > 0);
 
@@ -189,7 +198,7 @@ TEST(sim_golden_matches_recorded_trajectory) {
 
 // The transcript is a pure function of the seeds: two runs in one process
 // must agree, which is what makes the file above a meaningful pin.
-TEST(sim_golden_is_deterministic) {
+TEST(care_golden_is_deterministic) {
   static char again[GOLDEN_TEXT_MAX];
   golden_run(s_text, sizeof s_text);
   golden_run(again, sizeof again);

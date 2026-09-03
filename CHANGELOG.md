@@ -8,6 +8,135 @@ Versions are tagged at phase boundaries of `PEBBLEBOL_IMPLEMENTATION_PLAN.md`; t
 tag for a phase is cut only when its gate (`tools/check.sh`) and its variant matrix
 (`tools/build_matrix.sh`) are both green.
 
+## [0.3.0-pet] — Unreleased
+
+Phase 3 turns the Pebblebol core engine into a virtual pet. Care moved onto the hours scale
+spec §27 asks for, XP and levels arrived with an anti-farm ledger, the light switch was
+deleted and sleep now follows the sun, evolution became a data table with a ceremony behind
+a confirmation, and the minigames left `ui.cpp` for a framework with six two-button games
+in it. A tap lands 255 ms sooner than it did. Nothing here talks to a cloud service either.
+
+Every commit in this range passes the gate: firmware compile with `--warnings all` at 0
+project warnings, size caps, and `make -C tests check`.
+
+### Added
+
+- **Care on the hours scale** (`data/balance.h`, new): every tunable in one file — care
+  rates (`-4,200 / -3,000 / 0 / -2,000 / -6,000` milli-points per hour), action gains,
+  cooldowns, gain caps, `XP_TABLE[31]`, the daylight table and the sleep constants. Health is
+  no longer a decay rate hiding in a decay array: the slot is 0 and the bleed is
+  `CARE_HEALTH_BLEED_MPH`, behind `CARE_ZERO_GRACE_S`, with `HEALTH_FLOOR_PCT` under it.
+- **XP and levels** (`game/xp.{h,cpp}`): a 30-level curve in data, multi-level carry-over, one
+  shared `xp_hp_rescale()`, and a device-wide anti-farm ledger that rides two already-reserved
+  `Inventory` fields — **no save-layout change**. A save/restore round trip can only
+  under-report the budget, never invent a point, and a reboot cannot refill a spent one.
+- **Sleep follows the daylight** (`game/daylight.{h,cpp}`, decision D13): a twelve-entry
+  sunrise/sunset table interpolated by day of year, integer arithmetic only. Bedtime is
+  sunset + 90 min, morning is sunrise. Three refused gestures inside ten seconds wake the pet
+  and the third one then lands; waking costs no stat (§27 forbids punishment).
+- **Data-driven evolution** (`data/evolution_table.h`, `game/evolution.{h,cpp}`): all five
+  §18 condition kinds behind a **validity mask** — a condition whose input this phase cannot
+  supply refuses, it never passes. A confirmation modal gates it, a decline leaves the pending
+  bit set, and the model change plus both its flushes land **before** the ceremony's first
+  frame. The roster grew from one placeholder row to family 1's three real species (D14).
+- **Minigame framework** (`minigames/`): six hooks split into `MgLogic` (pure) and
+  `MinigameDef` (plus `draw`), a fixed-size `MgCtx` with no heap, and a **pure** manager, so
+  "exactly one report per game" is a host test rather than a hope. Six games — PING,
+  SECUENCIA, PACKET FLOOD, FIREWALL, BUFFER, DELETE — each a `*_logic.cpp` / `*_draw.cpp`
+  pair, every run a constant length, every run reproducible from its seed.
+- **Host tests**: `test_xp` (16), `test_daylight` (7), `test_evolution` (18),
+  `test_minigames` (49), plus 11 minigame pixel goldens and the confirmation snapshot.
+
+### Changed
+
+- **A tap is emitted at RELEASE**, ~25 ms after the button comes up instead of 280 ms.
+  `GST_DBL_L/R` and `DOUBLE_TAP_WINDOW_MS` are gone from every header and every call site;
+  `input_pressed_edge()` is the press-edge seam the games read.
+- **The chunking test means something.** `care_one_hour_of_catch_up_is_the_same_however_it_is_chunked`
+  could not fail as written — `sim_tick()` chops any dt into 60 s sub-steps, so its three cases
+  were one case. The 1 s case is in it now, which is the step size the live device runs.
+- **`test_sim_golden.cpp` → `test_care_golden.cpp`**, `golden/sim_v1.txt` →
+  `golden/care_v2.txt`. The `v1` meant the legacy v1 *simulation* the transcript was first
+  recorded from; two retunes later that is not what it pins. Only the header line changed.
+
+### Removed
+
+- **The light.** `PF_LIGHT_ON`, `ACT_LIGHT_TOGGLE`, `MULT_LIGHT_ON_SLEEP`, five
+  `STR_*_LIGHT`, the CARE row and the SETTINGS row. Bit 0x0004 of the live flag word and bit
+  0x10 of `PebbleInstance.status` are reserved, never reused, never written; no other bit
+  moved, and the v1 migration drops the old bit rather than carrying it. It was the worst
+  mechanic in the game: a player who never found the toggle owned a Pebble that never slept.
+- SALTO, which is in no §29 list, and `MinigameState` with it.
+- The menu's repeat-last-action (in no spec section; its empty path toasted "bad argument")
+  and `s_last_action`, which after that was written in three places and read in none.
+
+### Fixed
+
+- **A sleeping pebble could not poop overnight, ever, on real hardware.** `poop_step()`
+  scaled its advance by `MULT_SLEEP` (×0.35) and truncated it every sub-step with no carry:
+  `(1 * 350) / 1000` is 0, and 1 s is the step the device runs outside god mode. An offline
+  catch-up over the same night (60 s sub-steps, an exact 21) produced two poops. It carries
+  its remainder now, the way the stat integrator always has. Found by adding the 1 s case to
+  the chunking test — the exercise the phase-3 exit asked for. Nothing at dt = 60 moved, so
+  the care golden did not need re-recording. `stage_step()` lost the same class of leak.
+- Three minigame framework defects, each of which would have bitten the four §29 games:
+  `MgCtx::state` sat at offset 14, so every 32-bit game field was read at 2 mod 4;
+  `draw_str_list()` sized its row array `CARE_ROWS` and clamped, so two PLAY rows would never
+  have drawn; and the in-run pause was on the same physical press the games are played with,
+  and the game kept stepping and eating press edges under the dialog it opened.
+- `ui.cpp` no longer freezes a chained evolution for a frame, and the model change is flushed
+  before the ceremony arms rather than after.
+
+### Measured
+
+| Variant | Overrides | Flash (B) | Static RAM (B) | Warnings |
+|---|---|---|---|---|
+| baseline | — | 1,893,072 | 70,348 | 0 |
+| no-ble | `FEATURE_BLE=0` | 1,180,684 | 46,868 | 0 |
+| no-web | `FEATURE_WEB=0` | 1,263,616 | 49,420 | 0 |
+| no-god | `GOD_MODE_ENABLED=0` | 1,881,054 | 70,204 | 0 |
+| sh1106 | `DISPLAY_IS_SH1106=1` | 1,893,072 | 70,348 | 0 |
+| all-off | all `FEATURE_*`=0 + `GOD_MODE_ENABLED=0` | 492,610 | 22,112 | 0 |
+| **release** | `GOD_MODE_ENABLED=0 FEATURE_BLE=0` | **1,168,772** | **46,708** | 0 |
+
+The whole phase cost **11,696 B of flash and 72 B of static RAM** on the baseline, which is
+79 % of the 2,400,000 B gate cap; the release build is 37 % of the 3,145,728 B `app0` slot,
+where phase 2 left it. Host suite: **21 binaries, 327 tests, 350,157 checks** (phase 2 shipped
+17 / 205 / 185,482).
+
+**The phase-3 exit soak, run rather than asserted from a comment.** Fourteen simulated days
+of total neglect — a hatched pebble, a trustworthy clock, not one action for a fortnight —
+recording the longest *continuous* run each stat spends at 0:
+
+| Stat | First reaches 0 | Longest run at 0 | Ends at |
+|---|---|---|---|
+| hunger | 30.8 h | 305.2 h | 0 % |
+| happiness | 27.5 h | 160.2 h | 40 % |
+| **energy** | 34.7 h | **2.1 h** | 79 % |
+| cleanliness | 24.7 h | 311.4 h | 0 % |
+| health | never | 0.0 h | 10 % |
+
+Energy — the one core stat the simulation restores by itself — is never at 0 for more than
+6 continuous hours and is above 90 % at all 14 sunrises (99 % every time). Over 480
+fortnights (40 genesis genomes × 12 month anchors) its worst run is 3.87 h and it exceeds 6 h
+in 0 of 480; at a metabolism gene of 15 (×1.50), which genesis cannot roll, it is 5.40 h.
+Health reaches 0 in none of them. Hunger, happiness and cleanliness are pinned for most of
+the fortnight and are meant to be — they are the ones only the player can refill. Scoped to a
+valid clock on purpose: without one there is no night, and energy pins at 0 for 322.78 h of
+the same 336. `docs/decisions.md` carries the full tables.
+
+### Not verified
+
+**This firmware has still never run on a physical board.** No ESP32-C3, no panel, no cells.
+Everything above is a host measurement or a compile result.
+
+**Evolution is not visible yet.** The model half is done and tested — the rule table, the
+conditions, the level gate, the stat recompute, the ceremony. But `pet_view_fill_sim()`, the
+path the firmware actually runs, derives the body from the genome, the minor form and the
+life stage, none of which an evolution moves, and `sprite_lookup_pose()` never sees
+`species_id`. So confirming an evolution today gives back the same body, the same name and a
+different `hp_max`. §18's visual transformation is carried to P4-C1, where the roster grows.
+
 ## [0.2.0-core] — Unreleased
 
 Phase 2 turns "Nottamagochi", a single 26,703-line Arduino sketch that had never run

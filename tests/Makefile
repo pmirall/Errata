@@ -89,7 +89,7 @@ $(OBJ)/host_shims.o: host_shims.cpp host_shims.h | $(OBJ)
 $(BIN)/test_crc16:      $(OBJ)/crc16.o
 $(BIN)/test_rng:        $(OBJ)/rng.o
 $(BIN)/test_genome:     $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
-$(BIN)/test_sim_golden: $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/genome.o \
+$(BIN)/test_care_golden: $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
 # box.o comes along for the "seven days stored comes back full" case: box_recover
 # is the OTHER half of the care model (spec section 9) and P3-C1 tunes both.
@@ -150,7 +150,15 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
 # halves: the draw half calls accessors the logic half owns, which is the whole
 # point of the split - neither side re-derives a rule. minigame.o drives them;
 # rng.o is already in SCREEN_OBJS.
+# ALL SIX GAMES, since P3-C5. P3-C4b shipped four: ping_draw.cpp and
+# sequence_draw.cpp were compiled only by the firmware build and never rendered
+# on the host, so the P3-C4 claim "snapshots for each game" was true of four of
+# six. They are here now, and the same argument that put the other four here
+# applies - a frozen BUFFER zone passed all 45 logic cases and was caught only
+# by a pixel golden.
 MG_FRAME_OBJS := $(OBJ)/minigame.o \
+                 $(OBJ)/ping_logic.o         $(OBJ)/ping_draw.o \
+                 $(OBJ)/sequence_logic.o     $(OBJ)/sequence_draw.o \
                  $(OBJ)/packet_flood_logic.o $(OBJ)/packet_flood_draw.o \
                  $(OBJ)/firewall_logic.o     $(OBJ)/firewall_draw.o \
                  $(OBJ)/buffer_logic.o       $(OBJ)/buffer_draw.o \
@@ -174,8 +182,8 @@ $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
 
 # --- goldens ----------------------------------------------------------------
-golden: $(BIN)/test_sim_golden
-	./$(BIN)/test_sim_golden --record
+golden: $(BIN)/test_care_golden
+	./$(BIN)/test_care_golden --record
 
 # Screen snapshots (golden/screens/*.pbm). Same rule as above: only from a
 # commit that means to change what a screen looks like, and read the diff.

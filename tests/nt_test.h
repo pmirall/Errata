@@ -10,7 +10,7 @@
 //  main() is provided here (define NT_TEST_NO_MAIN to supply your own):
 //      ./bin/test_x [--seed N] [--filter substr] [--list] [extra flags]
 //  Extra flags are left for the test to query with nt_flag()/nt_opt()
-//  (test_sim_golden uses --record). Every failed check prints file:line;
+//  (test_care_golden uses --record). Every failed check prints file:line;
 //  the process exits non-zero if any check failed or no test matched.
 // =============================================================================
 #ifndef NT_TEST_H

@@ -22,10 +22,8 @@
 
 #include <string.h>
 
-// Sub-step grid. Every cadence in the design (60 s stage check, 600 s sickness
-// roll, 600 s care-quality tick) is a multiple of this, so the event grid is
-// identical whether the caller ticks 1 s at a time or hands us 1800 s at once.
-#define SIM_SUBSTEP_S            60u
+// SIM_SUBSTEP_S, the sub-step grid, is declared in sim.h: the chunk-size
+// equivalence it buys is a contract tests state, not a private detail.
 
 // Auto-wake thresholds (see the note on "collapse" in sleep_machine()).
 #define SIM_WAKE_DAY_ENERGY_PCT  60
@@ -128,6 +126,10 @@ struct CareCtx {
   uint32_t acc_sick;
   uint32_t acc_minute;
   uint32_t poop_timer;
+  // Sub-second remainder of poop_timer, in thousandths of a second. The
+  // advance is fractional while the pebble sleeps (x0.35), so it is carried
+  // rather than truncated - see poop_step().
+  uint16_t poop_rem;
   int32_t  hapavg_rem;
   // How long at least one CORE stat has been pinned at zero. Health bleeds
   // only past CARE_ZERO_GRACE_S of this (spec section 27); it is RAM-only, so
@@ -265,7 +267,7 @@ static inline uint32_t rnd(void)
 }
 
 // Modulo on purpose: the legacy sim reduced its draws this way, and the care
-// golden (tests/golden/sim_v1.txt) pins that exact sequence of outcomes.
+// golden (tests/golden/care_v2.txt) pins that exact sequence of outcomes.
 static inline uint32_t rnd_below(uint32_t n)
 {
   return (n == 0u) ? 0u : (rnd() % n);
@@ -803,8 +805,20 @@ static void poop_step(uint32_t dt)
   // runs at. Without this, an 8 h night produces 5 poops and GAME_DESIGN 1.5's
   // "overnight is free, sleeping the pet before bed is a real strategy" is
   // simply false: the hygiene collapse alone would cost ~7 h of decay.
-  uint32_t adv = dt;
-  if (g.view.flags & PF_ASLEEP) adv = (dt * (uint32_t)MULT_SLEEP) / 1000u;
+  //
+  // That x0.35 is FRACTIONAL, so it carries its remainder exactly the way
+  // accum() does. Truncating it per sub-step was not a rounding error, it was
+  // a hole: the live device ticks the sim one second at a time
+  // (app.cpp -> sim_step_seconds() -> 1), and (1 * 350) / 1000 is 0 every
+  // time, so a sleeping pebble never advanced its timer at all and could not
+  // poop overnight, ever - while the offline catch-up over the same night
+  // (60 s sub-steps, where 60 * 350 / 1000 is an exact 21) produced two.
+  // Same night, same pebble, two different models. dt is at most
+  // SIM_SUBSTEP_S, so dt * 1000 + 999 cannot overflow.
+  const uint32_t mult  = (g.view.flags & PF_ASLEEP) ? (uint32_t)MULT_SLEEP : 1000u;
+  const uint32_t milli = dt * mult + (uint32_t)g.poop_rem;
+  const uint32_t adv   = milli / 1000u;
+  g.poop_rem           = (uint16_t)(milli % 1000u);
 
   g.poop_timer += adv;
   while (g.poop_timer >= period) {
@@ -929,7 +943,10 @@ static void stage_step(uint32_t dt)
 {
   g.acc_stage += dt;
   if (g.acc_stage < (uint32_t)STAGE_CHECK_PERIOD_S) return;
-  g.acc_stage = 0;
+  // Carry, do not discard: `= 0` loses whatever dt overshot the period by,
+  // which is the same class of leak poop_step() used to have. dt is at most
+  // SIM_SUBSTEP_S == STAGE_CHECK_PERIOD_S, so one subtraction is enough.
+  g.acc_stage -= (uint32_t)STAGE_CHECK_PERIOD_S;
 
   while (g.view.stage < STAGE_SENIOR && g.pb->age_s >= stage_enter_s((uint8_t)(g.view.stage + 1))) {
     g.view.stage = (uint8_t)(g.view.stage + 1);
@@ -969,6 +986,7 @@ static void hatch_now(void)
   g.view.minor_form   = 0;
   g.view.poop_count   = 0;
   g.poop_timer   = 0;
+  g.poop_rem     = 0;
   for (uint8_t i = 0; i < ST_COUNT; ++i) {
     stat_set(i, STAT_MILLI_MAX);
     stat_rem_set(i, 0);
@@ -1154,6 +1172,7 @@ static void reset_pebble_state(uint8_t fresh)
   g.events = 0;
   g.acc_stage = g.acc_cq = g.acc_sick = g.acc_minute = 0;
   g.poop_timer = 0;
+  g.poop_rem   = 0;
   g.hapavg_rem = 0;
   g.zero_dwell_s = 0;
   g.alert = AL_NONE;
@@ -1467,6 +1486,7 @@ bool sim_apply_action(ActionId action, ActionResult& out)
       stat_add(ST_HUNGER, ACT_MEAL_HUNGER);
       cq_add(ACT_MEAL_CQ);
       g.poop_timer = 0;                       // next poop 90 min after the meal
+      g.poop_rem   = 0;
       str_id = STR_RX_MEAL;
       break;
     }

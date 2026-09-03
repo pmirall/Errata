@@ -253,3 +253,175 @@ first flash. The soak is listed below with the other first-hardware measurements
   in P6, and the ceremony's phase edges in `ui/ceremony.cpp` are where those calls slot in
   (one per phase transition, armed exactly once, next to `rd_flash()` / `rd_shake()`). No
   tone engine was invented in P3.
+
+## Phase-3 exit (P3-C5, 2026-09-03)
+
+**Variant matrix.** `tools/build_matrix.sh` compiles all seven feature variants with
+`--warnings all` and fails on any warning pointing into the sketch. Result at the
+`v0.3.0-pet` tag, every variant at **0 project warnings**:
+
+| Variant | Overrides | Flash (B) | Static RAM (B) | Δ flash vs 0.2.0-core |
+|---|---|---|---|---|
+| baseline | — | 1,893,072 | 70,348 | +11,696 |
+| no-ble | `FEATURE_BLE=0` | 1,180,684 | 46,868 | +11,706 |
+| no-web | `FEATURE_WEB=0` | 1,263,616 | 49,420 | +11,644 |
+| no-god | `GOD_MODE_ENABLED=0` | 1,881,054 | 70,204 | +11,904 |
+| sh1106 | `DISPLAY_IS_SH1106=1` | 1,893,072 | 70,348 | +11,696 |
+| all-off | every `FEATURE_*`=0 + `GOD_MODE_ENABLED=0` | 492,610 | 22,112 | +11,844 |
+| **release** | `GOD_MODE_ENABLED=0 FEATURE_BLE=0` (D2) | **1,168,772** | **46,708** | +11,906 |
+
+A whole phase — XP and levels, the daylight sleep machine, data-driven evolution, the
+minigame framework and six games — cost **11,696 B of flash and 72 B of static RAM** on the
+baseline. Caps are `GATE_FLASH_MAX` 2,400,000 and `GATE_GLOBALS_MAX` 90,000 (`config.h`), so
+the baseline sits at 79 % of the flash cap and the release build at 37 % of the 3,145,728 B
+`app0` slot, where it was in phase 2.
+
+**Host suite.** 21 binaries, **327 tests, 350,157 checks** (phase 2 shipped 17 / 205 /
+185,482). Phase 3 added 4 binaries, 122 tests and 164,675 checks.
+
+### The soak criterion, restated and measured
+
+The phase-3 exit criterion the plan carried in was *"no stat pinned at 0 for more than 6
+simulated hours of neglect"*. Before D13 closed that was unreachable — a pebble whose light
+nobody switched off never slept, and energy pinned at 0 for ever. It is reachable now, but
+only for the one stat the simulation refills by itself, so it is restated:
+
+> **Fourteen simulated days of total neglect** — a hatched pebble, a trustworthy clock, and
+> not one action for a fortnight, recording the longest CONTINUOUS run each stat spends at 0.
+> **ENERGY**, the one core stat the simulation restores on its own, **is never at 0 for more
+> than 6 continuous simulated hours, and is back above 90 % at every sunrise.**
+> **HUNGER, HAPPINESS and CLEANLINESS** are at 0 for most of the fortnight, and are meant to
+> be: they are the ones only the player can refill, and refilling them is what the player is
+> for. **HEALTH** is what the floor protects — it never reaches 0 at all, and never falls
+> below `HEALTH_FLOOR_PCT`.
+
+It is asserted, not merely benched:
+`tests/test_care.cpp` §16 `care_a_fortnight_of_neglect_only_pins_the_stats_the_player_owns`
+runs the whole fortnight (20,160 minutes) in about a millisecond, so it is a gate rather
+than something somebody has to remember to drive on a device that has never been flashed.
+
+Measured on that fixture (seed `0x5EED0C7A`, 10:00, day 100, 336 h):
+
+| Stat | First reaches 0 | **Longest run at 0** | Total at 0 | Ends at |
+|---|---|---|---|---|
+| hunger | 30.8 h | **305.2 h** | 305.2 h | 0 % |
+| happiness | 27.5 h | **160.2 h** | 296.8 h | 40 % |
+| **energy** | 34.7 h | **2.1 h** | 24.6 h | 79 % |
+| cleanliness | 24.7 h | **311.4 h** | 311.4 h | 0 % |
+| health | never | **0.0 h** | 0.0 h | 10 % |
+
+14 wake-ups in 14 nights, every one of them above 90 % energy (99 % each time). The pebble
+is asleep for 124.6 h of the 336, sick for 329.9 h, and sits at the 10 % health floor for
+267.4 h — inconveniently unhappy, exactly as spec §27 asks, and still alive.
+
+Robustness, measured outside the suite over **480 fortnights** (40 genesis genomes × the 12
+month anchors):
+
+| Stat | min | mean | max | runs ever at 0 | runs with a run > 6 h |
+|---|---|---|---|---|---|
+| hunger | 292.48 h | 307.12 h | 313.08 h | 480/480 | 480/480 |
+| happiness | 155.85 h | 158.98 h | 160.47 h | 480/480 | 480/480 |
+| **energy** | 0.00 h | 0.49 h | **3.87 h** | 125/480 | **0/480** |
+| cleanliness | 307.57 h | 310.20 h | 312.55 h | 480/480 | 480/480 |
+| **health** | 0.00 h | 0.00 h | **0.00 h** | **0/480** | 0/480 |
+
+Hard worst case: forcing the metabolism gene to its maximum 15 (×1.50) — which genesis
+cannot roll, it clamps to 4..12 — over all 366 start days gives energy a longest run of
+**5.40 h**, still under 6 (worst 14-day start measured at day 151, which straddles the
+solstice). The closed form agrees: the longest awake window is 16.50 h — a 7.50 h midsummer
+night — minus 100000/(6000×1.50) = 11.11 h of energy, i.e. 5.39 h. The
+6 h number is not arbitrary — it is where the night stops being long enough to pay for the
+day, so `CARE_ENERGY_ASLEEP_MPH` dropped much below 13,300, `SLEEP_AFTER_DUSK_MIN` pushed
+past ~3 h, or `CARE_DECAY_MPH[CARE_ENERGY]` raised all break it.
+
+Two things the criterion could not honestly leave out:
+
+- **CLEANLINESS.** Restating this as "hunger and happiness" and stopping, as the plan's own
+  draft did, is factually wrong: cleanliness is the WORST of the five (311.4 h) and the
+  FIRST to bottom out (24.7 h, before hunger's 30.8 h), because every poop adds
+  `CARE_HYGIENE_POOP_MPH` on top of the base rate.
+- **Happiness does not stay empty, and no player is involved.** `events_step()` pays
+  `EVENT_VISITA_HAPPINESS` at 72 h of age and `EVENT_BIRTHDAY_HAPPY` every 168 h, which is
+  why its longest run is ~160 h rather than ~300 and why it finishes the fortnight at 40 %.
+  Hunger and cleanliness genuinely do stay empty.
+
+**Scoped to a valid clock on purpose.** With `clock_valid = 0` there is no night —
+`daylight_is_night()` is not asked without a trustworthy clock — the pebble never sleeps,
+and energy sits at 0 for **322.78 h of the same 336**, with 0.00 h asleep. That is D13
+reproduced exactly, on a device that has never had SNTP and learns the date from a human.
+It is the documented cost of the mechanic, not a defect in `game/sim.cpp`, but a criterion
+that does not say "with a valid clock" is simply false of the shipped simulation.
+
+### A real integrator defect, found by the chunking test the plan asked for
+
+The plan asked for one thing here: add 1 s chunking to
+`care_one_hour_of_catch_up_is_the_same_however_it_is_chunked`, because the three cases it
+had (3600, 60×60, 6×600) are the identical sub-step sequence and cannot disagree. The hour
+does match on all 128 bytes at every chunk size, and the test says so and says why. One hour
+later it does not, and the cause was not rounding:
+
+**`poop_step()` scaled its advance by `MULT_SLEEP` (×0.35) and truncated it every sub-step
+with no carry.** `(1 * 350) / 1000` is 0 — and **1 s is the step the live device runs**
+(`app/app.cpp` → `sim_step_seconds()`, which is 1 outside god mode). So a pebble asleep on
+real hardware never advanced its poop timer at all and **could not poop overnight, ever**,
+while an offline catch-up over the same night (60 s sub-steps, an exact 21) produced two.
+Same night, same pebble, two different models — and `poop_step()`'s own comment, "an 8 h
+night produces 5 poops… sleeping the pet before bed is a real strategy", was accidentally
+absolute on-device: sleeping the pet was not a discount, it was total immunity.
+
+Measured poops over 8 h from 23:00, by the step size the sim is driven at:
+
+| `sim_tick(n)` | 3600 | 600 | 60 | 30 | 20 | 10 | 5 | 2 | 1 |
+|---|---|---|---|---|---|---|---|---|---|
+| before | 2 | 2 | 2 | 2 | 2 | 2 | 1 | 0 | **0** |
+| after | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | **2** |
+
+`poop_step()` carries its remainder now, the way `accum()` always has. `stage_step()`'s
+`g.acc_stage = 0` became `-=` for the same reason — the same leak whenever `dt` does not
+divide the period, harmless at dt ∈ {1, 60} but the same class of bug.
+
+**Nothing at dt = 60 moved**, because 60 × 350 / 1000 is exact, so `golden/care_v2.txt` was
+NOT re-recorded and no existing test changed. Cost: 32 B of flash, 0 B of static RAM.
+
+What remains is a bound, not a bug, and the test says that plainly: a rate CHANGE — a poop
+arriving, the loneliness multiplier turning on — is evaluated on the `SIM_SUBSTEP_S` grid,
+so a finer step charges the new rate up to one sub-step early. The budget is one sub-step of
+the largest rate change in the model, **25 milli**; measured 9 milli over 2 awake hours
+(1 poop), 25 over 4 (3 poops), 11 over an 8 h night (2 poops at ×0.35 plus the loneliness
+edge). A displayed percent is 1,000 milli. `SIM_SUBSTEP_S` moved to `game/sim.h` so a test
+can state that bound. Mutation-checked: reverting the carry fails 6 checks across the two
+new cases.
+
+### Two overstated claims in the phase-3 audit trail, corrected
+
+- **P3-C3's "`test_pet_view` proves the body the view describes really changes" is not true
+  of the shipping build**, and the box has been split so that the false half is now an OPEN
+  item. `pet_view_fill()` — the only path that feeds `evo_state`'s stage bits to
+  `sprite_form_of()`, and the one the test drives — **has no caller in `Pebblebol/src`**. The
+  firmware fills the active pet through `pet_view_fill_sim()`, whose `form` comes from the
+  genome, the minor form and the life stage, none of which an evolution moves;
+  `sprite_lookup_pose()` never sees `species_id`, `SpeciesDef.sprite_id` is read by nothing,
+  and `STR_SPC_NAME_1..3` are displayed nowhere. A player who confirms an evolution today
+  watches 4.5 s of ceremony and gets back the same body, the same name and a different
+  `hp_max`. The MODEL half of P3-C3 is genuinely complete; §18's visual transformation is
+  not, and it is carried to P4-C1 as a sixth obligation, where the roster grows to twelve
+  species that would otherwise all wear their genome's body.
+- **P3-C4's "snapshots for each game" was true of four of six.** `ping_draw.cpp` and
+  `sequence_draw.cpp` were compiled only by the firmware build and never rendered on the
+  host. Both objects are in `MG_FRAME_OBJS` now with four goldens — `mg_ping_wait` /
+  `mg_ping_lit`, `mg_sequence_show` / `mg_sequence_answer` — so all six draw halves render at
+  128×64 with `fb_oob() == 0`, and the claim is true as written. The re-record produced only
+  those four files; every existing golden came back byte-identical.
+- **P3-C4's "DELETE's choice proof now DERIVES its '3 indices apart' from
+  `DEL_LIFE_MS`/`DEL_SPAWN_MS`" describes something that is not in the tree.** The test names
+  neither macro; it measures the maximum simultaneous corrupt count over 32 seeds and asserts
+  `>= 2`. That proves the property directly rather than deriving the schedule that implies
+  it — stronger than the description, but not the description. Corrected in place.
+
+### Still not run on hardware
+
+Unchanged from the phase-2 exit and worth repeating at a tag: **this firmware has never run
+on a physical board.** Every number above is a host measurement or a compile result. The
+plan's god-mode ×3600 soak (`dev/godmode.cpp`, the DIAG CSV) stays listed with the other
+first-flash measurements; the criterion it was meant to check now lives in the suite, where
+it runs on every gate instead of once, by hand, on a board nobody has.

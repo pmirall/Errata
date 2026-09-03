@@ -122,6 +122,16 @@ void     sim_switch(PebbleInstance& next);
 // No-op before sim_bind(), and a no-op when `p` is already the bound Pebble.
 void     sim_rebind(PebbleInstance& p);
 
+// The sub-step grid. Every cadence in the design (60 s stage check, 600 s
+// sickness roll, 600 s care-quality tick) is a multiple of it, and every
+// integrator carries its remainder, so a caller that hands over 1800 s at once
+// lands on the same bytes as one that ticks a second at a time. It is public
+// because that equivalence is a contract a test has to be able to state: a
+// rate CHANGE (a poop arriving, the loneliness multiplier turning on) is
+// evaluated on this grid, so a finer step charges the new rate up to one
+// sub-step earlier - a bounded offset, not a drift.
+#define SIM_SUBSTEP_S            60u
+
 // Advances the simulation by `seconds` simulated seconds. Internally sub-steps
 // at SIM_SUBSTEP_S so thresholds, poop, sickness and stage checks land on the
 // same grid regardless of the chunk size the caller uses.

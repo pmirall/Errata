@@ -318,9 +318,18 @@ TEST(care_a_pebble_stored_for_a_week_comes_back_full) {
 
 // -----------------------------------------------------------------------------
 //  9. Catch-up chunk equivalence (plan P3-C1, plan 1.7)
-//     One hour handed over in one call, in sixty, or in six must land on the
-//     same bytes: the integrator carries its remainder, so step size is not a
-//     tuning knob a player could find.
+//     One hour handed over in one call, in sixty, in six or in three thousand
+//     six hundred must land on the same bytes.
+//
+//     THE FIRST THREE CANNOT DISAGREE. sim_tick() is nothing but a chopper:
+//     it splits any dt into SIM_SUBSTEP_S pieces and holds no state of its
+//     own, so 1x3600, 60x60 and 6x600 emit the identical stream of sixty
+//     sub_step(60) calls. As written the case was a tautology whose entire
+//     detection power was "SIM_SUBSTEP_S divides 60".
+//
+//     THE 1 s CASE IS THE ONE THAT PROBES BELOW THE GRID - and it is the step
+//     size the live device actually runs (app.cpp asks sim_step_seconds(),
+//     which is 1 outside god mode). It found a real hole; see section 9b.
 // -----------------------------------------------------------------------------
 static PebbleInstance g_chunk_a;
 static PebbleInstance g_chunk_b;
@@ -333,20 +342,135 @@ static void care_check_same(const PebbleInstance& a, const PebbleInstance& b) {
   CHECK_EQ(b.age_s, a.age_s);
   CHECK_EQ(b.last_updated_epoch, a.last_updated_epoch);
   CHECK_EQ((int)b.status, (int)a.status);
+  // And nothing else moved either: the whole 128 B instance, byte for byte.
+  CHECK(memcmp(&a, &b, sizeof(PebbleInstance)) == 0);
+}
+
+// Runs `total_s` from `hour` local on day 100 in fixed `chunk` handovers.
+static void care_run_chunked(PebbleInstance& p, uint8_t hour,
+                             uint32_t total_s, uint32_t chunk) {
+  care_pet_at_day(p, hour, 100);
+  for (uint32_t t = 0; t < total_s; t += chunk) sim_tick(chunk);
 }
 
 TEST(care_one_hour_of_catch_up_is_the_same_however_it_is_chunked) {
-  care_pet_at(g_chunk_a, 10);
-  sim_tick(3600u);
+  care_run_chunked(g_chunk_a, 10, 3600u, 3600u);
   const PebbleInstance one_call = g_chunk_a;
 
-  care_pet_at(g_chunk_b, 10);
-  for (uint32_t i = 0; i < 60u; ++i) sim_tick(60u);
+  // 60 x 60 s and 6 x 600 s: the same sub-step sequence, kept as a guard on
+  // "SIM_SUBSTEP_S still divides an hour".
+  care_run_chunked(g_chunk_b, 10, 3600u, 60u);
+  care_check_same(one_call, g_chunk_b);
+  care_run_chunked(g_chunk_b, 10, 3600u, 600u);
   care_check_same(one_call, g_chunk_b);
 
-  care_pet_at(g_chunk_b, 10);
-  for (uint32_t i = 0; i < 6u; ++i) sim_tick(600u);
+  // 3600 x 1 s: below the grid. Exact equality is the right contract for THIS
+  // hour because 10:00 -> 11:00 on a fresh hatchling contains no rate CHANGE -
+  // no poop lands, the loneliness multiplier is six hours away, and the pebble
+  // neither falls asleep nor wakes. Every integrator carries its remainder, so
+  // with the rates held constant the chunk size cannot matter. Section 9c
+  // states what happens once a rate change is in the span.
+  care_run_chunked(g_chunk_b, 10, 3600u, 1u);
   care_check_same(one_call, g_chunk_b);
+  CHECK_EQ((int)sim_view()->poop_count, 0);
+  CHECK((sim_view()->flags & PF_ASLEEP) == 0);
+}
+
+// -----------------------------------------------------------------------------
+//  9b. The poop clock advances at every step size, asleep included
+//      WHAT THE 1 s CASE FOUND. poop_step() scaled its advance by MULT_SLEEP
+//      (x0.35) and TRUNCATED it every sub-step with no carry: (1 * 350) / 1000
+//      is 0, so at the 1 s step the device runs, a SLEEPING pebble never
+//      advanced its timer at all and could not poop overnight, ever - while an
+//      offline catch-up over the same night (60 s sub-steps, an exact 21)
+//      produced two. Same night, same pebble, two different models, and the
+//      whole "sleeping the pet before bed is a real strategy" line in
+//      poop_step() was accidentally absolute on hardware.
+//
+//      poop_step() carries its remainder now, the way accum() always has.
+//      Measured over eight hours from 23:00 before the fix: 2 poops at every
+//      step of 10 s or more, 1 at 5 s, 0 at 2 s and 0 at 1 s.
+// -----------------------------------------------------------------------------
+static PebbleInstance g_poop_chunk;
+
+TEST(care_the_poop_clock_advances_at_every_step_size) {
+  // Every divisor of the sub-step, plus two chunk sizes above it.
+  static const uint32_t STEPS[] = { 3600u, 600u, 60u, 30u, 20u, 10u, 5u, 2u, 1u };
+
+  care_run_chunked(g_poop_chunk, 23, 8u * 3600u, 60u);
+  const uint8_t ref = sim_view()->poop_count;
+  // The span has to be a real night, or this case passes for the wrong reason.
+  CHECK((sim_view()->flags & PF_ASLEEP) != 0);
+  CHECK(ref > 0);
+
+  for (unsigned i = 0; i < sizeof(STEPS) / sizeof(STEPS[0]); ++i) {
+    care_run_chunked(g_poop_chunk, 23, 8u * 3600u, STEPS[i]);
+    CHECK((sim_view()->flags & PF_ASLEEP) != 0);
+    CHECK_EQ((int)sim_view()->poop_count, (int)ref);
+  }
+}
+
+// -----------------------------------------------------------------------------
+//  9c. Past the first rate change, the bound - not equality
+//      A rate CHANGE is evaluated on the sub-step grid, so a finer step charges
+//      the new rate up to one sub-step early. That is a bounded, one-off offset
+//      per change, not a drift, and it is not a defect to be fixed: the grid is
+//      what makes the cadences (60 s stage check, 600 s sickness roll) land in
+//      the same places whatever the caller hands over.
+//
+//      The budget per change is one sub-step at the largest rate change the
+//      care model has. Two exist: a poop arriving, which adds
+//      CARE_HYGIENE_POOP_MPH (1,000 milli/h) to the cleanliness rate, and the
+//      loneliness multiplier turning on at LONELY_AFTER_S, which adds
+//      (MULT_LONELY - MULT_ONE)/1000 = x0.5 of the happiness base
+//      (1,500 milli/h). One sub-step of the larger is 25 milli.
+//
+//      Measured: 9 milli over two awake hours (1 poop), 25 over four (3 poops),
+//      11 and 9 over an eight-hour night (2 poops at x0.35, plus the
+//      loneliness edge). None of them approaches a displayed percent, which is
+//      1,000 milli.
+// -----------------------------------------------------------------------------
+#define CARE_GRID_EVENT_MILLI  (((int32_t)MULT_LONELY - (int32_t)MULT_ONE) \
+                                * -(int32_t)CARE_DECAY_MPH[CARE_HAPPINESS] \
+                                / 1000 * (int32_t)SIM_SUBSTEP_S / 3600)
+
+static PebbleInstance g_grid_a;
+static PebbleInstance g_grid_b;
+
+// |dt=1 minus dt=SIM_SUBSTEP_S| on the worst stat, over `total_s` from `hour`.
+static int32_t care_grid_gap(uint8_t hour, uint32_t total_s, uint8_t& poops_out) {
+  care_run_chunked(g_grid_a, hour, total_s, (uint32_t)SIM_SUBSTEP_S);
+  poops_out = sim_view()->poop_count;
+  care_run_chunked(g_grid_b, hour, total_s, 1u);
+  CHECK_EQ((int)sim_view()->poop_count, (int)poops_out);
+  int32_t worst = 0;
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    int32_t d = g_grid_b.care[i] - g_grid_a.care[i];
+    if (d < 0) d = -d;
+    if (d > worst) worst = d;
+  }
+  return worst;
+}
+
+TEST(care_a_finer_step_moves_a_rate_change_by_less_than_one_substep) {
+  CHECK_EQ((int)CARE_GRID_EVENT_MILLI, 25);
+
+  // Four awake hours from 10:00: three poops, no loneliness edge yet.
+  uint8_t poops = 0;
+  int32_t gap = care_grid_gap(10, 4u * 3600u, poops);
+  CHECK_EQ((int)poops, 3);
+  CHECK(gap <= (int32_t)poops * CARE_GRID_EVENT_MILLI);
+  // And it is not zero, or the bound is being asserted against nothing.
+  CHECK(gap > 0);
+
+  // Eight asleep hours from 23:00: two poops plus the loneliness edge at 6 h.
+  gap = care_grid_gap(23, 8u * 3600u, poops);
+  CHECK_EQ((int)poops, 2);
+  CHECK(gap <= ((int32_t)poops + 1) * CARE_GRID_EVENT_MILLI);
+  CHECK(gap > 0);
+
+  // Nowhere near a displayed percent, which is what the bound has to mean.
+  CHECK(gap < 1000);
 }
 
 // -----------------------------------------------------------------------------
@@ -625,4 +749,120 @@ TEST(care_a_full_night_of_neglect_is_spent_asleep_and_recharging) {
   // And the night did its job: a pebble nobody touched wakes up rested.
   CHECK((sim_view()->flags & PF_ASLEEP) == 0);
   CHECK(sim_stat_pct(ST_ENERGY) > 60);
+}
+
+// -----------------------------------------------------------------------------
+// 16. THE PHASE-3 EXIT SOAK (plan P3-C5)
+//     The criterion the plan carried in was "no stat pinned at 0 for more than
+//     6 simulated hours of neglect". Before P3-C2b closed D13 that was
+//     unreachable: a pebble whose light nobody switched off never slept and
+//     energy pinned at 0 for ever. It is reachable now - but only for the one
+//     stat the simulation refills BY ITSELF. Restated and measured:
+//
+//       Fourteen simulated days of total neglect - a hatched pebble, a
+//       trustworthy clock, and not one action for a fortnight.
+//
+//       ENERGY, the one core stat the simulation restores on its own, is never
+//       at 0 for more than 6 continuous simulated hours, and is back above 90 %
+//       at every sunrise.
+//
+//       HUNGER, HAPPINESS and CLEANLINESS are at 0 for most of the fortnight,
+//       and are MEANT to be: they are the ones only the player can refill, and
+//       refilling them is what the player is for. They are asserted here as
+//       design, so that "no stat is pinned" cannot quietly come back.
+//
+//       HEALTH is what the floor protects. It never reaches 0 at all and never
+//       falls below HEALTH_FLOOR_PCT.
+//
+//     Measured on this fixture (seed 0x5EED0C7A, 10:00, day 100, 336 h), as the
+//     longest CONTINUOUS run each stat spends at 0:
+//
+//       hunger      first 0 at  30.8 h   longest run 305.2 h   ends   0 %
+//       happiness   first 0 at  27.5 h   longest run 160.2 h   ends  40 %
+//       energy      first 0 at  34.7 h   longest run   2.1 h   ends  79 %
+//       cleanliness first 0 at  24.7 h   longest run 311.4 h   ends   0 %
+//       health      never 0                longest run   0.0 h   ends  10 %
+//
+//     14 wake-ups, all of them above 90 % energy (99 % every time). Robustness,
+//     measured outside the suite over 40 genesis genomes x 12 month anchors
+//     (480 fortnights): energy's longest run at 0 is at most 3.87 h and never
+//     exceeds 6 h in any run; health reaches 0 in 0 of 480. Forcing the
+//     metabolism gene to its maximum 15 (x1.50), which genesis cannot roll,
+//     over all 366 start days: 5.40 h, still under 6.
+//
+//     SCOPED TO A VALID CLOCK ON PURPOSE. Without one there is no night -
+//     is_night() refuses to answer - the pebble never sleeps, and energy pins
+//     at 0 for 322.78 h of the same 336. That is D13's known cost, not a defect
+//     in this model, and section 13 of docs/decisions.md records it.
+// -----------------------------------------------------------------------------
+#define SOAK_DAYS            14u
+#define SOAK_ENERGY_MAX_S    (6u * 3600u)     // the criterion
+#define SOAK_PLAYER_MIN_S    (24u * 3600u)    // what the player is for
+
+static PebbleInstance g_soak;
+
+TEST(care_a_fortnight_of_neglect_only_pins_the_stats_the_player_owns) {
+  care_pet_at(g_soak, 10);
+  SimEnv env = sim_env();
+  (void)sim_take_events();
+
+  uint32_t run_s[ST_COUNT];
+  uint32_t max_run_s[ST_COUNT];
+  for (uint8_t i = 0; i < (uint8_t)ST_COUNT; ++i) { run_s[i] = 0; max_run_s[i] = 0; }
+
+  uint32_t wakes = 0;
+  uint8_t  worst_wake_pct = 100;
+
+  for (uint32_t m = 0; m < SOAK_DAYS * 24u * 60u; ++m) {
+    care_minute(env);
+
+    if (sim_take_events() & SIM_EV_WAKE) {
+      wakes++;
+      const uint8_t pct = sim_stat_pct(ST_ENERGY);
+      if (pct < worst_wake_pct) worst_wake_pct = pct;
+    }
+
+    // The floor holds on every one of the 20,160 minutes, not just at the end.
+    CHECK(sim_stat_pct(ST_HEALTH) >= HEALTH_FLOOR_PCT);
+
+    for (uint8_t i = 0; i < (uint8_t)ST_COUNT; ++i) {
+      if (sim_stat_milli((StatId)i) <= 0) {
+        run_s[i] += 60u;
+        if (run_s[i] > max_run_s[i]) max_run_s[i] = run_s[i];
+      } else {
+        run_s[i] = 0;
+      }
+    }
+  }
+
+  // --- THE CRITERION ---------------------------------------------------------
+  CHECK(max_run_s[ST_ENERGY] < SOAK_ENERGY_MAX_S);
+  // It is not a vacuous bound: energy really does empty, it just does not stay
+  // empty. A model that never let energy reach 0 at all would be a different
+  // (and wrong) thing, so the run has to be non-zero too.
+  CHECK(max_run_s[ST_ENERGY] > 0);
+  CHECK_EQ((int)wakes, (int)SOAK_DAYS);
+  CHECK(worst_wake_pct > 90);
+
+  // --- HEALTH: what the floor protects ---------------------------------------
+  CHECK_EQ((int)max_run_s[ST_HEALTH], 0);
+  CHECK(sim_stat_pct(ST_HEALTH) >= HEALTH_FLOOR_PCT);
+
+  // --- THE THREE THE PLAYER OWNS: pinned, on purpose -------------------------
+  CHECK(max_run_s[ST_HUNGER]    > SOAK_PLAYER_MIN_S);
+  CHECK(max_run_s[ST_HAPPINESS] > SOAK_PLAYER_MIN_S);
+  CHECK(max_run_s[ST_HYGIENE]   > SOAK_PLAYER_MIN_S);
+  CHECK_EQ(sim_stat_pct(ST_HUNGER), 0);
+  CHECK_EQ(sim_stat_pct(ST_HYGIENE), 0);
+
+  // Happiness is the one exception among the three, and it is not the player:
+  // events_step() pays EVENT_VISITA_HAPPINESS at 72 h of age and
+  // EVENT_BIRTHDAY_HAPPY every 168 h, which is why its longest run is about
+  // 160 h rather than 300 and why it does not finish at 0.
+  CHECK(sim_stat_pct(ST_HAPPINESS) > 0);
+  CHECK(max_run_s[ST_HAPPINESS] < max_run_s[ST_HUNGER]);
+
+  // And after a fortnight of nothing, it is still here.
+  CHECK(sim_view()->stage < STAGE_COUNT);
+  CHECK(sim_stat_milli(ST_HEALTH) > 0);
 }
