@@ -8,10 +8,12 @@
 //  is bound and forwarded from section 20 of this file.
 //
 //  Invariants implemented literally (GAME_DESIGN 8.2):
-//    1. GST_HOLD_R == BACK on every screen except GAME.
+//    1. GST_TAP_R == BACK on every screen (spec section 7: B is back/cancel).
+//       Since P2-C11d this lives in app/input_router.cpp, and the screens that
+//       answer B themselves say so with SF_OWNS_BACK rather than by name.
 //    2. GST_LONG_BOTH == HOME from anywhere.
-//    3. Every screen except HOME / GAME / EGG / GOD auto-returns to HOME
-//       after UI_AUTORETURN_MS, with a 3 px countdown bar in the last
+//    3. Every screen without SF_STICKY auto-returns to HOME after
+//       UI_AUTORETURN_MS, with a 3 px countdown bar in the last
 //       UI_COUNTDOWN_MS.
 //    4. Every menu is a ring.
 //    5. Every confirmation starts on NO.
@@ -60,14 +62,17 @@
 #include "petfx.h"      // the body's own presentation layer: floor, position, gaze
 #include "actfx.h"      // the choreography of every action the player can take
 #include "../game/box.h"          // the active slot: level, xp, hp for the view
+#include "../game/box_sim.h"      // and what a swap does to sim's raw pointer
 #include "../data/species_table.h" // and the base_hp hp_max is derived from
 #include "gfx.h"           // the header bar, the countdown and the list widgets
 #include "screen.h"        // the ScreenDef table this file is being dissolved into
+#include "../app/input_router.h"  // the section 7 grammar (P2-C11d)
 #include "screen_error.h"  // the ERROR screen moved out first (P2-C11a)
 // P2-C11b moved HOME, MENU, CARE, PLAY, both STATUS pages, SETTINGS and TIME
 // out. What is left here is the DEVICE half each of them needs - the animated
 // body layer, the diagnostics page, the minigame start - which this file binds
 // and hands over. It draws none of them.
+#include "screen_box.h"      // box_screen_to_list(), for the release commit
 #include "screen_home.h"
 #include "screen_settings.h"
 #include "screen_view.h"
@@ -118,6 +123,10 @@ static_assert(HOME_METER_Y0 + 2 * HOME_METER_PITCH + 12 <= HOME_FLOOR_Y,
 // app/state_machine.cpp now (P2-C11a); reach them through sm_current(),
 // sm_idle_ms() and sm_screen_ms().
 static uint32_t s_wiggle_ms   = 0;
+// The slot the two Box release dialogs are about. Written only by
+// ui_box_release(), read only by the CFM_BOX_REL2 commit - and box_release()
+// re-checks it there, so a stale value can still destroy nothing.
+static uint8_t  s_box_slot    = BOX_ACTIVE_NONE;
 static uint8_t  s_fps_want    = FPS_NORMAL;
 static uint8_t  s_god_prog    = 0;      // god_entry_progress(), 0..100
 
@@ -461,9 +470,6 @@ static bool do_action(ActionId a) {
 // =============================================================================
 //  6. NAVIGATION
 // =============================================================================
-static void screen_enter(uint8_t s);
-static void screen_leave(uint8_t s);
-
 // Defined further down, next to the widgets they animate; ui_goto() is above
 // all of them and is the one place that has to cut them. Only the FUNCTIONS
 // are forward declared: the state they move is defined once in section 2,
@@ -504,12 +510,9 @@ static void nav_push(uint8_t to) { sm_push((ScreenId)to); }
 static void nav_back(void)       { sm_back(); }
 static void nav_home(void)       { sm_home(); }
 
-// The three parts of a screen change that are still this file's: the legacy
-// enter / leave hooks, the interpolators the shared widgets animate, and the
-// entry dissolve. state_machine.cpp calls them in that order (ui.h).
-void ui_nav_leave(uint8_t from) { screen_leave(from); }
-void ui_nav_enter(uint8_t to)   { screen_enter(to); }
-
+// The two parts of a screen change that are still this file's: the
+// interpolators the shared widgets animate, and the entry dissolve.
+// state_machine.cpp calls them in that order (ui.h).
 void ui_nav_reset(void) {
   dialog_close();
   gfx_list_reset();
@@ -591,7 +594,7 @@ static void draw_header(const char* title, const char* tag) {
 static bool screen_wants_transition(uint8_t s) {
   // GAME costs reaction time and the reflex game is scored in milliseconds.
   // GOD owns the whole frame by contract.
-  return s != SCR_GAME && s != SCR_GOD;
+  return s != SCR_GAME && s != SCR_DIAG;
 }
 
 static void draw_transition(void) {
@@ -1254,12 +1257,14 @@ static void draw_game(void) {
       default:        jump_draw();   break;
     }
   }
-  rd_affordance(S(STR_AF_PAUSE), nullptr);
+  rd_affordance(nullptr, S(STR_AF_PAUSE));
 }
 
-// GAME_DESIGN 8.3: "games must not have hidden gestures."
+// GAME_DESIGN 8.3: "games must not have hidden gestures." Section 7's B, which
+// is a TAP since P2-C11d: the strip has always said PAUSA and the gesture used
+// to be a 600 ms hold, which is the definition of a hidden one.
 static void handle_game(Gesture g) {
-  if (g != GST_HOLD_R) return;
+  if (g != GST_TAP_R) return;
   if (s_g.phase == 1) dialog_open_confirm(CFM_QUIT_GAME, STR_CF_QUIT_GAME);
   else                nav_back();
 }
@@ -1331,7 +1336,7 @@ static bool diag_gesture(Gesture g) {
       const SimView* np = pet();
       if (np) petfx_reset(body_view(*np, POSE_IDLE));  // a different animal entirely
       s_stat_ok = 0;
-      sm_replace_root(SCR_EGG);
+      sm_replace_root(SCR_EVOLUTION);
       return false;                 // already re-rooted; do not send HOME on top
     }
     default:
@@ -1357,7 +1362,7 @@ static void ceremony_start(uint8_t kind) {
   dialog_reset();
   s_toast[0]    = '\0';
   s_absence_ms  = 0;
-  sm_replace_root(SCR_EGG);
+  sm_replace_root(SCR_EVOLUTION);
   s_trans_ms    = 0;           // the ceremony owns the frame: no dissolve on top
   actfx_cancel();              // whatever the previous animal was doing, it is over
   petfx_reset(body_view(*p, POSE_IDLE));   // the body about to appear is brand new
@@ -1397,6 +1402,28 @@ static void dialog_commit(uint8_t which) {
       break;
     case CFM_MEDICINE: act_and_show(ACT_MEDICINE); break;   // BRIEF D
     case CFM_WIPE1:    dialog_open_confirm(CFM_WIPE2, STR_CF_WIPE2); break;  // two dialogs
+    // The Box release, behind the same two dialogs and for the same reason:
+    // it is the one action in the game that destroys a Pebble (spec section 9,
+    // invariant B4).
+    case CFM_BOX_REL1: dialog_open_confirm(CFM_BOX_REL2, STR_BOX_REL_Q2); break;
+    case CFM_BOX_REL2: {
+      if (box_release(s_box_slot, true)) {
+        gs_save_slot(s_box_slot, true);
+        gs_save_box();
+        // The action list this came from is now about an EMPTY slot, so send
+        // the screen back to the ten rows rather than leave VIEW / ACTIVATE /
+        // SWAP / RELEASE offered for a Pebble that no longer exists.
+        box_screen_to_list();
+        ui_toast(STR_BOX_RELEASED);
+      } else if (s_box_slot == box_active()) {
+        ui_toast(STR_BOX_NO_RELEASE_ACTIVE);
+      } else {
+        // Out of range, or a slot that holds nothing: "you cannot release the
+        // one you are carrying" would be the wrong explanation for both.
+        ui_toast(STR_BOX_EMPTY);
+      }
+      break;
+    }
     case CFM_WIPE2: {
       gs_factory_reset();
       if (s_cfg) { gs_cfg_defaults(*s_cfg); gs_save_cfg(*s_cfg); }
@@ -1406,7 +1433,7 @@ static void dialog_commit(uint8_t which) {
       if (p) { gs_save_active(true); petfx_reset(body_view(*p, POSE_IDLE)); }
       s_stat_ok  = 0;                // a wiped device shows the truth at once
       err_set_kind(ERRK_NONE);       // the save the ERROR screen was about is gone
-      sm_replace_root(SCR_EGG);
+      sm_replace_root(SCR_EVOLUTION);
       break;
     }
     default: break;
@@ -1414,26 +1441,27 @@ static void dialog_commit(uint8_t which) {
 }
 
 // =============================================================================
-//  18. SCREEN ENTER / LEAVE HOOKS
+//  18. THE GAME ROW (ui.h, retired by P3-C4)
+//      SCR_GAME's five hooks. The minigames themselves are still in this file;
+//      the table is what dispatches to them, exactly as it does for every
+//      other state.
 // =============================================================================
-// Only the screens that have NOT moved into the table reach these two: a
-// migrated row carries its own enter / leave hooks and state_machine.cpp calls
-// those instead (state_machine.cpp, sm_goto).
-static void screen_enter(uint8_t /* screen */) {
-  // GAME is the last screen in this file with no table row, and it needs
-  // nothing on the way in: game_start() is what arms it.
+void ui_game_enter(void) {
+  // Nothing: game_start() is what arms a minigame, and it runs before the
+  // navigation that brings this screen up.
 }
 
-static void screen_leave(uint8_t s) {
-  // HOME's own leave hook (home_leave_layer) is what ends the choreography
-  // now; this one only sees the screens still living in this file.
-  if (s == SCR_GAME && s_g.phase == 1) {
-    // Abandoning a game in any way at all is a loss.
-    ActionResult r;
-    s_g.score = 0;
-    sim_apply_play_result(0, r);
-    s_g.phase = 2;
-  }
+void ui_game_update(uint32_t /* now_ms */) { game_service(); }
+void ui_game_render(void)                  { draw_game(); }
+void ui_game_input(Gesture g)              { handle_game(g); }
+
+void ui_game_leave(void) {
+  // Abandoning a game in any way at all is a loss.
+  if (s_g.phase != 1) return;
+  ActionResult r;
+  s_g.score = 0;
+  sim_apply_play_result(0, r);
+  s_g.phase = 2;
 }
 
 // =============================================================================
@@ -1509,7 +1537,7 @@ void ui_begin(void) {
 
   const SimView* p = pet();
   if (p) petfx_reset(body_view(*p, POSE_IDLE));  // AFTER petfx_begin(), before a draw
-  if (p && p->stage == STAGE_EGG) { ui_goto(SCR_EGG); return; }
+  if (p && p->stage == STAGE_EGG) { ui_goto(SCR_EVOLUTION); return; }
   ui_goto(SCR_HOME);
 }
 
@@ -1608,37 +1636,12 @@ void ui_handle(Gesture g) {
   // is open. That is the invariant, in one call.
   if (dialog_input(g)) return;
 
-  // --- the screen table, for the screens that have moved ------------------
-  // SF_LOCK_INPUT means the row owns every gesture: the two global invariants
-  // below are not applied to it. ERROR uses that to hold the device on an
-  // unanswered question - walking away would leave the user playing a
-  // placeholder pet that can never be written - and BOOT / LOAD_SAVE use it
-  // because they are not waiting on a button at all.
-  const ScreenDef* def = sm_def();
-  const bool owns_input = (def != nullptr) && ((def->flags & SF_LOCK_INPUT) != 0u);
-  const uint8_t scr = (uint8_t)sm_current();
-
-  if (!owns_input) {
-    // --- invariant 2: HOME from anywhere ----------------------------------
-    if (g == GST_LONG_BOTH && scr != SCR_HOME) { nav_home(); return; }
-
-    // --- invariant 1: BACK on every screen except GAME -------------------
-    // The TIME screen needs a repeating right button to enter a date, and it
-    // says so through SF_LOCK_INPUT rather than through a name checked here.
-    if (g == GST_HOLD_R && scr != SCR_GAME) {
-      if (scr == SCR_HOME) { s_wiggle_ms = now_ms(); return; }
-      // On the "Acerca de" page BACK closes the page, not the screen.
-      if (scr == SCR_SETTINGS && settings_page() == 1) { settings_close_page(); return; }
-      nav_back();
-      return;
-    }
-  }
-
-  if (sm_handle(g)) return;
-  if (def) return;             // migrated, and this row takes no input at all
-
-  // GAME is the last screen in this file with no table row of its own.
-  if (scr == SCR_GAME) handle_game(g);
+  // --- the section 7 grammar, then the screen ------------------------------
+  // app/input_router.cpp applies the two global invariants (LONG_BOTH = HOME,
+  // B = BACK) subject to the row's SF_LOCK_INPUT / SF_OWNS_BACK, and hands
+  // whatever is left to the current screen's input hook. Every state has a
+  // row, so there is nothing after this line.
+  (void)router_handle(g);
 }
 
 void ui_service(void) {
@@ -1683,7 +1686,7 @@ void ui_service(void) {
   if (s_god_prog >= 100u) {
     actfx_cancel();
     s_god_prog = 0;
-    sm_replace_root(SCR_GOD);
+    sm_replace_root(SCR_DIAG);
     return;
   }
 
@@ -1691,7 +1694,6 @@ void ui_service(void) {
   // ceremony's back for its whole 4.5 s. ui/ceremony.cpp ends it itself, with
   // an input flush and a trip HOME.
   if (ceremony_active()) { ceremony_service(t); return; }
-  if (sm_current() == SCR_GAME) game_service();
 
   // The alert layer surfaces only when nothing else owns the screen, and the
   // HELP strip expires on its own clock. Both are dialog_service()'s. A screen
@@ -1732,15 +1734,10 @@ void ui_draw(void) {
       // screen's own status display and a second "GOD xN" bar would overwrite
       // it with what it already says.
       rd_affordance_echo();
-      if (sm_current() != SCR_GOD) god_draw_marker();
+      if (sm_current() != SCR_DIAG) god_draw_marker();
       return;
     }
   }
-  // GAME is the last screen with no table row. Every remaining id is either
-  // migrated (handled above) or a modal with no base frame of its own, and
-  // drawing nothing for those is the honest answer: the modal layer below
-  // still runs.
-  else if (sm_current() == SCR_GAME) draw_game();
 
   if (dialog_modal() != MODAL_NONE) dialog_render();
   else                              draw_toast();
@@ -1778,10 +1775,50 @@ uint32_t ui_now_ms(void)   { return now_ms(); }
 uint32_t ui_idle_ms(void)  { return sm_idle_ms(); }
 
 void ui_push(ScreenId s)   { sm_push(s); }
+void ui_wiggle(void)       { s_wiggle_ms = now_ms(); }
 void ui_back(void)         { sm_back(); }
 void ui_home(void)         { sm_home(); }
 void ui_note_input(void)   { sm_note_input(); }
 void ui_request_frame(void){ rd_request_frame(); }
+
+// --- the BOX seams (ui.h) ----------------------------------------------------
+void ui_box_activate(uint8_t slot) {
+  if (slot == box_active()) return;
+  PebbleInstance* next = box_slot(slot);
+  if (!next) { ui_toast(STR_BOX_EMPTY); return; }
+  // FLUSH THE OUTGOING PEBBLE FIRST. gs_save_active() only ever writes the slot
+  // box.active_slot names, so once the index moves the Pebble being put away
+  // can no longer be saved at all and its last SAVE_FULL_PERIOD_S window would
+  // be lost - on a deliberate action, not on a power cut.
+  gs_save_active(true);
+  if (!box_set_active(slot)) { ui_toast(STR_ERR_BUSY); return; }
+  // sim_switch() resets the PER-PEBBLE accumulators and keeps the device-wide
+  // gain ledger, so changing the active slot cannot be used to farm (P2-C10).
+  sim_switch(*next);
+  gs_save_box();
+  gs_save_active(true);
+  s_stat_ok = 0;                     // the new pet's bars start at the truth
+  actfx_cancel();
+  const SimView* p = pet();
+  if (p) petfx_reset(body_view(*p, POSE_IDLE));
+  ui_toast(STR_BOX_ACTIVATED);
+}
+
+void ui_box_swap(uint8_t a, uint8_t b) {
+  // box_sim_swap(), not box_swap(): when the swap moves the ACTIVE slot the two
+  // creatures exchange addresses and sim's raw pointer has to follow the one
+  // the player is carrying (game/box_sim.h). Doing it here instead would put
+  // the repair in a translation unit no host test can compile.
+  if (!box_sim_swap(a, b)) return;
+  gs_save_slot(a, true);
+  gs_save_slot(b, true);
+  gs_save_box();
+}
+
+void ui_box_release(uint8_t slot) {
+  s_box_slot = slot;
+  dialog_open_confirm(CFM_BOX_REL1, STR_BOX_REL_Q1);
+}
 
 Config* ui_cfg(void)       { return s_cfg; }
 void ui_cfg_changed(void)  { cfg_persist(); }

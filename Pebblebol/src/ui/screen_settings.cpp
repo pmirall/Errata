@@ -87,8 +87,8 @@ static void settings_select(void) {
   switch (s_cur) {
     case SET_BACK:  ui_back();                  return;
     case SET_INFO:  s_page = 1; ui_note_input(); return;
-    case SET_QR:    ui_push(SCR_QR);            return;
-    case SET_CLOCK: ui_push(SCR_CLOCK);         return;
+    case SET_QR:    ui_push(SCR_CREATOR);            return;
+    case SET_CLOCK: ui_push(SCR_TIME);         return;
     case SET_LIGHT: ui_do_action(ACT_LIGHT_TOGGLE); return;
     case SET_RESET: ui_confirm_wipe();          return;
     default: break;
@@ -120,10 +120,13 @@ static uint8_t ring_next(uint8_t cur, uint8_t n) {
 
 void settings_input(Gesture g) {
   // Any gesture at all closes the info page: it is a read-only panel, and the
-  // one thing every button on it should do is give the list back.
+  // one thing every button on it should do is give the list back. SF_OWNS_BACK
+  // is what lets B reach this line instead of being spent on sm_back() by the
+  // router: the page is one level BELOW the navigation stack.
   if (s_page == 1) { s_page = 0; return; }
   switch (g) {
-    case GST_TAP_R:  settings_select(); break;
+    case GST_TAP_R:  ui_back(); break;      // section 7: B cancels
+    case GST_HOLD_R: settings_select(); break;
     case GST_TAP_L:
     case GST_HOLD_L: s_cur = ring_next(s_cur, SET_ROWS); break;
     case GST_DBL_L:  s_cur = 0; break;

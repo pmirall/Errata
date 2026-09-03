@@ -74,6 +74,8 @@ void evo_render(void) {
 //  on the same button are a player leaning on a button, not a player rubbing an
 //  egg, so they reset nothing and earn nothing.
 // -----------------------------------------------------------------------------
+// SF_OWNS_BACK, and this is why: the rub ALTERNATES the two buttons, so B is
+// half of the only gesture this screen has. LONG_BOTH is how you leave.
 void evo_input(Gesture g) {
   if (g != GST_TAP_L && g != GST_TAP_R) { ui_toast(STR_EGG_NOT_YET); return; }
 

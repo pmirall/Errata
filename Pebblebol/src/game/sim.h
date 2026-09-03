@@ -107,6 +107,20 @@ void     sim_bind(PebbleInstance& pebble);
 // a property of the device and of real time, not of the creature holding it.
 void     sim_switch(PebbleInstance& next);
 
+// Re-points the simulation at the SAME creature after it MOVED IN MEMORY.
+// game/box.cpp stores Pebbles by value and box_swap() exchanges two slots'
+// CONTENTS, so a swap that touches the active slot leaves the raw g.pb of this
+// module aimed one slot away from the creature the player is carrying. The
+// caller (game/box_sim.cpp) hands the new address here.
+//
+// This is NOT sim_switch(): nothing about the creature changed, so none of the
+// per-Pebble accumulators may be reset and the view must NOT be re-derived -
+// care quality, bond, the poop count and the minor form live in this module,
+// not in the PebbleInstance, and derive_view() would put all four back to their
+// boot defaults. A rebind is an address correction and nothing else.
+// No-op before sim_bind(), and a no-op when `p` is already the bound Pebble.
+void     sim_rebind(PebbleInstance& p);
+
 // Advances the simulation by `seconds` simulated seconds. Internally sub-steps
 // at SIM_SUBSTEP_S so thresholds, poop, sickness and stage checks land on the
 // same grid regardless of the chunk size the caller uses.

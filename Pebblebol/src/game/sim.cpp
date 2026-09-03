@@ -1203,6 +1203,17 @@ void sim_switch(PebbleInstance& next)
   status_sync();
 }
 
+// See sim.h: a swap moved the bound Pebble, it did not replace it. Only the
+// pointer is wrong. clamp_care() and status_sync() are re-asserted because they
+// are idempotent and cost nothing; derive_view() is deliberately absent.
+void sim_rebind(PebbleInstance& p)
+{
+  if (!g.pb || g.pb == &p) return;
+  g.pb = &p;
+  clamp_care();
+  status_sync();
+}
+
 void sim_new_pet(const Genome& gn, uint32_t now_epoch, uint8_t cold)
 {
   if (!g.pb) return;

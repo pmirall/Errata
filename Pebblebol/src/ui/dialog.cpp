@@ -117,7 +117,7 @@ static void draw_confirm(void) {
     }
     gfx_color(GFX_DRAW);
   }
-  gfx_affordance(S(STR_AF_NEXT), S(STR_AF_OK));
+  gfx_affordance(S(STR_AF_NEXT), S(STR_AF_BACK_SEL));
 }
 
 static void draw_alert(void) {
@@ -165,11 +165,15 @@ static void confirm_commit(void) {
   if (s_commit) s_commit(which);
 }
 
+// The section 7 grammar, and it is the SAME one every list uses: A steps the
+// cursor, B held activates the row it is on, B tapped cancels. Invariant 5
+// (every confirmation starts on NO) means the dangerous answer always costs a
+// step and then a deliberate 600 ms hold.
 static void handle_confirm(Gesture g) {
   switch (g) {
     case GST_TAP_L:     s_confirm_yes = (uint8_t)!s_confirm_yes; break;
-    case GST_TAP_R:     if (s_confirm_yes) confirm_commit(); else dialog_close(); break;
-    case GST_HOLD_R:    dialog_close(); break;
+    case GST_HOLD_R:    if (s_confirm_yes) confirm_commit(); else dialog_close(); break;
+    case GST_TAP_R:     dialog_close(); break;
     case GST_LONG_BOTH: dialog_close(); ui_home(); break;
     default: break;
   }
@@ -178,7 +182,7 @@ static void handle_confirm(Gesture g) {
 // INVARIANT 7, and the audit's S11 defect (section 8.3).
 //
 // What this used to do: wait UI_ALERT_MIN_MS so the line was readable, then let
-// the FIRST gesture close the alert AND run alert_act() - push SCR_FEED, run
+// the FIRST gesture close the alert AND run alert_act() - push SCR_CARE, run
 // ACT_CLEAN, open the medicine confirmation. The documented rule at the top of
 // ui.cpp said the opposite ("an alert never steals a press: the first gesture
 // only dismisses it"), and the rule is the right one: an alert appears without

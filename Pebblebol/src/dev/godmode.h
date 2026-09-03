@@ -84,10 +84,10 @@
 //    itself because they belong to the screen state machine in ui.cpp.
 // -----------------------------------------------------------------------------
 enum GodEvt : uint8_t {
-  GOD_EVT_NONE = 0,   // handled internally, stay on SCR_GOD
-  GOD_EVT_LEAVE,      // leave SCR_GOD for SCR_HOME. god_active() may still be 1.
+  GOD_EVT_NONE = 0,   // handled internally, stay on SCR_DIAG
+  GOD_EVT_LEAVE,      // leave SCR_DIAG for SCR_HOME. god_active() may still be 1.
   GOD_EVT_WIPED,      // NVS erased and a fresh gen-0 egg installed: reload cfg
-                      // and go to SCR_EGG
+                      // and go to SCR_EVOLUTION
   GOD_EVT_COUNT
 };
 
@@ -95,12 +95,12 @@ enum GodEvt : uint8_t {
 //  4. MANDATORY PUBLIC INTERFACE
 // =============================================================================
 
-// True while god mode is ON. This SURVIVES leaving SCR_GOD: the whole point of
+// True while god mode is ON. This SURVIVES leaving SCR_DIAG: the whole point of
 // the time scale is watching an accelerated life on the normal screens. Whoever
 // draws a frame must therefore call god_draw_marker() whenever this is true.
 bool     god_active(void);
 
-// Feed one gesture while SCR_GOD is the current screen. Returns what the caller
+// Feed one gesture while SCR_DIAG is the current screen. Returns what the caller
 // must do next. Never call this when god_active() is false.
 GodEvt   god_handle(Gesture g);
 
@@ -140,7 +140,7 @@ void     god_service(void);
 // buttons have been held for on SCR_STATUS_B; the caller draws that as the
 // "..." fill bar (STR_UI_GOD_HOLD). At 100 god mode has ALREADY been entered
 // and input_flush() has already been called, so the caller only has to switch
-// to SCR_GOD. Returns 0 on every other screen.
+// to SCR_DIAG. Returns 0 on every other screen.
 //
 // The SAME hold re-opens the console when god mode is already on, which is the
 // way back after GOD_EVT_LEAVE: the only off switch is the console's exit row,

@@ -28,6 +28,7 @@
 #include "core/strings_es.h"
 #include "data/sprites.h"      // POSE_IDLE, for the body fixture
 #include "fakes/gfx_fb.h"
+#include "game/box.h"
 #include "persistence/save_manager.h"
 #include "ui/dialog.h"
 #include "ui/screen.h"
@@ -39,7 +40,9 @@
 #include "ui/screen_home.h"
 #include "ui/screen_link.h"
 #include "ui/screen_menu.h"
+#include "ui/screen_box.h"
 #include "ui/screen_settings.h"
+#include "ui/screen_soon.h"
 #include "ui/screen_status.h"
 #include "ui/screen_time.h"
 #include "ui/screen_view.h"
@@ -102,6 +105,11 @@ static uint8_t  g_ap_up    = 0;
 static uint8_t  g_sta_up   = 0;
 static int      g_commits  = 0;
 static uint8_t  g_commit_id = CFM_NONE;
+static int      g_wiggles   = 0;
+static uint8_t  g_box_active   = 0xFF;
+static uint8_t  g_box_released = 0xFF;
+static uint8_t  g_box_swap_a   = 0xFF;
+static uint8_t  g_box_swap_b   = 0xFF;
 
 uint32_t ui_now_ms(void)  { return g_now; }
 uint32_t ui_idle_ms(void) { return g_idle; }
@@ -123,6 +131,21 @@ void ui_home(void)                { g_goto = (uint8_t)SCR_HOME; }
 void ui_request_frame(void)       { g_frames++; }
 void ui_request_hatch(void)       { g_hatches++; }
 void ui_creator_radio(bool on)    { g_radio = on ? 1 : 0; g_radio_calls++; }
+void ui_wiggle(void)              { g_wiggles++; }
+
+// The BOX seams: the screen reads game/box.h directly and every WRITE goes
+// through ui.cpp, so here they are a recording (P2-C11d).
+void ui_box_activate(uint8_t slot)      { g_box_active = slot; }
+void ui_box_swap(uint8_t a, uint8_t b)  { g_box_swap_a = a; g_box_swap_b = b; }
+void ui_box_release(uint8_t slot)       { g_box_released = slot; }
+
+// SCR_GAME's five hooks are still ui.cpp's until P3-C4; the table names them,
+// so this binary has to define them. Nothing here renders a minigame.
+void ui_game_enter(void)          { }
+void ui_game_update(uint32_t)     { }
+void ui_game_render(void)         { }
+void ui_game_input(Gesture)       { }
+void ui_game_leave(void)          { }
 
 void ui_creator_info(CreatorInfo& out) {
   memset(&out, 0, sizeof out);
@@ -243,6 +266,11 @@ static void seams2_reset(void) {
   g_commits = 0;
   g_commit_id = CFM_NONE;
   g_goto = 0xFF;
+  g_wiggles = 0;
+  g_box_active = 0xFF;
+  g_box_released = 0xFF;
+  g_box_swap_a = 0xFF;
+  g_box_swap_b = 0xFF;
   dialog_reset();
   dialog_bind_commit(&fake_commit);
   diag_bind(nullptr, nullptr, nullptr);
@@ -309,47 +337,31 @@ static void snapshot(uint8_t screen, const char* name) {
 //  THE TABLE
 // =============================================================================
 TEST(table_rows_are_consistent) {
-  // A row is migrated exactly when it has a render hook, and screen_def()
-  // must agree with that for every id.
+  // The table is COMPLETE since P2-C11d: every id has a row, and every row
+  // names all five hooks. tests/test_statemachine.cpp is where that property
+  // lives; here it is only the floor under the snapshots below.
   for (uint8_t s = 0; s < (uint8_t)SCR_COUNT; s++) {
     const ScreenDef* d = screen_def(s);
-    CHECK((d == nullptr) == (SCREENS[s].render == nullptr));
-    if (!d) continue;
+    CHECK(d != nullptr);
+    CHECK(d->render != nullptr);
     // No row may ask for a frame rate the scheduler cannot honour.
     CHECK(d->fps == 0 || (d->fps >= 1 && d->fps <= 60));
   }
-
-  // Everything P2-C11a, P2-C11b and P2-C11c migrated.
-  static const uint8_t kMigrated[] = {
-    SCR_BOOT, SCR_LOAD_SAVE, SCR_ERROR,
-    SCR_HOME, SCR_MENU, SCR_FEED, SCR_PLAY,
-    SCR_STATUS_A, SCR_STATUS_B, SCR_SETTINGS, SCR_CLOCK,
-    SCR_SOCIAL, SCR_EGG, SCR_GOD, SCR_QR
-  };
-  for (size_t i = 0; i < sizeof kMigrated / sizeof kMigrated[0]; i++)
-    CHECK(screen_def(kMigrated[i]) != nullptr);
-
-  // And nothing else. GAME is the last screen still living in ui.cpp (P3-C4),
-  // and CONFIRM / ALERT are overlays with no base frame of their own: they
-  // never become sm_current(), so a row would never be dispatched to.
-  static const uint8_t kLegacy[] = { SCR_GAME, SCR_CONFIRM, SCR_ALERT };
-  for (size_t i = 0; i < sizeof kLegacy / sizeof kLegacy[0]; i++)
-    CHECK(screen_def(kLegacy[i]) == nullptr);
 
   // HOME is where the auto-return goes, so it must never time out itself.
   CHECK((SCREENS[SCR_HOME].flags & SF_STICKY) != 0);
   // Leaving HOME has to end the choreography and release the petfx hold.
   CHECK(SCREENS[SCR_HOME].leave != nullptr);
-  // TIME owns HOLD_R (which is BACK everywhere else) and must not be timed out
+  // TIME owns B (which is BACK everywhere else) and must not be timed out
   // half way through a date.
-  CHECK((SCREENS[SCR_CLOCK].flags & (SF_STICKY | SF_LOCK_INPUT))
+  CHECK((SCREENS[SCR_TIME].flags & (SF_STICKY | SF_LOCK_INPUT))
         == (SF_STICKY | SF_LOCK_INPUT));
-  CHECK(SCREENS[SCR_CLOCK].update != nullptr);   // the right button's repeat
+  CHECK(SCREENS[SCR_TIME].update != nullptr);   // the right button's repeat
   // Every other migrated row is an ordinary screen: it times out, and the
   // global navigation grammar runs before its own handler.
   static const uint8_t kOrdinary[] = {
-    SCR_MENU, SCR_FEED, SCR_PLAY, SCR_STATUS_A, SCR_STATUS_B, SCR_SETTINGS,
-    SCR_SOCIAL, SCR_QR
+    SCR_MENU, SCR_CARE, SCR_PLAY, SCR_STATUS, SCR_STATUS_B,
+    SCR_LINK, SCR_CREATOR, SCR_NETWORK, SCR_BATTLE, SCR_SLEEP
   };
   for (size_t i = 0; i < sizeof kOrdinary / sizeof kOrdinary[0]; i++)
     CHECK(SCREENS[kOrdinary[i]].flags == 0);
@@ -359,26 +371,34 @@ TEST(table_rows_are_consistent) {
   CHECK((SCREENS[SCR_LOAD_SAVE].flags & (SF_STICKY | SF_LOCK_INPUT)) == (SF_STICKY | SF_LOCK_INPUT));
   CHECK((SCREENS[SCR_ERROR].flags     & (SF_STICKY | SF_LOCK_INPUT)) == (SF_STICKY | SF_LOCK_INPUT));
 
-  // BOOT and LOAD_SAVE are frames, not states: no hooks beyond render.
-  CHECK(SCREENS[SCR_BOOT].input      == nullptr);
-  CHECK(SCREENS[SCR_LOAD_SAVE].input == nullptr);
-  CHECK(SCREENS[SCR_ERROR].input     != nullptr);
+  // BOOT and LOAD_SAVE are frames, not states: their input hook exists (every
+  // row's does) and ignores everything.
+  CHECK(SCREENS[SCR_BOOT].input      == nop_input);
+  CHECK(SCREENS[SCR_LOAD_SAVE].input == nop_input);
+  CHECK(SCREENS[SCR_ERROR].input     != nop_input);
+
+  // SETTINGS, BOX, EVOLUTION and GAME answer B themselves; nothing that has
+  // SF_LOCK_INPUT needs to say so twice.
+  static const uint8_t kOwnsBack[] = { SCR_SETTINGS, SCR_BOX, SCR_EVOLUTION, SCR_GAME };
+  for (size_t i = 0; i < sizeof kOwnsBack / sizeof kOwnsBack[0]; i++)
+    CHECK((SCREENS[kOwnsBack[i]].flags & SF_OWNS_BACK) != 0);
 
   // CREATOR is the one screen that owns the Wi-Fi station, so it is the one
   // screen whose enter AND leave hooks must both exist: taking the radio
   // without a hook to give it back is exactly the always-on policy the plan
   // removed (section 2 row G4).
-  CHECK(SCREENS[SCR_QR].enter  != nullptr);
-  CHECK(SCREENS[SCR_QR].leave  != nullptr);
-  CHECK(SCREENS[SCR_QR].update != nullptr);   // the payload follows the IP
+  CHECK(SCREENS[SCR_CREATOR].enter  != nullptr);
+  CHECK(SCREENS[SCR_CREATOR].leave  != nullptr);
+  CHECK(SCREENS[SCR_CREATOR].update != nullptr);   // the payload follows the IP
 
   // The console composes its own frame and answers its own gestures.
-  CHECK((SCREENS[SCR_GOD].flags & (SF_STICKY | SF_LOCK_INPUT | SF_OWNS_FRAME))
+  CHECK((SCREENS[SCR_DIAG].flags & (SF_STICKY | SF_LOCK_INPUT | SF_OWNS_FRAME))
         == (SF_STICKY | SF_LOCK_INPUT | SF_OWNS_FRAME));
-  // EVOLUTION is sticky and NOTHING else: an incubating egg still shows a
-  // toast and still answers BACK. The ceremony's "no chrome, no buttons" is
-  // dynamic and belongs to ui/ceremony.cpp.
-  CHECK_EQ(SCREENS[SCR_EGG].flags, (uint8_t)SF_STICKY);
+  // EVOLUTION is sticky and owns B, and nothing else: the rub ALTERNATES the
+  // two buttons, so the router may not spend B on BACK - LONG_BOTH is how you
+  // leave. The ceremony's "no chrome, no buttons" is dynamic and belongs to
+  // ui/ceremony.cpp.
+  CHECK_EQ(SCREENS[SCR_EVOLUTION].flags, (uint8_t)(SF_STICKY | SF_OWNS_BACK));
 }
 
 // =============================================================================
@@ -625,7 +645,7 @@ TEST(snapshot_menu_countdown) {
 TEST(snapshot_care_list) {
   seams2_reset();
   care_enter();
-  snapshot(SCR_FEED, "care_list");
+  snapshot(SCR_CARE, "care_list");
 }
 
 TEST(snapshot_care_list_scrolled) {
@@ -633,7 +653,7 @@ TEST(snapshot_care_list_scrolled) {
   care_enter();
   for (uint8_t i = 0; i < CARE_BACK; i++) care_input(GST_TAP_L);
   CHECK_EQ(care_cursor(), (uint8_t)CARE_BACK);
-  snapshot(SCR_FEED, "care_list_back");
+  snapshot(SCR_CARE, "care_list_back");
 }
 
 TEST(snapshot_play_list) {
@@ -645,14 +665,14 @@ TEST(snapshot_play_list) {
 TEST(snapshot_status_a) {
   seams2_reset();
   status_a_enter();
-  snapshot(SCR_STATUS_A, "status_a_starter");
+  snapshot(SCR_STATUS, "status_a_starter");
 }
 
 TEST(snapshot_status_a_maxed) {
   seams2_reset();
   fixture_maxed();
   status_a_enter();
-  snapshot(SCR_STATUS_A, "status_a_maxed");
+  snapshot(SCR_STATUS, "status_a_maxed");
 }
 
 TEST(snapshot_status_b) {
@@ -678,7 +698,7 @@ TEST(snapshot_settings_info) {
   seams2_reset();
   settings_enter();
   for (uint8_t i = 0; i < SET_INFO; i++) settings_input(GST_TAP_L);
-  settings_input(GST_TAP_R);
+  settings_input(GST_HOLD_R);
   CHECK_EQ(settings_page(), 1);
   snapshot(SCR_SETTINGS, "settings_info");
 }
@@ -687,7 +707,7 @@ TEST(snapshot_time_entry) {
   seams2_reset();
   g_clock_known = false;
   time_enter();
-  snapshot(SCR_CLOCK, "time_entry");
+  snapshot(SCR_TIME, "time_entry");
 }
 
 // =============================================================================
@@ -701,25 +721,21 @@ TEST(menu_goes_where_section_8_says) {
   menu_to(MENU_PEBBLE);
 
   struct { uint8_t item; int pushes; uint8_t to; } kWant[] = {
-    { MENU_PEBBLE,   1, SCR_STATUS_A },
-    { MENU_CARE,     1, SCR_FEED     },
+    { MENU_PEBBLE,   1, SCR_STATUS },
+    { MENU_CARE,     1, SCR_CARE     },
     { MENU_PLAY,     1, SCR_PLAY     },
-    { MENU_BOX,      0, 0xFF         },
-    { MENU_NETWORK,  0, 0xFF         },
-    { MENU_LINK,     1, SCR_SOCIAL   },
+    { MENU_BOX,      1, SCR_BOX      },
+    { MENU_NETWORK,  1, SCR_NETWORK  },
+    { MENU_LINK,     1, SCR_LINK   },
     { MENU_SETTINGS, 1, SCR_SETTINGS },
   };
   for (size_t i = 0; i < sizeof kWant / sizeof kWant[0]; i++) {
     seams_reset();
     g_push = 0xFF;
     CHECK_EQ(menu_cursor(), kWant[i].item);
-    menu_input(GST_TAP_R);
-    if (kWant[i].pushes) {
-      CHECK_EQ(g_push, kWant[i].to);
-    } else {
-      CHECK_EQ(g_push, (uint8_t)0xFF);         // nothing was opened...
-      CHECK_EQ(g_toast, STR_UI_SOON);          // ...and the user was told why
-    }
+    menu_input(GST_HOLD_R);                    // section 7: B held chooses
+    CHECK_EQ(g_push, kWant[i].to);
+    CHECK(kWant[i].pushes == 1);
     menu_input(GST_TAP_L);                     // on to the next item
   }
   CHECK_EQ(menu_cursor(), (uint8_t)MENU_PEBBLE);   // invariant 4: it is a ring
@@ -744,51 +760,51 @@ TEST(care_actions_and_the_rejected_path) {
   seams2_reset();
   care_enter();
 
-  care_input(GST_TAP_R);                        // meal
+  care_input(GST_HOLD_R);                        // meal
   CHECK_EQ(g_shown, (uint8_t)ACT_FEED_MEAL);
   CHECK_EQ(g_backs, 0);
 
   g_action_ok = false;
-  care_input(GST_TAP_R);
+  care_input(GST_HOLD_R);
   CHECK_EQ(g_backs, 1);                         // refused: back to where we were
   g_action_ok = true;
 
   care_input(GST_TAP_L);                        // snack
-  care_input(GST_TAP_R);
+  care_input(GST_HOLD_R);
   CHECK_EQ(g_shown, (uint8_t)ACT_FEED_SNACK);
 
   care_input(GST_TAP_L);                        // clean
-  care_input(GST_TAP_R);
+  care_input(GST_HOLD_R);
   CHECK_EQ(g_shown, (uint8_t)ACT_CLEAN);
 
   care_input(GST_TAP_L);                        // medicine: always a confirmation
-  care_input(GST_TAP_R);
+  care_input(GST_HOLD_R);
   CHECK_EQ(g_medicine, 1);
 
   care_input(GST_TAP_L);                        // light: no film, so no journey
   g_shown = ACT_NONE;
-  care_input(GST_TAP_R);
+  care_input(GST_HOLD_R);
   CHECK_EQ(g_action, (uint8_t)ACT_LIGHT_TOGGLE);
   CHECK_EQ(g_shown, (uint8_t)ACT_NONE);
 
   care_input(GST_TAP_L);                        // volver
   g_backs = 0;
-  care_input(GST_TAP_R);
+  care_input(GST_HOLD_R);
   CHECK_EQ(g_backs, 1);
 }
 
 TEST(play_list_starts_a_game_or_leaves) {
   seams2_reset();
   play_enter();
-  play_input(GST_TAP_R);
+  play_input(GST_HOLD_R);
   CHECK_EQ(g_minigame, (uint8_t)0);
   play_input(GST_TAP_L);
-  play_input(GST_TAP_R);
+  play_input(GST_HOLD_R);
   CHECK_EQ(g_minigame, (uint8_t)1);
   play_input(GST_DBL_R);                        // jump to the last row
   CHECK_EQ(play_cursor(), (uint8_t)(PLAY_ROWS - 1));
   g_backs = 0;
-  play_input(GST_TAP_R);
+  play_input(GST_HOLD_R);
   CHECK_EQ(g_backs, 1);
 }
 
@@ -799,7 +815,7 @@ TEST(home_gestures) {
   home_input(GST_TAP_R);
   CHECK_EQ(g_shown, (uint8_t)ACT_PET);
   home_input(GST_HOLD_L);
-  CHECK_EQ(g_push, (uint8_t)SCR_STATUS_A);
+  CHECK_EQ(g_push, (uint8_t)SCR_STATUS);
   home_input(GST_LONG_BOTH);
   CHECK_EQ(g_push, (uint8_t)SCR_SETTINGS);
 
@@ -817,31 +833,31 @@ TEST(status_pages_flip) {
   CHECK_EQ(g_goto, (uint8_t)SCR_STATUS_B);
   status_b_enter();
   status_input(GST_TAP_L);
-  CHECK_EQ(g_goto, (uint8_t)SCR_STATUS_A);
+  CHECK_EQ(g_goto, (uint8_t)SCR_STATUS);
 }
 
 TEST(settings_toggles_persist_and_the_info_page_closes) {
   seams2_reset();
   settings_enter();
 
-  settings_input(GST_TAP_R);                    // SET_SOUND
+  settings_input(GST_HOLD_R);                    // SET_SOUND
   CHECK_EQ((uint8_t)(g_cfg.flags & CF_MUTE), (uint8_t)CF_MUTE);
   CHECK_EQ(g_cfg_saves, 1);
 
   settings_input(GST_TAP_L);                    // SET_WEB
-  settings_input(GST_TAP_R);
+  settings_input(GST_HOLD_R);
   CHECK_EQ((uint8_t)(g_cfg.flags & CF_WEB_ENABLED), (uint8_t)CF_WEB_ENABLED);
 
   settings_input(GST_TAP_L);                    // SET_BRIGHT: a five-step ring
   const uint8_t b0 = g_cfg.brightness;
-  settings_input(GST_TAP_R);
+  settings_input(GST_HOLD_R);
   CHECK(g_cfg.brightness != b0);
   CHECK_EQ(g_bright, g_cfg.brightness);         // and it went through the arbiter
 
   // The "Acerca de" page is read-only and any gesture gives the list back.
   settings_enter();
   for (uint8_t i = 0; i < SET_INFO; i++) settings_input(GST_TAP_L);
-  settings_input(GST_TAP_R);
+  settings_input(GST_HOLD_R);
   CHECK_EQ(settings_page(), 1);
   settings_close_page();
   CHECK_EQ(settings_page(), 0);
@@ -850,10 +866,17 @@ TEST(settings_toggles_persist_and_the_info_page_closes) {
   settings_enter();
   g_cfg_p = nullptr;
   g_cfg_saves = 0;
-  settings_input(GST_TAP_R);
+  settings_input(GST_HOLD_R);
   CHECK_EQ(g_toast, STR_ERR_BUSY);
   CHECK_EQ(g_cfg_saves, 0);
   g_cfg_p = &g_cfg;
+
+  // Section 7: B TAPPED leaves the screen, and it reaches the hook because the
+  // row carries SF_OWNS_BACK (the info page is one level below the stack).
+  settings_enter();
+  g_backs = 0;
+  settings_input(GST_TAP_R);
+  CHECK_EQ(g_backs, 1);
 }
 
 // The five fields, the wrap, the leap-year clamp and the commit.
@@ -976,7 +999,7 @@ TEST(the_countdown_bar_drains) {
 // =============================================================================
 TEST(snapshot_link) {
   seams2_reset();
-  snapshot(SCR_SOCIAL, "link_phase7");
+  snapshot(SCR_LINK, "link_phase7");
 }
 
 TEST(snapshot_evolution_incubator) {
@@ -984,7 +1007,7 @@ TEST(snapshot_evolution_incubator) {
   g_view.stage = STAGE_EGG;
   g_view.age_s = 60;
   evo_enter();
-  snapshot(SCR_EGG, "evolution_egg");
+  snapshot(SCR_EVOLUTION, "evolution_egg");
 }
 
 // The same screen with the shell already cracking, five of the ten taps in,
@@ -997,7 +1020,7 @@ TEST(snapshot_evolution_cold_egg) {
   evo_enter();
   for (uint8_t i = 0; i < 5; i++) evo_input((i & 1u) ? GST_TAP_R : GST_TAP_L);
   CHECK_EQ(evo_rub_count(), (uint8_t)5);
-  snapshot(SCR_EGG, "evolution_egg_cold");
+  snapshot(SCR_EVOLUTION, "evolution_egg_cold");
 }
 
 // With no ceremony bound - which is every host build, and any device build
@@ -1033,7 +1056,7 @@ TEST(evolution_rub_needs_alternating_taps) {
 
 TEST(snapshot_diag_console_off) {
   seams2_reset();
-  snapshot(SCR_GOD, "diag_console_off");
+  snapshot(SCR_DIAG, "diag_console_off");
 }
 
 // A console that switched itself off must not keep the screen.
@@ -1054,7 +1077,7 @@ TEST(snapshot_creator_station) {
   g_sta_up = 1;
   creator_enter();
   CHECK_EQ(g_radio, 1);                        // it asked for the station
-  snapshot(SCR_QR, "creator_station");
+  snapshot(SCR_CREATOR, "creator_station");
 }
 
 TEST(snapshot_creator_portal) {
@@ -1062,13 +1085,13 @@ TEST(snapshot_creator_portal) {
   g_ap_up = 1;
   creator_enter();
   CHECK_EQ(creator_variant(), (uint8_t)1);     // the portal opens on "join me"
-  snapshot(SCR_QR, "creator_portal");
+  snapshot(SCR_CREATOR, "creator_portal");
 }
 
 TEST(snapshot_creator_offline) {
   seams2_reset();
   creator_enter();
-  snapshot(SCR_QR, "creator_offline");
+  snapshot(SCR_CREATOR, "creator_offline");
 }
 
 // The radio is SCREEN-OWNED: taken on the way in, given back on the way out.
@@ -1142,15 +1165,222 @@ TEST(a_confirmation_starts_on_no) {
   dialog_open_confirm(CFM_WIPE2, STR_CF_WIPE2);
   CHECK_EQ(dialog_modal(), (uint8_t)MODAL_CONFIRM);
   CHECK_EQ(dialog_confirm_yes(), (uint8_t)0);
-  dialog_input(GST_TAP_R);                     // "OK" on NO closes it
+  dialog_input(GST_HOLD_R);                    // choosing NO closes it
   CHECK_EQ(dialog_modal(), (uint8_t)MODAL_NONE);
   CHECK_EQ(g_commits, 0);
 
   dialog_open_confirm(CFM_WIPE2, STR_CF_WIPE2);
   dialog_input(GST_TAP_L);                     // onto YES
-  dialog_input(GST_TAP_R);
+  dialog_input(GST_HOLD_R);
   CHECK_EQ(g_commits, 1);
   CHECK_EQ(g_commit_id, (uint8_t)CFM_WIPE2);
+}
+
+// =============================================================================
+//  THE BOX (P2-C11d)
+//
+//  ui/screen_box.cpp reads game/box.h directly, so the fixture here is a REAL
+//  GameState with a real Box bound to it - which also means these snapshots
+//  exercise box_add()/box_set_active() rather than a hand-drawn mock.
+// =============================================================================
+static GameState g_gs;
+
+static void box_fixture(uint8_t occupied) {
+  memset(&g_gs, 0, sizeof g_gs);
+  box_bind(g_gs);
+  Genome gen;
+  memset(&gen, 0, sizeof gen);
+  gen.magic_ver  = GENOME_MAGIC_VER;
+  gen.lineage_id = 0x0BADF00Du;
+  gen.g0 = 0x1234u; gen.g1 = 0x5678u; gen.g2 = 0x9ABCu;
+  gen.generation = 3;
+  for (uint8_t i = 0; i < occupied; ++i) {
+    // Species 1 for all three: the roster is one species until Phase 9 fills
+    // data/species_table.h, and box_new_pebble() correctly refuses an id that
+    // has no row.
+    const uint8_t slot = box_new_pebble(1u, (uint8_t)(1u + i * 3u),
+                                        ORIGIN_STARTER, gen, 0xC0FFEEu + i, 1000u);
+    CHECK(slot != BOX_SLOT_NONE);
+    PebbleInstance* p = box_slot(slot);
+    if (!p) continue;
+    for (uint8_t c = 0; c < PB_CARE_COUNT; ++c)
+      p->care[c] = (int32_t)(PB_CARE_MILLI_MAX - (int32_t)c * 12000);
+    p->hp_cur = (uint16_t)(15u + i);
+    // The second row carries the longest nickname the schema allows: the list
+    // has a number, a marker, a name and a right-aligned level to fit in 128 px.
+    if (i == 1u) snprintf(p->nickname, sizeof p->nickname, "ABCDEFGHIJKL");
+  }
+  if (occupied) CHECK(box_set_active(0));
+  box_enter();
+}
+
+TEST(snapshot_box_list) {
+  seams2_reset();
+  box_fixture(3);
+  snapshot(SCR_BOX, "box_list");
+}
+
+TEST(snapshot_box_empty) {
+  seams2_reset();
+  box_fixture(0);
+  snapshot(SCR_BOX, "box_empty");
+}
+
+TEST(snapshot_box_actions) {
+  seams2_reset();
+  box_fixture(3);
+  box_input(GST_TAP_L);                 // onto slot 2, which is not the active one
+  box_input(GST_HOLD_R);                // choose it
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
+  CHECK_EQ(box_screen_slot(), (uint8_t)1);
+  snapshot(SCR_BOX, "box_actions");
+}
+
+TEST(snapshot_box_card) {
+  seams2_reset();
+  box_fixture(3);
+  box_input(GST_TAP_L);
+  box_input(GST_HOLD_R);                // the action list for slot 2
+  box_input(GST_HOLD_R);                // BOXA_VIEW: a stored Pebble's card
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_CARD);
+  snapshot(SCR_BOX, "box_card");
+}
+
+// Spec section 9, and invariants B3 / B4: select active, swap, and a release
+// that refuses the Pebble you are carrying before any dialog is opened.
+TEST(box_does_what_section_9_says) {
+  seams2_reset();
+  box_fixture(3);
+
+  // VIEW on the ACTIVE slot goes to the PEBBLE pages, because that one IS the
+  // simulated pet; a stored one gets the card above instead.
+  CHECK_EQ(box_screen_cursor(), (uint8_t)0);
+  box_input(GST_HOLD_R);
+  box_input(GST_HOLD_R);
+  CHECK_EQ(g_push, (uint8_t)SCR_STATUS);
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
+
+  // Select active.
+  box_enter();
+  box_input(GST_TAP_L);                 // slot 2
+  box_input(GST_HOLD_R);
+  box_input(GST_TAP_L);                 // BOXA_ACTIVATE
+  box_input(GST_HOLD_R);
+  CHECK_EQ(g_box_active, (uint8_t)1);
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_LIST);
+
+  // Swap: pick the slot, pick the target, and the exchange goes through the
+  // ui.cpp seam because it has to reach flash.
+  box_enter();
+  box_input(GST_HOLD_R);                // slot 1
+  box_input(GST_TAP_L); box_input(GST_TAP_L);   // BOXA_SWAP
+  box_input(GST_HOLD_R);
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_SWAP);
+  CHECK_EQ(g_toast, STR_BOX_SWAP_PICK);
+  box_input(GST_TAP_L);                 // onto slot 2
+  box_input(GST_HOLD_R);
+  CHECK_EQ(g_box_swap_a, (uint8_t)0);
+  CHECK_EQ(g_box_swap_b, (uint8_t)1);
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_LIST);
+
+  // B4: the active Pebble is refused before a dialog is ever opened.
+  box_enter();                          // opens on the active slot
+  const uint8_t active = box_active();
+  CHECK(active != BOX_ACTIVE_NONE);
+  box_input(GST_HOLD_R);
+  for (uint8_t i = 0; i < BOXA_RELEASE; ++i) box_input(GST_TAP_L);
+  g_box_released = 0xFF;
+  box_input(GST_HOLD_R);
+  CHECK_EQ(g_box_released, (uint8_t)0xFF);
+  CHECK_EQ(g_toast, STR_BOX_NO_RELEASE_ACTIVE);
+
+  // A stored one is offered, and only to the two dialogs.
+  box_enter();
+  box_input(GST_TAP_L);
+  box_input(GST_HOLD_R);
+  for (uint8_t i = 0; i < BOXA_RELEASE; ++i) box_input(GST_TAP_L);
+  box_input(GST_HOLD_R);
+  CHECK_EQ(g_box_released, (uint8_t)1);
+
+  // TRADE and BREED exist, are reachable, and say which phase brings them.
+  box_enter();
+  box_input(GST_TAP_L);
+  box_input(GST_HOLD_R);
+  for (uint8_t i = 0; i < BOXA_TRADE; ++i) box_input(GST_TAP_L);
+  box_input(GST_HOLD_R);
+  CHECK_EQ(g_toast, STR_UI_SOON);
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
+
+  // B walks back through the modes and only then leaves the screen.
+  g_backs = 0;
+  box_input(GST_TAP_R);
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_LIST);
+  CHECK_EQ(g_backs, 0);
+  box_input(GST_TAP_R);
+  CHECK_EQ(g_backs, 1);
+}
+
+// The ladder is LIST -> ACTIONS -> {SWAP, CARD} and B climbs it ONE RUNG at a
+// time, landing back on the action row the sub-mode was opened from - a card
+// that dropped straight to the ten slots would skip the level the header
+// promises, and a cancelled swap would too.
+TEST(box_b_climbs_the_mode_ladder_one_rung_at_a_time) {
+  seams2_reset();
+  box_fixture(3);
+  g_backs = 0;
+
+  // ACTIONS -> CARD -> ACTIONS, on the row that opened it.
+  box_input(GST_TAP_L);                 // slot 2, a stored one
+  box_input(GST_HOLD_R);
+  box_input(GST_HOLD_R);                // BOXA_VIEW
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_CARD);
+  box_input(GST_TAP_R);
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
+  CHECK_EQ(box_screen_cursor(), (uint8_t)BOXA_VIEW);
+  CHECK_EQ(g_backs, 0);
+
+  // The card's own single row means the same thing as B does.
+  box_input(GST_HOLD_R);
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_CARD);
+  box_input(GST_HOLD_R);
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
+
+  // ACTIONS -> SWAP -> ACTIONS, cancelled by B and by picking the slot itself.
+  box_input(GST_TAP_L); box_input(GST_TAP_L);   // BOXA_SWAP
+  box_input(GST_HOLD_R);
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_SWAP);
+  box_input(GST_TAP_R);
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
+  CHECK_EQ(box_screen_cursor(), (uint8_t)BOXA_SWAP);
+
+  g_box_swap_a = 0xFF;
+  box_input(GST_HOLD_R);                // into SWAP again, cursor on its own slot
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_SWAP);
+  box_input(GST_HOLD_R);                // choosing itself is a cancel
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
+  CHECK_EQ(g_box_swap_a, (uint8_t)0xFF);
+  CHECK_EQ(g_backs, 0);                 // none of that left the screen
+}
+
+// The release commits in ui.cpp, and it has to send the screen back to the ten
+// slots: the action list it came from is now about a slot that holds nothing.
+TEST(box_screen_to_list_leaves_the_emptied_action_list) {
+  seams2_reset();
+  box_fixture(3);
+  box_input(GST_TAP_L);
+  box_input(GST_HOLD_R);
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
+
+  box_screen_to_list();
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_LIST);
+  CHECK_EQ(box_screen_cursor(), box_screen_slot());
+}
+
+// One placeholder is enough to prove the frame: they differ only in two string
+// ids, and test_statemachine.cpp renders every single row.
+TEST(snapshot_soon_network) {
+  seams2_reset();
+  snapshot(SCR_NETWORK, "soon_network");
 }
 
 // INVARIANT 7, and the audit's S11 defect. The first gesture after the read
@@ -1170,7 +1400,7 @@ TEST(an_alert_never_steals_a_press) {
   g_now += UI_ALERT_MIN_MS;
   CHECK(dialog_input(GST_TAP_L));
   CHECK_EQ(dialog_modal(), (uint8_t)MODAL_NONE);
-  // The old alert_act() would have pushed SCR_FEED here. Nothing may.
+  // The old alert_act() would have pushed SCR_CARE here. Nothing may.
   CHECK_EQ(g_push, (uint8_t)0xFF);
   CHECK_EQ(g_action, (uint8_t)ACT_NONE);
   CHECK_EQ(g_shown, (uint8_t)ACT_NONE);

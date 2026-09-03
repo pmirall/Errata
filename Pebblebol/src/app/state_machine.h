@@ -9,10 +9,12 @@
 //  gate - `grep -cE "s_screen\s*=" src/` == 0 outside this file - mean
 //  something.
 //
-//  STRANGLER. sm_handle/sm_service/sm_draw dispatch to SCREENS[s] and report
-//  whether they did: a screen that has not been migrated yet returns false and
-//  ui.cpp runs its old switch. The enter / leave / dissolve / fps work that is
-//  still ui.cpp's is reached through the four ui_nav_* seams in ui.h.
+//  THE TABLE IS COMPLETE (P2-C11d). Every ScreenId has a row with all five
+//  hooks, so sm_handle/sm_service/sm_draw dispatch unconditionally and there is
+//  no legacy switch left to fall through to. The presentation work that is
+//  still ui.cpp's - closing the modal, cutting the shared interpolators, the
+//  entry dissolve and the frame rate - is reached through the two ui_nav_*
+//  seams in ui.h.
 //
 //  Identifiers and comments: English.
 // =============================================================================
@@ -51,7 +53,7 @@ void     sm_replace_root(ScreenId s);
 // it; this is the base.
 ScreenId sm_current(void);
 
-// The row for the current screen, or NULL while it still lives in ui.cpp.
+// The row for the current screen. Never NULL for an id inside the enum.
 const ScreenDef* sm_def(void);
 
 // Per-loop pump: runs the current screen's update hook and the 20 s
@@ -60,11 +62,12 @@ const ScreenDef* sm_def(void);
 // the caller can stop touching a screen that is already gone.
 bool     sm_service(uint32_t now_ms);
 
-// Feed one gesture to the current screen. Returns false when the screen is not
-// migrated (the caller runs its own switch) or when the row has no input hook.
+// Feed one gesture to the current screen. app/input_router.cpp calls this
+// AFTER the section 7 global grammar has had its say. False only for an id
+// outside the enum.
 bool     sm_handle(Gesture g);
 
-// Draw the current screen. Returns false when it is not migrated.
+// Draw the current screen. False only for an id outside the enum.
 bool     sm_draw(void);
 
 // "The user just did something": restarts the auto-return countdown.

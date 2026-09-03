@@ -47,7 +47,7 @@ void status_a_render(void) {
   if (!v || !v->present) {
     gfx_text_center(GF_NARR, 34, S(STR_UI_NOBODY));
     gfx_countdown(ui_idle_ms());
-    gfx_affordance(S(STR_ST_TITLE_B), nullptr);
+    gfx_affordance(S(STR_ST_TITLE_B), S(STR_AF_BACK));
     return;
   }
 
@@ -86,7 +86,7 @@ void status_a_render(void) {
   }
 
   gfx_countdown(ui_idle_ms());
-  gfx_affordance(S(STR_ST_TITLE_B), nullptr);
+  gfx_affordance(S(STR_ST_TITLE_B), S(STR_AF_BACK));
 }
 
 // -----------------------------------------------------------------------------
@@ -97,7 +97,7 @@ void status_b_render(void) {
   gfx_header(S(STR_ST_TITLE_B), nullptr);
   if (!v || !v->present) {
     gfx_text_center(GF_NARR, 34, S(STR_UI_NOBODY));
-    gfx_affordance(S(STR_ST_TITLE_A), nullptr);
+    gfx_affordance(S(STR_ST_TITLE_A), S(STR_AF_BACK));
     return;
   }
 
@@ -110,7 +110,7 @@ void status_b_render(void) {
     gfx_text_center(GF_TINY, (int16_t)(UI_HDR_H + 24), b);
     gfx_rect(8, (int16_t)(UI_HDR_H + 5), OLED_W - 16, 24);
     gfx_countdown(ui_idle_ms());
-    gfx_affordance(S(STR_ST_TITLE_A), nullptr);
+    gfx_affordance(S(STR_ST_TITLE_A), S(STR_AF_BACK));
     return;
   }
 
@@ -153,7 +153,7 @@ void status_b_render(void) {
   }
 
   gfx_countdown(ui_idle_ms());
-  gfx_affordance(S(STR_ST_TITLE_A), nullptr);
+  gfx_affordance(S(STR_ST_TITLE_A), S(STR_AF_BACK));
 }
 
 // -----------------------------------------------------------------------------
@@ -163,7 +163,7 @@ void status_input(Gesture g) {
   switch (g) {
     case GST_TAP_L:
       s_hex_ms = 0;
-      ui_goto(s_page ? SCR_STATUS_A : SCR_STATUS_B);
+      ui_goto(s_page ? SCR_STATUS : SCR_STATUS_B);
       break;
     case GST_DBL_R: {
       const PebbleView* v = ui_view();

@@ -92,19 +92,19 @@ void menu_render(void) {
   }
 
   gfx_countdown(ui_idle_ms());
-  gfx_affordance(S(STR_AF_NEXT), S(STR_AF_SEL));
+  gfx_affordance(S(STR_AF_NEXT), S(STR_AF_BACK_SEL));
 }
 
 static void menu_select(void) {
   switch (s_idx) {
-    case MENU_PEBBLE:   ui_push(SCR_STATUS_A); break;
-    case MENU_CARE:     ui_push(SCR_FEED);     break;   // the CARE list
+    case MENU_PEBBLE:   ui_push(SCR_STATUS);   break;
+    case MENU_CARE:     ui_push(SCR_CARE);     break;
     case MENU_PLAY:     ui_push(SCR_PLAY);     break;
-    // BOX is the last screen of this plan step and NETWORK is Phase 5. Until
-    // then the entry exists, is reachable and says so.
-    case MENU_BOX:
-    case MENU_NETWORK:  ui_toast(STR_UI_SOON); break;
-    case MENU_LINK:     ui_push(SCR_SOCIAL);   break;
+    case MENU_BOX:      ui_push(SCR_BOX);      break;
+    // NETWORK is Phase 5. The entry goes to a real screen that says so rather
+    // than to a toast: every section 6 state has a row now (ui/screen_soon.h).
+    case MENU_NETWORK:  ui_push(SCR_NETWORK);  break;
+    case MENU_LINK:     ui_push(SCR_LINK);     break;
     default:            ui_push(SCR_SETTINGS); break;
   }
 }
@@ -120,7 +120,10 @@ void menu_input(Gesture g) {
       s_ring_from = UI_RING_STEP_PX;
       s_ring_ms   = ui_now_ms();
       break;
-    case GST_TAP_R: menu_select(); break;
+    // Section 7: B taps back (the router took it), B held chooses. HOLD_R
+    // fires exactly ONCE, which is why choosing sits on it and stepping does
+    // not - see app/input_router.h.
+    case GST_HOLD_R: menu_select(); break;
     case GST_DBL_L: s_idx = 0; s_ring_from = 0; break;   // a jump, not a step
     case GST_DBL_R: ui_repeat_last_action(); break;
     case GST_BOTH:  ui_help(kHelp[s_idx]); break;

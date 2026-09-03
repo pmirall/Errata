@@ -51,7 +51,7 @@ static void draw_str_list(uint16_t title, const uint16_t* ids, uint8_t n, uint8_
   gfx_header(S(title), nullptr);
   gfx_list(items, n, cur, nullptr, ui_now_ms());
   gfx_countdown(ui_idle_ms());
-  gfx_affordance(S(STR_AF_NEXT), S(STR_AF_SEL));
+  gfx_affordance(S(STR_AF_NEXT), S(STR_AF_BACK_SEL));
 }
 
 static uint8_t ring_next(uint8_t cur, uint8_t n) {
@@ -75,7 +75,7 @@ static void list_common(Gesture g, uint8_t& cur, uint8_t n, const uint16_t* help
 void care_render(void) { draw_str_list(STR_MENU_CARE, kCareItem, CARE_ROWS, s_care); }
 
 void care_input(Gesture g) {
-  if (g != GST_TAP_R) { list_common(g, s_care, CARE_ROWS, kCareHelp); return; }
+  if (g != GST_HOLD_R) { list_common(g, s_care, CARE_ROWS, kCareHelp); return; }
   switch (s_care) {
     case CARE_MEAL:     if (!ui_act_and_show(ACT_FEED_MEAL))  ui_back(); break;
     case CARE_SNACK:    if (!ui_act_and_show(ACT_FEED_SNACK)) ui_back(); break;
@@ -95,7 +95,7 @@ void care_input(Gesture g) {
 void play_render(void) { draw_str_list(STR_MENU_PLAY, kPlayItem, PLAY_ROWS, s_play); }
 
 void play_input(Gesture g) {
-  if (g != GST_TAP_R) { list_common(g, s_play, PLAY_ROWS, kPlayHelp); return; }
+  if (g != GST_HOLD_R) { list_common(g, s_play, PLAY_ROWS, kPlayHelp); return; }
   if (s_play >= (uint8_t)(PLAY_ROWS - 1)) { ui_back(); return; }
   // The cooldown, the energy floor and the game itself are all still ui.cpp's
   // until P3-C4 lifts the minigames out; this screen only says which one.

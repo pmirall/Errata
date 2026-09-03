@@ -9,7 +9,7 @@
 //  by ui.cpp on the device, all NULL on the host, where the screen draws the
 //  "console off" frame that the golden snapshot is a statement about.
 //
-//  That is the whole point of the migration: it takes `case SCR_GOD` out of
+//  That is the whole point of the migration: it takes `case SCR_DIAG` out of
 //  ui.cpp's three switches (the plan's grep exit gate) without pretending that
 //  a console which can wipe the save is a pure translation unit.
 //

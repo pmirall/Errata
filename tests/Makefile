@@ -56,6 +56,9 @@ $(OBJ)/%.o: $(SRC_ROOT)/hardware/%.cpp Makefile | $(OBJ)
 $(OBJ)/%.o: $(SRC_ROOT)/ui/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
+$(OBJ)/%.o: $(SRC_ROOT)/app/%.cpp Makefile | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
 $(OBJ)/%.o: $(SRC_ROOT)/persistence/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
@@ -78,6 +81,10 @@ $(BIN)/test_genome:     $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_sim_golden: $(OBJ)/sim.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_care:       $(OBJ)/sim.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_box:        $(OBJ)/box.o
+# The Box <-> sim seam: the real box.cpp and the real sim.cpp together, which
+# is the only way to see a swap move sim's raw pointer off its creature.
+$(BIN)/test_box_sim:    $(OBJ)/box_sim.o $(OBJ)/box.o $(OBJ)/sim.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 $(BIN)/test_qr:         $(OBJ)/qr.o
 $(BIN)/test_clock:      $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o
@@ -91,16 +98,25 @@ $(BIN)/test_game_state: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migrati
 # The screen table's migrated rows are pure translation units, so they compile
 # here exactly as they do in the firmware; gfx_fb.o is the host end of gfx.h
 # and gfx_widgets.o is the SHARED half of it, linked into both.
-$(BIN)/test_screens:    $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
-                        $(OBJ)/screen_error.o $(OBJ)/screen_home.o \
-                        $(OBJ)/screen_menu.o $(OBJ)/screen_care.o \
-                        $(OBJ)/screen_status.o $(OBJ)/screen_settings.o \
-                        $(OBJ)/screen_time.o $(OBJ)/screen_view.o \
-                        $(OBJ)/screen_link.o $(OBJ)/screen_diag.o \
-                        $(OBJ)/screen_evolution.o $(OBJ)/screen_creator.o \
-                        $(OBJ)/dialog.o $(OBJ)/qr.o \
-                        $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o \
-                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+# Every ScreenId has a row since P2-C11d, so the table drags in every screen
+# module - which is exactly what makes "the table is complete" testable.
+SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
+               $(OBJ)/screen_box.o $(OBJ)/screen_soon.o \
+               $(OBJ)/screen_error.o $(OBJ)/screen_home.o \
+               $(OBJ)/screen_menu.o $(OBJ)/screen_care.o \
+               $(OBJ)/screen_status.o $(OBJ)/screen_settings.o \
+               $(OBJ)/screen_time.o $(OBJ)/screen_view.o \
+               $(OBJ)/screen_link.o $(OBJ)/screen_diag.o \
+               $(OBJ)/screen_evolution.o $(OBJ)/screen_creator.o \
+               $(OBJ)/dialog.o $(OBJ)/qr.o $(OBJ)/box.o \
+               $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o \
+               $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
+$(BIN)/test_screens:    $(SCREEN_OBJS)
+
+# The navigation machine and the section 7 router, over the REAL table.
+$(BIN)/test_statemachine: $(SCREEN_OBJS) $(OBJ)/state_machine.o \
+                        $(OBJ)/input_router.o $(OBJ)/host_shims.o
 # pet_view.cpp is the model->view seam petfx and actfx read (P2-C11c). It is
 # pure, so it compiles here; sim.o comes with it because the live fill reads
 # sim_stat_pct() / sim_mood_score().

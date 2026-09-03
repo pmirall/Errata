@@ -44,17 +44,17 @@ if [ $DO_TESTS -eq 1 ]; then
 fi
 
 # --- grep gates (each is enabled by the plan commit that makes it true) ---
-# The screen state machine owns navigation. Scoped to ui/ and app/ ON PURPOSE:
-# dev/godmode.cpp has its own unrelated `static uint8_t s_screen` for the
-# console sub-screen (33 hits), so the plan's tree-wide wording would fail on
-# false positives and teach the next person to disable the gate. True since
-# P2-C11c.
-if [ -d "$SKETCH/src/ui" ]; then
+# The screen state machine owns navigation. TREE-WIDE since P2-C11d: the
+# exception this gate used to carry (dev/godmode.cpp had its own unrelated
+# `static uint8_t s_screen` for the console sub-screen, 39 hits) was removed by
+# renaming that variable to s_console_page, so the plan's own wording now holds
+# with no scoping and no false positives to teach the next person to disable it.
+if [ -d "$SKETCH/src" ]; then
   # `|| true` on BOTH greps: this script runs under `set -o pipefail`, so a grep
   # that finds nothing returns 1, fails the pipeline and — with `set -e` — kills
   # the run at the exact moment the gate should be approving. A gate must not be
   # able to abort the thing it guards.
-  n=$( { grep -rE 's_screen[[:space:]]*=' "$SKETCH/src/ui" "$SKETCH/src/app" --include='*.cpp' || true; } \
+  n=$( { grep -rE 's_screen[[:space:]]*=' "$SKETCH/src" --include='*.cpp' || true; } \
         | { grep -v 'app/state_machine\.cpp' || true; } | wc -l )
   [ "$n" -eq 0 ] || fail "navigation assigned outside app/state_machine.cpp ($n)"
 fi
@@ -63,6 +63,13 @@ fi
 if [ -f "$SKETCH/src/ui/ui.cpp" ]; then
   n=$(grep -c 'case SCR_' "$SKETCH/src/ui/ui.cpp" || true)
   [ "${n:-0}" -eq 0 ] || fail "ui.cpp still switches on ScreenId ($n cases)"
+fi
+
+# Every spec section 6 state has a table row with all five hooks (P2-C11d).
+# The cheap shape check lives here; tests/test_statemachine.cpp is the real one.
+if [ -f "$SKETCH/src/ui/screen_table.cpp" ]; then
+  n=$(grep -c 'nullptr,' "$SKETCH/src/ui/screen_table.cpp" || true)
+  [ "${n:-0}" -eq 0 ] || fail "screen_table.cpp still has a null hook ($n)"
 fi
 
 # Rendering reads views, not models (audit risk 9). True since P2-C11c.

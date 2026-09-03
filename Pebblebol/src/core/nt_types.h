@@ -47,29 +47,44 @@ enum Stage : uint8_t {
 // Screen state machine. Renumbered when MEMORIAL and LINEAGE were removed, so
 // the S-numbers below are the current ones, not the historical ones.
 enum ScreenId : uint8_t {
-  SCR_HOME = 0,      // S0
-  SCR_MENU,          // S1  8-icon ring
-  SCR_FEED,          // S2  vertical list
-  SCR_PLAY,          // S3  vertical list
-  SCR_GAME,          // S4  minigame active
-  SCR_STATUS_A,      // S5  bars
-  SCR_STATUS_B,      // S6  genome / ADN
-  SCR_SOCIAL,        // S7  BLE
-  SCR_SETTINGS,      // S8
-  SCR_CONFIRM,       // S9  modal, cursor defaults to NO
-  SCR_ALERT,         // S10 overlay
-  SCR_EGG,           // S11
-  SCR_GOD,           // S12
-  SCR_QR,            // S13
-  SCR_CLOCK,         // S14 on-device time entry
-  // P2-C9c. Appended rather than inserted: P2-C11 renumbers the whole enum to
-  // the spec section 6 order when the screen table lands, and until then every
-  // id above is load-bearing in three switches.
-  SCR_BOOT,          // S15 splash, before anything has been read
-  SCR_LOAD_SAVE,     // S16 the save pipeline is running
-  SCR_ERROR,         // S17 SAVE ERROR and the two choices
+  // ---- the spec section 6 set, in the spec's own order --------------------
+  SCR_BOOT = 0,      // splash, before anything has been read
+  SCR_LOAD_SAVE,     // the save pipeline is running
+  SCR_HOME,          // the pet, the one screen you stare at for days
+  SCR_MENU,          // the 7-icon ring
+  SCR_CARE,          // the care list (ex SCR_FEED)
+  SCR_PLAY,          // the minigame list
+  SCR_GAME,          // a minigame is running
+  SCR_BOX,           // the ten slots (spec section 9)
+  SCR_STATUS,        // PEBBLE page A: vitals
+  SCR_STATUS_B,      // PEBBLE page B: genome. See the note below.
+  SCR_NETWORK,       // Wi-Fi exploration, phase 5
+  SCR_LINK,          // peer link, phase 7 (ex SCR_SOCIAL)
+  SCR_CREATOR,       // the creator portal (ex SCR_QR)
+  SCR_SETTINGS,
+  SCR_TIME,          // on-device time entry (ex SCR_CLOCK)
+  SCR_CONFIRM,       // overlay, cursor defaults to NO
+  SCR_ALERT,         // overlay
+  SCR_ENCOUNTER,     // phase 5
+  SCR_CAPTURE,       // phase 5
+  SCR_BATTLE,        // phase 4
+  SCR_TRADE,         // phase 7
+  SCR_BREED,         // phase 7
+  SCR_EVOLUTION,     // the egg / the evolution ceremony (ex SCR_EGG)
+  SCR_ITEM_REWARD,   // phase 6
+  SCR_ERROR,         // SAVE ERROR / PANTALLA and the two choices
+  SCR_SLEEP,         // phase 10
+  SCR_DIAG,          // the developer console (ex SCR_GOD)
   SCR_COUNT
 };
+
+// STATUS_B is the ONE id here that spec section 6 does not name, and it is not
+// a new state: it is the second page of the same PEBBLE state. The pages are
+// two table rows rather than one row plus a page byte because the screen table
+// is what the navigation stack, the back gesture and the snapshot tests all
+// address - collapsing them would move page changes out of the state machine
+// and back into a screen-local variable the stack cannot see, which is exactly
+// the "global boolean spaghetti" section 6 forbids.
 
 // Gesture recogniser output. Prefixed GST_ deliberately: bare BOTH/NONE at
 // global scope in a header shared by 20 files is a collision waiting to happen.
@@ -80,7 +95,7 @@ enum Gesture : uint8_t {
   GST_DBL_L,
   GST_DBL_R,
   GST_HOLD_L,        // repeats every REPEAT_RATE_MS
-  GST_HOLD_R,        // BACK on every screen except S4
+  GST_HOLD_R,        // CHOOSES (section 7); fires once, never repeats
   GST_BOTH,
   GST_LONG_BOTH,     // HOME from anywhere
   GST_COUNT

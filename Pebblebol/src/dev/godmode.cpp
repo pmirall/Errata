@@ -152,7 +152,7 @@ static const GodGene GD_GENES[GOD_GENE_COUNT] = {
 //  4. MODULE STATE
 // =============================================================================
 static bool     s_active      = false;
-static uint8_t  s_screen      = GSC_MENU;
+static uint8_t  s_console_page      = GSC_MENU;
 static uint8_t  s_menu_cur    = 0;        // root list cursor, survives sub-screens
 static uint8_t  s_sub_cur     = 0;        // cursor inside the current sub-screen
 static uint8_t  s_scale_idx   = 0;
@@ -232,7 +232,7 @@ static void open_confirm(uint16_t question, uint8_t act)
   s_confirm_str = question;
   s_confirm_act = act;
   s_confirm_yes = false;          // NO, always
-  s_screen      = GSC_CONFIRM;
+  s_console_page      = GSC_CONFIRM;
 }
 
 // -----------------------------------------------------------------------------
@@ -341,7 +341,7 @@ static void install_genome(const Genome& g)
 // =============================================================================
 static void hex_paste_service(void)
 {
-  if (!(s_screen == GSC_HEX && s_hex_mode == GHX_LOAD)) return;
+  if (!(s_console_page == GSC_HEX && s_hex_mode == GHX_LOAD)) return;
 
   while (Serial.available() > 0) {
     const int c = Serial.read();
@@ -353,7 +353,7 @@ static void hex_paste_service(void)
       Genome g;
       if (genome_from_hex32(s_hex, g)) {
         install_genome(g);
-        s_screen = GSC_GENOME;
+        s_console_page = GSC_GENOME;
       } else {
         toast((uint16_t)STR_ERR_GENOME);
       }
@@ -413,7 +413,7 @@ static void run_cmd(const char* line)
 static void cmd_service(void)
 {
   // The genome paste owns the line while it is open; never fight it.
-  if (s_screen == GSC_HEX && s_hex_mode == GHX_LOAD) return;
+  if (s_console_page == GSC_HEX && s_hex_mode == GHX_LOAD) return;
 
   while (Serial.available() > 0) {
     const int c = Serial.read();
@@ -492,7 +492,7 @@ void god_dump_line(void)
 void god_begin(void)
 {
   s_active      = false;
-  s_screen      = GSC_MENU;
+  s_console_page      = GSC_MENU;
   s_menu_cur    = 0;
   s_sub_cur     = 0;
   s_scale_idx   = 0;
@@ -526,7 +526,7 @@ void god_enter(void)
 {
   if (s_active) return;
   s_active   = true;
-  s_screen   = GSC_MENU;
+  s_console_page   = GSC_MENU;
   s_menu_cur = 0;
   s_sub_cur  = 0;
   s_abs_done = false;
@@ -565,7 +565,7 @@ void god_exit(void)
   set_scale(0);
   s_frozen = false;
   s_active   = false;
-  s_screen   = GSC_MENU;
+  s_console_page   = GSC_MENU;
 
   const SimView* p = pet();
   if (p) gs_save_active(true);
@@ -596,11 +596,11 @@ uint8_t god_entry_progress(uint8_t screen_id)
   const uint32_t held = (l < r) ? l : r;
   if (held >= (uint32_t)GOD_ENTER_HOLD_MS) {
     // The same hold RE-OPENS the console when god mode is already on. Without
-    // this the user who left SCR_GOD with GOD_EVT_LEAVE to watch an accelerated
+    // this the user who left SCR_DIAG with GOD_EVT_LEAVE to watch an accelerated
     // life would be stranded: the only off switch is the console's exit row.
     if (!s_active) god_enter();
-    else           s_screen = GSC_MENU;
-    input_flush();          // the eventual release must not fire on SCR_GOD
+    else           s_console_page = GSC_MENU;
+    input_flush();          // the eventual release must not fire on SCR_DIAG
     return 100;
   }
   return (uint8_t)((held * 100UL) / (uint32_t)GOD_ENTER_HOLD_MS);
@@ -641,12 +641,12 @@ static GodEvt commit_confirm(void)
 
     case GCF_WIPE2: {
       const bool ok = run_wipe();
-      s_screen = GSC_MENU;
+      s_console_page = GSC_MENU;
       toast((uint16_t)(ok ? STR_GOD_DONE : STR_ERR_NVS));
       return GOD_EVT_WIPED;
     }
     default:
-      s_screen = GSC_MENU;
+      s_console_page = GSC_MENU;
       return GOD_EVT_NONE;
   }
 }
@@ -658,12 +658,12 @@ static GodEvt open_command(uint8_t row)
   s_abs_done = false;
 
   switch (row) {
-    case  0: s_screen = GSC_SPEED;    s_sub_cur = s_scale_idx; break;
-    case  1: s_screen = GSC_ABSENCE;  break;
-    case  2: s_screen = GSC_STATPICK; break;
-    case  3: s_screen = GSC_STAGE;    break;
-    case  4: s_screen = GSC_GENOME;   break;
-    case  5: s_screen = GSC_SYS;      s_sys_page = GD_SYS_CLOCK; break;
+    case  0: s_console_page = GSC_SPEED;    s_sub_cur = s_scale_idx; break;
+    case  1: s_console_page = GSC_ABSENCE;  break;
+    case  2: s_console_page = GSC_STATPICK; break;
+    case  3: s_console_page = GSC_STAGE;    break;
+    case  4: s_console_page = GSC_GENOME;   break;
+    case  5: s_console_page = GSC_SYS;      s_sys_page = GD_SYS_CLOCK; break;
     case  6: open_confirm((uint16_t)STR_CF_WIPE, GCF_WIPE1); break;
     default:
       god_exit();
@@ -675,7 +675,7 @@ static GodEvt open_command(uint8_t row)
 // How many rows the current sub-screen has.
 static uint8_t sub_count(void)
 {
-  switch (s_screen) {
+  switch (s_console_page) {
     case GSC_SPEED:    return (uint8_t)GOD_SCALE_COUNT;
     case GSC_ABSENCE:  return (uint8_t)GOD_ABSENCE_COUNT;
     case GSC_STATPICK: return (uint8_t)ST_COUNT;
@@ -691,7 +691,7 @@ static uint8_t sub_count(void)
 // TAP_R / select inside a sub-screen.
 static GodEvt select_sub(void)
 {
-  switch (s_screen) {
+  switch (s_console_page) {
     case GSC_SPEED:
       set_scale(s_sub_cur);
       toast((uint16_t)STR_GOD_DONE);
@@ -704,7 +704,7 @@ static GodEvt select_sub(void)
     case GSC_STATPICK:
       s_pick    = s_sub_cur;
       s_sub_cur = 0;
-      s_screen  = GSC_STATVAL;
+      s_console_page  = GSC_STATVAL;
       return GOD_EVT_NONE;
 
     case GSC_STATVAL:
@@ -728,7 +728,7 @@ static GodEvt select_sub(void)
         }
         case GD_GEN_EDIT:
           s_gene_idx = 0;
-          s_screen   = GSC_GENE;
+          s_console_page   = GSC_GENE;
           break;
         case GD_GEN_DUMP: {
           const SimView* p = pet();
@@ -737,14 +737,14 @@ static GodEvt select_sub(void)
             GOD_LOGF("GENOME,%s\n", s_hex_show);
           }
           s_hex_mode = GHX_DUMP;
-          s_screen   = GSC_HEX;
+          s_console_page   = GSC_HEX;
           break;
         }
         default:
           s_hex_mode = GHX_LOAD;
           s_hexlen   = 0;
           s_hex[0]   = '\0';
-          s_screen   = GSC_HEX;
+          s_console_page   = GSC_HEX;
           GOD_LOGF("[god] %s\n", S(STR_GOD_PASTE));
           break;
       }
@@ -777,23 +777,23 @@ GodEvt god_handle(Gesture g)
 
   // GAME_DESIGN 8.2 invariant 2: HOME from anywhere. God mode STAYS ON - the
   // marker bar guarantees the user knows - and the exit row turns it off.
-  if (g == GST_LONG_BOTH) { s_screen = GSC_MENU; return GOD_EVT_LEAVE; }
+  if (g == GST_LONG_BOTH) { s_console_page = GSC_MENU; return GOD_EVT_LEAVE; }
 
   // ---- the shared confirm modal -------------------------------------------
-  if (s_screen == GSC_CONFIRM) {
+  if (s_console_page == GSC_CONFIRM) {
     switch (g) {
       case GST_TAP_L:  s_confirm_yes = !s_confirm_yes;      return GOD_EVT_NONE;
       case GST_TAP_R:  if (s_confirm_yes) return commit_confirm();
-                       s_confirm_act = GCF_NONE; s_screen = GSC_MENU;
+                       s_confirm_act = GCF_NONE; s_console_page = GSC_MENU;
                        return GOD_EVT_NONE;
-      case GST_HOLD_R: s_confirm_act = GCF_NONE; s_screen = GSC_MENU;
+      case GST_HOLD_R: s_confirm_act = GCF_NONE; s_console_page = GSC_MENU;
                        return GOD_EVT_NONE;
       default:         return GOD_EVT_NONE;
     }
   }
 
   // ---- the root list -------------------------------------------------------
-  if (s_screen == GSC_MENU) {
+  if (s_console_page == GSC_MENU) {
     switch (g) {
       case GST_TAP_L:
       case GST_HOLD_L: list_step(s_menu_cur, (uint8_t)GOD_MENU_ROWS, +1); return GOD_EVT_NONE;
@@ -812,26 +812,26 @@ GodEvt god_handle(Gesture g)
   // ---- every sub-screen ----------------------------------------------------
   switch (g) {
     case GST_HOLD_R:
-      if (s_screen == GSC_STATVAL) { s_screen = GSC_STATPICK; s_sub_cur = s_pick; }
-      else if (s_screen == GSC_GENE || s_screen == GSC_HEX) { s_screen = GSC_GENOME; s_sub_cur = 0; }
-      else                       { s_screen = GSC_MENU; }
+      if (s_console_page == GSC_STATVAL) { s_console_page = GSC_STATPICK; s_sub_cur = s_pick; }
+      else if (s_console_page == GSC_GENE || s_console_page == GSC_HEX) { s_console_page = GSC_GENOME; s_sub_cur = 0; }
+      else                       { s_console_page = GSC_MENU; }
       return GOD_EVT_NONE;
 
     case GST_TAP_L:
     case GST_HOLD_L:
-      if (s_screen == GSC_SYS)      { s_sys_page = (uint8_t)((s_sys_page + 1u) % GD_SYS_PAGES); }
-      else if (s_screen == GSC_GENE){ list_step(s_gene_idx, (uint8_t)GOD_GENE_COUNT, +1); }
+      if (s_console_page == GSC_SYS)      { s_sys_page = (uint8_t)((s_sys_page + 1u) % GD_SYS_PAGES); }
+      else if (s_console_page == GSC_GENE){ list_step(s_gene_idx, (uint8_t)GOD_GENE_COUNT, +1); }
       else                          { list_step(s_sub_cur, sub_count(), +1); }
       return GOD_EVT_NONE;
 
     case GST_DBL_L:
-      if (s_screen == GSC_GENE) s_gene_idx = 0; else s_sub_cur = 0;
+      if (s_console_page == GSC_GENE) s_gene_idx = 0; else s_sub_cur = 0;
       return GOD_EVT_NONE;
 
     case GST_DBL_R:
       // On the gene editor this is the decrement; everywhere else it is the
       // vertical-list "jump to last item" of GAME_DESIGN 8.3.
-      if (s_screen == GSC_GENE) {
+      if (s_console_page == GSC_GENE) {
         const SimView* p = pet();
         if (p) {
           const GodGene& gg = GD_GENES[s_gene_idx % GOD_GENE_COUNT];
@@ -1167,7 +1167,7 @@ void god_draw(void)
 {
   if (!s_active) return;
 
-  switch (s_screen) {
+  switch (s_console_page) {
     case GSC_MENU:     draw_menu(); break;
     case GSC_SPEED:    draw_simple_list(S(STR_GOD_SPEED),   (uint8_t)GOD_SCALE_COUNT,  lbl_speed);    break;
     case GSC_ABSENCE:  draw_absence(); break;

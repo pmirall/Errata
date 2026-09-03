@@ -419,6 +419,45 @@ enum StrId : uint16_t {
   STR_DISP_ERR_TITLE,
   STR_DISP_ERR_A,
 
+  // --- 33k. P2-C11d. The affordance the two-button grammar needed, the BOX
+  //          screen, and one title per spec section 6 state that has no
+  //          implementation yet: the screen table is COMPLETE, so every state
+  //          the spec names can be entered and every one of them says what it
+  //          is and which phase brings it to life.
+  STR_AF_BACK_SEL,
+  STR_BOX_TITLE,
+  STR_BOX_EMPTY,
+  STR_BOX_ACTIVE,
+  STR_BOX_FULL,
+  STR_BOX_ACT_VIEW,
+  STR_BOX_ACT_ACTIVATE,
+  STR_BOX_ACT_SWAP,
+  STR_BOX_ACT_RELEASE,
+  STR_BOX_ACT_TRADE,
+  STR_BOX_ACT_BREED,
+  STR_BOX_SWAP_PICK,
+  STR_BOX_SWAP_DONE,
+  STR_BOX_ACTIVATED,
+  STR_BOX_NO_RELEASE_ACTIVE,
+  STR_BOX_RELEASED,
+  STR_BOX_REL_Q1,
+  STR_BOX_REL_Q2,
+  STR_SOON_TITLE,
+  STR_SOON_BODY,
+  STR_SOON_NETWORK,
+  STR_SOON_ENCOUNTER,
+  STR_SOON_CAPTURE,
+  STR_SOON_BATTLE,
+  STR_SOON_TRADE,
+  STR_SOON_BREED,
+  STR_SOON_ITEM,
+  STR_SOON_SLEEP,
+  STR_PHASE_4,
+  STR_PHASE_5,
+  STR_PHASE_6,
+  STR_PHASE_7,
+  STR_PHASE_10,
+
   STR_COUNT
 };
 
@@ -783,7 +822,42 @@ inline constexpr const char* const ES[] = {
   /* STR_DIAG_OFF */              "Consola apagada.",
 
   /* STR_DISP_ERR_TITLE */        "PANTALLA",
-  /* STR_DISP_ERR_A */            "A: Reintentar"
+  /* STR_DISP_ERR_A */            "A: Reintentar",
+
+  /* --- 33k. P2-C11d: BOX, the complete state table, the B affordance --- */
+  /* STR_AF_BACK_SEL */           "ATRÁS/SEL",
+  /* STR_BOX_TITLE */             "CAJA",
+  /* STR_BOX_EMPTY */             "Vacío",
+  /* STR_BOX_ACTIVE */            "*",
+  /* STR_BOX_FULL */              "La caja está llena.",
+  /* STR_BOX_ACT_VIEW */          "Ver ficha",
+  /* STR_BOX_ACT_ACTIVATE */      "Sacar a pasear",
+  /* STR_BOX_ACT_SWAP */          "Mover de sitio",
+  /* STR_BOX_ACT_RELEASE */       "Liberar",
+  /* STR_BOX_ACT_TRADE */         "Intercambiar",
+  /* STR_BOX_ACT_BREED */         "Criar",
+  /* STR_BOX_SWAP_PICK */         "Elige el otro hueco.",
+  /* STR_BOX_SWAP_DONE */         "Hueco cambiado.",
+  /* STR_BOX_ACTIVATED */         "Ahora te acompaña.",
+  /* STR_BOX_NO_RELEASE_ACTIVE */ "No puedes liberar al que te acompaña.",
+  /* STR_BOX_RELEASED */          "Se ha ido.",
+  /* STR_BOX_REL_Q1 */            "¿Liberar a este Pebble?",
+  /* STR_BOX_REL_Q2 */            "No hay vuelta atrás. ¿Seguro?",
+  /* STR_SOON_TITLE */            "PRÓXIMAMENTE",
+  /* STR_SOON_BODY */             "Esta parte del juego todavía no existe.",
+  /* STR_SOON_NETWORK */          "RED",
+  /* STR_SOON_ENCOUNTER */        "ENCUENTRO",
+  /* STR_SOON_CAPTURE */          "CAPTURA",
+  /* STR_SOON_BATTLE */           "COMBATE",
+  /* STR_SOON_TRADE */            "INTERCAMBIO",
+  /* STR_SOON_BREED */            "CRÍA",
+  /* STR_SOON_ITEM */             "PREMIO",
+  /* STR_SOON_SLEEP */            "DESCANSO",
+  /* STR_PHASE_4 */               "Fase 4",
+  /* STR_PHASE_5 */               "Fase 5",
+  /* STR_PHASE_6 */               "Fase 6",
+  /* STR_PHASE_7 */               "Fase 7",
+  /* STR_PHASE_10 */              "Fase 10"
 };
 
 // -----------------------------------------------------------------------------

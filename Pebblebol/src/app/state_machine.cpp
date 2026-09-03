@@ -28,20 +28,11 @@ static uint8_t  s_block_ar  = 0;
 
 static inline uint32_t since(uint32_t t0) { return (uint32_t)(sm_now() - t0); }
 
-// -----------------------------------------------------------------------------
-//  Screens that never time out (invariant 3) and are NOT in the table yet. The
-//  list shrinks to nothing as they migrate; SF_STICKY is the real answer.
-// -----------------------------------------------------------------------------
-static bool legacy_sticky(uint8_t s) {
-  // GAME is the last one left: EGG and GOD carry SF_STICKY in their own rows
-  // since P2-C11c, and HOME has since P2-C11b.
-  return s == SCR_GAME;
-}
-
+// Invariant 3 is a table answer now: the last screen that needed a hard-coded
+// exception (GAME) got its own row in P2-C11d.
 bool sm_is_sticky(void) {
   const ScreenDef* d = screen_def(s_screen);
-  if (d) return (d->flags & SF_STICKY) != 0u;
-  return legacy_sticky(s_screen);
+  return d && (d->flags & SF_STICKY) != 0u;
 }
 
 ScreenId sm_current(void)       { return (ScreenId)s_screen; }
@@ -64,8 +55,7 @@ void sm_goto(ScreenId s) {
   if (s >= SCR_COUNT) return;
   if (s_screen != (uint8_t)s) {
     const ScreenDef* from = screen_def(s_screen);
-    if (from) { if (from->leave) from->leave(); }
-    else      { ui_nav_leave(s_screen); }
+    if (from) from->leave();
   }
   s_screen   = (uint8_t)s;
   s_enter_ms = sm_now();
@@ -77,8 +67,7 @@ void sm_goto(ScreenId s) {
   // modal, which is why ui.cpp owns it.
   ui_nav_reset();
   const ScreenDef* to = screen_def(s_screen);
-  if (to) { if (to->enter) to->enter(); }
-  else    { ui_nav_enter(s_screen); }
+  if (to) to->enter();
   // Entry dissolve, frame rate, frame request: presentation, still ui.cpp's.
   ui_nav_arrived(s_screen);
 }
@@ -99,7 +88,7 @@ void sm_replace_root(ScreenId s) { s_sp = 0; sm_goto(s); }
 
 bool sm_service(uint32_t now_ms) {
   const ScreenDef* d = screen_def(s_screen);
-  if (d && d->update) d->update(now_ms);
+  if (d) d->update(now_ms);
 
   // Invariant 3: 20 s without a gesture returns to HOME, except where the
   // screen says otherwise.
@@ -111,7 +100,7 @@ bool sm_service(uint32_t now_ms) {
 
 bool sm_handle(Gesture g) {
   const ScreenDef* d = screen_def(s_screen);
-  if (!d || !d->input) return false;
+  if (!d) return false;
   d->input(g);
   return true;
 }

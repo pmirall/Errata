@@ -45,7 +45,11 @@ enum ConfirmId : uint8_t {
   CFM_QUIT_GAME,
   CFM_MEDICINE,
   CFM_WIPE1,
-  CFM_WIPE2
+  CFM_WIPE2,
+  // The Box release, spec section 9. Two dialogs for the same reason the wipe
+  // has two: it is destructive and there is no undo (invariant B4).
+  CFM_BOX_REL1,
+  CFM_BOX_REL2
 };
 
 typedef void (*DialogCommitFn)(uint8_t confirm_id);

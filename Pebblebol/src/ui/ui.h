@@ -174,15 +174,55 @@ void     ui_note_recovered(void);
 //  that are still ui.cpp's business. They are called in this order and from
 //  nowhere else:
 //
-//      ui_nav_leave(from)   only for a screen with no table row yet
 //      ui_nav_reset()       close the modal, cut the shared interpolators
-//      ui_nav_enter(to)     only for a screen with no table row yet
 //      ui_nav_arrived(to)   entry dissolve, frame rate, frame request
+//
+//  The two ui_nav_leave/ui_nav_enter forwarders that used to sit either side of
+//  them went with P2-C11d: the table has a row for every state now, so there is
+//  no screen left whose enter and leave live in ui.cpp.
 // -----------------------------------------------------------------------------
-void     ui_nav_leave(uint8_t from);
 void     ui_nav_reset(void);
-void     ui_nav_enter(uint8_t to);
 void     ui_nav_arrived(uint8_t to);
+
+// -----------------------------------------------------------------------------
+//  THE GAME SEAMS (P2-C11d, retired by P3-C4)
+//
+//  SCR_GAME's five hooks. The three minigames, their scoring and their pause
+//  dialog are still inside ui.cpp - lifting them out is P3-C4 - but the screen
+//  table may not have a hole for them, so the row points at these forwarders
+//  instead of at a special case in the dispatcher. When P3-C4 lands
+//  ui/screen_game.cpp these five disappear and the row points straight at it.
+// -----------------------------------------------------------------------------
+void     ui_game_enter(void);
+void     ui_game_update(uint32_t now_ms);
+void     ui_game_render(void);
+void     ui_game_input(Gesture g);
+void     ui_game_leave(void);
+
+// -----------------------------------------------------------------------------
+//  THE BOX SEAMS (P2-C11d)
+//
+//  ui/screen_box.cpp READS game/box.h directly (pure queries over the live
+//  GameState) but may not write: activating a slot changes what the simulation
+//  is bound to, and every mutation has to reach flash. Both are ui.cpp's.
+// -----------------------------------------------------------------------------
+
+// box_set_active(slot) + sim_switch() + save. A no-op for an empty slot or for
+// the slot that is already active.
+void     ui_box_activate(uint8_t slot);
+
+// The "nope" wiggle: a gesture that means nothing on this screen shakes the
+// body for UI_WIGGLE_MS instead of doing nothing at all. HOME's B secondary is
+// the only dead end left in the grammar.
+void     ui_wiggle(void);
+
+// box_swap(a, b) + save. Display order is the player's to arrange (spec 9).
+void     ui_box_swap(uint8_t a, uint8_t b);
+
+// Open the FIRST of the two confirmations that stand in front of a release.
+// Nothing is destroyed until both have been answered YES (invariant B4, spec
+// section 9 "release/discard if explicitly supported").
+void     ui_box_release(uint8_t slot);
 
 
 // -----------------------------------------------------------------------------

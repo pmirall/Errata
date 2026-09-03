@@ -127,7 +127,11 @@ void home_input(Gesture g) {
     // section 8 asks it to say, always.
     case GST_TAP_R:
     case GST_DBL_R:  ui_act_and_show(ACT_PET); break;
-    case GST_HOLD_L: ui_push(SCR_STATUS_A); break;
+    case GST_HOLD_L: ui_push(SCR_STATUS); break;
+    // HOME is the root, so the router leaves B alone and A/B both do something
+    // here. B HELD is the one gesture left with nothing to mean: the body
+    // shakes instead of the press vanishing.
+    case GST_HOLD_R: ui_wiggle(); break;
     case GST_BOTH: {
       Config* c = ui_cfg();
       if (!c) break;

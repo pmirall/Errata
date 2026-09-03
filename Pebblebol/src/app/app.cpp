@@ -415,7 +415,7 @@ void app_setup(void)
   ui_note_load((uint8_t)load);
 
   if (!gs_readonly() && boot == BOOT_FIRST_RUN && gt_cal_state() == CAL_UNSET) {
-    ui_goto(SCR_CLOCK);
+    ui_goto(SCR_TIME);
   }
 
   // Last, so it wins the screen: with no panel there is nothing to read, and

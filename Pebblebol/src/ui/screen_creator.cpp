@@ -110,8 +110,10 @@ void creator_update(uint32_t now_ms) {
   build(in);
 }
 
+// Section 7: A is the only button this screen owns. B is BACK (the router
+// took it) and there is nothing here a long press should mean.
 void creator_input(Gesture g) {
-  if (g != GST_TAP_L && g != GST_TAP_R) return;
+  if (g != GST_TAP_L) return;
   CreatorInfo in;
   ui_creator_info(in);
   if (!in.ap_up) return;                    // one symbol only: nothing to flip
