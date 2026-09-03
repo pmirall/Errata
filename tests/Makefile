@@ -172,8 +172,12 @@ $(BIN)/test_statemachine: $(SCREEN_OBJS) $(OBJ)/state_machine.o \
 # pet_view.cpp is the model->view seam petfx and actfx read (P2-C11c). It is
 # pure, so it compiles here; sim.o comes with it because the live fill reads
 # sim_stat_pct() / sim_mood_score().
-# evolution.o + xp.o as well: the view is where "the body changed" is provable,
-# so the P3-C3 case evolves a Pebble and re-fills its PetView.
+# evolution.o + xp.o as well: the P3-C3 case evolves a Pebble and re-fills its
+# PetView. NOT the shipped body - that goes through pet_view_fill_sim(), which
+# never reads evo_state; the case drives pet_view_fill(), which no firmware file
+# calls. It proves the MODEL half. See the banner in test_pet_view.cpp and the
+# open P3-C3 bullet in the plan. (Corrected by the P3-C5 follow-up: this comment
+# said "the view is where the body changed is provable".)
 $(BIN)/test_pet_view:   $(OBJ)/pet_view.o $(OBJ)/sim.o $(OBJ)/daylight.o \
                         $(OBJ)/box.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o

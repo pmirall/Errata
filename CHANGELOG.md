@@ -43,7 +43,14 @@ project warnings, size caps, and `make -C tests check`.
   `MinigameDef` (plus `draw`), a fixed-size `MgCtx` with no heap, and a **pure** manager, so
   "exactly one report per game" is a host test rather than a hope. Six games — PING,
   SECUENCIA, PACKET FLOOD, FIREWALL, BUFFER, DELETE — each a `*_logic.cpp` / `*_draw.cpp`
-  pair, every run a constant length, every run reproducible from its seed.
+  pair, every run reproducible from its seed and every run under a fixed ceiling.
+  **Corrected after the exit:** this said "every run a constant length", which is true of two
+  of the six. FIREWALL (12,000 ms) and BUFFER (10,000 ms) are constant under every tape. The
+  four §29 games have a fixed *upper bound* no press can exceed — 11,675 / 12,000 / 10,000 /
+  11,600 ms, the idle case — and presses can only shorten a run: PACKET FLOOD collapses to
+  9,875 ms when it is played and DELETE to 175 ms when B is mashed. PING and SEQUENCE are
+  not constant in any sense (PING's idle length varies with the seed; SEQUENCE is the one
+  game a player can lengthen, 2,100 ms idle against a 14,100 ms stretch).
 - **Host tests**: `test_xp` (16), `test_daylight` (7), `test_evolution` (18),
   `test_minigames` (49), plus 11 minigame pixel goldens and the confirmation snapshot.
 
@@ -72,6 +79,9 @@ project warnings, size caps, and `make -C tests check`.
 - **`test_sim_golden.cpp` → `test_care_golden.cpp`**, `golden/sim_v1.txt` →
   `golden/care_v2.txt`. The `v1` meant the legacy v1 *simulation* the transcript was first
   recorded from; two retunes later that is not what it pins. Only the header line changed.
+  The rename also touched `core/rng.cpp`, which the exit commit never explained: it is a
+  one-line comment edit and nothing else — the header note "`tests/golden/sim_v1.txt` depends
+  on it" became "`tests/golden/care_v2.txt` depends on it". `xorshift32` is untouched.
 
 ### Removed
 
@@ -125,9 +135,12 @@ project warnings, size caps, and `make -C tests check`.
 | all-off | all `FEATURE_*`=0 + `GOD_MODE_ENABLED=0` | 492,610 | 22,112 | 0 |
 | **release** | `GOD_MODE_ENABLED=0 FEATURE_BLE=0` | **1,168,772** | **46,708** | 0 |
 
-The whole phase cost **11,696 B of flash and 72 B of static RAM** on the baseline, which is
-79 % of the 2,400,000 B gate cap; the release build is 37 % of the 3,145,728 B `app0` slot,
-where phase 2 left it. Host suite: **21 binaries, 328 tests, 350,214 checks** (phase 2 shipped
+The whole phase cost **11,696 B of flash and 72 B of static RAM**; the baseline sits at 79 %
+of the 2,400,000 B gate cap and the release build at 37 % of the 3,145,728 B `app0` slot,
+where phase 2 left it. (Reworded after the exit: as first written, "cost 11,696 B … which is
+79 % of the cap" attached the percentage to the phase delta rather than to the 1,893,072 B
+baseline total. Both figures were right — 1,893,072/2,400,000 = 78.9 %,
+1,168,772/3,145,728 = 37.2 % — but the antecedent was not.) Host suite: **21 binaries, 328 tests, 350,214 checks** (phase 2 shipped
 17 / 205 / 185,482).
 
 **The phase-3 exit soak, run rather than asserted from a comment.** Fourteen simulated days
@@ -150,6 +163,35 @@ Health reaches 0 in none of them. Hunger, happiness and cleanliness are pinned f
 the fortnight and are meant to be — they are the ones only the player can refill. Scoped to a
 valid clock on purpose: without one there is no night, and energy pins at 0 for 322.78 h of
 the same 336. `docs/decisions.md` carries the full tables.
+
+### Corrected after the exit (second P3-C5 follow-up)
+
+Two of the five adversarial lenses meant to check this exit died on API errors before the tag
+was cut. They were re-run, and the corrections above marked *"corrected after the exit"* come
+from them. Four more that had no inline home:
+
+- **The evolution ceremony is 2.7 s, not 4.5 s.** `docs/decisions.md`, the plan and
+  `tests/test_pet_view.cpp` all said 4.5 s. That is the HATCH ceremony. The EVOLVE arm of
+  `ceremony_begin()` back-dates `s_t0` by `HATCH_T_FLASH` (1,800 ms) because there is no shell
+  to rock or crack, and the show ends at `HATCH_TOTAL_MS` (4,480 ms): 2,680 ms.
+- **The three constants "6 h" was said to depend on were all wrong, and the dependence is not
+  monotonic.** The criterion first breaks at `CARE_ENERGY_ASLEEP_MPH` ≈ 11,000 (not "much
+  below 13,300" — 13,300 breaks nothing), `SLEEP_AFTER_DUSK_MIN` ≈ 240 min (not ~3 h) and
+  `CARE_DECAY_MPH[CARE_ENERGY]` ≈ −8,000. Below ≈ 5,000 the pebble stays asleep past sunrise
+  (`SIM_WAKE_DAY_ENERGY_PCT` = 60) and the run at 0 gets *shorter* again. Full sweep in
+  `docs/decisions.md`.
+- **The poop carry cost 28 B of flash, not 32 B** (0 B of static RAM either way, which is
+  exact). Measured against a rebuild of the pre-fix `poop_step()`.
+- **Three §67 boxes were due and had been left open** — "Two-button input is robust", "Box
+  supports 10 Pebbles", "Active Pebble can be selected". The rule the section applies (tick
+  when every commit named on the line has landed) is now written down above the list, because
+  it was being applied unevenly.
+
+Also: the sentence the exit says it struck from `test_pet_view` was struck only in the plan —
+the test file and `tests/Makefile` still asserted it, and now do not; `tools/check.sh` gained
+the `esp_random` gate the plan had listed for two phases without it ever existing; and the
+god-mode ×3600 soak is now genuinely in the first-flash measurement list two documents claimed
+it was already in.
 
 ### Not verified
 
@@ -273,6 +315,35 @@ Worst-case offline catch-up (400 days) measures 8.4 ms on the host at `-O1`, pro
 at ~421 ms on a 160 MHz ESP32-C3 — well under the 5 s Task WDT, so catch-up does not
 need to be resumable.
 
+### Corrected after the exit (second P3-C5 follow-up)
+
+Two of the five adversarial lenses meant to check this exit died on API errors before the tag
+was cut. They were re-run, and the corrections above marked *"corrected after the exit"* come
+from them. Four more that had no inline home:
+
+- **The evolution ceremony is 2.7 s, not 4.5 s.** `docs/decisions.md`, the plan and
+  `tests/test_pet_view.cpp` all said 4.5 s. That is the HATCH ceremony. The EVOLVE arm of
+  `ceremony_begin()` back-dates `s_t0` by `HATCH_T_FLASH` (1,800 ms) because there is no shell
+  to rock or crack, and the show ends at `HATCH_TOTAL_MS` (4,480 ms): 2,680 ms.
+- **The three constants "6 h" was said to depend on were all wrong, and the dependence is not
+  monotonic.** The criterion first breaks at `CARE_ENERGY_ASLEEP_MPH` ≈ 11,000 (not "much
+  below 13,300" — 13,300 breaks nothing), `SLEEP_AFTER_DUSK_MIN` ≈ 240 min (not ~3 h) and
+  `CARE_DECAY_MPH[CARE_ENERGY]` ≈ −8,000. Below ≈ 5,000 the pebble stays asleep past sunrise
+  (`SIM_WAKE_DAY_ENERGY_PCT` = 60) and the run at 0 gets *shorter* again. Full sweep in
+  `docs/decisions.md`.
+- **The poop carry cost 28 B of flash, not 32 B** (0 B of static RAM either way, which is
+  exact). Measured against a rebuild of the pre-fix `poop_step()`.
+- **Three §67 boxes were due and had been left open** — "Two-button input is robust", "Box
+  supports 10 Pebbles", "Active Pebble can be selected". The rule the section applies (tick
+  when every commit named on the line has landed) is now written down above the list, because
+  it was being applied unevenly.
+
+Also: the sentence the exit says it struck from `test_pet_view` was struck only in the plan —
+the test file and `tests/Makefile` still asserted it, and now do not; `tools/check.sh` gained
+the `esp_random` gate the plan had listed for two phases without it ever existing; and the
+god-mode ×3600 soak is now genuinely in the first-flash measurement list two documents claimed
+it was already in.
+
 ### Not verified
 
 **This firmware has still never run on a physical board.** No ESP32-C3, no panel, no
@@ -296,6 +367,15 @@ The plan cuts tags from Phase 2 onward, so Phase 1 has no `v0.1.0` tag; it is co
 [0.2.0-core]: https://github.com/pmirall/Pebblebol/commit/db3feb3
 <!-- The annotated tags v0.2.0-core and v0.3.0-pet exist in the local
      repository but this environment's git remote refuses tag pushes
-     (send-pack disconnects), so each link points at the commit, which does
+     (send-pack disconnects), so each link points at a commit, which does
      resolve. Create the releases from those commits on GitHub to restore
-     tag URLs. -->
+     tag URLs.
+
+     THE TWO LINKS ARE NOT EQUIVALENT, which this note used to imply and the
+     P3-C5 follow-up corrected. db3feb3 IS the commit v0.2.0-core points at.
+     e2004e7 is the phase-3 EXIT COMMIT, not what v0.3.0-pet points at: the
+     tag has been moved forward twice since, by 4bc71d8 and then by this
+     follow-up, as post-exit audits found and fixed things. A reader following
+     the 0.3.0-pet link therefore lands on the exit as it was cut, before the
+     corrections recorded above. That is the useful anchor for a changelog
+     entry, but it is the exit commit, not the tag. -->

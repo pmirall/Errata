@@ -174,6 +174,11 @@ first flash. The soak is listed below with the other first-hardware measurements
 - Real `sendBuffer()` frame time vs the ≈ 24 ms estimate at 400 kHz.
 - I2C probe result (0x3C / 0x3D / bus sweep) and panel variant (D5). LED polarity is moot while `PIN_LED 5` points at an unpopulated pin (see D1 consequences).
 - USB-CDC port name.
+- **God-mode ×3600 neglect soak (P3-C5).** Drive the DIAG CSV in `dev/godmode.cpp` at
+  `GOD_SCALE_4` and confirm on the board what `care_a_fortnight_of_neglect_only_pins_the_stats_the_player_owns`
+  now gates on the host: no stat the simulation owns pinned at 0 for more than 6 simulated
+  hours. Added here by the P3-C5 follow-up, because both the plan and the "Still not run on
+  hardware" note below claimed it was *already* listed here and it was not.
 
 ## D13 — consequences of deleting the light (recorded 2026-09-03)
 
@@ -300,6 +305,23 @@ It is asserted, not merely benched:
 runs the whole fortnight (20,160 minutes) in about a millisecond, so it is a gate rather
 than something somebody has to remember to drive on a device that has never been flashed.
 
+**How much of a gate, measured (P3-C5 follow-up).** One fixture, and a measured 2.1 h against
+a 6 h cap — a factor of 2.8 of headroom — so the assertion is looser than the sentence above
+sounds. Each of the three constants that governs the criterion was edited in turn and
+`make -C tests check` re-run: **the criterion case stayed green in all three**, and the gate
+went red through something else every time.
+
+| Edit | `…only_pins_the_stats_the_player_owns` | What actually failed |
+|---|---|---|
+| `CARE_ENERGY_ASLEEP_MPH` 11,000 | **ok** | `care_a_finer_step…`, `CARE_GRID_SLEEP_MILLI` 283 ≠ 433 |
+| `CARE_DECAY_MPH[CARE_ENERGY]` −8,000 | **ok** | the same constant check, 466 ≠ 433 |
+| `SLEEP_AFTER_DUSK_MIN` 300 | **ok** | five sleep-window cases, none of them this one |
+
+The gate is not blind to these edits, but what catches them is an unrelated grid-bound
+equality, not the exit criterion. Asserting the criterion over a small genome × month-anchor
+grid rather than the single `0x5EED0C7A` / day-100 fixture would put the bite where the
+sentence says it is; that is open work, not a claim.
+
 Measured on that fixture (seed `0x5EED0C7A`, 10:00, day 100, 336 h):
 
 | Stat | First reaches 0 | **Longest run at 0** | Total at 0 | Ends at |
@@ -330,9 +352,42 @@ cannot roll, it clamps to 4..12 — over all 366 start days gives energy a longe
 **5.40 h**, still under 6 (worst 14-day start measured at day 151, which straddles the
 solstice). The closed form agrees: the longest awake window is 16.50 h — a 7.50 h midsummer
 night — minus 100000/(6000×1.50) = 11.11 h of energy, i.e. 5.39 h. The
-6 h number is not arbitrary — it is where the night stops being long enough to pay for the
-day, so `CARE_ENERGY_ASLEEP_MPH` dropped much below 13,300, `SLEEP_AFTER_DUSK_MIN` pushed
-past ~3 h, or `CARE_DECAY_MPH[CARE_ENERGY]` raised all break it.
+6 h number is not arbitrary, but it is not a knife edge either — **and the three thresholds
+this paragraph used to name were all wrong** (P3-C5 follow-up). Re-measured by an independent
+re-run of the same harness shape, 40 genesis genomes × 12 month anchors, one constant edited
+at a time. The seeds differ from the exit harness's, so figures move about 1 %: the shipped
+build reads 3.88 h here against the exit's 3.87 h.
+
+| Edit to `data/balance.h` | Worst energy run at 0 | Fortnights over 6 h | Worst energy at wake |
+|---|---|---|---|
+| *shipped* | 3.88 h | 0/480 | 99 % |
+| `CARE_ENERGY_ASLEEP_MPH` 13,300 | 3.92 h | 0/480 | 99 % |
+| `CARE_ENERGY_ASLEEP_MPH` 12,200 | 4.95 h | 0/480 | 91 % |
+| `CARE_ENERGY_ASLEEP_MPH` 12,000 | 5.15 h | 0/480 | 89 % |
+| **`CARE_ENERGY_ASLEEP_MPH` 11,000** | **6.10 h** | **6/480** | 82 % |
+| `CARE_ENERGY_ASLEEP_MPH` 8,000 | 8.93 h | 88/480 | 59 % |
+| `CARE_ENERGY_ASLEEP_MPH` 5,000 | 6.38 h | 19/480 | 59 % |
+| `CARE_ENERGY_ASLEEP_MPH` 4,000 | 5.23 h | **0/480 — met again** | 59 % |
+| `SLEEP_AFTER_DUSK_MIN` 180 (3 h) | 5.38 h | 0/480 | 99 % |
+| **`SLEEP_AFTER_DUSK_MIN` 240 (4 h)** | **6.38 h** | **18/480** | 99 % |
+| `CARE_DECAY_MPH[CARE_ENERGY]` −7,000 | 5.68 h | 0/480 | 99 % |
+| **`CARE_DECAY_MPH[CARE_ENERGY]` −8,000** | **7.03 h** | **36/480** | 99 % |
+
+So the criterion first breaks at `CARE_ENERGY_ASLEEP_MPH` ≈ 11,000 (a 45 % cut, not "much
+below 13,300"), at `SLEEP_AFTER_DUSK_MIN` ≈ 240 min (4 h, not ~3 h), and at
+`CARE_DECAY_MPH[CARE_ENERGY]` ≈ −8,000 (a 33 % raise). **13,300 is not a threshold for the
+6 h run at all** — at 13,300 nothing breaks and the worst run barely moves. What the asleep
+rate protects near there is the OTHER half of the criterion, energy above 90 % at sunrise,
+and that first fails around 12,100.
+
+**And the dependence is not monotonic**, so no sentence of the form "dropped much below X
+breaks it" can be true. Below about 5,000 the pebble is too flat at sunrise to satisfy
+`SIM_WAKE_DAY_ENERGY_PCT` (60, `game/sim.cpp:672`), so instead of being pinned awake at 0 it
+simply stays asleep into the day and keeps charging. The same harness counting minutes spent
+asleep while it is light: **0** across all 480 fortnights at 20,000, 11,000 and 8,000;
+697,889 at 5,000; 1,475,847 at 4,000 — mean sleep per fortnight 145.3 h, 145.3 h, 145.3 h,
+169.5 h, 196.5 h. The run at 0 gets *shorter* as the recharge gets worse, and the criterion
+is satisfied again at 4,000.
 
 Two things the criterion could not honestly leave out:
 
@@ -381,7 +436,12 @@ Measured poops over 8 h from 23:00, by the step size the sim is driven at:
 divide the period, harmless at dt ∈ {1, 60} but the same class of bug.
 
 **Nothing at dt = 60 moved**, because 60 × 350 / 1000 is exact, so `golden/care_v2.txt` was
-NOT re-recorded and no existing test changed. Cost: 32 B of flash, 0 B of static RAM.
+NOT re-recorded and no existing test changed. Cost: **28 B of flash, 0 B of static RAM**
+(corrected from 32 B by the P3-C5 follow-up). Measured by rebuilding the baseline against the
+fullest reconstruction of the pre-fix `poop_step()` — carry arithmetic, the `g.poop_rem`
+field and its three resets all removed: 1,893,072 → 1,893,044. Removing only the carry
+arithmetic and keeping the field costs 14 B (1,893,058). Globals are 70,348 in all three
+builds, so "0 B of static RAM" is exact. No reconstruction reproduces 32 B.
 
 **How far it reached, precisely.** `POOP_MAX` is 4, and a pebble already holding four
 uncleaned poops has nowhere to put a fifth: the `poop_count` branch is not taken and the
@@ -435,7 +495,7 @@ carry fails 11 checks across sections 9b and 9c — 6 before this follow-up wide
    enough — which also makes `SIM_SUBSTEP_S = 3600` a compile error rather than one arithmetic
    identity in one test.
 
-### Two overstated claims in the phase-3 audit trail, corrected
+### Overstated claims in the phase-3 audit trail, corrected
 
 - **P3-C3's "`test_pet_view` proves the body the view describes really changes" is not true
   of the shipping build**, and the box has been split so that the false half is now an OPEN
@@ -445,8 +505,12 @@ carry fails 11 checks across sections 9b and 9c — 6 before this follow-up wide
   genome, the minor form and the life stage, none of which an evolution moves;
   `sprite_lookup_pose()` never sees `species_id`, `SpeciesDef.sprite_id` is read by nothing,
   and `STR_SPC_NAME_1..3` are displayed nowhere. A player who confirms an evolution today
-  watches 4.5 s of ceremony and gets back the same body, the same name and a different
-  `hp_max`. The MODEL half of P3-C3 is genuinely complete; §18's visual transformation is
+  watches **2.7 s** of ceremony and gets back the same body, the same name and a different
+  `hp_max`. (2.7 s, not the 4.5 s this paragraph used to say: the EVOLVE arm of
+  `ceremony_begin()` back-dates `s_t0` by `HATCH_T_FLASH` — there is no shell to rock or
+  crack — and `CP_NAME` ends the show at `HATCH_TOTAL_MS`, so an evolution runs
+  4,480 − 1,800 = **2,680 ms**. 4,480 ms is the HATCH ceremony. `ui/ceremony.cpp:69-73`
+  and `:140-143`, constants from `core/config.h:187-206`.) The MODEL half of P3-C3 is genuinely complete; §18's visual transformation is
   not, and it is carried to P4-C1 as a sixth obligation, where the roster grows to twelve
   species that would otherwise all wear their genome's body.
 - **P3-C4's "snapshots for each game" was true of four of six.** `ping_draw.cpp` and
@@ -461,10 +525,63 @@ carry fails 11 checks across sections 9b and 9c — 6 before this follow-up wide
   `>= 2`. That proves the property directly rather than deriving the schedule that implies
   it — stronger than the description, but not the description. Corrected in place.
 
+Four more, found by the P3-C5 follow-up's number and checkbox audits — the two adversarial
+lenses that died on API errors before the tag was cut, so nothing below had been checked by
+anyone when it was written.
+
+- **"Every minigame run is a CONSTANT length" is a WORST CASE, not a constant, for four of
+  the six.** Measured by driving each game's pure logic to `done()` and reading `MgCtx::t_ms`,
+  over five seeds and four input tapes (idle, mash both, mash L, mash R):
+
+  | Game | Idle | Mashed | Constant? |
+  |---|---|---|---|
+  | PING | 9,025 – 12,500 ms *(varies by seed)* | 75 ms | no |
+  | SEQUENCE | 2,100 ms | 1,350 – 3,250 ms | no |
+  | PACKET FLOOD | 11,675 ms | 9,875 ms | no |
+  | FIREWALL | 12,000 ms | 12,000 ms | **yes** |
+  | BUFFER | 10,000 ms | 10,000 ms | **yes** |
+  | DELETE | 11,600 ms | 175 ms | no |
+
+  What IS true, and is the property the claim was reaching for: **the idle figure is a fixed
+  UPPER BOUND that no press can exceed** — 11,675 / 12,000 / 10,000 / 11,600 ms for the four
+  §29 games, which is the hole both shipped games had. Presses can only shorten a run.
+  DELETE ends the moment its charges run out (`delete_logic.cpp:211`, `s.charges == 0u`);
+  PACKET FLOOD's `pf_press()` calls `pf_resolve()`, which advances `c.round` early
+  (`packet_flood_logic.cpp:227`, `:176`). `test_minigames.cpp` knew this and said so in the
+  body — `CHECK(sort_steps <= idle_steps); // playing can only shorten it` — while its own
+  name claimed the opposite; the name is corrected too. PING and SEQUENCE are not constant in
+  any sense: PING's idle length is seed-dependent, and SEQUENCE is the one game a player can
+  *lengthen* (the plan's own stretch tape runs 14,100 ms against a 2,100 ms idle).
+- **The sentence e2004e7 says it struck was struck only in the plan.** e2004e7's diffstat
+  does not contain `tests/test_pet_view.cpp` at all (it touches `tests/Makefile` alone), so
+  "`test_pet_view` proves the body the view describes really changes" survived verbatim in
+  the two places a reader actually meets the test: the §P3-C3 banner and case name in
+  `tests/test_pet_view.cpp`, and the `tests/Makefile` comment above its link line. Both now
+  say what the case covers — the MODEL half, on `pet_view_fill()`, a path with no caller in
+  `Pebblebol/src` — and point at the open P3-C3 bullet. The case is renamed
+  `an_evolution_changes_the_body_the_view_would_describe`. Its banner also carried the same
+  4.5 s figure corrected above.
+- **The exit's "Cost: 32 B of flash" for the poop carry does not reproduce**; 28 B does. See
+  the integrator section above for the three builds.
+- **The CHANGELOG's "cost 11,696 B of flash and 72 B of static RAM … which is 79 % of the
+  2,400,000 B gate cap" reads as 11,696 B being 79 % of the cap.** Both percentages are
+  right — 1,893,072/2,400,000 = 78.9 % and 1,168,772/3,145,728 = 37.2 % — but the antecedent
+  is the baseline total, not the phase delta. Reworded to match this file, which already had
+  it right.
+
+Not corrected, because it holds: the "9 milli over 2 awake hours (1 poop)" above was
+challenged as no longer reproducible. It reproduces exactly from this tree — driving
+`care_grid_gap(10, h*3600)` for h = 1…8 gives 0 / **9** / 13 / **25** / 31 / 31 / 31 / 31
+milli at 0 / **1** / 2 / **3** / 4 / 4 / 4 / 4 poops. The 2 h span is not a *live assertion*
+(§9c's first case starts at 4 h), but the sentence claims a measurement, and the measurement
+is right.
+
 ### Still not run on hardware
 
 Unchanged from the phase-2 exit and worth repeating at a tag: **this firmware has never run
 on a physical board.** Every number above is a host measurement or a compile result. The
-plan's god-mode ×3600 soak (`dev/godmode.cpp`, the DIAG CSV) stays listed with the other
-first-flash measurements; the criterion it was meant to check now lives in the suite, where
+plan's god-mode ×3600 soak (`dev/godmode.cpp`, the DIAG CSV) stays as the on-hardware
+confirmation and **is now genuinely listed** with the other first-flash measurements above —
+the P3-C5 follow-up found that this sentence and the plan's had both been asserting a listing
+that did not exist, and added the bullet; the criterion it was meant to check now lives in the suite, where
 it runs on every gate instead of once, by hand, on a board nobody has.

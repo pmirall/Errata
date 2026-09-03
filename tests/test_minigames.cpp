@@ -600,9 +600,15 @@ TEST(packet_flood_resolves_every_packet_exactly_once_routed_lost_or_wrong) {
   CHECK_EQ(pf_lost(c), pf_packets());        // nobody pressed anything
 }
 
-TEST(packet_flood_ends_at_the_same_instant_however_it_is_played) {
-  // The schedule is a function of the packet index, so no press can move the
-  // end of the run - only retire a packet before its expiry.
+TEST(packet_flood_can_only_be_shortened_by_playing_never_lengthened) {
+  // The schedule is a function of the packet index, so no press can EXTEND the
+  // run past the idle length - 467 steps, 11,675 ms, the hard ceiling asserted
+  // below. A press CAN end it early: pf_press() calls pf_resolve(), which
+  // advances c.round, and pf_done() is `c.round >= PF_PACKETS`, so a run that
+  // is actually sorted finishes at 9,875 ms. The bound is the property; the
+  // length is not a constant. (P3-C5 follow-up: this case was named
+  // ..._ends_at_the_same_instant_however_it_is_played, which its own
+  // `sort_steps <= idle_steps` line contradicts.)
   uint32_t idle_steps = 0, sort_steps = 0;
   for (uint32_t seed = 1; seed <= 8u; ++seed) {
     (void)run_tape(MG_PACKET_FLOOD, seed, tape_idle,    &idle_steps);

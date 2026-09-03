@@ -157,16 +157,34 @@ TEST(pose_and_mood_ladders) {
 }
 
 // =============================================================================
-//  P3-C3: AN EVOLUTION IS A VISIBLE CHANGE
+//  P3-C3: AN EVOLUTION MOVES THE MODEL. IT DOES NOT YET MOVE THE SHIPPED BODY.
 //
-//  This is the only place the claim can be checked. ui/ceremony.cpp is a DEVICE
-//  translation unit (it drives the panel's flash and shake registers through
-//  render.h), so its frames cannot be rendered on the host - but what the
-//  ceremony reveals is a PetView, and a PetView is exactly what this file
-//  builds. If evolving a Pebble did not move anything petfx reads, the section
-//  18 show would be 4.5 seconds of animation ending on the same body.
+//  READ THIS BEFORE CITING THE CASE BELOW AS PROOF OF THE CEREMONY. It used to
+//  claim to be "the only place the claim can be checked", on the argument that
+//  "what the ceremony reveals is a PetView, and a PetView is exactly what this
+//  file builds". The second half is true of the WRONG PetView.
+//
+//  This case drives pet_view_fill(), which HAS NO CALLER IN Pebblebol/src - the
+//  only two references are its declaration (ui/pet_view.h:97) and its definition
+//  (ui/pet_view.cpp:138). The firmware fills the active pet through
+//  pet_view_fill_sim() + pet_view_attach() (ui/ui.cpp:201-203), whose `form`
+//  comes from fill_genome(out, p.genome, p.minor_form, p.stage) - three SimView
+//  fields an evolution does not move, as app_evolve_active() says itself. So
+//  what is proved here is the MODEL half: evolution_apply() moves species_id and
+//  the evo_state stage bits, and a view built FROM THOSE would draw a different
+//  body. Nothing here touches the body the section 18 show actually reveals.
+//
+//  The visual half is the OPEN P3-C3 bullet in the plan, carried to P4-C1 where
+//  the view has to learn species_id. Renamed ..._would_describe for the same
+//  reason. (P3-C5 follow-up: the phase-3 exit commit said it had struck the
+//  "proves the body really changes" sentence, but it struck it in the plan only -
+//  e2004e7's diffstat does not contain this file.)
+//
+//  For the record, the duration this banner used to quote was wrong too: an
+//  EVOLVE ceremony is 2.7 s, not 4.5 s. 4.48 s is the HATCH ceremony;
+//  ceremony_begin() back-dates s_t0 by HATCH_T_FLASH for the evolve arm.
 // =============================================================================
-TEST(an_evolution_changes_the_body_the_view_describes) {
+TEST(an_evolution_changes_the_body_the_view_would_describe) {
   PebbleInstance p;
   memset(&p, 0, sizeof p);
   p.magic      = (uint16_t)PEBBLE_MAGIC;
@@ -192,9 +210,11 @@ TEST(an_evolution_changes_the_body_the_view_describes) {
   PetView after;
   pet_view_fill(after, p, *s2, POSE_IDLE);
 
-  // A different species, drawn with a different form: pet_view.cpp feeds
+  // A different species, drawn with a different form: pet_view_fill() feeds
   // evo_state's stage bits to sprite_form_of(), so the stage bit the evolution
-  // set is what changes the sprite the ceremony hands back.
+  // set is what WOULD change the sprite - on this fill path. It is not the
+  // sprite the ceremony hands back: ui.cpp fills the shipped body through
+  // pet_view_fill_sim(), which never reads evo_state. See the banner above.
   CHECK(after.species_id != before.species_id);
   CHECK(after.form != before.form);
   CHECK_EQ(after.stage, before.stage);    // the LIFE stage follows the level only

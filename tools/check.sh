@@ -84,6 +84,21 @@ for f in petfx actfx; do
   fi
 done
 
+# ONE esp_random() IN THE WHOLE FIRMWARE (plan §1.1 / §1.4, core/rng.h:12-14).
+# app.cpp seeds every stream once with it; everything else draws from rng.h, so
+# a Pebble is reproducible from its seed. ADDED BY THE P3-C5 FOLLOW-UP: the plan
+# listed this gate from P2-C2 but it had never been in this file, and as the
+# plan worded it - `grep -c "genome_rand|esp_random" src/game src/minigames` == 0
+# - it could never have passed, because genome_rand is DEFINED in
+# src/game/genome.cpp. Comment lines are dropped: the rule is about calls, and
+# five headers discuss the rule in prose.
+if [ -d "$SKETCH/src" ]; then
+  n=$( { grep -rn "esp_random" "$SKETCH/src" --include='*.cpp' --include='*.h' || true; } \
+        | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true; } \
+        | { grep -v 'app/app\.cpp' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "esp_random outside app/app.cpp ($n)"
+fi
+
 # P5-C1: no station association anywhere (scan-only Wi-Fi, spec §68 r5)
 # if [ -d "$SKETCH/src" ]; then
 #   n=$(grep -rn "WiFi\.begin(" "$SKETCH/src" | grep -v creator_server | wc -l); [ "$n" -eq 0 ] || fail "WiFi.begin outside creator_server ($n)"
