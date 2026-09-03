@@ -130,8 +130,7 @@ void home_input(Gesture g) {
     // TAP_R strokes the pet. It used to cycle the three status-bar modes, and
     // there are no modes left to cycle: the strip now says the one thing spec
     // section 8 asks it to say, always.
-    case GST_TAP_R:
-    case GST_DBL_R:  ui_act_and_show(ACT_PET); break;
+    case GST_TAP_R:  ui_act_and_show(ACT_PET); break;
     case GST_HOLD_L: ui_push(SCR_STATUS); break;
     // HOME is the root, so the router leaves B alone and A/B both do something
     // here. B HELD is the one gesture left with nothing to mean: the body

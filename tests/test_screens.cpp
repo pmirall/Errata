@@ -86,7 +86,6 @@ static int      g_medicine = 0;
 static uint8_t  g_action   = ACT_NONE;      // the last ui_do_action()
 static uint8_t  g_shown    = ACT_NONE;      // the last ui_act_and_show()
 static bool     g_action_ok = true;
-static int      g_repeat   = 0;
 static uint8_t  g_minigame = 0xFF;
 static uint8_t  g_god      = 0;
 static uint8_t  g_bright   = 0;
@@ -122,7 +121,6 @@ void ui_cfg_changed(void) { g_cfg_saves++; }
 void ui_apply_brightness(uint8_t c) { g_bright = c; }
 bool ui_do_action(uint8_t a)      { g_action = a; return g_action_ok; }
 bool ui_act_and_show(uint8_t a)   { g_shown  = a; return g_action_ok; }
-void ui_repeat_last_action(void)  { g_repeat++; }
 void ui_help(uint16_t id)         { g_help = id; }
 void ui_confirm_medicine(void)    { g_medicine++; }
 void ui_start_minigame(uint8_t i) { g_minigame = i; }
@@ -251,7 +249,6 @@ static void seams2_reset(void) {
   g_action = ACT_NONE;
   g_shown = ACT_NONE;
   g_action_ok = true;
-  g_repeat = 0;
   g_minigame = 0xFF;
   g_god = 0;
   g_bright = 0;
@@ -744,16 +741,19 @@ TEST(menu_goes_where_section_8_says) {
   CHECK_EQ(menu_cursor(), (uint8_t)MENU_PEBBLE);   // invariant 4: it is a ring
 }
 
-TEST(menu_help_and_repeat) {
+TEST(menu_help_and_the_ring_wraps_back_to_the_first_item) {
   seams2_reset();
   menu_to(MENU_PEBBLE);
   menu_input(GST_BOTH);
   CHECK_EQ(g_help, STR_HLP_STATUS);
-  menu_input(GST_DBL_R);
-  CHECK_EQ(g_repeat, 1);
-  menu_input(GST_TAP_L);
-  menu_input(GST_TAP_L);
-  menu_input(GST_DBL_L);                        // a jump back to the first item
+
+  // P3-C4a took the double tap away, and with it this screen's two shortcuts:
+  // DBL_L jumped to the first item and DBL_R repeated the last care action.
+  // The jump is replaced by the ring itself - stepping A all the way round
+  // comes back to where it started - and repeat-last-action was deleted with
+  // its only caller (it is in no spec section and its "nothing to repeat"
+  // path toasted "bad argument").
+  for (uint8_t i = 0; i < (uint8_t)MENU_ITEM_COUNT; ++i) menu_input(GST_TAP_L);
   CHECK_EQ(menu_cursor(), (uint8_t)MENU_PEBBLE);
 }
 
@@ -798,7 +798,9 @@ TEST(play_list_starts_a_game_or_leaves) {
   play_input(GST_TAP_L);
   play_input(GST_HOLD_R);
   CHECK_EQ(g_minigame, (uint8_t)1);
-  play_input(GST_DBL_R);                        // jump to the last row
+  // The "jump to the last row" shortcut went with the double tap; the list
+  // wraps, so one step back from the first row is the last one.
+  while (play_cursor() != (uint8_t)(PLAY_ROWS - 1)) play_input(GST_TAP_L);
   CHECK_EQ(play_cursor(), (uint8_t)(PLAY_ROWS - 1));
   g_backs = 0;
   play_input(GST_HOLD_R);

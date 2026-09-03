@@ -248,7 +248,6 @@ void box_input(Gesture g) {
     case GST_HOLD_L:
       if (s_mode != BOXM_CARD) s_cur = ring_next(s_cur, mode_rows());
       break;
-    case GST_DBL_L: s_cur = 0; break;
     case GST_HOLD_R:
       switch (s_mode) {
         case BOXM_LIST:    choose_slot();        break;

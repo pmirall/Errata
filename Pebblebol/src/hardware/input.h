@@ -4,11 +4,14 @@
 //  No screen knowledge, no game logic, no allocation.
 //
 //  Emitted gestures (nt_types.h, enum Gesture):
-//      GST_TAP_L  GST_TAP_R  GST_DBL_L  GST_DBL_R
+//      GST_TAP_L  GST_TAP_R
 //      GST_HOLD_L (repeating)  GST_HOLD_R (once)  GST_BOTH  GST_LONG_BOTH
 //
+//  A TAP is emitted AT RELEASE (P3-C4a). There is no double tap: it cost
+//  280 ms of latency on every press in the product to buy two shortcuts.
+//
 //  Timing constants all come from config.h section 5:
-//      DEBOUNCE_MS 25 / DOUBLE_TAP_WINDOW_MS 280 / HOLD_MS 600 / TAP_MAX_MS 599
+//      DEBOUNCE_MS 25 / HOLD_MS 600 / TAP_MAX_MS 599
 //      LONG_BOTH_MS 1500 / BOTH_SYNC_MS 80 / REPEAT_START_MS 600
 //      REPEAT_RATE_MS 220 / INPUT_POLL_MS 5
 //
@@ -54,6 +57,20 @@ bool input_raw(uint8_t which);
 // Milliseconds since the debounced press of one button; 0 if it is not down.
 // For "both held for N ms" use the smaller of the two values.
 uint32_t input_hold_ms(uint8_t which);
+
+// PRESS EDGES, for the minigames and nothing else.
+//
+// A game scored on reaction time cannot wait for the gesture recogniser: even
+// with the double tap gone a TAP arrives one debounce interval after RELEASE,
+// and "press A when the indicator is in the zone" must be judged when the
+// button goes DOWN. This reports the debounced press edge of one button and
+// CONSUMES it, so each physical press is seen exactly once however often the
+// caller asks. Out of range -> false.
+//
+// It reads the same debounced state input_raw() does, so it never sees a
+// bounce, and it is independent of the gesture queue: a game may use this
+// while the router still routes BACK from the same button's TAP.
+bool input_pressed_edge(uint8_t which);
 
 // Drop every queued gesture and swallow the presses that are in flight right
 // now: nothing more is emitted from the current button episode until BOTH

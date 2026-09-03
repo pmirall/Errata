@@ -26,9 +26,15 @@
 //    GST_BOTH       -                              help (the screen owns the
 //                                                  topic, so only it can)
 //    GST_LONG_BOTH  HOME (invariant 2)             only on HOME itself
-//    GST_DBL_L/R    -                              shortcuts; the recogniser
-//                                                  keeps emitting them until
-//                                                  P3-C4 decides their fate
+//
+//  P3-C4a DECIDED THE FATE OF GST_DBL_L/R: they are gone. They bought a
+//  "jump to first / last" on six list screens and cost 280 ms of latency on
+//  EVERY press in the product, because a tap could not be classified until the
+//  double-tap window had expired with no second press. A TAP now lands at
+//  RELEASE (~25 ms). Every list already wraps, so first and last are still a
+//  short walk with A held; the two shortcuts that were not list jumps moved
+//  (STATUS's genome hex to HOLD_R) or went with their only caller (the menu's
+//  repeat-last-action).
 //
 //  WHY BACK MOVED FROM HOLD_R TO TAP_R. Until P2-C11d, B's short press was
 //  "select" and BACK was a 600 ms hold - the opposite of section 7, and the

@@ -273,7 +273,6 @@ bool     ui_act_and_show(uint8_t action);
 
 // The MENU's "do that again": replays the last accepted action, or explains
 // that there is not one yet.
-void     ui_repeat_last_action(void);
 
 // The modal layer. ui_help() is the one-line hint BOTH opens on a list row;
 // ui_confirm_medicine() opens the confirmation the medicine costs.

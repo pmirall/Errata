@@ -123,8 +123,6 @@ void settings_input(Gesture g) {
     case GST_HOLD_R: settings_select(); break;
     case GST_TAP_L:
     case GST_HOLD_L: s_cur = ring_next(s_cur, SET_ROWS); break;
-    case GST_DBL_L:  s_cur = 0; break;
-    case GST_DBL_R:  s_cur = (uint8_t)(SET_ROWS - 1u); break;
     case GST_BOTH:   ui_help(kHelp[s_cur]); break;
     default: break;
   }

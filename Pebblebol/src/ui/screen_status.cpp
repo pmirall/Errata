@@ -165,7 +165,11 @@ void status_input(Gesture g) {
       s_hex_ms = 0;
       ui_goto(s_page ? SCR_STATUS : SCR_STATUS_B);
       break;
-    case GST_DBL_R: {
+    // The genome as hex. It lived on a double tap until P3-C4a took the double
+    // tap away; HOLD_R is where it belongs anyway - the router calls HOLD_R
+    // "B secondary", TAP_R is BACK and TAP_L flips the page, so this is the
+    // only gesture STATUS has left and the only one that means "secondary".
+    case GST_HOLD_R: {
       const PebbleView* v = ui_view();
       if (v && v->present) {
         genome_to_hex32(v->genome, s_hex);

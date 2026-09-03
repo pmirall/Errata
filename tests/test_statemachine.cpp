@@ -332,13 +332,21 @@ TEST(router_back_and_home) {
   CHECK(router_global(GST_LONG_BOTH));
   CHECK(sm_current() == SCR_HOME);
 
-  // Nothing else is ever consumed globally: A, its hold, the double taps and
-  // BOTH all belong to the screen.
+  // Nothing else is ever consumed globally: A, its hold, B held and BOTH all
+  // belong to the screen.
+  //
+  // Written as a sweep of the WHOLE enum rather than a hand-listed array,
+  // because the hand-listed one went stale the moment P3-C4a deleted
+  // GST_DBL_L/R - it was still asserting a property of gestures that no longer
+  // existed. This form cannot drift: a gesture added tomorrow is covered, and
+  // one that starts being consumed globally fails here until it is listed.
   reset_all();
   sm_push(SCR_MENU);
-  const Gesture pass[6] = { GST_TAP_L, GST_HOLD_L, GST_HOLD_R,
-                            GST_DBL_L, GST_DBL_R, GST_BOTH };
-  for (uint8_t i = 0; i < 6; ++i) CHECK(!router_global(pass[i]));
+  for (uint8_t g = 0; g < (uint8_t)GST_COUNT; ++g) {
+    const Gesture gg = (Gesture)g;
+    if (gg == GST_NONE || gg == GST_TAP_R || gg == GST_LONG_BOTH) continue;
+    CHECK(!router_global(gg));
+  }
   CHECK(sm_current() == SCR_MENU);
   CHECK(!router_handle(GST_NONE));
 }

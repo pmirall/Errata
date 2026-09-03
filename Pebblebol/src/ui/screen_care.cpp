@@ -62,8 +62,6 @@ static void list_common(Gesture g, uint8_t& cur, uint8_t n, const uint16_t* help
   switch (g) {
     case GST_TAP_L:
     case GST_HOLD_L: cur = ring_next(cur, n); break;
-    case GST_DBL_L:  cur = 0; break;
-    case GST_DBL_R:  cur = (uint8_t)(n - 1u); break;
     case GST_BOTH:   if (help) ui_help(help[cur]); break;
     default: break;
   }

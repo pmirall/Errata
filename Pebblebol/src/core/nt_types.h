@@ -92,8 +92,6 @@ enum Gesture : uint8_t {
   GST_NONE = 0,
   GST_TAP_L,
   GST_TAP_R,
-  GST_DBL_L,
-  GST_DBL_R,
   GST_HOLD_L,        // repeats every REPEAT_RATE_MS
   GST_HOLD_R,        // CHOOSES (section 7); fires once, never repeats
   GST_BOTH,

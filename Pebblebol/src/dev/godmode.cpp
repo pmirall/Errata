@@ -835,8 +835,6 @@ GodEvt god_handle(Gesture g)
       case GST_TAP_L:
       case GST_HOLD_L: list_step(s_menu_cur, (uint8_t)GOD_MENU_ROWS, +1); return GOD_EVT_NONE;
       case GST_TAP_R:  return open_command(s_menu_cur);
-      case GST_DBL_L:  s_menu_cur = 0;                                    return GOD_EVT_NONE;
-      case GST_DBL_R:  s_menu_cur = (uint8_t)(GOD_MENU_ROWS - 1);         return GOD_EVT_NONE;
       case GST_BOTH:   s_dump_on = !s_dump_on;
                        toast((uint16_t)(s_dump_on ? STR_GOD_DUMP_ON : STR_GOD_DUMP_OFF));
                        if (s_dump_on) god_dump_line();
@@ -861,29 +859,11 @@ GodEvt god_handle(Gesture g)
       else                          { list_step(s_sub_cur, sub_count(), +1); }
       return GOD_EVT_NONE;
 
-    case GST_DBL_L:
-      if (s_console_page == GSC_GENE) s_gene_idx = 0; else s_sub_cur = 0;
-      return GOD_EVT_NONE;
-
-    case GST_DBL_R:
-      // On the gene editor this is the decrement; everywhere else it is the
-      // vertical-list "jump to last item" of GAME_DESIGN 8.3.
-      if (s_console_page == GSC_GENE) {
-        const SimView* p = pet();
-        if (p) {
-          const GodGene& gg = GD_GENES[s_gene_idx % GOD_GENE_COUNT];
-          Genome gn = p->genome;
-          uint8_t v = gg.get(gn);
-          v = (uint8_t)((v == 0) ? gg.vmax : (v - 1u));
-          gg.set(gn, v);
-          install_genome(gn);
-        }
-      } else {
-        const uint8_t n = sub_count();
-        s_sub_cur = (uint8_t)((n > 0) ? (n - 1) : 0);
-      }
-      return GOD_EVT_NONE;
-
+    // The gene editor's DECREMENT lived on GST_DBL_R and went with the double
+    // tap (P3-C4a). TAP_R still increments and it WRAPS at vmax, so every value
+    // is still reachable - at worst vmax presses instead of one. This is the
+    // cheapest of the shortcuts the double tap took with it: the console is a
+    // dev tool behind a five-second hold.
     case GST_TAP_R:
       return select_sub();
 

@@ -154,7 +154,6 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 // 5. INPUT / GESTURES
 // =============================================================================
 #define DEBOUNCE_MS             25
-#define DOUBLE_TAP_WINDOW_MS    280
 #define HOLD_MS                 600
 #define LONG_BOTH_MS            1500
 #define BOTH_SYNC_MS            80

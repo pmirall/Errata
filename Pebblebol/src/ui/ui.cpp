@@ -134,7 +134,6 @@ static uint8_t  s_fps_want    = FPS_NORMAL;
 static uint8_t  s_god_prog    = 0;      // god_entry_progress(), 0..100
 
 // ---- the last accepted action, replayed by the MENU's DBL_R -----------------
-static uint8_t  s_last_action = ACT_NONE;
 
 // ---- modal layer ------------------------------------------------------------
 // The CONFIRM dialog, the ALERT overlay and the HELP strip are ui/dialog.cpp's
@@ -198,7 +197,6 @@ struct MinigameState {
   uint32_t jump_ms;      // jump: 0 = grounded, else takeoff timestamp
 };
 static MinigameState s_g;
-static uint8_t  s_raw_prev[INPUT_BTN_N];
 
 #define GAME_STEP_MS       25UL
 #define GAME_INTRO_MS    1600UL
@@ -466,7 +464,6 @@ static bool do_action(ActionId a) {
   ActionResult r;
   const bool ok = sim_apply_action(a, r);
   if (ok) {
-    s_last_action = (uint8_t)a;
     if (a == ACT_PET) s_mimo_ms = now_ms();
     // Only a SUCCESSFUL action gets a film. A rejected one (cooldown, full,
     // asleep) keeps its toast and nothing else, which is the honest
@@ -997,11 +994,13 @@ static void game_start(uint8_t dev_id);
 //  sim_apply_play_result(), which owns the shared cooldown and hourly ledger,
 //  so no surface can be farmed.
 //
-//  INPUT: the recogniser only classifies a TAP after DOUBLE_TAP_WINDOW_MS
-//  (280 ms), which is fatal for a reflex game. The games therefore read
-//  debounced RAW edges (~25 ms) and IGNORE the GST_TAP_*/GST_DBL_* that arrive
-//  later, so nothing is ever counted twice. GST_HOLD_R (pause) and
-//  GST_LONG_BOTH (force quit) still arrive as gestures, exactly as 8.3 wants.
+//  INPUT: a game is judged on the PRESS, not on the gesture the press turns
+//  into, so the games read input_pressed_edge() - the debounced press edge,
+//  consumed once - and ignore the GST_TAP_* that arrives at release. Since
+//  P3-C4a that release is only ~25 ms behind the press rather than 280 ms,
+//  but the distinction still matters: "press A as the indicator crosses the
+//  zone" must be timed from the button going DOWN. GST_HOLD_R (pause) and
+//  GST_LONG_BOTH (force quit) still arrive as gestures.
 // =============================================================================
 
 static void game_start(uint8_t dev_id) {
@@ -1010,7 +1009,8 @@ static void game_start(uint8_t dev_id) {
   s_g.t0      = now_ms();
   s_g.step_ms = s_g.t0;
   s_g.seq_len = 3;
-  for (uint8_t i = 0; i < INPUT_BTN_N; ++i) s_raw_prev[i] = input_raw(i) ? 1u : 0u;
+  (void)input_pressed_edge(INPUT_BTN_L);   // drop the press that opened the game
+  (void)input_pressed_edge(INPUT_BTN_R);
   nav_push(SCR_GAME);
 }
 
@@ -1018,7 +1018,6 @@ static void game_finish(void) {
   ActionResult r;
   const uint16_t permille = (s_g.score > 1000u) ? 1000u : s_g.score;
   sim_apply_play_result(permille, r);
-  s_last_action = ACT_PLAY;
   (void)app_award_xp(xp_minigame_amount(permille), XP_SRC_MINIGAME);
   const SimView* p = pet();
   if (p) gs_save_active(true);
@@ -1235,10 +1234,12 @@ static void game_service(void) {
   }
 
   for (uint8_t b = 0; b < 2; ++b) {
-    const uint8_t down = input_raw(b) ? 1u : 0u;
-    const uint8_t prev = s_raw_prev[b];
-    s_raw_prev[b] = down;
-    if (down && !prev) game_press(b);
+    // input_pressed_edge() consumes the edge, so one physical press is one
+    // game_press() however often this runs. It replaces the s_raw_prev[]
+    // sampling that lived here, which could MISS a press entirely: it compared
+    // input_raw() between frames, and a press shorter than one frame at
+    // FPS_LOW went down and up inside the gap.
+    if (input_pressed_edge(b)) game_press(b);
     if (s_g.phase != 1) return;
   }
 
@@ -1561,12 +1562,10 @@ void ui_begin(void) {
   ceremony_bind_body(&ceremony_body);
   evo_bind_ceremony(&evo_ceremony_frame);
   diag_bind(&god_active, &god_draw, &diag_gesture);
-  memset(s_raw_prev, 0, sizeof(s_raw_prev));
   sm_begin();
   dialog_bind_commit(&dialog_commit);
   dialog_reset();
   s_toast[0]    = '\0';
-  s_last_action = ACT_NONE;
   s_absence_ms  = 0;
   s_evo_ask_ms  = 0;                 // a boot or a wipe re-offers a pending evolution
   s_stat_ok     = 0;                 // boot: show the truth, do not animate to it
@@ -1905,11 +1904,6 @@ bool ui_do_action(uint8_t action) {
 
 bool ui_act_and_show(uint8_t action) {
   return (action < (uint8_t)ACT_COUNT) ? act_and_show((ActionId)action) : false;
-}
-
-void ui_repeat_last_action(void) {
-  if (s_last_action != ACT_NONE) act_and_show((ActionId)s_last_action);
-  else                           ui_toast(STR_AERR_BAD_ARG);
 }
 
 void ui_help(uint16_t str_id)    { dialog_open_help(str_id); }
