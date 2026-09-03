@@ -240,14 +240,30 @@ enum StrId : uint16_t {
   STR_CF_EVOLVE,
 
   // --- 29. minigames ------------------------------ <= 12 chars --------------
+  //     The six names are INDEX-PARALLEL TO MgId (minigames/minigame.h) and the
+  //     guard at the bottom of the file ties them to MG_ID_COUNT: PING and
+  //     SECUENCIA are canonical for the persisted minigames_won counter, so
+  //     nothing may be inserted before them.
   STR_MG_PING,
   STR_MG_SEQ,
+  STR_MG_FLOOD,
+  STR_MG_FIREWALL,
+  STR_MG_BUFFER,
+  STR_MG_DELETE,
   STR_GM_READY,
   STR_GM_GO,
   STR_GM_WIN,
   STR_GM_LOSE,
   STR_GM_SCORE,
   STR_GM_COOLDOWN,
+  //     The affordance strip a RUNNING game shows. Both buttons are play
+  //     inputs in every one of the six, so the strip may not advertise B as
+  //     "PAUSA" alone; the pause is B HELD, in the same tap/hold shape the
+  //     lists already use for "ATRAS/SEL". Wider than the 9-char affordance
+  //     budget in group 3, which is why they live here: rd_affordance() caps a
+  //     label at 12 glyphs of 5x8 and "JUGAR/PAUSA" is 11.
+  STR_GM_AF_PLAY,
+  STR_GM_AF_PLAY_PAUSE,
 
   // --- 30. god mode ------------------------------- <= 16 chars --------------
   STR_GOD_SPEED,
@@ -309,11 +325,25 @@ enum StrId : uint16_t {
   STR_HLP_BACK,
 
   // --- 33c. on-device minigames --------------------------- <= 25 @ 5x8 ---
+  //     The six hints are index-parallel to the six names above (and therefore
+  //     to MgId); the guard at the bottom of the file ties both blocks to
+  //     MG_ID_COUNT. A hint says WHAT the game is, never which button: the
+  //     firmware speaks SIG. / SEL / ATRAS / PAUSA and never names a button.
+  //     THE 25-CHARACTER BUDGET IS HARD HERE, not advisory: the GAME intro card
+  //     draws a hint with rd_text_center() at 5x8 and does NOT wrap, so 26
+  //     glyphs is 130 px on a 128 px panel. The help modal wraps; the intro
+  //     card is what sets the limit.
   STR_MG_PING_HINT,
   STR_MG_SEQ_HINT,
+  STR_MG_FLOOD_HINT,
+  STR_MG_FIREWALL_HINT,
+  STR_MG_BUFFER_HINT,
+  STR_MG_DELETE_HINT,
   STR_GM_ROUND,
   STR_GM_NEXT,
   STR_GM_TOOSOON,
+  STR_GM_REROUTE,
+  STR_GM_WASTED,
 
   // --- 33d. deterministic dynasty names ------------------
   //  name = SYL_A[h % 12] + SYL_B[(h / 12) % 12], h = hash(lineage_id, gen).
@@ -686,12 +716,18 @@ inline constexpr const char* const ES[] = {
   /* --- 29. minigames --- */
   /* STR_MG_PING */               "PING",
   /* STR_MG_SEQ */                "SECUENCIA",
+  /* STR_MG_FLOOD */              "PAQUETES",
+  /* STR_MG_FIREWALL */           "CORTAFUEGOS",
+  /* STR_MG_BUFFER */             "BUFFER",
+  /* STR_MG_DELETE */             "BORRAR",
   /* STR_GM_READY */              "¿Listo?",
   /* STR_GM_GO */                 "¡YA!",
   /* STR_GM_WIN */                "¡Ganaste!",
   /* STR_GM_LOSE */               "Otra vez será.",
   /* STR_GM_SCORE */              "Puntos",
   /* STR_GM_COOLDOWN */           "Descansa un poco.",
+  /* STR_GM_AF_PLAY */            "JUGAR",
+  /* STR_GM_AF_PLAY_PAUSE */      "JUGAR/PAUSA",
 
   /* --- 30. god mode --- */
   /* STR_GOD_SPEED */             "VELOCIDAD",
@@ -747,9 +783,15 @@ inline constexpr const char* const ES[] = {
   /* --- 33c. on-device minigames --- */
   /* STR_MG_PING_HINT */          "Pulsa el lado que brille.",
   /* STR_MG_SEQ_HINT */           "Repite la secuencia.",
+  /* STR_MG_FLOOD_HINT */         "Cada paquete a su puerto.",
+  /* STR_MG_FIREWALL_HINT */      "Mueve el escudo a tiempo.",
+  /* STR_MG_BUFFER_HINT */        "Mantén el cursor dentro.",
+  /* STR_MG_DELETE_HINT */        "Borra solo los rotos.",
   /* STR_GM_ROUND */              "Ronda",
   /* STR_GM_NEXT */               "¿Otra?",
   /* STR_GM_TOOSOON */            "Demasiado pronto.",
+  /* STR_GM_REROUTE */            "Puertos cambiados.",
+  /* STR_GM_WASTED */             "Carga gastada.",
 
   /* --- 33d. dynasty name syllables --- */
   /* A */ "Bo", "Ti", "Nu", "Ma", "Ke", "Zu", "Pi", "Ro", "La", "Ve", "Gu", "Ña",
@@ -915,5 +957,13 @@ static_assert(STR_SYL_B11         - STR_SYL_B00     + 1 == 12,                 "
 // 19 -> 18: STR_HLP_LIGHT went with the light mechanic (P3-C2b).
 static_assert(STR_HLP_BACK        - STR_HLP_FEED    + 1 == 18,                 "ui help block");
 static_assert(STR_AF_ADD          - STR_SET_CLOCK   + 1 == 12,                 "time entry block");
+// The six minigame names and the six hints are index-parallel to MgId, which is
+// what lets ui/screen_care.cpp build the PLAY list by row index alone. Written
+// against the literal 6 rather than MG_ID_COUNT because this header is included
+// by translation units that never see the minigame contract; screen_care.cpp
+// then folds these two blocks against MgId itself, which is where a row in the
+// wrong PLACE (rather than a wrong count) becomes a build error.
+static_assert(STR_MG_DELETE       - STR_MG_PING      + 1 == 6,                 "minigame names");
+static_assert(STR_MG_DELETE_HINT  - STR_MG_PING_HINT + 1 == 6,                 "minigame hints");
 
 #endif // NT_STRINGS_ES_H

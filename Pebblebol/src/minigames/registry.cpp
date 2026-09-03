@@ -9,13 +9,21 @@
 
 void ping_draw(const MgCtx& c);
 void sequence_draw(const MgCtx& c);
+void packet_flood_draw(const MgCtx& c);
+void firewall_draw(const MgCtx& c);
+void buffer_draw(const MgCtx& c);
+void delete_draw(const MgCtx& c);
 
 // Indexed by MgId, exactly like the pool in manager.cpp and exactly like the
 // PLAY screen's rows. The static_assert is what keeps the three in step: get
 // it wrong and a game draws its neighbour's frame.
 static const MinigameDef DEFS[] = {
-  { &MG_PING,     ping_draw     },
-  { &MG_SEQUENCE, sequence_draw },
+  { &MG_PING,          ping_draw         },
+  { &MG_SEQUENCE,      sequence_draw     },
+  { &MG_PACKET_FLOOD,  packet_flood_draw },
+  { &MG_FIREWALL,      firewall_draw     },
+  { &MG_BUFFER,        buffer_draw       },
+  { &MG_DELETE,        delete_draw       },
 };
 static_assert(sizeof(DEFS) / sizeof(DEFS[0]) == (size_t)MG_ID_COUNT,
               "every MgId needs exactly one MinigameDef");

@@ -15,7 +15,8 @@
 //  700 + rng_below(1500) ms, i.e. up to 2199 ms, and gave a 900 ms window:
 //  5 * (2199 + 900) = 15,495 ms, which BREAKS the 15 s ceiling spec 29 sets
 //  (and MG_MAX_MS would have cut the last round off mid-play). The range is now
-//  600..1999, so the worst case is 5 * (1999 + 900) = 14,495 ms.
+//  600..1999, so the worst case is 5 * 2900 = 14,500 ms - see PING_ROUND_MAX_MS
+//  below, which is that arithmetic as a build error rather than as a comment.
 // =============================================================================
 #include "games.h"
 
@@ -27,6 +28,22 @@
 // Per round: a perfect (0 ms) reaction is worth PING_ROUND_MAX, a reaction at
 // the very edge of the window is worth 0. Five rounds -> exactly MG_SCORE_MAX.
 #define PING_ROUND_MAX  (MG_SCORE_MAX / PING_ROUNDS)
+
+// THE RUN BUDGET, as a build error. This was the one game with no compile-time
+// bound on its own schedule - the only record was the header comment above, and
+// that number was 5 ms short of the truth: ping_step() ends a round at the first
+// step STRICTLY after arm + window, and the elapsed time it tests is always a
+// whole number of MG_STEP_MS, so the longest round is the next step boundary
+// past 1999 + 900 = 2899, i.e. 2900 ms, not 2899. The margin is 500 ms - the
+// thinnest of the six by a factor of six - which is exactly why a future tweak
+// of the span or the window must not be able to cross the ceiling in silence.
+// Nothing a player does extends a round: an early press spends it, and a late
+// one arrives after it has already ended.
+#define PING_ROUND_MAX_MS \
+  ((((PING_ARM_MIN_MS + PING_ARM_SPAN_MS - 1u) + PING_WINDOW_MS) / MG_STEP_MS \
+    + 1u) * MG_STEP_MS)
+static_assert(PING_ROUNDS * PING_ROUND_MAX_MS < MG_MAX_MS,
+              "the worst-case ping run must fit inside the section 29 ceiling");
 
 struct PingState {
   uint32_t arm_ms;      // dead time of THIS round

@@ -33,6 +33,7 @@
 #ifndef PB_MINIGAME_H
 #define PB_MINIGAME_H
 
+#include <stddef.h>     // offsetof, for the MgCtx::state alignment guard
 #include <stdint.h>
 
 #include "../core/rng.h"
@@ -54,10 +55,19 @@
 
 // The game ids. They lived in nt_types.h as DevGameId until P3-C4a; they
 // belong with the contract instead. CANONICAL FOR minigames_won.
-// P3-C4b adds packet_flood, firewall, buffer and delete after these two.
+//
+// THE ORDER IS LOAD-BEARING IN FOUR PLACES and pinned by a static_assert in
+// each: POOL[] in manager.cpp, DEFS[] in registry.cpp, the PLAY list rows in
+// ui/screen_care.cpp, and the name/hint pair in core/strings_es.h. PING and
+// SEQUENCE keep 0 and 1 because minigames_won is persisted against them; the
+// P3-C4b four are appended rather than interleaved for the same reason.
 enum MgId : uint8_t {
   MG_ID_PING = 0,      // spec 29.1
   MG_ID_SEQUENCE,      // spec 29, "additional candidates"
+  MG_ID_PACKET_FLOOD,  // spec 29.2
+  MG_ID_FIREWALL,      // spec 29.3
+  MG_ID_BUFFER,        // spec 29.4
+  MG_ID_DELETE,        // spec 29.5
   MG_ID_COUNT
 };
 
@@ -73,8 +83,17 @@ struct MgCtx {
                        // Pure logic cannot toast, so it leaves a note instead.
   uint8_t  round;
   uint8_t  finished;   // set by the game; read by the manager and by done()
-  uint8_t  state[MG_STATE_BYTES];
+  // ALIGNED, not merely sized. mg_state<T>() reinterpret_casts this array to a
+  // game's struct, and the alignof() assert below cannot see the OFFSET the
+  // array sits at: without the alignas the members before it add up to 14, so
+  // a struct holding a uint32_t (PING's arm_ms, packet_flood's marks) would be
+  // read at 2 mod 4 - undefined behaviour, and on Xtensa a real alignment
+  // exception rather than a slow load. The pad costs nothing: sizeof(MgCtx)
+  // stays 48, measured before and after.
+  alignas(uint32_t) uint8_t state[MG_STATE_BYTES];
 };
+static_assert(offsetof(MgCtx, state) % alignof(uint32_t) == 0,
+              "MgCtx::state must be 32-bit aligned: mg_state<T>() casts it");
 
 // A game's private state, laid over MgCtx::state. The static_asserts are the
 // whole safety of the arrangement.

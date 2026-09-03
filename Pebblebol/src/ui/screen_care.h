@@ -18,6 +18,7 @@
 #include <stdint.h>
 
 #include "../core/nt_types.h"
+#include "../minigames/minigame.h"   // MgId: the PLAY list's row order IS it
 
 // CARE list rows, in display order.
 enum CareRow : uint8_t {
@@ -29,9 +30,21 @@ enum CareRow : uint8_t {
   CARE_ROWS
 };
 
-#define PLAY_ROWS  3        // MG_ID_COUNT minigames plus "Volver"
-                            // SALTO was the third; P3-C4a deleted it (it is in
-                            // no spec 29 list) and P3-C4b brings the count to 7.
+// The PLAY list: one row per game, in MgId order, plus "Volver". The
+// static_assert is what makes a mismatch a build error rather than a game that
+// launches its neighbour - screen_care.cpp's comment has promised it since
+// P3-C4a, and P3-C4b is the commit that made it true.
+#define PLAY_ROWS  7
+static_assert(PLAY_ROWS == (uint8_t)MG_ID_COUNT + 1u,
+              "PLAY needs one row per minigame plus the way out");
+
+// The widest list either screen draws. draw_str_list() sizes its row array by
+// this and clamps NOTHING: it used to be CARE_ROWS (5) with a silent
+// `if (n > CARE_ROWS) n = CARE_ROWS`, which at PLAY_ROWS = 7 would have drawn
+// only the first five rows - BORRAR and "Volver" never appearing - while
+// list_common() still rang the cursor through all seven and play_input()
+// happily launched game 5 from an invisible row.
+#define LIST_ROWS_MAX  ((CARE_ROWS > PLAY_ROWS) ? (uint8_t)CARE_ROWS : (uint8_t)PLAY_ROWS)
 
 void    care_enter(void);
 void    care_render(void);

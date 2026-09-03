@@ -30,6 +30,8 @@
 #include "data/balance.h"      // XP_TABLE: what a level costs, for the HOME bar
 #include "fakes/gfx_fb.h"
 #include "game/box.h"
+#include "minigames/games/games.h"
+#include "minigames/minigame.h"
 #include "persistence/save_manager.h"
 #include "ui/dialog.h"
 #include "ui/screen.h"
@@ -1475,4 +1477,115 @@ TEST(the_help_strip_expires) {
   CHECK_EQ(dialog_modal(), (uint8_t)MODAL_HELP);
   dialog_service(g_now + UI_MODAL_HELP_MS, true);
   CHECK_EQ(dialog_modal(), (uint8_t)MODAL_NONE);
+}
+
+// =============================================================================
+//  THE MINIGAME RUN FRAMES (P3-C4b, spec section 29)
+//
+//  Every other snapshot here is a screen-table row; these are not - a game's
+//  run frame is drawn INSIDE the GAME screen, under the manager's header and
+//  over its affordance strip, neither of which lives in a pure translation
+//  unit. So the game is driven headlessly to a chosen step and its draw half is
+//  called on the bare framebuffer: what is snapshotted is exactly the content
+//  band, which is exactly the part these four commits wrote.
+//
+//  Note WHICH objects this links: games/*_logic.o AND games/*_draw.o. The draw
+//  halves are device code in the sense that they draw, but they draw through
+//  gfx.h and nothing else - which is what the seam is for, and what makes spec
+//  section 63 ("every screen tested at the actual physical resolution") reach
+//  them at all. tests/test_minigames.cpp still links NO draw object, and must
+//  not: that binary is where the determinism argument lives.
+// =============================================================================
+void packet_flood_draw(const MgCtx& c);
+void firewall_draw(const MgCtx& c);
+void buffer_draw(const MgCtx& c);
+void delete_draw(const MgCtx& c);
+
+static MgCtx    g_mg;
+static MgDrawFn g_mg_draw = nullptr;
+static void mg_render_shim(void) { if (g_mg_draw) g_mg_draw(g_mg); }
+
+typedef int8_t (*MgTape)(const MgCtx&, uint32_t);
+
+static void mg_snapshot(const MgLogic& g, MgDrawFn draw, uint32_t seed,
+                        uint32_t steps, MgTape tape, const char* name) {
+  mg_begin(g_mg, g, seed);
+  for (uint32_t i = 0; i < steps && !g_mg.finished; ++i) {
+    const int8_t side = tape ? tape(g_mg, i) : (int8_t)-1;
+    if (side >= 0) mg_press(g_mg, g, (uint8_t)side);
+    if (!g_mg.finished) mg_tick(g_mg, g);
+  }
+  g_mg_draw = draw;
+  snapshot_fn(mg_render_shim, name);
+}
+
+// The pursuit tape from test_minigames.cpp, so BUFFER is snapshotted mid-chase
+// rather than parked against the wall it starts at - the frame is only worth
+// looking at if the cursor is somewhere the player would have put it.
+static int8_t snap_buf_track(const MgCtx& c, uint32_t) {
+  const int16_t err  = (int16_t)(buf_zone_q4(c) - buf_cursor_q4(c));
+  const int16_t want = (int16_t)(buf_zone_vel_q4(c) + err / 4);
+  const int16_t v    = buf_vel_q4(c);
+  const int16_t half = (int16_t)(buf_kick_q4() / 2);
+  if (v + half < want) return MG_SIDE_R;
+  if (v - half > want) return MG_SIDE_L;
+  return -1;
+}
+
+// The triage tape, so DELETE is snapshotted with charges spent and blocks
+// cleared instead of an untouched board.
+static int8_t snap_del_triage(const MgCtx& c, uint32_t) {
+  uint8_t  best = 0xFFu;
+  uint16_t best_life = 0xFFFFu;
+  for (uint8_t i = 0; i < del_slots(); ++i) {
+    if (del_kind_at(c, i) != DEL_KIND_CORRUPT) continue;
+    const uint16_t l = del_life_left_ms(c, i);
+    if (l < best_life) { best_life = l; best = i; }
+  }
+  if (best == 0xFFu) return -1;
+  return (del_cursor(c) != best) ? (int8_t)MG_SIDE_L : (int8_t)MG_SIDE_R;
+}
+
+// Three packets in the lane, the router holding an address and both mouths
+// showing theirs: the frame the player spends most of the run reading.
+TEST(snapshot_packet_flood_run) {
+  mg_snapshot(MG_PACKET_FLOOD, packet_flood_draw, 3u, 60u, nullptr,
+              "mg_packet_flood_run");
+}
+
+// THE REROUTE, at the step packet 9 spawns: both mouths inverted together, and
+// the backlog deep enough to show the "+1".
+TEST(snapshot_packet_flood_reroute) {
+  mg_snapshot(MG_PACKET_FLOOD, packet_flood_draw, 3u, 234u, nullptr,
+              "mg_packet_flood_reroute");
+}
+
+// A packet halfway down its lane, the shield still in the middle.
+TEST(snapshot_firewall_run) {
+  mg_snapshot(MG_FIREWALL, firewall_draw, 2u, 30u, nullptr, "mg_firewall_run");
+}
+
+// The 250 ms after an impact the shield was not there for: the wall breached in
+// that lane, with the packet coming through the hole.
+TEST(snapshot_firewall_leaked) {
+  mg_snapshot(MG_FIREWALL, firewall_draw, 2u, 64u, nullptr, "mg_firewall_leaked");
+}
+
+// Mid-chase, the caliper inside the zone (so the slab is solid) and the fill
+// bar part way along.
+TEST(snapshot_buffer_run) {
+  mg_snapshot(MG_BUFFER, buffer_draw, 4u, 200u, snap_buf_track, "mg_buffer_run");
+}
+
+// THE BOARD the game is about: two corrupted blocks up at once - which the
+// schedule forces at least once in every run - plus a healthy one, on three
+// different fuse lengths, with every charge still in hand. This is the frame
+// the whole selection dimension is made of.
+TEST(snapshot_delete_run) {
+  mg_snapshot(MG_DELETE, delete_draw, 1u, 100u, nullptr, "mg_delete_run");
+}
+
+// Part way through a triage: charges spent, the caret parked on its next target.
+TEST(snapshot_delete_purged) {
+  mg_snapshot(MG_DELETE, delete_draw, 5u, 200u, snap_del_triage, "mg_delete_purged");
 }

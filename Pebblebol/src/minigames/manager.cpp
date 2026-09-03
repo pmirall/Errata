@@ -7,7 +7,9 @@
 #include "games/games.h"
 
 // The pool. MgId order, so PLAY's row index IS the game id.
-static const MgLogic* const POOL[] = { &MG_PING, &MG_SEQUENCE };
+static const MgLogic* const POOL[] = {
+  &MG_PING, &MG_SEQUENCE, &MG_PACKET_FLOOD, &MG_FIREWALL, &MG_BUFFER, &MG_DELETE
+};
 static const uint8_t POOL_N = (uint8_t)(sizeof(POOL) / sizeof(POOL[0]));
 static_assert(sizeof(POOL) / sizeof(POOL[0]) == (size_t)MG_ID_COUNT,
               "every MgId must have exactly one MgLogic in the pool");

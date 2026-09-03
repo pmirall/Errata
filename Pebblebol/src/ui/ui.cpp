@@ -993,6 +993,22 @@ static void game_service(void) {
   const uint32_t dt = s_game_ms ? (uint32_t)(t - s_game_ms) : 0u;
   s_game_ms = t;
 
+  // A MODAL IS A PAUSE, AND THE PAUSE HAS TO REACH THE GAME. This hook is
+  // called by sm_service() every frame regardless of what is on top of the
+  // screen, and the confirm layer collects GESTURES - so without this the quit
+  // confirm went up while the run underneath it kept stepping, kept scoring and
+  // kept eating the raw press edges that the player was using to ANSWER the
+  // dialog. Returning here (after s_game_ms has been moved forward, so the
+  // paused time is dropped rather than delivered as one enormous dt on resume)
+  // is what makes "PAUSA" true. The two edges are drained rather than left
+  // latched, because input_pressed_edge() holds a press until someone consumes
+  // it and the presses spent on the dialog belong to the dialog.
+  if (dialog_modal() != MODAL_NONE) {
+    (void)input_pressed_edge(INPUT_BTN_L);
+    (void)input_pressed_edge(INPUT_BTN_R);
+    return;
+  }
+
   // Presses first, so a button pressed in the same frame the game ends still
   // counts; mg_press() refuses once the game is over.
   if (mgr_phase() == MGR_RUN || mgr_phase() == MGR_NEXT) {
@@ -1055,16 +1071,41 @@ static void draw_game(void) {
       mg_draw_current();      // the run frame, from minigames/registry.cpp
       break;
   }
-  rd_affordance(nullptr, S(STR_AF_PAUSE));
+  // DURING A RUN BOTH BUTTONS ARE PLAY INPUTS, in all six games, so the strip
+  // may not offer B as PAUSA alone - the pause is B HELD, in the same tap/hold
+  // shape the lists already write "ATRAS/SEL" in. Outside the run B is the way
+  // out and nothing else. See handle_game() for the collision this closes.
+  if (mgr_phase() == MGR_RUN)
+    rd_affordance(S(STR_GM_AF_PLAY), S(STR_GM_AF_PLAY_PAUSE));
+  else
+    rd_affordance(nullptr, S(STR_AF_PAUSE));
 }
 
-// GAME_DESIGN 8.3: "games must not have hidden gestures." Section 7's B, which
-// is a TAP since P2-C11d: the strip has always said PAUSA and the gesture used
-// to be a 600 ms hold, which is the definition of a hidden one.
+// GAME_DESIGN 8.3: "games must not have hidden gestures."
+//
+// THE PAUSE IS ON HOLD_R DURING A RUN, and that is a collision fix rather than
+// a preference. game_service() feeds input_pressed_edge(INPUT_BTN_R) straight
+// into mgr_press() while in_on_release() turns the same physical press into a
+// GST_TAP_R - so with the pause on the tap, ONE press of B both played the game
+// and opened a modal over it. PING has been able to trip that since P3-C4a
+// whenever its target was R; P3-C4b would have given four more games the same
+// problem, with B as a play input in every one.
+//
+// The OTHER half of that bug was that the run did not actually stop: the modal
+// went up and the game kept ticking, scoring and consuming press edges behind
+// it, because dialog_input() consumes gestures and never touches the raw edge.
+// That half is fixed in game_service() above, which is where the clock is.
+//
+// GST_HOLD_R is the natural home: it is already SELECT on every list screen,
+// and in_on_release() emits nothing at all after a HOLD has fired, so a held B
+// cannot also arrive as a tap. The press edge underneath it still reaches the
+// game as one press, which is correct - the player did press the button.
 static void handle_game(Gesture g) {
-  if (g != GST_TAP_R) return;
-  if (mgr_phase() == MGR_RUN) dialog_open_confirm(CFM_QUIT_GAME, STR_CF_QUIT_GAME);
-  else                        mgr_back();
+  if (mgr_phase() == MGR_RUN) {
+    if (g == GST_HOLD_R) dialog_open_confirm(CFM_QUIT_GAME, STR_CF_QUIT_GAME);
+    return;
+  }
+  if (g == GST_TAP_R) mgr_back();
 }
 
 // =============================================================================

@@ -62,8 +62,11 @@ $(OBJ)/%.o: $(SRC_ROOT)/app/%.cpp Makefile | $(OBJ)
 $(OBJ)/%.o: $(SRC_ROOT)/minigames/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
-# The PURE half of every game. games/*_draw.cpp is NOT buildable here on
-# purpose: it draws, so it belongs to the device.
+# Both halves of every game. games/*_logic.cpp is pure; games/*_draw.cpp draws,
+# but only through the gfx.h seam, so it compiles here against tests/fakes/gfx_fb
+# exactly as a migrated screen does - which is how test_screens.cpp snapshots a
+# run frame at the real 128x64 (spec section 63). THE INVARIANT IS NOT "no draw
+# object anywhere", it is that test_minigames links none: see its line below.
 $(OBJ)/%.o: $(SRC_ROOT)/minigames/games/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
@@ -113,7 +116,9 @@ $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 # no ui/: if this link line ever needs one, a game has leaked drawing into its
 # logic and the determinism argument has gone with it.
 $(BIN)/test_minigames: $(OBJ)/minigame.o $(OBJ)/manager.o $(OBJ)/ping_logic.o \
-                        $(OBJ)/sequence_logic.o $(OBJ)/rng.o
+                        $(OBJ)/sequence_logic.o $(OBJ)/packet_flood_logic.o \
+                        $(OBJ)/firewall_logic.o $(OBJ)/buffer_logic.o \
+                        $(OBJ)/delete_logic.o $(OBJ)/rng.o
 $(BIN)/test_qr:         $(OBJ)/qr.o
 $(BIN)/test_clock:      $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o
 $(BIN)/test_overflow:   $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o \
@@ -141,7 +146,17 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o \
                $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
-$(BIN)/test_screens:    $(SCREEN_OBJS)
+# The minigame run frames, snapshotted by test_screens.cpp. Each game needs BOTH
+# halves: the draw half calls accessors the logic half owns, which is the whole
+# point of the split - neither side re-derives a rule. minigame.o drives them;
+# rng.o is already in SCREEN_OBJS.
+MG_FRAME_OBJS := $(OBJ)/minigame.o \
+                 $(OBJ)/packet_flood_logic.o $(OBJ)/packet_flood_draw.o \
+                 $(OBJ)/firewall_logic.o     $(OBJ)/firewall_draw.o \
+                 $(OBJ)/buffer_logic.o       $(OBJ)/buffer_draw.o \
+                 $(OBJ)/delete_logic.o       $(OBJ)/delete_draw.o
+
+$(BIN)/test_screens:    $(SCREEN_OBJS) $(MG_FRAME_OBJS)
 
 # The navigation machine and the section 7 router, over the REAL table.
 $(BIN)/test_statemachine: $(SCREEN_OBJS) $(OBJ)/state_machine.o \

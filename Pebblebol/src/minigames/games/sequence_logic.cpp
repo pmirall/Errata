@@ -69,6 +69,15 @@ uint8_t seq_symbol_at(const MgCtx& c, uint8_t i)
   return (i < s.len) ? s.seq[i] : 0u;
 }
 
+// THE ANSWER DEADLINE this level is running against, in ctx.t_ms. Meaningful
+// only once playback has ended (seq_is_showing() == false); before that it is
+// whatever the previous level left, or 0 on the first. Exposed for the same
+// reason seq_symbol_at() is: a SCRIPTED PLAYER in tests/test_minigames.cpp
+// presses on the last legal step to stretch the run to its true maximum, and it
+// must not re-derive SEQ_ANSWER_MS to know when that is. Nothing on the device
+// calls it.
+uint32_t seq_deadline_ms(const MgCtx& c) { return mg_state<SeqState>(c).deadline; }
+
 // Which side is lit right now, or -1 while the gap between symbols is on.
 int8_t seq_lit_side(const MgCtx& c)
 {
