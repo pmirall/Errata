@@ -11,6 +11,7 @@
 | Build baseline (verified 2026-09-02) | `arduino-cli compile --fqbn esp32:esp32:esp32c3:PartitionScheme=huge_app,CDCOnBoot=cdc --warnings all` — core esp32 3.1.1, U8g2 2.35.30; 2,105,548 B flash (66 % of 3,145,728), 72,748 B static RAM (22 % of 327,680), 0 project warnings. All `FEATURE_*`=0 + `GOD_MODE_ENABLED`=0: 1,106,556 B / 41,996 B, 12 unused-function warnings (telegram.cpp x9, ui.cpp x3). |
 | Tests baseline | None in the repo (audit §15). `g++ 13.3` on the host compiles `sim.cpp genome.cpp qr.cpp gametime.cpp input.cpp` with `-std=c++17 -Wall -Wextra` at 0 warnings. |
 | Hardware run status | Never executed on a physical board (README.md:801, CHANGELOG.md:193). |
+| Hardware baseline | `docs/PEBBLEBOL_HARDWARE_AND_BATTERY_SPEC.md` (V1: ESP32-C3 SuperMini + 0.96" OLED + 2 buttons + **passive piezo** + **2xAAA**). Reconciled in `docs/hardware_reconciliation.md`: the piezo makes `hardware/audio.h` a real implementation instead of a null stub, and the 2xAAA supply raises decisions D9/D10. Radios-off, OLED-off, timestamp-driven state and checkpoint saves were already the plan's direction. |
 | Language rule | Code, comments, docs in English. User-facing UI strings may stay Spanish (`strings_es.h`). |
 | Effort key | S = hours, M = 1-3 days, L = > 3 days (one engineer). |
 | Task count | 139 checkbox tasks in §3 (2 done, 137 open; per phase: P1 8, P2 54, P3 13, P4 12, P5 11, P6 8, P7 11, P8 7, P9 7, P10 8). Every `- [ ]` / `- [x]` line in §3 is one task; §2 is an ordered surgery list executed by Phase-2 commits and §5 is spec §67 copied as done-criteria — neither adds tasks. |
@@ -555,6 +556,7 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 ### Phase 6 — Activity — size M — goal: sensor abstraction, activity score, growth rewards, deep-sleep integration
 
 **P6-C1 Sensor abstraction** — S
+- [ ] `hardware/audio.{h,cpp}` is now a REAL implementation, not a stub: the V1 hardware baseline adds a passive piezo (decision D8). Tone engine over `tone()`/`noTone()` or LEDC, non-blocking event queue, GPIO idle between effects, `noTone()` on every effect end, honours `CF_MUTE`. Vocabulary per hardware spec §19 (beep, chirp, buzz, rise, fall, double-beep, glitch) with the §18 durations.
 - [ ] `hardware/motion.h` (`bool motion_supported(void)`, `bool motion_poll(MotionSample&)`), `motion_null.cpp` returns unsupported (audit §6: no IMU; §4 capability detection; §68 r3 no pin invented).
 
 **P6-C2 Activity score + growth rewards** — M
