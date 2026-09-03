@@ -1009,44 +1009,7 @@ void rd_splash(void) {
   s_next_frame_ms = millis();
 }
 
-void rd_fatal(const char* msg) {
-  if (msg == NULL) msg = "FATAL";
-
-  Serial.printf("[FATAL] %s\r\n", msg);
-
-  s_display_on = true;
-  s_u8g2.setPowerSave(0);
-  // This screen never repaints again, so it cannot rely on fx_apply() to clean
-  // up after it: whatever effect was running when the firmware died would stay
-  // latched forever. Reset the registers before anything is drawn - a fatal
-  // message is useless if it is displayed inverted or shifted by 3 rows.
-  rd_fx_reset();
-  s_u8g2.clearBuffer();
-  s_u8g2.setDrawColor(1);
-  s_u8g2.drawFrame(0, 0, OLED_W, OLED_H);
-
-  // "!" badge: a filled box with an inverted exclamation mark.
-  s_u8g2.drawBox(4, 4, 11, 15);
-  s_u8g2.setDrawColor(0);
-  s_u8g2.drawVLine(9, 6, 8);
-  s_u8g2.drawPixel(9, 16);
-  s_u8g2.setDrawColor(1);
-
-  rd_text_wrap(19, 11, (int16_t)(OLED_W - 23), RD_LINE_BODY, 5, RD_FONT_BODY, msg);
-  rd_text(4, 60, RD_FONT_TINY, FW_NAME " " FW_VERSION);
-
-  if (s_display_ok) s_u8g2.sendBuffer();
-
-  pinMode(PIN_LED, OUTPUT);
-  for (;;) {
-    digitalWrite(PIN_LED, LED_ON);
-    delay(120);
-    digitalWrite(PIN_LED, LED_OFF);
-    delay(120);
-    digitalWrite(PIN_LED, LED_ON);
-    delay(120);
-    digitalWrite(PIN_LED, LED_OFF);
-    delay(1640);
-    Serial.printf("[FATAL] %s\r\n", msg);
-  }
-}
+// rd_fatal() is gone (plan T10, audit risk 15): a device that halts forever
+// because the panel did not answer cannot be fixed by the person holding it.
+// The failure is a screen now - ui/screen_error.cpp, ERRK_DISPLAY - which keeps
+// the same LED pattern and adds a retry.

@@ -20,7 +20,7 @@ CPPFLAGS := -DNT_HOST -I$(SRC_ROOT) -I. -DNT_TESTS_DIR=\"$(CURDIR)\"
 
 TESTS := $(patsubst %.cpp,$(BIN)/%,$(sort $(wildcard test_*.cpp)))
 
-.PHONY: all check clean golden fixtures
+.PHONY: all check clean golden screens fixtures
 all: $(TESTS)
 
 check: all
@@ -80,6 +80,10 @@ $(BIN)/test_persistence: $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/crc16.o
 $(BIN)/test_game_state: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o
+# The screen table's migrated rows are pure translation units, so they compile
+# here exactly as they do in the firmware; gfx_fb.o is the host end of gfx.h.
+$(BIN)/test_screens:    $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
+                        $(OBJ)/screen_error.o $(OBJ)/gfx_fb.o
 
 $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
@@ -87,6 +91,11 @@ $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)
 # --- goldens ----------------------------------------------------------------
 golden: $(BIN)/test_sim_golden
 	./$(BIN)/test_sim_golden --record
+
+# Screen snapshots (golden/screens/*.pbm). Same rule as above: only from a
+# commit that means to change what a screen looks like, and read the diff.
+screens: $(BIN)/test_screens
+	./$(BIN)/test_screens --record
 
 # --- legacy fixtures (v1 PetSave / Config / GainSave blobs, plan P2-C2) ------
 $(BIN)/mkfixtures: legacy/mkfixtures.cpp $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o | $(BIN)

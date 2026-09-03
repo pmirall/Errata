@@ -148,10 +148,41 @@ void     ui_toast(uint16_t str_id);
 // which ui.cpp may not do. Returning false means "there was no copy" and
 // nothing was written.
 // -----------------------------------------------------------------------------
+// ui_bind_recover(), ui_note_load() and the ERROR screen itself live in
+// ui/screen_error.cpp since P2-C11a: the screen is in the table, and the table
+// rows are pure translation units. The declarations stay here because the
+// entry point calls them and knows only ui.h.
 typedef bool (*UiRecoverFn)(void);
 void     ui_bind_recover(UiRecoverFn fn);
 void     ui_note_load(uint8_t load_result);
 void     ui_boot_screen(ScreenId s);
+
+// Open the two-step "factory reset" confirmation. The ERROR screen's B button
+// asks for it; the dialogs, and the reset itself, are ui.cpp's modal layer.
+void     ui_confirm_wipe(void);
+
+// The nvs2 checkpoint came back and the simulation is bound to the pet it
+// carried: re-prime the body, stop animating stats towards stale values and
+// land on HOME. Called by the ERROR screen after a successful recovery.
+void     ui_note_recovered(void);
+
+// -----------------------------------------------------------------------------
+//  NAVIGATION SEAMS (P2-C11a)
+//
+//  app/state_machine.cpp owns the current screen, the back stack and the two
+//  navigation clocks; the four calls below are the parts of a screen change
+//  that are still ui.cpp's business. They are called in this order and from
+//  nowhere else:
+//
+//      ui_nav_leave(from)   only for a screen with no table row yet
+//      ui_nav_reset()       close the modal, cut the shared interpolators
+//      ui_nav_enter(to)     only for a screen with no table row yet
+//      ui_nav_arrived(to)   entry dissolve, frame rate, frame request
+// -----------------------------------------------------------------------------
+void     ui_nav_leave(uint8_t from);
+void     ui_nav_reset(void);
+void     ui_nav_enter(uint8_t to);
+void     ui_nav_arrived(uint8_t to);
 
 // True while the hatch ceremony owns the buttons. The ceremony is
 // unskippable, so every gesture is dropped for its duration.

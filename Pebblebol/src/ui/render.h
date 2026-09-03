@@ -109,9 +109,10 @@ static_assert(OLED_W == 128 && OLED_H == 64, "render.cpp fast paths assume a 128
 // Brings up Wire on PIN_SDA/PIN_SCL, scans the I2C bus, selects the OLED
 // address (0x3C or 0x3D), starts U8g2, enables UTF-8 printing and applies the
 // default contrast. Logs the whole scan to Serial.
-// Returns false if nothing acknowledged at 0x3C/0x3D; the caller decides
-// whether to continue headless or call rd_fatal(). Drawing after a false
-// return is harmless (the buffer is written, the panel just never answers).
+// Returns false if nothing acknowledged at 0x3C/0x3D. The caller continues
+// headless and shows the ERROR screen (plan T10); drawing after a false return
+// is harmless (the buffer is written, the panel just never answers), and
+// calling rd_begin() again is how "A: Reintentar" retries the bring-up.
 bool  rd_begin(void);
 
 // The one and only U8G2 instance. Use it for primitives this header does not
@@ -300,8 +301,7 @@ void rd_affordance_echo(void);
 //     rd_power(true) with no visible glitch.
 //   - Every effect expires on its own and restores its register. A stuck 0xA7
 //     or 0xD3 leaves the device looking permanently broken, so rd_fx_reset()
-//     cancels the lot and rd_fatal() calls it before it paints: a crash can
-//     never inherit an inverted or shifted panel. rd_power(false) settles the
+//     cancels the lot: a crash can never inherit an inverted or shifted panel. rd_power(false) settles the
 //     two transients (flash, shake) before the panel goes dark but deliberately
 //     leaves the contrast base, a ramp and the breathing alone - those are
 //     ambient properties of the pet, not of the screen that was up, and they
@@ -386,9 +386,5 @@ void rd_fx_reset(void);
 // Boot logo: procedural egg + FW_NAME + FW_VERSION. Draws AND sends, then
 // resets the frame scheduler. Safe to call before the pet exists.
 void rd_splash(void);
-
-// Draws the message (word-wrapped) on a framed screen, prints it to Serial and
-// blinks the LED forever. NEVER RETURNS. msg may be Spanish (drawn as UTF-8).
-void rd_fatal(const char* msg) __attribute__((noreturn));
 
 #endif // NT_RENDER_H

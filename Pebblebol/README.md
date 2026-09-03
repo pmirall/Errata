@@ -184,7 +184,7 @@ El desplazamiento es constante y se ve a simple vista: no hace falta medir nada.
 
 En el SuperMini el LED de GPIO8 va **cableado a 3V3 en unos clones y a masa en otros**, así que la misma línea de código lo enciende en una placa y lo apaga en otra. El firmware asume **activo en bajo** (`LED_ACTIVE_LOW 1`, `LED_ON` = `LOW`), que es lo habitual.
 
-**El LED se usa para una sola cosa en todo el firmware: parpadear eternamente si la pantalla no aparece en el bus I2C** (`rd_fatal()`). Eso lo convierte en la única prueba posible, y hay que provocarla a propósito.
+**El LED se usa para una sola cosa en todo el firmware: parpadear si la pantalla no aparece en el bus I2C** (pantalla de ERROR, `ui/screen_error.cpp`). Eso lo convierte en la única prueba posible, y hay que provocarla a propósito. El aparato ya no se queda colgado: sigue funcionando y el botón A reintenta el arranque de la pantalla.
 
 **Cómo comprobarlo, sin desoldar nada:** desconecta el cable **SDA** de la pantalla (o el de SCL, da igual) y enchufa el aparato. El patrón que emite el firmware es exacto y fácil de reconocer:
 

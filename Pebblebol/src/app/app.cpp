@@ -35,6 +35,7 @@
 #include "../networking/net.h"
 #include "../networking/ble_social.h"
 #include "../ui/ui.h"
+#include "../ui/screen_error.h"   // the ERROR screen's retry / LED bindings
 #include "../networking/webui.h"
 #include "../dev/godmode.h"
 // data/index_html.h is deliberately NOT included: networking/webui.cpp is its
@@ -65,6 +66,7 @@ static uint16_t g_cfg_crc        = 0;      // change detector for Config
 static uint8_t  g_absence_unknown = 0;     // boot took the unknown-clock path
 static uint8_t  g_clock_was_valid = 0;     // edge detector for a landing calibration
 static uint8_t  g_nvs_ok          = 0;
+static uint8_t  g_display_ok      = 0;     // rd_begin() answered on the I2C bus
 
 // =============================================================================
 //  THE TWO CLOCKS persistence/save_manager.cpp CANNOT COMPUTE ITSELF
@@ -91,6 +93,26 @@ static void apply_config(void)
   net_set_credentials(g_cfg.wifi_ssid, g_cfg.wifi_pass);
 
   g_cfg_crc = g_cfg.crc16;
+}
+
+// =============================================================================
+//  THE ERROR SCREEN'S TWO HARDWARE HANDS (plan T10)
+//  ui/screen_error.cpp is a pure translation unit, so the panel bring-up and
+//  PIN_LED are bound in from here. app_retry_display() is what "A: Reintentar"
+//  runs: a display that answers on the second attempt gives the user the whole
+//  device back, contrast and all.
+// =============================================================================
+static bool app_retry_display(void)
+{
+  if (!rd_begin()) return false;
+  g_display_ok = 1;
+  apply_config();
+  return true;
+}
+
+static void app_led(bool on)
+{
+  digitalWrite(PIN_LED, on ? LED_ON : LED_OFF);
 }
 
 // True when someone rewrote Config since the last call. gs_save_cfg() is
@@ -302,12 +324,19 @@ void app_setup(void)
   Serial.println();
   Serial.println(F("[nt] " FW_NAME " " FW_VERSION));
 
+  // The LED is the ERROR screen's only voice when the panel is missing.
+  pinMode(PIN_LED, OUTPUT);
+  digitalWrite(PIN_LED, LED_OFF);
+
   // --- display first, so every later failure has somewhere to be shown ------
   // rd_begin() owns Wire on PIN_SDA/PIN_SCL, scans the bus and picks 0x3C/0x3D.
   // Risk 2: it is the ONLY place a U8G2 is constructed.
-  if (!rd_begin()) {
-    rd_fatal(S(STR_ERR_OLED));    // noreturn: draws, logs and blinks forever
-  }
+  // rd_begin() failing is no longer fatal (plan T10, audit risk 15). The boot
+  // continues headless - drawing into a buffer nobody sends is harmless - and
+  // the ERROR screen armed at the end of setup() blinks the LED and offers a
+  // retry, so a loose cable costs a button press instead of a power cycle.
+  g_display_ok = rd_begin() ? 1u : 0u;
+  if (!g_display_ok) Serial.println(F("[nt] no display on the I2C bus"));
   ui_boot_screen(SCR_BOOT);       // S15: something on the panel before any I/O
 
   // --- entropy --------------------------------------------------------------
@@ -355,6 +384,8 @@ void app_setup(void)
   god_begin();
 
   ui_bind_recover(&app_recover_save);
+  ui_bind_display_retry(&app_retry_display);
+  ui_bind_led(&app_led);
   ui_bind_config(&g_cfg);
   web_bind_config(&g_cfg);
   ui_begin();
@@ -386,6 +417,10 @@ void app_setup(void)
   if (!gs_readonly() && boot == BOOT_FIRST_RUN && gt_cal_state() == CAL_UNSET) {
     ui_goto(SCR_CLOCK);
   }
+
+  // Last, so it wins the screen: with no panel there is nothing to read, and
+  // every question above is moot until the user has a display again.
+  if (!g_display_ok) ui_note_display_failure();
 
   g_tick_ms        = millis();
   g_clock_was_valid = gt_is_valid() ? 1u : 0u;

@@ -384,8 +384,8 @@ Hoy **todas las pantallas cortan en seco** (`screen_enter()` no anima nada) y
 
 ## 9. El LED: un canal de salida entero apagado
 
-`PIN_LED` (GPIO5) **sólo se usa dentro de `rd_fatal()`**. Fuera de un fallo
-catastrófico, está apagado siempre.
+`PIN_LED` (GPIO5) **sólo se usa en la pantalla de ERROR cuando el panel no
+responde** (`ui/screen_error.cpp`). Fuera de ese fallo, está apagado siempre.
 
 El C3 tiene LEDC, así que puede hacer PWM real:
 

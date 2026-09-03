@@ -51,16 +51,26 @@
 #include "../dev/godmode.h"    // GodEvt, god_active/handle/draw/entry_progress/marker
 #include "petfx.h"      // the body's own presentation layer: floor, position, gaze
 #include "actfx.h"      // the choreography of every action the player can take
+#include "screen.h"        // the ScreenDef table this file is being dissolved into
+#include "screen_error.h"  // the ERROR screen moved out first (P2-C11a)
+// app/ sits ABOVE ui/, and this include points the wrong way on purpose: the
+// strangler is moving the state machine out of this file, not wiring a new
+// dependency into it. Every one of these calls disappears with the switch that
+// still needs it (plan P2-C11).
+#include "../app/state_machine.h"
 #include "ui.h"
 
 // =============================================================================
 //  1. LAYOUT
 // =============================================================================
-#define UI_HDR_H            11                        // inverted title bar
-#define UI_HDR_BASE          9                        // its text baseline
+// UI_HDR_H, UI_HDR_BASE, UI_AFFORD_Y and UI_CONTENT_BOTTOM moved to screen.h:
+// a migrated screen may not include render.h, so the shared geometry has to
+// live where both sides can see it.
 #define UI_CONTENT_Y        UI_HDR_H                  // 11
-#define UI_CONTENT_BOTTOM   (RD_AFFORD_Y - 1)         // 55
 #define UI_CONTENT_H        (RD_AFFORD_Y - UI_CONTENT_Y)   // 45
+
+static_assert(UI_AFFORD_Y == RD_AFFORD_Y,
+              "screen.h and render.h disagree about where the affordance strip starts");
 
 static_assert(UI_LIST_ROWS * UI_LIST_PITCH <= UI_CONTENT_H + 1,
               "the vertical list does not fit under the header");
@@ -92,11 +102,9 @@ enum SocPhase : uint8_t {
 };
 
 // ---- screen / navigation ----------------------------------------------------
-static uint8_t  s_screen      = SCR_HOME;
-static uint8_t  s_stack[UI_STACK_DEPTH];
-static uint8_t  s_sp          = 0;
-static uint32_t s_enter_ms    = 0;
-static uint32_t s_input_ms    = 0;
+// The current screen, the back stack and the two navigation clocks live in
+// app/state_machine.cpp now (P2-C11a); reach them through sm_current(),
+// sm_idle_ms() and sm_screen_ms().
 static uint32_t s_wiggle_ms   = 0;
 static uint8_t  s_fps_want    = FPS_NORMAL;
 static uint8_t  s_god_prog    = 0;      // god_entry_progress(), 0..100
@@ -112,19 +120,7 @@ static uint32_t s_modal_ms    = 0;
 static uint16_t s_modal_str   = STR_EMPTY;
 static uint8_t  s_confirm_id  = CFM_NONE;
 
-// ---- SAVE ERROR (P2-C9c) ----------------------------------------------------
-// What the ERROR screen is showing. The two are not interchangeable: a save
-// this firmware cannot READ may be recoverable from the nvs2 checkpoint, while
-// a save from a NEWER firmware is perfectly good data that only a newer build
-// can read - offering a factory reset for it would be offering to destroy a
-// working save because the device is out of date.
-enum ErrKind : uint8_t {
-  ERRK_NONE = 0,
-  ERRK_SAVE_CORRUPT,
-  ERRK_SAVE_NEWER
-};
-static uint8_t     s_err_kind = ERRK_NONE;
-static UiRecoverFn s_recover  = nullptr;
+// ---- SAVE ERROR (P2-C9c, moved to ui/screen_error.cpp by P2-C11a) ----------
 static uint8_t  s_confirm_yes = 0;      // invariant 5: NO
 
 // ---- alert queue ------------------------------------------------------------
@@ -549,11 +545,15 @@ static void list_anim_reset(void);
 static bool screen_wants_transition(uint8_t s);
 
 uint8_t ui_fps(void) {
+  // A migrated screen states the rate it wants in its table row; 0 means "no
+  // opinion" and falls through to the rules below.
+  const ScreenDef* d = sm_def();
+  if (d && d->fps) return d->fps;
   // The birth is 4.5 s of animation on a pet that has just been created: the
   // energy / PF_ASLEEP fallbacks below would be reading a state that did not
   // exist a moment ago, and a 4 fps hatch is not a hatch.
   if (hatch_active()) return FPS_NORMAL;
-  if (s_screen == SCR_GAME) return FPS_NORMAL;
+  if (sm_current() == SCR_GAME) return FPS_NORMAL;
   // A choreography is 28 to 52 frames. At FPS_LOW (4 fps) a meal would be ten
   // frames long and read as a fault - and the two states that ASK for FPS_LOW,
   // a sleeping pet and an exhausted one, are exactly the ones ACT_SLEEP_TOGGLE
@@ -570,39 +570,33 @@ static void apply_fps(void) {
   if (want != s_fps_want) { s_fps_want = want; rd_set_fps(want); }
 }
 
-void ui_goto(ScreenId s) {
-  if (s >= SCR_COUNT) return;
-  if (s_screen != (uint8_t)s) screen_leave(s_screen);
+// The five movers are sm_*() now. ui_goto() stays because it is the mandated
+// public entry point (ui.h) and because the entry point calls it.
+void ui_goto(ScreenId s) { sm_goto(s); }
+
+static void nav_push(uint8_t to) { sm_push((ScreenId)to); }
+static void nav_back(void)       { sm_back(); }
+static void nav_home(void)       { sm_home(); }
+
+// The three parts of a screen change that are still this file's: the legacy
+// enter / leave hooks, the interpolators the shared widgets animate, and the
+// entry dissolve. state_machine.cpp calls them in that order (ui.h).
+void ui_nav_leave(uint8_t from) { screen_leave(from); }
+void ui_nav_enter(uint8_t to)   { screen_enter(to); }
+
+void ui_nav_reset(void) {
   modal_close();
-  s_screen   = (uint8_t)s;
-  s_enter_ms = now_ms();
-  s_input_ms = s_enter_ms;
-  // Every interpolator that outlives a screen has to be cut here, because
-  // draw_list() and draw_menu() are shared across screens: otherwise the list
-  // highlight flies in from the previous list's row and the carousel finishes a
-  // step that belonged to a menu the player already left.
   list_anim_reset();
   s_ring_from = 0;
-  screen_enter(s_screen);
-  // A 3-step dither dissolve on entry (see draw_transition). ui_goto is the
-  // single funnel: nav_push() and nav_back() both come through here.
-  s_trans_ms = screen_wants_transition(s_screen) ? now_ms() : 0u;
+}
+
+void ui_nav_arrived(uint8_t to) {
+  // A 3-step dither dissolve on entry (see draw_transition).
+  s_trans_ms = screen_wants_transition(to) ? now_ms() : 0u;
   s_fps_want = 0xFF;                 // force a re-apply on the new screen
   apply_fps();
   rd_request_frame();
 }
-
-static void nav_push(uint8_t to) {
-  if (s_sp < UI_STACK_DEPTH) s_stack[s_sp++] = s_screen;
-  ui_goto((ScreenId)to);
-}
-
-static void nav_back(void) {
-  const uint8_t to = (s_sp > 0) ? s_stack[--s_sp] : (uint8_t)SCR_HOME;
-  ui_goto((ScreenId)to);
-}
-
-static void nav_home(void) { s_sp = 0; ui_goto(SCR_HOME); }
 
 // EVERY ACTION WITH A CHOREOGRAPHY SENDS THE PLAYER HOME TO WATCH IT. That is
 // the whole point of the feature - "if I feed the pet, I have to see it eat" -
@@ -630,23 +624,14 @@ static bool act_and_show(ActionId a) {
   // which is the normal case for all three: the player pressed a button and the
   // screen fell apart. In the firmware the user has flashed, that gesture did
   // not navigate and there was no dissolve.
-  if (ok && actfx_active() && s_screen != (uint8_t)SCR_HOME) nav_home();
+  if (ok && actfx_active() && sm_current() != SCR_HOME) nav_home();
   return ok;
 }
 
 ScreenId ui_screen(void) {
   if (s_modal == MODAL_ALERT)   return SCR_ALERT;
   if (s_modal == MODAL_CONFIRM) return SCR_CONFIRM;
-  return (ScreenId)s_screen;
-}
-
-// Screens that never time out (invariant 3).
-static bool screen_is_sticky(uint8_t s) {
-  // ERROR is sticky for the same reason it refuses BACK and HOME: the auto
-  // return would drop the user on HOME with a read-only session and no idea
-  // why nothing is being saved.
-  return s == SCR_HOME || s == SCR_GAME || s == SCR_EGG || s == SCR_GOD ||
-         s == SCR_ERROR;
+  return sm_current();
 }
 
 bool ui_input_locked(void) {
@@ -680,8 +665,8 @@ static void draw_header(const char* title, const char* tag) {
 // Invariant 3: a 3 px bar that drains right to left in the last 5 seconds.
 // XORed so it stays visible over whatever the screen already drew.
 static void draw_countdown(void) {
-  if (screen_is_sticky(s_screen)) return;
-  const uint32_t el = since(s_input_ms);
+  if (sm_is_sticky()) return;
+  const uint32_t el = sm_idle_ms();
   if (el + UI_COUNTDOWN_MS < UI_AUTORETURN_MS) return;
   const uint32_t left = (el >= UI_AUTORETURN_MS) ? 0u : (UI_AUTORETURN_MS - el);
   int16_t w = (int16_t)((left * (uint32_t)OLED_W) / UI_COUNTDOWN_MS);
@@ -1346,7 +1331,7 @@ static void draw_str_list(uint16_t title, const uint16_t* ids, uint8_t n, uint8_
 static void game_start(uint8_t dev_id);
 
 static void list_common(Gesture g, uint8_t n, const uint16_t* help) {
-  uint8_t& cur = s_cursor[s_screen];
+  uint8_t& cur = s_cursor[sm_current()];
   switch (g) {
     case GST_TAP_L:
     case GST_HOLD_L: cur = ring_next(cur, n); break;
@@ -1799,7 +1784,7 @@ static void handle_status(Gesture g) {
   switch (g) {
     case GST_TAP_L:
       s_hex_ms = 0;
-      ui_goto(s_screen == SCR_STATUS_A ? SCR_STATUS_B : SCR_STATUS_A);
+      ui_goto(sm_current() == SCR_STATUS_A ? SCR_STATUS_B : SCR_STATUS_A);
       break;
     case GST_DBL_R: {
       const SimView* p = pet();
@@ -2040,7 +2025,7 @@ static void settings_select(void) {
   const uint8_t row = s_cursor[SCR_SETTINGS];
   switch (row) {
     case SET_BACK:  nav_back();                              return;
-    case SET_INFO:  s_set_page = 1; s_input_ms = now_ms();   return;
+    case SET_INFO:  s_set_page = 1; sm_note_input();          return;
     case SET_QR:    nav_push(SCR_QR);                        return;
     case SET_CLOCK: nav_push(SCR_CLOCK);                     return;
     case SET_LIGHT: do_action(ACT_LIGHT_TOGGLE);             return;
@@ -2251,7 +2236,7 @@ static void clk_bump(void) {
     case CLK_MIN:  s_clk[CLK_MIN]  = (uint16_t)((s_clk[CLK_MIN]  + 1u) % 60u); break;
     default: break;
   }
-  s_input_ms = now_ms();
+  sm_note_input();
 }
 
 // The whole point of the screen. gt_set_epoch() with CAL_USER is the one source
@@ -2364,27 +2349,23 @@ static void hatch_begin(void) {
 
   gs_save_active(true);   // commit FIRST: everything below is presentation
 
-  screen_leave(s_screen);      // drops BLE / an in-flight minigame
-  s_sp          = 0;
-  s_modal       = MODAL_NONE;
-  s_alert_n     = 0;
-  s_alert_cur   = AL_NONE;
-  s_toast[0]    = '\0';
-  s_absence_ms  = 0;
-  s_trans_ms    = 0;           // the ceremony owns the frame: no dissolve on top
-  s_screen      = SCR_EGG;
+  // The phase is armed BEFORE the navigation: sm_replace_root() applies the
+  // frame rate on arrival, and ui_fps() answers FPS_NORMAL only once
+  // hatch_active() is true. It also runs the leave hook of whatever screen the
+  // ceremony arrived on - which is what drops BLE or an in-flight minigame.
   s_hatch_phase = HP_WOBBLE;
   s_hatch_ms    = now_ms();
   s_hatch_jolts = 0;
   s_hatch_look  = 0;
-  s_enter_ms    = s_hatch_ms;
-  s_input_ms    = s_hatch_ms;
+  s_alert_n     = 0;
+  s_alert_cur   = AL_NONE;
+  s_toast[0]    = '\0';
+  s_absence_ms  = 0;
+  sm_replace_root(SCR_EGG);
+  s_trans_ms    = 0;           // the ceremony owns the frame: no dissolve on top
   actfx_cancel();              // whatever the previous animal was doing, it is over
   petfx_reset(*p);             // the body about to appear is a brand new one
   petfx_freeze(1);             // and it must be born in the centre, not mid-walk
-  s_fps_want    = 0xFF;
-  apply_fps();
-  rd_request_frame();
 }
 
 // Phase edges only. Every register effect is armed EXACTLY once here: doing it
@@ -2607,87 +2588,23 @@ static void handle_egg(Gesture g) {
 }
 
 // =============================================================================
-//  16b. BOOT / LOAD_SAVE / ERROR (P2-C9c)
+//  16b. BOOT / LOAD_SAVE / ERROR
 //
-//  These three are the save pipeline's face. BOOT and LOAD_SAVE are drawable
-//  BEFORE ui_begin() - they read no pet and no config - because that is when
-//  they are needed: the load runs between them. P2-C11 moves all three into the
-//  screen table with the rest.
+//  Gone from this file. All three are screen-table rows now (P2-C11a):
+//  ui/screen_boot.cpp draws the two splashes, ui/screen_error.cpp owns the
+//  ERROR state including the checkpoint recovery, the newer-save refusal and
+//  the panel-failure retry that replaced rd_fatal(). What is left here is the
+//  wipe confirmation the ERROR screen asks for and the re-prime after a
+//  successful recovery, both of which are modal-layer and pet-presentation
+//  work that belongs to ui.cpp until those move too.
 // =============================================================================
-static void draw_boot(void) {
-  rd_text_center(28, RD_FONT_HEAD, S(STR_APP_NAME));
-  rd_text_center(40, RD_FONT_TINY, FW_VERSION);
-}
+void ui_confirm_wipe(void) { confirm_open(CFM_WIPE1, STR_CF_WIPE); }
 
-static void draw_load_save(void) {
-  rd_text_center(28, RD_FONT_HEAD, S(STR_APP_NAME));
-  rd_text_center(42, RD_FONT_BODY, S(STR_BOOT_LOADING));
-}
-
-static void draw_error(void) {
-  draw_header(S(STR_SAVE_ERR_TITLE), nullptr);
-  const uint16_t body = (s_err_kind == ERRK_SAVE_NEWER) ? STR_SAVE_ERR_NEWER
-                                                        : STR_SAVE_ERR_BODY;
-  rd_text_wrap(2, 22, OLED_W - 4, RD_LINE_BODY, 2, RD_FONT_BODY, S(body));
-  if (s_err_kind == ERRK_SAVE_NEWER) {
-    // A newer save is GOOD data, so NEITHER button may write and neither is
-    // offered. "Recuperar" was the dangerous one: restoring an older nvs2
-    // checkpoint over a save this firmware merely cannot READ would destroy
-    // the collection the newer firmware wrote (spec 48, 60). The fix is a
-    // firmware update, not a wipe and not a rollback.
-    rd_text(2, 42, RD_FONT_BODY, S(STR_SAVE_UPDATE_FW));
-  } else {
-    rd_text(2, 42, RD_FONT_BODY, S(STR_SAVE_ERR_A));
-    rd_text(2, 52, RD_FONT_BODY, S(STR_SAVE_ERR_B));
-  }
-  rd_affordance(S(STR_AF_OK), S(STR_AF_SEL));
-}
-
-// "Recuperar": restore the nvs2 checkpoint, through the entry point, because
-// only it can rebind the simulation to the pet that comes back.
-static void error_recover(void) {
-  // Defence in depth, not a redundant check: this is the only path on the
-  // device that can write an OLD checkpoint over a save it could not read.
-  // handle_error() already refuses to route here for ERRK_SAVE_NEWER, but a
-  // future re-route must not be able to reopen a data-loss hole silently.
-  if (s_err_kind == ERRK_SAVE_NEWER) {
-    ui_toast(STR_SAVE_UPDATE_FW);
-    return;
-  }
-  if (!s_recover || !s_recover()) {
-    ui_toast(STR_SAVE_NO_BACKUP);       // nothing was written; still read-only
-    return;
-  }
-  ui_toast(STR_SAVE_FROM_BACKUP);
-  s_err_kind = ERRK_NONE;
-  s_stat_ok  = 0;
-  s_sp       = 0;
+void ui_note_recovered(void) {
+  s_stat_ok = 0;                 // show the recovered pet's truth at once
   const SimView* p = pet();
   if (p) petfx_reset(*p);
-  ui_goto(SCR_HOME);
-}
-
-static void handle_error(Gesture g) {
-  // A save from a newer firmware is intact data this build cannot parse, so no
-  // gesture here may write: not the wipe (B already refused it) and not the
-  // checkpoint restore (A used to accept it, which silently overwrote the very
-  // save the screen was warning about). Both buttons say the same true thing.
-  if (s_err_kind == ERRK_SAVE_NEWER) {
-    if (g == GST_TAP_L || g == GST_TAP_R) {
-      ui_toast(STR_SAVE_UPDATE_FW);
-    }
-    return;
-  }
-  switch (g) {
-    case GST_TAP_L:
-      error_recover();
-      break;
-    case GST_TAP_R:
-      confirm_open(CFM_WIPE1, STR_CF_WIPE);   // two dialogs, then the reset
-      break;
-    default:
-      break;
-  }
+  sm_replace_root(SCR_HOME);
 }
 
 // =============================================================================
@@ -2711,9 +2628,8 @@ static void confirm_commit(void) {
       const SimView* p = pet();
       if (p) { gs_save_active(true); petfx_reset(*p); }
       s_stat_ok  = 0;                // a wiped device shows the truth at once
-      s_sp       = 0;
-      s_err_kind = ERRK_NONE;        // the save the ERROR screen was about is gone
-      ui_goto(SCR_EGG);
+      err_set_kind(ERRK_NONE);       // the save the ERROR screen was about is gone
+      sm_replace_root(SCR_EGG);
       break;
     }
     default: break;
@@ -2872,31 +2788,16 @@ void ui_bind_config(Config* cfg) {
   bright_service();
 }
 
-void ui_bind_recover(UiRecoverFn fn) { s_recover = fn; }
-
-void ui_note_load(uint8_t result) {
-  switch (result) {
-    case LOAD_CORRUPT:
-      s_err_kind = ERRK_SAVE_CORRUPT;
-      ui_goto(SCR_ERROR);
-      break;
-    case LOAD_FOREIGN_NEWER:
-      s_err_kind = ERRK_SAVE_NEWER;
-      ui_goto(SCR_ERROR);
-      break;
-    case LOAD_MIGRATED:       ui_toast(STR_SAVE_UPDATED);     break;
-    case LOAD_RECOVERED_PAIR: ui_toast(STR_SAVE_RECOVERED);   break;
-    case LOAD_RECOVERED_CKPT: ui_toast(STR_SAVE_FROM_BACKUP); break;
-    default: break;
-  }
-}
-
 // Draws one frame of a screen that needs no state at all, so the entry point
 // can show BOOT and LOAD_SAVE while the save pipeline runs - before ui_begin().
+// Straight out of the table: neither row has an enter hook, so drawing one
+// without navigating to it is exactly what the row promises.
 void ui_boot_screen(ScreenId s) {
   if (s != SCR_BOOT && s != SCR_LOAD_SAVE) return;
+  const ScreenDef* d = screen_def((uint8_t)s);
+  if (!d) return;
   if (!rd_begin_frame()) return;
-  if (s == SCR_BOOT) draw_boot(); else draw_load_save();
+  d->render();
   rd_end_frame();
 }
 
@@ -2907,10 +2808,9 @@ void ui_note_brightness(uint8_t contrast) {
 
 void ui_begin(void) {
   memset(s_cursor, 0, sizeof(s_cursor));
-  memset(s_stack,  0, sizeof(s_stack));
   memset(&s_g,     0, sizeof(s_g));
   memset(s_raw_prev, 0, sizeof(s_raw_prev));
-  s_sp          = 0;
+  sm_begin();
   s_modal       = MODAL_NONE;
   s_alert_n     = 0;
   s_alert_cur   = AL_NONE;
@@ -3026,7 +2926,7 @@ void ui_handle(Gesture g) {
   if (g == GST_NONE) return;
   if (ui_input_locked()) return;                       // the hatch ceremony
 
-  s_input_ms  = now_ms();
+  sm_note_input();
   s_wiggle_ms = 0;
   // Any gesture, on any screen: the pet turns to look at the player. Placed
   // after the ui_input_locked() gate above, so the hatch ceremony cannot be
@@ -3035,7 +2935,7 @@ void ui_handle(Gesture g) {
   rd_request_frame();
 
   // --- god mode owns its own screen; we act on what it tells us ------------
-  if (s_screen == SCR_GOD) {
+  if (sm_current() == SCR_GOD) {
     // godmode.h: "Never call this when god_active() is false." The console's
     // own exit row turns the MODE off from inside a previous god_handle(), so
     // the screen can outlive it by one gesture.
@@ -3051,8 +2951,7 @@ void ui_handle(Gesture g) {
         const SimView* np = pet();
         if (np) petfx_reset(*np);    // god handed us a different animal entirely
         s_stat_ok = 0;
-        s_sp = 0;
-        ui_goto(SCR_EGG);
+        sm_replace_root(SCR_EGG);
         break;
       }
       default:
@@ -3075,28 +2974,36 @@ void ui_handle(Gesture g) {
     return;
   }
 
-  // --- invariant 2: HOME from anywhere, ERROR excepted ---------------------
-  // ERROR holds the device: the question "recover or reset?" is about a save
-  // that is still on flash, and walking away from it would leave the user
-  // playing a placeholder pet that can never be written. P2-C11 expresses this
-  // as SF_STICKY in the screen table.
-  if (g == GST_LONG_BOTH) {
-    if (s_screen != SCR_HOME && s_screen != SCR_ERROR) { nav_home(); return; }
+  // --- the screen table, for the screens that have moved ------------------
+  // SF_LOCK_INPUT means the row owns every gesture: the two global invariants
+  // below are not applied to it. ERROR uses that to hold the device on an
+  // unanswered question - walking away would leave the user playing a
+  // placeholder pet that can never be written - and BOOT / LOAD_SAVE use it
+  // because they are not waiting on a button at all.
+  const ScreenDef* def = sm_def();
+  const bool owns_input = (def != nullptr) && ((def->flags & SF_LOCK_INPUT) != 0u);
+  const uint8_t scr = (uint8_t)sm_current();
+
+  if (!owns_input) {
+    // --- invariant 2: HOME from anywhere ----------------------------------
+    if (g == GST_LONG_BOTH && scr != SCR_HOME) { nav_home(); return; }
+
+    // --- invariant 1: BACK on every screen except GAME and CLOCK ----------
+    // The clock screen needs a repeating right button to enter a date (see
+    // handle_clock); it is left with BOTH (cancel), HOLD L (save) and LONG
+    // BOTH (HOME) instead.
+    if (g == GST_HOLD_R && scr != SCR_GAME && scr != SCR_CLOCK) {
+      if (scr == SCR_HOME) { s_wiggle_ms = now_ms(); return; }
+      if (scr == SCR_SETTINGS && s_set_page == 1) { s_set_page = 0; return; }
+      nav_back();
+      return;
+    }
   }
 
-  // --- invariant 1: BACK on every screen except GAME, CLOCK and ERROR ------
-  // The clock screen needs a repeating right button to enter a date (see
-  // handle_clock); it is left with BOTH (cancel), HOLD L (save) and LONG BOTH
-  // (HOME) instead.
-  if (g == GST_HOLD_R && s_screen != SCR_GAME &&
-      s_screen != SCR_CLOCK && s_screen != SCR_ERROR) {
-    if (s_screen == SCR_HOME) { s_wiggle_ms = now_ms(); return; }
-    if (s_screen == SCR_SETTINGS && s_set_page == 1) { s_set_page = 0; return; }
-    nav_back();
-    return;
-  }
+  if (sm_handle(g)) return;
+  if (def) return;             // migrated, and this row takes no input at all
 
-  switch (s_screen) {
+  switch (scr) {
     case SCR_HOME:      handle_home(g);     break;
     case SCR_MENU:      handle_menu(g);     break;
     case SCR_FEED:      handle_feed(g);     break;
@@ -3109,9 +3016,6 @@ void ui_handle(Gesture g) {
     case SCR_EGG:       handle_egg(g);      break;
     case SCR_QR:        handle_qr(g);       break;
     case SCR_CLOCK:     handle_clock(g);    break;
-    case SCR_ERROR:     handle_error(g);    break;
-    case SCR_BOOT:
-    case SCR_LOAD_SAVE: break;             // no input: they are not waiting on one
     default:            break;
   }
 }
@@ -3145,8 +3049,8 @@ void ui_service(void) {
   // this file were deleted. The five explicit ones are:
   //   screen_leave(SCR_HOME)  - leaving HOME by any route, back or home or push
   //   hatch_begin()           - the birth ceremony, which may arrive on any screen
-  //   the god-mode entry just below, which sets s_screen WITHOUT ui_goto() and
-  //     therefore never reaches screen_leave() at all
+  //   the god-mode entry just below, belt and braces: it re-roots the machine
+  //     through sm_replace_root(), so the leave hook does run
   //   ui_begin()              - boot, and the wipe that re-runs it
   // A hold that outlives its film is a pet nailed to the floor until the device
   // is power-cycled, and it is the single most likely way this feature breaks.
@@ -3154,49 +3058,41 @@ void ui_service(void) {
 
   // The undocumented GOD entry. godmode.cpp owns the hold timing and performs
   // the entry itself (including input_flush()); at 100 we only switch screen.
-  s_god_prog = god_entry_progress(s_screen);
+  s_god_prog = god_entry_progress((uint8_t)sm_current());
   if (s_god_prog >= 100u) {
-    actfx_cancel();     // this path sets s_screen by hand: screen_leave() never runs
+    actfx_cancel();
     s_god_prog = 0;
-    s_sp       = 0;
-    s_screen   = SCR_GOD;
-    s_enter_ms = t;
-    s_input_ms = t;
-    s_fps_want = 0xFF;
-    apply_fps();
-    rd_request_frame();
+    sm_replace_root(SCR_GOD);
     return;
   }
 
   // god_service() is the entry point's to call; ui only owns the screen.
-  if (s_screen == SCR_GOD) { if (!god_active()) nav_home(); return; }
+  if (sm_current() == SCR_GOD) { if (!god_active()) nav_home(); return; }
   // Returning here is what keeps the alert layer, the auto-return and the QR
   // pump off the ceremony's back for its whole 4.5 s.
   if (hatch_active()) { hatch_service(); return; }
-  if (s_screen == SCR_GAME)       game_service();
-  if (s_screen == SCR_SOCIAL)     social_service();
-  if (s_screen == SCR_CLOCK)      clock_service();
+  if (sm_current() == SCR_GAME)   game_service();
+  if (sm_current() == SCR_SOCIAL) social_service();
+  if (sm_current() == SCR_CLOCK)  clock_service();
 
   // The alert layer surfaces only when nothing else owns the screen.
-  if (s_modal == MODAL_NONE && s_alert_n > 0 && s_screen != SCR_GAME) {
+  if (s_modal == MODAL_NONE && s_alert_n > 0 && sm_current() != SCR_GAME) {
     alert_pop();
   }
   if (s_modal == MODAL_HELP && since(s_modal_ms) >= UI_MODAL_HELP_MS) modal_close();
 
-  // Invariant 3.
-  if (!screen_is_sticky(s_screen) && s_modal == MODAL_NONE &&
-      since(s_input_ms) >= UI_AUTORETURN_MS) {
-    nav_home();
-    return;
-  }
+  // Invariant 3, plus the update hook of a migrated screen. A modal freezes
+  // the countdown: the one that is running belongs to the screen underneath.
+  sm_block_autoreturn(s_modal != MODAL_NONE);
+  if (sm_service(t)) return;
 
   // The QR payload changes when the IP or the PIN does. In AP-provisioning
   // mode the two symbols alternate every 5 s: join the network first, then
   // open the page. A manual tap pins the choice for 10 s.
-  if (s_screen == SCR_QR && since(s_qr_ms) >= 1000UL) {
+  if (sm_current() == SCR_QR && since(s_qr_ms) >= 1000UL) {
     s_qr_ms = t;
     if (net_is_ap_up() && (s_qr_manual == 0 || since(s_qr_manual) > 10000UL)) {
-      const uint8_t want = (uint8_t)(((since(s_enter_ms) / 5000UL) & 1u) ? 0u : 1u);
+      const uint8_t want = (uint8_t)(((sm_screen_ms() / 5000UL) & 1u) ? 0u : 1u);
       if (want != s_qr_variant) { s_qr_variant = want; s_qr_key[0] = '\0'; }
     }
     qr_build();
@@ -3211,7 +3107,16 @@ void ui_draw(void) {
   // must agree about what is being held.
   rd_affordance_pressed((uint8_t)((input_raw(INPUT_BTN_L) ? 1u : 0u) |
                                   (input_raw(INPUT_BTN_R) ? 2u : 0u)));
-  switch (s_screen) {
+  // The screen table first: a migrated row draws the whole base frame, and
+  // SF_OWNS_FRAME means it also owns the layers below (no toast, no modal, no
+  // dissolve on top of it).
+  const ScreenDef* def = sm_def();
+  if (def) {
+    def->render();
+    if (def->flags & SF_OWNS_FRAME) { rd_affordance_echo(); return; }
+  }
+  // Not migrated yet: the old switch, one case shorter every commit.
+  else switch (sm_current()) {
     case SCR_HOME:     draw_home();     break;
     case SCR_MENU:     draw_menu();     break;
     case SCR_FEED:     draw_str_list(STR_MENU_FEED, kFeedItem, 3, s_cursor[SCR_FEED]); break;
@@ -3229,9 +3134,6 @@ void ui_draw(void) {
       break;
     case SCR_QR:       draw_qr();       break;
     case SCR_CLOCK:    draw_clock();    break;
-    case SCR_BOOT:     draw_boot();      break;
-    case SCR_LOAD_SAVE:draw_load_save(); break;
-    case SCR_ERROR:    draw_error();     break;
     case SCR_GOD:      god_draw();      rd_affordance_echo(); return;  // god owns the frame
     default:           draw_home();     break;
   }

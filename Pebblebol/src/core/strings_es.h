@@ -382,6 +382,13 @@ enum StrId : uint16_t {
   STR_SAVE_FROM_BACKUP,
   STR_SAVE_UPDATED,
 
+  // --- 33j. DISPLAY error (P2-C11a). The panel did not answer on the I2C
+  //          bus, so nobody will ever read these: they are written for the
+  //          retry that succeeds, when the screen comes back and the device
+  //          has to explain what it has been blinking about.
+  STR_DISP_ERR_TITLE,
+  STR_DISP_ERR_A,
+
   STR_COUNT
 };
 
@@ -721,7 +728,10 @@ inline constexpr const char* const ES[] = {
   /* STR_SAVE_UPDATE_FW */        "Actualiza el firmware.",
   /* STR_SAVE_RECOVERED */        "Partida reparada.",
   /* STR_SAVE_FROM_BACKUP */      "Recuperada de la copia.",
-  /* STR_SAVE_UPDATED */          "Partida actualizada."
+  /* STR_SAVE_UPDATED */          "Partida actualizada.",
+
+  /* STR_DISP_ERR_TITLE */        "PANTALLA",
+  /* STR_DISP_ERR_A */            "A: Reintentar"
 };
 
 // -----------------------------------------------------------------------------
