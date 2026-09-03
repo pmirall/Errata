@@ -1387,7 +1387,12 @@ static void ceremony_start(uint8_t kind) {
     return;
   }
 
-  gs_save_active(true);   // commit FIRST: everything below is presentation
+  // Commit FIRST: everything below is presentation. EXCEPT for an evolution,
+  // which app_evolve_active() has already applied AND flushed before calling
+  // in - it has to, because its return value is what promises the change
+  // survives a brownout mid-show. Writing again here would be a second forced
+  // NVS write for one event, for nothing.
+  if (kind != CEREMONY_EVOLVE) gs_save_active(true);
 
   if (!ceremony_begin(kind, now_ms())) return;
 

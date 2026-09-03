@@ -27,6 +27,7 @@
 #include <string.h>
 
 #include "data/evolution_table.h"
+#include "data/sprites.h"          // SPRITE_SET_COUNT, for the plan 1.5.2 guard
 #include "data/species_table.h"
 #include "game/evolution.h"
 #include "game/xp.h"
@@ -314,21 +315,19 @@ TEST(a_failing_condition_neither_evolves_nor_clears_the_pending_bit) {
   evo_context_clear(none);
   CHECK_EQ(evolution_cond_holds(r, none), 0);
 
+  // WHAT THIS TEST CANNOT REACH, stated rather than faked. Every rule in the
+  // shipped table is EVOC_NONE (decision D14: the roster stops at family 1,
+  // and family 4 is the first with a condition), and evolution_apply() looks
+  // its rule up from that table. So apply's CONDITION arm has no input that
+  // can fail it here: the refusal below is driven through the level gate,
+  // which is a different arm of the same guard.
+  //
+  // An earlier version of this test pretended otherwise - it copied the
+  // Pebble, called nothing, and asserted the copy still matched, which no
+  // implementation could fail. P4-C1 ships conditional rules; the obligation
+  // to drive apply through a failing condition is recorded against it in the
+  // plan's test section.
   PebbleInstance p;
-  make_pebble(p, 1, 8);
-  p.evo_state |= (uint8_t)EVO_STATE_PENDING;
-  const PebbleInstance before = p;
-
-  // The device path is "pending AND the whole rule", so a failing condition
-  // stops at the second half and the first half is left exactly as it was.
-  if (!evolution_cond_holds(r, none)) {
-    CHECK_EQ(memcmp(&before, &p, sizeof p), 0);
-    CHECK(p.evo_state & EVO_STATE_PENDING);
-  }
-
-  // And the same shape through the real API: a rule the context cannot satisfy
-  // leaves the Pebble alone. EVOC_NONE always holds, so this drives the
-  // refusal through the level gate instead, with the bit already raised.
   make_pebble(p, 1, 4);
   p.evo_state |= (uint8_t)EVO_STATE_PENDING;
   const PebbleInstance low = p;
@@ -354,6 +353,42 @@ TEST(the_evolutions_counter_saturates_at_255) {
 // =============================================================================
 //  5. THE WHOLE FAMILY, WALKED
 // =============================================================================
+// A CHAIN must not wait for the next XP award. evolution_apply() clears the
+// pending bit it just answered, so it has to raise it again when the creature
+// it produced is ALREADY past its own level gate - otherwise the second offer
+// stays hidden until some unrelated award happens to raise the bit.
+TEST(a_chained_evolution_re_raises_pending_without_another_award) {
+  PebbleInstance p;
+  make_pebble(p, 1, 20);              // level 20 Paketo: past BOTH gates (8, 18)
+  p.hp_cur = hp_max_of(p);
+  p.evo_state |= (uint8_t)EVO_STATE_PENDING;
+
+  CHECK(evolution_apply(p, full_ctx()));
+  CHECK_EQ(p.species_id, 2);                                   // Fragmar
+  CHECK(p.evo_state & EVO_STATE_PENDING);                      // and offered again
+  CHECK_EQ(evolution_ready(p, full_ctx()), 1);
+
+  CHECK(evolution_apply(p, full_ctx()));
+  CHECK_EQ(p.species_id, 3);                                   // Rafagon, final
+  CHECK_EQ(p.evolutions, 2);
+  // The final stage has no rule, so the bit must go DOWN and stay down.
+  CHECK_EQ((int)(p.evo_state & EVO_STATE_PENDING), 0);
+  CHECK_EQ(evolution_ready(p, full_ctx()), 0);
+}
+
+// Plan 1.5.2 lists `sprite_id < SPRITE_SET_COUNT` among the generator's
+// compile-time guards. species_table.h cannot assert it without including the
+// 86 KB sprite atlas into every translation unit that only wants a base_hp, so
+// it is asserted here instead - which still fails the build for a bad table,
+// just through the test binary rather than the firmware one.
+TEST(every_species_row_points_at_a_real_sprite_set) {
+  for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
+    const SpeciesDef& sp = SPECIES_TABLE[i];
+    CHECK(sp.sprite_id < (uint8_t)SPRITE_SET_COUNT);
+    CHECK((uint16_t)(SPR_BABY_BLOB + sp.sprite_id) < (uint16_t)SPRITE_SET_COUNT);
+  }
+}
+
 TEST(a_family_walk_ends_at_the_final_stage) {
   PebbleInstance p;
   make_pebble(p, 1, 1);

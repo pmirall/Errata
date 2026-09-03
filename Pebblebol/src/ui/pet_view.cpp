@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "../data/species_table.h"
+#include "../game/xp.h"           // xp_hp_max(): the ONE hp_max formula
 #include "../data/sprites.h"
 #include "../game/genome.h"
 #include "../game/sim.h"
@@ -157,8 +158,11 @@ void pet_view_fill(PetView& out, const PebbleInstance& inst,
                       : (inst.level >=  4u) ? STAGE_CHILD
                                             : STAGE_BABY);
 
-  // hp_max = 10 + 2*base_hp + level (plan 1.5.1), derived and never stored.
-  const uint16_t hp_max = (uint16_t)(10u + 2u * (uint16_t)sp.base_hp + (uint16_t)out.level);
+  // Derived and never stored (plan 1.5.1). Through xp_hp_max() rather than
+  // open-coded: P3-C3 made that function the ONE owner of the formula so a
+  // level-up and an evolution rescale identically, and a third copy here would
+  // be the one that silently disagrees.
+  const uint16_t hp_max = xp_hp_max(sp.base_hp, out.level);
   // CLAMP BEFORE THE CAST. A record claiming far more HP than its maximum -
   // hp_cur 60000 against an hp_max of 23 - divides to 260,869 %, and narrowing
   // THAT to a uint8 first wraps it to 5 %: a "> 100" test after the cast can

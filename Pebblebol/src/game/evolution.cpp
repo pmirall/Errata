@@ -106,6 +106,14 @@ bool evolution_apply(PebbleInstance& p, const EvoContext& ctx)
 
   if (p.evolutions < 255u) p.evolutions = (uint8_t)(p.evolutions + 1u);
 
+  // A CHAIN evolves without waiting for the next award. Clearing the pending
+  // bit above is right - that offer has been answered - but a level-20 Paketo
+  // becoming a Fragmar already satisfies Fragmar's own level-18 rule, and
+  // leaving the bit down would hide the second offer until the next xp_add()
+  // happened to raise it. Re-raising here keeps the bit's meaning exact: it is
+  // set exactly when the level gate of the CURRENT species is met.
+  if (evolution_level_ready(p)) p.evo_state |= (uint8_t)EVO_STATE_PENDING;
+
   // DELIBERATELY UNTOUCHED: moves, xp, level, care[], care_rem[], the genome
   // and the nickname. In particular the new species' LEARNSET is not applied -
   // there is no attack table until P4-C1, so overwriting moves[] here would

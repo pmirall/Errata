@@ -280,13 +280,31 @@ bool app_evolve_active(void)
 
   EvoContext ctx;
   evo_context_of(*p, ctx);
+
+  // Kept so the RAM change can be undone if the commit below refuses. Without
+  // it a failed write would leave an evolved creature that flash has never
+  // heard of - which is the exact state this function's ordering exists to
+  // make impossible.
+  const PebbleInstance before = *p;
   if (!evolution_apply(*p, ctx)) return false;
 
-  // COMMIT, both copies, before anything animates. game/sim.cpp holds a raw
-  // pointer at this same record and nothing moved it, so the simulation needs
-  // no re-bind: species_id and hp_cur are not mirrored into its SimView, and
-  // the stage it does mirror is derived from the level, which did not change.
-  (void)gs_save_active(true);
+  // COMMIT, before anything animates. game/sim.cpp holds a raw pointer at this
+  // same record and nothing moved it, so the simulation needs no re-bind:
+  // species_id and hp_cur are not mirrored into its SimView, and the stage it
+  // does mirror is derived from the level, which did not change.
+  //
+  // THE RETURN VALUE IS THE PROMISE. app.h tells the caller it may start a
+  // 4.5 s ceremony because the change is already on flash; if the write did
+  // not happen, saying "true" would turn a full NVS or a read-only session
+  // into a silently lost evolution the moment the battery dips mid-show. Roll
+  // back and refuse instead: the player sees no ceremony, keeps their pebble,
+  // and the pending bit is still up so the offer returns.
+  if (!gs_save_active(true)) { *p = before; return false; }
+
+  // The checkpoint is a BACKUP of a save that already succeeded, so its failure
+  // does not invalidate the evolution and must not roll one back. The ceremony
+  // may proceed; only the nvs2 recovery copy is stale, which is what
+  // save_checkpoint_all() failing means everywhere else in this file too.
   (void)save_checkpoint_all();
   return true;
 }

@@ -253,7 +253,7 @@ struct AttackDef {                  // 16 B, ~30 rows
 static_assert(sizeof(AttackDef) == 16);
 
 struct ItemDef  { uint8_t id, klass, value, rarity; uint16_t name_idx; uint8_t reserved[2]; };   // 8 B (§24: XP candy, capture, care, battle modifier)
-struct EvolutionRule { uint8_t species, target, level, cond, cond_value; uint8_t reserved[3]; };  // 8 B (§18); cond: NONE, HAPPINESS_GE, ACTIVITY_GE, CORRUPTED, BATTLES_WON_GE, ITEM
+struct EvolutionRule { uint8_t species, target, level, cond; uint16_t cond_value; };  // 6 B (§18); cond: EVOC_NONE, EVOC_HAPPINESS_GE, EVOC_CORRUPTED, EVOC_ITEM, EVOC_ACTIVITY_GE  [SHIPPED SHAPE, P3-C3 — was 8 B with a uint8 cond_value and a BATTLES_WON_GE kind; cond_value is 16-bit so a generator must NOT truncate it, and battles-won was dropped because no rule in the content pack uses it]
 struct EncounterRow  { uint8_t category, outcome, weight, rarity_min, rarity_max; uint8_t reserved[3]; }; // 8 B (§22)
 inline constexpr int8_t TYPE_CHART[3][3] = { /* SIGNAL>CORRUPT>SYSTEM>SIGNAL */ };
 ```
@@ -523,6 +523,12 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 **P4-C1 Content pipeline v0 + minimal roster** — M
 - [ ] `tools/gen_content.py` (JSON → `src/data/{species,attacks,items,evolution,encounter}_table.h` + `src/data/creator_schema.h` + the §1.5.2 compile-time guards + `CONTENT_VERSION` hash); `tools/content/*.json` with 12 species (4 families x 3), ~12 attacks covering every §13 category, 4 items, `TYPE_CHART`; `data/balance.h` battle constants (§1.5.1 formulas; damage `max(1, power*atk/(def*K)) + 2*type_mod + rng(0..2)`, protection halves, buffs ±1 stage for N rounds).
 - [ ] `game/species.cpp` accessors; `game/pebble.cpp` `pebble_derive_stats()`; `test_stats.cpp` (integer, monotonic in level, bounds); `test_content.cpp` (guards as runtime tests).
+- [ ] **Carried forward from P3-C3 (do not lose these).** The generated content already exists and is verified in the session scratchpad (`content/final/*.json`, 60 species / 34 attacks / 40 rules); its own `verify.py` is the gate for it. Five obligations attach to this step:
+  1. **Ids 1..3 must come out BYTE-IDENTICAL.** P3-C3 froze family 1 (Paketo / Fragmar / Rafagón) into `species_table.h` straight from that pack precisely so this step re-emits them unchanged. Diff them before and after; a learnset rebalance that quietly moves family 1 invalidates the Phase-3 evolution tests and the recorded goldens.
+  2. **Two attacks are on no learnset** — id 26 *Pánico* (SYSTEM, power 95, RISK) and id 30 *Caché* (NEUTRAL, power 0, PROTECT). They are referenced nowhere else in the pack either, so today they are content the player can never obtain. Place them or delete them; do not ship with `verify.py` failing. (Neither is in family 1, so fixing this need not touch ids 1..3.)
+  3. **The pack was never critiqued for OMISSIONS.** The content workflow's `content-critic` agent died on a content filter, so the pack has been validated per-item and judged between drafts but never asked "what does the spec name that has no row at all?". The two orphan attacks are exactly that shape. Run a completeness pass before committing the tables.
+  4. **Drive `evolution_apply()` through a failing CONDITION** in `test_content.cpp` or `test_evolution.cpp`. P3-C3 could not: every rule it ships is `EVOC_NONE`, so apply's condition arm is unreachable and `tests/test_evolution.cpp` says so in place of pretending otherwise. This step ships conditional rules (families 4, 11, 16, 18, 20), which makes the arm reachable for the first time.
+  5. **Fix `persistence/migration.cpp`'s `LEGACY_FAMILY_SPECIES`.** It maps the eight v1 families onto ids 1..8; since P3-C3, ids 2 and 3 are the mid and final STAGES of family 1, and 4..8 still resolve to nothing. Every legacy family must land on a BASE-stage species.
 - Acceptance: gate; generator output committed; tables compile with all guards.
 
 **P4-C2 Battle engine (pure)** — L

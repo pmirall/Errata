@@ -238,6 +238,17 @@ first flash. The soak is listed below with the other first-hardware measurements
   mid and final STAGES of family 1 rather than other families, and 4..8 still resolve to
   nothing. P4-C1 must land every legacy family on the BASE-stage species of its family. Not
   fixed here: with only one family in the roster there is no correct answer to move it to.
+- **Correction to the P3-C3 commit message.** It says "Six strings added to
+  `core/strings_es.h`, appended so no existing id moves". That is wrong on both counts:
+  **seven** strings were added, and one of them — `STR_CF_EVOLVE`, the confirmation
+  question — went in mid-enum after `STR_CF_WIPE2` so it would sit with the other
+  confirmations, which shifted every `StrId` from `STR_DG_REFLEX` to `STR_PHASE_10` by one.
+  It is harmless: `ES[]` moved in lockstep, and no `StrId` is persisted, sent on the wire or
+  written into a golden (checked against `save_schema.h`, `protocol.h` and `tests/golden/`).
+  But a future reader must not act on "no existing id moves" — it is not a property this
+  file has. The rule that DOES hold is the weaker one: a `StrId` is a compile-time index and
+  nothing outside the firmware image may store it.
+
 - **Section 18's fourth item, sound, is NOT here.** The plan sequences `hardware/audio.{h,cpp}`
   in P6, and the ceremony's phase edges in `ui/ceremony.cpp` are where those calls slot in
   (one per phase transition, armed exactly once, next to `rd_flash()` / `rd_shake()`). No

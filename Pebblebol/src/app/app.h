@@ -36,10 +36,14 @@ bool app_award_xp(uint16_t amount, XpSource src);
 // the context this build can actually supply. Reads nothing, writes nothing.
 bool app_evolution_offer(void);
 
-// Performs the evolution the player just confirmed and COMMITS it: the Pebble
-// reaches flash and the nvs2 checkpoint before this returns, so the caller may
-// start the ceremony knowing a brownout mid-show reboots into the evolved
-// creature. False when nothing evolved, in which case nothing was written.
+// Performs the evolution the player just confirmed and COMMITS it: on TRUE the
+// Pebble has reached flash before this returns, so the caller may start the
+// ceremony knowing a brownout mid-show reboots into the evolved creature.
+// FALSE means nothing evolved AND nothing was written - including the case
+// where the model change succeeded but the save refused it, which is rolled
+// back rather than shown. The nvs2 checkpoint is refreshed too, but it is a
+// backup of a save that already landed: if only the checkpoint fails this
+// still returns true and only the recovery copy is stale.
 bool app_evolve_active(void);
 
 #endif  // PB_APP_H
