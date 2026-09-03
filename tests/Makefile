@@ -9,7 +9,12 @@
 # SRC_ROOT is that src/ directory, so a test includes "game/sim.h" exactly as
 # the firmware does, and the pattern rules below find the .cpp in its layer.
 CXX      ?= g++
-CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O1
+# -MMD -MP make the compiler emit a .d file listing every header each object
+# depends on. Without them a header-only edit leaves stale objects in place and
+# `make check` reports ALL PASS over code it did not rebuild — a gate that lies.
+# Proven: editing HOME_METER_Y0 in ui/screen_home.h passed 14/14 before this,
+# and fails the HOME snapshots after it.
+CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O1 -MMD -MP
 SRC_ROOT ?= ../Pebblebol/src
 BIN      ?= bin
 OBJ      := $(BIN)/obj
@@ -36,23 +41,26 @@ $(BIN) $(OBJ):
 # --- sketch sources compiled for the host -----------------------------------
 # One pattern rule per layer that holds a host-compilable .cpp; make picks the
 # rule whose prerequisite exists, so objects keep their flat basenames.
-$(OBJ)/%.o: $(SRC_ROOT)/core/%.cpp | $(OBJ)
+# Every .d emitted above; the wildcard keeps a clean tree working.
+-include $(wildcard $(OBJ)/*.d) $(wildcard $(BIN)/*.d)
+
+$(OBJ)/%.o: $(SRC_ROOT)/core/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
-$(OBJ)/%.o: $(SRC_ROOT)/game/%.cpp | $(OBJ)
+$(OBJ)/%.o: $(SRC_ROOT)/game/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
-$(OBJ)/%.o: $(SRC_ROOT)/hardware/%.cpp | $(OBJ)
+$(OBJ)/%.o: $(SRC_ROOT)/hardware/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
-$(OBJ)/%.o: $(SRC_ROOT)/ui/%.cpp | $(OBJ)
+$(OBJ)/%.o: $(SRC_ROOT)/ui/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
-$(OBJ)/%.o: $(SRC_ROOT)/persistence/%.cpp | $(OBJ)
+$(OBJ)/%.o: $(SRC_ROOT)/persistence/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # Host fakes for the device seams (kv_store, later gfx).
-$(OBJ)/%.o: fakes/%.cpp fakes/%.h | $(OBJ)
+$(OBJ)/%.o: fakes/%.cpp fakes/%.h Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # gametime pinned to the estimated-clock path so test_clock can drive the
