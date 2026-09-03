@@ -32,8 +32,8 @@ void     sm_begin(void);
 // through this one, exactly as ui_goto() used to.
 void     sm_goto(ScreenId s);
 
-// Remember where we are (UI_STACK_DEPTH deep, silently dropping the oldest
-// beyond that) and go to s.
+// Remember where we are (UI_STACK_DEPTH deep; once full the NEWEST push is
+// dropped and the existing trail is kept, which is what nav_push always did) and go to s.
 void     sm_push(ScreenId s);
 
 // Back to whatever sm_push() remembered, or HOME when the stack is empty.

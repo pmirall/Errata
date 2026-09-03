@@ -24,6 +24,11 @@
 
 // ---- state ------------------------------------------------------------------
 static uint8_t     s_kind      = ERRK_NONE;
+// A display failure and a save problem are independent, and the display one
+// is armed second (app_setup runs the load first). Without this slot the
+// later arming would erase the earlier question and the user would play on
+// with an unreadable save and no warning.
+static uint8_t s_pending_save_kind = ERRK_NONE;
 static UiRecoverFn s_recover   = nullptr;
 static UiRetryFn   s_retry     = nullptr;
 static UiLedFn     s_led       = nullptr;
@@ -125,6 +130,17 @@ void err_input(Gesture g) {
     // user presses A because the LED is blinking, not because they can read a
     // prompt. A successful retry gives them the whole device back.
     if (g == GST_TAP_L && s_retry && s_retry()) {
+      // The panel coming back does not answer the OTHER question. A save
+      // problem raised earlier in this same boot was hidden behind this
+      // screen, and dropping it here would drop the user into a read-only
+      // session with no warning that their collection is unreadable.
+      if (s_pending_save_kind != ERRK_NONE) {
+        s_kind = s_pending_save_kind;
+        s_pending_save_kind = ERRK_NONE;
+        s_blinking = 0;
+        led_set(0);
+        return;                         // stay on ERROR, now asking about the save
+      }
       s_kind = ERRK_NONE;
       ui_goto(SCR_HOME);
     }
@@ -168,6 +184,11 @@ void ui_note_load(uint8_t result) {
 }
 
 void ui_note_display_failure(void) {
+  // Park a save question raised earlier this boot rather than overwriting it;
+  // err_input() re-arms it once the panel is back.
+  if (s_kind == ERRK_SAVE_CORRUPT || s_kind == ERRK_SAVE_NEWER) {
+    s_pending_save_kind = s_kind;
+  }
   err_set_kind(ERRK_DISPLAY);
   ui_goto(SCR_ERROR);
 }

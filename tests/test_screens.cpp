@@ -227,6 +227,57 @@ TEST(error_display_retries_and_blinks) {
   CHECK(!g_led_on);
 }
 
+// A dead panel and an unreadable save are independent failures, and app_setup
+// arms them in that order, so the display one used to overwrite the save one.
+// Answering the panel must not silently answer the save.
+TEST(a_display_failure_does_not_swallow_a_save_question) {
+  seams_reset();
+  ui_bind_display_retry(&fake_retry);
+  ui_bind_led(&fake_led);
+
+  // Boot order: the load runs first and raises a corrupt save...
+  ui_note_load(LOAD_CORRUPT);
+  CHECK_EQ(err_kind(), ERRK_SAVE_CORRUPT);
+  // ...then the panel turns out to be dead too.
+  ui_note_display_failure();
+  CHECK_EQ(err_kind(), ERRK_DISPLAY);
+
+  // The panel comes back. The device must NOT drop the user on HOME with an
+  // unreadable save and no warning: the parked question takes the screen back.
+  g_display_ok = true;
+  g_goto = 0xFF;
+  err_input(GST_TAP_L);
+  CHECK_EQ(err_kind(), ERRK_SAVE_CORRUPT);
+  CHECK_EQ(g_goto, 0xFF);                 // still on ERROR, now asking about the save
+  CHECK(!g_led_on);                       // and no longer blinking at the owner
+
+  // The save question then behaves exactly as it does on its own.
+  g_wipe = 0;
+  err_input(GST_TAP_R);
+  CHECK_EQ(g_wipe, 1);                    // two-dialog wipe, not an instant reset
+}
+
+// A newer save is parked and re-armed the same way, and stays unwritable.
+TEST(a_display_failure_does_not_swallow_a_newer_save_question) {
+  seams_reset();
+  ui_bind_display_retry(&fake_retry);
+  ui_bind_led(&fake_led);
+  ui_bind_recover(&fake_recover);
+
+  ui_note_load(LOAD_FOREIGN_NEWER);
+  ui_note_display_failure();
+  g_display_ok = true;
+  err_input(GST_TAP_L);
+  CHECK_EQ(err_kind(), ERRK_SAVE_NEWER);
+
+  // Neither button may write to a save this build merely cannot parse.
+  g_recovered = 0;
+  err_input(GST_TAP_L);
+  CHECK_EQ(g_recovered, 0);
+  err_input(GST_TAP_R);
+  CHECK_EQ(g_wipe, 0);
+}
+
 // The save pipeline's verdicts, which is how the ERROR screen is ever reached.
 TEST(load_result_routes_to_the_right_screen) {
   seams_reset();
