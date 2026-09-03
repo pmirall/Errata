@@ -107,7 +107,7 @@ void     ui_service(void);
 
 // Bind the live Config the settings screen edits and persists. REQUIRED: with
 // no binding the SETTINGS screen renders read-only and every toggle answers
-// STR_ERR_BUSY. The pointer must outlive the UI (the .ino's own Config).
+// STR_ERR_BUSY. The pointer must outlive the UI (app.cpp's own Config).
 void     ui_bind_config(Config* cfg);
 
 // The entry point's apply_config() routes the user brightness through here

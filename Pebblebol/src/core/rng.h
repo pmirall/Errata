@@ -9,7 +9,7 @@
 //  seed. Seed 0 is an absorbing state for xorshift and is remapped to
 //  RNG_DEFAULT_SEED, exactly as the legacy genome/sim generators did.
 //
-//  On the device esp_random() is called EXACTLY ONCE, in the .ino, to feed
+//  On the device esp_random() is called EXACTLY ONCE, in app.cpp, to feed
 //  rng_seed_all(); host tests pass constants (rng_seed_all(0xC0FFEE) or
 //  rng_seed(stream, n)). Nothing else in the tree may call esp_random().
 // =============================================================================

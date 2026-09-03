@@ -79,7 +79,7 @@ static bool     s_save_dirty       = false;   // a forced save was deferred by t
 
 // Hourly-gain ledger, key "gl". s_gain_last/-_epoch/-_sane mirror the blob that
 // is actually ON FLASH and drive the wear filter described at store_save_gain();
-// s_gain_fn is the sim-side provider the .ino binds.
+// s_gain_fn is the sim-side provider app.cpp binds.
 static StoreGainFn s_gain_fn       = 0;
 static uint8_t     s_gain_last[NT_GAIN_SLOTS];
 static uint32_t    s_gain_last_epoch = 0;   // the epoch as WRITTEN (0 when insane)
@@ -670,7 +670,7 @@ bool store_load_cfg(Config& out) {
 bool store_save_cfg(Config& c) {
   // Seal IN PLACE, before the s_open test. 'c' is the caller's live object -
   // usually the entry point's g_cfg, which ui and webui both hold a
-  // pointer to - and the .ino's config_changed() compares c.crc16 against the
+  // pointer to - and app.cpp's config_changed() compares c.crc16 against the
   // value apply_config() latched. Sealing into a local copy (as this function
   // used to) left that CRC frozen for the whole session, so config_changed()
   // could never return true, apply_config() never re-ran, and a brightness set

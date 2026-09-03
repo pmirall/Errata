@@ -11,7 +11,7 @@
 //  ZERO FLOATING POINT. Every multiplier is an integer per-mille value (x1000).
 //
 //  RANDOMNESS: the module never calls esp_random() itself. Every draw comes
-//  from the RNG_BREEDING stream of rng.h, which the .ino seeds once at boot
+//  from the RNG_BREEDING stream of rng.h, which app.cpp seeds once at boot
 //  through rng_seed_all(); genome_seed() reseeds that stream so every function
 //  here is deterministic under a fixed seed (host tests, goldens).
 //

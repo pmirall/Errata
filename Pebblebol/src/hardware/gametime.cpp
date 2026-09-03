@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL - gametime.cpp
+//  PEBBLEBOL - hardware/gametime.cpp
 //  Wall clock, calibration, virtual skew, exact elapsed formatting.
 //
 //  The whole file is deliberately host-compilable: everything that needs
@@ -42,7 +42,7 @@ static_assert(sizeof(CFG_TZ_STRING) <= TZ_MAX_LEN + 1, "CFG_TZ_STRING is longer 
 // value near zero, so the test is unambiguous - there is no plausible way to be
 // wrong by 47 years.
 // -----------------------------------------------------------------------------
-// PH3 #2: this is now config.h's NT_EPOCH_SANE_MIN, so the .ino's absence
+// PH3 #2: this is now config.h's NT_EPOCH_SANE_MIN, so app.cpp's absence
 // discriminator and this module cannot drift apart. The value is unchanged.
 #define GT_EPOCH_SANE_MIN   NT_EPOCH_SANE_MIN   // 1483228800 = 2017-01-01T00:00:00Z
 

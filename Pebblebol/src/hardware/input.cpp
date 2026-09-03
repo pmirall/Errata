@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL - input.cpp
+//  PEBBLEBOL - hardware/input.cpp
 //  Two-button debounce + gesture recogniser (GAME_DESIGN 8.1).
 //
 //  DESIGN NOTES (the reasons this file looks the way it does)

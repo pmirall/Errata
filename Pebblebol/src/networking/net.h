@@ -30,7 +30,7 @@
 
 // NOT #include "strings_es.h". The only thing this header needs from the string
 // table is the TYPE of net_last_err_str()'s return value, and every consumer of
-// net.h - ui, render, qr, webui, the .ino - would otherwise drag in the whole
+// net.h - ui, render, qr, webui, app.cpp - would otherwise drag in the whole
 // 347-entry table. An opaque-enum declaration with a fixed underlying type is a
 // complete type as far as a prototype is concerned; the translation unit that
 // actually indexes ES[] includes strings_es.h itself.

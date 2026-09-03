@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL - gametime.h
+//  PEBBLEBOL - hardware/gametime.h
 //  The wall clock. Calibration, TZ, virtual (god-mode) skew, and the exact
 //  elapsed-time formatter the absence line renders {t} with.
 //

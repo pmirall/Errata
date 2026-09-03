@@ -46,7 +46,7 @@
 
 // =============================================================================
 //  MODULE-OWNED STATE
-//  The .ino owns exactly two long-lived objects: the PetSave the simulation is
+//  The app.cpp owns exactly two long-lived objects: the PetSave the simulation is
 //  bound to and the Config every other module reads through a pointer. Both
 //  must outlive setup(), hence file scope (and never a function-local static -
 //  see trap 2 above).
@@ -148,7 +148,7 @@ static bool gain_source(uint8_t pts[NT_GAIN_SLOTS], uint32_t& epoch)
 // =============================================================================
 //  BOOT: PET
 //  storage decides whether there is anything to load; genome/sim decide what a
-//  fresh pet is. The .ino only sequences them.
+//  fresh pet is. The app.cpp only sequences them.
 // =============================================================================
 static void boot_pet(void)
 {

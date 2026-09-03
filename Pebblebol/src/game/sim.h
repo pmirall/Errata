@@ -13,7 +13,7 @@
 //   - No Arduino headers, no WiFi.h / BLEDevice.h / WebServer.h / U8g2lib.h.
 //     The module has no clock and no RNG of its own: the caller feeds it a
 //     SimEnv once per logic tick, and every draw comes from the RNG_CARE
-//     stream of rng.h (seeded by the .ino at boot, by the tests explicitly).
+//     stream of rng.h (seeded by app.cpp at boot, by the tests explicitly).
 //   - Nothing here reads millis(). Game logic time comes from
 //     sim_step_seconds() only.
 // =============================================================================
@@ -27,7 +27,7 @@
 // -----------------------------------------------------------------------------
 // 1. SIM ENVIRONMENT
 //    Everything the simulation needs from the outside world, pushed in once per
-//    logic tick by the .ino main loop. A zeroed SimEnv is NOT valid - use
+//    logic tick by app.cpp main loop. A zeroed SimEnv is NOT valid - use
 //    sim_env_defaults() and then fill in what you know.
 // -----------------------------------------------------------------------------
 struct SimEnv {
