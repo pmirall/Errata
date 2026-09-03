@@ -169,3 +169,58 @@ Agreed, with one addition: **measure the pack voltage under load with the OLED o
 Wi-Fi scan running**, because that is the moment the brownout will fire if it is going to.
 That single measurement decides D9, and D9 decides whether the 30-day target is a firmware
 problem at all.
+
+---
+
+## 7. D9 closed: boost converter (2026-09-03)
+
+The owner fitted a 3.3 V boost module fed from the 2×AAA pack, and is desoldering the
+board's power LED. Both problems in §2 are therefore solved, and the arithmetic changes.
+
+### New energy budget
+
+A boost lets the cells run down to ~1.0 V each instead of dying at 3.0 V pack voltage:
+
+```
+2×AAA to 1.0 V/cell        ≈ 1100 mAh at ~2.4 V average  ≈ 2640 mWh
+boost efficiency ~85 %                                    ≈ 2244 mWh
+usable at 3.3 V                                           ≈ 680 mAh
+```
+
+Against the hardware spec's own "normal use" profile of 60 min/day active:
+
+| Idle draw (boost quiescent + sleeping chip) | Daily cost | Runtime |
+|---|---|---|
+| 25 µA | 25.6 mAh | **~26 days** |
+| 200 µA | 29.6 mAh | ~23 days |
+| 1 mA | 48 mAh | ~14 days |
+| 2 mA | 71 mAh | ~9 days |
+
+Active use is 25 mAh/day of that in every row. So the whole spread between nine days and
+twenty-six comes from one number nobody has measured yet: **what the boost module draws
+while doing nothing**. That is decision D11, and it is now what the power LED used to be —
+the single component that decides whether the target is reachable.
+
+Measuring it is a multimeter in series with the cells, chip in deep sleep, OLED off,
+radios off. No instrumentation beyond that.
+
+### The new failure mode: transient collapse, not slow decline
+
+The old risk was the pack sagging below brownout over weeks. The new one is instantaneous.
+The ESP32-C3 draws ~350 mA in Wi-Fi TX; pulled through a boost from 2.4 V cells whose
+internal resistance is around 0.3 Ω, that transient can drop the rail far enough to reset
+the chip. It would show up exactly where the hardware checklist §30 already looks: "Wi-Fi
+scan does not cause resets".
+
+Two mitigations, both cheap:
+
+- **Hardware (D12):** a 100–470 µF electrolytic across the boost output absorbs the
+  transient. Cents.
+- **Firmware (already specified):** plan P5-C1 calls `WiFi.scanNetworks(async, show_hidden,
+  **passive=true**, …)`. A passive scan listens on each channel instead of broadcasting
+  probe requests, so it avoids most of the TX bursts a normal scan would produce. This was
+  chosen for privacy reasons and turns out to be the low-current option too.
+
+If the bench still shows resets with both in place, the next firmware lever is
+`esp_wifi_set_max_tx_power()` — but a passive scan barely transmits, so reach for the
+capacitor first.
