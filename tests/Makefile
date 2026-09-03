@@ -96,7 +96,15 @@ $(BIN)/test_screens:    $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                         $(OBJ)/screen_menu.o $(OBJ)/screen_care.o \
                         $(OBJ)/screen_status.o $(OBJ)/screen_settings.o \
                         $(OBJ)/screen_time.o $(OBJ)/screen_view.o \
+                        $(OBJ)/screen_link.o $(OBJ)/screen_diag.o \
+                        $(OBJ)/screen_evolution.o $(OBJ)/screen_creator.o \
+                        $(OBJ)/dialog.o $(OBJ)/qr.o \
                         $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+# pet_view.cpp is the model->view seam petfx and actfx read (P2-C11c). It is
+# pure, so it compiles here; sim.o comes with it because the live fill reads
+# sim_stat_pct() / sim_mood_score().
+$(BIN)/test_pet_view:   $(OBJ)/pet_view.o $(OBJ)/sim.o $(OBJ)/box.o \
                         $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
 $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)

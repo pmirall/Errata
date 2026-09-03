@@ -404,6 +404,18 @@ enum StrId : uint16_t {
   //          bus, so nobody will ever read these: they are written for the
   //          retry that succeeds, when the screen comes back and the device
   //          has to explain what it has been blinking about.
+  // --- 33j. the Phase 2 placeholders (P2-C11c). CREATOR and LINK exist as
+  //          screens now - CREATOR already owns the radio and prints the PIN -
+  //          but what they are FOR arrives in Phases 8 and 7. The screen says
+  //          so instead of pretending.
+  STR_CREATOR_TITLE,
+  STR_CREATOR_PHASE,
+  STR_LINK_TITLE,
+  STR_LINK_PHASE,
+  STR_LINK_BODY,
+  STR_DIAG_TITLE,
+  STR_DIAG_OFF,
+
   STR_DISP_ERR_TITLE,
   STR_DISP_ERR_A,
 
@@ -759,6 +771,16 @@ inline constexpr const char* const ES[] = {
   /* STR_SAVE_RECOVERED */        "Partida reparada.",
   /* STR_SAVE_FROM_BACKUP */      "Recuperada de la copia.",
   /* STR_SAVE_UPDATED */          "Partida actualizada.",
+
+  /* --- 33j. Phase 2 placeholders --- */
+  /* STR_CREATOR_TITLE */         "CREADOR",
+  /* STR_CREATOR_PHASE */         "Creador - Fase 8",
+  /* STR_LINK_TITLE */            "ENLACE",
+  /* STR_LINK_PHASE */            "Enlace - Fase 7",
+  /* STR_LINK_BODY */             "Intercambio, combate y cría entre Pebbles.",
+
+  /* STR_DIAG_TITLE */            "DIAG",
+  /* STR_DIAG_OFF */              "Consola apagada.",
 
   /* STR_DISP_ERR_TITLE */        "PANTALLA",
   /* STR_DISP_ERR_A */            "A: Reintentar"

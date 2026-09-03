@@ -10,7 +10,7 @@
 //      whole sketch cannot be built without hardware headers.
 //
 //   2. A behaviour automaton. Deterministic integer hash PRNG seeded from
-//      lineage_id ^ genome, so the same pet always moves the same way and its
+//      PetView.identity, so the same pet always moves the same way and its
 //      siblings do not. Temperament picks the timings, the other genes bend
 //      them. No floats anywhere, ever.
 //
@@ -22,9 +22,7 @@
 
 #include <string.h>
 
-#include "../game/genome.h"
 #include "render.h"
-#include "../game/sim.h"
 #include "../data/sprites.h"
 
 // The eyelid table below is indexed by SpriteSetId and holds hand-verified row
@@ -395,7 +393,12 @@ static const int8_t PF_ORB_Y[12] = { -18, -16,  -9,   0,   9,  16,  18,  16,   9
 // =============================================================================
 static uint8_t  s_began       = 0;
 static uint8_t  s_seeded      = 0;     // petfx_reset() has run at least once
-static uint32_t s_identity    = 0;     // genome fingerprint, for auto-reseed
+static uint32_t s_identity    = 0;     // pebble_identity(), for auto-reseed
+// The two live numbers the automaton bends to. Read off the PetView on every
+// petfx_service()/petfx_reset(), never from the simulation: this module has not
+// been allowed to see game/sim.h since P2-C11c.
+static uint8_t  s_mood_pct    = 50;
+static uint8_t  s_energy_pct  = 100;
 static uint32_t s_now         = 0;     // last now_ms handed to petfx_service()
 static uint32_t s_last_ms     = 0;
 
@@ -454,7 +457,7 @@ static int16_t  s_ink_x0 = 44, s_ink_y0 = 12, s_ink_x1 = 83, s_ink_y1 = 51;
 
 // The identity petfx_draw_body() last drew, kept ONLY so petfx_pose_ink_x() can
 // answer "how wide would this animal be in pose X" without the caller having to
-// carry a SimView into a query. Written where set_id is derived, three lines
+// carry a PetView into a query. Written where set_id is derived, three lines
 // below, so the two cannot drift apart.
 static uint8_t  s_qry_ok      = 0;
 static uint8_t  s_qry_species = 0;
@@ -489,13 +492,9 @@ static inline int16_t pf_stage_hi(uint8_t w) {
   return (hi < (int16_t)PETFX_STAGE_L) ? (int16_t)PETFX_STAGE_L : hi;
 }
 
-static uint32_t pf_identity(const SimView& p) {
-  return p.genome.lineage_id
-       ^ ((uint32_t)p.genome.g0 << 16)
-       ^ (uint32_t)p.genome.g1
-       ^ ((uint32_t)p.genome.g2 << 7)
-       ^ ((uint32_t)p.genome.generation << 24);
-}
+// The identity is DERIVED BY pet_view.cpp now (pebble_identity: the Pebble's
+// id ^ creation_seed, with the old genome hash as the fallback for a pet that
+// has never been filed into the Box). This module only reads it.
 
 // The width the automaton clamps against MUST be the width that actually gets
 // drawn, and the old "poses never change a set's width" claim was simply false.
@@ -514,10 +513,10 @@ static uint32_t pf_identity(const SimView& p) {
 // live pose instead would fix the overlap but move the wall in the middle of a
 // stroll, which is the same jump wearing a different hat; the maximum is stable
 // for as long as the stage is, which is what a clamp has to be.
-static uint8_t pf_width_of(const SimView& p) {
+static uint8_t pf_width_of(const PetView& p) {
   static const uint8_t kPoses[] = { POSE_IDLE, POSE_SLEEP, POSE_SICK, POSE_EAT };
-  const uint8_t species = gene_species(p.genome);
-  const uint8_t form    = sprite_form_of(p.genome, p.minor_form, (Stage)p.stage);
+  const uint8_t species = p.gene_species;
+  const uint8_t form    = p.form;
   uint8_t w = 0;
   for (uint8_t i = 0; i < (uint8_t)(sizeof(kPoses) / sizeof(kPoses[0])); i++) {
     const uint8_t id = sprite_set_id(species, p.stage, form, kPoses[i]);
@@ -576,7 +575,7 @@ static void pf_ink_span(int16_t* l, int16_t* r) {
 // 30..100. In MISERIA the pet barely moves; this scales speed and hop apex,
 // never the timings, so a miserable pet is slow rather than catatonic.
 static uint8_t pf_amp(void) {
-  const uint16_t m = sim_mood_score();
+  const uint16_t m = s_mood_pct;
   return (uint8_t)(30u + (m * 70u) / 100u);
 }
 
@@ -646,15 +645,13 @@ static void pf_cache_sync(uint8_t set_id, uint8_t mirrored) {
 // Where the pet would like to end up. Sociable pets come to the middle where
 // the player is looking; unsociable ones pick a side and hug it. The side is
 // chosen from the lineage, not from a coin toss, so it is part of the pet.
-static void pf_derive(const SimView& p) {
-  const Genome& g = p.genome;
-
-  s_temper = gene_temper_class(g);
+static void pf_derive(const PetView& p) {
+  s_temper = p.temper;
   if (s_temper >= TEMPER_COUNT) s_temper = TEMPER_TRANQUILO;
   const PfTemper& T = PF_TEMPER[s_temper];
 
-  const uint8_t bs  = gene_body_size(g);      // 0..7
-  const uint8_t soc = gene_sociability(g);    // 0..15
+  const uint8_t bs  = p.body_size;            // 0..7
+  const uint8_t soc = p.sociability;          // 0..15
 
   // Big bodies are slower and hop lower. 20-bs over 16 keeps it integer and
   // lands between 0.81x and 1.25x.
@@ -665,23 +662,23 @@ static void pf_derive(const SimView& p) {
     s_anchor = 64;
     s_roam   = (uint8_t)(18u + (soc - 8u) * 4u);
   } else {
-    s_anchor = (g.lineage_id & 1u) ? 22 : 106;
+    s_anchor = (p.lineage_bits & 1u) ? 22 : 106;
     s_roam   = (uint8_t)(10u + soc * 2u);
   }
   if (s_temper == TEMPER_GOTICO) {            // drifts to a corner and stays
-    s_anchor = (g.lineage_id & 2u) ? 14 : 114;
+    s_anchor = (p.lineage_bits & 2u) ? 14 : 114;
     s_roam   = 12;
   }
 
-  s_luck  = gene_luck(g);                     // 0..7
-  s_rare  = gene_rare(g);
-  s_asym  = (uint8_t)(gene_mutations(g) >= 3u);
+  s_luck  = p.luck;                           // 0..7
+  s_rare  = p.rare;
+  s_asym  = (uint8_t)(p.mutations >= 3u);
   s_dilate = (uint8_t)(bs >= 6u);
 
   // The phase is the whole gene nibble, not just its low 2 bits: render.h
   // reads phase as (dy << 2) | dx, so all 4 bits move the matrix and all 16
   // pattern values land on a different coat.
-  const uint8_t pat = gene_pattern(g);
+  const uint8_t pat = p.pattern;
   s_pat_level = PF_PAT_LEVEL[pat & 0x0Fu];
   s_pat_phase = (uint8_t)(pat & 0x0Fu);
 }
@@ -761,7 +758,7 @@ static void pf_pick_next(void) {
   uint8_t w_sit  = T.w_sit,  w_look = T.w_look;
 
   // A tired pet sits down and stops bouncing.
-  const uint8_t energy = sim_stat_pct(ST_ENERGY);
+  const uint8_t energy = s_energy_pct;
   if (energy < 25u) { w_walk = (uint8_t)(w_walk / 3u); w_hop = 0; w_sit = (uint8_t)(w_sit + 22u); }
   else if (energy < 50u) { w_walk = (uint8_t)(w_walk / 2u); w_hop = (uint8_t)(w_hop / 2u); w_sit = (uint8_t)(w_sit + 8u); }
 
@@ -843,11 +840,13 @@ void petfx_begin(void) {
   s_obst_w     = 0;
 }
 
-void petfx_reset(const SimView& p) {
+void petfx_reset(const PetView& p) {
   if (!s_began) petfx_begin();
 
   s_seeded   = 1;
-  s_identity = pf_identity(p);
+  s_identity   = p.identity;
+  s_mood_pct   = p.mood_pct;
+  s_energy_pct = p.care_pct[CARE_ENERGY];
   s_seed     = pf_mix(s_identity ^ 0xA5C3F17Bu);
   s_rng      = s_seed | 1u;
 
@@ -880,11 +879,13 @@ void petfx_reset(const SimView& p) {
   pf_schedule_blink();
 }
 
-void petfx_service(const SimView& p, uint32_t now_ms) {
+void petfx_service(const PetView& p, uint32_t now_ms) {
   if (!s_began) petfx_begin();
 
   s_now = now_ms;
-  const uint32_t id = pf_identity(p);
+  s_mood_pct   = p.mood_pct;
+  s_energy_pct = p.care_pct[CARE_ENERGY];
+  const uint32_t id = p.identity;
   if (!s_seeded || id != s_identity) { petfx_reset(p); return; }
 
   uint32_t dt = (uint32_t)(now_ms - s_last_ms);
@@ -1058,7 +1059,7 @@ static void pf_draw_shadow(int16_t cx, uint8_t ink_w, int16_t lift) {
   if (sw >= 10) rd_dither_rect((int16_t)(sx + 2), (int16_t)(PETFX_SHADOW_Y + 1), (int16_t)(sw - 4), 1, RD_D50);
 }
 
-void petfx_draw_body(const SimView& p, uint8_t pose, uint8_t frame, int16_t dy,
+void petfx_draw_body(const PetView& p, uint8_t pose, uint8_t frame, int16_t dy,
                      int16_t dx) {
   U8G2& u = rd_u8g2();
   const uint8_t entry_color = u.getDrawColor();   // restored on the way out
@@ -1075,9 +1076,9 @@ void petfx_draw_body(const SimView& p, uint8_t pose, uint8_t frame, int16_t dy,
   } else {
     // sprite_form_of() is the ONLY correct source of `form`: the adult body
     // comes from the species gene and child/teen variants live in minor_form.
-    s_qry_species = gene_species(p.genome);
+    s_qry_species = p.gene_species;
     s_qry_stage   = p.stage;
-    s_qry_form    = sprite_form_of(p.genome, p.minor_form, (Stage)p.stage);
+    s_qry_form    = p.form;
     s_qry_ok      = 1;
     set_id = sprite_set_id(s_qry_species, s_qry_stage, s_qry_form, pose);
   }

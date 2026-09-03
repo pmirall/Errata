@@ -10,7 +10,8 @@
 //
 //  P2-C11a migrated BOOT, LOAD_SAVE and ERROR; P2-C11b added HOME, MENU, the
 //  CARE and PLAY lists, both PEBBLE pages, SETTINGS (list and "Acerca de") and
-//  the TIME entry screen. Every later screen adds its fixtures here.
+//  the TIME entry screen; P2-C11c added LINK, EVOLUTION, DIAG, CREATOR and the
+//  CONFIRM / ALERT / HELP overlays. Every later screen adds its fixtures here.
 //
 //  TWO FIXTURES render on every screen that shows a Pebble: a fresh starter,
 //  and a MAXED one whose nickname is the full twelve characters the schema
@@ -28,10 +29,15 @@
 #include "data/sprites.h"      // POSE_IDLE, for the body fixture
 #include "fakes/gfx_fb.h"
 #include "persistence/save_manager.h"
+#include "ui/dialog.h"
 #include "ui/screen.h"
 #include "ui/screen_care.h"
+#include "ui/screen_creator.h"
+#include "ui/screen_diag.h"
+#include "ui/screen_evolution.h"
 #include "ui/screen_error.h"
 #include "ui/screen_home.h"
+#include "ui/screen_link.h"
 #include "ui/screen_menu.h"
 #include "ui/screen_settings.h"
 #include "ui/screen_status.h"
@@ -88,6 +94,14 @@ static bool     g_clock_known = false;
 static bool     g_clock_ok = true;
 static uint16_t g_set_y = 0;
 static uint8_t  g_set_mo = 0, g_set_d = 0, g_set_h = 0, g_set_mi = 0;
+static int      g_frames   = 0;
+static int      g_hatches  = 0;
+static int      g_radio    = -1;      // the last ui_creator_radio() argument
+static int      g_radio_calls = 0;
+static uint8_t  g_ap_up    = 0;
+static uint8_t  g_sta_up   = 0;
+static int      g_commits  = 0;
+static uint8_t  g_commit_id = CFM_NONE;
 
 uint32_t ui_now_ms(void)  { return g_now; }
 uint32_t ui_idle_ms(void) { return g_idle; }
@@ -105,6 +119,20 @@ void ui_confirm_medicine(void)    { g_medicine++; }
 void ui_start_minigame(uint8_t i) { g_minigame = i; }
 uint8_t ui_god_progress(void)     { return g_god; }
 void ui_input_flush(void)         { g_flushes++; }
+void ui_home(void)                { g_goto = (uint8_t)SCR_HOME; }
+void ui_request_frame(void)       { g_frames++; }
+void ui_request_hatch(void)       { g_hatches++; }
+void ui_creator_radio(bool on)    { g_radio = on ? 1 : 0; g_radio_calls++; }
+
+void ui_creator_info(CreatorInfo& out) {
+  memset(&out, 0, sizeof out);
+  out.ap_up  = g_ap_up;
+  out.sta_up = g_sta_up;
+  out.pin    = 1234;
+  snprintf(out.ssid, sizeof out.ssid, "PEBBLEBOL-1234");
+  snprintf(out.ip,   sizeof out.ip,   "192.168.4.1");
+  if (g_ap_up || g_sta_up) snprintf(out.url, sizeof out.url, "http://192.168.4.1/?k=1234");
+}
 bool ui_btn_down(uint8_t)         { return false; }
 uint32_t ui_btn_hold_ms(uint8_t)  { return 0; }
 
@@ -184,6 +212,8 @@ static void fixture_none(void) {
   memset(&g_view, 0, sizeof g_view);
 }
 
+static void fake_commit(uint8_t id);
+
 static void seams2_reset(void) {
   g_now = 100000u;
   g_idle = 0;
@@ -204,9 +234,24 @@ static void seams2_reset(void) {
   g_cfg_p = &g_cfg;
   memset(&g_cfg, 0, sizeof g_cfg);
   g_cfg.brightness = OLED_CONTRAST_DEFAULT;
+  g_frames = 0;
+  g_hatches = 0;
+  g_radio = -1;
+  g_radio_calls = 0;
+  g_ap_up = 0;
+  g_sta_up = 0;
+  g_commits = 0;
+  g_commit_id = CFM_NONE;
+  g_goto = 0xFF;
+  dialog_reset();
+  dialog_bind_commit(&fake_commit);
+  diag_bind(nullptr, nullptr, nullptr);
+  evo_bind_ceremony(nullptr);
   ui_bind_view(&fixture_view);
   fixture_starter();
 }
+
+static void fake_commit(uint8_t id) { g_commits++; g_commit_id = id; }
 
 // Bound "Recuperar" / "Reintentar" outcomes the tests can steer.
 static bool g_backup_ok  = false;
@@ -221,13 +266,9 @@ static void fake_led(bool on)  { g_led_on = on; g_led_calls++; }
 // =============================================================================
 //  Snapshot helper
 // =============================================================================
-static void snapshot(uint8_t screen, const char* name) {
-  const ScreenDef* d = screen_def(screen);
-  CHECK(d != nullptr);
-  if (!d) return;
-
+static void snapshot_fn(void (*render)(void), const char* name) {
   fb_reset();
-  d->render();
+  render();
 
   // (a) nothing may draw off the panel.
   if (fb_oob() != 0) {
@@ -255,6 +296,15 @@ static void snapshot(uint8_t screen, const char* name) {
   CHECK_EQ(diff, 0);
 }
 
+// The same, for a screen-table row. The overlays in ui/dialog.cpp have no row
+// - they float over one - so they go through snapshot_fn() directly.
+static void snapshot(uint8_t screen, const char* name) {
+  const ScreenDef* d = screen_def(screen);
+  CHECK(d != nullptr);
+  if (!d) return;
+  snapshot_fn(d->render, name);
+}
+
 // =============================================================================
 //  THE TABLE
 // =============================================================================
@@ -269,20 +319,20 @@ TEST(table_rows_are_consistent) {
     CHECK(d->fps == 0 || (d->fps >= 1 && d->fps <= 60));
   }
 
-  // Everything P2-C11a and P2-C11b migrated.
+  // Everything P2-C11a, P2-C11b and P2-C11c migrated.
   static const uint8_t kMigrated[] = {
     SCR_BOOT, SCR_LOAD_SAVE, SCR_ERROR,
     SCR_HOME, SCR_MENU, SCR_FEED, SCR_PLAY,
-    SCR_STATUS_A, SCR_STATUS_B, SCR_SETTINGS, SCR_CLOCK
+    SCR_STATUS_A, SCR_STATUS_B, SCR_SETTINGS, SCR_CLOCK,
+    SCR_SOCIAL, SCR_EGG, SCR_GOD, SCR_QR
   };
   for (size_t i = 0; i < sizeof kMigrated / sizeof kMigrated[0]; i++)
     CHECK(screen_def(kMigrated[i]) != nullptr);
 
-  // And nothing else: GAME, SOCIAL, EGG, GOD and QR are still ui.cpp's, and
-  // CONFIRM / ALERT are modals with no base frame of their own.
-  static const uint8_t kLegacy[] = {
-    SCR_GAME, SCR_SOCIAL, SCR_CONFIRM, SCR_ALERT, SCR_EGG, SCR_GOD, SCR_QR
-  };
+  // And nothing else. GAME is the last screen still living in ui.cpp (P3-C4),
+  // and CONFIRM / ALERT are overlays with no base frame of their own: they
+  // never become sm_current(), so a row would never be dispatched to.
+  static const uint8_t kLegacy[] = { SCR_GAME, SCR_CONFIRM, SCR_ALERT };
   for (size_t i = 0; i < sizeof kLegacy / sizeof kLegacy[0]; i++)
     CHECK(screen_def(kLegacy[i]) == nullptr);
 
@@ -298,7 +348,8 @@ TEST(table_rows_are_consistent) {
   // Every other migrated row is an ordinary screen: it times out, and the
   // global navigation grammar runs before its own handler.
   static const uint8_t kOrdinary[] = {
-    SCR_MENU, SCR_FEED, SCR_PLAY, SCR_STATUS_A, SCR_STATUS_B, SCR_SETTINGS
+    SCR_MENU, SCR_FEED, SCR_PLAY, SCR_STATUS_A, SCR_STATUS_B, SCR_SETTINGS,
+    SCR_SOCIAL, SCR_QR
   };
   for (size_t i = 0; i < sizeof kOrdinary / sizeof kOrdinary[0]; i++)
     CHECK(SCREENS[kOrdinary[i]].flags == 0);
@@ -312,6 +363,22 @@ TEST(table_rows_are_consistent) {
   CHECK(SCREENS[SCR_BOOT].input      == nullptr);
   CHECK(SCREENS[SCR_LOAD_SAVE].input == nullptr);
   CHECK(SCREENS[SCR_ERROR].input     != nullptr);
+
+  // CREATOR is the one screen that owns the Wi-Fi station, so it is the one
+  // screen whose enter AND leave hooks must both exist: taking the radio
+  // without a hook to give it back is exactly the always-on policy the plan
+  // removed (section 2 row G4).
+  CHECK(SCREENS[SCR_QR].enter  != nullptr);
+  CHECK(SCREENS[SCR_QR].leave  != nullptr);
+  CHECK(SCREENS[SCR_QR].update != nullptr);   // the payload follows the IP
+
+  // The console composes its own frame and answers its own gestures.
+  CHECK((SCREENS[SCR_GOD].flags & (SF_STICKY | SF_LOCK_INPUT | SF_OWNS_FRAME))
+        == (SF_STICKY | SF_LOCK_INPUT | SF_OWNS_FRAME));
+  // EVOLUTION is sticky and NOTHING else: an incubating egg still shows a
+  // toast and still answers BACK. The ceremony's "no chrome, no buttons" is
+  // dynamic and belongs to ui/ceremony.cpp.
+  CHECK_EQ(SCREENS[SCR_EGG].flags, (uint8_t)SF_STICKY);
 }
 
 // =============================================================================
@@ -904,3 +971,265 @@ TEST(the_countdown_bar_drains) {
   CHECK_EQ(fb_oob(), 0u);
 }
 
+// =============================================================================
+//  P2-C11c: LINK, EVOLUTION, DIAG, CREATOR and the overlays
+// =============================================================================
+TEST(snapshot_link) {
+  seams2_reset();
+  snapshot(SCR_SOCIAL, "link_phase7");
+}
+
+TEST(snapshot_evolution_incubator) {
+  seams2_reset();
+  g_view.stage = STAGE_EGG;
+  g_view.age_s = 60;
+  evo_enter();
+  snapshot(SCR_EGG, "evolution_egg");
+}
+
+// The same screen with the shell already cracking, five of the ten taps in,
+// and the "this egg went cold" line: the widest the incubator ever gets.
+TEST(snapshot_evolution_cold_egg) {
+  seams2_reset();
+  g_view.stage = STAGE_EGG;
+  g_view.age_s = AGE_EGG_S - 10u;
+  g_view.flags = PF_COLD_EGG;
+  evo_enter();
+  for (uint8_t i = 0; i < 5; i++) evo_input((i & 1u) ? GST_TAP_R : GST_TAP_L);
+  CHECK_EQ(evo_rub_count(), (uint8_t)5);
+  snapshot(SCR_EGG, "evolution_egg_cold");
+}
+
+// With no ceremony bound - which is every host build, and any device build
+// where nothing is hatching - the screen draws the incubator, not an empty
+// panel.
+TEST(evolution_falls_back_to_the_incubator) {
+  seams2_reset();
+  g_view.stage = STAGE_EGG;
+  evo_bind_ceremony(nullptr);
+  fb_reset();
+  evo_render();
+  int lit = 0;
+  for (int y = 0; y < FB_H; y++) for (int x = 0; x < FB_W; x++) lit += fb_get(x, y);
+  CHECK(lit > 0);
+  CHECK_EQ(fb_oob(), 0u);
+}
+
+// Ten taps hatch the egg; ten taps on the SAME side do not. The alternation is
+// the whole gesture: leaning on one button is not rubbing an egg.
+TEST(evolution_rub_needs_alternating_taps) {
+  seams2_reset();
+  g_view.stage = STAGE_EGG;
+  evo_enter();
+  for (uint8_t i = 0; i < EGG_RUB_TAPS; i++) evo_input(GST_TAP_L);
+  CHECK_EQ(g_hatches, 0);
+  CHECK_EQ(evo_rub_count(), (uint8_t)1);      // only the first one counted
+
+  evo_enter();
+  for (uint8_t i = 0; i < EGG_RUB_TAPS; i++) evo_input((i & 1u) ? GST_TAP_R : GST_TAP_L);
+  CHECK_EQ(g_hatches, 1);
+  CHECK_EQ(evo_rub_count(), (uint8_t)0);      // and the counter starts over
+}
+
+TEST(snapshot_diag_console_off) {
+  seams2_reset();
+  snapshot(SCR_GOD, "diag_console_off");
+}
+
+// A console that switched itself off must not keep the screen.
+TEST(diag_leaves_when_the_console_is_gone) {
+  seams2_reset();
+  diag_bind(nullptr, nullptr, nullptr);
+  g_goto = 0xFF;
+  diag_update(0);
+  CHECK_EQ(g_goto, (uint8_t)SCR_HOME);
+
+  g_goto = 0xFF;
+  diag_input(GST_TAP_L);
+  CHECK_EQ(g_goto, (uint8_t)SCR_HOME);
+}
+
+TEST(snapshot_creator_station) {
+  seams2_reset();
+  g_sta_up = 1;
+  creator_enter();
+  CHECK_EQ(g_radio, 1);                        // it asked for the station
+  snapshot(SCR_QR, "creator_station");
+}
+
+TEST(snapshot_creator_portal) {
+  seams2_reset();
+  g_ap_up = 1;
+  creator_enter();
+  CHECK_EQ(creator_variant(), (uint8_t)1);     // the portal opens on "join me"
+  snapshot(SCR_QR, "creator_portal");
+}
+
+TEST(snapshot_creator_offline) {
+  seams2_reset();
+  creator_enter();
+  snapshot(SCR_QR, "creator_offline");
+}
+
+// The radio is SCREEN-OWNED: taken on the way in, given back on the way out.
+// Holding the station after the screen closes is the always-on policy the plan
+// removed, and it costs ~50 KB of heap and the largest current draw on the
+// board.
+TEST(creator_takes_and_releases_the_radio) {
+  seams2_reset();
+  g_sta_up = 1;
+  creator_enter();
+  CHECK_EQ(g_radio, 1);
+  creator_leave();
+  CHECK_EQ(g_radio, 0);
+  CHECK_EQ(g_radio_calls, 2);
+}
+
+// With the portal up a tap flips between the two symbols; with one symbol
+// there is nothing to flip and the tap is a no-op rather than a broken frame.
+TEST(creator_alternates_only_while_the_portal_is_up) {
+  seams2_reset();
+  g_ap_up = 1;
+  creator_enter();
+  const uint8_t first = creator_variant();
+  creator_input(GST_TAP_L);
+  CHECK(creator_variant() != first);
+
+  seams2_reset();
+  g_sta_up = 1;
+  creator_enter();
+  const uint8_t only = creator_variant();
+  creator_input(GST_TAP_L);
+  CHECK_EQ(creator_variant(), only);
+}
+
+// =============================================================================
+//  THE MODAL LAYER (ui/dialog.cpp)
+// =============================================================================
+static void render_confirm(void) { dialog_render(); }
+
+TEST(snapshot_confirm) {
+  seams2_reset();
+  dialog_open_confirm(CFM_WIPE1, STR_CF_WIPE);
+  snapshot_fn(&render_confirm, "confirm_wipe");
+}
+
+TEST(snapshot_confirm_yes) {
+  seams2_reset();
+  dialog_open_confirm(CFM_WIPE1, STR_CF_WIPE);
+  dialog_input(GST_TAP_L);                     // move the cursor onto YES
+  CHECK_EQ(dialog_confirm_yes(), (uint8_t)1);
+  snapshot_fn(&render_confirm, "confirm_wipe_yes");
+}
+
+TEST(snapshot_alert) {
+  seams2_reset();
+  dialog_alert(AL_HUNGRY);
+  CHECK(dialog_service(g_now, true));
+  snapshot_fn(&render_confirm, "alert_hungry");
+}
+
+TEST(snapshot_help) {
+  seams2_reset();
+  dialog_open_help(STR_HLP_MEAL);
+  snapshot_fn(&render_confirm, "help_line");
+}
+
+// Invariant 5: every confirmation starts on NO, so the destructive answer is
+// never one press away.
+TEST(a_confirmation_starts_on_no) {
+  seams2_reset();
+  dialog_open_confirm(CFM_WIPE2, STR_CF_WIPE2);
+  CHECK_EQ(dialog_modal(), (uint8_t)MODAL_CONFIRM);
+  CHECK_EQ(dialog_confirm_yes(), (uint8_t)0);
+  dialog_input(GST_TAP_R);                     // "OK" on NO closes it
+  CHECK_EQ(dialog_modal(), (uint8_t)MODAL_NONE);
+  CHECK_EQ(g_commits, 0);
+
+  dialog_open_confirm(CFM_WIPE2, STR_CF_WIPE2);
+  dialog_input(GST_TAP_L);                     // onto YES
+  dialog_input(GST_TAP_R);
+  CHECK_EQ(g_commits, 1);
+  CHECK_EQ(g_commit_id, (uint8_t)CFM_WIPE2);
+}
+
+// INVARIANT 7, and the audit's S11 defect. The first gesture after the read
+// guard DISMISSES the alert and does nothing else: it does not act on the
+// alert, and it does not reach the screen underneath either.
+TEST(an_alert_never_steals_a_press) {
+  seams2_reset();
+  dialog_alert(AL_HUNGRY);
+  CHECK(dialog_service(g_now, true));
+  CHECK_EQ(dialog_modal(), (uint8_t)MODAL_ALERT);
+
+  // Inside the read guard nothing at all happens: the line must be readable
+  // before it can be dismissed.
+  CHECK(dialog_input(GST_TAP_L));
+  CHECK_EQ(dialog_modal(), (uint8_t)MODAL_ALERT);
+
+  g_now += UI_ALERT_MIN_MS;
+  CHECK(dialog_input(GST_TAP_L));
+  CHECK_EQ(dialog_modal(), (uint8_t)MODAL_NONE);
+  // The old alert_act() would have pushed SCR_FEED here. Nothing may.
+  CHECK_EQ(g_push, (uint8_t)0xFF);
+  CHECK_EQ(g_action, (uint8_t)ACT_NONE);
+  CHECK_EQ(g_shown, (uint8_t)ACT_NONE);
+  CHECK_EQ(g_medicine, 0);
+  CHECK_EQ(g_goto, (uint8_t)0xFF);
+
+  // Every alert, not just the hungry one: the two that used to run an action
+  // on the spot are the ones the defect was worst on.
+  static const uint8_t kActing[] = { AL_POOP, AL_TIRED, AL_SICK, AL_LOW_HEALTH };
+  for (size_t i = 0; i < sizeof kActing / sizeof kActing[0]; i++) {
+    dialog_alert(kActing[i]);
+    CHECK(dialog_service(g_now, true));
+    g_now += UI_ALERT_MIN_MS;
+    CHECK(dialog_input(GST_TAP_R));
+    CHECK_EQ(dialog_modal(), (uint8_t)MODAL_NONE);
+  }
+  CHECK_EQ(g_action, (uint8_t)ACT_NONE);
+  CHECK_EQ(g_shown, (uint8_t)ACT_NONE);
+  CHECK_EQ(g_medicine, 0);
+  CHECK_EQ(g_push, (uint8_t)0xFF);
+
+  // Invariant 2 still outranks it: LONG_BOTH dismisses AND goes home, which is
+  // not the alert acting - it is the global grammar the alert may not block.
+  dialog_alert(AL_SAD);
+  CHECK(dialog_service(g_now, true));
+  g_now += UI_ALERT_MIN_MS;
+  dialog_input(GST_LONG_BOTH);
+  CHECK_EQ(g_goto, (uint8_t)SCR_HOME);
+}
+
+// The queue is UI_ALERT_QUEUE deep, duplicates collapse, and nothing surfaces
+// while something else owns the screen.
+TEST(the_alert_queue_collapses_and_waits) {
+  seams2_reset();
+  dialog_alert(AL_HUNGRY);
+  dialog_alert(AL_HUNGRY);
+  CHECK_EQ(dialog_alert_pending(), (uint8_t)1);
+
+  for (uint8_t i = 0; i < UI_ALERT_QUEUE + 4u; i++) dialog_alert(AL_POOP);
+  CHECK(dialog_alert_pending() <= UI_ALERT_QUEUE);
+
+  // allow_pop false (a running minigame, or a screen that composed its own
+  // frame): nothing is raised, and nothing is lost either.
+  const uint8_t pending = dialog_alert_pending();
+  CHECK(!dialog_service(g_now, false));
+  CHECK_EQ(dialog_modal(), (uint8_t)MODAL_NONE);
+  CHECK_EQ(dialog_alert_pending(), pending);
+
+  CHECK(dialog_service(g_now, true));
+  CHECK_EQ(dialog_alert_id(), (uint8_t)AL_HUNGRY);   // FIFO, not a stack
+}
+
+// The one-line help strip expires on its own clock, and any gesture closes it.
+TEST(the_help_strip_expires) {
+  seams2_reset();
+  dialog_open_help(STR_HLP_MEAL);
+  CHECK_EQ(dialog_modal(), (uint8_t)MODAL_HELP);
+  CHECK(!dialog_service(g_now + UI_MODAL_HELP_MS - 1u, true));
+  CHECK_EQ(dialog_modal(), (uint8_t)MODAL_HELP);
+  dialog_service(g_now + UI_MODAL_HELP_MS, true);
+  CHECK_EQ(dialog_modal(), (uint8_t)MODAL_NONE);
+}

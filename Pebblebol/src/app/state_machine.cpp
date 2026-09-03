@@ -33,7 +33,9 @@ static inline uint32_t since(uint32_t t0) { return (uint32_t)(sm_now() - t0); }
 //  list shrinks to nothing as they migrate; SF_STICKY is the real answer.
 // -----------------------------------------------------------------------------
 static bool legacy_sticky(uint8_t s) {
-  return s == SCR_HOME || s == SCR_GAME || s == SCR_EGG || s == SCR_GOD;
+  // GAME is the last one left: EGG and GOD carry SF_STICKY in their own rows
+  // since P2-C11c, and HOME has since P2-C11b.
+  return s == SCR_GAME;
 }
 
 bool sm_is_sticky(void) {

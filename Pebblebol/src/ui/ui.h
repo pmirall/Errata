@@ -205,7 +205,12 @@ uint32_t ui_idle_ms(void);
 // auto-return without moving.
 void     ui_push(ScreenId s);
 void     ui_back(void);
+void     ui_home(void);
 void     ui_note_input(void);
+
+// Ask the frame scheduler for one more frame. A modal that appears between two
+// FPS_LOW frames would otherwise wait up to 250 ms to be seen.
+void     ui_request_frame(void);
 
 // The live Config the SETTINGS screen edits, or NULL when nothing is bound
 // (ui_bind_config()). ui_cfg_changed() stamps and persists it with a toast.
@@ -231,6 +236,24 @@ void     ui_repeat_last_action(void);
 // ui_confirm_medicine() opens the confirmation the medicine costs.
 void     ui_help(uint16_t str_id);
 void     ui_confirm_medicine(void);
+
+// -----------------------------------------------------------------------------
+//  THE CREATOR SCREEN'S RADIO SEAM (P2-C11c)
+//
+//  CREATOR is the one screen that owns the Wi-Fi station. It is a pure
+//  translation unit, so it cannot call net_request() itself: it asks through
+//  these two instead. ui_creator_radio(true) is a REQUEST, not a promise - the
+//  station may still be settling when it returns, which is why the screen
+//  re-reads ui_creator_info() every second rather than caching one answer.
+// -----------------------------------------------------------------------------
+struct CreatorInfo;
+void     ui_creator_info(CreatorInfo& out);
+void     ui_creator_radio(bool on);
+
+// The EVOLUTION screen's ten alternating taps landed: hatch the egg now. The
+// simulation, the save and the ceremony are all ui.cpp's, so the screen only
+// says that it happened.
+void     ui_request_hatch(void);
 
 // Start minigame `idx` (the PLAY list order), refusing with a toast when the
 // cooldown or the energy floor says no. The GAME screen itself is still

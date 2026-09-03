@@ -48,11 +48,15 @@
 #include "../persistence/game_state.h"
 #include "../hardware/kv_nvs.h"      // kv_error(), for the DIAG line
 #include "../hardware/gametime.h"
-#include "qr.h"
+#include "ceremony.h"  // the hatch / evolution show (P2-C11c)
+#include "dialog.h"    // the CONFIRM / ALERT / HELP overlays (P2-C11c)
+#include "screen_creator.h"   // CreatorInfo, for the radio seam below
+#include "screen_diag.h"
+#include "screen_evolution.h"
 #include "../networking/net.h"
-#include "../networking/ble_social.h"
 #include "../networking/webui.h"      // web_pin() only - no network header comes with it
 #include "../dev/godmode.h"    // GodEvt, god_active/handle/draw/entry_progress/marker
+#include "pet_view.h"  // PetView: what petfx and actfx are allowed to know
 #include "petfx.h"      // the body's own presentation layer: floor, position, gaze
 #include "actfx.h"      // the choreography of every action the player can take
 #include "../game/box.h"          // the active slot: level, xp, hp for the view
@@ -109,27 +113,6 @@ static_assert(HOME_METER_Y0 + 2 * HOME_METER_PITCH + 12 <= HOME_FLOOR_Y,
 //  2. LOCAL TYPES AND STATE
 // =============================================================================
 
-enum UiModal : uint8_t {
-  MODAL_NONE = 0,
-  MODAL_ALERT,      // ALERT overlay
-  MODAL_CONFIRM,    // CONFIRM modal
-  MODAL_HELP        // BOTH on a list item, UI_MODAL_HELP_MS
-};
-
-enum ConfirmId : uint8_t {
-  CFM_NONE = 0,
-  CFM_QUIT_GAME,
-  CFM_MEDICINE,
-  CFM_WIPE1,
-  CFM_WIPE2
-};
-
-enum SocPhase : uint8_t {
-  SOC_ENTER = 0,
-  SOC_SCAN,
-  SOC_ERROR
-};
-
 // ---- screen / navigation ----------------------------------------------------
 // The current screen, the back stack and the two navigation clocks live in
 // app/state_machine.cpp now (P2-C11a); reach them through sm_current(),
@@ -142,18 +125,9 @@ static uint8_t  s_god_prog    = 0;      // god_entry_progress(), 0..100
 static uint8_t  s_last_action = ACT_NONE;
 
 // ---- modal layer ------------------------------------------------------------
-static uint8_t  s_modal       = MODAL_NONE;
-static uint32_t s_modal_ms    = 0;
-static uint16_t s_modal_str   = STR_EMPTY;
-static uint8_t  s_confirm_id  = CFM_NONE;
-
-// ---- SAVE ERROR (P2-C9c, moved to ui/screen_error.cpp by P2-C11a) ----------
-static uint8_t  s_confirm_yes = 0;      // invariant 5: NO
-
-// ---- alert queue ------------------------------------------------------------
-static uint8_t  s_alert_q[UI_ALERT_QUEUE];
-static uint8_t  s_alert_n     = 0;
-static uint8_t  s_alert_cur   = AL_NONE;
+// The CONFIRM dialog, the ALERT overlay and the HELP strip are ui/dialog.cpp's
+// since P2-C11c, queue and cursor included. This file opens them, answers the
+// commit callback and draws them into the frame.
 
 // ---- toast ------------------------------------------------------------------
 static char     s_toast[72];
@@ -178,49 +152,11 @@ static uint8_t  s_absence_known = 1;   // 0 = the clock could not measure the ga
 // ---- settings ---------------------------------------------------------------
 static Config*  s_cfg         = nullptr;
 
-// ---- egg --------------------------------------------------------------------
-static uint8_t  s_rub_count   = 0;
-static uint8_t  s_rub_last    = 0xFF;
-static uint32_t s_rub_ms      = 0;
-
-// ---- birth staging ----------------------------------------------------------
-// A phase enum riding on the EGG screen rather than a ScreenId of its own.
-// P2-C11's renumbering bullet is where the ceremony gets an id of its own.
-enum HatchPhase : uint8_t {
-  HP_NONE = 0,
-  HP_WOBBLE,   //    0 .. 1200   the egg rocks, accelerating
-  HP_CRACK,    // 1200 .. 1800   crack art + three 0xD3 jolts
-  HP_FLASH,    // 1800 .. 1880   one 0xA7 white frame
-  HP_SHARDS,   // 1880 .. 2280   shell fragments thrown outwards
-  HP_GROW,     // 2280 .. 3080   the baby revealed by a descending dither
-  HP_LOOK,     // 3080 .. 3880   looks left, then right
-  HP_NAME      // 3880 .. 4480   the name
-};
-
-static uint8_t  s_hatch_phase = HP_NONE;
-static uint32_t s_hatch_ms    = 0;
-static uint8_t  s_hatch_jolts = 0;    // 0..3, one rd_shake() per jolt
-static uint8_t  s_hatch_look  = 0;    // 0 = not yet, 1 = left done, 2 = right done
-
-// Declared here, not in section 16, because ui_fps() and ui_input_locked()
-// (section 6) are both above the ceremony and both have to know about it.
-static inline bool hatch_active(void) { return s_hatch_phase != HP_NONE; }
-
-// ---- QR ---------------------------------------------------------------------
-static uint8_t  s_qr_mod[QR_BUF_BYTES];
-static uint8_t  s_qr_size     = 0;
-static uint8_t  s_qr_variant  = 0;      // 0 = URL, 1 = join-the-AP
-static uint32_t s_qr_ms       = 0;
-static uint32_t s_qr_manual   = 0;      // suppress auto-alternation after a tap
-static char     s_qr_key[QR_TEXT_MAX];
-
-// ---- SOCIAL -----------------------------------------------------------------
-// The old s_cursor[SCR_COUNT] went with the screens that used it; SOCIAL is
-// the only one left in this file that has a list.
-static uint8_t  s_soc_cursor  = 0;
-static uint8_t  s_soc_phase   = SOC_ENTER;
-static uint8_t  s_soc_prev    = RADIO_OFF;
-static uint16_t s_soc_err     = STR_EMPTY;
+// ---- the ceremony, the egg, the QR symbol and the peer list -----------------
+// All four are other files' now (P2-C11c): ui/ceremony.cpp, and the pure
+// screens ui/screen_evolution.cpp, ui/screen_creator.cpp and
+// ui/screen_link.cpp. This file keeps only the ORDERING of a birth, in
+// ceremony_start().
 
 // ---- GAME -------------------------------------------------------------------
 // MinigameState, not GameState: SaveSchema v2 owns that name for the whole
@@ -269,6 +205,20 @@ static uint8_t  s_raw_prev[INPUT_BTN_N];
 static inline uint32_t now_ms(void) { return millis(); }
 static inline uint32_t since(uint32_t t) { return (uint32_t)(millis() - t); }
 static inline const SimView* pet(void) { return sim_view(); }
+
+// ---- the BODY's view (ui/pet_view.h) ----------------------------------------
+// petfx and actfx read a PetView and nothing else since P2-C11c, so this file
+// is what fills one: the simulation owns the RAM half (pose, poop, the alert
+// flags), the Box owns the stored half (the identity petfx seeds its automaton
+// from, and the level). One static, refilled per call and never stored.
+static PetView s_body_view;
+
+static const PetView& body_view(const SimView& p, uint8_t pose) {
+  pet_view_fill_sim(s_body_view, p, pose);
+  const uint8_t slot = box_active();
+  pet_view_attach(s_body_view, (slot == BOX_ACTIVE_NONE) ? nullptr : box_peek(slot));
+  return s_body_view;
+}
 
 // u8g2 coordinates are unsigned: a negative value wraps to ~65500 and paints
 // at the far edge. Everything the UI computes goes through these.
@@ -340,10 +290,10 @@ void ui_pet_name(char* out, size_t cap) {
   ui_name_for(p->genome.lineage_id, p->genome.generation, out, cap);
 }
 
-// GAME_DESIGN 6.3's score -> face table, via webui's copy rather than a second
-// one here: two independent ladders would eventually disagree about the pet's
-// face. The policy moves into the render layer with the PetView struct.
-static uint8_t mood_of(void) { return web_mood_index(sim_mood_score()); }
+// GAME_DESIGN 6.3's score -> face table. The ladder lives in ui/pet_view.cpp
+// since P2-C11c - it is a render decision, and the web mirror that used to own
+// it was never the right home for one.
+static uint8_t mood_of(void) { return pet_mood_index((uint8_t)sim_mood_score()); }
 
 // ---- displayed stat smoothing ----------------------------------------------
 // rd_bar() paints the truth instantly, so a meal that moves hunger 30 points is
@@ -468,45 +418,7 @@ static void cfg_persist(void) {
   ui_toast(STR_SET_SAVED);
 }
 
-void ui_alert(AlertId a) {
-  if (a == AL_NONE || a >= AL_COUNT) return;
-  if (s_alert_cur == (uint8_t)a) return;
-  for (uint8_t i = 0; i < s_alert_n; ++i) if (s_alert_q[i] == (uint8_t)a) return;
-  if (s_alert_n >= UI_ALERT_QUEUE) return;
-  s_alert_q[s_alert_n++] = (uint8_t)a;
-}
-
-static void alert_pop(void) {
-  if (s_alert_n == 0) return;
-  s_alert_cur = s_alert_q[0];
-  for (uint8_t i = 1; i < s_alert_n; ++i) s_alert_q[i - 1] = s_alert_q[i];
-  --s_alert_n;
-  s_modal    = MODAL_ALERT;
-  s_modal_ms = now_ms();
-  rd_request_frame();
-}
-
-static void modal_close(void) {
-  s_modal      = MODAL_NONE;
-  s_alert_cur  = AL_NONE;
-  s_confirm_id = CFM_NONE;
-  s_modal_str  = STR_EMPTY;
-}
-
-static void confirm_open(uint8_t which, uint16_t str_id) {
-  s_confirm_id  = which;
-  s_modal_str   = str_id;
-  s_confirm_yes = 0;                 // invariant 5
-  s_modal       = MODAL_CONFIRM;
-  s_modal_ms    = now_ms();
-  rd_request_frame();
-}
-
-static void help_open(uint16_t str_id) {
-  s_modal_str = str_id;
-  s_modal     = MODAL_HELP;
-  s_modal_ms  = now_ms();
-}
+void ui_alert(AlertId a) { dialog_alert((uint8_t)a); }
 
 // =============================================================================
 //  5. ACTIONS
@@ -530,7 +442,7 @@ static bool do_action(ActionId a) {
     // Only a SUCCESSFUL action gets a film. A rejected one (cooldown, full,
     // asleep) keeps its toast and nothing else, which is the honest
     // reading: nothing happened to the pet, so nothing happens on screen.
-    if (had) actfx_begin((uint8_t)a, before);
+    if (had) actfx_begin((uint8_t)a, body_view(before, pet_pose_of(before.flags)));
     if (r.str_id) ui_toast(r.str_id);
     const SimView* p = pet();
     if (p) gs_save_active(true);
@@ -566,7 +478,7 @@ uint8_t ui_fps(void) {
   // The birth is 4.5 s of animation on a pet that has just been created: the
   // energy / PF_ASLEEP fallbacks below would be reading a state that did not
   // exist a moment ago, and a 4 fps hatch is not a hatch.
-  if (hatch_active()) return FPS_NORMAL;
+  if (ceremony_active()) return FPS_NORMAL;
   if (sm_current() == SCR_GAME) return FPS_NORMAL;
   // A choreography is 28 to 52 frames. At FPS_LOW (4 fps) a meal would be ten
   // frames long and read as a fault - and the two states that ASK for FPS_LOW,
@@ -599,7 +511,7 @@ void ui_nav_leave(uint8_t from) { screen_leave(from); }
 void ui_nav_enter(uint8_t to)   { screen_enter(to); }
 
 void ui_nav_reset(void) {
-  modal_close();
+  dialog_close();
   gfx_list_reset();
 }
 
@@ -642,34 +554,28 @@ static bool act_and_show(ActionId a) {
 }
 
 ScreenId ui_screen(void) {
-  if (s_modal == MODAL_ALERT)   return SCR_ALERT;
-  if (s_modal == MODAL_CONFIRM) return SCR_CONFIRM;
+  const uint8_t m = dialog_modal();
+  if (m == MODAL_ALERT)   return SCR_ALERT;
+  if (m == MODAL_CONFIRM) return SCR_CONFIRM;
   return sm_current();
 }
 
 bool ui_input_locked(void) {
   // The birth ceremony is unskippable. It is also short enough that locking the
   // buttons costs the player nothing.
-  return hatch_active();
+  return ceremony_active();
 }
-
-static uint8_t ring_next(uint8_t cur, uint8_t n) { return n ? (uint8_t)((cur + 1u) % n) : 0u; }
 
 // =============================================================================
 //  7. SHARED CHROME
 // =============================================================================
 
-// The header bar and the auto-return countdown are gfx_widgets.cpp's now, so
-// the migrated screens and the four that are still here draw the identical
-// thing. draw_countdown() keeps the sticky test, which is navigation state and
-// not a drawing decision.
+// The header bar is gfx_widgets.cpp's now, so the migrated screens and GAME
+// draw the identical thing. The countdown wrapper went with the last screen in
+// this file that was not sticky (P2-C11c): every migrated row calls
+// gfx_countdown(ui_idle_ms()) itself, and GAME never counts down.
 static void draw_header(const char* title, const char* tag) {
   gfx_header(title, tag);
-}
-
-static void draw_countdown(void) {
-  if (sm_is_sticky()) return;
-  gfx_countdown(sm_idle_ms());
 }
 
 // ---- screen entry dissolve --------------------------------------------------
@@ -721,7 +627,7 @@ static void draw_toast(void) {
 
 // POSE_EAT, and the POSE_SICK the medicine film borrows, are device-only
 // transients: the web mirror caches sprite sets by id and would have to refetch
-// for a two-second animation. Everything else defers to web_pose_of() so the
+// for a two-second animation. Everything else defers to pet_pose_of() so the
 // phone and the panel share one table.
 //
 // The pose window now belongs to actfx, not to a UI_EAT_POSE_MS constant: it is
@@ -731,7 +637,7 @@ static void draw_toast(void) {
 // ACT_SLEEP_TOGGLE's film is carried entirely by actfx_body_dy().
 static uint8_t home_pose(const SimView* p) {
   if (!p) return POSE_IDLE;
-  const uint8_t base = web_pose_of(*p);
+  const uint8_t base = pet_pose_of(p->flags);
   if (p->flags & PF_ASLEEP) return base;
   return actfx_pose(base);
 }
@@ -837,7 +743,7 @@ static void draw_pet_body(int16_t dy, int16_t dx, uint8_t frame) {
   // `form`. ui keeps only what is genuinely UI: the device-only POSE_EAT
   // transient, the idle bob and the "nope" wiggle it passes in as dy, and every
   // emote below.
-  petfx_draw_body(*p, home_pose(p), frame, dy, dx);
+  petfx_draw_body(body_view(*p, home_pose(p)), home_pose(p), frame, dy, dx);
 
   // Emotes anchor to the LIVE body box. Hanging them off the old fixed centre
   // would make a wandering pet trail its own hearts across the screen.
@@ -1354,7 +1260,7 @@ static void draw_game(void) {
 // GAME_DESIGN 8.3: "games must not have hidden gestures."
 static void handle_game(Gesture g) {
   if (g != GST_HOLD_R) return;
-  if (s_g.phase == 1) confirm_open(CFM_QUIT_GAME, STR_CF_QUIT_GAME);
+  if (s_g.phase == 1) dialog_open_confirm(CFM_QUIT_GAME, STR_CF_QUIT_GAME);
   else                nav_back();
 }
 
@@ -1364,158 +1270,12 @@ static void handle_game(Gesture g) {
 // =============================================================================
 
 // =============================================================================
-//  13. SOCIAL - connectionless BLE discovery
-//      Discovery only: the screen owns the radio (request on enter, release on
-//      leave) and lists the pets it can hear. Everything a user can DO with a
-//      peer - trade, battle, breed - is the Phase 7 LINK screen; until then
-//      this screen says so.
+//  13. SOCIAL is gone. ui/screen_link.cpp is the LINK placeholder that replaced
+//      it (P2-C11c): the BLE peer browser it used to be was built on a
+//      transport this firmware no longer uses (D2 chose ESP-NOW) and on a
+//      mating protocol that was removed before Phase 2. Nothing here holds a
+//      radio any more, and what LINK is FOR arrives in P7-C2.
 // =============================================================================
-
-// How many peer rows fit under the placeholder line.
-#define SOC_LIST_ROWS   3
-#define SOC_LIST_Y      (UI_CONTENT_Y + 7)
-
-// Bring the BLE stack up and start advertising. net_request() no longer blocks
-// (net.cpp replaced delay(RADIO_SETTLE_MS) by the NPH_SETTLING phase), so the
-// stack may still be settling when it returns true: stay in SOC_ENTER and let
-// social_service() call this again on the next pump until net_mode() agrees.
-static void social_try_bringup(void) {
-#if FEATURE_BLE
-  if (net_ble_sessions_left() == 0) { s_soc_phase = SOC_ERROR; s_soc_err = STR_SO_CAP; return; }
-  if (!net_request(RADIO_BLE)) {
-    s_soc_phase = SOC_ERROR;
-    s_soc_err   = (net_last_err() == NERR_BLE_SESSION_CAP)
-                    ? (uint16_t)STR_SO_CAP : (uint16_t)net_last_err_str();
-    return;
-  }
-  if (net_mode() != RADIO_BLE) {
-    return;                       // settling; try again next pump
-  }
-  if (!ble_begin()) {
-    s_soc_phase = SOC_ERROR;
-    s_soc_err   = (ble_session_count() >= BLE_SESSION_CAP) ? (uint16_t)STR_SO_CAP
-                                                           : (uint16_t)STR_ERR_BUSY;
-    return;
-  }
-  const SimView* p = pet();
-  if (p) ble_advertise_beacon(p->genome, p->stage, (uint8_t)(p->cq >> 2));
-  s_soc_phase = SOC_SCAN;
-#else
-  s_soc_phase = SOC_ERROR;
-  s_soc_err   = STR_ERR_BUSY;
-#endif
-}
-
-static void social_enter(void) {
-  s_soc_phase          = SOC_ENTER;
-  s_soc_err            = STR_EMPTY;
-  s_soc_cursor = 0;
-  s_soc_prev           = (uint8_t)net_mode();
-
-  social_try_bringup();
-}
-
-static void social_leave(void) {
-#if FEATURE_BLE
-  if (ble_is_up()) ble_end();
-  // The radio is screen-owned (plan section 2 row G4). SOCIAL took the stack, so
-  // SOCIAL gives it back - to whatever was resident on the way in, which with no
-  // policy left in the entry point is RADIO_OFF unless QR is below us.
-  if (net_mode() == RADIO_BLE) net_request((RadioMode)s_soc_prev);
-#endif
-  s_soc_phase = SOC_ENTER;
-}
-
-static void social_service(void) {
-#if FEATURE_BLE
-  if (s_soc_phase == SOC_ERROR) return;
-  if (s_soc_phase == SOC_ENTER && !ble_is_up()) { social_try_bringup(); return; }
-  if (!ble_is_up()) return;
-
-  const SimView* p = pet();
-  uint8_t self = BLE_SELF_SEEKING;
-  if (p && (p->flags & PF_GOD_TAINTED)) self = (uint8_t)(self | BLE_SELF_GOD);
-  ble_set_self(self);
-  ble_scan_service();
-#endif
-}
-
-static void draw_social(void) {
-  char tag[10];
-#if FEATURE_BLE
-  snprintf(tag, sizeof(tag), "%u", (unsigned)ble_peer_count());
-#else
-  tag[0] = '\0';
-#endif
-  draw_header(S(STR_SO_TITLE), tag);
-
-  if (s_soc_phase == SOC_ERROR) {
-    rd_text_wrap(3, (int16_t)(UI_CONTENT_Y + 10), OLED_W - 6, RD_LINE_BODY, 4,
-                 RD_FONT_BODY, S(s_soc_err ? s_soc_err : (uint16_t)STR_ERR_BUSY));
-    draw_countdown();
-    rd_affordance(nullptr, nullptr);
-    return;
-  }
-
-  // The screen is honest about what it is: a radio that finds neighbours and
-  // nothing else yet.
-  rd_text_center((int16_t)(UI_CONTENT_Y + 5), RD_FONT_TINY, S(STR_SO_LINK_SOON));
-
-#if FEATURE_BLE
-  U8G2& u = rd_u8g2();
-  const uint8_t n = ble_peer_count();
-  if (n == 0) {
-    rd_text_center((int16_t)(UI_CONTENT_Y + 18), RD_FONT_NARR, S(STR_SO_SEARCHING));
-    const uint8_t dots = (uint8_t)((now_ms() / 400u) % 4u);
-    for (uint8_t i = 0; i < dots; ++i)
-      px_box((int16_t)(OLED_W / 2 - 8 + i * 6), (int16_t)(UI_CONTENT_Y + 24), 4, 4);
-    rd_text_wrap(3, (int16_t)(UI_CONTENT_Y + 38), OLED_W - 6, RD_LINE_BODY, 2,
-                 RD_FONT_BODY, S(STR_SO_NOBODY));
-  } else {
-    if (s_soc_cursor >= n) s_soc_cursor = 0;
-    const uint8_t rows = (n < SOC_LIST_ROWS) ? n : (uint8_t)SOC_LIST_ROWS;
-    for (uint8_t i = 0; i < rows; ++i) {
-      const BlePeerInfo* pi = ble_peer(i);
-      if (!pi) continue;
-      const int16_t y   = (int16_t)(SOC_LIST_Y + i * UI_LIST_PITCH);
-      const bool    sel = (i == s_soc_cursor);
-      if (sel) px_box(0, y, OLED_W, UI_LIST_PITCH - 1);
-      u.setDrawColor(sel ? 0 : 1);
-      char nm[16];
-      ui_name_for(pi->genome.lineage_id, pi->genome.generation, nm, sizeof(nm));
-      rd_text_fit(3, (int16_t)(y + 8), 58, RD_FONT_NARR, nm);
-      rd_text_fit(64, (int16_t)(y + 8), 48, RD_FONT_BODY,
-                  (pi->stage < STAGE_COUNT) ? S_STAGE(pi->stage) : "-");
-      for (uint8_t b = 0; b < 3; ++b) {          // signal strength, three bars
-        const int16_t bx = (int16_t)(OLED_W - 12 + b * 4);
-        const int8_t  th = (int8_t)(-50 - b * 10);
-        if (pi->rssi >= th) px_box(bx, (int16_t)(y + 6 - b * 2), 3, (int16_t)(2 + b * 2));
-        else                px_hline(bx, (int16_t)(y + 7), 3);
-      }
-      u.setDrawColor(1);
-    }
-  }
-#endif
-  draw_countdown();
-  rd_affordance(S(STR_AF_NEXT), nullptr);
-}
-
-static void handle_social(Gesture g) {
-#if FEATURE_BLE
-  const uint8_t n = ble_peer_count();
-#else
-  const uint8_t n = 0;
-#endif
-  switch (g) {
-    case GST_TAP_L:
-    case GST_HOLD_L: s_soc_cursor = ring_next(s_soc_cursor, n); break;
-    case GST_DBL_L:  s_soc_cursor = 0; break;
-    case GST_DBL_R:  if (n) s_soc_cursor = (uint8_t)(n - 1u); break;
-    case GST_BOTH:   help_open(STR_HLP_PEER); break;
-    default: break;
-  }
-}
-
 // =============================================================================
 //  14. SETTINGS moved to ui/screen_settings.cpp (P2-C11b). The five lines of
 //      its "Acerca de" page are device facts, so they are still produced here
@@ -1523,95 +1283,14 @@ static void handle_social(Gesture g) {
 // =============================================================================
 
 // =============================================================================
-//  15. QR
-//      BRIEF 1.4 geometry: a 62 px white box at (0,1) with a 3-module quiet
-//      zone. That box owns the rows the affordance strip would use, so the
-//      hint lives in the right-hand column instead.
+//  15. QR is gone. ui/screen_creator.cpp is the CREATOR screen that replaced it
+//      (P2-C11c): same 62 px symbol box, same PIN, and it still owns the Wi-Fi
+//      station on entry and gives it back on the way out - but the symbol and
+//      the modules are painted through gfx.h now, so the whole screen is
+//      snapshot-tested on the host. What the page it points at will SERVE is
+//      Phase 8. ui_creator_info() / ui_creator_radio() in section 20 are the
+//      two seams it reaches the radio through.
 // =============================================================================
-static void qr_build(void) {
-  char text[QR_TEXT_MAX];
-  text[0] = '\0';
-
-  if (s_qr_variant == 1 && net_is_ap_up()) {
-    // Open network. "WIFI:S:<ssid>;;" is 26 B and fits QR version 2 (25
-    // modules -> 62 px at 2 px/module). Adding "T:nopass" makes it 35 B, which
-    // forces version 3 -> 29 modules -> 70 px, and 70 does not fit in 64 rows.
-    snprintf(text, sizeof(text), "WIFI:S:%s;;", net_ap_ssid());
-  } else if (net_url(text, sizeof(text), web_pin()) == 0) {
-    text[0] = '\0';
-  }
-
-  if (text[0] == '\0') { s_qr_size = 0; s_qr_key[0] = '\0'; return; }
-  if (strcmp(text, s_qr_key) == 0) return;                 // already cached
-
-  uint8_t size = 0;
-  if (qr_encode(text, s_qr_mod, size)) {
-    s_qr_size = size;
-    snprintf(s_qr_key, sizeof(s_qr_key), "%s", text);
-  } else {
-    s_qr_size   = 0;
-    s_qr_key[0] = '\0';
-  }
-}
-
-static void draw_qr(void) {
-  U8G2& u = rd_u8g2();
-
-  if (s_qr_size) {
-    uint8_t px = (uint8_t)(QR_BOX_SIZE / (s_qr_size + 2 * QR_QUIET_MODULES));
-    if (px == 0) px = 1;
-    if (px > 3)  px = 3;
-    qr_draw(u, QR_BOX_X, QR_BOX_Y, px);
-  } else {
-    px_frame(QR_BOX_X, QR_BOX_Y, QR_BOX_SIZE, QR_BOX_SIZE);
-    rd_text_center_in(QR_BOX_X, QR_BOX_SIZE, 34, RD_FONT_BODY, "...");
-  }
-
-  const int16_t rx = QR_BOX_SIZE + 3;        // 65
-  const int16_t rw = OLED_W - rx - 1;        // 62
-
-  if (net_is_ap_up()) {
-    rd_text_fit(rx, 8, rw, RD_FONT_BODY, S(STR_WEB_NOWIFI));
-    rd_text_wrap(rx, 17, rw, RD_LINE_BODY, 2, RD_FONT_BODY, S(STR_WEB_AP_HINT));
-    rd_text_fit(rx, 33, rw, RD_FONT_TINY, net_ap_ssid());
-    rd_text_fit(rx, 41, rw, RD_FONT_TINY, net_ip());   // softAP address, not a literal
-    // The PIN used to be drawn only in the STA branch, while this screen tells
-    // the user to open the address by hand - so a hand-typed URL hit the PIN
-    // prompt with the PIN shown nowhere. The alternating URL symbol carries
-    // ?k=NNNN, but only if you scan it. Show it here too.
-    {
-      char pin[12];
-      snprintf(pin, sizeof(pin), "%s %04u",
-               S(STR_WEB_PIN), (unsigned)(web_pin() % 10000u));
-      rd_text_fit(rx, 51, rw, RD_FONT_BODY, pin);
-    }
-  } else if (net_is_sta_up()) {
-    rd_text_fit(rx, 8, rw, RD_FONT_BODY, S(STR_WEB_TITLE));
-    rd_text_fit(rx, 16, rw, RD_FONT_TINY, net_ip());
-    rd_text(rx, 23, RD_FONT_TINY, S(STR_WEB_PIN));
-    char pin[8];
-    snprintf(pin, sizeof(pin), "%04u", (unsigned)(web_pin() % 10000u));
-    rd_text(rx, 40, RD_FONT_BIGNUM, pin);    // 9x19 digits: unmissable at arm's length
-  } else {
-    rd_text_fit(rx, 8, rw, RD_FONT_BODY, S(STR_WEB_TITLE));
-    rd_text_wrap(rx, 20, rw, RD_LINE_BODY, 3, RD_FONT_BODY, S(STR_WEB_CONNECTING));
-  }
-
-  // Invariant 6, relocated: the hint lives in the right column's bottom strip.
-  px_spr(rx, RD_AFFORD_Y, sprite_mini(MIC_ARROW_L));
-  rd_text_fit((int16_t)(rx + 10), RD_AFFORD_BASELINE, 40, RD_FONT_BODY, S(STR_AF_BACK));
-  if (net_is_ap_up()) px_spr(OLED_W - 8, RD_AFFORD_Y, sprite_mini(MIC_ARROW_R));
-}
-
-static void handle_qr(Gesture g) {
-  if ((g == GST_TAP_R || g == GST_TAP_L) && net_is_ap_up()) {
-    s_qr_variant = (uint8_t)!s_qr_variant;
-    s_qr_key[0]  = '\0';
-    s_qr_manual  = now_ms();
-    qr_build();
-  }
-}
-
 // =============================================================================
 //  15b. TIME ENTRY moved to ui/screen_time.cpp (P2-C11b). The clock itself is
 //       still reached through gametime.h, from the ui_get_clock() /
@@ -1619,270 +1298,70 @@ static void handle_qr(Gesture g) {
 // =============================================================================
 
 // =============================================================================
-//  16. THE HATCH CEREMONY
-//
-//  Birth used to be a toast. It is the only ceremony left, so it gets a real
-//  one: one phase enum, one cumulative clock read from config.h, nothing
-//  skippable, no chrome.
-//
-//  ORDERING IS THE WHOLE SAFETY ARGUMENT. sim_hatch() has ALREADY run and the
-//  SimView has ALREADY been flushed to flash before the first frame below is
-//  drawn, so every phase here is pure presentation. A brownout half way through
-//  therefore reboots into ui_begin() -> STAGE_BABY -> HOME with a perfectly
-//  ordinary baby: the player loses the show, never the pet. Deferring
-//  sim_hatch() to the END of the ceremony would do the opposite - a reboot at
-//  second 3 leaves a STAGE_EGG that the sim is simultaneously trying to hatch
-//  on age, which is exactly the weird state to avoid.
+//  16. THE CEREMONY moved to ui/ceremony.cpp and the EGG screen to
+//      ui/screen_evolution.cpp (P2-C11c). The phase machine is parameterised
+//      by CeremonyKind now, so P3-C3 drives the same show for an evolution,
+//      and the screen that hosts it is a pure translation unit with the
+//      ceremony bound into it. What is left here is the ORDERING argument that
+//      cannot move: the model change and its flush happen BEFORE the first
+//      frame, in ceremony_start() below.
 // =============================================================================
 
-// Idempotent. The manual rub path calls sim_hatch() itself and the sim then
-// reports SIM_EV_HATCHED on the NEXT logic tick, so this is reached twice for
-// one birth; the second call must do nothing. The s_hatch_ms window also covers
-// an event that arrives after the ceremony has already finished.
-static void hatch_begin(void) {
+// The body ui/ceremony.cpp draws, through the same view petfx reads.
+static const PetView* ceremony_body(void) {
+  const SimView* p = pet();
+  if (!p) return nullptr;
+  return &body_view(*p, POSE_IDLE);
+}
+
+// The pure EVOLUTION screen's ceremony hook (screen_evolution.h): draw one
+// ceremony frame, or answer false so the screen draws the incubator instead.
+static bool evo_ceremony_frame(void) { return ceremony_draw(now_ms()); }
+
+// The pure DIAG screen's input hook (screen_diag.h). Returns true when the
+// console wants the SCREEN closed - which is not the same as the console being
+// switched off: watching an accelerated life on the ordinary screens is the
+// entire point of it.
+static bool diag_gesture(Gesture g) {
+  switch (god_handle(g)) {
+    case GOD_EVT_LEAVE:
+      return true;
+    case GOD_EVT_WIPED: {
+      if (s_cfg) gs_cfg_defaults(*s_cfg);
+      const SimView* np = pet();
+      if (np) petfx_reset(body_view(*np, POSE_IDLE));  // a different animal entirely
+      s_stat_ok = 0;
+      sm_replace_root(SCR_EGG);
+      return false;                 // already re-rooted; do not send HOME on top
+    }
+    default:
+      return false;                 // handled inside the console
+  }
+}
+
+// Idempotent, and it has to be: the manual rub path calls sim_hatch() itself
+// and the simulation then reports SIM_EV_HATCHED on the NEXT logic tick, so
+// this is reached twice for one birth. ceremony_begin() holds the guard.
+static void ceremony_start(uint8_t kind) {
   const SimView* p = pet();
   if (!p || p->stage != STAGE_BABY) return;
-  if (hatch_active()) return;
-  if (s_hatch_ms != 0 && since(s_hatch_ms) < HATCH_TOTAL_MS + 3000UL) return;
 
   gs_save_active(true);   // commit FIRST: everything below is presentation
 
-  // The phase is armed BEFORE the navigation: sm_replace_root() applies the
+  if (!ceremony_begin(kind, now_ms())) return;
+
+  // The show is armed BEFORE the navigation: sm_replace_root() applies the
   // frame rate on arrival, and ui_fps() answers FPS_NORMAL only once
-  // hatch_active() is true. It also runs the leave hook of whatever screen the
-  // ceremony arrived on - which is what drops BLE or an in-flight minigame.
-  s_hatch_phase = HP_WOBBLE;
-  s_hatch_ms    = now_ms();
-  s_hatch_jolts = 0;
-  s_hatch_look  = 0;
-  s_alert_n     = 0;
-  s_alert_cur   = AL_NONE;
+  // ceremony_active() is true. It also runs the leave hook of whatever screen
+  // the ceremony arrived on - which is what drops an in-flight minigame.
+  dialog_reset();
   s_toast[0]    = '\0';
   s_absence_ms  = 0;
   sm_replace_root(SCR_EGG);
   s_trans_ms    = 0;           // the ceremony owns the frame: no dissolve on top
   actfx_cancel();              // whatever the previous animal was doing, it is over
-  petfx_reset(*p);             // the body about to appear is a brand new one
+  petfx_reset(body_view(*p, POSE_IDLE));   // the body about to appear is brand new
   petfx_freeze(1);             // and it must be born in the centre, not mid-walk
-}
-
-// Phase edges only. Every register effect is armed EXACTLY once here: doing it
-// from the draw path would re-arm it on every frame and the shake would never
-// decay.
-static void hatch_service(void) {
-  const uint32_t el = since(s_hatch_ms);
-
-  switch (s_hatch_phase) {
-    case HP_WOBBLE:
-      if (el >= HATCH_T_CRACK) s_hatch_phase = HP_CRACK;
-      break;
-
-    case HP_CRACK: {
-      // Three separate jolts, not one long decay: the shell gives way in steps.
-      // A single decaying shake reads as a rumble; three read as a crack.
-      const uint32_t ce   = (el > HATCH_T_CRACK) ? (el - HATCH_T_CRACK) : 0u;
-      const uint8_t  want = (uint8_t)((ce / HATCH_JOLT_GAP_MS) + 1u);
-      while (s_hatch_jolts < want && s_hatch_jolts < 3u) {
-        ++s_hatch_jolts;
-        rd_shake(HATCH_JOLT_PX, HATCH_JOLT_MS);
-      }
-      if (el >= HATCH_T_FLASH) { s_hatch_phase = HP_FLASH; rd_flash(HATCH_FLASH_MS); }
-      break;
-    }
-
-    case HP_FLASH:
-      if (el >= HATCH_T_SHARDS) s_hatch_phase = HP_SHARDS;
-      break;
-
-    case HP_SHARDS:
-      if (el >= HATCH_T_GROW) s_hatch_phase = HP_GROW;
-      break;
-
-    case HP_GROW:
-      if (el >= HATCH_T_LOOK) s_hatch_phase = HP_LOOK;
-      break;
-
-    case HP_LOOK:
-      // petfx_freeze() stops LOCOMOTION, not the head. The first thing a newborn
-      // does is check whether the world has anything in it.
-      if (s_hatch_look == 0) {
-        s_hatch_look = 1;
-        petfx_face_point(0);
-      } else if (s_hatch_look == 1 && el >= HATCH_T_LOOK + HATCH_LOOK_MS / 2u) {
-        s_hatch_look = 2;
-        petfx_face_point(OLED_W - 1);
-      }
-      if (el >= HATCH_T_NAME) { s_hatch_phase = HP_NAME; petfx_face_point(OLED_W / 2); }
-      break;
-
-    case HP_NAME:
-      if (el >= HATCH_TOTAL_MS) {
-        s_hatch_phase = HP_NONE;
-        petfx_freeze(0);
-        input_flush();      // a button held through the ceremony must not fire a
-        nav_home();         // stale gesture on the HOME it lands on (AUDIT 15)
-      }
-      break;
-
-    default:
-      break;
-  }
-}
-
-// Shell fragments. Six fixed directions scaled by an expanding radius; the
-// table is deliberately asymmetric so it does not read as a mechanical star.
-static const int8_t kShardDX[6] = { -4,  4, -4,  4, -1,  1 };
-static const int8_t kShardDY[6] = { -2, -2,  1,  1,  3,  3 };
-
-// The ceremony owns the WHOLE frame: no header, no affordance strip, no toast,
-// no countdown. Chrome would turn a birth into a screen.
-static void draw_hatch(void) {
-  U8G2& u = rd_u8g2();
-  const SimView* p     = pet();
-  const uint32_t el    = since(s_hatch_ms);
-  const uint8_t  frame = (uint8_t)((now_ms() / 120u) & 1u);   // fast: it is straining
-
-  // ---- 1. the egg rocking, accelerating ----------------------------------
-  if (s_hatch_phase == HP_WOBBLE) {
-    // Quadratic swing count: the rocking gets FASTER, which is what reads as
-    // effort. el <= HATCH_WOBBLE_MS so el*el <= 1.44e6 and this stays in uint32.
-    const uint32_t swings = (el * el) / HATCH_WOBBLE_K;
-    const int16_t  amp    = (int16_t)(1 + (el * 3u) / HATCH_WOBBLE_MS);
-    const SpriteRef r = sprite_egg(0, frame);
-    px_spr((int16_t)((int16_t)sprite_center_x(r.w) + ((swings & 1u) ? amp : (int16_t)-amp)),
-           (int16_t)sprite_center_y(r.h), r);
-    rd_text_center(52, RD_FONT_BODY, S(STR_EGG_HATCHING));
-    return;
-  }
-
-  // ---- 2. the crack, and 3. the flash ------------------------------------
-  // HP_FLASH draws the same thing: the 0xA7 invert is a PANEL state, so the
-  // white frame costs nothing to draw and the egg simply reads as a dark
-  // silhouette on white for 80 ms.
-  if (s_hatch_phase == HP_CRACK || s_hatch_phase == HP_FLASH) {
-    const SpriteRef r = sprite_egg(1, frame);
-    px_spr((int16_t)((int16_t)sprite_center_x(r.w) + (frame ? 2 : -2)),
-           (int16_t)sprite_center_y(r.h), r);
-    if (s_hatch_phase == HP_CRACK)
-      rd_text_center(52, RD_FONT_BODY, S(STR_EGG_HATCHING));
-    return;
-  }
-
-  // ---- 4. the shards ------------------------------------------------------
-  if (s_hatch_phase == HP_SHARDS) {
-    // Same clamp-the-input rule as HP_GROW below: an overrun must hold the last
-    // frame, not run the radius off the panel and the dissolve past full.
-    uint32_t t = el - HATCH_T_SHARDS;
-    if (t > HATCH_SHARDS_MS) t = HATCH_SHARDS_MS;
-    const int16_t  rad = (int16_t)((t * 22u) / HATCH_SHARDS_MS);
-    const SpriteRef r  = sprite_egg(1, frame);
-    px_spr((int16_t)sprite_center_x(r.w), (int16_t)sprite_center_y(r.h), r);
-    // The shell disintegrates while the fragments leave: erase an increasing
-    // share of it. Colour 0 over a colour-0 background is a no-op, so this is
-    // clipped to the silhouette for free (render.cpp:637).
-    u.setDrawColor(0);
-    rd_dither_rect((int16_t)sprite_center_x(r.w), (int16_t)sprite_center_y(r.h),
-                   r.w, r.h, (uint8_t)((t * RD_DITHER_MAX) / HATCH_SHARDS_MS));
-    u.setDrawColor(1);
-    const int16_t cx = (int16_t)(OLED_W / 2 - 3);
-    const int16_t cy = (int16_t)(SPRITE_AREA_Y + SPRITE_AREA_H / 2 - 3);
-    for (uint8_t i = 0; i < 6; ++i)
-      px_spr((int16_t)(cx + ((int16_t)kShardDX[i] * rad) / 4),
-             (int16_t)(cy + ((int16_t)kShardDY[i] * rad) / 4), sprite_emote(EMO_SPARK));
-    return;
-  }
-
-  if (!p) return;
-
-  // ---- 5..7: the body is out. petfx owns where it is from here on ---------
-  petfx_draw_body(*p, POSE_IDLE, frame, 0);
-
-  if (s_hatch_phase == HP_GROW) {
-    // A window that opens outwards from the body's waist (so it reads as
-    // growing, not as wiping) and a dither that thins out (so it materialises,
-    // not pops).
-    // Clamp t, NOT lvl. The old code clamped the RESULT: with t past
-    // HATCH_GROW_MS the subtraction below underflows a uint8 to ~255 and a
-    // "lvl > RD_DITHER_MAX" clamp pins it to RD_DITHER_MAX - a FULL erase of
-    // the sprite band - instead of to 0, which is the state the phase is
-    // travelling towards. One such frame is a black flash at the exact moment
-    // the baby finishes materialising. Clamping the input makes the overrun a
-    // no-op that simply holds the final frame.
-    uint32_t t = el - HATCH_T_GROW;
-    if (t > HATCH_GROW_MS) t = HATCH_GROW_MS;
-    const int16_t  by = petfx_body_y();
-    const int16_t  bh = (int16_t)petfx_body_h();
-    const int16_t  cy = (int16_t)(by + bh / 2);
-    const int16_t  hh = (int16_t)(((int32_t)t * (int32_t)(bh / 2 + 1)) / (int32_t)HATCH_GROW_MS);
-    const uint8_t lvl = (uint8_t)(RD_DITHER_MAX - (t * RD_DITHER_MAX) / HATCH_GROW_MS);
-    u.setDrawColor(0);
-    px_box(0, SPRITE_AREA_Y, OLED_W, (int16_t)(cy - hh - SPRITE_AREA_Y));
-    px_box(0, (int16_t)(cy + hh), OLED_W,
-           (int16_t)(SPRITE_AREA_Y + SPRITE_AREA_H - (cy + hh)));
-    rd_dither_rect(0, SPRITE_AREA_Y, OLED_W, SPRITE_AREA_H, lvl);
-    u.setDrawColor(1);
-    return;
-  }
-
-  if (s_hatch_phase == HP_NAME) {
-    char name[16], line[64];
-    ui_pet_name(name, sizeof(name));
-    const FmtArg fa[1] = { { 'n', name } };
-    fmt_apply(line, sizeof(line), S(STR_EGG_NAMED), fa, 1);
-    rd_text_center(52, RD_FONT_NARR, line);
-    rd_text_center(61, RD_FONT_BODY, S(STR_HATCH_WELCOME));
-    return;
-  }
-
-  rd_text_center(52, RD_FONT_BODY, S(STR_HATCH_LOOK));   // HP_LOOK
-}
-
-// ---- THE EGG SCREEN ---------------------------------------------------------
-
-static void draw_egg(void) {
-  const SimView* p = pet();
-  draw_header(S(STR_EGG_TITLE), nullptr);
-  if (!p) { rd_affordance(nullptr, nullptr); return; }
-
-  const int16_t wob   = (int16_t)(((now_ms() / 260u) & 1u) ? 1 : -1);
-  const uint8_t frame = (uint8_t)((now_ms() / UI_ANIM_FRAME_MS) & 1u);
-  const uint8_t phase = (p->age_s + 60u >= AGE_EGG_S || s_rub_count >= EGG_RUB_TAPS) ? 1u : 0u;
-  const SpriteRef r   = sprite_egg(phase, frame);
-  px_spr((int16_t)((int16_t)sprite_center_x(r.w) + wob), (int16_t)(UI_CONTENT_Y + 2), r);
-
-  rd_text_center(45, RD_FONT_BODY, S(STR_EGG_RUB));
-  for (uint8_t i = 0; i < EGG_RUB_TAPS; ++i) {
-    const int16_t x = (int16_t)(OLED_W / 2 - EGG_RUB_TAPS * 3 + i * 6);
-    if (i < s_rub_count) px_box(x, 50, 5, 5);
-    else                 px_frame(x, 50, 5, 5);
-  }
-  rd_affordance(S(STR_AF_RUB), S(STR_AF_RUB));
-
-  if (p->flags & PF_COLD_EGG)
-    rd_text_fit(2, 19, 124, RD_FONT_BODY, S(STR_EGG_COLD));
-  else if (p->genome.generation > 0 && (p->flags & PF_INBRED))
-    rd_text_fit(2, 19, 124, RD_FONT_BODY, S(STR_EGG_KIN));
-}
-
-static void handle_egg(Gesture g) {
-  if (g != GST_TAP_L && g != GST_TAP_R) { ui_toast(STR_EGG_NOT_YET); return; }
-
-  const uint8_t side = (g == GST_TAP_L) ? 0u : 1u;
-  if (s_rub_ms == 0 || since(s_rub_ms) > EGG_RUB_WINDOW_MS) {
-    s_rub_ms    = now_ms();
-    s_rub_count = 0;
-    s_rub_last  = 0xFF;
-  }
-  if (s_rub_last == side) { ui_toast(STR_EGG_NOT_YET); return; }   // must alternate
-  s_rub_last = side;
-  if (++s_rub_count >= EGG_RUB_TAPS) {
-    sim_hatch();
-    s_rub_count = 0;
-    // Neither the save nor the toast happen here any more: hatch_begin() owns
-    // the save, and sim_hatch() raises SIM_EV_HATCHED so ui_note_events() owns
-    // the toast.
-    hatch_begin();
-  }
 }
 
 // =============================================================================
@@ -1896,35 +1375,35 @@ static void handle_egg(Gesture g) {
 //  successful recovery, both of which are modal-layer and pet-presentation
 //  work that belongs to ui.cpp until those move too.
 // =============================================================================
-void ui_confirm_wipe(void) { confirm_open(CFM_WIPE1, STR_CF_WIPE); }
+void ui_confirm_wipe(void) { dialog_open_confirm(CFM_WIPE1, STR_CF_WIPE); }
 
 void ui_note_recovered(void) {
   s_stat_ok = 0;                 // show the recovered pet's truth at once
   const SimView* p = pet();
-  if (p) petfx_reset(*p);
+  if (p) petfx_reset(body_view(*p, POSE_IDLE));
   sm_replace_root(SCR_HOME);
 }
 
 // =============================================================================
 //  17. CONFIRM / ALERT overlays
 // =============================================================================
-static void confirm_commit(void) {
-  const uint8_t which = s_confirm_id;
-  modal_close();
+// The dialog layer collects the answer; committing needs the simulation, the
+// Box and flash, so it comes back here. Bound in ui_begin().
+static void dialog_commit(uint8_t which) {
   switch (which) {
     case CFM_QUIT_GAME:
       s_g.score = 0;
       game_finish();                                   // counts as a loss
       break;
     case CFM_MEDICINE: act_and_show(ACT_MEDICINE); break;   // BRIEF D
-    case CFM_WIPE1:    confirm_open(CFM_WIPE2, STR_CF_WIPE2); break;   // two dialogs
+    case CFM_WIPE1:    dialog_open_confirm(CFM_WIPE2, STR_CF_WIPE2); break;  // two dialogs
     case CFM_WIPE2: {
       gs_factory_reset();
       if (s_cfg) { gs_cfg_defaults(*s_cfg); gs_save_cfg(*s_cfg); }
       const Genome g0 = genome_genesis();
       sim_new_pet(g0, gt_now(), 0);
       const SimView* p = pet();
-      if (p) { gs_save_active(true); petfx_reset(*p); }
+      if (p) { gs_save_active(true); petfx_reset(body_view(*p, POSE_IDLE)); }
       s_stat_ok  = 0;                // a wiped device shows the truth at once
       err_set_kind(ERRK_NONE);       // the save the ERROR screen was about is gone
       sm_replace_root(SCR_EGG);
@@ -1934,130 +1413,20 @@ static void confirm_commit(void) {
   }
 }
 
-static void draw_confirm(void) {
-  U8G2& u = rd_u8g2();
-  const int16_t y = 12, h = 40;
-  px_box(4, y, OLED_W - 8, h);
-  u.setDrawColor(0);
-  px_frame(5, (int16_t)(y + 1), OLED_W - 10, (int16_t)(h - 2));
-  rd_text_wrap(9, (int16_t)(y + 11), OLED_W - 18, RD_LINE_BODY, 2,
-               RD_FONT_BODY, S(s_modal_str));
-  u.setDrawColor(1);
-
-  const int16_t by = (int16_t)(y + h - 14);
-  for (uint8_t i = 0; i < 2; ++i) {
-    const bool    yes = (i == 1);
-    const int16_t bx  = (int16_t)(yes ? 68 : 14);
-    const bool    sel = (yes == (s_confirm_yes != 0));
-    u.setDrawColor(0);
-    px_box(bx, by, 46, 12);
-    u.setDrawColor(1);
-    if (sel) px_box((int16_t)(bx + 1), (int16_t)(by + 1), 44, 10);
-    u.setDrawColor(sel ? 0 : 1);
-    rd_text_center_in((int16_t)(bx + 1), 44, (int16_t)(by + 9), RD_FONT_HEAD,
-                      S(yes ? STR_YES : STR_NO));
-    u.setDrawColor(1);
-  }
-  rd_affordance(S(STR_AF_NEXT), S(STR_AF_OK));
-}
-
-static void handle_confirm(Gesture g) {
-  switch (g) {
-    case GST_TAP_L:     s_confirm_yes = (uint8_t)!s_confirm_yes; break;
-    case GST_TAP_R:     if (s_confirm_yes) confirm_commit(); else modal_close(); break;
-    case GST_HOLD_R:    modal_close(); break;
-    case GST_LONG_BOTH: modal_close(); nav_home(); break;
-    default: break;
-  }
-}
-
-static void draw_alert(void) {
-  U8G2& u = rd_u8g2();
-  const int16_t y = 16, h = 32;
-  px_box(2, y, OLED_W - 4, h);
-  u.setDrawColor(0);
-  px_frame(3, (int16_t)(y + 1), OLED_W - 6, (int16_t)(h - 2));
-  px_spr(7, (int16_t)(y + 11), sprite_mini(MIC_ALERT));
-  rd_text_wrap(19, (int16_t)(y + 13), OLED_W - 26, RD_LINE_BODY, 2,
-               RD_FONT_BODY, S_ALERT(s_alert_cur));
-  u.setDrawColor(1);
-  rd_affordance(S(STR_AF_OK), S(STR_AF_SEL));
-}
-
-// One press solves it: dismiss AND jump to the screen that fixes the problem.
-static void alert_act(void) {
-  const uint8_t a = s_alert_cur;
-  modal_close();
-  switch (a) {
-    case AL_HUNGRY:     nav_push(SCR_FEED);      break;
-    case AL_SAD:        nav_push(SCR_PLAY);      break;
-    case AL_DIRTY:
-    case AL_POOP:       act_and_show(ACT_CLEAN); break;
-    case AL_TIRED:      act_and_show(ACT_SLEEP_TOGGLE); break;
-    case AL_SICK:       confirm_open(CFM_MEDICINE, STR_CF_SURE); break;
-    case AL_LOW_HEALTH: nav_push(SCR_STATUS_A);  break;
-    case AL_MATE_FOUND: nav_push(SCR_SOCIAL);    break;
-    default: break;
-  }
-}
-
-static void handle_alert(Gesture g) {
-  if (since(s_modal_ms) < UI_ALERT_MIN_MS) return;      // must be readable first
-  if (g == GST_HOLD_R)    { modal_close(); return; }    // dismiss without acting
-  if (g == GST_LONG_BOTH) { modal_close(); nav_home(); return; }
-  alert_act();
-}
-
 // =============================================================================
 //  18. SCREEN ENTER / LEAVE HOOKS
 // =============================================================================
 // Only the screens that have NOT moved into the table reach these two: a
 // migrated row carries its own enter / leave hooks and state_machine.cpp calls
 // those instead (state_machine.cpp, sm_goto).
-static void screen_enter(uint8_t s) {
-  switch (s) {
-    case SCR_SOCIAL:
-      social_enter();
-      break;
-    case SCR_QR:
-#if FEATURE_WEB
-      // QR is the screen that wants the station; there is no radio policy in
-      // the entry point any more (plan section 2 row G4). It is released again
-      // in screen_leave().
-      // Was cfg_flag(CF_WEB_ENABLED). The helper had exactly this one caller
-      // left once SETTINGS and the HOME status bar moved out, and that caller
-      // is inside #if FEATURE_WEB - so in the no-web variant the function was
-      // defined and never used, which is a warning and this build treats as an
-      // error. Read the flag here instead of keeping a helper for one site.
-      if (net_mode() != RADIO_WIFI && s_cfg && (s_cfg->flags & CF_WEB_ENABLED) != 0)
-        net_request(RADIO_WIFI);
-#endif
-      s_qr_variant = net_is_ap_up() ? 1u : 0u;
-      s_qr_key[0]  = '\0';
-      s_qr_ms      = now_ms();
-      s_qr_manual  = 0;
-      qr_build();
-      break;
-    case SCR_EGG:
-      s_rub_count = 0;
-      s_rub_last  = 0xFF;
-      s_rub_ms    = 0;
-      break;
-    default:
-      break;
-  }
+static void screen_enter(uint8_t /* screen */) {
+  // GAME is the last screen in this file with no table row, and it needs
+  // nothing on the way in: game_start() is what arms it.
 }
 
 static void screen_leave(uint8_t s) {
   // HOME's own leave hook (home_leave_layer) is what ends the choreography
   // now; this one only sees the screens still living in this file.
-  if (s == SCR_SOCIAL) social_leave();
-#if FEATURE_WEB
-  // Radio OFF by default: the QR screen is the only owner of RADIO_WIFI, so
-  // leaving it gives the ~50 KB and the largest current draw on the board back
-  // instead of holding the station powered until the next reboot.
-  if (s == SCR_QR && net_mode() == RADIO_WIFI) (void)net_request(RADIO_OFF);
-#endif
   if (s == SCR_GAME && s_g.phase == 1) {
     // Abandoning a game in any way at all is a loss.
     ActionResult r;
@@ -2107,21 +1476,20 @@ void ui_begin(void) {
   // every ui_begin(), which is also what a factory reset runs.
   ui_bind_view(&ui_fill_view);
   home_bind_body(&home_body, &home_leave_layer);
+  // The three layers a pure screen cannot link against: the ceremony's panel
+  // registers, the developer console, and the body the ceremony draws.
+  ceremony_bind_body(&ceremony_body);
+  evo_bind_ceremony(&evo_ceremony_frame);
+  diag_bind(&god_active, &god_draw, &diag_gesture);
   memset(s_raw_prev, 0, sizeof(s_raw_prev));
   sm_begin();
-  s_modal       = MODAL_NONE;
-  s_alert_n     = 0;
-  s_alert_cur   = AL_NONE;
+  dialog_bind_commit(&dialog_commit);
+  dialog_reset();
   s_toast[0]    = '\0';
-  s_qr_key[0]   = '\0';
-  s_qr_size     = 0;
-  s_soc_cursor  = 0;
   s_last_action = ACT_NONE;
   s_absence_ms  = 0;
-  s_soc_phase   = SOC_ENTER;
   s_stat_ok     = 0;                 // boot: show the truth, do not animate to it
-  s_hatch_phase = HP_NONE;
-  s_hatch_ms    = 0;
+  ceremony_reset();
   s_trans_ms    = 0;
   gfx_list_reset();
   s_bright_valid = 0;                // force the first contrast decision
@@ -2140,7 +1508,7 @@ void ui_begin(void) {
   actfx_bind_poop_layout(kPoopX, (uint8_t)POOP_MAX);
 
   const SimView* p = pet();
-  if (p) petfx_reset(*p);            // AFTER petfx_begin(), BEFORE any draw
+  if (p) petfx_reset(body_view(*p, POSE_IDLE));  // AFTER petfx_begin(), before a draw
   if (p && p->stage == STAGE_EGG) { ui_goto(SCR_EGG); return; }
   ui_goto(SCR_HOME);
 }
@@ -2155,24 +1523,24 @@ void ui_note_events(uint32_t ev) {
   if (ev & SIM_EV_HATCHED) {
     ui_toast(STR_EGG_HATCHED);
     // Replaces the bare nav_home(). Reached from BOTH the age-driven hatch and
-    // (one tick late) from the manual rub, so hatch_begin() is idempotent. When
+    // (one tick late) from the manual rub, so ceremony_start() is idempotent. When
     // the egg hatches while the player is on some other screen they get pulled
     // into the ceremony.
     //
     // UNLESS it happened while nobody was watching. An egg hatches at AGE_EGG_S
     // (900 s), so leaving the device off for a quarter of an hour is enough for
-    // it to hatch inside sim_catch_up_ex(); hatch_begin() would then clear
-    // s_absence_ms and s_alert_n and the welcome-back report - armed moments
+    // it to hatch inside sim_catch_up_ex(); ceremony_start() would then clear
+    // s_absence_ms and the alert queue and the welcome-back report - armed moments
     // earlier by ui_note_absence() - would be destroyed by a 4.5 s show about a
     // moment the player did not see. The ceremony is for when you are IN FRONT
     // OF IT: rubbing the shell, or coming of age with the device switched on.
     // An offline hatch gets the old bare nav_home() and the banner stands.
     if (offline) nav_home();
-    else         hatch_begin();
+    else         ceremony_start(CEREMONY_HATCH);
   }
   // Being born is not evolving. sim_hatch() raises SIM_EV_HATCHED and
   // SIM_EV_STAGE_UP in the SAME batch (sim.cpp), and the two do not compose:
-  // hatch_begin() has just cleared the alert queue, this branch would refill it,
+  // ceremony_start() has just cleared the alert queue, this branch would refill it,
   // the queue does not expire and ui_service() returns early for the whole
   // ceremony - so the alert fires on the first frame of HOME after the birth,
   // with UI_ALERT_MIN_MS forcing the player to sit through a modal telling them
@@ -2230,45 +1598,15 @@ void ui_handle(Gesture g) {
   petfx_attention();
   rd_request_frame();
 
-  // --- god mode owns its own screen; we act on what it tells us ------------
-  if (sm_current() == SCR_GOD) {
-    // godmode.h: "Never call this when god_active() is false." The console's
-    // own exit row turns the MODE off from inside a previous god_handle(), so
-    // the screen can outlive it by one gesture.
-    if (!god_active()) { nav_home(); return; }
-    switch (god_handle(g)) {
-      case GOD_EVT_LEAVE:
-        // Leaves the SCREEN. god_active() may well still be true - watching an
-        // accelerated life on the normal screens is the entire point.
-        nav_home();
-        break;
-      case GOD_EVT_WIPED: {
-        if (s_cfg) gs_cfg_defaults(*s_cfg);
-        const SimView* np = pet();
-        if (np) petfx_reset(*np);    // god handed us a different animal entirely
-        s_stat_ok = 0;
-        sm_replace_root(SCR_EGG);
-        break;
-      }
-      default:
-        break;                                         // handled internally
-    }
-    return;
-  }
-
   // godmode.h: while the entry hold is in progress GST_LONG_BOTH must be
   // swallowed, or 1500 ms into a 5000 ms hold the user is thrown HOME and the
   // gesture becomes unreachable.
   if (s_god_prog && g == GST_LONG_BOTH) return;
 
   // --- invariant 7: an alert never lets a press through --------------------
-  if (s_modal == MODAL_ALERT)   { handle_alert(g);   return; }
-  if (s_modal == MODAL_CONFIRM) { handle_confirm(g); return; }
-  if (s_modal == MODAL_HELP) {
-    modal_close();
-    if (g == GST_LONG_BOTH) nav_home();                // invariant 2 still wins
-    return;
-  }
+  // ui/dialog.cpp owns all three overlays and consumes the gesture whenever one
+  // is open. That is the invariant, in one call.
+  if (dialog_input(g)) return;
 
   // --- the screen table, for the screens that have moved ------------------
   // SF_LOCK_INPUT means the row owns every gesture: the two global invariants
@@ -2299,13 +1637,8 @@ void ui_handle(Gesture g) {
   if (sm_handle(g)) return;
   if (def) return;             // migrated, and this row takes no input at all
 
-  switch (scr) {
-    case SCR_GAME:      handle_game(g);     break;
-    case SCR_SOCIAL:    handle_social(g);   break;
-    case SCR_EGG:       handle_egg(g);      break;
-    case SCR_QR:        handle_qr(g);       break;
-    default:            break;
-  }
+  // GAME is the last screen in this file with no table row of its own.
+  if (scr == SCR_GAME) handle_game(g);
 }
 
 void ui_service(void) {
@@ -2326,7 +1659,7 @@ void ui_service(void) {
       const uint8_t np = (p->poop_count > POOP_MAX) ? (uint8_t)POOP_MAX
                                                     : p->poop_count;
       petfx_set_obstacles(kPoopX, np, 12);   // sprite_icon() is 12x12
-      petfx_service(*p, t);
+      petfx_service(body_view(*p, home_pose(p)), t);
     }
   }
 
@@ -2336,7 +1669,7 @@ void ui_service(void) {
   // within one film (2.6 s worst case) even if every explicit actfx_cancel() in
   // this file were deleted. The five explicit ones are:
   //   screen_leave(SCR_HOME)  - leaving HOME by any route, back or home or push
-  //   hatch_begin()           - the birth ceremony, which may arrive on any screen
+  //   ceremony_start()        - the birth ceremony, which may arrive on any screen
   //   the god-mode entry just below, belt and braces: it re-roots the machine
   //     through sm_replace_root(), so the leave hook does run
   //   ui_begin()              - boot, and the wipe that re-runs it
@@ -2354,36 +1687,26 @@ void ui_service(void) {
     return;
   }
 
-  // god_service() is the entry point's to call; ui only owns the screen.
-  if (sm_current() == SCR_GOD) { if (!god_active()) nav_home(); return; }
-  // Returning here is what keeps the alert layer, the auto-return and the QR
-  // pump off the ceremony's back for its whole 4.5 s.
-  if (hatch_active()) { hatch_service(); return; }
-  if (sm_current() == SCR_GAME)   game_service();
-  if (sm_current() == SCR_SOCIAL) social_service();
+  // Returning here is what keeps the alert layer and the auto-return off the
+  // ceremony's back for its whole 4.5 s. ui/ceremony.cpp ends it itself, with
+  // an input flush and a trip HOME.
+  if (ceremony_active()) { ceremony_service(t); return; }
+  if (sm_current() == SCR_GAME) game_service();
 
-  // The alert layer surfaces only when nothing else owns the screen.
-  if (s_modal == MODAL_NONE && s_alert_n > 0 && sm_current() != SCR_GAME) {
-    alert_pop();
+  // The alert layer surfaces only when nothing else owns the screen, and the
+  // HELP strip expires on its own clock. Both are dialog_service()'s. A screen
+  // that composed its own frame (SF_OWNS_FRAME: the console) would never draw
+  // the overlay, so it must not be handed one either.
+  {
+    const ScreenDef* d = sm_def();
+    const bool owns_frame = (d != nullptr) && ((d->flags & SF_OWNS_FRAME) != 0u);
+    (void)dialog_service(t, sm_current() != SCR_GAME && !owns_frame);
   }
-  if (s_modal == MODAL_HELP && since(s_modal_ms) >= UI_MODAL_HELP_MS) modal_close();
 
   // Invariant 3, plus the update hook of a migrated screen. A modal freezes
   // the countdown: the one that is running belongs to the screen underneath.
-  sm_block_autoreturn(s_modal != MODAL_NONE);
+  sm_block_autoreturn(dialog_modal() != MODAL_NONE);
   if (sm_service(t)) return;
-
-  // The QR payload changes when the IP or the PIN does. In AP-provisioning
-  // mode the two symbols alternate every 5 s: join the network first, then
-  // open the page. A manual tap pins the choice for 10 s.
-  if (sm_current() == SCR_QR && since(s_qr_ms) >= 1000UL) {
-    s_qr_ms = t;
-    if (net_is_ap_up() && (s_qr_manual == 0 || since(s_qr_manual) > 10000UL)) {
-      const uint8_t want = (uint8_t)(((sm_screen_ms() / 5000UL) & 1u) ? 0u : 1u);
-      if (want != s_qr_variant) { s_qr_variant = want; s_qr_key[0] = '\0'; }
-    }
-    qr_build();
-  }
 
   apply_fps();
 }
@@ -2400,42 +1723,31 @@ void ui_draw(void) {
   const ScreenDef* def = sm_def();
   if (def) {
     def->render();
-    if (def->flags & SF_OWNS_FRAME) { rd_affordance_echo(); return; }
+    // A screen owns the frame either by flag (the console) or because a
+    // ceremony is running on it.
+    if ((def->flags & SF_OWNS_FRAME) || ceremony_active()) {
+      // The ceremony draws no strip, so the echo finds nothing to invert - it
+      // is called only to leave the per-frame state clean. The marker goes on
+      // top of it, but NOT on top of the console: that frame is the god
+      // screen's own status display and a second "GOD xN" bar would overwrite
+      // it with what it already says.
+      rd_affordance_echo();
+      if (sm_current() != SCR_GOD) god_draw_marker();
+      return;
+    }
   }
-  // Not migrated yet: the old switch, one case shorter every commit.
-  else switch (sm_current()) {
-    case SCR_GAME:     draw_game();     break;
-    case SCR_SOCIAL:   draw_social();   break;
-    case SCR_EGG:
-      // The ceremony owns the frame and draws no strip, so the echo below finds
-      // nothing to invert - it is called only to leave the per-frame state clean.
-      if (hatch_active()) { draw_hatch(); rd_affordance_echo(); god_draw_marker(); return; }
-      draw_egg();
-      break;
-    case SCR_QR:       draw_qr();       break;
-    case SCR_GOD:      god_draw();      rd_affordance_echo(); return;  // god owns the frame
-    // Every remaining id is either migrated (handled above) or a modal that
-    // has no base frame of its own. Drawing nothing is the honest answer: the
-    // modal layer below still runs.
-    default:           break;
-  }
+  // GAME is the last screen with no table row. Every remaining id is either
+  // migrated (handled above) or a modal with no base frame of its own, and
+  // drawing nothing for those is the honest answer: the modal layer below
+  // still runs.
+  else if (sm_current() == SCR_GAME) draw_game();
 
-  if (s_modal == MODAL_CONFIRM)      draw_confirm();
-  else if (s_modal == MODAL_ALERT)   draw_alert();
-  else if (s_modal == MODAL_HELP) {
-    U8G2& u = rd_u8g2();
-    const int16_t y = RD_AFFORD_Y - 12;
-    px_box(0, y, OLED_W, 12);
-    u.setDrawColor(0);
-    rd_text_center((int16_t)(y + 9), RD_FONT_BODY, S(s_modal_str));
-    u.setDrawColor(1);
-  } else {
-    draw_toast();
-  }
+  if (dialog_modal() != MODAL_NONE) dialog_render();
+  else                              draw_toast();
 
   // ONE tactile echo per frame, here, after the base screen and the modal have
   // both had their say. rd_invert_rect() is a real XOR, and draw_home() and
-  // draw_confirm() / draw_alert() each call rd_affordance() in the same frame:
+  // dialog_render() each call rd_affordance() in the same frame:
   // inverting inside rd_affordance() meant the second call undid the first, so
   // with any modal open no button press produced any feedback at all. Held
   // BEFORE draw_transition(), where the inversion used to happen, so a
@@ -2467,7 +1779,9 @@ uint32_t ui_idle_ms(void)  { return sm_idle_ms(); }
 
 void ui_push(ScreenId s)   { sm_push(s); }
 void ui_back(void)         { sm_back(); }
+void ui_home(void)         { sm_home(); }
 void ui_note_input(void)   { sm_note_input(); }
+void ui_request_frame(void){ rd_request_frame(); }
 
 Config* ui_cfg(void)       { return s_cfg; }
 void ui_cfg_changed(void)  { cfg_persist(); }
@@ -2490,8 +1804,8 @@ void ui_repeat_last_action(void) {
   else                           ui_toast(STR_AERR_BAD_ARG);
 }
 
-void ui_help(uint16_t str_id)    { help_open(str_id); }
-void ui_confirm_medicine(void)   { confirm_open(CFM_MEDICINE, STR_CF_SURE); }
+void ui_help(uint16_t str_id)    { dialog_open_help(str_id); }
+void ui_confirm_medicine(void)   { dialog_open_confirm(CFM_MEDICINE, STR_CF_SURE); }
 
 void ui_start_minigame(uint8_t idx) {
   const uint16_t cd = sim_minigame_cooldown_s();
@@ -2506,6 +1820,51 @@ void ui_start_minigame(uint8_t idx) {
 }
 
 uint8_t ui_god_progress(void) { return s_god_prog; }
+
+// -----------------------------------------------------------------------------
+//  THE CREATOR SCREEN'S RADIO SEAM
+// -----------------------------------------------------------------------------
+void ui_creator_info(CreatorInfo& out) {
+  memset(&out, 0, sizeof(out));
+  out.ap_up  = net_is_ap_up()  ? 1u : 0u;
+  out.sta_up = net_is_sta_up() ? 1u : 0u;
+  out.pin    = web_pin();
+  snprintf(out.ssid, sizeof(out.ssid), "%s", net_ap_ssid());
+  snprintf(out.ip,   sizeof(out.ip),   "%s", net_ip());
+  if (net_url(out.url, sizeof(out.url), out.pin) == 0) out.url[0] = '\0';
+}
+
+void ui_creator_radio(bool on) {
+#if FEATURE_WEB
+  if (on) {
+    // The screen that wants the station is the screen that asks for it; there
+    // is no radio policy in the entry point any more (plan section 2 row G4).
+    // Was cfg_flag(CF_WEB_ENABLED): the helper had exactly this one caller left
+    // once SETTINGS and the HOME status bar moved out, and that caller is
+    // inside #if FEATURE_WEB - so in the no-web variant the function was
+    // defined and never used, which this build treats as an error.
+    if (net_mode() != RADIO_WIFI && s_cfg && (s_cfg->flags & CF_WEB_ENABLED) != 0)
+      net_request(RADIO_WIFI);
+  } else if (net_mode() == RADIO_WIFI) {
+    // Radio OFF by default: CREATOR is the only owner of RADIO_WIFI, so leaving
+    // it gives back the ~50 KB of heap and the largest current draw on the
+    // board instead of holding the station powered until the next reboot.
+    (void)net_request(RADIO_OFF);
+  }
+#else
+  (void)on;
+#endif
+}
+
+// -----------------------------------------------------------------------------
+//  THE EVOLUTION SCREEN'S HATCH SEAM
+// -----------------------------------------------------------------------------
+void ui_request_hatch(void) {
+  sim_hatch();
+  // Neither the save nor the toast happen here: ceremony_start() owns the save,
+  // and sim_hatch() raises SIM_EV_HATCHED so ui_note_events() owns the toast.
+  ceremony_start(CEREMONY_HATCH);
+}
 
 void ui_info_lines(char lines[UI_INFO_LINES][UI_INFO_CAP]) {
   for (uint8_t i = 0; i < UI_INFO_LINES; ++i) lines[i][0] = '\0';

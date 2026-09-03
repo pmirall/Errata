@@ -579,7 +579,7 @@ void actfx_cancel(void) {
   s_fired = 0;
 }
 
-void actfx_begin(uint8_t action, const SimView& before) {
+void actfx_begin(uint8_t action, const PetView& before) {
   actfx_cancel();                       // no queue: the newest action wins
 
   // The light switch has no film. It is one register flash on top of the
@@ -737,7 +737,7 @@ uint8_t actfx_pose(uint8_t fallback) {
     case ACT_MEDICINE:
       // Ill right up to the moment the germ finishes dissolving, healthy
       // afterwards. If the pet really was sick this simply agrees with
-      // web_pose_of(); if it was not, it is the story the animation is telling.
+      // pet_pose_of(); if it was not, it is the story the animation is telling.
       if (t < AF_MED_GERM_MS) return (uint8_t)POSE_SICK;
       break;
     default: break;

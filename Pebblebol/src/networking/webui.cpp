@@ -139,25 +139,10 @@ static void send_throttled(void)
 }
 
 // =============================================================================
-//  5. SPRITE / MOOD POLICY  (shared with ui so both panels agree)
+//  5. SPRITE / MOOD POLICY is ui/pet_view.cpp's since P2-C11c. Nothing in this
+//     file consumed it; ui.cpp was the only caller and the rule belongs to the
+//     render layer, not to the phone mirror (audit risk 9).
 // =============================================================================
-
-uint8_t web_pose_of(const SimView& p)
-{
-  if (p.flags & PF_ASLEEP)     return POSE_SLEEP;
-  if (p.flags & PF_SICK)       return POSE_SICK;
-  return POSE_IDLE;
-}
-
-uint8_t web_mood_index(uint8_t score)
-{
-  if (score <= 15) return MOOD_MISERIA;
-  if (score <= 35) return MOOD_TRISTE;
-  if (score <= 55) return MOOD_NEUTRO;
-  if (score <= 75) return MOOD_CONTENTO;
-  if (score <= 90) return MOOD_FELIZ;
-  return MOOD_EUFORICO;
-}
 
 // =============================================================================
 //  6. HANDLERS
@@ -309,7 +294,5 @@ bool     web_running(void)            { return false; }
 uint16_t web_port(void)               { return 0; }
 uint16_t web_pin(void)                { return 0; }
 void     web_bind_config(Config*)     {}
-uint8_t  web_pose_of(const SimView&)  { return POSE_IDLE; }
-uint8_t  web_mood_index(uint8_t)      { return MOOD_NEUTRO; }
 
 #endif // FEATURE_WEB

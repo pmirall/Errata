@@ -10,8 +10,9 @@
 //  Mixing the two is what froze the pet in the middle of the panel for the
 //  whole project so far.
 //
-//  Layering: petfx includes render/sprites/genome/sim and nothing else. It
-//  never touches NVS, never talks to the network and never blocks.
+//  Layering: petfx includes render/sprites and ui/pet_view.h and nothing
+//  else. It never sees game/sim.h or game/genome.h (audit risk 9, fixed by
+//  P2-C11c), never touches NVS, never talks to the network and never blocks.
 //
 //  Identifiers and comments: English. No user-facing text lives here at all -
 //  this module draws pixels, never glyphs, so it needs no strings_es.h.
@@ -23,7 +24,7 @@
 
 #include "../core/config.h"
 #include "../core/nt_types.h"
-#include "../game/sim.h"      // SimView, the sim's read-only presentation view
+#include "pet_view.h"   // PetView - the ONLY thing this module knows about the pet
 
 // -----------------------------------------------------------------------------
 // THE GROUND LINE.
@@ -98,16 +99,16 @@ static_assert(PETFX_STAGE_L >= UI_HUD_L_END && PETFX_STAGE_R < UI_HUD_R_BEGIN,
 void petfx_begin(void);
 
 // Reseed the automaton from this pet's identity. Call on boot, on hatch and
-// whenever the pet changes. Seeding from lineage_id ^ genome makes
+// whenever the pet changes. Seeding from PetView.identity (pebble_identity) makes
 // the SAME pet always move the same way and siblings move differently, so
 // motion becomes a visible, heritable trait.
-void petfx_reset(const SimView& p);
+void petfx_reset(const PetView& p);
 
 // Advance the behaviour automaton. Call once per loop() from ui_service().
 // Cheap (a few hundred cycles) and never blocks; it is time-based, so calling
 // it at an irregular rate is fine, and a stall longer than 250 ms is clamped
 // so the pet walks instead of teleporting.
-void petfx_service(const SimView& p, uint32_t now_ms);
+void petfx_service(const PetView& p, uint32_t now_ms);
 
 // =============================================================================
 //  DRAWING  (inside a rd_begin_frame() / rd_end_frame() pair)
@@ -131,7 +132,7 @@ void petfx_draw_floor(void);
 // body into the HUD columns however hard the caller pushes.
 //
 // It defaults to 0 so the ceremonies, which have no lunge, are unchanged.
-void petfx_draw_body(const SimView& p, uint8_t pose, uint8_t frame, int16_t dy,
+void petfx_draw_body(const PetView& p, uint8_t pose, uint8_t frame, int16_t dy,
                      int16_t dx = 0);
 
 // Where the body actually landed this frame, so the caller can hang emotes

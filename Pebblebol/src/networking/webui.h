@@ -95,15 +95,11 @@ uint16_t web_pin(void);
 void     web_bind_config(Config* cfg);
 
 // -----------------------------------------------------------------------------
-//  SPRITE / MOOD POLICY
-//    ui calls these so the pose and mood rules live in one place. They are the
-//    last remnants of the phone mirror and move into the render layer when the
-//    PetView struct lands (audit risk 9).
+//  SPRITE / MOOD POLICY moved to ui/pet_view.cpp by P2-C11c (audit risk 9):
+//  "what does this pet look like right now" is a RENDER decision, so
+//  pet_pose_of() / pet_mood_index() own it and the phone mirror is one of the
+//  two consumers instead of the owner.
 // -----------------------------------------------------------------------------
-uint8_t  web_pose_of(const SimView& p);      // SpritePose
-
-// 0..100 mood score -> enum Mood ordinal, using the nt_types.h bands.
-uint8_t  web_mood_index(uint8_t score_0_100);
 
 // -----------------------------------------------------------------------------
 //  Compile-time sanity on the constants this module contracts against.

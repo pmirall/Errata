@@ -8,9 +8,10 @@
 //  in ui.cpp; screen_def() returns NULL for it and the legacy path runs.
 //
 //  P2-C11a migrated BOOT, LOAD_SAVE and ERROR; P2-C11b added HOME, MENU, the
-//  two CARE lists, both STATUS pages, SETTINGS and TIME. The remaining rows
-//  fill in one commit at a time until the switches are empty (plan P2-C11,
-//  grep exit gate).
+//  two CARE lists, both STATUS pages, SETTINGS and TIME; P2-C11c added LINK
+//  (ex SOCIAL), EVOLUTION (ex EGG), DIAG (ex GOD) and CREATOR (ex QR), and
+//  moved the CONFIRM / ALERT overlays into ui/dialog.cpp. GAME is the only
+//  screen left in ui.cpp's switches, and it goes in P3-C4.
 //
 //  PURE translation unit: it names hooks, it does not draw.
 // =============================================================================
@@ -18,8 +19,12 @@
 
 #include "screen_boot.h"
 #include "screen_care.h"
+#include "screen_creator.h"
+#include "screen_diag.h"
 #include "screen_error.h"
+#include "screen_evolution.h"
 #include "screen_home.h"
+#include "screen_link.h"
 #include "screen_menu.h"
 #include "screen_settings.h"
 #include "screen_status.h"
@@ -41,14 +46,35 @@ const ScreenDef SCREENS[SCR_COUNT] = {
                                                                   // SCR_STATUS_A
   { status_b_enter, nullptr, status_b_render, status_input, nullptr, 0, 0 },
                                                                   // SCR_STATUS_B
-  { nullptr, nullptr, nullptr, nullptr, nullptr, 0, 0 },          // SCR_SOCIAL
+  // LINK is a placeholder until P7-C2, so it is an ordinary non-sticky screen
+  // with nothing to enter and nothing to release. The BLE peer browser that
+  // used to live here owned RADIO_BLE on entry; nothing does now.
+  { nullptr, nullptr, link_render, link_input, nullptr, 0, 0 },   // SCR_SOCIAL (LINK)
   { settings_enter, nullptr, settings_render, settings_input, nullptr, 0, 0 },
                                                                   // SCR_SETTINGS
+  // CONFIRM and ALERT are OVERLAYS, not screens: they float over whatever is
+  // up and never become sm_current(), so they have no row to dispatch through.
+  // ui/dialog.cpp owns both, and ui_screen() is what reports them.
   { nullptr, nullptr, nullptr, nullptr, nullptr, 0, 0 },   // SCR_CONFIRM
   { nullptr, nullptr, nullptr, nullptr, nullptr, 0, 0 },   // SCR_ALERT
-  { nullptr, nullptr, nullptr, nullptr, nullptr, 0, 0 },   // SCR_EGG
-  { nullptr, nullptr, nullptr, nullptr, nullptr, 0, 0 },   // SCR_GOD
-  { nullptr, nullptr, nullptr, nullptr, nullptr, 0, 0 },   // SCR_QR
+  // EVOLUTION (ex EGG). SF_STICKY only, deliberately: an incubating egg is a
+  // place to stand, so no auto-return - but it is also a screen with a toast
+  // ("todavía no") and the ordinary BACK gesture, and SF_OWNS_FRAME would
+  // suppress the first while SF_LOCK_INPUT would swallow the second. The
+  // ceremony's "no chrome, no buttons" is DYNAMIC and belongs to the ceremony:
+  // ui_input_locked() drops every gesture while one runs, and ui_draw() treats
+  // ceremony_active() as an owns-frame of its own.
+  { evo_enter, nullptr, evo_render, evo_input, nullptr, 0,
+    SF_STICKY },                                                  // SCR_EGG (EVOLUTION)
+  // DIAG (ex GOD). All three flags: no auto-return off a console somebody is
+  // typing into, no global grammar over its own, and it draws its own frame.
+  { nullptr, diag_update, diag_render, diag_input, nullptr, 0,
+    SF_STICKY | SF_LOCK_INPUT | SF_OWNS_FRAME },                  // SCR_GOD (DIAG)
+  // CREATOR (ex QR). Its enter/leave hooks are the radio: request on the way
+  // in, release on the way out, which is the whole "radio OFF by default"
+  // policy for the Wi-Fi station (plan section 2 row G4).
+  { creator_enter, creator_update, creator_render, creator_input, creator_leave, 0,
+    0 },                                                          // SCR_QR (CREATOR)
   // TIME owns every gesture (SF_LOCK_INPUT), because HOLD_R means "+1" here
   // and BACK everywhere else, and it never times out (SF_STICKY), because
   // throwing away a half-entered date after 20 s of thinking would be wrong.
