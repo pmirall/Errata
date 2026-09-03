@@ -367,6 +367,21 @@ enum StrId : uint16_t {
   STR_GN_SEX,
   STR_GN_RARE,
 
+  // --- 33i. BOOT / LOAD_SAVE / ERROR (P2-C9c). The save pipeline is the one
+  //          place the device tells the user something went wrong with their
+  //          pet's memory, so the words are plain and the choice is explicit.
+  STR_BOOT_LOADING,
+  STR_SAVE_ERR_TITLE,
+  STR_SAVE_ERR_BODY,
+  STR_SAVE_ERR_NEWER,
+  STR_SAVE_ERR_A,
+  STR_SAVE_ERR_B,
+  STR_SAVE_NO_BACKUP,
+  STR_SAVE_UPDATE_FW,
+  STR_SAVE_RECOVERED,
+  STR_SAVE_FROM_BACKUP,
+  STR_SAVE_UPDATED,
+
   STR_COUNT
 };
 
@@ -693,7 +708,20 @@ inline constexpr const char* const ES[] = {
   /* STR_GN_HARDY */              "DUREZA",
   /* STR_GN_LUCK */               "SUERTE",
   /* STR_GN_SEX */                "SEXO",
-  /* STR_GN_RARE */               "RARO"
+  /* STR_GN_RARE */               "RARO",
+
+  /* --- 33i. boot / load / save error --- */
+  /* STR_BOOT_LOADING */          "Cargando la partida...",
+  /* STR_SAVE_ERR_TITLE */        "ERROR DE PARTIDA",
+  /* STR_SAVE_ERR_BODY */         "No he podido leerla.",
+  /* STR_SAVE_ERR_NEWER */        "Es de un firmware más nuevo.",
+  /* STR_SAVE_ERR_A */            "A: Recuperar",
+  /* STR_SAVE_ERR_B */            "B: Reset de fábrica",
+  /* STR_SAVE_NO_BACKUP */        "No hay copia que recuperar.",
+  /* STR_SAVE_UPDATE_FW */        "Actualiza el firmware.",
+  /* STR_SAVE_RECOVERED */        "Partida reparada.",
+  /* STR_SAVE_FROM_BACKUP */      "Recuperada de la copia.",
+  /* STR_SAVE_UPDATED */          "Partida actualizada."
 };
 
 // -----------------------------------------------------------------------------

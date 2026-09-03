@@ -113,6 +113,14 @@ void save_service(void);
 // the Arduino core's wholesale erase of "nvs" cannot reach (decision D6).
 bool save_checkpoint_all(void);
 
+// EXPLICIT RECOVERY - the SAVE ERROR screen's "Recuperar" and nothing else.
+// Loads the nvs2 checkpoint into 'gs' and commits it over KV_MAIN. Returns
+// false when there is no usable checkpoint, and then writes NOTHING, so a user
+// who asks to recover and has no copy still has whatever KV_MAIN held.
+// save_load_all() reaches the checkpoint on its own only when KV_MAIN is empty;
+// this is the path for the other case - KV_MAIN holds bytes, and they are rot.
+bool save_restore_checkpoint(GameState& gs);
+
 // Clears both partitions. The caller builds the new starter afterwards; this
 // function deliberately does not, so nothing can wipe a unit "helpfully".
 bool save_factory_reset(void);

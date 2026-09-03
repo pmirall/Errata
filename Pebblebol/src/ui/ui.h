@@ -132,6 +132,27 @@ void     ui_note_absence(const AbsenceReport& rep);
 // Transient one-line notice above the affordance strip, UI_TOAST_MS long.
 void     ui_toast(uint16_t str_id);
 
+// -----------------------------------------------------------------------------
+// The save pipeline's face (P2-C9c).
+//
+// ui_boot_screen() draws ONE frame of SCR_BOOT or SCR_LOAD_SAVE and may be
+// called before ui_begin(): neither reads the pet or the config, which is the
+// point - they are what is on screen while the load decides.
+//
+// ui_note_load() takes the LoadResult (persistence/save_manager.h) and turns it
+// into either a toast or the SAVE ERROR screen. It NEVER wipes anything: the
+// two refused outcomes leave the session read-only until the user chooses.
+//
+// ui_bind_recover() binds the "Recuperar" action. It lives in the entry point
+// because recovery has to rebind the simulation to the pet that comes back,
+// which ui.cpp may not do. Returning false means "there was no copy" and
+// nothing was written.
+// -----------------------------------------------------------------------------
+typedef bool (*UiRecoverFn)(void);
+void     ui_bind_recover(UiRecoverFn fn);
+void     ui_note_load(uint8_t load_result);
+void     ui_boot_screen(ScreenId s);
+
 // True while the hatch ceremony owns the buttons. The ceremony is
 // unskippable, so every gesture is dropped for its duration.
 // The entry point must keep pumping input_poll() anyway - ui_handle() drops

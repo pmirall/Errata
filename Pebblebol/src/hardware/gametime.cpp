@@ -175,6 +175,21 @@ static void gt_load_seed(void)
     s_est_base_s = seen;
   }
 
+  // Plan 1.7: a unit that HAS been calibrated before, and whose persisted
+  // last-known epoch is a real wall clock, is CAL_ESTIMATED at boot rather than
+  // blind - the estimate below is "that epoch plus this uptime", which is what
+  // CAL_ESTIMATED means. Without it a device whose RTC timer was reset by a
+  // power cut would charge no absence at all, however long it really was.
+  uint8_t  cal   = (uint8_t)CAL_UNSET;
+  uint32_t known = 0;
+  compat_boot_cal(cal, known);
+  if (known > s_est_base_s && known >= (uint32_t)GT_EPOCH_SANE_MIN) {
+    s_est_base_s = known;           // ConfigV2 kept a newer mirror than key "t"
+  }
+  if (cal != (uint8_t)CAL_UNSET && s_est_base_s >= (uint32_t)GT_EPOCH_SANE_MIN) {
+    s_cal = (uint8_t)CAL_ESTIMATED;
+  }
+
   char tz[CFGV2_TZ_CAP];
   compat_boot_tz(tz, sizeof(tz));
   if (tz[0] != '\0') {
@@ -278,6 +293,13 @@ bool gt_set_epoch(uint32_t epoch, TimeCal src)
 #endif
 
   s_cal = (uint8_t)src;
+
+  // Persist HOW the clock was set, not just what it was set to (plan 1.7): the
+  // next boot needs to know a real clock once existed here before it may call
+  // its own estimate CAL_ESTIMATED and charge an absence with it.
+#if defined(ARDUINO)
+  compat_note_time_cal(s_cal, epoch);
+#endif
   return true;
 }
 

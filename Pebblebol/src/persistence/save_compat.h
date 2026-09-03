@@ -61,6 +61,13 @@ static_assert((int)COMPAT_GAIN_SLOTS == LEGACY_STAT_COUNT,
 LoadResult compat_load(PetSave& pet, Config& cfg);
 bool       compat_have_pet(void);
 
+// The SAVE ERROR screen's "Recuperar". Restores the nvs2 checkpoint over
+// KV_MAIN and re-derives the live pet from it. Returns LOAD_RECOVERED_CKPT on
+// success; LOAD_CORRUPT when there was no checkpoint to recover, in which case
+// nothing was written and the session stays read-only. Never called except by
+// an explicit user choice.
+LoadResult compat_recover(PetSave& pet, Config& cfg);
+
 // The live GameState this module owns, for the screens that already speak v2.
 GameState& compat_state(void);
 
@@ -97,5 +104,20 @@ bool compat_load_gain(uint8_t pts[COMPAT_GAIN_SLOTS], uint32_t& epoch);
 // The persisted POSIX TZ string, for hardware/gametime.cpp's bootstrap. Empty
 // when nothing has been persisted yet; the caller keeps its compiled default.
 void compat_boot_tz(char* out, size_t cap);
+
+// The persisted clock calibration (plan 1.7): what the clock last knew and
+// when. A boot whose state is not CAL_UNSET and whose last_known_epoch is sane
+// may call itself CAL_ESTIMATED instead of blind, which is the difference
+// between charging an honest absence and charging none.
+void compat_boot_cal(uint8_t& state, uint32_t& epoch);
+
+// Records a calibration. gt_set_epoch() is the only caller: the state is
+// persisted so the NEXT boot knows a real clock once existed.
+void compat_note_time_cal(uint8_t state, uint32_t epoch);
+
+// The device identity of spec section 43, generated exactly once from the rng
+// service (which app_setup() seeds with the firmware's single esp_random()
+// call) and never regenerated while a save survives. 0 until the first load.
+uint32_t compat_device_id(void);
 
 #endif // PB_SAVE_COMPAT_H

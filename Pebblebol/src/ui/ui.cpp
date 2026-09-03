@@ -111,6 +111,20 @@ static uint8_t  s_modal       = MODAL_NONE;
 static uint32_t s_modal_ms    = 0;
 static uint16_t s_modal_str   = STR_EMPTY;
 static uint8_t  s_confirm_id  = CFM_NONE;
+
+// ---- SAVE ERROR (P2-C9c) ----------------------------------------------------
+// What the ERROR screen is showing. The two are not interchangeable: a save
+// this firmware cannot READ may be recoverable from the nvs2 checkpoint, while
+// a save from a NEWER firmware is perfectly good data that only a newer build
+// can read - offering a factory reset for it would be offering to destroy a
+// working save because the device is out of date.
+enum ErrKind : uint8_t {
+  ERRK_NONE = 0,
+  ERRK_SAVE_CORRUPT,
+  ERRK_SAVE_NEWER
+};
+static uint8_t     s_err_kind = ERRK_NONE;
+static UiRecoverFn s_recover  = nullptr;
 static uint8_t  s_confirm_yes = 0;      // invariant 5: NO
 
 // ---- alert queue ------------------------------------------------------------
@@ -628,7 +642,11 @@ ScreenId ui_screen(void) {
 
 // Screens that never time out (invariant 3).
 static bool screen_is_sticky(uint8_t s) {
-  return s == SCR_HOME || s == SCR_GAME || s == SCR_EGG || s == SCR_GOD;
+  // ERROR is sticky for the same reason it refuses BACK and HOME: the auto
+  // return would drop the user on HOME with a read-only session and no idea
+  // why nothing is being saved.
+  return s == SCR_HOME || s == SCR_GAME || s == SCR_EGG || s == SCR_GOD ||
+         s == SCR_ERROR;
 }
 
 bool ui_input_locked(void) {
@@ -2589,6 +2607,70 @@ static void handle_egg(Gesture g) {
 }
 
 // =============================================================================
+//  16b. BOOT / LOAD_SAVE / ERROR (P2-C9c)
+//
+//  These three are the save pipeline's face. BOOT and LOAD_SAVE are drawable
+//  BEFORE ui_begin() - they read no pet and no config - because that is when
+//  they are needed: the load runs between them. P2-C11 moves all three into the
+//  screen table with the rest.
+// =============================================================================
+static void draw_boot(void) {
+  rd_text_center(28, RD_FONT_HEAD, S(STR_APP_NAME));
+  rd_text_center(40, RD_FONT_TINY, FW_VERSION);
+}
+
+static void draw_load_save(void) {
+  rd_text_center(28, RD_FONT_HEAD, S(STR_APP_NAME));
+  rd_text_center(42, RD_FONT_BODY, S(STR_BOOT_LOADING));
+}
+
+static void draw_error(void) {
+  draw_header(S(STR_SAVE_ERR_TITLE), nullptr);
+  const uint16_t body = (s_err_kind == ERRK_SAVE_NEWER) ? STR_SAVE_ERR_NEWER
+                                                        : STR_SAVE_ERR_BODY;
+  rd_text_wrap(2, 22, OLED_W - 4, RD_LINE_BODY, 2, RD_FONT_BODY, S(body));
+  rd_text(2, 42, RD_FONT_BODY, S(STR_SAVE_ERR_A));
+  // No factory reset is offered for a newer save: the bytes are fine and the
+  // fix is a firmware update, not a wipe.
+  rd_text(2, 52, RD_FONT_BODY,
+          (s_err_kind == ERRK_SAVE_NEWER) ? S(STR_SAVE_UPDATE_FW) : S(STR_SAVE_ERR_B));
+  rd_affordance(S(STR_AF_OK), S(STR_AF_SEL));
+}
+
+// "Recuperar": restore the nvs2 checkpoint, through the entry point, because
+// only it can rebind the simulation to the pet that comes back.
+static void error_recover(void) {
+  if (!s_recover || !s_recover()) {
+    ui_toast(STR_SAVE_NO_BACKUP);       // nothing was written; still read-only
+    return;
+  }
+  ui_toast(STR_SAVE_FROM_BACKUP);
+  s_err_kind = ERRK_NONE;
+  s_stat_ok  = 0;
+  s_sp       = 0;
+  const PetSave* p = pet();
+  if (p) petfx_reset(*p);
+  ui_goto(SCR_HOME);
+}
+
+static void handle_error(Gesture g) {
+  switch (g) {
+    case GST_TAP_L:
+      error_recover();
+      break;
+    case GST_TAP_R:
+      if (s_err_kind == ERRK_SAVE_NEWER) {
+        ui_toast(STR_SAVE_UPDATE_FW);   // never a wipe: the save is good data
+      } else {
+        confirm_open(CFM_WIPE1, STR_CF_WIPE);   // two dialogs, then the reset
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+// =============================================================================
 //  17. CONFIRM / ALERT overlays
 // =============================================================================
 static void confirm_commit(void) {
@@ -2608,8 +2690,9 @@ static void confirm_commit(void) {
       sim_new_pet(g0, gt_now(), 0);
       const PetSave* p = pet();
       if (p) { compat_save_pet(*p, true); petfx_reset(*p); }
-      s_stat_ok = 0;                 // a wiped device shows the truth at once
-      s_sp = 0;
+      s_stat_ok  = 0;                // a wiped device shows the truth at once
+      s_sp       = 0;
+      s_err_kind = ERRK_NONE;        // the save the ERROR screen was about is gone
       ui_goto(SCR_EGG);
       break;
     }
@@ -2767,6 +2850,34 @@ void ui_bind_config(Config* cfg) {
   s_bright_base  = s_cfg->brightness ? s_cfg->brightness : (uint8_t)OLED_CONTRAST_DEFAULT;
   s_bright_valid = 0;             // force the first write, whatever the value
   bright_service();
+}
+
+void ui_bind_recover(UiRecoverFn fn) { s_recover = fn; }
+
+void ui_note_load(uint8_t result) {
+  switch (result) {
+    case LOAD_CORRUPT:
+      s_err_kind = ERRK_SAVE_CORRUPT;
+      ui_goto(SCR_ERROR);
+      break;
+    case LOAD_FOREIGN_NEWER:
+      s_err_kind = ERRK_SAVE_NEWER;
+      ui_goto(SCR_ERROR);
+      break;
+    case LOAD_MIGRATED:       ui_toast(STR_SAVE_UPDATED);     break;
+    case LOAD_RECOVERED_PAIR: ui_toast(STR_SAVE_RECOVERED);   break;
+    case LOAD_RECOVERED_CKPT: ui_toast(STR_SAVE_FROM_BACKUP); break;
+    default: break;
+  }
+}
+
+// Draws one frame of a screen that needs no state at all, so the entry point
+// can show BOOT and LOAD_SAVE while the save pipeline runs - before ui_begin().
+void ui_boot_screen(ScreenId s) {
+  if (s != SCR_BOOT && s != SCR_LOAD_SAVE) return;
+  if (!rd_begin_frame()) return;
+  if (s == SCR_BOOT) draw_boot(); else draw_load_save();
+  rd_end_frame();
 }
 
 void ui_note_brightness(uint8_t contrast) {
@@ -2944,17 +3055,21 @@ void ui_handle(Gesture g) {
     return;
   }
 
-  // --- invariant 2: HOME from anywhere -------------------------------------
+  // --- invariant 2: HOME from anywhere, ERROR excepted ---------------------
+  // ERROR holds the device: the question "recover or reset?" is about a save
+  // that is still on flash, and walking away from it would leave the user
+  // playing a placeholder pet that can never be written. P2-C11 expresses this
+  // as SF_STICKY in the screen table.
   if (g == GST_LONG_BOTH) {
-    if (s_screen != SCR_HOME) { nav_home(); return; }
+    if (s_screen != SCR_HOME && s_screen != SCR_ERROR) { nav_home(); return; }
   }
 
-  // --- invariant 1: BACK on every screen except GAME and CLOCK -------------
+  // --- invariant 1: BACK on every screen except GAME, CLOCK and ERROR ------
   // The clock screen needs a repeating right button to enter a date (see
   // handle_clock); it is left with BOTH (cancel), HOLD L (save) and LONG BOTH
   // (HOME) instead.
   if (g == GST_HOLD_R && s_screen != SCR_GAME &&
-      s_screen != SCR_CLOCK) {
+      s_screen != SCR_CLOCK && s_screen != SCR_ERROR) {
     if (s_screen == SCR_HOME) { s_wiggle_ms = now_ms(); return; }
     if (s_screen == SCR_SETTINGS && s_set_page == 1) { s_set_page = 0; return; }
     nav_back();
@@ -2974,6 +3089,9 @@ void ui_handle(Gesture g) {
     case SCR_EGG:       handle_egg(g);      break;
     case SCR_QR:        handle_qr(g);       break;
     case SCR_CLOCK:     handle_clock(g);    break;
+    case SCR_ERROR:     handle_error(g);    break;
+    case SCR_BOOT:
+    case SCR_LOAD_SAVE: break;             // no input: they are not waiting on one
     default:            break;
   }
 }
@@ -3091,6 +3209,9 @@ void ui_draw(void) {
       break;
     case SCR_QR:       draw_qr();       break;
     case SCR_CLOCK:    draw_clock();    break;
+    case SCR_BOOT:     draw_boot();      break;
+    case SCR_LOAD_SAVE:draw_load_save(); break;
+    case SCR_ERROR:    draw_error();     break;
     case SCR_GOD:      god_draw();      rd_affordance_echo(); return;  // god owns the frame
     default:           draw_home();     break;
   }

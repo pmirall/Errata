@@ -62,6 +62,12 @@ enum ScreenId : uint8_t {
   SCR_GOD,           // S12
   SCR_QR,            // S13
   SCR_CLOCK,         // S14 on-device time entry
+  // P2-C9c. Appended rather than inserted: P2-C11 renumbers the whole enum to
+  // the spec section 6 order when the screen table lands, and until then every
+  // id above is load-bearing in three switches.
+  SCR_BOOT,          // S15 splash, before anything has been read
+  SCR_LOAD_SAVE,     // S16 the save pipeline is running
+  SCR_ERROR,         // S17 SAVE ERROR and the two choices
   SCR_COUNT
 };
 

@@ -25,6 +25,7 @@
 #include "../hardware/boot.h"      // the free RTC mirror of the last-seen epoch
 #include "../core/config.h"
 #include "../core/crc16.h"
+#include "../core/rng.h"           // the device id of spec section 43
 
 // The single live game state. 1,936 B of .bss, exactly the sum of the persisted
 // blobs (save_schema.h section 8).
@@ -264,6 +265,27 @@ LoadResult compat_load(PetSave& pet, Config& cfg) {
     return r;
   }
 
+  // --- the identity and the fields no screen owns yet -----------------------
+  // Creator PIN state is zeroed until P8 brings the creator server back: a
+  // stale lockout deadline or fail count from a firmware that no longer has a
+  // PIN screen could lock a user out of a feature they cannot reach.
+  s_gs.cfg.creator_pin    = 0;
+  s_gs.cfg.pin_fail_count = 0;
+  s_gs.cfg.pin_lock_until = 0;
+
+  // Spec section 43: one identity per device, drawn once from the rng service
+  // app_setup() seeded with esp_random(), then persisted forever. Never on a
+  // read-only session - that would be the first write onto a save the user has
+  // not yet been asked about.
+  if (s_gs.cfg.device_id == 0) {
+    do {
+      s_gs.cfg.device_id = rng_u32(RNG_MISC);
+    } while (s_gs.cfg.device_id == 0);
+    if (r != LOAD_FRESH) {
+      save_config(s_gs.cfg);
+    }
+  }
+
   cfg_from_v2(s_gs.cfg, cfg);
   if (r == LOAD_FRESH) {
     return r;
@@ -291,6 +313,43 @@ LoadResult compat_load(PetSave& pet, Config& cfg) {
     pet_seal(pet);
   }
   return r;
+}
+
+uint32_t compat_device_id(void) { return s_gs.cfg.device_id; }
+
+void compat_boot_cal(uint8_t& state, uint32_t& epoch) {
+  state = (s_gs.cfg.time_cal_state < (uint8_t)CAL_COUNT) ? s_gs.cfg.time_cal_state
+                                                         : (uint8_t)CAL_UNSET;
+  epoch = s_gs.cfg.last_known_epoch;
+}
+
+void compat_note_time_cal(uint8_t state, uint32_t epoch) {
+  if (state >= (uint8_t)CAL_COUNT) return;
+  if (s_gs.cfg.time_cal_state == state && s_gs.cfg.time_cal_epoch == epoch) return;
+  s_gs.cfg.time_cal_state = state;
+  s_gs.cfg.time_cal_epoch = epoch;
+  if (epoch > s_gs.cfg.last_known_epoch) s_gs.cfg.last_known_epoch = epoch;
+  if (s_readonly) return;
+  save_config(s_gs.cfg);
+}
+
+LoadResult compat_recover(PetSave& pet, Config& cfg) {
+  if (!save_restore_checkpoint(s_gs)) {
+    return LOAD_CORRUPT;            // no copy: nothing written, still read-only
+  }
+  // The companion blob belongs to the save that just lost, not to the copy that
+  // replaced it, so it goes: the pet is rebuilt from the recovered slot 0.
+  kv_erase(KV_MAIN, KEY_COMPAT_PET);
+
+  s_readonly     = false;
+  s_box_sig_seen = false;
+  cfg_from_v2(s_gs.cfg, cfg);
+  memset(&pet, 0, sizeof pet);
+  s_have_pet = !pebble_is_empty(s_gs.pebbles[0]);
+  if (s_have_pet) {
+    pet_from_state(pet);
+  }
+  return LOAD_RECOVERED_CKPT;
 }
 
 void compat_boot_tz(char* out, size_t cap) {

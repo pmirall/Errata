@@ -195,6 +195,24 @@ static void boot_pet(void)
 }
 
 // =============================================================================
+//  SAVE RECOVERY
+//  The SAVE ERROR screen's "Recuperar", bound into ui.cpp. It lives here and
+//  not in ui.cpp because recovery ends with a DIFFERENT pet in g_pet, and
+//  rebinding the simulation is the entry point's job. False means "there was no
+//  checkpoint": nothing was written and the session stays read-only.
+// =============================================================================
+static bool app_recover_save(void)
+{
+  if (compat_recover(g_pet, g_cfg) != LOAD_RECOVERED_CKPT) {
+    return false;
+  }
+  sim_init(g_pet);
+  apply_config();
+  g_boot_last_seen = save_last_seen();
+  return true;
+}
+
+// =============================================================================
 //  BOOT: ABSENCE
 //  sim_catch_up_ex() reads SimEnv, so the environment must
 //  already be pushed in. With no trustworthy clock (gt_cal_state() == CAL_UNSET)
@@ -257,6 +275,7 @@ void app_setup(void)
   if (!rd_begin()) {
     rd_fatal(S(STR_ERR_OLED));    // noreturn: draws, logs and blinks forever
   }
+  ui_boot_screen(SCR_BOOT);       // S15: something on the panel before any I/O
 
   // --- entropy --------------------------------------------------------------
   // The ONE esp_random() call of the firmware (plan §1.4): it seeds every
@@ -272,6 +291,7 @@ void app_setup(void)
   }
 
   // --- the save -------------------------------------------------------------
+  ui_boot_screen(SCR_LOAD_SAVE);  // S16: the pipeline below owns the screen
   // The whole load pipeline runs here, before the clock: gt_begin() bootstraps
   // its estimate from save_last_seen() and its timezone from the persisted
   // config, and both are answers this call produces.
@@ -301,6 +321,7 @@ void app_setup(void)
   net_begin();
   god_begin();
 
+  ui_bind_recover(&app_recover_save);
   ui_bind_config(&g_cfg);
   web_bind_config(&g_cfg);
   ui_begin();
@@ -312,10 +333,7 @@ void app_setup(void)
   rd_splash();
   boot_absence();
 
-  if (!g_nvs_ok || compat_readonly()) {
-    // A refused load (LOAD_CORRUPT / LOAD_FOREIGN_NEWER) is a read-only
-    // session: nothing has been written and nothing will be. P2-C9c replaces
-    // this toast with the SAVE ERROR screen and its two choices.
+  if (!g_nvs_ok) {
     ui_toast(STR_ERR_NVS);
   } else if (boot == BOOT_FIRST_RUN) {
     ui_toast(STR_BOOT_FIRST);
@@ -327,7 +345,12 @@ void app_setup(void)
   // the date from a human or not at all, so ask once, right here, before the
   // pet's first day starts running on an estimate. Every later visit is through
   // SETTINGS. Backing out is allowed - CAL_UNSET simply charges no absence.
-  if (boot == BOOT_FIRST_RUN && gt_cal_state() == CAL_UNSET) {
+  // The load's verdict wins the screen: a save this firmware refused to touch
+  // is a question the user has to answer before anything else happens, and
+  // nothing on the way there wipes it (audit risk 3).
+  ui_note_load((uint8_t)load);
+
+  if (!compat_readonly() && boot == BOOT_FIRST_RUN && gt_cal_state() == CAL_UNSET) {
     ui_goto(SCR_CLOCK);
   }
 

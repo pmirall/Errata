@@ -253,6 +253,109 @@ TEST(compat_gain_ledger_survives_a_write_and_refuses_a_foreign_one) {
   CHECK_EQ(epoch, 0u);
 }
 
+TEST(compat_device_id_is_drawn_once_and_then_kept) {
+  begin();
+  if (!seed_v1()) { CHECK(false); return; }
+
+  PetSave pet;
+  Config  cfg;
+  CHECK_EQ((int)compat_load(pet, cfg), (int)LOAD_MIGRATED);
+  const uint32_t id = compat_device_id();
+  CHECK(id != 0u);
+
+  PetSave pet2;
+  Config  cfg2;
+  CHECK_EQ((int)compat_load(pet2, cfg2), (int)LOAD_OK);
+  CHECK_EQ(compat_device_id(), id);         // spec section 43: once, forever
+
+  // The creator PIN state stays zero until P8 gives it a screen again.
+  CHECK_EQ(compat_state().cfg.creator_pin, 0);
+  CHECK_EQ(compat_state().cfg.pin_fail_count, 0);
+  CHECK_EQ(compat_state().cfg.pin_lock_until, 0u);
+}
+
+TEST(compat_time_calibration_is_persisted_and_read_back) {
+  begin();
+  if (!seed_v1()) { CHECK(false); return; }
+  PetSave pet;
+  Config  cfg;
+  CHECK_EQ((int)compat_load(pet, cfg), (int)LOAD_MIGRATED);
+
+  compat_note_time_cal((uint8_t)CAL_USER, 1700500000u);
+
+  PetSave pet2;
+  Config  cfg2;
+  CHECK_EQ((int)compat_load(pet2, cfg2), (int)LOAD_OK);
+  uint8_t  state = 0;
+  uint32_t known = 0;
+  compat_boot_cal(state, known);
+  CHECK_EQ(state, (uint8_t)CAL_USER);
+  CHECK(known >= 1700500000u);
+  CHECK_EQ(compat_state().cfg.time_cal_epoch, 1700500000u);
+}
+
+TEST(compat_recovers_from_the_nvs2_checkpoint_when_the_user_asks) {
+  begin();
+  if (!seed_v1()) { CHECK(false); return; }
+  PetSave pet;
+  Config  cfg;
+  CHECK_EQ((int)compat_load(pet, cfg), (int)LOAD_MIGRATED);
+  pet.stat[ST_HAPPINESS] = 55000;
+  s_ms += 2000;
+  CHECK(compat_save_pet(pet, true));
+  CHECK(save_checkpoint_all());                 // the daily nvs2 copy
+
+  // Now lose KV_MAIN's Box the way bit rot does.
+  CHECK(kv_mem_corrupt("box0", 6));
+  CHECK(kv_mem_corrupt("box1", 6));
+  PetSave pet2;
+  Config  cfg2;
+  CHECK_EQ((int)compat_load(pet2, cfg2), (int)LOAD_CORRUPT);
+  CHECK(compat_readonly());
+
+  PetSave back;
+  Config  cfg3;
+  CHECK_EQ((int)compat_recover(back, cfg3), (int)LOAD_RECOVERED_CKPT);
+  CHECK(!compat_readonly());
+  CHECK(compat_have_pet());
+  CHECK_EQ(back.stat[ST_HAPPINESS], 55000);
+  CHECK(!kv_mem_exists(KV_MAIN, KEY_COMPAT_PET));   // it belonged to the lost save
+
+  // The recovered state is on KV_MAIN. The next boot still finds the rotten
+  // second copy of the Box pair - commit_all() rewrote the one a reader would
+  // not pick - repairs it, and the boot after that is an ordinary one.
+  PetSave again;
+  Config  cfg4;
+  CHECK_EQ((int)compat_load(again, cfg4), (int)LOAD_RECOVERED_PAIR);
+  PetSave settled;
+  Config  cfg5;
+  CHECK_EQ((int)compat_load(settled, cfg5), (int)LOAD_OK);
+  CHECK_EQ(settled.stat[ST_HAPPINESS], 55000);
+}
+
+TEST(compat_recover_with_no_checkpoint_writes_nothing) {
+  begin();
+  if (!seed_v1()) { CHECK(false); return; }
+  PetSave pet;
+  Config  cfg;
+  CHECK_EQ((int)compat_load(pet, cfg), (int)LOAD_MIGRATED);
+  s_ms += 2000;
+  CHECK(compat_save_pet(pet, true));
+  CHECK(kv_mem_corrupt("box0", 6));
+  CHECK(kv_mem_corrupt("box1", 6));
+
+  PetSave pet2;
+  Config  cfg2;
+  CHECK_EQ((int)compat_load(pet2, cfg2), (int)LOAD_CORRUPT);
+
+  const uint32_t puts_before = kv_mem_puts();
+  PetSave back;
+  Config  cfg3;
+  CHECK_EQ((int)compat_recover(back, cfg3), (int)LOAD_CORRUPT);
+  CHECK(compat_readonly());                     // still nobody's decision but ours
+  CHECK_EQ(kv_mem_puts(), puts_before);         // and still not one byte written
+}
+
 TEST(compat_mirrors_the_last_seen_epoch_into_rtc) {
   begin();
   PetSave pet;

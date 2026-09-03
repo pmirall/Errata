@@ -554,6 +554,19 @@ static bool commit_all(GameState& gs) {
   return ok;
 }
 
+bool save_restore_checkpoint(GameState& gs) {
+  // Static, not a local: a GameState is 1,936 B and this runs on the loop
+  // task's stack. Nothing here re-enters.
+  static GameState tmp;
+  state_defaults(tmp);
+  if (!checkpoint_load(tmp)) return false;      // nothing written, nothing lost
+  gs = tmp;
+  save_bind(gs);
+  s_pending_mask = 0;
+  for (uint8_t slot = 0; slot < BOX_SLOTS; ++slot) s_have_written[slot] = false;
+  return commit_all(gs);
+}
+
 LoadResult save_load_all(GameState& gs) {
   state_defaults(gs);
   save_bind(gs);
