@@ -88,6 +88,17 @@ uint8_t daylight_is_night(uint16_t day_of_year, uint16_t minute_of_day)
   const uint16_t rise = daylight_sunrise_min(day_of_year);
   const uint16_t bed  = daylight_bedtime_min(day_of_year);
 
-  if (bed > rise) return (m >= bed || m < rise) ? 1u : 0u;   // the normal case
-  return (m >= bed && m < rise) ? 1u : 0u;                   // a wrapped bedtime
+  // The normal case: bedtime is in the evening and sunrise the next morning, so
+  // night is the range that WRAPS midnight.
+  if (bed > rise) return (m >= bed || m < rise) ? 1u : 0u;
+
+  // bed <= rise. Unreachable with the committed table — daylight_every_day_of_
+  // the_year_is_a_sane_day asserts bed > rise on all 366 days — and it would
+  // only arise if a future table edit pushed bedtime past midnight. Note this
+  // branch then describes a SAME-DAY range, which is the wrong shape for that
+  // case: a bedtime after midnight needs `m >= bed || m < rise` too, against a
+  // rise on the following day. Left as the conservative reading (a narrow night
+  // rather than an inverted one), but anyone editing the table past midnight
+  // must revisit it rather than trust it.
+  return (m >= bed && m < rise) ? 1u : 0u;
 }

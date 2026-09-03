@@ -249,6 +249,20 @@ TEST(game_state_xp_ledger_rides_the_inventory_pair) {
 
   // An uptime counter is not an epoch: stored as 0, and refused on the way back.
   CHECK(gs_save_xp_ledger(spent, 4200u));
+  {
+    // The read-side guard below refuses a sub-sane epoch however it was stored,
+    // so it passes with or without the write-side normalisation -- confirmed by
+    // mutating that line and watching the suite stay green. What tells the two
+    // implementations apart is the BYTES on flash: normalised they read 0, and
+    // unnormalised they read the uptime counter back.
+    Inventory a{}, b{};
+    const int na = kv_get(KV_MAIN, "inv0", &a, sizeof a);
+    const int nb = kv_get(KV_MAIN, "inv1", &b, sizeof b);
+    CHECK(na == (int)sizeof a || nb == (int)sizeof b);
+    const Inventory& live =
+        (na == (int)sizeof a && (nb != (int)sizeof b || a.seq >= b.seq)) ? a : b;
+    CHECK_EQ(live.ledger_epoch, 0u);
+  }
   CHECK(!gs_load_xp_ledger(pts, epoch));
   CHECK_EQ(epoch, 0u);
 

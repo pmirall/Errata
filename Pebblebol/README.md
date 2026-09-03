@@ -1,5 +1,13 @@
 # NOTTAMAGOCHI
 
+> **AVISO: este documento describe la versión Nottamagochi y está obsoleto.**
+> El proyecto es ahora Pebblebol (ver `docs/PEBBLEBOL_PRODUCT_SYSTEM_SPEC.md`).
+> Ya no existen: el clima, Telegram, los minijuegos del navegador, la muerte y el
+> memorial, la disciplina, el peso, el cortejo por Bluetooth ni el interruptor de
+> la luz — el sueño lo marcan ahora las horas de luz aproximadas. Se reescribe en
+> la fase 10; hasta entonces, lo único fiable de este fichero es el §2 de
+> cableado y la sección de puesta en marcha.
+
 **Una mascota virtual de 128×64 píxeles que sabe cuándo la has abandonado, mira el tiempo que hace en tu calle para decidir de qué humor está, y te escribe por Telegram para recordártelo.**
 
 Vive dentro de un ESP32-C3 SuperMini del tamaño de una moneda grande. Nace de un huevo, come, se ensucia, se pone enferma, evoluciona a una de seis formas adultas según cómo la trates, se empareja por Bluetooth con la mascota de otra persona, y al final se muere. Cuando se muere, se muere de verdad: no hay revivir, no hay deshacer, no hay guardar partida. Lo que deja es un huevo con su genoma mutado, y la siguiente generación es visiblemente distinta de la anterior. Al cabo de cinco generaciones ya no reconocerás al bicho con el que empezaste.

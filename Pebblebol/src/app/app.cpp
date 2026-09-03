@@ -267,10 +267,17 @@ static void boot_box(void)
       (void)sim_gain_restore(gpts, GS_GAIN_SLOTS, gepoch,
                              sim_pebble()->last_updated_epoch);
     }
-    // The XP ledger is the same composition over the same interval. Without a
-    // trustworthy snapshot it stays at the zero xp_ledger_reset(0) seeded:
-    // unkind for an hour, but the only direction that cannot be farmed by
-    // power-cycling the device after spending the budget.
+    // The XP ledger is the same composition ONE TERM SHORT. Both restores age
+    // the saved budget forward to last_updated_epoch, but only the care gain
+    // gets a second term: boot_absence()'s catch-up calls gain_refill() over
+    // [last_seen, now], and nothing anywhere calls an xp_ledger equivalent. So
+    // the XP budget is reconstructed as of THE LAST SAVE and the offline gap
+    // never refills it. That is deliberate and it is the safe direction - it
+    // under-reports, so it cannot be farmed - but it is not the same interval,
+    // and a reader who assumes it is will look for a refill that is not there.
+    // Without a trustworthy snapshot it stays at the zero xp_ledger_reset(0)
+    // seeded: unkind for an hour, but the only direction that cannot be farmed
+    // by power-cycling the device after spending the budget.
     uint8_t  xpts[XP_LEDGER_SLOTS];
     uint32_t xepoch = 0;
     if (gs_load_xp_ledger(xpts, xepoch)) {
