@@ -84,6 +84,9 @@ $(BIN)/test_sim_golden: $(OBJ)/sim.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_care:       $(OBJ)/sim.o $(OBJ)/box.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_box:        $(OBJ)/box.o
+# xp.cpp is pure: the curve, the level carry and the anti-farm ledger, with
+# species_table.h (header-only) for the base_hp the hp rescale needs.
+$(BIN)/test_xp:         $(OBJ)/xp.o
 # The Box <-> sim seam: the real box.cpp and the real sim.cpp together, which
 # is the only way to see a swap move sim's raw pointer off its creature.
 $(BIN)/test_box_sim:    $(OBJ)/box_sim.o $(OBJ)/box.o $(OBJ)/sim.o \

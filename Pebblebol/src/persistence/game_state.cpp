@@ -282,6 +282,36 @@ static bool gain_at_cap(const uint8_t pts[GS_GAIN_SLOTS]) {
          pts[ST_HYGIENE]   == (uint8_t)GAIN_CAP_HYGIENE_H;
 }
 
+// -----------------------------------------------------------------------------
+// The XP ledger, inside the inventory pair. save_load_all() has already checked
+// the blob's magic, version and CRC, so what is in s_gs.inv is either what was
+// stored or inventory_defaults()' zeros - and a ledger_epoch of 0 is exactly
+// what xp_ledger_restore() refuses to trust.
+// -----------------------------------------------------------------------------
+bool gs_load_xp_ledger(uint8_t pts[XP_LEDGER_SLOTS], uint32_t& epoch) {
+  memset(pts, 0, (size_t)XP_LEDGER_SLOTS);
+  epoch = 0;
+  if (s_gs.inv.ledger_epoch < (uint32_t)NT_EPOCH_SANE_MIN) return false;
+  memcpy(pts, s_gs.inv.xp_ledger, (size_t)XP_LEDGER_SLOTS);
+  epoch = s_gs.inv.ledger_epoch;
+  return true;
+}
+
+bool gs_save_xp_ledger(const uint8_t pts[XP_LEDGER_SLOTS], uint32_t epoch) {
+  if (s_readonly) return false;
+  // An epoch that is not a wall clock describes no interval, so it is stored as
+  // 0 - which retires the last trusted snapshot instead of leaving a never-synced
+  // unit replaying an intact budget on every reboot (the "gl" reasoning).
+  const uint32_t wire = (epoch >= (uint32_t)NT_EPOCH_SANE_MIN) ? epoch : 0u;
+  if (memcmp(s_gs.inv.xp_ledger, pts, (size_t)XP_LEDGER_SLOTS) == 0 &&
+      s_gs.inv.ledger_epoch == wire) {
+    return true;                        // the blob would be byte-identical
+  }
+  memcpy(s_gs.inv.xp_ledger, pts, (size_t)XP_LEDGER_SLOTS);
+  s_gs.inv.ledger_epoch = wire;
+  return save_inventory(s_gs.inv);
+}
+
 static void gain_commit(void) {
   if (!s_gain_fn) return;
 

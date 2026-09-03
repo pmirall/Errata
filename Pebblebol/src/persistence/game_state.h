@@ -97,6 +97,19 @@ typedef bool (*GsGainFn)(uint8_t pts[GS_GAIN_SLOTS], uint32_t& epoch);
 void gs_bind_gain(GsGainFn fn);
 bool gs_load_gain(uint8_t pts[GS_GAIN_SLOTS], uint32_t& epoch);
 
+// -----------------------------------------------------------------------------
+// The XP anti-farm ledger (plan P3-C2). Unlike "gl" it needs no key of its own:
+// SaveSchema v2 already reserved Inventory.xp_ledger[4] and Inventory.ledger_epoch
+// for it, so it rides the inventory pair. It is NOT bound to a provider the way
+// the gain ledger is, because it must be written at a different moment: the
+// instant XP is SPENT, and only then. A refill costs no write - xp_ledger_restore()
+// reconstructs it from the elapsed time - so a save is owed only when the budget
+// went DOWN, which is the half a reboot could otherwise undo.
+// gs_load_xp_ledger() returns false when nothing trustworthy was ever stored.
+// -----------------------------------------------------------------------------
+bool gs_load_xp_ledger(uint8_t pts[XP_LEDGER_SLOTS], uint32_t& epoch);
+bool gs_save_xp_ledger(const uint8_t pts[XP_LEDGER_SLOTS], uint32_t epoch);
+
 // The persisted POSIX TZ string, for hardware/gametime.cpp's bootstrap. Empty
 // when nothing has been persisted yet; the caller keeps its compiled default.
 void gs_boot_tz(char* out, size_t cap);

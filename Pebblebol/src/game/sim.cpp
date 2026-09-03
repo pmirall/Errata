@@ -721,7 +721,7 @@ static void health_step(uint32_t dt)
   int32_t total = 0;
   if (any_zero && g.zero_dwell_s >= (uint32_t)CARE_ZERO_GRACE_S) {
     const uint16_t md[2] = { m_hardy, m_off };
-    total = rate_chain(-CARE_DECAY_MPH[CARE_HEALTH], md, 2);
+    total = rate_chain(CARE_HEALTH_BLEED_MPH, md, 2);
   }
 
   // ---- regeneration -------------------------------------------------------
@@ -1056,6 +1056,7 @@ const SimView* sim_view(void)
 const PebbleInstance* sim_pebble(void) { return g.pb; }
 
 uint32_t sim_take_events(void)       { uint32_t e = g.events; g.events = 0; return e; }
+void     sim_post_event(uint32_t m)  { g.events |= m; }
 uint8_t  sim_alert(void)             { return g.alert; }
 uint8_t  sim_is_asleep(void)         { return (g.pb && (g.view.flags & PF_ASLEEP)) ? 1u : 0u; }
 uint8_t  sim_is_sick(void)           { return (g.pb && (g.view.flags & PF_SICK)) ? 1u : 0u; }

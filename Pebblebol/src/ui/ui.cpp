@@ -65,6 +65,8 @@
 #include "../game/box.h"          // the active slot: level, xp, hp for the view
 #include "../game/box_sim.h"      // and what a swap does to sim's raw pointer
 #include "../data/species_table.h" // and the base_hp hp_max is derived from
+#include "../game/xp.h"        // the XP curve HOME draws and the award amounts
+#include "../app/app.h"        // app_award_xp(): the one door for experience
 #include "gfx.h"           // the header bar, the countdown and the list widgets
 #include "screen.h"        // the ScreenDef table this file is being dissolved into
 #include "../app/input_router.h"  // the section 7 grammar (P2-C11d)
@@ -433,6 +435,20 @@ void ui_alert(AlertId a) { dialog_alert((uint8_t)a); }
 // =============================================================================
 //  5. ACTIONS
 // =============================================================================
+// The care actions experience is paid for. LIGHT and SLEEP are toggles: they
+// change what the Pebble is doing, not how well it is being looked after.
+static bool act_earns_xp(ActionId a) {
+  switch (a) {
+    case ACT_FEED_MEAL:
+    case ACT_FEED_SNACK:
+    case ACT_CLEAN:
+    case ACT_MEDICINE:
+    case ACT_PLAY:
+    case ACT_PET:      return true;
+    default:           return false;
+  }
+}
+
 static bool do_action(ActionId a) {
   // THE COPY HAS TO BE TAKEN FIRST. sim_apply_action(ACT_CLEAN) sets poop_count
   // to 0 on the spot, so a snapshot taken afterwards has nothing left for the
@@ -454,6 +470,12 @@ static bool do_action(ActionId a) {
     // reading: nothing happened to the pet, so nothing happens on screen.
     if (had) actfx_begin((uint8_t)a, body_view(before, pet_pose_of(before.flags)));
     if (r.str_id) ui_toast(r.str_id);
+    // EVERY care action pays XP, not just feeding. A meal is refused above 90 %
+    // satiety and satiety only falls at 4,200 milli/h, so FEED_MEAL comes round
+    // about once every 2.4 h and could never spend an hourly budget by itself;
+    // the two toggles are excluded because they care for nothing. The hourly
+    // ceiling inside app_award_xp() is what makes a spammable action harmless.
+    if (act_earns_xp(a)) (void)app_award_xp(xp_care_action_amount(), XP_SRC_CARE);
     const SimView* p = pet();
     if (p) gs_save_active(true);
   } else if (r.err == AERR_COOLDOWN && r.cooldown_s) {
@@ -996,6 +1018,7 @@ static void game_finish(void) {
   const uint16_t permille = (s_g.score > 1000u) ? 1000u : s_g.score;
   sim_apply_play_result(permille, r);
   s_last_action = ACT_PLAY;
+  (void)app_award_xp(xp_minigame_amount(permille), XP_SRC_MINIGAME);
   const SimView* p = pet();
   if (p) gs_save_active(true);
   s_g.phase = 2;
@@ -1579,6 +1602,11 @@ void ui_note_events(uint32_t ev) {
     ui_alert(AL_EVOLVING);
     ui_toast(STR_RX_EVOLVE);
   }
+  // A level-up is the one moment the numbers under the sprite change without
+  // the player doing anything to the sprite, so it gets the flash as well as
+  // the toast: HOME's XP rule snaps back to empty and the level in the strip
+  // ticks over, and the frame flash is what points at it.
+  if (ev & SIM_EV_LEVEL_UP)  { rd_flash(HATCH_FLASH_MS); ui_toast(STR_RX_LEVEL_UP); }
   if (ev & SIM_EV_POOP)        ui_alert(AL_POOP);
   if (ev & SIM_EV_SICK_START)  ui_alert(AL_SICK);
   if (ev & SIM_EV_SICK_END)    ui_toast(STR_RX_MED);
@@ -1953,9 +1981,9 @@ uint32_t ui_btn_hold_ms(uint8_t btn)     { return input_hold_ms(btn); }
 // -----------------------------------------------------------------------------
 //  THE SCREEN VIEW. One snapshot per frame, derived and never stored: the
 //  smoothed care percentages this file already computes, the identity the Box
-//  holds, and the two numbers spec section 8 asks for that Phases 3 and 4 will
-//  fill in properly (hp_max is derived from the species base, and the XP curve
-//  is a flat placeholder until P3-C2 lands XP_TABLE[31]).
+//  holds, and the two numbers spec section 8 asks for: hp_max derived from the
+//  species base (P4-C1 gives it a real roster) and the XP cost of the current
+//  level from XP_TABLE[31].
 // -----------------------------------------------------------------------------
 static PebbleView s_view;
 
@@ -1994,6 +2022,8 @@ static const PebbleView* ui_fill_view(void) {
                        : pb->hp_cur;
   }
   if (s_view.level == 0) s_view.level = 1;
-  s_view.xp_next = (uint16_t)PB_XP_PER_LEVEL_PLACEHOLDER;
+  // What THIS level costs to leave (game/xp.h). 0 at XP_LEVEL_MAX, which is how
+  // a screen is told the curve is finished rather than being handed a divisor.
+  s_view.xp_next = xp_for_level(s_view.level);
   return &s_view;
 }

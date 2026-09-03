@@ -140,6 +140,7 @@ enum StrId : uint16_t {
   STR_RX_SLEEP,
   STR_RX_WAKE,
   STR_RX_EVOLVE,
+  STR_RX_LEVEL_UP,
 
   // --- 15. action errors, parallel to ActionErr --- <= 25 chars @ 5x8 --------
   STR_AERR_NONE,
@@ -575,6 +576,7 @@ inline constexpr const char* const ES[] = {
   /* STR_RX_SLEEP */              "Buenas noches. Supongo.",
   /* STR_RX_WAKE */               "Estaba bien dormido.",
   /* STR_RX_EVOLVE */             "¡Estoy cambiando!",
+  /* STR_RX_LEVEL_UP */           "¡Subo de nivel!",
 
   /* --- 15. action errors --- */
   /* STR_AERR_NONE */             "",

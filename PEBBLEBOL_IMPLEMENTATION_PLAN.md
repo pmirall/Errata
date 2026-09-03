@@ -481,10 +481,10 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 
 **P3-C2 XP and levels** — M
 > **Trap from P3-C1's retune.** A meal is refused above `ACT_MEAL_REFUSE_PCT` (90 % satiety), and at the new `-4,200` mph hunger rate satiety stays above that for about **2.4 hours** after eating. So `FEED_MEAL` is only available roughly once every 2.4 h, and "+2 XP per care action with an hourly cap" will rarely be able to spend that hourly budget on feeding. Either source XP from the other care actions too (clean, play, pet), or size the cap to what the cooldowns actually permit — do not assume one feed per hour.
-> Also: `CARE_DECAY_MPH[CARE_HEALTH]` is NOT a decay rate like its four neighbours. It is consumed sign-flipped inside `health_step()` as a damage rate, so a future "loop over all five and accumulate" refactor would apply health twice with the wrong sign. Give it its own named constant when you next touch `balance.h`.
+> Also: `CARE_DECAY_MPH[CARE_HEALTH]` is NOT a decay rate like its four neighbours. It is consumed sign-flipped inside `health_step()` as a damage rate, so a future "loop over all five and accumulate" refactor would apply health twice with the wrong sign. Give it its own named constant when you next touch `balance.h`. — **DONE in P3-C2**: the slot is now `0` and the bleed is `CARE_HEALTH_BLEED_MPH (+2000)`, same number, so the array is a pure decay table for the four stats that decay.
 
-- [ ] `game/xp.{h,cpp}`; `XP_TABLE[31]` in `balance.h` (`static_assert` sum < 65535); sources: care action +2 (hourly cap), minigame `permille*8/1000`, carried time +1/10 min awake (daily cap 48), later battle +25 / capture +10 / items; ledger snapshot/restore semantics from `GainSave`; `SIM_EV_LEVEL_UP` event → toast + `rd_flash`; HOME shows level + XP bar (§8); on level-up `hp_cur` rescales with `hp_max`.
-- [ ] `test_xp.cpp` (curve monotonic, multi-level carry-over, cap 30, caps, ledger under-reports never over-reports).
+- [x] `game/xp.{h,cpp}`; `XP_TABLE[31]` in `balance.h` (`static_assert` sum < 65535); sources: care action +2 (hourly cap), minigame `permille*8/1000`, carried time +1/10 min awake (daily cap 48), later battle +25 / capture +10 / items; ledger snapshot/restore semantics from `GainSave`; `SIM_EV_LEVEL_UP` event → toast + `rd_flash`; HOME shows level + XP bar (§8); on level-up `hp_cur` rescales with `hp_max`.
+- [x] `test_xp.cpp` (curve monotonic, multi-level carry-over, cap 30, caps, ledger under-reports never over-reports).
 - Acceptance: gate; §67 "XP and leveling work".
 
 **P3-C3 Evolution** — M
@@ -773,7 +773,7 @@ Invocation everywhere: `make -C tests check [ARGS="--seed N --filter battle"]`; 
 - [x] Care works. — P3-C1
 - [x] Stored Pebbles recover. — P2-C10 (`box_recover`), P3-C1 (rates)
 - [ ] Time-based calculations work across reboot. — P2-C6 (clock model), P2-C10 (catch-up), P6-C3 (sleep)
-- [ ] XP and leveling work. — P3-C2
+- [x] XP and leveling work. — P3-C2
 - [ ] Evolution works. — P3-C3
 
 ### Games

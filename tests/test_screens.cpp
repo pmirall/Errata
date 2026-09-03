@@ -27,6 +27,7 @@
 #include "core/nt_types.h"
 #include "core/strings_es.h"
 #include "data/sprites.h"      // POSE_IDLE, for the body fixture
+#include "data/balance.h"      // XP_TABLE: what a level costs, for the HOME bar
 #include "fakes/gfx_fb.h"
 #include "game/box.h"
 #include "persistence/save_manager.h"
@@ -209,8 +210,8 @@ static void fixture_starter(void) {
   fixture_common();
   snprintf(g_view.name, sizeof g_view.name, "BOLOTA");
   g_view.level    = 1;
-  g_view.xp       = 12;
-  g_view.xp_next  = PB_XP_PER_LEVEL_PLACEHOLDER;
+  g_view.xp       = 2;
+  g_view.xp_next  = XP_TABLE[1];
   g_view.hp_cur   = 15;
   g_view.hp_max   = 21;
   g_view.mood_pct = 64;
@@ -222,9 +223,11 @@ static void fixture_starter(void) {
 static void fixture_maxed(void) {
   fixture_common();
   snprintf(g_view.name, sizeof g_view.name, "ABCDEFGHIJKL");
+  // Level 30 is the top of the curve: xp_for_level() answers 0 there and the
+  // Pebble holds no in-level XP, which is what makes the HOME rule solid.
   g_view.level    = 30;
-  g_view.xp       = 99;
-  g_view.xp_next  = PB_XP_PER_LEVEL_PLACEHOLDER;
+  g_view.xp       = 0;
+  g_view.xp_next  = 0;
   g_view.hp_cur   = 250;
   g_view.hp_max   = 250;
   g_view.mood_pct = 100;

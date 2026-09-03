@@ -15,6 +15,7 @@
 #include "app.h"
 
 #include <Arduino.h>
+#include <string.h>
 #include <esp_random.h>
 
 #include "../core/config.h"
@@ -25,6 +26,7 @@
 #include "../game/sim.h"
 #include "../persistence/game_state.h"
 #include "../game/box.h"
+#include "../game/xp.h"
 #include "../data/species_table.h"
 #include "../persistence/save_manager.h"
 #include "../hardware/boot.h"
@@ -182,6 +184,45 @@ static bool gain_source(uint8_t pts[GS_GAIN_SLOTS], uint32_t& epoch)
 }
 
 // =============================================================================
+//  THE XP FUNNEL
+//  Every source of experience goes through here, and nowhere else, so the
+//  three things a level-up owes the rest of the system happen exactly once:
+//  the anti-farm ledger reaches flash the instant XP is SPENT (a reboot must
+//  not be able to refill it), the UI is told through the event word it already
+//  drains, and the new level is committed rather than left in RAM.
+//
+//  Only the ledger DECREASE is persisted. A refill needs no blob: it is
+//  reconstructed from the elapsed time by xp_ledger_restore(), which is the
+//  same composition the hourly gain budget uses above.
+// =============================================================================
+bool app_award_xp(uint16_t amount, XpSource src)
+{
+  if (amount == 0u) return false;
+  const uint8_t act = box_active();
+  if (act >= (uint8_t)BOX_SLOTS) return false;
+  PebbleInstance* p = box_slot(act);
+  if (!p) return false;
+
+  uint8_t before[XP_LEDGER_SLOTS];
+  uint8_t after[XP_LEDGER_SLOTS];
+  xp_ledger_snapshot(before);
+
+  uint8_t    ups     = 0;
+  const bool leveled = xp_add(*p, amount, src, &ups);
+
+  xp_ledger_snapshot(after);
+  if (memcmp(before, after, sizeof after) != 0) {
+    (void)gs_save_xp_ledger(after, sim_now());
+  }
+
+  if (leveled) {
+    sim_post_event(SIM_EV_LEVEL_UP);
+    (void)gs_save_active(true);
+  }
+  return leveled;
+}
+
+// =============================================================================
 //  BOOT: THE BOX AND THE ACTIVE PEBBLE
 //  persistence decides whether there is anything to load; game/box.cpp decides
 //  which slot is active and what a brand new Pebble is; the app.cpp only
@@ -205,6 +246,11 @@ static void boot_box(void)
 {
   box_bind(gs_state());
 
+  // Empty is the safe seed for the anti-farm ledger; the branches below either
+  // reconstruct it from what was actually left at the last save, or - on a
+  // device with no history at all - hand it the full caps.
+  xp_ledger_reset(0);
+
   if (gs_have_pebble() && bind_active()) {
     // sim_bind() seeded the hourly gain budget to 0 - safe, but a lie to anyone
     // who just had a power cut ("esta llena" at 19 % satiety for the first
@@ -221,6 +267,16 @@ static void boot_box(void)
       (void)sim_gain_restore(gpts, GS_GAIN_SLOTS, gepoch,
                              sim_pebble()->last_updated_epoch);
     }
+    // The XP ledger is the same composition over the same interval. Without a
+    // trustworthy snapshot it stays at the zero xp_ledger_reset(0) seeded:
+    // unkind for an hour, but the only direction that cannot be farmed by
+    // power-cycling the device after spending the budget.
+    uint8_t  xpts[XP_LEDGER_SLOTS];
+    uint32_t xepoch = 0;
+    if (gs_load_xp_ledger(xpts, xepoch)) {
+      (void)xp_ledger_restore(xpts, (uint8_t)XP_LEDGER_SLOTS, xepoch,
+                              sim_pebble()->last_updated_epoch);
+    }
     return;
   }
 
@@ -229,6 +285,11 @@ static void boot_box(void)
   // has levels, and the hatch ceremony becomes the evolution shell in P2-C11.
   // On a read-only session this Pebble is never written; it exists only so the
   // renderer has something to draw behind the error the user is about to see.
+  // Nothing has ever been earned on this device, so a full ledger cannot be a
+  // refill of a spent one - and a Pebble out of the box should not owe its
+  // owner six minutes before the first care action is worth anything.
+  xp_ledger_reset(1);
+
   const uint32_t now  = gt_now();
   const uint8_t  slot = box_new_pebble((uint8_t)SPECIES_ID_STARTER, 1,
                                        (uint8_t)ORIGIN_STARTER,
@@ -443,7 +504,19 @@ static void logic_tick(void)
   build_env(env);
   sim_set_env(env);               // every tick, not once at boot
 
-  sim_tick(sim_step_seconds());
+  const uint32_t step = sim_step_seconds();
+  sim_tick(step);
+
+  // XP from carried time (plan P3-C2): the ledger refills on real time, and a
+  // Pebble that is awake and switched on earns for being carried. Both happen
+  // BEFORE the event drain so a level-up reaches the UI in the same batch as
+  // the tick that caused it.
+  xp_ledger_tick(step);
+  if (!sim_is_asleep()) {
+    const uint16_t due = xp_carry_due(step);
+    if (due != 0u) (void)app_award_xp(due, XP_SRC_CARRY);
+  }
+
   const uint32_t ev = sim_take_events();
   ui_note_events(ev);
 
@@ -452,11 +525,11 @@ static void logic_tick(void)
   save_service();                        // flushes a write the 1 s floor deferred
 
   // The nvs2 checkpoint (D6). Daily, plus the events that change what the pet
-  // IS. The plan's list is level-up / evolution / capture / trade; of those only
-  // evolution exists before P3 and P7, and its v1 spelling is a stage
-  // transition, so that is what forces one here. P2-C10 and P7 add the rest at
-  // the same call.
-  const bool grew = (ev & (SIM_EV_HATCHED | SIM_EV_STAGE_UP | SIM_EV_EVOLVE_MINOR)) != 0;
+  // IS. The plan's list is level-up / evolution / capture / trade; P3-C2 added
+  // the first of them, evolution is still spelled as a stage transition until
+  // P3-C3, and P5/P7 add capture and trade at the same call.
+  const bool grew = (ev & (SIM_EV_HATCHED | SIM_EV_STAGE_UP | SIM_EV_EVOLVE_MINOR |
+                          SIM_EV_LEVEL_UP)) != 0;
   if (!gs_readonly()) {
     (void)save_checkpoint_service(env.now_epoch, grew);
   }

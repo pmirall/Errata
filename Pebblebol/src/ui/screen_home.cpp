@@ -54,10 +54,15 @@ static void draw_identity(const PebbleView& v) {
 // separator row the status strip needed anyway, so it costs no vertical space
 // at all - which is the whole reason HOME can carry six numbers and a stage.
 static void draw_xp_rule(const PebbleView& v) {
-  uint16_t next = v.xp_next ? v.xp_next : (uint16_t)PB_XP_PER_LEVEL_PLACEHOLDER;
-  uint16_t have = (v.xp > next) ? next : v.xp;
-  int16_t  w    = (int16_t)(((int32_t)OLED_W * (int32_t)have) / (int32_t)next);
-  if (w > OLED_W) w = OLED_W;
+  // xp_next == 0 is XP_LEVEL_MAX (game/xp.h): there is nothing left to buy, so
+  // the rule is drawn solid end to end instead of dividing by zero.
+  const uint16_t next = v.xp_next;
+  int16_t w = OLED_W;
+  if (next != 0u) {
+    const uint16_t have = (v.xp > next) ? next : v.xp;
+    w = (int16_t)(((int32_t)OLED_W * (int32_t)have) / (int32_t)next);
+    if (w > OLED_W) w = OLED_W;
+  }
   if (w > 0) gfx_hline(0, HOME_XP_RULE_Y, w);
   for (int16_t x = w; x < OLED_W; x = (int16_t)(x + 3)) gfx_pixel(x, HOME_XP_RULE_Y);
 }

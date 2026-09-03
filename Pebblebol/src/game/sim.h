@@ -64,6 +64,7 @@ void sim_env_defaults(SimEnv& env);
 #define SIM_EV_WISH_FAIL    0x00002000u
 #define SIM_EV_BIRTHDAY     0x00004000u
 #define SIM_EV_VISITA       0x00008000u
+#define SIM_EV_LEVEL_UP     0x00010000u  // game/xp.h: at least one level gained
 #define SIM_EV_EVOLVE_MINOR 0x00080000u  // child/teen variant chosen
 
 // -----------------------------------------------------------------------------
@@ -231,6 +232,12 @@ bool     sim_apply_play_result(uint16_t win_permille, ActionResult& out);
 const SimView*        sim_view(void);   // read-only presentation view for ui
 const PebbleInstance* sim_pebble(void); // the bound Pebble, read-only
 uint32_t sim_take_events(void);         // returns and CLEARS the event bitmask
+// The one door for the OTHER game systems into the event word the UI drains.
+// game/xp.h has no UI of its own and no clock, and a second event channel
+// would mean a second place ui_note_events() has to be kept in step with; the
+// bits it posts (SIM_EV_LEVEL_UP today) are drained by the same call as the
+// care simulation's own. It ORs, so it can never clear somebody else's event.
+void     sim_post_event(uint32_t mask);
 uint8_t  sim_alert(void);               // AlertId currently demanding attention
 uint8_t  sim_is_asleep(void);
 uint8_t  sim_is_sick(void);

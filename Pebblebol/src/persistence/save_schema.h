@@ -254,6 +254,16 @@ static_assert(CFGV2_CRC_BYTES == sizeof(ConfigV2) - 2, "ConfigV2 CRC span drifte
 //    is kept and the slot count is what gives: 32 - 18 B of fixed fields = 14 B
 //    = seven item kinds. Spec section 24 asks for "no enormous inventory", which
 //    seven satisfies; widening it later is a reserved-free schema bump.
+//
+//    NOTE ON THE XP LEDGER. P3-C2 filled these two fields in, and what they
+//    hold is the budget STILL SPENDABLE per metered XpSource plus the epoch the
+//    snapshot was taken at - not "granted today", which the layout comment
+//    guessed at before game/xp.h existed. The two are the same information, but
+//    the spendable form is the one that reconstructs correctly across a power
+//    cut: left = min(cap, saved + elapsed / refill_step), which can only
+//    under-report. Four buckets is what fits, so the four sources a player can
+//    repeat at will are metered and the later ones (capture, item) are
+//    farm-proof by construction instead. See game/xp.h.
 // -----------------------------------------------------------------------------
 #define INV_MAGIC               0x5649u   // bytes 'I','V'
 #define INV_CRC_BYTES           30
@@ -269,8 +279,8 @@ struct Inventory {
   uint8_t  version;                      //  2  SAVE_SCHEMA_VERSION
   uint8_t  slots;                        //  3  == INVENTORY_SLOTS
   uint32_t seq;                          //  4  pair sequence number
-  uint32_t ledger_epoch;                 //  8  start of the current XP day
-  uint8_t  xp_ledger[XP_LEDGER_SLOTS];   // 12  XP already granted today, by source
+  uint32_t ledger_epoch;                 //  8  when xp_ledger was snapshotted
+  uint8_t  xp_ledger[XP_LEDGER_SLOTS];   // 12  XP still SPENDABLE, by source
   InvSlot  items[INVENTORY_SLOTS];       // 16
   uint16_t crc16;                        // 30  over bytes 0..29
 };

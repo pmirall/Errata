@@ -41,10 +41,21 @@
 inline constexpr int32_t CARE_DECAY_MPH[PB_BALANCE_CARE_COUNT] = {
   -4200,      // CARE_HUNGER       satiety; 100 = full, do NOT invert
   -3000,      // CARE_HAPPINESS
-  -2000,      // CARE_HEALTH       bleed rate, gated by CARE_ZERO_GRACE_S
+      0,      // CARE_HEALTH       NOT a decay: see CARE_HEALTH_BLEED_MPH
   -2000,      // CARE_CLEANLINESS  base, before CARE_HYGIENE_POOP_MPH
   -6000       // CARE_ENERGY       awake; asleep uses CARE_ENERGY_ASLEEP_MPH
 };
+
+// HEALTH IS NOT A DECAY RATE AND MUST NOT LIVE IN THE ARRAY ABOVE. Its slot
+// there used to hold -2,000 and game/sim.cpp consumed it SIGN-FLIPPED, as a
+// damage rate behind CARE_ZERO_GRACE_S - so the one refactor everybody reaches
+// for ("loop over all five and accumulate") would have applied health twice,
+// with the wrong sign, and silently. P3-C2 zeroed the slot and gave the bleed
+// its own name: the array is now a pure decay table for the four stats that do
+// decay, and this is the positive milli-points per hour health LOSES while a
+// core stat has been pinned at 0 for at least CARE_ZERO_GRACE_S. The number is
+// unchanged (2,000/h, i.e. 45 h from full to the floor), so nothing moved.
+#define CARE_HEALTH_BLEED_MPH   (+2000L)
 
 // Sleeping is a full recharge, not a slow one: 100000 / 20000 = 5 h.
 #define CARE_ENERGY_ASLEEP_MPH  (+20000L)
@@ -130,5 +141,91 @@ inline constexpr int32_t CARE_DECAY_MPH[PB_BALANCE_CARE_COUNT] = {
 #define GAIN_CAP_HYGIENE_H      80
 #define GAIN_CAP_ENERGY_H       90
 #define GAIN_CAP_HAPPINESS_H    40
+
+// =============================================================================
+// 4. XP AND LEVELS  -- spec section 11 (levels 1..30), plan P3-C2
+//
+//    XP_TABLE[L] is what it costs to go from level L to level L+1, so
+//    PebbleInstance.xp is always "XP inside the current level" and never a
+//    running total. Index 0 is unused (there is no level 0) and index 30 is 0
+//    (level 30 is the end of the curve, and xp_add() saturates there).
+//
+//    The curve is 10 + L*L. It is written out rather than computed so the
+//    numbers a designer would move are visible, and so the two static_asserts
+//    below are asserting the real table and not a formula:
+//      * every entry fits u16 - PebbleInstance.xp is u16 (plan 1.5.1);
+//      * the WHOLE curve sums to 8,845, which also fits u16, so any code that
+//        wants a lifetime total can hold one without a wider type.
+// =============================================================================
+#define XP_LEVEL_MAX            30
+
+inline constexpr uint16_t XP_TABLE[XP_LEVEL_MAX + 1] = {
+  /*  0 */    0,   // no level 0
+  /*  1 */   11, /*  2 */   14, /*  3 */   19, /*  4 */   26, /*  5 */   35,
+  /*  6 */   46, /*  7 */   59, /*  8 */   74, /*  9 */   91, /* 10 */  110,
+  /* 11 */  131, /* 12 */  154, /* 13 */  179, /* 14 */  206, /* 15 */  235,
+  /* 16 */  266, /* 17 */  299, /* 18 */  334, /* 19 */  371, /* 20 */  410,
+  /* 21 */  451, /* 22 */  494, /* 23 */  539, /* 24 */  586, /* 25 */  635,
+  /* 26 */  686, /* 27 */  739, /* 28 */  794, /* 29 */  851,
+  /* 30 */    0    // the top of the curve: nothing left to buy
+};
+
+// Compile-time shape checks (plan 1.5.2 "generator-emitted compile-time
+// guards"): strictly increasing over 1..29, and the whole curve inside u16.
+inline constexpr uint32_t xp_table_total(void) {
+  uint32_t t = 0;
+  for (uint8_t i = 0; i <= (uint8_t)XP_LEVEL_MAX; ++i) t += XP_TABLE[i];
+  return t;
+}
+inline constexpr bool xp_table_monotonic(void) {
+  for (uint8_t i = 1; i + 1 < (uint8_t)XP_LEVEL_MAX; ++i) {
+    if (XP_TABLE[i + 1] <= XP_TABLE[i]) return false;
+  }
+  return XP_TABLE[0] == 0 && XP_TABLE[XP_LEVEL_MAX] == 0;
+}
+static_assert(xp_table_monotonic(),
+              "XP_TABLE must rise strictly over levels 1..29 and be 0 at both ends");
+static_assert(xp_table_total() < 65535u,
+              "the whole XP curve must fit u16 (PebbleInstance.xp is u16)");
+
+// --- what each source is worth ----------------------------------------------
+// A CARE ACTION is worth XP_CARE_ACTION, and EVERY care action pays: feeding,
+// cleaning, medicine, petting and playing alike. That is deliberate. A meal is
+// refused above ACT_MEAL_REFUSE_PCT (90 % satiety) and hunger only falls at
+// 4,200 milli/h, so FEED_MEAL is available roughly once every 2.4 h and could
+// never spend an hourly budget on its own.
+#define XP_CARE_ACTION          2
+
+// A minigame pays permille * XP_MINIGAME_NUM / 1000, i.e. 0..8 for a run.
+#define XP_MINIGAME_NUM         8
+#define XP_MINIGAME_DEN         1000
+
+// Carried time: +XP_CARRY_STEP_XP for every XP_CARRY_STEP_S seconds the active
+// Pebble spends AWAKE with the device on. Asleep time and time in the Box pay
+// nothing - what is rewarded is carrying the thing around.
+#define XP_CARRY_STEP_S         600UL
+#define XP_CARRY_STEP_XP        1
+
+// --- the anti-farm ledger ----------------------------------------------------
+// Same shape as the hourly gain ceiling of section 3, and the same reasoning:
+// the budget belongs to the DEVICE and to real time, so swapping the active
+// Pebble is worthless as a farming move, and it refills continuously rather
+// than resetting on a boundary, so a reboot cannot refill it either.
+//
+// Each metered source has a cap in whole XP and a window in seconds; the
+// refill step is window / cap, and the static_assert below pins that the
+// division is exact so no XP is lost to rounding over a full window.
+#define XP_CAP_CARE             10          // per hour  (5 care actions)
+#define XP_WIN_CARE_S           3600UL
+#define XP_CAP_MINIGAME         16          // per hour  (2 perfect runs)
+#define XP_WIN_MINIGAME_S       3600UL
+#define XP_CAP_CARRY            48          // per day   (8 h of carrying)
+#define XP_WIN_CARRY_S          86400UL
+
+static_assert(XP_WIN_CARE_S     % XP_CAP_CARE     == 0, "care refill step is not exact");
+static_assert(XP_WIN_MINIGAME_S % XP_CAP_MINIGAME == 0, "minigame refill step is not exact");
+static_assert(XP_WIN_CARRY_S    % XP_CAP_CARRY    == 0, "carry refill step is not exact");
+static_assert(XP_CAP_CARE < 256 && XP_CAP_MINIGAME < 256 && XP_CAP_CARRY < 256,
+              "a ledger bucket is persisted as one byte (Inventory.xp_ledger)");
 
 #endif // PB_BALANCE_H

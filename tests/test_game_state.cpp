@@ -219,6 +219,45 @@ TEST(game_state_gain_ledger_survives_a_write_and_refuses_a_foreign_one) {
   CHECK_EQ(epoch, 0u);
 }
 
+// The XP anti-farm ledger rides the inventory pair (plan P3-C2). What has to
+// hold is that a SPEND reaches flash and comes back, and that an epoch which is
+// not a wall clock is stored as 0 - the value xp_ledger_restore() refuses,
+// which is what stops a never-calibrated device replaying an intact budget.
+TEST(game_state_xp_ledger_rides_the_inventory_pair) {
+  begin();
+  if (!seed_v1()) { CHECK(false); return; }
+  uint8_t pts[XP_LEDGER_SLOTS];
+  uint32_t epoch = 0;
+  Config cfg;
+  CHECK_EQ((int)gs_load(cfg), (int)LOAD_MIGRATED);
+  CHECK(!gs_load_xp_ledger(pts, epoch));       // a fresh device has no snapshot
+
+  const uint8_t spent[XP_LEDGER_SLOTS] = { 3, 11, 40, 0 };
+  CHECK(gs_save_xp_ledger(spent, 1700200000u));
+  CHECK(gs_load_xp_ledger(pts, epoch));
+  CHECK_EQ(epoch, 1700200000u);
+  CHECK_EQ(pts[0], 3);
+  CHECK_EQ(pts[1], 11);
+  CHECK_EQ(pts[2], 40);
+
+  // Survives a reload from flash, which is the whole point of writing it.
+  Config cfg2;
+  CHECK_EQ((int)gs_load(cfg2), (int)LOAD_OK);
+  CHECK(gs_load_xp_ledger(pts, epoch));
+  CHECK_EQ(epoch, 1700200000u);
+  CHECK_EQ(pts[2], 40);
+
+  // An uptime counter is not an epoch: stored as 0, and refused on the way back.
+  CHECK(gs_save_xp_ledger(spent, 4200u));
+  CHECK(!gs_load_xp_ledger(pts, epoch));
+  CHECK_EQ(epoch, 0u);
+
+  // A read-only session (a save the user has not answered for yet) writes nothing.
+  gs_set_readonly(true);
+  CHECK(!gs_save_xp_ledger(spent, 1700200000u));
+  gs_set_readonly(false);
+}
+
 TEST(game_state_device_id_is_drawn_once_and_then_kept) {
   begin();
   if (!seed_v1()) { CHECK(false); return; }

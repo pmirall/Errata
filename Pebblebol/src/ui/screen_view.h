@@ -23,11 +23,6 @@
 #include "../core/nt_types.h"
 #include "../persistence/save_schema.h"    // PB_NICKNAME_CAP
 
-// XP per level until P3-C2 lands XP_TABLE[31] in data/balance.h. The HOME bar
-// and the PEBBLE page both draw xp / xp_next, so the placeholder lives in ONE
-// place and is a plain constant rather than a curve.
-#define PB_XP_PER_LEVEL_PLACEHOLDER  100u
-
 struct PebbleView {
   // Identity
   char     name[PB_NICKNAME_CAP];   // nickname, else the deterministic name
@@ -35,7 +30,10 @@ struct PebbleView {
   uint8_t  species_id;
   uint8_t  level;                   // 1..30
   uint16_t xp;                      // inside the current level
-  uint16_t xp_next;                 // what the current level costs
+  // What the current level costs to leave, from XP_TABLE[31] (data/balance.h).
+  // ZERO means XP_LEVEL_MAX: the curve is finished, and a screen must draw that
+  // as "done" rather than dividing by it.
+  uint16_t xp_next;
 
   // Battle numbers (spec section 8 "HP / health"). hp_max is derived, never
   // stored, and stays a placeholder until the Phase 4 stat block exists.
