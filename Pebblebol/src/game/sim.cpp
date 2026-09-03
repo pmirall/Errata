@@ -815,7 +815,8 @@ static void poop_step(uint32_t dt)
   // (60 s sub-steps, where 60 * 350 / 1000 is an exact 21) produced two.
   // Same night, same pebble, two different models. dt is at most
   // SIM_SUBSTEP_S, so dt * 1000 + 999 cannot overflow.
-  const uint32_t mult  = (g.view.flags & PF_ASLEEP) ? (uint32_t)MULT_SLEEP : 1000u;
+  const uint32_t mult  = (g.view.flags & PF_ASLEEP) ? (uint32_t)MULT_SLEEP
+                                                    : (uint32_t)MULT_ONE;
   const uint32_t milli = dt * mult + (uint32_t)g.poop_rem;
   const uint32_t adv   = milli / 1000u;
   g.poop_rem           = (uint16_t)(milli % 1000u);
@@ -939,13 +940,22 @@ static void events_step(void)
   }
 }
 
+// One subtraction below is only enough while a sub-step cannot overshoot the
+// period by more than the period itself. Both are 60 today and the comment used
+// to say so and stop there; pin it, or a sub-step grid coarser than the stage
+// cadence would leave acc_stage growing without bound.
+static_assert((uint32_t)SIM_SUBSTEP_S <= (uint32_t)STAGE_CHECK_PERIOD_S,
+              "stage_step() carries with one subtraction: a sub-step may not "
+              "exceed STAGE_CHECK_PERIOD_S");
+
 static void stage_step(uint32_t dt)
 {
   g.acc_stage += dt;
   if (g.acc_stage < (uint32_t)STAGE_CHECK_PERIOD_S) return;
   // Carry, do not discard: `= 0` loses whatever dt overshot the period by,
   // which is the same class of leak poop_step() used to have. dt is at most
-  // SIM_SUBSTEP_S == STAGE_CHECK_PERIOD_S, so one subtraction is enough.
+  // SIM_SUBSTEP_S, which the static_assert above pins at or below the period,
+  // so one subtraction is enough.
   g.acc_stage -= (uint32_t)STAGE_CHECK_PERIOD_S;
 
   while (g.view.stage < STAGE_SENIOR && g.pb->age_s >= stage_enter_s((uint8_t)(g.view.stage + 1))) {

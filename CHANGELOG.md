@@ -55,6 +55,20 @@ project warnings, size caps, and `make -C tests check`.
 - **The chunking test means something.** `care_one_hour_of_catch_up_is_the_same_however_it_is_chunked`
   could not fail as written — `sim_tick()` chops any dt into 60 s sub-steps, so its three cases
   were one case. The 1 s case is in it now, which is the step size the live device runs.
+  **Corrected after the exit:** that case still could not see `sim_tick()`'s chopper — the hour
+  it runs (10:00 → 11:00, fresh hatchling) contains no rate *change*, so one `sub_step(3600)`
+  lands on the same 128 bytes as sixty `sub_step(60)`, and deleting the chopper outright left
+  all 21 binaries green. `care_a_finer_step_moves_a_rate_change_by_less_than_one_substep` now
+  runs three chunks *above* the grid over spans that **do** contain a rate change — four awake
+  hours an hour at a time, a whole night in one 28,800 s call, and an hour at a time across
+  sunrise with the wall clock moving — where the gaps go from 25 / 11 / 126 milli to
+  1,858 / 3,594 / 3,655 without the chopper. Reachable on the device: `GOD_SCALE_4` is 3600
+  and `app.cpp` calls `sim_tick(sim_step_seconds())`, so god mode hands `sim_tick()` an hour
+  in one call. Two more claims in that test were false and are corrected: the 60 × 60 and
+  6 × 600 cases guard nothing, not even the "*`SIM_SUBSTEP_S` still divides an hour*" they were
+  documented as guarding (set it to 7 and the case still passes), and the whole equality-only
+  case passed all 44 of its checks with `sim_tick()` stubbed to a no-op, which a liveness
+  assertion now prevents.
 - **`test_sim_golden.cpp` → `test_care_golden.cpp`**, `golden/sim_v1.txt` →
   `golden/care_v2.txt`. The `v1` meant the legacy v1 *simulation* the transcript was first
   recorded from; two retunes later that is not what it pins. Only the header line changed.
@@ -78,7 +92,19 @@ project warnings, size caps, and `make -C tests check`.
   catch-up over the same night (60 s sub-steps, an exact 21) produced two poops. It carries
   its remainder now, the way the stat integrator always has. Found by adding the 1 s case to
   the chunking test — the exercise the phase-3 exit asked for. Nothing at dt = 60 moved, so
-  the care golden did not need re-recording. `stage_step()` lost the same class of leak.
+  the care golden did not need re-recording. **Bounded by `POOP_MAX`:** a pebble already
+  sitting on four uncleaned poops has nowhere to put a fifth, so a *neglected* pebble's
+  trajectory does not move at all — reintroducing the truncation leaves every neglect case,
+  the fortnight case and the golden green. It is the played pet, the one that goes to bed
+  clean, that the bug took the overnight poop away from.
+- **The stage carry, which shipped unverified.** `stage_step()` lost the same class of leak in
+  the same commit (`g.acc_stage = 0` → `-=`), but nothing tested it: reverting it left the
+  whole suite green. `care_the_stage_check_keeps_its_cadence_at_any_chunk_size` covers it now
+  — driven 90 s and 100 s at a time, neither a multiple of `STAGE_CHECK_PERIOD_S`, the
+  baby → child transition is noticed at the second it is due instead of a whole chunk late —
+  and a `static_assert` pins the `SIM_SUBSTEP_S <= STAGE_CHECK_PERIOD_S` that makes one
+  subtraction enough. That assert also turns `SIM_SUBSTEP_S = 3600` from a single arithmetic
+  identity in one test into a compile error in the firmware and all 21 binaries.
 - Three minigame framework defects, each of which would have bitten the four §29 games:
   `MgCtx::state` sat at offset 14, so every 32-bit game field was read at 2 mod 4;
   `draw_str_list()` sized its row array `CARE_ROWS` and clamped, so two PLAY rows would never
@@ -101,7 +127,7 @@ project warnings, size caps, and `make -C tests check`.
 
 The whole phase cost **11,696 B of flash and 72 B of static RAM** on the baseline, which is
 79 % of the 2,400,000 B gate cap; the release build is 37 % of the 3,145,728 B `app0` slot,
-where phase 2 left it. Host suite: **21 binaries, 327 tests, 350,157 checks** (phase 2 shipped
+where phase 2 left it. Host suite: **21 binaries, 328 tests, 350,214 checks** (phase 2 shipped
 17 / 205 / 185,482).
 
 **The phase-3 exit soak, run rather than asserted from a comment.** Fourteen simulated days

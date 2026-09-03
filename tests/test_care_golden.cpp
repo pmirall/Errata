@@ -37,6 +37,14 @@
 //  golden/care_v2.txt, the second care model. The rename touched the file's
 //  HEADER LINE and nothing else; every hashed minute is byte-identical, which
 //  is exactly what the diff and this test passing together prove.
+//
+//  WHAT THIS FILE CANNOT SEE, said plainly because the P3-C5 exit landed a
+//  simulation fix next to it: the scripted run is pinned at 10:00 -> 16:00,
+//  clear of the sleep window, and it drives sim_tick(60) and nothing else. So
+//  it touches neither the PF_ASLEEP branch nor any dt != 60 - the two axes the
+//  poop-carry fix lives on. This transcript staying byte-identical across that
+//  fix is evidence that nothing at dt = 60 while awake moved, NOT evidence that
+//  the fix is right. That belongs to test_care.cpp sections 9, 9b, 9c and 9d.
 // =============================================================================
 #include "nt_test.h"
 

@@ -276,8 +276,8 @@ baseline. Caps are `GATE_FLASH_MAX` 2,400,000 and `GATE_GLOBALS_MAX` 90,000 (`co
 the baseline sits at 79 % of the flash cap and the release build at 37 % of the 3,145,728 B
 `app0` slot, where it was in phase 2.
 
-**Host suite.** 21 binaries, **327 tests, 350,157 checks** (phase 2 shipped 17 / 205 /
-185,482). Phase 3 added 4 binaries, 122 tests and 164,675 checks.
+**Host suite.** 21 binaries, **328 tests, 350,214 checks** (phase 2 shipped 17 / 205 /
+185,482). Phase 3 added 4 binaries, 123 tests and 164,732 checks.
 
 ### The soak criterion, restated and measured
 
@@ -383,14 +383,57 @@ divide the period, harmless at dt ∈ {1, 60} but the same class of bug.
 **Nothing at dt = 60 moved**, because 60 × 350 / 1000 is exact, so `golden/care_v2.txt` was
 NOT re-recorded and no existing test changed. Cost: 32 B of flash, 0 B of static RAM.
 
+**How far it reached, precisely.** `POOP_MAX` is 4, and a pebble already holding four
+uncleaned poops has nowhere to put a fifth: the `poop_count` branch is not taken and the
+trajectory is unchanged. So the *neglected* pebble — the one every long-run case in
+`test_care.cpp` plays — never saw this bug at all; reintroducing the truncation leaves the
+thirty-day, month-offline, fortnight and week-in-the-Box cases and the golden green, and
+fails only the two cases that play a pebble which goes to bed clean. That is the played pet,
+so the fix matters, but "a sleeping pebble could not poop overnight" is a statement about the
+timer, not about every save file.
+
 What remains is a bound, not a bug, and the test says that plainly: a rate CHANGE — a poop
-arriving, the loneliness multiplier turning on — is evaluated on the `SIM_SUBSTEP_S` grid,
-so a finer step charges the new rate up to one sub-step early. The budget is one sub-step of
-the largest rate change in the model, **25 milli**; measured 9 milli over 2 awake hours
-(1 poop), 25 over 4 (3 poops), 11 over an 8 h night (2 poops at ×0.35 plus the loneliness
-edge). A displayed percent is 1,000 milli. `SIM_SUBSTEP_S` moved to `game/sim.h` so a test
-can state that bound. Mutation-checked: reverting the carry fails 6 checks across the two
-new cases.
+arriving, the loneliness multiplier turning on, the sleep/wake flip — is evaluated on the
+`SIM_SUBSTEP_S` grid, so a finer step charges the new rate up to one sub-step early. The
+budget is one sub-step of the change in question: **25 milli** for the poop/loneliness pair
+(`CARE_GRID_EVENT_MILLI`), and **433 milli** for the sleep/wake flip
+(`CARE_GRID_SLEEP_MILLI`: energy swings 26,000 milli/h, from `CARE_DECAY_MPH[CARE_ENERGY]`
+−6,000 to `CARE_ENERGY_ASLEEP_MPH` +20,000). Measured 9 milli over 2 awake hours (1 poop),
+25 over 4 (3 poops), 11 over an 8 h night (2 poops at ×0.35 plus the loneliness edge), 43
+across bedtime and 126 across sunrise. A displayed percent is 1,000 milli. `SIM_SUBSTEP_S`
+moved to `game/sim.h` so a test can state that bound. Mutation-checked: reverting the poop
+carry fails 11 checks across sections 9b and 9c — 6 before this follow-up widened them.
+
+**Three corrections to the above, from the phase-3 exit verification (P3-C5 follow-up).**
+
+1. *The largest rate change was not 25 milli, and the exit's own comment said "two exist".*
+   The third is the sleep/wake energy flip, 17× the other two. The test could not see it
+   because `care_run_chunked()` sets `SimEnv` once and never advances the wall clock, so no
+   sleep/wake edge can fall inside any span it measures. `care_run_chunked_clock()` moves the
+   clock the way `app.cpp` does; across bedtime the 1 s-vs-coarse gap is 43 milli and across
+   sunrise 126, both bounded by one sub-step of the flip and both still far under a displayed
+   percent.
+2. *The chunk test never tested the chopper.* `sim_tick()` is nothing but a chopper, and the
+   strengthened case ran the one hour — 10:00 → 11:00 on a fresh hatchling — that contains no
+   rate change, so a single `sub_step(3600)` lands on the same 128 bytes as sixty
+   `sub_step(60)`. Replacing the loop with `if (seconds > 0) sub_step(seconds);` kept the
+   whole gate green. Section 9c now also runs a chunk *above* the grid over spans that do
+   contain a rate change: gaps of 25 / 11 / 126 milli become 1,858 / 3,594 / 3,655 — up to
+   3.7 displayed percent — without the chopper. God mode reaches this on hardware
+   (`GOD_SCALE_4` is 3600 s per tick). Two related claims in that test were also false and are gone: the
+   60 × 60 and 6 × 600 cases guard nothing, not even the "`SIM_SUBSTEP_S` still divides an
+   hour" they were documented as guarding (set it to 7 and the case still passes), and the
+   equality-only case passed all 44 checks with `sim_tick()` stubbed to a no-op, which a
+   liveness assertion now prevents.
+3. *"`stage_step()` lost the same class of leak" was not mutation-checked.* Reverting
+   `g.acc_stage -= STAGE_CHECK_PERIOD_S` to `= 0` left the entire suite green. It is
+   observable, and section 9d now observes it: driven 90 s or 100 s at a time — neither a
+   multiple of the period — the carry has the k-th check land as soon as elapsed time reaches
+   60 k, so the baby → child transition is noticed at 13,500 s exactly; with `= 0` the cadence
+   stretches to the caller's chunk and it is noticed 90 s and 100 s late. A `static_assert`
+   now pins `SIM_SUBSTEP_S <= STAGE_CHECK_PERIOD_S`, the assumption that makes one subtraction
+   enough — which also makes `SIM_SUBSTEP_S = 3600` a compile error rather than one arithmetic
+   identity in one test.
 
 ### Two overstated claims in the phase-3 audit trail, corrected
 

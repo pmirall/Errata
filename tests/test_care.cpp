@@ -321,18 +321,28 @@ TEST(care_a_pebble_stored_for_a_week_comes_back_full) {
 //     One hour handed over in one call, in sixty, in six or in three thousand
 //     six hundred must land on the same bytes.
 //
-//     THE FIRST THREE CANNOT DISAGREE. sim_tick() is nothing but a chopper:
-//     it splits any dt into SIM_SUBSTEP_S pieces and holds no state of its
-//     own, so 1x3600, 60x60 and 6x600 emit the identical stream of sixty
-//     sub_step(60) calls. As written the case was a tautology whose entire
-//     detection power was "SIM_SUBSTEP_S divides 60".
+//     THE FIRST THREE CANNOT DISAGREE ON THIS HOUR. sim_tick() is nothing but
+//     a chopper: it splits any dt into SIM_SUBSTEP_S pieces and holds no state
+//     of its own, so 60x60 and 6x600 emit the identical stream of sixty
+//     sub_step(60) calls. 1x3600 DOES hand sim_tick a chunk sixty times the
+//     grid - but 10:00 -> 11:00 on a fresh hatchling contains no rate CHANGE,
+//     and with every rate constant a single sub_step(3600) lands on the same
+//     bytes as sixty sub_step(60), so this hour cannot see the chopper either.
+//     As written the case was a tautology whose entire detection power was
+//     "SIM_SUBSTEP_S divides 60" - and not even that; see the comment on the
+//     60x60 case below.
 //
 //     THE 1 s CASE IS THE ONE THAT PROBES BELOW THE GRID - and it is the step
 //     size the live device actually runs (app.cpp asks sim_step_seconds(),
 //     which is 1 outside god mode). It found a real hole; see section 9b.
+//
+//     THE CHOPPER ITSELF IS TESTED IN 9c, which is the only place that hands
+//     sim_tick a chunk above the grid over a span that HAS a rate change in
+//     it - the one shape that can tell a chopped tick from an unchopped one.
 // -----------------------------------------------------------------------------
 static PebbleInstance g_chunk_a;
 static PebbleInstance g_chunk_b;
+static PebbleInstance g_chunk_fresh;
 
 static void care_check_same(const PebbleInstance& a, const PebbleInstance& b) {
   for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
@@ -346,19 +356,61 @@ static void care_check_same(const PebbleInstance& a, const PebbleInstance& b) {
   CHECK(memcmp(&a, &b, sizeof(PebbleInstance)) == 0);
 }
 
-// Runs `total_s` from `hour` local on day 100 in fixed `chunk` handovers.
+// Runs `total_s` from `hour` local on day 100 in fixed `chunk` handovers, with
+// the wall clock FROZEN at `hour`: SimEnv is set once and never advanced. The
+// pebble settles into whatever the start hour implies on its first sub-step and
+// stays there, so NO sleep/wake edge can fall inside the span - which is what
+// sections 9, 9b and 9c(a,b) want, because it isolates the poop and loneliness
+// rate changes. care_run_chunked_clock() below is the one that moves the clock.
+//
+// `chunk` must divide `total_s`, or the loop overshoots and the case silently
+// measures a longer span than the one it names.
 static void care_run_chunked(PebbleInstance& p, uint8_t hour,
                              uint32_t total_s, uint32_t chunk) {
+  CHECK_EQ((int)(total_s % chunk), 0);
   care_pet_at_day(p, hour, 100);
   for (uint32_t t = 0; t < total_s; t += chunk) sim_tick(chunk);
 }
 
+// The same run, but SimEnv follows simulated time the way app/app.cpp does, so
+// the sleep window's edges - bedtime and sunrise, the model's LARGEST rate
+// change (section 9c) - land inside the span. The frozen-clock helper above
+// cannot reach them at any chunk size.
+static void care_run_chunked_clock(PebbleInstance& p, uint8_t hour,
+                                   uint32_t total_s, uint32_t chunk) {
+  CHECK_EQ((int)(total_s % chunk), 0);
+  care_pet_at_day(p, hour, 100);
+  SimEnv env = sim_env();
+  const uint32_t base_sod = (uint32_t)hour * 3600u;
+  for (uint32_t t = 0; t < total_s; t += chunk) {
+    sim_tick(chunk);
+    uint32_t sod    = base_sod + t + chunk;
+    env.now_epoch   = CARE_EPOCH0 + t + chunk;
+    env.day_of_year = (uint16_t)((100u + sod / 86400u) % 366u);
+    sod            %= 86400u;
+    env.local_hour  = (uint8_t)(sod / 3600u);
+    env.local_min   = (uint8_t)((sod % 3600u) / 60u);
+    sim_set_env(env);
+  }
+}
+
 TEST(care_one_hour_of_catch_up_is_the_same_however_it_is_chunked) {
+  // Liveness FIRST. Every case here is an equality, and an equality holds just
+  // as well when sim_tick() does nothing at all: with the tick stubbed out to a
+  // no-op this case passed all of its checks. So pin that the hour happened.
+  care_pet_at_day(g_chunk_fresh, 10, 100);
+  const PebbleInstance fresh = g_chunk_fresh;
+
   care_run_chunked(g_chunk_a, 10, 3600u, 3600u);
   const PebbleInstance one_call = g_chunk_a;
+  CHECK_EQ(one_call.age_s, 3600u);
+  CHECK(one_call.care[CARE_HUNGER] < fresh.care[CARE_HUNGER]);
 
-  // 60 x 60 s and 6 x 600 s: the same sub-step sequence, kept as a guard on
-  // "SIM_SUBSTEP_S still divides an hour".
+  // 60 x 60 s and 6 x 600 s: the same sub-step sequence. On their own these two
+  // guard NOTHING - not even the "SIM_SUBSTEP_S still divides an hour" they
+  // used to claim: with SIM_SUBSTEP_S set to 7u, which divides neither 60 nor
+  // 3600, this whole case still passes and only 9c and the golden notice. They
+  // are the plain statement of the contract every catch-up caller relies on.
   care_run_chunked(g_chunk_b, 10, 3600u, 60u);
   care_check_same(one_call, g_chunk_b);
   care_run_chunked(g_chunk_b, 10, 3600u, 600u);
@@ -418,31 +470,51 @@ TEST(care_the_poop_clock_advances_at_every_step_size) {
 //      what makes the cadences (60 s stage check, 600 s sickness roll) land in
 //      the same places whatever the caller hands over.
 //
-//      The budget per change is one sub-step at the largest rate change the
-//      care model has. Two exist: a poop arriving, which adds
-//      CARE_HYGIENE_POOP_MPH (1,000 milli/h) to the cleanliness rate, and the
-//      loneliness multiplier turning on at LONELY_AFTER_S, which adds
-//      (MULT_LONELY - MULT_ONE)/1000 = x0.5 of the happiness base
-//      (1,500 milli/h). One sub-step of the larger is 25 milli.
+//      The budget per change is one sub-step at that change's size. THREE rate
+//      changes exist in the care model, not the two this comment used to name:
+//        - a poop arriving, which adds CARE_HYGIENE_POOP_MPH (1,000 milli/h)
+//          to the cleanliness rate;
+//        - the loneliness multiplier turning on at LONELY_AFTER_S, which adds
+//          (MULT_LONELY - MULT_ONE)/1000 = x0.5 of the happiness base
+//          (1,500 milli/h). One sub-step of that, the larger of the two, is
+//          CARE_GRID_EVENT_MILLI = 25 milli;
+//        - the sleep/wake flip, which is far the largest and was missed: energy
+//          goes from CARE_DECAY_MPH[CARE_ENERGY] (-6,000 milli/h) to
+//          CARE_ENERGY_ASLEEP_MPH (+20,000), a 26,000 milli/h swing. One
+//          sub-step of it is CARE_GRID_SLEEP_MILLI = 433 milli, 17x the other
+//          two. The frozen-clock helper cannot see it - it never advances the
+//          wall clock, so no sleep/wake edge can occur inside any span it runs
+//          - which is why case (c) below drives the clock as app.cpp does.
+//
+//      THIS IS ALSO THE ONLY PLACE THE CHOPPER ITSELF IS TESTED. Cases (a2),
+//      (b2) and (c) hand sim_tick a chunk ABOVE SIM_SUBSTEP_S over a span that
+//      HAS a rate change in it, which is the only shape that can tell a chopped
+//      tick from an unchopped one. Replacing sim_tick()'s loop with a single
+//      sub_step(seconds) leaves sections 9 and 9b, the golden and the other 20
+//      binaries green, and moves these three gaps from 25 / 11 / 126 milli to
+//      1,858 / 3,594 / 3,655. It is reachable on the device: GOD_SCALE_4 is
+//      3600 and app.cpp ticks sim_tick(sim_step_seconds()), so god mode hands
+//      sim_tick a full hour in one call.
 //
 //      Measured: 9 milli over two awake hours (1 poop), 25 over four (3 poops),
-//      11 and 9 over an eight-hour night (2 poops at x0.35, plus the
-//      loneliness edge). None of them approaches a displayed percent, which is
-//      1,000 milli.
+//      11 and 9 over an eight-hour night (2 poops at x0.35, plus the loneliness
+//      edge), 43 across bedtime and 126 across sunrise with the clock moving.
+//      None of them approaches a displayed percent, which is 1,000 milli.
 // -----------------------------------------------------------------------------
 #define CARE_GRID_EVENT_MILLI  (((int32_t)MULT_LONELY - (int32_t)MULT_ONE) \
                                 * -(int32_t)CARE_DECAY_MPH[CARE_HAPPINESS] \
                                 / 1000 * (int32_t)SIM_SUBSTEP_S / 3600)
 
+// One sub-step of the sleep/wake energy flip: the model's largest rate change.
+#define CARE_GRID_SLEEP_MILLI  (((int32_t)CARE_ENERGY_ASLEEP_MPH \
+                                 - (int32_t)CARE_DECAY_MPH[CARE_ENERGY]) \
+                                * (int32_t)SIM_SUBSTEP_S / 3600)
+
 static PebbleInstance g_grid_a;
 static PebbleInstance g_grid_b;
 
-// |dt=1 minus dt=SIM_SUBSTEP_S| on the worst stat, over `total_s` from `hour`.
-static int32_t care_grid_gap(uint8_t hour, uint32_t total_s, uint8_t& poops_out) {
-  care_run_chunked(g_grid_a, hour, total_s, (uint32_t)SIM_SUBSTEP_S);
-  poops_out = sim_view()->poop_count;
-  care_run_chunked(g_grid_b, hour, total_s, 1u);
-  CHECK_EQ((int)sim_view()->poop_count, (int)poops_out);
+// The worst per-stat distance between the two runs just performed.
+static int32_t care_grid_worst(void) {
   int32_t worst = 0;
   for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
     int32_t d = g_grid_b.care[i] - g_grid_a.care[i];
@@ -452,10 +524,37 @@ static int32_t care_grid_gap(uint8_t hour, uint32_t total_s, uint8_t& poops_out)
   return worst;
 }
 
+// |dt=1 minus dt=`chunk`| on the worst stat, over `total_s` from `hour`, clock
+// frozen. `chunk` is the COARSE side: passing one ABOVE SIM_SUBSTEP_S is what
+// puts sim_tick()'s chopper under test.
+static int32_t care_grid_gap_chunk(uint8_t hour, uint32_t total_s,
+                                   uint32_t chunk, uint8_t& poops_out) {
+  care_run_chunked(g_grid_a, hour, total_s, chunk);
+  poops_out = sim_view()->poop_count;
+  care_run_chunked(g_grid_b, hour, total_s, 1u);
+  CHECK_EQ((int)sim_view()->poop_count, (int)poops_out);
+  return care_grid_worst();
+}
+
+static int32_t care_grid_gap(uint8_t hour, uint32_t total_s, uint8_t& poops_out) {
+  return care_grid_gap_chunk(hour, total_s, (uint32_t)SIM_SUBSTEP_S, poops_out);
+}
+
+// The same, with the wall clock moving, so a sleep/wake edge is in the span.
+static int32_t care_grid_gap_clock(uint8_t hour, uint32_t total_s,
+                                   uint32_t chunk, uint8_t& poops_out) {
+  care_run_chunked_clock(g_grid_a, hour, total_s, chunk);
+  poops_out = sim_view()->poop_count;
+  care_run_chunked_clock(g_grid_b, hour, total_s, 1u);
+  CHECK_EQ((int)sim_view()->poop_count, (int)poops_out);
+  return care_grid_worst();
+}
+
 TEST(care_a_finer_step_moves_a_rate_change_by_less_than_one_substep) {
   CHECK_EQ((int)CARE_GRID_EVENT_MILLI, 25);
+  CHECK_EQ((int)CARE_GRID_SLEEP_MILLI, 433);
 
-  // Four awake hours from 10:00: three poops, no loneliness edge yet.
+  // (a) Four awake hours from 10:00: three poops, no loneliness edge yet.
   uint8_t poops = 0;
   int32_t gap = care_grid_gap(10, 4u * 3600u, poops);
   CHECK_EQ((int)poops, 3);
@@ -463,7 +562,15 @@ TEST(care_a_finer_step_moves_a_rate_change_by_less_than_one_substep) {
   // And it is not zero, or the bound is being asserted against nothing.
   CHECK(gap > 0);
 
-  // Eight asleep hours from 23:00: two poops plus the loneliness edge at 6 h.
+  // (a2) The same four hours handed over an HOUR at a time - sixty times the
+  // sub-step, and the size god mode hands over at GOD_SCALE_4. The bound is the
+  // same one: the chunk size may not buy the caller a different simulation.
+  uint8_t poops_coarse = 0;
+  int32_t gap_coarse = care_grid_gap_chunk(10, 4u * 3600u, 3600u, poops_coarse);
+  CHECK_EQ((int)poops_coarse, (int)poops);
+  CHECK(gap_coarse <= (int32_t)poops * CARE_GRID_EVENT_MILLI);
+
+  // (b) Eight asleep hours from 23:00: two poops plus the loneliness edge at 6 h.
   gap = care_grid_gap(23, 8u * 3600u, poops);
   CHECK_EQ((int)poops, 2);
   CHECK(gap <= ((int32_t)poops + 1) * CARE_GRID_EVENT_MILLI);
@@ -471,6 +578,82 @@ TEST(care_a_finer_step_moves_a_rate_change_by_less_than_one_substep) {
 
   // Nowhere near a displayed percent, which is what the bound has to mean.
   CHECK(gap < 1000);
+
+  // (b2) The whole night in ONE call: 28,800 s, 480 times the sub-step, the
+  // shape an offline catch-up takes. Same bound again.
+  gap_coarse = care_grid_gap_chunk(23, 8u * 3600u, 8u * 3600u, poops_coarse);
+  CHECK_EQ((int)poops_coarse, (int)poops);
+  CHECK(gap_coarse <= ((int32_t)poops + 1) * CARE_GRID_EVENT_MILLI);
+  CHECK(gap_coarse < 1000);
+
+  // (c) With the clock moving, the sleep/wake flip is inside the span and the
+  // budget is CARE_GRID_SLEEP_MILLI, not CARE_GRID_EVENT_MILLI. An hour at a
+  // time, so this also runs above the grid.
+  uint8_t poops_c = 0;
+  gap = care_grid_gap_clock(21, 4u * 3600u, 3600u, poops_c);   // through bedtime
+  CHECK((sim_view()->flags & PF_ASLEEP) != 0);          // ends asleep ...
+  care_run_chunked_clock(g_grid_b, 21, 60u, 60u);
+  CHECK((sim_view()->flags & PF_ASLEEP) == 0);          // ... and began awake,
+  // so the flip really is inside the span and not off one end of it.
+  CHECK(gap <= CARE_GRID_SLEEP_MILLI + (int32_t)poops_c * CARE_GRID_EVENT_MILLI);
+  // Larger than the poop/loneliness budget: this IS the third rate change, and
+  // the old "one sub-step of the largest is 25 milli" was simply wrong.
+  CHECK(gap > CARE_GRID_EVENT_MILLI);
+  CHECK(gap < 1000);
+
+  gap = care_grid_gap_clock(5, 4u * 3600u, 3600u, poops_c);    // through sunrise
+  CHECK((sim_view()->flags & PF_ASLEEP) == 0);          // ends awake ...
+  care_run_chunked_clock(g_grid_b, 5, 60u, 60u);
+  CHECK((sim_view()->flags & PF_ASLEEP) != 0);          // ... and began asleep.
+  CHECK(gap <= CARE_GRID_SLEEP_MILLI + (int32_t)poops_c * CARE_GRID_EVENT_MILLI);
+  CHECK(gap > CARE_GRID_EVENT_MILLI);
+  CHECK(gap < 1000);
+}
+
+// -----------------------------------------------------------------------------
+//  9d. The stage check keeps its cadence at any chunk size
+//      The OTHER carry the poop fix pulled in: stage_step() used to reset
+//      g.acc_stage to 0 instead of subtracting STAGE_CHECK_PERIOD_S, which
+//      throws away whatever the sub-step overshot the period by. That is
+//      invisible whenever dt divides 60 - which is every step the device takes
+//      outside an offline catch-up - so nothing in the suite noticed it, and it
+//      shipped in the exit commit unchecked. This is the shape that sees it: a
+//      handover that is NOT a multiple of the period, so every period ends
+//      part-way through a sub-step.
+//
+//      With the carry, the k-th check happens as soon as elapsed simulated time
+//      reaches 60k, at the sub-step boundary that reaches it; discarding the
+//      remainder stretches the cadence to the caller's whole chunk. Measured at
+//      the baby -> child transition (AGE_CHILD_S, 13,500 s, an exact multiple of
+//      both 60 and the chunks below): on time to the second with the carry, 90 s
+//      and 100 s late with `= 0`.
+// -----------------------------------------------------------------------------
+static PebbleInstance g_stage_chunk;
+
+// Sim time at which the pebble is first seen past STAGE_BABY, driven `chunk` at
+// a time. 0 if it never happens inside `limit_s`.
+static uint32_t care_child_seen_at(uint32_t chunk, uint32_t limit_s) {
+  care_pet_at_day(g_stage_chunk, 10, 100);
+  CHECK_EQ((int)sim_view()->stage, (int)STAGE_BABY);
+  for (uint32_t t = chunk; t <= limit_s; t += chunk) {
+    sim_tick(chunk);
+    if (sim_view()->stage > (uint8_t)STAGE_BABY) return t;
+  }
+  return 0;
+}
+
+TEST(care_the_stage_check_keeps_its_cadence_at_any_chunk_size) {
+  const uint32_t due = (uint32_t)AGE_CHILD_S;
+  CHECK_EQ(due % (uint32_t)STAGE_CHECK_PERIOD_S, 0u);
+
+  // The control: 60 s handovers, where the accumulator lands exactly on the
+  // period and the carry cannot matter.
+  CHECK_EQ(care_child_seen_at(60u, due + 3600u), due);
+
+  // 90 s and 100 s: neither is a multiple of STAGE_CHECK_PERIOD_S. The check
+  // must still land on the 60 s grid of elapsed time, not on the caller's.
+  CHECK_EQ(care_child_seen_at(90u, due + 3600u), due);
+  CHECK_EQ(care_child_seen_at(100u, due + 3600u), due);
 }
 
 // -----------------------------------------------------------------------------
