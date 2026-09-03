@@ -46,10 +46,9 @@ bool input_raw(uint8_t which);
 
 // -----------------------------------------------------------------------------
 // Extensions beyond the BRIEF 4 list (additive; nothing above changes).
-// Needed because two screens key off a hold DURATION, not off a gesture:
-//   S14 GOD MODE entry  = BOTH held GOD_ENTER_HOLD_MS     (5000 ms) on S6
-//   S12 MEMORIAL bury   = HOLD_R held MEMORIAL_BURY_HOLD_MS (3000 ms)
-// Both need a progress bar, i.e. a live "how long has it been down" query.
+// Needed because the god-mode entry keys off a hold DURATION, not off a
+// gesture: BOTH held GOD_ENTER_HOLD_MS (5000 ms) on the STATUS_B screen. It
+// needs a progress bar, i.e. a live "how long has it been down" query.
 // -----------------------------------------------------------------------------
 
 // Milliseconds since the debounced press of one button; 0 if it is not down.
@@ -59,8 +58,8 @@ uint32_t input_hold_ms(uint8_t which);
 // Drop every queued gesture and swallow the presses that are in flight right
 // now: nothing more is emitted from the current button episode until BOTH
 // buttons have been released. Use it after a screen transition that was
-// triggered by a hold duration rather than by a gesture (god-mode entry,
-// bury), so the eventual release cannot fire a stale gesture on the new screen.
+// triggered by a hold duration rather than by a gesture (god-mode entry), so
+// the eventual release cannot fire a stale gesture on the new screen.
 void input_flush(void);
 
 #endif // NT_INPUT_H

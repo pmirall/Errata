@@ -516,7 +516,7 @@ static uint32_t pf_identity(const PetSave& p) {
 // stroll, which is the same jump wearing a different hat; the maximum is stable
 // for as long as the stage is, which is what a clamp has to be.
 static uint8_t pf_width_of(const PetSave& p) {
-  static const uint8_t kPoses[] = { POSE_IDLE, POSE_SLEEP, POSE_SICK, POSE_EAT, POSE_GHOST };
+  static const uint8_t kPoses[] = { POSE_IDLE, POSE_SLEEP, POSE_SICK, POSE_EAT };
   const uint8_t species = gene_species(p.genome);
   const uint8_t form    = sprite_form_of(p, (Stage)p.stage);
   uint8_t w = 0;
@@ -766,12 +766,6 @@ static void pf_pick_next(void) {
   if (energy < 25u) { w_walk = (uint8_t)(w_walk / 3u); w_hop = 0; w_sit = (uint8_t)(w_sit + 22u); }
   else if (energy < 50u) { w_walk = (uint8_t)(w_walk / 2u); w_hop = (uint8_t)(w_hop / 2u); w_sit = (uint8_t)(w_sit + 8u); }
 
-  // Sulking after an absence: it refuses to play, it does not refuse to exist.
-  if (sim_sulk_left_s() > 0u) {
-    w_walk = (uint8_t)(w_walk / 4u); w_hop = 0; w_turn = (uint8_t)(w_turn / 2u);
-    w_sit  = (uint8_t)(w_sit + 16u);
-  }
-
   // Rare animations are a luck gene, thinned out by boredom.
   const uint8_t bore = pf_boredom();
   w_look = (uint8_t)(((uint16_t)w_look * (2u + s_luck)) / 6u);
@@ -925,7 +919,7 @@ void petfx_service(const PetSave& p, uint32_t now_ms) {
   //             deliberately NOT part of `pinned`, because pinned also means
   //             "recentre", which is exactly what an action must not do.
   const uint8_t asleep  = (uint8_t)((p.flags & PF_ASLEEP) != 0);
-  const uint8_t no_face = (uint8_t)((p.stage == STAGE_EGG) || (p.stage >= STAGE_DEAD));
+  const uint8_t no_face = (uint8_t)(p.stage == STAGE_EGG);
   const uint8_t no_eyes = (uint8_t)(no_face || asleep);
   const uint8_t pinned  = (uint8_t)(no_face || s_freeze);
 
@@ -962,7 +956,6 @@ void petfx_service(const PetSave& p, uint32_t now_ms) {
       // Integer walk: accumulate q4*ms and spend whole 1/16 px. No floats and
       // no drift, whatever the loop() rate happens to be.
       uint32_t sp = ((uint32_t)s_speed_q4 * pf_amp()) / 100u;
-      if (sim_sulk_left_s() > 0u) sp /= 3u;
       s_walk_acc += (int32_t)(sp * dt);
       const int32_t step = s_walk_acc / 1000;
       s_walk_acc -= step * 1000;
@@ -1072,7 +1065,7 @@ void petfx_draw_body(const PetSave& p, uint8_t pose, uint8_t frame, int16_t dy,
   const uint8_t entry_color = u.getDrawColor();   // restored on the way out
   frame = (uint8_t)(frame & 1u);
 
-  const uint8_t no_face = (uint8_t)((p.stage == STAGE_EGG) || (p.stage >= STAGE_DEAD));
+  const uint8_t no_face = (uint8_t)(p.stage == STAGE_EGG);
   const uint8_t pinned  = (uint8_t)(no_face || s_freeze);
 
   uint8_t set_id;
@@ -1081,8 +1074,8 @@ void petfx_draw_body(const PetSave& p, uint8_t pose, uint8_t frame, int16_t dy,
     // cracking a minute before it hatches.
     set_id = (uint8_t)(((uint32_t)p.age_s + 60u >= AGE_EGG_S) ? SPR_EGG_CRACK : SPR_EGG_IDLE);
   } else {
-    // sprite_form_of() is the ONLY correct source of `form`: adult_form is
-    // FORM_UNSET (0xFF) until 48 h and child/teen variants live in minor_form.
+    // sprite_form_of() is the ONLY correct source of `form`: the adult body
+    // comes from the species gene and child/teen variants live in minor_form.
     s_qry_species = gene_species(p.genome);
     s_qry_stage   = p.stage;
     s_qry_form    = sprite_form_of(p, (Stage)p.stage);
@@ -1334,7 +1327,7 @@ void petfx_draw_body(const PetSave& p, uint8_t pose, uint8_t frame, int16_t dy,
   // --- blink --------------------------------------------------------------------
   // Gated on no_eyes, not on `pinned`: a pet held still by a ceremony is
   // paused, not switched off, and a body that never blinks reads as dead.
-  const uint8_t no_eyes = (uint8_t)((p.stage == STAGE_EGG) || (p.stage >= STAGE_DEAD) ||
+  const uint8_t no_eyes = (uint8_t)((p.stage == STAGE_EGG) ||
                                     ((p.flags & PF_ASLEEP) != 0));
   if (s_blink_end && s_lid_h[frame] && !no_eyes) {
     const int16_t ly = (int16_t)(y + s_lid_y[frame]);
@@ -1348,7 +1341,7 @@ void petfx_draw_body(const PetSave& p, uint8_t pose, uint8_t frame, int16_t dy,
   }
 
   // --- gene_rare: a permanent orbiting spark -------------------------------------
-  // Not while pinned: ceremonies (evolution, death) run their own spark
+  // Not while pinned: ceremonies (evolution, hatch) run their own spark
   // choreography in ui.cpp and two sets of sparks read as noise.
   if (s_rare && !pinned) {
     const SpriteRef sp = sprite_emote(EMO_SPARK);
@@ -1429,8 +1422,7 @@ void petfx_pose_ink_x(uint8_t pose, int16_t* x0, int16_t* x1) {
     // Same x derivation as petfx_draw_body(), with THIS pose's width: the draw
     // clamp uses the drawn width, and SPR_EAT_ADULT is 40 px where a senior's
     // idle body is 32, so the two poses do not always land on the same column.
-    const uint8_t no_face = (uint8_t)((s_qry_stage == STAGE_EGG) ||
-                                      (s_qry_stage >= STAGE_DEAD));
+    const uint8_t no_face = (uint8_t)(s_qry_stage == STAGE_EGG);
     const uint8_t pinned  = (uint8_t)(no_face || s_freeze);
     int16_t x = pinned ? (int16_t)sprite_center_x(s.w) : (int16_t)(s_x_q4 >> 4);
     x = pf_clamp16((int16_t)(x + s_jitter), pf_stage_lo(), pf_stage_hi(s.w));

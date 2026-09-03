@@ -1,8 +1,8 @@
 // =============================================================================
 //  NOTTAMAGOCHI - godmode.h
-//  The debug console. Screen S14 (GAME_DESIGN 10) plus the persistent state
+//  The debug console. The GOD screen (GAME_DESIGN 10) plus the persistent state
 //  that makes the rest of the firmware testable in minutes instead of a week:
-//  the time-scale multiplier, forced absences, forced stage/form/death,
+//  the time-scale multiplier, forced absences, a forced stage,
 //  a genome editor with hex dump and paste-in, a synthetic BLE partner, a live
 //  heap panel and a CSV soak log over Serial.
 //
@@ -14,11 +14,10 @@
 //  HONESTY RULES this module enforces (GAME_DESIGN 10.2), not just implements:
 //   - The system clock is NEVER touched. Time travel is gt_skew_add() only.
 //   - Acceleration is NEVER a stat hack: it goes through sim_set_time_scale(),
-//     so every simulated hour runs the real decay, poop, sickness and death
-//     paths at the real cadence.
+//     so every simulated hour runs the real decay, poop and sickness paths at
+//     the real cadence.
 //   - Entering sets genome.god_tainted permanently, on the living pet and on
 //     everything it will ever produce. There is no way back.
-//   - God mode cannot resurrect. It can only kill.
 //   - While it is active the top GOD_BAR_H rows of EVERY screen are inverted
 //     and read "GOD xN". It is impossible to leave it on by accident.
 //
@@ -84,20 +83,19 @@
 // "FIJAR STAT" offers 0 / 25 / 50 / 100 (GAME_DESIGN 10.1 command 3).
 #define GOD_STATVAL_COUNT      4
 
-// The root list is the ten surviving GAME_DESIGN 10.1 commands plus an
+// The root list is the eight surviving GAME_DESIGN 10.1 commands plus an
 // explicit exit row. HOLD_R leaves the SCREEN (god mode stays on, and stays visible); the
 // exit row leaves the MODE.
 #define GOD_MENU_ROWS          (GOD_CMD_COUNT + 1)
 
 // -----------------------------------------------------------------------------
 // 3. WHAT god_handle() WANTS THE CALLER TO DO NEXT
-//    god mode owns its own screen; these are the only four things it cannot do
-//    for itself because they belong to the screen state machine in ui.cpp.
+//    god mode owns its own screen; these are the only things it cannot do for
+//    itself because they belong to the screen state machine in ui.cpp.
 // -----------------------------------------------------------------------------
 enum GodEvt : uint8_t {
   GOD_EVT_NONE = 0,   // handled internally, stay on SCR_GOD
   GOD_EVT_LEAVE,      // leave SCR_GOD for SCR_HOME. god_active() may still be 1.
-  GOD_EVT_DIED,       // the pet was killed: run the full GAME_DESIGN 9.2 staging
   GOD_EVT_WIPED,      // NVS erased and a fresh gen-0 egg installed: reload cfg
                       // and go to SCR_EGG
   GOD_EVT_COUNT
@@ -189,8 +187,8 @@ bool     god_dump_enabled(void);
 // Compile-time sanity on the constants this module contracts against.
 static_assert(GOD_SCALE_COUNT == 5, "godmode.h: the speed ring is five wide");
 static_assert(GOD_SCALE_0 == 1, "godmode.h: index 0 must be real time");
-static_assert(GOD_ABSENCE_COUNT == 6, "godmode.h: absence ladder is six wide");
-static_assert(GOD_CMD_COUNT == 10, "godmode.h: 10 commands after TELEGRAM went");
+static_assert(GOD_ABSENCE_COUNT == 6, "godmode.h: six forced-absence durations");
+static_assert(GOD_CMD_COUNT == 8, "godmode.h: 8 commands after the death surgery");
 static_assert(GOD_BAR_H <= STATUS_BAR_H, "god marker must fit the status bar rows");
 
 #endif // NT_GODMODE_H

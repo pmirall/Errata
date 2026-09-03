@@ -69,7 +69,7 @@ typedef U8G2_SSD1306_128X64_NONAME_F_HW_I2C  RdDisplay;
 //   setDrawColor(1) -> paints the pattern   (shading, texture, fog)
 //   setDrawColor(0) -> erases the pattern   (fades, dissolves, "ghost" sprites)
 //   setDrawColor(2) -> XORs it              (shimmer)
-// The 4-step evolution / death dissolve is levels 4, 8, 12, 16 at colour 0.
+// The 4-step evolution dissolve is levels 4, 8, 12, 16 at colour 0.
 // -----------------------------------------------------------------------------
 #define RD_D0            0
 #define RD_D12           2
@@ -137,8 +137,8 @@ void  rd_set_contrast(uint8_t contrast);
 bool     rd_begin_frame(void);
 void     rd_end_frame(void);
 
-// Requested frame rate, clamped to 1..60. FPS_NORMAL (20) / FPS_LOW (4) /
-// FPS_MEMORIAL (1). Takes effect immediately.
+// Requested frame rate, clamped to 1..60. FPS_NORMAL (20) / FPS_LOW (4).
+// Takes effect immediately.
 void     rd_set_fps(uint8_t fps);
 
 // The rate actually being used right now (the request, capped at FPS_LOW while
@@ -340,7 +340,7 @@ void rd_affordance_echo(void);
 // Full-screen invert for ms milliseconds (SSD1306 0xA7 / 0xA6). One command
 // byte each way, no repaint: the ideal "you hit something" acknowledgement.
 // ms == 0 cancels a flash already running. ms is clamped to RD_FX_FLASH_MAX_MS.
-// Requests a frame so the flash starts now even at FPS_LOW / FPS_MEMORIAL.
+// Requests a frame so the flash starts now even at FPS_LOW.
 void rd_flash(uint16_t ms);
 
 // Vertical screen shake of +/- amp_px, decaying linearly over ms (SSD1306

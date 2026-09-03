@@ -1,7 +1,7 @@
 // =============================================================================
 //  PEBBLEBOL - gametime.h
 //  The wall clock. Calibration, TZ, virtual (god-mode) skew, and the exact
-//  elapsed-time formatter the absence ladder renders {t} with.
+//  elapsed-time formatter the absence line renders {t} with.
 //
 //  THIS IS THE ONLY MODULE ALLOWED TO CALL time() / localtime_r() /
 //  settimeofday() / tzset(). Everybody else asks gt_now().
@@ -116,9 +116,9 @@ TimeCal gt_cal_state(void);
 //   false -> gt_now() is an ESTIMATE (last persisted epoch + uptime). It is
 //            monotonic and plausible but arbitrary.
 //   THE ABSENCE MECHANIC MUST CHECK THIS FIRST. With false the absence is
-//   ABS_UNKNOWN and charges ZERO (plan section 1.7); the true tier is
-//   retro-applied if this later flips to true. Never accuse the user on the
-//   strength of an estimate.
+//   unknown and charges ZERO (plan section 1.7); the truth is retro-applied if
+//   this later flips to true. Never accuse the user on the strength of an
+//   estimate.
 //   Cheap; this is also the poller that adopts a surviving RTC value as
 //   CAL_ESTIMATED, so call it (or gt_now(), which calls it) at least once per
 //   loop().
@@ -151,7 +151,7 @@ void gt_skew_add(int64_t delta_s);
 
 // -----------------------------------------------------------------------------
 // gt_format_elapsed(seconds, buf, buflen) -> buf
-//   The {t} renderer for the whole absence ladder, the memorial and the egg
+//   The {t} renderer for the absence line and the egg
 //   waiting line. GAME_DESIGN 5.3: "t is always rendered with the EXACT
 //   elapsed time - the precision is the joke; never round."
 //     0..59 s        "45 s"
@@ -184,7 +184,7 @@ uint32_t gt_elapsed_since(uint32_t then, uint32_t now);
 //   render something. Returns gt_is_valid(): false means "this is an estimate,
 //   do not print it as a fact".
 //   Note: tm_wday / tm_mon are indices; the Spanish weekday and month names
-//   for the memorial "{f}, {h}" line live in ui.cpp, not here.
+//   live in strings_es.h, not here.
 // -----------------------------------------------------------------------------
 bool gt_local_tm(struct tm& out);
 

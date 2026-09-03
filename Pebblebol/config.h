@@ -127,7 +127,6 @@
 // =============================================================================
 #define FPS_NORMAL              20
 #define FPS_LOW                 4            // energy < FPS_LOW_ENERGY_PCT, or web client active
-#define FPS_MEMORIAL            1
 #define FPS_LOW_ENERGY_PCT      15
 #define RENDER_WEB_BUSY_MS      10000UL      // drop to FPS_LOW this long after a web hit
 #define FRAME_BUDGET_US         50000UL      // 20 fps; sendBuffer is ~24 ms of it
@@ -146,14 +145,13 @@
 
 // Special holds
 #define GOD_ENTER_HOLD_MS       5000UL       // BOTH on S6 STATUS_B
-#define MEMORIAL_BURY_HOLD_MS   3000UL       // HOLD_R on S12
 #define EGG_RUB_TAPS            10           // alternating L/R taps to hatch early
 #define EGG_RUB_WINDOW_MS       20000UL
 
 // =============================================================================
 // 6. UI NAVIGATION
 // =============================================================================
-#define UI_AUTORETURN_MS        20000UL      // every screen except S0/S4/S12
+#define UI_AUTORETURN_MS        20000UL      // every screen except S0 and S4
 #define UI_COUNTDOWN_MS         5000UL       // 3 px bar shows for the last 5 s
 #define UI_MODAL_HELP_MS        3000UL       // BOTH on a list = 1 line of help
 #define UI_TOAST_MS             1800UL
@@ -162,20 +160,7 @@
 #define UI_ALERT_MIN_MS         1200UL
 #define MENU_ITEM_COUNT         8
 
-// Death staging (GAME_DESIGN 9.2) - milliseconds from T+0
-#define DEATH_HEARTBEAT_MS      12000UL
-#define DEATH_COLLAPSE_MS       1200UL
-#define DEATH_TEXT_START_MS     16200UL
-#define DEATH_TEXT_LINE_MS      1200UL
-#define DEATH_INPUT_LOCK_MS     22000UL
-
-// Memorial -> lineage -> egg
-#define MEMORIAL_LINEAGE_MS     4000UL
-#define MEMORIAL_EGG_FADE_MS    3000UL
-#define EGG_MOURNING_LOCK_S     600UL        // 10 min, unskippable
-#define EGG_AUTOHATCH_S         900UL        // 15 min
-
-// --- birth staging. The mirror of the death script above: 4.5 s in 7 phases --
+// --- birth staging: 4.5 s in 7 phases ----------------------------------------
 #define HATCH_WOBBLE_MS      1200UL
 #define HATCH_CRACK_MS        600UL
 #define HATCH_FLASH_MS         80UL
@@ -188,7 +173,7 @@
 #define HATCH_JOLT_PX           3
 #define HATCH_WOBBLE_K     100000UL   // swings = el*el / K -> the rocking accelerates
 
-// Cumulative marks. One clock, one comparison per phase, exactly like DEATH_*.
+// Cumulative marks. One clock, one comparison per phase.
 #define HATCH_T_CRACK   (HATCH_WOBBLE_MS)
 #define HATCH_T_FLASH   (HATCH_T_CRACK  + HATCH_CRACK_MS)
 #define HATCH_T_SHARDS  (HATCH_T_FLASH  + HATCH_FLASH_MS)
@@ -215,19 +200,18 @@
 #define RATE_HYGIENE_MPH        (-2000L)
 #define RATE_HYGIENE_POOP_MPH   (-6000L)     // additional, per poop on screen
 #define RATE_BOND_MPH           (-800L)
-#define RATE_DISCIPLINE_MPH     (-250L)
-#define RATE_WEIGHT_DG_MPH      (-3500L)     // milli-decigram per hour (=-0.35 g/h)
 #define RATE_HEALTH_REGEN_MPH   (+4000L)
 #define HEALTH_REGEN_MIN_PCT    55           // all four core stats >= 55 and !sick
 
 // Health damage per hour (milli-points), additive while the condition holds.
+// Health is the ONLY stat that cannot be driven to zero: it bleeds solely while
+// a core stat is pinned at 0 and never below HEALTH_FLOOR_PCT, so neglect ends
+// in an inconveniently unhappy pebble, never in a dead one (spec section 27).
 #define DMG_HUNGER_ZERO_MPH     (3000L)
 #define DMG_HYGIENE_ZERO_MPH    (2500L)
 #define DMG_ENERGY_ZERO_MPH     (1500L)
 #define DMG_HAPPINESS_ZERO_MPH  (1000L)
-#define DMG_SICK_MPH            (1500L)
-#define DMG_OBESE_MPH           (800L)
-#define OBESE_WEIGHT_DG         700
+#define HEALTH_FLOOR_PCT        10
 
 // Stage multipliers, x1000 (integer). Index by Stage.
 #define STAGE_MULT_EGG          0
@@ -236,7 +220,6 @@
 #define STAGE_MULT_TEEN         1150
 #define STAGE_MULT_ADULT        1000
 #define STAGE_MULT_SENIOR       850
-#define STAGE_MULT_DEAD         0
 
 // Contextual multipliers, x1000
 #define MULT_SLEEP              350          // hunger/happiness/hygiene while asleep
@@ -270,9 +253,7 @@
 #define SICK_HUNGRY_PPH         100          // hunger < 15
 #define SICK_LOWHEALTH_PPH      80           // health < 50
 #define SICK_ROLL_PERIOD_S      600          // every 10 min, p_hour/6
-#define SICK_OVERFEED_PPH       100          // 3 overfeeds -> +10 %/h for 2 h
-#define SICK_OVERFEED_WINDOW_S  7200UL
-#define OVERFEED_TRIGGER        3
+#define SICK_SUPPRESS_WINDOW_S  7200UL       // how long a suppressed poop counts
 #define INBRED_SICK_MULT        1250         // x1.25 for life
 
 // Care quality
@@ -283,49 +264,29 @@
 #define CQ_GOOD_STATS_PCT       40
 #define CQ_D_GOOD               (+1)
 #define CQ_D_ZEROSTAT           (-1)
-#define CQ_D_CARE_MISS          (-3)
 #define CQ_D_SICK_EPISODE       (-25)
 #define CQ_D_MINIGAME           (+2)
 #define CQ_D_WISH_OK            (+25)
 #define CQ_D_WISH_FAIL          (-10)
-#define CQ_D_ABANDONO           (-40)
-#define CQ_D_ABANDONO_GRAVE     (-100)
 #define CQ_MINIGAME_DAILY_CAP   40
 #define CQ_GOOD_DAILY_CAP       144
 
-// care_miss
-#define CARE_MISS_ALERT_PCT     25           // a stat crossing below this raises an alert
-#define CARE_MISS_GRACE_S       720UL        // 12 min to address it
-#define CARE_MISS_MIN_GAP_S     1800UL       // max 1 per 30 min
+// Alerts
+#define ALERT_LOW_STAT_PCT      25           // a stat crossing below this raises an alert
 
 // Action deltas, in whole points (converted to milli by the sim).
 #define ACT_MEAL_HUNGER         30
-#define ACT_MEAL_WEIGHT_DG      10
 #define ACT_MEAL_CQ             2
 #define ACT_MEAL_REFUSE_PCT     90           // refused above this satiety
 #define ACT_SNACK_HUNGER        10
 #define ACT_SNACK_HAPPINESS     12
-#define ACT_SNACK_WEIGHT_DG     25
-#define ACT_SNACK_OVERFEED_PCT  70
 #define ACT_CLEAN_HYGIENE       25
 #define ACT_MED_HAPPINESS       (-10)
 #define ACT_MED_SECOND_DOSE_PCT 30           // if health < 25
 #define ACT_PLAY_HAPPINESS_MAX  6
 #define ACT_PLAY_ENERGY         (-8)
-#define ACT_PLAY_WEIGHT_DG      (-10)
 #define ACT_PLAY_MIN_ENERGY_PCT 12
-#define ACT_SCOLD_WINDOW_S      30
-#define ACT_SCOLD_DISCIPLINE    15
-#define ACT_SCOLD_HAPPINESS     (-8)
-#define ACT_SCOLD_CQ            5
-#define ACT_SCOLD_UNJUST_BOND   (-10)
-#define ACT_SCOLD_UNJUST_HAP    (-12)
-#define ACT_SCOLD_UNJUST_CQ     (-8)
 #define ACT_PET_HAPPINESS       3
-#define ACT_FORCE_FEED_BOND     (-2)         // after 3 forced refusals
-#define ACT_FORCE_FEED_LIMIT    3
-#define WEIGHT_DG_MIN           50
-#define WEIGHT_DG_MAX           990
 
 // Diminishing returns on minigame happiness, permille, rolling 3 h window.
 #define PLAY_DECAY_WINDOW_S     10800UL
@@ -351,24 +312,13 @@
 #define AGE_SENIOR_S            604800UL     // 168 h = 7 d
 #define STAGE_CHECK_PERIOD_S    60
 
-// natural_death_h = 216 + (CQ-500)/6, clamped [192,288]
-#define DEATH_NATURAL_BASE_H    216
-#define DEATH_NATURAL_CQ_DIV    6
-#define DEATH_NATURAL_MIN_H     192
-#define DEATH_NATURAL_MAX_H     288
 #define SENIOR_MAXHEALTH_MIN    40
 #define SENIOR_REGEN_MULT       500          // x0.5
-#define ACCIDENT_PPM_PER_DAY    1500         // 0.15 %/day, only if CQ < 350
-#define ACCIDENT_CQ_MAX         350
 
 // Weekly / scheduled events
 #define EVENT_VISITA_H          72
 #define EVENT_VISITA_SOC_MIN    10
 #define EVENT_VISITA_HAPPINESS  20
-#define EVENT_STORM_H           144
-#define EVENT_STORM_DUR_S       7200UL
-#define EVENT_STORM_HEALTH      (-8)
-#define EVENT_STORM_PETS_NEEDED 3
 #define EVENT_BIRTHDAY_H        168
 #define EVENT_BIRTHDAY_HAPPY    40
 
@@ -393,34 +343,6 @@
 // Before the clock is calibrated, time()/gt_now() return seconds-since-boot,
 // i.e. a value near zero, so the test is unambiguous by ~47 years.
 #define NT_EPOCH_SANE_MIN       1483228800UL // 2017-01-01T00:00:00Z
-#define ABSENCE_CORTA_S         3600UL       // 1 h
-#define ABSENCE_LARGA_S         21600UL      // 6 h
-#define ABSENCE_ABANDONO_S      86400UL      // 24 h
-#define ABSENCE_GRAVE_S         259200UL     // 72 h
-#define ABSENCE_NEGLECT_DEATH_S 86400UL      // death inside an absence >= 24 h => ABANDONO
-
-// Tier penalties, whole points, applied AFTER the offline sim, clamped at 0.
-#define ABS_CORTA_BOND          (-3)
-#define ABS_CORTA_HAP           (-5)
-#define ABS_CORTA_HEA           0
-#define ABS_LARGA_BOND          (-12)
-#define ABS_LARGA_HAP           (-20)
-#define ABS_LARGA_HEA           (-5)
-#define ABS_ABANDONO_BOND       (-35)
-#define ABS_ABANDONO_HAP        (-45)
-#define ABS_ABANDONO_HEA        (-20)
-#define ABS_GRAVE_BOND          (-70)
-#define ABS_GRAVE_HAP           (-80)
-#define ABS_GRAVE_HEA           (-45)
-#define ABS_ABANDONO_MISSES     3
-#define ABS_GRAVE_MISSES        8
-
-// Sulk / refusal timers
-#define SULK_LARGA_S            30
-#define SULK_ABANDONO_S         120
-#define SULK_GRAVE_S            300
-#define SULK_PET_FORGIVE_S      20           // each mimo removes this much
-#define BOND_ABSENCE_DECAY_MULT 2000         // x2.0 while the AUSENCIA flag is set
 
 // Cold egg
 #define EGG_COLD_AFTER_S        259200UL     // 72 h
@@ -432,7 +354,6 @@
 #define NVS_NS                  "notta"
 #define NVS_KEY_LASTSEEN        "t"
 #define NVS_KEY_SAVE            "save"
-#define NVS_KEY_ANC             "anc"
 #define NVS_KEY_CFG             "cfg"
 #define NVS_KEY_EGG             "egg"        // pending BLE-mating egg (see nt_types.h)
 #define NVS_KEY_CANARY          "ok"         // store_selftest()
@@ -451,7 +372,6 @@
 
 #define SAVE_LASTSEEN_PERIOD_S  60UL         // do NOT lower: NVS wear
 #define SAVE_FULL_PERIOD_S      300UL
-#define ANCESTOR_MAX            16           // ring buffer, 16 * 12 = 192 B
 
 // =============================================================================
 // 11. RADIO / NETWORK  (BRIEF 1.3, NET_APIS)
@@ -558,7 +478,7 @@
 #define GOD_SCALE_4             3600
 #define GOD_SCALE_COUNT         5
 #define GOD_ABSENCE_COUNT       6            // 1 h, 6 h, 24 h, 72 h, 168 h, 720 h
-#define GOD_CMD_COUNT           10
+#define GOD_CMD_COUNT           8
 #define GOD_BAR_H               9
 
 // =============================================================================

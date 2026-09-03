@@ -82,7 +82,7 @@
 // nicety: sim_apply_action(ACT_CLEAN) sets poop_count to 0 on the spot, so a
 // copy taken afterwards has nothing left to dissolve. Every caller has to take
 // the copy first. Only a SUCCESSFUL action may be announced here; a rejected
-// one (cooldown, full, asleep, sulking) gets its toast and no film.
+// one (cooldown, full, asleep) gets its toast and no film.
 void    actfx_begin(uint8_t action, const PetSave& before);
 
 // Advance the clock. MUST be called once per loop() from ui_service(), above
@@ -98,7 +98,7 @@ void    actfx_service(uint32_t now_ms);
 uint8_t actfx_active(void);
 
 // Give up now: release petfx_hold() and forget the film. Call on every exit
-// from HOME, on death, on hatch, on entering god mode and at ui_begin().
+// from HOME, on hatch, on entering god mode and at ui_begin().
 void    actfx_cancel(void);
 
 // -----------------------------------------------------------------------------

@@ -86,13 +86,13 @@
 // 2. WIRE FLAGS - BEACON frame flags byte (BRIEF 6.2 defines b0 and b1)
 // -----------------------------------------------------------------------------
 #define BLE_BF_DEBUG    0x01u   // b0: god-mode tainted, real units must refuse
-#define BLE_BF_SEEKING  0x02u   // b1: sitting on S8 SOCIAL, open to courting
+#define BLE_BF_SEEKING  0x02u   // b1: sitting on SOCIAL, open to courting
 #define BLE_BF_SICK     0x04u   // b2: EXTENSION - contagion source (see report)
 
 // -----------------------------------------------------------------------------
 // 3. LOCAL STATE BITS - ble_set_self()
 // -----------------------------------------------------------------------------
-#define BLE_SELF_SEEKING    0x01u  // user is on S8 SOCIAL: advertise + accept
+#define BLE_SELF_SEEKING    0x01u  // user is on SOCIAL: advertise + accept
 #define BLE_SELF_SICK       0x02u  // PF_SICK mirror: we radiate, we cannot catch
 #define BLE_SELF_GOD        0x04u  // PF_GOD_TAINTED mirror: sets BLE_BF_DEBUG
 #define BLE_SELF_MATE_LOCK  0x08u  // caller-side lock (pending egg / persisted CD)
@@ -143,7 +143,7 @@ void ble_end(void);
 
 // Publish the identity beacon. Also registers who we are for the protocol, so
 // it must be called at least once before any mating can happen. Safe to call
-// on every entry to S8 SOCIAL; the radio is only re-keyed when something moved.
+// on every entry to SOCIAL; the radio is only re-keyed when something moved.
 void ble_advertise_beacon(const Genome &g, uint8_t stage, uint8_t cq_hi);
 
 // Become the initiator: court the peer whose MAC ends in mac3 with this

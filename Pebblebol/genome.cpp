@@ -62,7 +62,7 @@ struct GeneDef {
 };
 
 // Numeric genes (GAME_DESIGN 4.2 "Numeric" class). Order is contractual for
-// the death-egg "random numeric gene" draw and for the host test.
+// the mutation draw and for the host test.
 enum NumGeneId {
   NG_APPETITE = 0,
   NG_METABOLISM,
@@ -423,7 +423,7 @@ Genome genome_breed(const Genome& A, const Genome& B,
     if (sa != sb && chance_pct(12)) {
       uint8_t hyb = genome_hybrid_species(sa, sb);
       GN_SET(c.g0, GN_SPECIES_SH, GN_SPECIES_MK, hyb);
-      flags |= EF_HYBRID;          // -> QUIMERA eligible (PetSave PF_HYBRID_ELIG)
+      flags |= EF_HYBRID;          // reported to the caller; no PetSave bit
       any_mutation = true;
     }
   }
@@ -480,117 +480,7 @@ Genome genome_breed(const Genome& A, const Genome& B,
 }
 
 // =============================================================================
-// 9. DEATH-EGG - ONE PARENT, PARTHENOGENESIS (GAME_DESIGN 4.3)
-//    Drifts and specialises: pushes a dynasty further into whatever killed it.
-// =============================================================================
-
-Genome genome_death_egg(const Genome& parent, uint8_t cause, int16_t cq_at_death) {
-  Genome c = parent;                     // step 1: full copy
-
-  // --- step 2: numeric genes, p = 18% each ---------------------------------
-  for (uint8_t i = 0; i < NG_COUNT; ++i) {
-    const GeneDef& d = NUMGENE[i];
-    if (chance_pct(18)) {
-      gd_put_reflected(c, d, (int)gd_get(c, d) + genome_mut_delta());
-    }
-  }
-
-  // --- step 3: morphology churn --------------------------------------------
-  if (chance_pct(25)) {                  // pattern: re-roll
-    GN_SET(c.g0, GN_PATTERN_SH, GN_PATTERN_MK, (uint8_t)rnd_below(PATTERN_COUNT));
-  }
-  if (chance_pct(60)) {                  // palette: +-1 reflected
-    gd_put_reflected(c, CATGENE[CG_PALETTE],
-                     (int)gd_get(c, CATGENE[CG_PALETTE]) + (coin() ? 1 : -1));
-  }
-  if (chance_pct(20)) {                  // body_size: +-1 reflected
-    gd_put_reflected(c, CATGENE[CG_BODYSIZE],
-                     (int)gd_get(c, CATGENE[CG_BODYSIZE]) + (coin() ? 1 : -1));
-  }
-  if (chance_pct(15)) {                  // ear_horn: re-roll
-    GN_SET(c.g0, GN_EARHORN_SH, GN_EARHORN_MK, (uint8_t)rnd_below(4));
-  }
-
-  // --- step 4: species, p = 6%, +-1 within [0,11] (adjacent only) -----------
-  // A hybrid-exclusive species (12..15) is left alone: those shapes exist only
-  // through BLE recombination and a parthenogenetic line must not launder one
-  // back into the ordinary [0,11] range.
-  if (gd_get(c, CATGENE[CG_SPECIES]) <= 11 && chance_pct(6)) {
-    gd_put_reflected(c, CATGENE[CG_SPECIES],
-                     (int)gd_get(c, CATGENE[CG_SPECIES]) + (coin() ? 1 : -1));
-  }
-
-  // --- step 5: directed drift by cause of death ----------------------------
-  switch (cause) {
-    case DEATH_HUNGER:
-      gd_put_reflected(c, NUMGENE[NG_APPETITE],
-                       (int)gd_get(c, NUMGENE[NG_APPETITE]) - 2);
-      break;
-    case DEATH_ILLNESS:
-      gd_put_reflected(c, NUMGENE[NG_HARDINESS],
-                       (int)gd_get(c, NUMGENE[NG_HARDINESS]) + 2);
-      break;
-    case DEATH_FILTH:
-      gd_put_reflected(c, NUMGENE[NG_METABOLISM],
-                       (int)gd_get(c, NUMGENE[NG_METABOLISM]) - 1);
-      gd_put_reflected(c, NUMGENE[NG_HARDINESS],
-                       (int)gd_get(c, NUMGENE[NG_HARDINESS]) + 1);
-      break;
-    case DEATH_NEGLECT:
-      // The line drifts toward not needing you - and it shows.
-      gd_put_reflected(c, NUMGENE[NG_SOCIABILITY],
-                       (int)gd_get(c, NUMGENE[NG_SOCIABILITY]) - 3);
-      break;
-    case DEATH_OLD_AGE:
-      if (cq_at_death >= 700) {
-        uint8_t i = (uint8_t)rnd_below(NG_COUNT);
-        gd_put_reflected(c, NUMGENE[i], (int)gd_get(c, NUMGENE[i]) + 1);
-        if (chance_pct(10)) GN_SET(c.g2, GN_RARE_SH, GN_RARE_MK, 1);
-      }
-      break;
-    default:
-      break;   // DEATH_NONE / DEATH_SADNESS / DEATH_ACCIDENT: no directed drift
-  }
-
-  // --- step 8: forced-novelty guarantee ------------------------------------
-  // Steps 2..5 may have produced nothing visible. Every death-egg must be a
-  // visibly different creature from its parent, so force one change in the
-  // morphology word AND one in the physiology word.
-  if (c.g0 == parent.g0 && c.g1 == parent.g1) {
-    uint8_t p0 = GN_GET(c.g0, GN_PATTERN_SH, GN_PATTERN_MK);
-    uint8_t np;
-    do { np = (uint8_t)rnd_below(PATTERN_COUNT); } while (np == p0);
-    GN_SET(c.g0, GN_PATTERN_SH, GN_PATTERN_MK, np);
-
-    // Only the four g1 numeric genes, so g1 is guaranteed to move too.
-    const GeneDef& d = NUMGENE[rnd_below(NG_G1_COUNT)];
-    int v  = (int)gd_get(c, d);
-    int nv = genome_reflect(v + (coin() ? 1 : -1), d.lo, d.hi);
-    if (nv == v) nv = genome_reflect(v + 1, d.lo, d.hi);   // ranges are >2 wide
-    if (nv == v) nv = genome_reflect(v - 1, d.lo, d.hi);
-    gd_put(c, d, (uint8_t)nv);
-  }
-
-  // --- step 6: mutation_counter += 1 always, saturate 15 -------------------
-  {
-    int mc = (int)gene_mutations(c) + 1;
-    GN_SET(c.g2, GN_MUTCNT_SH, GN_MUTCNT_MK, (uint8_t)NT_MIN(mc, 15));
-  }
-
-  // --- step 7: lineage_id preserved (only BLE can break a dynasty) ---------
-  c.lineage_id = parent.lineage_id;
-  if (c.lineage_id == 0u) c.lineage_id = rnd_nonzero_u32();
-
-  // --- step 9: bookkeeping -------------------------------------------------
-  c.generation = (uint8_t)NT_MIN((int)parent.generation + 1, 255);
-  c.parent_tag = (uint8_t)((parent.lineage_id ^ (uint32_t)parent.g1) & 0xFFu);
-
-  genome_seal(c);
-  return c;
-}
-
-// =============================================================================
-// 10. HEX SERIALISATION
+// 9. HEX SERIALISATION
 // =============================================================================
 
 static const char HEX_UP[] = "0123456789ABCDEF";

@@ -38,7 +38,7 @@ enum StrId : uint16_t {
   STR_BOOT_DIZZY,
   STR_BOOT_FIRST,
 
-  // --- 2. main menu ring, S1 ---------------------- <= 10 chars @ t0_11b -----
+  // --- 2. main menu ring -------------------------- <= 10 chars @ t0_11b -----
   STR_MENU_FEED,
   STR_MENU_CLEAN,
   STR_MENU_PLAY,
@@ -58,7 +58,6 @@ enum StrId : uint16_t {
   STR_AF_PREV,
   STR_AF_FWD,
   STR_AF_MORE,
-  STR_AF_BURY,
   STR_YES,
   STR_NO,
   STR_ON,
@@ -72,7 +71,6 @@ enum StrId : uint16_t {
   STR_STAT_HYGIENE,
   STR_STAT_HEALTH,
   STR_STAT_BOND,
-  STR_STAT_DISCIPLINE,
 
   // --- 5. life stages, parallel to Stage ---------- <= 8 chars ---------------
   STR_STAGE_EGG,
@@ -81,7 +79,6 @@ enum StrId : uint16_t {
   STR_STAGE_TEEN,
   STR_STAGE_ADULT,
   STR_STAGE_SENIOR,
-  STR_STAGE_DEAD,
 
   // --- 6. mood faces, parallel to Mood ------------ <= 9 chars ---------------
   STR_MOOD_MISERIA,
@@ -90,14 +87,6 @@ enum StrId : uint16_t {
   STR_MOOD_CONTENTO,
   STR_MOOD_FELIZ,
   STR_MOOD_EUFORICO,
-
-  // --- 7. adult forms, parallel to AdultForm ------ <= 11 chars --------------
-  STR_FORM_BOLOTA,
-  STR_FORM_ZAMPASALTO,
-  STR_FORM_BUHO,
-  STR_FORM_PUNKI,
-  STR_FORM_MOHO,
-  STR_FORM_QUIMERA,
 
   // --- 8. species 0..15 (genome g0 bits 3:0) ------ <= 10 chars --------------
   STR_SPECIES_00, STR_SPECIES_01, STR_SPECIES_02, STR_SPECIES_03,
@@ -117,16 +106,6 @@ enum StrId : uint16_t {
   STR_TEMPER_NERVIOSO,
   STR_TEMPER_GOTICO,
 
-  // --- 12. death causes, parallel to DeathCause --- <= 11 chars --------------
-  STR_CAUSE_NONE,
-  STR_CAUSE_HUNGER,
-  STR_CAUSE_FILTH,
-  STR_CAUSE_ILLNESS,
-  STR_CAUSE_SADNESS,
-  STR_CAUSE_OLD_AGE,
-  STR_CAUSE_NEGLECT,
-  STR_CAUSE_ACCIDENT,
-
   // --- 13. action names, parallel to ActionId ----- <= 10 chars --------------
   STR_ACT_NONE,
   STR_ACT_FEED_MEAL,
@@ -135,7 +114,6 @@ enum StrId : uint16_t {
   STR_ACT_MEDICINE,
   STR_ACT_PLAY,
   STR_ACT_PET,
-  STR_ACT_SCOLD,
   STR_ACT_LIGHT,
   STR_ACT_SLEEP,
 
@@ -146,15 +124,11 @@ enum StrId : uint16_t {
   STR_RX_MED,
   STR_RX_PLAY,
   STR_RX_PET,
-  STR_RX_SCOLD_OK,
-  STR_RX_SCOLD_BAD,
   STR_RX_LIGHT_ON,
   STR_RX_LIGHT_OFF,
   STR_RX_SLEEP,
   STR_RX_WAKE,
-  STR_RX_OVERFED,
   STR_RX_EVOLVE,
-  STR_RX_NOW_FORM,                       // "Ahora soy un {f}."
 
   // --- 15. action errors, parallel to ActionErr --- <= 25 chars @ 5x8 --------
   STR_AERR_NONE,
@@ -164,36 +138,18 @@ enum StrId : uint16_t {
   STR_AERR_NOT_SICK,
   STR_AERR_NOTHING_TODO,
   STR_AERR_ASLEEP,
-  STR_AERR_REFUSED,
-  STR_AERR_SULKING,
-  STR_AERR_DEAD,
   STR_AERR_IS_EGG,
   STR_AERR_BAD_ARG,
 
-  // --- 16. absence ladder, parallel to AbsenceTier ---------------------------
+  // --- 16. welcome back ---------------------------------------------------
   //     {t} = exact elapsed time, never rounded. ui wraps these to 2-3 lines.
-  STR_ABS_NONE,
-  STR_ABS_CORTA,
-  STR_ABS_LARGA,
-  STR_ABS_ABANDONO,
-  STR_ABS_GRAVE,
-  STR_ABS_MUERTO,
+  STR_ABS_AWAY,
   STR_ABS_UNKNOWN,
 
-  // --- 17. memorial, S12 -------------------------- <= 21 chars @ 6x10 -------
-  STR_MEM_DIED,
-  STR_MEM_SLEPT,
-  STR_MEM_ALONE,
-  STR_MEM_LIVED,
-  STR_MEM_CAUSE,
-  STR_MEM_EGG_LEFT_3P,
-  STR_MEM_EGG_COLD,
-  STR_MEM_BURY_HINT,
-
-  // --- 18. egg, S13 ------------------------------- <= 25 chars @ 5x8 --------
+  // --- 18. egg ------------------------------------ <= 25 chars @ 5x8 --------
   STR_EGG_TITLE,
   STR_EGG_NOT_YET,
-  STR_EGG_MOURN,
+  STR_EGG_COLD,
   STR_EGG_RUB,
   STR_EGG_KIN,
   STR_EGG_HATCHING,
@@ -214,7 +170,6 @@ enum StrId : uint16_t {
   STR_AL_WISH,
   STR_AL_EVOLVING,
   STR_AL_BIRTHDAY,
-  STR_AL_STORM,
   STR_AL_MATE_FOUND,
 
   // --- 20. daily wish, parallel to WishId --------- <= 25 chars @ 5x8 --------
@@ -228,23 +183,9 @@ enum StrId : uint16_t {
 
   // --- 21. scheduled events ----------------------- <= 25 chars @ 5x8 --------
   STR_EV_VISITA,
-  STR_EV_STORM,
   STR_EV_BIRTHDAY,
-  STR_EV_SCARE,
 
-  // --- 22. lineage, S7 ---------------------------- <= 12 chars @ 4x6/5x8 ----
-  STR_LIN_TITLE,
-  STR_LIN_LIVED,
-  STR_LIN_DIED_OF,
-  STR_LIN_GRADE,
-  STR_LIN_EMPTY,
-  STR_LIN_TAINTED,
-  STR_LIN_OF,
-
-  // --- 23. care grades A..F, parallel to CareGrade -- 1 char -----------------
-  STR_GRADE_A, STR_GRADE_B, STR_GRADE_C, STR_GRADE_D, STR_GRADE_E, STR_GRADE_F,
-
-  // --- 24. status screens S5/S6 ------------------- <= 12 chars --------------
+  // --- 24. status screens ------------------- <= 12 chars --------------
   STR_ST_TITLE_A,
   STR_ST_TITLE_B,
   STR_ST_GEN,
@@ -255,7 +196,7 @@ enum StrId : uint16_t {
   STR_ST_SEX_O,
   STR_ST_SEX_X,
 
-  // --- 25. social / BLE, S8 ----------------------- <= 25 chars @ 5x8 --------
+  // --- 25. social / BLE --------------------------- <= 25 chars @ 5x8 --------
   STR_SO_TITLE,
   STR_SO_SEARCHING,
   STR_SO_NOBODY,
@@ -269,14 +210,14 @@ enum StrId : uint16_t {
   STR_SO_CAP,
   STR_SO_EGG_MADE,
 
-  // --- 26. web / QR, S15 -------------------------- <= 25 chars @ 5x8 --------
+  // --- 26. web / QR ------------------------------- <= 25 chars @ 5x8 --------
   STR_WEB_TITLE,
   STR_WEB_PIN,
   STR_WEB_CONNECTING,
   STR_WEB_NOWIFI,
   STR_WEB_AP_HINT,
 
-  // --- 27. settings, S9 --------------------------- <= 16 chars --------------
+  // --- 27. settings ------------------------------- <= 16 chars --------------
   STR_SET_TITLE,
   STR_SET_SOUND,
   STR_SET_BRIGHT,
@@ -287,12 +228,11 @@ enum StrId : uint16_t {
   STR_SET_MUTE_ON,
   STR_SET_MUTE_OFF,
 
-  // --- 28. confirmations, S10 --------------------- <= 25 chars @ 5x8 --------
+  // --- 28. confirmations -------------------------- <= 25 chars @ 5x8 --------
   STR_CF_SURE,
   STR_CF_QUIT_GAME,
   STR_CF_WIPE,
   STR_CF_WIPE2,
-  STR_CF_KILL,
 
   // --- 29. minigames ------------------------------ <= 12 chars --------------
   STR_DG_REFLEX,
@@ -305,13 +245,11 @@ enum StrId : uint16_t {
   STR_GM_SCORE,
   STR_GM_COOLDOWN,
 
-  // --- 30. god mode, S14 -------------------------- <= 16 chars --------------
+  // --- 30. god mode ------------------------------- <= 16 chars --------------
   STR_GOD_SPEED,
   STR_GOD_ABSENCE,
   STR_GOD_SETSTAT,
   STR_GOD_STAGE,
-  STR_GOD_FORM,
-  STR_GOD_KILL,
   STR_GOD_GENOME,
   STR_GOD_BLE,
   STR_GOD_CLOCK,
@@ -321,7 +259,6 @@ enum StrId : uint16_t {
   STR_GOD_DUMP,
   STR_GOD_LOAD,
   STR_GOD_TAINTED,
-  STR_GOD_NO_REVIVE,
   STR_GOD_EXIT,
 
   // --- 31. errors --------------------------------- <= 25 chars @ 5x8 --------
@@ -334,8 +271,10 @@ enum StrId : uint16_t {
   STR_ERR_GENOME,
 
   // ===========================================================================
-  //  33. UI BLOCK - appended by ui.cpp. APPEND ONLY, NEVER RENUMBER: every id
-  //  above this line is already persisted in save blobs and cooldown tables.
+  //  33. UI BLOCK - appended by ui.cpp. Nothing persists a StrId any more
+  //  (the Telegram cooldown table that did is gone), so the ids above are free
+  //  to renumber when a group is removed - the guards at the bottom of this
+  //  file are what keep the table and the enums in step.
   // ===========================================================================
 
   // --- 33a. affordance labels the base set did not carry -- <= 9 ch @ 5x8 ---
@@ -365,14 +304,14 @@ enum StrId : uint16_t {
   STR_HLP_PEER,
   STR_HLP_BACK,
 
-  // --- 33c. on-device (S4) minigames ----------------------- <= 25 @ 5x8 ---
+  // --- 33c. on-device minigames --------------------------- <= 25 @ 5x8 ---
   STR_DG_REFLEX_HINT,
   STR_DG_MEMORY_HINT,
   STR_DG_JUMP_HINT,
   STR_GM_ROUND,
   STR_GM_TOOSOON,
 
-  // --- 33d. deterministic ancestor names (GAME_DESIGN 9.3) -----------------
+  // --- 33d. deterministic dynasty names (GAME_DESIGN 9.3) ------------------
   //  name = SYL_A[h % 12] + SYL_B[(h / 12) % 12], h = hash(lineage_id, gen).
   //  Same dynasty + same generation yields the same name on every device.
   STR_SYL_A00, STR_SYL_A01, STR_SYL_A02, STR_SYL_A03,
@@ -387,7 +326,7 @@ enum StrId : uint16_t {
   STR_UI_GOD_HOLD,
   STR_UI_NO_CLOCK,
 
-  // --- 33f. S16 time entry ------------------------ <= 16 chars --------------
+  // --- 33f. time entry ---------------------------- <= 16 chars --------------
   STR_SET_CLOCK,
   STR_CLK_TITLE,
   STR_CLK_YEAR,
@@ -402,14 +341,12 @@ enum StrId : uint16_t {
   STR_AF_ADD,
 
   // ===========================================================================
-  //  34. GOD MODE BLOCK - appended by godmode.cpp. APPEND ONLY, NEVER RENUMBER.
-  //  The base block (section 30) carries the twelve GAME_DESIGN 10.1 command
-  //  labels; everything the debug console needs beyond those lives here.
+  //  34. GOD MODE BLOCK - appended by godmode.cpp.
+  //  The base block (section 30) carries the surviving command labels;
+  //  everything the debug console needs beyond those lives here.
   // ===========================================================================
 
   // --- 34a. list rows and panel titles ------------------- <= 16 ch @ 5x8 ---
-  STR_GOD_SICK,
-  STR_GOD_POOP,
   STR_GOD_AUTO,
   STR_GOD_HEAP,
   STR_GOD_RADIO,
@@ -484,7 +421,6 @@ inline constexpr const char* const ES[] = {
   /* STR_AF_PREV */               "ANTES",
   /* STR_AF_FWD */                "DESPUÉS",
   /* STR_AF_MORE */               "MÁS",
-  /* STR_AF_BURY */               "ENTERRAR",
   /* STR_YES */                   "SÍ",
   /* STR_NO */                    "NO",
   /* STR_ON */                    "ON",
@@ -498,7 +434,6 @@ inline constexpr const char* const ES[] = {
   /* STR_STAT_HYGIENE */          "Higiene",
   /* STR_STAT_HEALTH */           "Salud",
   /* STR_STAT_BOND */             "Cariño",
-  /* STR_STAT_DISCIPLINE */       "Disciplina",
 
   /* --- 5. life stages --- */
   /* STR_STAGE_EGG */             "HUEVO",
@@ -507,7 +442,6 @@ inline constexpr const char* const ES[] = {
   /* STR_STAGE_TEEN */            "JOVEN",
   /* STR_STAGE_ADULT */           "ADULTO",
   /* STR_STAGE_SENIOR */          "ANCIANO",
-  /* STR_STAGE_DEAD */            "MUERTO",
 
   /* --- 6. mood faces --- */
   /* STR_MOOD_MISERIA */          "MISERIA",
@@ -516,14 +450,6 @@ inline constexpr const char* const ES[] = {
   /* STR_MOOD_CONTENTO */         "CONTENTO",
   /* STR_MOOD_FELIZ */            "FELIZ",
   /* STR_MOOD_EUFORICO */         "EUFÓRICO",
-
-  /* --- 7. adult forms --- */
-  /* STR_FORM_BOLOTA */           "BOLOTA",
-  /* STR_FORM_ZAMPASALTO */       "ZAMPASALTO",
-  /* STR_FORM_BUHO */             "BÚHO",
-  /* STR_FORM_PUNKI */            "PUNKI",
-  /* STR_FORM_MOHO */             "MOHO",
-  /* STR_FORM_QUIMERA */          "QUIMERA",
 
   /* --- 8. species --- */
   /* 00 */ "BLOB",      /* 01 */ "ORUGA",   /* 02 */ "PÁJARO",  /* 03 */ "GATO",
@@ -543,16 +469,6 @@ inline constexpr const char* const ES[] = {
   /* STR_TEMPER_NERVIOSO */       "NERVIOSO",
   /* STR_TEMPER_GOTICO */         "GÓTICO",
 
-  /* --- 12. death causes --- */
-  /* STR_CAUSE_NONE */            "-",
-  /* STR_CAUSE_HUNGER */          "HAMBRE",
-  /* STR_CAUSE_FILTH */           "SUCIEDAD",
-  /* STR_CAUSE_ILLNESS */         "ENFERMEDAD",
-  /* STR_CAUSE_SADNESS */         "TRISTEZA",
-  /* STR_CAUSE_OLD_AGE */         "VEJEZ",
-  /* STR_CAUSE_NEGLECT */         "ABANDONO",
-  /* STR_CAUSE_ACCIDENT */        "ACCIDENTE",
-
   /* --- 13. action names --- */
   /* STR_ACT_NONE */              "-",
   /* STR_ACT_FEED_MEAL */         "Comida",
@@ -561,7 +477,6 @@ inline constexpr const char* const ES[] = {
   /* STR_ACT_MEDICINE */          "Medicina",
   /* STR_ACT_PLAY */              "Jugar",
   /* STR_ACT_PET */               "Mimo",
-  /* STR_ACT_SCOLD */             "Regañar",
   /* STR_ACT_LIGHT */             "Luz",
   /* STR_ACT_SLEEP */             "Dormir",
 
@@ -572,15 +487,11 @@ inline constexpr const char* const ES[] = {
   /* STR_RX_MED */                "Sabe a castigo. Sirve.",
   /* STR_RX_PLAY */               "¡Venga! A ver si puedes.",
   /* STR_RX_PET */                "Vale. No te emociones.",
-  /* STR_RX_SCOLD_OK */           "Vale. Me he pasado.",
-  /* STR_RX_SCOLD_BAD */          "¿Y eso a qué ha venido?",
   /* STR_RX_LIGHT_ON */           "Luz. Qué maravilla.",
   /* STR_RX_LIGHT_OFF */          "Luz fuera. Por fin.",
   /* STR_RX_SLEEP */              "Buenas noches. Supongo.",
   /* STR_RX_WAKE */               "Estaba bien dormido.",
-  /* STR_RX_OVERFED */            "Me va a explotar algo.",
   /* STR_RX_EVOLVE */             "¡Estoy cambiando!",
-  /* STR_RX_NOW_FORM */           "Ahora soy un {f}.",
 
   /* --- 15. action errors --- */
   /* STR_AERR_NONE */             "",
@@ -590,35 +501,17 @@ inline constexpr const char* const ES[] = {
   /* STR_AERR_NOT_SICK */         "No estoy enfermo. Aún.",
   /* STR_AERR_NOTHING_TODO */     "Está limpio. Bastante.",
   /* STR_AERR_ASLEEP */           "Duermo. Increíble, ¿eh?",
-  /* STR_AERR_REFUSED */          "No me apetece.",
-  /* STR_AERR_SULKING */          "Ahora mismo no.",
-  /* STR_AERR_DEAD */             "Ya no hay nadie aquí.",
   /* STR_AERR_IS_EGG */           "Es un huevo. No come.",
   /* STR_AERR_BAD_ARG */          "Eso no existe.",
 
-  /* --- 16. absence ladder --- */
-  /* STR_ABS_NONE */              "",
-  /* STR_ABS_CORTA */             "¿Dónde estabas? {t}.",
-  /* STR_ABS_LARGA */             "{t}. Sin avisar. Sin nada.",
-  /* STR_ABS_ABANDONO */          "{t}. He contado los segundos. Todos.",
-  /* STR_ABS_GRAVE */             "{t}. Ya no sé si esto lo arreglas.",
-  /* STR_ABS_MUERTO */            "{t}. Llegas tarde.",
+  /* --- 16. welcome back --- */
+  /* STR_ABS_AWAY */              "¿Dónde estabas? {t}.",
   /* STR_ABS_UNKNOWN */           "No sé cuánto tiempo ha pasado. Sé que fue mucho. Y sé que fuiste tú.",
-
-  /* --- 17. memorial --- */
-  /* STR_MEM_DIED */              "{n} murió.",
-  /* STR_MEM_SLEPT */             "{n} se durmió.",
-  /* STR_MEM_ALONE */             "Moriste solo.",
-  /* STR_MEM_LIVED */             "Vivió {t}.",
-  /* STR_MEM_CAUSE */             "Causa: {c}.",
-  /* STR_MEM_EGG_LEFT_3P */       "Dejó un huevo.",
-  /* STR_MEM_EGG_COLD */          "Se enfrió. Ha cambiado.",
-  /* STR_MEM_BURY_HINT */         "Mantén DCHA: enterrar",
 
   /* --- 18. egg --- */
   /* STR_EGG_TITLE */             "HUEVO",
   /* STR_EGG_NOT_YET */           "Todavía no.",
-  /* STR_EGG_MOURN */             "Todavía no. Dale un momento.",
+  /* STR_EGG_COLD */              "Se enfrió. Ha cambiado.",
   /* STR_EGG_RUB */               "Frótalo. Con ganas.",
   /* STR_EGG_KIN */               "Parientes. Ya veremos.",
   /* STR_EGG_HATCHING */          "Se está abriendo...",
@@ -639,7 +532,6 @@ inline constexpr const char* const ES[] = {
   /* STR_AL_WISH */               "Quiero una cosa.",
   /* STR_AL_EVOLVING */           "Algo está pasando...",
   /* STR_AL_BIRTHDAY */           "¡Es mi cumpleaños!",
-  /* STR_AL_STORM */              "Va a caer una buena.",
   /* STR_AL_MATE_FOUND */         "Hay alguien cerca.",
 
   /* --- 20. daily wish --- */
@@ -653,21 +545,7 @@ inline constexpr const char* const ES[] = {
 
   /* --- 21. scheduled events --- */
   /* STR_EV_VISITA */             "Ha venido alguien. Se ha ido.",
-  /* STR_EV_STORM */              "Esta noche truena.",
   /* STR_EV_BIRTHDAY */           "¡Feliz cumpleaños!",
-  /* STR_EV_SCARE */              "¡AY! Eso ha dolido.",
-
-  /* --- 22. lineage --- */
-  /* STR_LIN_TITLE */             "ESTIRPE",
-  /* STR_LIN_LIVED */             "vivió",
-  /* STR_LIN_DIED_OF */           "murió de",
-  /* STR_LIN_GRADE */             "nota",
-  /* STR_LIN_EMPTY */             "Sin antepasados. Aún.",
-  /* STR_LIN_TAINTED */           "* tocado por dios",
-  /* STR_LIN_OF */                "de",
-
-  /* --- 23. care grades --- */
-  /* STR_GRADE_A */ "A", /* B */ "B", /* C */ "C", /* D */ "D", /* E */ "E", /* F */ "F",
 
   /* --- 24. status screens --- */
   /* STR_ST_TITLE_A */            "ESTADO",
@@ -717,7 +595,6 @@ inline constexpr const char* const ES[] = {
   /* STR_CF_QUIT_GAME */          "¿Abandonar? Pierdes la partida.",
   /* STR_CF_WIPE */               "¿Borrar todo? No hay vuelta.",
   /* STR_CF_WIPE2 */              "¿De verdad? Última oportunidad.",
-  /* STR_CF_KILL */               "¿Matarlo? Va en serio.",
 
   /* --- 29. minigames --- */
   /* STR_DG_REFLEX */             "REFLEJOS",
@@ -735,8 +612,6 @@ inline constexpr const char* const ES[] = {
   /* STR_GOD_ABSENCE */           "SALTAR AUSENCIA",
   /* STR_GOD_SETSTAT */           "FIJAR STAT",
   /* STR_GOD_STAGE */             "FORZAR ETAPA",
-  /* STR_GOD_FORM */              "FORZAR FORMA",
-  /* STR_GOD_KILL */              "MATAR",
   /* STR_GOD_GENOME */            "GENOMA",
   /* STR_GOD_BLE */               "BLE FALSO",
   /* STR_GOD_CLOCK */             "RELOJ",
@@ -746,7 +621,6 @@ inline constexpr const char* const ES[] = {
   /* STR_GOD_DUMP */              "VOLCAR",
   /* STR_GOD_LOAD */              "CARGAR",
   /* STR_GOD_TAINTED */           "Tocado. Para siempre.",
-  /* STR_GOD_NO_REVIVE */         "Resucitar no. Matar sí.",
   /* STR_GOD_EXIT */              "Saliendo. Guardado.",
 
   /* --- 31. errors --- */
@@ -791,7 +665,7 @@ inline constexpr const char* const ES[] = {
   /* STR_GM_ROUND */              "Ronda",
   /* STR_GM_TOOSOON */            "Demasiado pronto.",
 
-  /* --- 33d. ancestor name syllables --- */
+  /* --- 33d. dynasty name syllables --- */
   /* A */ "Bo", "Ti", "Nu", "Ma", "Ke", "Zu", "Pi", "Ro", "La", "Ve", "Gu", "Ña",
   /* B */ "ri", "po", "tán", "fu", "sco", "lín", "ma", "zo", "que", "nel", "bi", "rrón",
 
@@ -800,7 +674,7 @@ inline constexpr const char* const ES[] = {
   /* STR_UI_GOD_HOLD */           "···",
   /* STR_UI_NO_CLOCK */           "Sin hora fiable.",
 
-  /* --- 33f. S16 time entry --- */
+  /* --- 33f. time entry --- */
   /* STR_SET_CLOCK */             "Poner hora",
   /* STR_CLK_TITLE */             "PONER HORA",
   /* STR_CLK_YEAR */              "Año",
@@ -815,8 +689,6 @@ inline constexpr const char* const ES[] = {
   /* STR_AF_ADD */                "+1",
 
   /* --- 34a. god mode: list rows and panel titles --- */
-  /* STR_GOD_SICK */              "ENFERMAR",
-  /* STR_GOD_POOP */              "CACAS",
   /* STR_GOD_AUTO */              "AUTO",
   /* STR_GOD_HEAP */              "MEMORIA",
   /* STR_GOD_RADIO */             "RADIO",
@@ -858,17 +730,13 @@ inline constexpr const char* const ES[] = {
 #define S_STAT(s)      (ES[STR_STAT_HUNGER    + (uint16_t)(s)])   // StatId
 #define S_STAGE(s)     (ES[STR_STAGE_EGG      + (uint16_t)(s)])   // Stage
 #define S_MOOD(m)      (ES[STR_MOOD_MISERIA   + (uint16_t)(m)])   // Mood
-#define S_FORM(f)      (ES[STR_FORM_BOLOTA    + (uint16_t)(f)])   // AdultForm (not UNSET)
 #define S_SPECIES(v)   (ES[STR_SPECIES_00     + (uint16_t)((v) & 0x0F)])
 #define S_PATTERN(v)   (ES[STR_PATTERN_00     + (uint16_t)((v) & 0x0F)])
 #define S_TEMPER(c)    (ES[STR_TEMPER_SOLAR   + (uint16_t)(c)])   // Temperament class
-#define S_CAUSE(c)     (ES[STR_CAUSE_NONE     + (uint16_t)(c)])   // DeathCause
 #define S_ACTION(a)    (ES[STR_ACT_NONE       + (uint16_t)(a)])   // ActionId
 #define S_AERR(e)      (ES[STR_AERR_NONE      + (uint16_t)(e)])   // ActionErr
-#define S_ABSENCE(t)   (ES[STR_ABS_NONE       + (uint16_t)(t)])   // AbsenceTier
 #define S_ALERT(a)     (ES[STR_AL_NONE        + (uint16_t)(a)])   // AlertId
 #define S_WISH(w)      (ES[STR_WISH_NONE      + (uint16_t)(w)])   // WishId
-#define S_GRADE(g)     (ES[STR_GRADE_A        + (uint16_t)(g)])   // CareGrade
 #define S_MENU(i)      (ES[STR_MENU_FEED      + (uint16_t)(i)])   // 0..7
 #define S_SYL_A(i)     (ES[STR_SYL_A00        + (uint16_t)((i) % 12u)])  // name syllable 1
 #define S_SYL_B(i)     (ES[STR_SYL_B00        + (uint16_t)((i) % 12u)])  // name syllable 2
@@ -879,24 +747,20 @@ inline constexpr const char* const ES[] = {
 static_assert(NT_ARRAY_LEN(ES) == (size_t)STR_COUNT,
               "strings_es.h: ES[] and StrId are out of sync");
 
-static_assert(STR_STAT_DISCIPLINE - STR_STAT_HUNGER + 1 == (int)ST_COUNT,      "stat labels");
-static_assert(STR_STAGE_DEAD      - STR_STAGE_EGG   + 1 == (int)STAGE_COUNT,   "stage names");
+static_assert(STR_STAT_BOND       - STR_STAT_HUNGER + 1 == (int)ST_COUNT,      "stat labels");
+static_assert(STR_STAGE_SENIOR    - STR_STAGE_EGG   + 1 == (int)STAGE_COUNT,   "stage names");
 static_assert(STR_MOOD_EUFORICO   - STR_MOOD_MISERIA+ 1 == (int)MOOD_COUNT,    "mood names");
-static_assert(STR_FORM_QUIMERA    - STR_FORM_BOLOTA + 1 == (int)FORM_COUNT,    "form names");
 static_assert(STR_SPECIES_15      - STR_SPECIES_00  + 1 == SPECIES_COUNT,      "species names");
 static_assert(STR_PATTERN_15      - STR_PATTERN_00  + 1 == PATTERN_COUNT,      "pattern names");
 static_assert(STR_TEMPER_GOTICO   - STR_TEMPER_SOLAR+ 1 == (int)TEMPER_COUNT,  "temperament names");
-static_assert(STR_CAUSE_ACCIDENT  - STR_CAUSE_NONE  + 1 == (int)DEATH_COUNT,   "cause names");
 static_assert(STR_ACT_SLEEP       - STR_ACT_NONE    + 1 == (int)ACT_COUNT,     "action names");
 static_assert(STR_AERR_BAD_ARG    - STR_AERR_NONE   + 1 == (int)AERR_COUNT,    "action errors");
-static_assert(STR_ABS_UNKNOWN     - STR_ABS_NONE    + 1 == (int)ABS_COUNT,     "absence lines");
 static_assert(STR_AL_MATE_FOUND   - STR_AL_NONE     + 1 == (int)AL_COUNT,      "alert lines");
 static_assert(STR_WISH_PET3       - STR_WISH_NONE   + 1 == (int)WISH_COUNT,    "wish lines");
-static_assert(STR_GRADE_F         - STR_GRADE_A     + 1 == (int)GRADE_COUNT,   "care grades");
 static_assert(STR_MENU_SETTINGS   - STR_MENU_FEED   + 1 == MENU_ITEM_COUNT,    "menu labels");
 static_assert(STR_SYL_A11         - STR_SYL_A00     + 1 == 12,                 "name syllables A");
 static_assert(STR_SYL_B11         - STR_SYL_B00     + 1 == 12,                 "name syllables B");
 static_assert(STR_HLP_BACK        - STR_HLP_FEED    + 1 == 17,                 "ui help block");
-static_assert(STR_AF_ADD          - STR_SET_CLOCK   + 1 == 12,                 "S16 time entry block");
+static_assert(STR_AF_ADD          - STR_SET_CLOCK   + 1 == 12,                 "time entry block");
 
 #endif // NT_STRINGS_ES_H

@@ -89,53 +89,37 @@ TEST(overflow_unknown_clock_charges_zero_absence) {
   sim_catch_up_ex(6u * 3600u, 0 /* clock unknown */, rep);
 
   CHECK_EQ(rep.clock_known, 0);
-  CHECK_EQ(rep.absence_s, 0);                        // no ABSENCE_LARGA_S floor
-  CHECK_EQ(rep.tier, (int)ABS_UNKNOWN);              // the UI still says "unknown"
-  CHECK_EQ(rep.sulk_s, 0);                           // and the pet does not sulk
+  CHECK_EQ(rep.absence_s, 0);                        // nothing invented
+  CHECK_EQ(rep.steps, 0);                            // nothing integrated
   CHECK((g_ovf.flags & PF_ABS_UNKNOWN) != 0);        // retro-fix armed instead
 
-  // ZERO means zero. Not the decay integration, and not the ladder either:
-  // dropping the ABSENCE_LARGA_S floor while still calling apply_tier(ABS_LARGA)
-  // would charge -12 bond / -20 happiness / -5 health for a gap nobody measured.
+  // ZERO means zero: the device cannot measure the gap, so it does not get to
+  // charge one. Every stat is exactly where it was.
   for (uint8_t i = 0; i < ST_COUNT; ++i) {
     CHECK_EQ(g_ovf.stat[i], before.stat[i]);
     CHECK_EQ(g_ovf.stat_rem[i], before.stat_rem[i]);
   }
-  CHECK_EQ(g_ovf.care_miss, before.care_miss);
-  CHECK_EQ(g_ovf.dmg_acc[DMG_OTHER], before.dmg_acc[DMG_OTHER]);
-  // PF_ABS_UNKNOWN is the only flag that may move (no PF_SCAR, no death).
+  // PF_ABS_UNKNOWN is the only flag that may move.
   CHECK_EQ(g_ovf.flags & (uint16_t)~PF_ABS_UNKNOWN, before.flags);
-  // The retro-fix baseline: ABS_NONE, because nothing has been charged yet.
-  // Storing ABS_UNKNOWN (6) here would put the baseline above every real tier
-  // and sim_absence_retrofix()'s "never better retroactively" test would then
-  // refuse the truth forever.
-  CHECK_EQ(g_ovf.absence_tier, (int)ABS_NONE);
 }
 
-TEST(overflow_retrofix_after_an_unknown_boot_charges_the_whole_tier) {
+TEST(overflow_retrofix_after_an_unknown_boot_charges_the_whole_absence) {
   ovf_pet();
   const PetSave before = g_ovf;
   AbsenceReport rep;
   sim_catch_up_ex(6u * 3600u, 0 /* clock unknown */, rep);
 
-  // The clock arrives (gt_set_epoch) and the true gap turns out to be 2 h,
-  // i.e. ABS_CORTA - LESS than the ABS_LARGA the old floor pretended to. The
-  // boot charged nothing, so the whole ABS_CORTA tier is charged now.
+  // The clock arrives (gt_set_epoch) and the true gap turns out to be 2 h. The
+  // boot integrated nothing, so the whole two hours are integrated now.
   sim_absence_retrofix(2u * 3600u);
 
-  CHECK_EQ(g_ovf.absence_tier, (int)ABS_CORTA);
-  CHECK_EQ(g_ovf.stat[ST_BOND],
-           before.stat[ST_BOND]      + (int32_t)ABS_CORTA_BOND * 1000);
-  CHECK_EQ(g_ovf.stat[ST_HAPPINESS],
-           before.stat[ST_HAPPINESS] + (int32_t)ABS_CORTA_HAP  * 1000);
-  CHECK_EQ(g_ovf.stat[ST_HEALTH],
-           before.stat[ST_HEALTH]    + (int32_t)ABS_CORTA_HEA  * 1000);
+  CHECK(g_ovf.stat[ST_HUNGER] < before.stat[ST_HUNGER]);
   CHECK((g_ovf.flags & PF_ABS_UNKNOWN) == 0);        // and the flag is spent
 
   // Spent means spent: a second calibration does not charge the gap twice.
-  const int32_t bond_after = g_ovf.stat[ST_BOND];
+  const int32_t hunger_after = g_ovf.stat[ST_HUNGER];
   sim_absence_retrofix(3u * 86400u);
-  CHECK_EQ(g_ovf.stat[ST_BOND], bond_after);
+  CHECK_EQ(g_ovf.stat[ST_HUNGER], hunger_after);
 }
 
 TEST(overflow_absence_beyond_the_400_day_ceiling_is_unknown) {
@@ -175,9 +159,8 @@ TEST(overflow_age_saturates_instead_of_rewinding_the_pet) {
   ovf_pet();
   // Park the pet 30 s short of the u32 ceiling, then advance one 60 s sub-step.
   // Plain `age_s += dt` would wrap to 29 - a newborn egg wearing an adult body;
-  // sat_add_u32() pins it at the ceiling instead. (Today the natural-death
-  // check keeps a pet from ever getting here on its own; P2-C7 removes death
-  // and the ceiling becomes the only thing between age_s and a wrap.)
+  // sat_add_u32() pins it at the ceiling instead. Nothing else bounds age_s:
+  // P2-C7 removed death, so the saturation IS the guard.
   g_ovf.age_s = 0xFFFFFFFFu - 30u;
   sim_tick(60);
   CHECK_EQ(sim_age_s(), 0xFFFFFFFFu);

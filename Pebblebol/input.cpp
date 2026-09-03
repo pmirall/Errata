@@ -15,7 +15,7 @@
 //     repeating every REPEAT_RATE_MS because GAME_DESIGN 8.3 uses it as the
 //     fast-scroll of every list. HOLD_R is BACK on almost every screen and
 //     therefore never repeats here; the one screen that needs a repeating right
-//     button (S16 time entry) times it itself from input_hold_ms().
+//     button (the CLOCK time-entry screen) times it itself from input_hold_ms().
 //
 //  3. Once an episode has produced its gesture, the remaining edges of that
 //     episode are swallowed (state ST_SWALLOW) until BOTH buttons are up. This

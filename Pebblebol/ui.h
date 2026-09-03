@@ -1,14 +1,14 @@
 // =============================================================================
 //  NOTTAMAGOCHI - ui.h
-//  The screen state machine S0..S15 (GAME_DESIGN 8.2 / 8.3), the navigation
+//  The screen state machine S0..S14 (GAME_DESIGN 8.2 / 8.3), the navigation
 //  grammar, the 20 s auto-return, the modal + alert layers, the on-device
-//  minigames, the death staging and the inheritance hand-off.
+//  minigames and the hatch ceremony.
 //
 //  LAYERING
 //  --------
 //  ui owns NO game state. Everything it shows comes from sim_save() /
-//  sim_*() / ble_peer() / store_ancestor(); everything it changes
-//  goes through sim_apply_action(), store_save_cfg() or net_request().
+//  sim_*() / ble_peer(); everything it changes goes through
+//  sim_apply_action(), store_save_cfg() or net_request().
 //  It never includes WiFi.h / BLEDevice.h / WebServer.h (net.h and
 //  ble_social.h are deliberately network-header-free) and it never constructs
 //  a U8G2: the single instance comes from rd_u8g2().
@@ -16,7 +16,7 @@
 //  TIME
 //  ----
 //  ui reads millis() for PRESENTATION only - animation phase, modal lifetimes,
-//  the death staging clock, hold progress bars. No game quantity is ever
+//  the hatch ceremony clock, hold progress bars. No game quantity is ever
 //  derived from it; game time is sim_step_seconds() and gt_now(), as the
 //  BRIEF 4 layering rule requires.
 //
@@ -67,9 +67,9 @@
 //  MANDATORY PUBLIC INTERFACE (BRIEF 4, row 11)
 // =============================================================================
 
-// Reset the state machine to S0 HOME (or straight into the death staging /
-// egg screen when the loaded save is already dead / still an egg). Call once
-// from setup(), AFTER store_begin(), gt_begin(), sim_init() and rd_begin().
+// Reset the state machine to S0 HOME (or straight into the EGG screen when the
+// loaded save is still an egg). Call once from setup(), AFTER store_begin(),
+// gt_begin(), sim_init() and rd_begin().
 void     ui_begin(void);
 
 // Feed the recogniser output. Exactly one gesture per call; GST_NONE is a
@@ -85,7 +85,7 @@ void     ui_draw(void);
 void     ui_goto(ScreenId s);
 
 // Raise an alert. Queued (UI_ALERT_QUEUE deep, duplicates collapse) and shown
-// as the S11 overlay as soon as no higher-priority staging is running.
+// as the ALERT overlay as soon as no higher-priority staging is running.
 void     ui_alert(AlertId a);
 
 // The screen the user is looking at. Reports SCR_ALERT / SCR_CONFIRM while
@@ -96,17 +96,17 @@ ScreenId ui_screen(void);
 //  ADDITIVE EXTENSIONS
 //  Nothing above changes shape. These exist because the six mandated entry
 //  points cannot express a per-loop pump, and because a UI with no writable
-//  Config cannot implement S9 SETTINGS.
+//  Config cannot implement the SETTINGS screen.
 // =============================================================================
 
-// Per-loop pump. Runs auto-return, modal lifetimes, the death staging clock,
-// the minigame loops, the hold-progress detectors (god entry, burial) and the
-// BLE service while S8 SOCIAL is open. Call once per loop(), unconditionally -
-// it is independent of the frame scheduler, so timing stays correct at 1 fps.
+// Per-loop pump. Runs auto-return, modal lifetimes, the hatch ceremony clock,
+// the minigame loops, the god-entry hold-progress detector and the BLE service
+// while SOCIAL is open. Call once per loop(), unconditionally - it is
+// independent of the frame scheduler, so timing stays correct at 1 fps.
 void     ui_service(void);
 
 // Bind the live Config the settings screen edits and persists. REQUIRED: with
-// no binding S9 SETTINGS renders read-only and every toggle answers
+// no binding the SETTINGS screen renders read-only and every toggle answers
 // STR_ERR_BUSY. The pointer must outlive the UI (the .ino's own Config).
 void     ui_bind_config(Config* cfg);
 
@@ -117,21 +117,23 @@ void     ui_bind_config(Config* cfg);
 // back to full brightness and leave it there until the pet woke up.
 void     ui_note_brightness(uint8_t contrast);
 
-// Drain one sim_take_events() bitmask into the UI: death staging, evolution
-// freeze, hatch, alerts, poop/sick toasts.
+// Drain one sim_take_events() bitmask into the UI: evolution freeze, hatch,
+// alerts, poop/sick toasts.
 // Call every logic tick with the value sim_take_events() returned.
 void     ui_note_events(uint32_t sim_events);
 
 // Hand over the AbsenceReport that sim_catch_up_ex() produced at boot. The UI
-// turns it into the tier line with the EXACT elapsed time substituted for {t}
-// (GAME_DESIGN 5.3: "never round - the precision is the joke") and shows it
-// over HOME for five seconds. rep.died == 1 starts the death staging instead.
+// turns it into the absence line with the EXACT elapsed time substituted for
+// {t} (GAME_DESIGN 5.3: "never round - the precision is the joke") and shows it
+// over HOME for five seconds. rep.clock_known == 0 picks the unknown-clock
+// wording instead, because nothing was charged for that gap.
 void     ui_note_absence(const AbsenceReport& rep);
 
 // Transient one-line notice above the affordance strip, UI_TOAST_MS long.
 void     ui_toast(uint16_t str_id);
 
-// True while the death staging owns the buttons (GAME_DESIGN 9.2 steps 2-6).
+// True while the hatch ceremony owns the buttons. The ceremony is
+// unskippable, so every gesture is dropped for its duration.
 // The entry point must keep pumping input_poll() anyway - ui_handle() drops
 // the gestures itself - but this lets the LED / buzzer stay quiet too.
 bool     ui_input_locked(void);
@@ -152,12 +154,12 @@ void     ui_name_for(uint32_t lineage_id, uint8_t generation, char* out, size_t 
 // =============================================================================
 //  MODULE SEAMS ui.cpp CONSUMES (declared by their owners, not here)
 //
-//  webui.h   uint16_t web_pin(void)          - the S15 QR payload and the
+//  webui.h   uint16_t web_pin(void)          - the QR payload and the
 //                                              4-digit PIN printed beside it.
 //  godmode.h bool     god_active(void)
 //            GodEvt   god_handle(Gesture)    - returns what ui must do next
-//            void     god_draw(void)         - owns the whole S14 frame
-//            uint8_t  god_entry_progress(id) - the undocumented S6 hold
+//            void     god_draw(void)         - owns the whole GOD frame
+//            uint8_t  god_entry_progress(id) - the undocumented STATUS_B hold
 //            void     god_draw_marker(void)  - the "GOD xN" bar, every screen
 //
 //  ui.cpp includes webui.h and godmode.h directly; neither pulls in a network

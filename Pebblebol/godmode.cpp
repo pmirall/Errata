@@ -54,19 +54,17 @@ static_assert((int)STR_GN_RARE - (int)STR_GN_SPECIES + 1 == GOD_GENE_COUNT,
 //  2. CONSOLE SCREENS
 // =============================================================================
 enum GodScreen : uint8_t {
-  GSC_MENU = 0,   // the 10 commands + the exit row
+  GSC_MENU = 0,   // the 8 commands + the exit row
   GSC_SPEED,      // 1  VELOCIDAD
   GSC_ABSENCE,    // 2  SALTAR AUSENCIA
-  GSC_STATPICK,   // 3  FIJAR STAT  (+ ENFERMAR / CACAS)
+  GSC_STATPICK,   // 3  FIJAR STAT
   GSC_STATVAL,    // 3  the value ring for the pick above
   GSC_STAGE,      // 4  FORZAR ETAPA
-  GSC_FORM,       // 5  FORZAR FORMA
-  GSC_KILL,       // 6  MATAR
-  GSC_GENOME,     // 7  GENOMA root
-  GSC_GENE,       // 7  GENOMA / EDITAR
-  GSC_HEX,        // 7  GENOMA / VOLCAR + CARGAR
-  GSC_BLE,        // 8  BLE FALSO
-  GSC_SYS,        // 9  RELOJ + the heap / radio / storage panels
+  GSC_GENOME,     // 5  GENOMA root
+  GSC_GENE,       // 5  GENOMA / EDITAR
+  GSC_HEX,        // 5  GENOMA / VOLCAR + CARGAR
+  GSC_BLE,        // 6  BLE FALSO
+  GSC_SYS,        // 7  RELOJ + the heap / radio / storage panels
   GSC_CONFIRM,    // shared modal, cursor defaults to NO
   GSC_COUNT
 };
@@ -74,7 +72,6 @@ enum GodScreen : uint8_t {
 // What a GSC_CONFIRM "YES" commits to.
 enum GodConfirm : uint8_t {
   GCF_NONE = 0,
-  GCF_KILL,
   GCF_WIPE1,
   GCF_WIPE2
 };
@@ -82,12 +79,7 @@ enum GodConfirm : uint8_t {
 // GSC_HEX has two jobs.
 enum GodHexMode : uint8_t { GHX_DUMP = 0, GHX_LOAD };
 
-// GSC_STATPICK rows past the real stats.
-#define GD_PICK_SICK    ((uint8_t)ST_COUNT)
-#define GD_PICK_POOP    ((uint8_t)(ST_COUNT + 1))
-#define GD_PICK_COUNT   ((uint8_t)(ST_COUNT + 2))
-
-// Synthetic-mating sub-machine (command 8).
+// Synthetic-mating sub-machine (command 6, BLE FALSO).
 enum GodBleStep : uint8_t {
   GBS_IDLE = 0,
   GBS_RADIO,      // asking net for RADIO_BLE, then ble_begin()
@@ -113,13 +105,19 @@ static const uint32_t GD_ABSENCES[GOD_ABSENCE_COUNT] = {
 
 static const uint8_t GD_STATVALS[GOD_STATVAL_COUNT] = { 0, 25, 50, 100 };
 
-// The root list. Ten commands, then the explicit exit row.
-static const uint16_t GD_MENU_STR[GOD_MENU_ROWS] = {
+// The root list. Eight commands, then the explicit exit row.
+static constexpr uint16_t GD_MENU_STR[GOD_MENU_ROWS] = {
   (uint16_t)STR_GOD_SPEED,    (uint16_t)STR_GOD_ABSENCE, (uint16_t)STR_GOD_SETSTAT,
-  (uint16_t)STR_GOD_STAGE,    (uint16_t)STR_GOD_FORM,    (uint16_t)STR_GOD_KILL,
-  (uint16_t)STR_GOD_GENOME,   (uint16_t)STR_GOD_BLE,     (uint16_t)STR_GOD_CLOCK,
-  (uint16_t)STR_GOD_WIPE,     (uint16_t)STR_AF_QUIT
+  (uint16_t)STR_GOD_STAGE,    (uint16_t)STR_GOD_GENOME,  (uint16_t)STR_GOD_BLE,
+  (uint16_t)STR_GOD_CLOCK,    (uint16_t)STR_GOD_WIPE,    (uint16_t)STR_AF_QUIT
 };
+
+// The two root rows draw_menu() prints a live value next to.
+enum : uint8_t { GD_ROW_SPEED = 0, GD_ROW_CLOCK = 6 };
+static_assert(GD_MENU_STR[GD_ROW_SPEED] == (uint16_t)STR_GOD_SPEED,
+              "GD_ROW_SPEED no longer names the speed row");
+static_assert(GD_MENU_STR[GD_ROW_CLOCK] == (uint16_t)STR_GOD_CLOCK,
+              "GD_ROW_CLOCK no longer names the clock row");
 
 // The gene editor. Index-parallel to strings_es.h block 34c.
 struct GodGene {
@@ -153,7 +151,7 @@ static const GodGene GD_GENES[GOD_GENE_COUNT] = {
 
 // GSC_SYS pages. GD_SYS_PET is the watch panel for an accelerated run: at
 // GOD_SCALE_4 a whole life goes past in minutes and the operator needs to see
-// the stats move without leaving S14.
+// the stats move without leaving the console.
 #define GD_SYS_CLOCK    0
 #define GD_SYS_PET      1
 #define GD_SYS_HEAP     2
@@ -305,8 +303,7 @@ static void push_env_now(void)
 
 // -----------------------------------------------------------------------------
 // Command 2: inject a real absence. The clock genuinely moves forward (skew,
-// never the system clock) and sim runs the GAME_DESIGN 5.2 offline path,
-// including its death branch.
+// never the system clock) and sim runs the GAME_DESIGN 5.2 offline path.
 // -----------------------------------------------------------------------------
 static void run_absence(uint32_t secs)
 {
@@ -323,14 +320,14 @@ static void run_absence(uint32_t secs)
 
   store_touch_lastseen(gt_now());
   changed();
-  GOD_LOGF("[god] absence %lus tier=%u died=%u steps=%u\n",
-           (unsigned long)secs, (unsigned)s_abs_rep.tier,
-           (unsigned)s_abs_rep.died, (unsigned)s_abs_rep.steps);
+  GOD_LOGF("[god] absence %lus known=%u steps=%u\n",
+           (unsigned long)secs, (unsigned)s_abs_rep.clock_known,
+           (unsigned)s_abs_rep.steps);
 }
 
 // -----------------------------------------------------------------------------
-// Command 10: factory reset, then a brand new gen-0 egg so the caller never
-// sees a firmware with no pet in it.
+// Command 8 (BORRAR TODO): factory reset, then a brand new gen-0 egg so the
+// caller never sees a firmware with no pet in it.
 // -----------------------------------------------------------------------------
 static bool run_wipe(void)
 {
@@ -361,7 +358,7 @@ static void install_genome(const Genome& g)
 }
 
 // =============================================================================
-//  6. SYNTHETIC BLE MATING (command 8)
+//  6. SYNTHETIC BLE MATING (command 6, BLE FALSO)
 //     One board, the whole three-frame handshake. Everything below drives the
 //     real ble_social state machine; only the packets are fabricated.
 // =============================================================================
@@ -493,7 +490,7 @@ static void ble_flow_service(void)
 }
 
 // =============================================================================
-//  7. SERIAL GENOME PASTE (command 7 "CARGAR")
+//  7. SERIAL GENOME PASTE (command 5, GENOMA / CARGAR)
 // =============================================================================
 static void hex_paste_service(void)
 {
@@ -595,8 +592,8 @@ static void dump_header(void)
 {
   Serial.println(F(
     "GOD#,epoch,stage,hun,hap,ene,hyg,hea,cq,gen,genome,"
-    "age_s,bond,disc,weight_dg,poop,sick,asleep,dead,cause,form,minor,"
-    "alert,tier,guilt,scale,clock_ok,skew_s,"
+    "age_s,bond,poop,sick,asleep,minor,"
+    "alert,scale,clock_ok,skew_s,"
     "heap_free,heap_min,heap_maxalloc,radio,phase"));
 }
 
@@ -622,23 +619,16 @@ void god_dump_line(void)
                 hex);
 
   // Everything below is APPENDED, so an eleven-column parser keeps working.
-  Serial.printf(",%lu,%u,%u,%d,%u,%u,%u,%u,%u,%u,%u",
+  Serial.printf(",%lu,%u,%u,%u,%u,%u",
                 (unsigned long)sim_age_s(),
                 (unsigned)sim_stat_pct(ST_BOND),
-                (unsigned)sim_stat_pct(ST_DISCIPLINE),
-                (int)p->weight_dg,
                 (unsigned)p->poop_count,
                 (unsigned)sim_is_sick(),
                 (unsigned)sim_is_asleep(),
-                (unsigned)sim_is_dead(),
-                (unsigned)p->death_cause,
-                (unsigned)p->adult_form,
                 (unsigned)p->minor_form);
 
-  Serial.printf(",%u,%u,%d,%lu,%u,%ld,%lu,%lu,%lu,%u,%u\n",
+  Serial.printf(",%u,%lu,%u,%ld,%lu,%lu,%lu,%u,%u\n",
                 (unsigned)sim_alert(),
-                (unsigned)p->absence_tier,
-                (int)p->guilt_level,
                 (unsigned long)god_time_scale(),
                 (unsigned)(gt_is_valid() ? 1u : 0u),
                 (long)s_skew_total,
@@ -763,7 +753,7 @@ uint8_t god_entry_progress(uint8_t screen_id)
   const uint32_t held = (l < r) ? l : r;
   if (held >= (uint32_t)GOD_ENTER_HOLD_MS) {
     // The same hold RE-OPENS the console when god mode is already on. Without
-    // this the user who left S14 with GOD_EVT_LEAVE to watch an accelerated
+    // this the user who left SCR_GOD with GOD_EVT_LEAVE to watch an accelerated
     // life would be stranded: the only off switch is the console's exit row.
     if (!s_active) god_enter();
     else           s_screen = GSC_MENU;
@@ -803,14 +793,6 @@ static GodEvt commit_confirm(void)
   s_confirm_act = GCF_NONE;
 
   switch (act) {
-    case GCF_KILL: {
-      const uint8_t cause = (uint8_t)(DEATH_HUNGER + s_sub_cur);
-      sim_god_kill(cause);
-      changed();
-      s_screen = GSC_MENU;
-      toast((uint16_t)STR_GOD_NO_REVIVE);
-      return GOD_EVT_DIED;
-    }
     case GCF_WIPE1:
       open_confirm((uint16_t)STR_CF_WIPE2, GCF_WIPE2);
       return GOD_EVT_NONE;
@@ -838,13 +820,11 @@ static GodEvt open_command(uint8_t row)
     case  1: s_screen = GSC_ABSENCE;  break;
     case  2: s_screen = GSC_STATPICK; break;
     case  3: s_screen = GSC_STAGE;    break;
-    case  4: s_screen = GSC_FORM;     break;
-    case  5: s_screen = GSC_KILL;     break;
-    case  6: s_screen = GSC_GENOME;   break;
-    case  7: s_screen = GSC_BLE;      s_bs = GBS_IDLE; s_bs_child_ok = false;
+    case  4: s_screen = GSC_GENOME;   break;
+    case  5: s_screen = GSC_BLE;      s_bs = GBS_IDLE; s_bs_child_ok = false;
              s_bs_str = (uint16_t)STR_EMPTY; break;
-    case  8: s_screen = GSC_SYS;      s_sys_page = GD_SYS_CLOCK; break;
-    case  9: open_confirm((uint16_t)STR_CF_WIPE, GCF_WIPE1); break;
+    case  6: s_screen = GSC_SYS;      s_sys_page = GD_SYS_CLOCK; break;
+    case  7: open_confirm((uint16_t)STR_CF_WIPE, GCF_WIPE1); break;
     default:
       god_exit();
       return GOD_EVT_LEAVE;
@@ -858,14 +838,10 @@ static uint8_t sub_count(void)
   switch (s_screen) {
     case GSC_SPEED:    return (uint8_t)GOD_SCALE_COUNT;
     case GSC_ABSENCE:  return (uint8_t)GOD_ABSENCE_COUNT;
-    case GSC_STATPICK: return GD_PICK_COUNT;
+    case GSC_STATPICK: return (uint8_t)ST_COUNT;
     case GSC_STATVAL:
-      if (s_pick == GD_PICK_SICK) return 2;
-      if (s_pick == GD_PICK_POOP) return (uint8_t)(POOP_MAX + 1);
       return (uint8_t)GOD_STATVAL_COUNT;
     case GSC_STAGE:    return (uint8_t)STAGE_COUNT;
-    case GSC_FORM:     return (uint8_t)FORM_COUNT;
-    case GSC_KILL:     return (uint8_t)(DEATH_COUNT - 1);   // DEATH_NONE excluded
     case GSC_GENOME:   return GD_GEN_ROWS;
     case GSC_GENE:     return (uint8_t)GOD_GENE_COUNT;
     default:           return 0;
@@ -883,7 +859,7 @@ static GodEvt select_sub(void)
 
     case GSC_ABSENCE:
       run_absence(GD_ABSENCES[s_sub_cur % GOD_ABSENCE_COUNT]);
-      return s_abs_rep.died ? GOD_EVT_DIED : GOD_EVT_NONE;
+      return GOD_EVT_NONE;
 
     case GSC_STATPICK:
       s_pick    = s_sub_cur;
@@ -892,37 +868,15 @@ static GodEvt select_sub(void)
       return GOD_EVT_NONE;
 
     case GSC_STATVAL:
-      if (s_pick == GD_PICK_SICK)      sim_god_set_sick((uint8_t)(s_sub_cur ? 1u : 0u));
-      else if (s_pick == GD_PICK_POOP) sim_god_set_poop(s_sub_cur);
-      else                             sim_god_set_stat((StatId)s_pick,
-                                            GD_STATVALS[s_sub_cur % GOD_STATVAL_COUNT]);
+      sim_god_set_stat((StatId)s_pick, GD_STATVALS[s_sub_cur % GOD_STATVAL_COUNT]);
       changed();
       toast((uint16_t)STR_GOD_DONE);
       return GOD_EVT_NONE;
 
-    case GSC_STAGE: {
-      const uint8_t st = s_sub_cur;
-      // "No revive. No undo. God mode cannot resurrect - it can only kill."
-      // (GAME_DESIGN 9, rule 10.) sim_god_set_stage() clears PF_DEAD for any
-      // living stage, so the refusal has to live here, at the only caller.
-      if (sim_is_dead() && st != (uint8_t)STAGE_DEAD) {
-        toast((uint16_t)STR_GOD_NO_REVIVE);
-        return GOD_EVT_NONE;
-      }
-      sim_god_set_stage(st);
+    case GSC_STAGE:
+      sim_god_set_stage(s_sub_cur);
       changed();
       toast((uint16_t)STR_GOD_DONE);
-      return (st == (uint8_t)STAGE_DEAD) ? GOD_EVT_DIED : GOD_EVT_NONE;
-    }
-
-    case GSC_FORM:
-      sim_god_set_form(s_sub_cur);
-      changed();
-      toast((uint16_t)STR_GOD_DONE);
-      return GOD_EVT_NONE;
-
-    case GSC_KILL:
-      open_confirm((uint16_t)STR_CF_KILL, GCF_KILL);
       return GOD_EVT_NONE;
 
     case GSC_GENOME:
@@ -1149,9 +1103,16 @@ static void draw_menu(void)
     const uint8_t i = (uint8_t)(top + r);
     if (i >= (uint8_t)GOD_MENU_ROWS) break;
     val[0] = '\0';
+    // Only two rows carry a value readout. The indices are pinned above, so a
+    // later renumbering of GD_MENU_STR breaks the build instead of quietly
+    // printing the readout next to the wrong command.
     switch (i) {
-      case 0: snprintf(val, sizeof(val), "x%lu", (unsigned long)god_time_scale()); break;
-      case 8: snprintf(val, sizeof(val), "%s", gt_is_valid() ? "OK" : "??"); break;
+      case GD_ROW_SPEED:
+        snprintf(val, sizeof(val), "x%lu", (unsigned long)god_time_scale());
+        break;
+      case GD_ROW_CLOCK:
+        snprintf(val, sizeof(val), "%s", gt_is_valid() ? "OK" : "??");
+        break;
       default: break;
     }
     draw_row(GD_ROOT_Y0, r, (i == s_menu_cur), S(GD_MENU_STR[i]), val);
@@ -1187,25 +1148,12 @@ static void lbl_absence(uint8_t i, char* b, size_t n)
   gt_format_elapsed(GD_ABSENCES[i % GOD_ABSENCE_COUNT], t, sizeof(t));
   snprintf(b, n, "%s", t);
 }
-static void lbl_statpick(uint8_t i, char* b, size_t n)
-{
-  if (i == GD_PICK_SICK)      snprintf(b, n, "%s", S(STR_GOD_SICK));
-  else if (i == GD_PICK_POOP) snprintf(b, n, "%s", S(STR_GOD_POOP));
-  else                        snprintf(b, n, "%s", S_STAT(i));
-}
+static void lbl_statpick(uint8_t i, char* b, size_t n) { snprintf(b, n, "%s", S_STAT(i)); }
 static void lbl_statval(uint8_t i, char* b, size_t n)
 {
-  if (s_pick == GD_PICK_SICK)      snprintf(b, n, "%s", S(i ? STR_ON : STR_OFF));
-  else if (s_pick == GD_PICK_POOP) snprintf(b, n, "%u", (unsigned)i);
-  else                             snprintf(b, n, "%u %%",
-                                            (unsigned)GD_STATVALS[i % GOD_STATVAL_COUNT]);
+  snprintf(b, n, "%u %%", (unsigned)GD_STATVALS[i % GOD_STATVAL_COUNT]);
 }
 static void lbl_stage(uint8_t i, char* b, size_t n)   { snprintf(b, n, "%s", S_STAGE(i)); }
-static void lbl_form(uint8_t i, char* b, size_t n)    { snprintf(b, n, "%s", S_FORM(i)); }
-static void lbl_kill(uint8_t i, char* b, size_t n)
-{
-  snprintf(b, n, "%s", S_CAUSE((uint8_t)(DEATH_HUNGER + i)));
-}
 static void lbl_genome(uint8_t i, char* b, size_t n)
 {
   static const uint16_t rows[GD_GEN_ROWS] = {
@@ -1223,11 +1171,9 @@ static void draw_absence(void)
   char b[30];
   gt_format_elapsed(s_abs_rep.absence_s, t, sizeof(t));
   rd_text(3, 27, RD_FONT_BODY, t);
-  rd_text_fit(3, 36, OLED_W - 6, RD_FONT_BODY, S_ABSENCE(s_abs_rep.tier));
-  snprintf(b, sizeof(b), "n=%u sulk=%u %s", (unsigned)s_abs_rep.steps,
-           (unsigned)s_abs_rep.sulk_s, s_abs_rep.died ? "DEAD" : "");
+  snprintf(b, sizeof(b), "n=%u clock=%u", (unsigned)s_abs_rep.steps,
+           (unsigned)s_abs_rep.clock_known);
   rd_text(3, 45, RD_FONT_TINY, b);
-  if (s_abs_rep.died) rd_text_fit(3, 53, OLED_W - 6, RD_FONT_BODY, S_CAUSE(s_abs_rep.cause));
   rd_affordance(0, S(STR_AF_BACK));
 }
 
@@ -1352,7 +1298,7 @@ static void draw_sys(void)
       gt_format_elapsed(sim_age_s(), el, sizeof(el));
       snprintf(b, sizeof(b), "%u %s", (unsigned)p->stage, el);
       rd_text(2, 35, RD_FONT_TINY, b);
-      snprintf(b, sizeof(b), "cq%d w%d p%u s%u a%u", (int)p->cq, (int)p->weight_dg,
+      snprintf(b, sizeof(b), "cq%d p%u s%u a%u", (int)p->cq,
                (unsigned)p->poop_count, (unsigned)sim_is_sick(),
                (unsigned)sim_alert());
       rd_text(2, 43, RD_FONT_TINY, b);
@@ -1393,7 +1339,7 @@ static void draw_sys(void)
       snprintf(b, sizeof(b), "boot=%u rst=%u n=%lu", (unsigned)store_boot_kind(),
                (unsigned)store_reset_reason(), (unsigned long)store_boot_count());
       rd_text(2, 35, RD_FONT_TINY, b);
-      snprintf(b, sizeof(b), "anc=%u fails=%u rtc=%u", (unsigned)store_ancestor_count(),
+      snprintf(b, sizeof(b), "fails=%u rtc=%u",
                (unsigned)store_write_fails(), (unsigned)(store_rtc_intact() ? 1u : 0u));
       rd_text(2, 43, RD_FONT_TINY, b);
       snprintf(b, sizeof(b), "%s  %s", FW_VERSION, s_dump_on ? "LOG" : "---");
@@ -1427,11 +1373,9 @@ void god_draw(void)
     case GSC_MENU:     draw_menu(); break;
     case GSC_SPEED:    draw_simple_list(S(STR_GOD_SPEED),   (uint8_t)GOD_SCALE_COUNT,  lbl_speed);    break;
     case GSC_ABSENCE:  draw_absence(); break;
-    case GSC_STATPICK: draw_simple_list(S(STR_GOD_SETSTAT), GD_PICK_COUNT,             lbl_statpick); break;
+    case GSC_STATPICK: draw_simple_list(S(STR_GOD_SETSTAT), (uint8_t)ST_COUNT,         lbl_statpick); break;
     case GSC_STATVAL:  draw_simple_list(S(STR_GOD_SETSTAT), sub_count(),               lbl_statval);  break;
     case GSC_STAGE:    draw_simple_list(S(STR_GOD_STAGE),   (uint8_t)STAGE_COUNT,      lbl_stage);    break;
-    case GSC_FORM:     draw_simple_list(S(STR_GOD_FORM),    (uint8_t)FORM_COUNT,       lbl_form);     break;
-    case GSC_KILL:     draw_simple_list(S(STR_GOD_KILL),    (uint8_t)(DEATH_COUNT - 1), lbl_kill);    break;
     case GSC_GENOME:   draw_simple_list(S(STR_GOD_GENOME),  GD_GEN_ROWS,               lbl_genome);   break;
     case GSC_GENE:     draw_gene(); break;
     case GSC_HEX:      draw_hex(); break;

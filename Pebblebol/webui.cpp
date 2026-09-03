@@ -47,7 +47,7 @@ static WebServer s_srv(WEB_PORT);
 static bool     s_running        = false;
 static bool     s_routes_done    = false;
 static uint16_t s_port           = WEB_PORT;
-// The port web_begin() was last asked for. S9 can switch web access off and
+// The port web_begin() was last asked for. SETTINGS can switch web access off and
 // back on at any time and the entry point calls web_begin() exactly once, so
 // web_service() needs to know what to re-open on the rising edge.
 static uint16_t s_want_port      = WEB_PORT;
@@ -75,7 +75,7 @@ void web_bind_config(Config* cfg)
   s_cfg = cfg;
 }
 
-// Does the user still want the HTTP server? CF_WEB_ENABLED is the S9 "WEB"
+// Does the user still want the HTTP server? CF_WEB_ENABLED is the SETTINGS "WEB"
 // toggle. It used to feed only the entry point's radio policy, so whenever
 // anything else kept the radio up the listening socket survived the toggle and
 // the server went on answering after the user had switched web access off.
@@ -144,7 +144,6 @@ static void send_throttled(void)
 
 uint8_t web_pose_of(const PetSave& p)
 {
-  if (p.stage >= STAGE_DEAD)   return POSE_GHOST;
   if (p.flags & PF_ASLEEP)     return POSE_SLEEP;
   if (p.flags & PF_SICK)       return POSE_SICK;
   return POSE_IDLE;
@@ -247,7 +246,7 @@ bool web_begin(uint16_t port)
 
   // Routes stay registered either way (they are registered exactly once for the
   // lifetime of the firmware), but the socket only opens when the user wants
-  // it. web_service() re-checks every pump, so a later S9 toggle is honoured
+  // it. web_service() re-checks every pump, so a later SETTINGS toggle is honoured
   // without the entry point calling us again.
   if (!web_enabled()) {
     if (s_running) web_stop();

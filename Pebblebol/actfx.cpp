@@ -1,6 +1,6 @@
 // =============================================================================
 //  NOTTAMAGOCHI - actfx.cpp
-//  Nine choreographies, one clock, one pixel writer. See actfx.h for the seam.
+//  Eight choreographies, one clock, one pixel writer. See actfx.h for the seam.
 //
 //  THE DESIGN DECISION THE WHOLE FILE HANGS OFF: THE PROP COMES TO THE PET.
 //  The bowl slides in along the floor from the nearest edge of the stage and
@@ -112,21 +112,17 @@
 #define AF_PET_HOP_MS       1150u
 #define AF_PET_MS           1400u
 
-// ---- C6 ACT_SCOLD, 1500 ms -------------------------------------------------
-#define AF_SCOLD_MS         1500u
-#define AF_SCOLD_BOND_PCT     35u   // below this it cries instead of sweating
-
-// ---- C7 ACT_LIGHT_TOGGLE ---------------------------------------------------
+// ---- C6 ACT_LIGHT_TOGGLE ---------------------------------------------------
 // The entire choreography is one register flash fired at begin(), on top of the
 // contrast ramp ui.cpp already runs. It arms no film - see actfx_begin().
 #define AF_LIGHT_FLASH_MS     60u
 
-// ---- C8 ACT_SLEEP_TOGGLE ---------------------------------------------------
+// ---- C7 ACT_SLEEP_TOGGLE ---------------------------------------------------
 #define AF_YAWN_MS           900u   // falling asleep: one slow, big stretch
 #define AF_WAKE_MS           700u   // waking: two quick ones
 #define AF_WAKE_HOP_MS       250u
 
-// ---- C9 ACT_PLAY, 2000 ms --------------------------------------------------
+// ---- C8 ACT_PLAY, 2000 ms --------------------------------------------------
 #define AF_PLAY_BALL_MS     1700u
 #define AF_PLAY_MS          2000u
 #define AF_PLAY_BOUNCES        3u
@@ -193,7 +189,6 @@ static uint8_t  s_held     = 0;      // we are the ones holding petfx
 
 // What actfx_begin() kept out of the "before" pet.
 static uint8_t  s_poop_n   = 0;
-static uint8_t  s_bond_pct = 100;
 static uint8_t  s_asleep0  = 0;      // it was ASLEEP before ACT_SLEEP_TOGGLE
 
 // One-shot latch, so a beat that must happen exactly once (the medicine
@@ -337,7 +332,6 @@ static uint8_t af_pct(uint32_t t, uint32_t t0, uint32_t t1) {
   return (uint8_t)(((t - t0) * 100u) / (t1 - t0));
 }
 
-static inline int16_t af_ink_cx(void) { return (int16_t)((s_ix0 + s_ix1) / 2); }
 
 // Keep an emote of height h inside the sprite band, CLAMPING and not clipping.
 // af_px() clips, which is the safety net and the wrong answer for a thing that
@@ -601,7 +595,6 @@ void actfx_begin(uint8_t action, const PetSave& before) {
     case ACT_CLEAN:        dur = (uint16_t)AF_CLN_MS;   break;
     case ACT_MEDICINE:     dur = (uint16_t)AF_MED_MS;   break;
     case ACT_PET:          dur = (uint16_t)AF_PET_MS;   break;
-    case ACT_SCOLD:        dur = (uint16_t)AF_SCOLD_MS; break;
     case ACT_PLAY:         dur = (uint16_t)AF_PLAY_MS;  break;
     case ACT_SLEEP_TOGGLE:
       // Which way round it goes is decided HERE, from the flags BEFORE the
@@ -634,23 +627,13 @@ void actfx_begin(uint8_t action, const PetSave& before) {
   s_dur = dur;
 
   s_poop_n = (uint8_t)((before.poop_count > s_poop_ns) ? s_poop_ns : before.poop_count);
-  {
-    const int32_t b = before.stat[ST_BOND];        // milli-points, 0..100000
-    s_bond_pct = (uint8_t)((b <= 0) ? 0 : ((b >= 100000) ? 100 : (b / 1000)));
-  }
 
   // Hold, do not freeze. petfx_freeze() would ALSO recentre the body, and the
   // whole point of this feature is that the pet is fed WHERE IT STANDS.
   petfx_hold(1);
   s_held = 1;
 
-  // "Turning its back" has no art - there is no rear-facing sprite in the atlas
-  // and inventing one is not in this change. The honest rendering is a recoil
-  // plus turning to face the WALL rather than the player, which says the same
-  // thing in the vocabulary the art actually has. The turn itself needs the
-  // body box and so happens on the first frame, in actfx_draw_over().
-  if (action == ACT_SCOLD)    petfx_startle(320u);
-  else if (action == ACT_PET) petfx_face_point((int16_t)(OLED_W / 2));
+  if (action == ACT_PET) petfx_face_point((int16_t)(OLED_W / 2));
 
   // The film outranks the web frame-rate cap from its first frame - see
   // AF_FPS_HOLD_MS and rd_hold_fps(). Armed HERE and not only in
@@ -682,7 +665,7 @@ void actfx_service(uint32_t now_ms) {
   // shorter than 250 ms drawn once or not at all.
   rd_hold_fps((uint8_t)FPS_NORMAL, (uint16_t)AF_FPS_HOLD_MS);
 
-  // C8's body language, and it is a COMPRESSION in both directions of the
+  // C7's body language, and it is a COMPRESSION in both directions of the
   // toggle. See actfx_body_dy(): the yawn used to be a 4 px lift of the entire
   // body with the sprite already in POSE_SLEEP, which at +450 ms left the ink in
   // rows 23..48 and the shadow abandoned on 53-54 - a sleeping pet levitating.
@@ -839,7 +822,7 @@ int16_t actfx_body_dy(void) {
       return (int16_t)(((t >= AF_YAWN_MS / 4u) &&
                         (t < (AF_YAWN_MS * 3u) / 4u)) ? 1 : 0);
 
-    default: return 0;                                   // SCOLD: petfx_startle
+    default: return 0;
   }
 }
 
@@ -978,7 +961,7 @@ void actfx_draw_props(void) {
       break;
     }
 
-    // ---- C9: the ball ------------------------------------------------------
+    // ---- C8: the ball ------------------------------------------------------
     case ACT_PLAY: {
       if (t >= AF_PLAY_BALL_MS) break;
       const SpriteRef ball = sprite_icon((uint8_t)ICO_BALL);
@@ -1027,13 +1010,6 @@ void actfx_draw_over(void) {
       // The pill and the germ are both 12 px and share the parked column.
       petfx_pose_ink_x((uint8_t)POSE_SICK, &px0, &px1);
       af_place_prop(sprite_emote((uint8_t)EMO_GERM).w, px0, px1);
-    } else if (s_act == ACT_SCOLD) {
-      // No pose change, so the resting box IS the box for the whole film.
-      af_place_prop(sprite_emote((s_bond_pct < AF_SCOLD_BOND_PCT)
-                                   ? (uint8_t)EMO_TEAR : (uint8_t)EMO_SWEAT).w,
-                    px0, px1);
-      petfx_face_point((af_ink_cx() < (int16_t)(OLED_W / 2)) ? (int16_t)0
-                                                             : (int16_t)(OLED_W - 1));
     }
   }
 
@@ -1126,22 +1102,7 @@ void actfx_draw_over(void) {
       break;
     }
 
-    // ---- C6: sweat, or a tear if the bond is already thin ------------------
-    case ACT_SCOLD: {
-      const uint8_t   cry = (uint8_t)(s_bond_pct < AF_SCOLD_BOND_PCT);
-      const SpriteRef e   = sprite_emote(cry ? (uint8_t)EMO_TEAR : (uint8_t)EMO_SWEAT);
-      // Sweat beads roll off the head in a quick loop; a tear falls further and
-      // slower. Both hang off the side af_place_prop() picked on the first
-      // frame, and follow the CURRENT ink box from there, so the 3 px recoil of
-      // the scolding itself does not leave them behind.
-      const uint32_t period = cry ? 700u : 420u;
-      const int16_t  drop   = (int16_t)(((uint32_t)(cry ? 14u : 8u) * (t % period)) / period);
-      af_blit(af_side_x(e.w), af_band_y((int16_t)(s_iy0 + 1 + drop), e.h), e,
-              0u, (uint8_t)(e.h - 1u), AF_DIS_NONE, 0u, 0u);
-      break;
-    }
-
-    // ---- C9: the note it hums when the ball stops --------------------------
+    // ---- C8: the note it hums when the ball stops --------------------------
     case ACT_PLAY: {
       if (t < AF_PLAY_BALL_MS) break;
       // Clear of the head from the first frame, for the same reason the germ is

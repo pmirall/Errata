@@ -9,6 +9,11 @@
 //  The fixtures are committed; regenerate only when the legacy layout itself
 //  is the subject of the commit. Every field is set explicitly so the output
 //  is a pure function of this file (no clock, no RNG).
+//
+//  P2-C7 retired several PetSave fields into pad_* members at the SAME offsets
+//  and dropped ST_DISCIPLINE from StatId. The v1 bytes did not move, so this
+//  file writes the retired values through the pads and the blobs it emits are
+//  still byte-identical to the committed ones.
 // =============================================================================
 #include <stdio.h>
 #include <string.h>
@@ -56,35 +61,41 @@ static PetSave petsave_adult(void) {
   p.magic   = NT_SAVE_MAGIC;
   p.version = NT_SAVE_VERSION;
   p.stage   = STAGE_ADULT;
-  static const int32_t stats[ST_COUNT] = { 73000, 61000, 88000, 45000, 92000, 70000, 55000 };
+  static const int32_t stats[ST_COUNT] = { 73000, 61000, 88000, 45000, 92000, 70000 };
   memcpy(p.stat, stats, sizeof stats);
+  p.pad_stat            = 55000;            // v1 stat[ST_DISCIPLINE]
   p.birth_epoch         = 1700000000u;
   p.last_seen_epoch     = 1700200000u;
-  p.death_epoch         = 0u;
+  p.pad_death_epoch     = 0u;               // v1 death_epoch
   p.egg_epoch           = 1699990000u;
   p.last_interact_epoch = 1700199000u;
   p.age_s               = 200000u;
   p.genome              = fixture_genome(0x0BADCAFEu);
-  static const int16_t rem[ST_COUNT] = { 120, 1500, 33, 2999, 0, 7, 3598 };
+  static const int16_t rem[ST_COUNT] = { 120, 1500, 33, 2999, 0, 7 };
   memcpy(p.stat_rem, rem, sizeof rem);
+  p.pad_stat_rem   = 3598;                  // v1 stat_rem[ST_DISCIPLINE]
   p.cq             = 640;
-  p.weight_dg      = 420;
-  static const uint16_t dmg[DMG_COUNT] = { 12, 3, 0, 5, 1 };
-  memcpy(p.dmg_acc, dmg, sizeof dmg);
-  p.care_miss      = 3;
+  p.pad_weight     = 420;                   // v1 weight_dg
+  // v1 dmg_acc[5] (uint16 LE) then care_miss (uint16 LE), 12 bytes at offset 90.
+  static const uint8_t dmg_and_miss[12] = {
+    12, 0,  3, 0,  0, 0,  5, 0,  1, 0,      // dmg_acc[]
+     3, 0                                    // care_miss
+  };
+  memcpy(p.pad_dmg, dmg_and_miss, sizeof dmg_and_miss);
   p.sick_episodes  = 1;
   p.minigames_won  = 7;
-  p.overfeed       = 2;
+  p.pad_overfeed   = 2;                     // v1 overfeed
   p.snacks_total   = 12;
   p.wish_left_s    = 0;
   p.flags          = PF_LIGHT_ON;
-  p.adult_form     = FORM_BOLOTA;
+  p.pad_adult_form = 0;                     // v1 adult_form = FORM_BOLOTA
   p.minor_form     = 0x21;
   p.poop_count     = 1;
-  p.guilt_level    = 0;
-  p.absence_tier   = ABS_NONE;
-  p.death_cause    = 0;
-  p.unjust_scolds  = 1;
+  // v1 guilt_level, absence_tier, death_cause, unjust_scolds at 117..120.
+  p.pad_ledger[0]  = 0;
+  p.pad_ledger[1]  = 0;
+  p.pad_ledger[2]  = 0;
+  p.pad_ledger[3]  = 1;
   p.happiness_avg  = 66;
   p.wish_id        = 0;
   p.events_done    = (uint8_t)(EV_VISITA | (2u << EV_BIRTHDAY_SH));
@@ -99,6 +110,7 @@ static PetSave petsave_egg(void) {
   p.version = NT_SAVE_VERSION;
   p.stage   = STAGE_EGG;
   for (uint8_t i = 0; i < ST_COUNT; i++) p.stat[i] = STAT_MILLI_MAX;
+  p.pad_stat            = STAT_MILLI_MAX;   // v1 stat[ST_DISCIPLINE]
   p.birth_epoch         = 1700000000u;
   p.last_seen_epoch     = 1700000000u;
   p.egg_epoch           = 1700000000u;
@@ -106,10 +118,9 @@ static PetSave petsave_egg(void) {
   p.age_s               = 0u;
   p.genome              = fixture_genome(0x00C0FFEEu);
   p.cq                  = CQ_START;
-  p.weight_dg           = (int16_t)gene_weight_ideal_dg(p.genome);
+  p.pad_weight          = (int16_t)gene_weight_ideal_dg(p.genome);
   p.flags               = PF_LIGHT_ON;
-  p.adult_form          = FORM_UNSET;
-  p.absence_tier        = ABS_NONE;
+  p.pad_adult_form      = 0xFF;             // v1 adult_form = FORM_UNSET
   p.crc16 = crc16_ccitt(&p, PETSAVE_CRC_BYTES);
   return p;
 }
@@ -145,9 +156,11 @@ static GainSave gainsave_v1(void) {
   memset(&g, 0, sizeof g);
   g.magic   = NT_GAIN_MAGIC;
   g.version = NT_GAIN_VERSION;
-  g.slots   = NT_GAIN_SLOTS;
+  g.slots   = 7;                            // the v1 blob carried seven StatIds
   g.epoch   = 1700200000u;
-  static const uint8_t pts[NT_GAIN_SLOTS] = { 30, 20, 10, 25, 0, 0, 0 };
+  // v1 pts[7] = { 30, 20, 10, 25, 0, 0, 0 }. The seventh byte is reserved[0]
+  // now and memset() above already wrote the same zero there.
+  static const uint8_t pts[NT_GAIN_SLOTS] = { 30, 20, 10, 25, 0, 0 };
   memcpy(g.pts, pts, sizeof pts);
   g.crc16 = crc16_ccitt(&g, GAINSAVE_CRC_BYTES);
   return g;

@@ -45,7 +45,6 @@ enum SpritePose : uint8_t {
   POSE_SLEEP,
   POSE_SICK,
   POSE_EAT,
-  POSE_GHOST,
   POSE_COUNT
 };
 
@@ -76,7 +75,6 @@ enum MiniIconId : uint8_t {
   MIC_HYGIENE,
   MIC_HEALTH,
   MIC_BOND,
-  MIC_DISCIPLINE,
   MIC_POOP,
   MIC_SICK,
   MIC_SLEEP,
@@ -139,6 +137,8 @@ enum SpriteSetId : uint8_t {
   SPR_SENIOR_PUNKI = 23,
   SPR_SENIOR_MOHO = 24,
   SPR_SENIOR_QUIMERA = 25,
+  // 26 / 27 are the retired ghost and tombstone bodies. The art stays in the
+  // atlas so the ids below keep their numbers; nothing selects them any more.
   SPR_GHOST = 26,
   SPR_TOMB = 27,
   SPR_SLEEP_BABY = 28,
@@ -972,21 +972,21 @@ inline constexpr uint8_t spr_icon12[] = {
 static_assert(sizeof(spr_icon12) == (size_t)ICO_COUNT * spr_xbm_bytes(12, 12),
               "spr_icon12 size vs ICO_COUNT");
 
-// 8x8 mini icons  22 x 8x8  (176 B)
+// 8x8 mini icons  21 x 8x8  (168 B)
 inline constexpr uint8_t spr_mini8[] = {
   0x25, 0x25, 0x27, 0x62, 0x22, 0x22, 0x22, 0x00, 0x3C, 0x7E, 0xDB, 0xFF, 0xBD, 0xC3, 0x7E, 0x3C,
   0x30, 0x18, 0x0C, 0x3E, 0x18, 0x0C, 0x06, 0x00, 0x08, 0x1C, 0x3E, 0x7F, 0x7F, 0x7F, 0x3E, 0x1C,
   0x3C, 0x3C, 0xFF, 0xFF, 0xFF, 0xFF, 0x3C, 0x3C, 0x66, 0xFF, 0xFF, 0xFF, 0x7E, 0x3C, 0x18, 0x00,
-  0x08, 0x08, 0x7F, 0x3E, 0x1C, 0x3E, 0x63, 0x00, 0x00, 0x0C, 0x1E, 0x3F, 0x59, 0xFF, 0xAD, 0xFF,
-  0x24, 0x7E, 0xDB, 0xFF, 0xBD, 0x7E, 0x24, 0x00, 0x3F, 0x30, 0x18, 0x0C, 0x06, 0x3F, 0x00, 0x00,
-  0x3E, 0x41, 0x1C, 0x22, 0x08, 0x1C, 0x1C, 0x00, 0x08, 0x18, 0x2A, 0x1C, 0x1C, 0x2A, 0x18, 0x08,
-  0x1C, 0x1C, 0x1C, 0x1C, 0x1C, 0x00, 0x1C, 0x1C, 0x3C, 0x42, 0x89, 0x89, 0xB9, 0x81, 0x42, 0x3C,
-  0x98, 0x5C, 0x3F, 0x1F, 0x1F, 0x3F, 0x5C, 0x98, 0x3C, 0x42, 0x42, 0xFF, 0xE7, 0xE7, 0xFF, 0x00,
-  0x29, 0x3E, 0x7F, 0x5D, 0x7F, 0x3E, 0x94, 0x00, 0x1C, 0x06, 0x07, 0x07, 0x07, 0x06, 0x1C, 0x00,
-  0x10, 0x18, 0x1C, 0x1E, 0x1C, 0x18, 0x10, 0x00, 0x08, 0x18, 0x38, 0x78, 0x38, 0x18, 0x08, 0x00,
-  0xC0, 0x60, 0x31, 0x1B, 0x1E, 0x0C, 0x00, 0x00, 0xC3, 0xE7, 0x7E, 0x3C, 0x3C, 0x7E, 0xE7, 0xC3,
+  0x00, 0x0C, 0x1E, 0x3F, 0x59, 0xFF, 0xAD, 0xFF, 0x24, 0x7E, 0xDB, 0xFF, 0xBD, 0x7E, 0x24, 0x00,
+  0x3F, 0x30, 0x18, 0x0C, 0x06, 0x3F, 0x00, 0x00, 0x3E, 0x41, 0x1C, 0x22, 0x08, 0x1C, 0x1C, 0x00,
+  0x08, 0x18, 0x2A, 0x1C, 0x1C, 0x2A, 0x18, 0x08, 0x1C, 0x1C, 0x1C, 0x1C, 0x1C, 0x00, 0x1C, 0x1C,
+  0x3C, 0x42, 0x89, 0x89, 0xB9, 0x81, 0x42, 0x3C, 0x98, 0x5C, 0x3F, 0x1F, 0x1F, 0x3F, 0x5C, 0x98,
+  0x3C, 0x42, 0x42, 0xFF, 0xE7, 0xE7, 0xFF, 0x00, 0x29, 0x3E, 0x7F, 0x5D, 0x7F, 0x3E, 0x94, 0x00,
+  0x1C, 0x06, 0x07, 0x07, 0x07, 0x06, 0x1C, 0x00, 0x10, 0x18, 0x1C, 0x1E, 0x1C, 0x18, 0x10, 0x00,
+  0x08, 0x18, 0x38, 0x78, 0x38, 0x18, 0x08, 0x00, 0xC0, 0x60, 0x31, 0x1B, 0x1E, 0x0C, 0x00, 0x00,
+  0xC3, 0xE7, 0x7E, 0x3C, 0x3C, 0x7E, 0xE7, 0xC3,
 };
-// 176 B, indexed by sprite_mini() with any id < MIC_COUNT.
+// 168 B, indexed by sprite_mini() with any id < MIC_COUNT.
 static_assert(sizeof(spr_mini8) == (size_t)MIC_COUNT * spr_xbm_bytes(8, 8),
               "spr_mini8 size vs MIC_COUNT");
 
@@ -1167,33 +1167,37 @@ NT_SPR_REF_FITS(spr_emo_bubbles,   SPRITE_EMOTES, EMO_BUBBLES);
 NT_SPR_REF_FITS(spr_emo_spark,     SPRITE_EMOTES, EMO_SPARK);
 
 
-#define SPRITE_DATA_BYTES 10631
+#define SPRITE_DATA_BYTES 10623
 static_assert(SPRITE_DATA_BYTES <= 14336, "sprite art over the flash budget");
 
 // -----------------------------------------------------------------------------
 //  LOOKUP
 // -----------------------------------------------------------------------------
 
+// Authored ADULT / SENIOR body designs in the atlas. An art count, not a game
+// rule: the care-scored adult branch was removed, so the adult body is a pure
+// genome trait now.
+#define SPRITE_ADULT_BODIES 6
+
 // -----------------------------------------------------------------------------
 //  sprite_form_of(pet, stage) - THE ONLY correct source of the `form` argument.
 //
-//  `form` means two different things depending on the stage, and PetSave keeps
-//  them in two different fields (nt_types.h:456-457):
-//      ADULT / SENIOR / DEAD : PetSave.adult_form, an AdultForm - but it stays
-//                              FORM_UNSET (0xFF) until the TEEN->ADULT branch
-//                              is taken at 48 h.
-//      TEEN                  : PetSave.minor_form bits 7:4
-//      CHILD                 : PetSave.minor_form bits 3:0
-//                              (0 = bueno, 1 = descuidado)
-//      EGG / BABY            : unused; the species gene picks the body.
+//  `form` means two different things depending on the stage:
+//      ADULT / SENIOR : one of SPRITE_ADULT_BODIES, chosen by the species gene
+//                       and therefore fixed for the pet's whole life.
+//      TEEN           : PetSave.minor_form bits 7:4
+//      CHILD          : PetSave.minor_form bits 3:0
+//                       (0 = bueno, 1 = descuidado)
+//      EGG / BABY     : unused; the species gene picks the body.
 //
-//  Reading adult_form for a CHILD or a TEEN is the trap: FORM_UNSET is 0xFF,
-//  and 0xFF picks variant 1, so every child and teen would render the
-//  "descuidado" body for the pet's whole minor life. Always feed
-//  sprite_lookup_pose() from here.
+//  Always feed sprite_lookup_pose() from here: reading minor_form for an adult
+//  (or the other way round) picks the wrong body for the pet's whole life.
 // -----------------------------------------------------------------------------
 inline uint8_t sprite_form_of(const PetSave& p, Stage stage) {
-  if (stage >= STAGE_ADULT) return p.adult_form;                  // clamped below
+  if (stage >= STAGE_ADULT) {
+    return (uint8_t)(GN_GET(p.genome.g0, GN_SPECIES_SH, GN_SPECIES_MK)
+                     % SPRITE_ADULT_BODIES);
+  }
   if (stage == STAGE_TEEN)  return (uint8_t)(p.minor_form >> 4);
   if (stage == STAGE_CHILD) return (uint8_t)(p.minor_form & 0x0Fu);
   return 0;
@@ -1201,13 +1205,14 @@ inline uint8_t sprite_form_of(const PetSave& p, Stage stage) {
 
 // Map a live pet onto an animation set id.
 //   species : Genome g0 species gene 0..15. Only the low 3 bits pick a BABY
-//             design (8 authored bodies); from CHILD on, care decides the look.
+//             design (8 authored bodies); CHILD and TEEN take a care-scored
+//             variant, and from ADULT on the gene picks the body again.
 //   stage   : enum Stage.
-//   form    : enum AdultForm for ADULT/SENIOR; child/teen variant (0 = bueno,
+//   form    : sprite_form_of() output - a body index 0..SPRITE_ADULT_BODIES-1
+//             for ADULT/SENIOR, the child/teen variant (0 = bueno,
 //             1 = descuidado) for CHILD/TEEN; ignored otherwise.
 //   pose    : enum SpritePose. Falls back to IDLE where there is no art.
 inline uint8_t sprite_set_id(uint8_t species, uint8_t stage, uint8_t form, uint8_t pose) {
-  if (stage >= STAGE_DEAD) return (pose == POSE_GHOST) ? SPR_GHOST : SPR_TOMB;
   if (stage == STAGE_EGG)  return SPR_EGG_IDLE;
 
   if (pose == POSE_SLEEP) {
@@ -1233,17 +1238,18 @@ inline uint8_t sprite_set_id(uint8_t species, uint8_t stage, uint8_t form, uint8
     }
   }
 
-  // Every branch clamps: `form` reaches here from a saved byte that may be
-  // FORM_UNSET (0xFF) or a nibble a future save format widened, and an
-  // unclamped add would index straight past SPRITE_SETS into the next set's
-  // art. Out of range always falls back to the "good"/first variant, never to
-  // "descuidado" - masking bit 0 used to do exactly the opposite.
+  // Every branch clamps: `form` may reach here from a saved nibble a future
+  // save format widened, and an unclamped add would index straight past
+  // SPRITE_SETS into the next set's art. Out of range always falls back to the
+  // "good"/first variant, never to "descuidado".
   switch (stage) {
     case STAGE_BABY:   return (uint8_t)(SPR_BABY_BLOB + (species & 0x07u));
     case STAGE_CHILD:  return (uint8_t)(SPR_CHILD_GOOD + (form <= 1u ? form : 0u));
     case STAGE_TEEN:   return (uint8_t)(SPR_TEEN_GOOD  + (form <= 1u ? form : 0u));
-    case STAGE_ADULT:  return (uint8_t)(SPR_ADULT_BOLOTA + (form < FORM_COUNT ? form : 0u));
-    default:           return (uint8_t)(SPR_SENIOR_BOLOTA + (form < FORM_COUNT ? form : 0u));
+    case STAGE_ADULT:  return (uint8_t)(SPR_ADULT_BOLOTA
+                                       + (form < SPRITE_ADULT_BODIES ? form : 0u));
+    default:           return (uint8_t)(SPR_SENIOR_BOLOTA
+                                       + (form < SPRITE_ADULT_BODIES ? form : 0u));
   }
 }
 

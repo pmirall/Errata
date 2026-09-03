@@ -67,13 +67,13 @@ static Config   g_cfg;
 static uint32_t g_tick_ms        = 0;      // scheduler cursor for the 1 Hz tick
 static uint32_t g_boot_last_seen = 0;      // store_last_seen() as found at boot
 static uint16_t g_cfg_crc        = 0;      // change detector for Config
-static uint8_t  g_absence_unknown = 0;     // boot took the ABS_UNKNOWN path
+static uint8_t  g_absence_unknown = 0;     // boot took the unknown-clock path
 static uint8_t  g_clock_was_valid = 0;     // edge detector for a landing calibration
 static uint8_t  g_nvs_ok          = 0;
 
 // =============================================================================
 //  CONFIG SIDE EFFECTS
-//  Config is shared by pointer with ui (S9 SETTINGS) and webui (the
+//  Config is shared by pointer with ui (SETTINGS) and webui (the
 //  CF_WEB_ENABLED toggle), so it can change under us from two directions.
 //  Rather than have both of them
 //  call back, the tick watches the struct's own CRC and re-applies the two
@@ -190,8 +190,8 @@ static void boot_pet(void)
 //  BOOT: ABSENCE
 //  GAME_DESIGN 5.1-5.3. sim_catch_up_ex() reads SimEnv, so the environment must
 //  already be pushed in. With no trustworthy clock (gt_cal_state() == CAL_UNSET)
-//  it takes the ABS_UNKNOWN path, which charges ZERO (plan section 1.7), and we
-//  arm the retro-fix for the moment gt_set_epoch() lands.
+//  it takes the unknown-clock path, which charges ZERO (plan section 1.7), and
+//  we arm the retro-fix for the moment gt_set_epoch() lands.
 //
 //  PH3 #1: "gt_is_valid() is false" alone is NOT evidence of an absence. The
 //  crash-vs-abandonment discriminator storage.cpp already computes is the
@@ -302,7 +302,7 @@ void setup()
   // Section 26, first boot: with no SNTP and no radio policy the device learns
   // the date from a human or not at all, so ask once, right here, before the
   // pet's first day starts running on an estimate. Every later visit is through
-  // S9 SETTINGS. Backing out is allowed - CAL_UNSET simply charges no absence.
+  // SETTINGS. Backing out is allowed - CAL_UNSET simply charges no absence.
   if (boot == BOOT_FIRST_RUN && gt_cal_state() == CAL_UNSET) {
     ui_goto(SCR_CLOCK);
   }
@@ -333,7 +333,7 @@ static void logic_tick(void)
   store_touch_lastseen(env.now_epoch);
   (void)store_save(g_pet, false); // rate-limited to SAVE_FULL_PERIOD_S inside
 
-  // gt_set_epoch() landed after an ABS_UNKNOWN boot: the boot charged nothing,
+  // gt_set_epoch() landed after an unknown-clock boot: the boot charged nothing,
   // so charge the truth now (GAME_DESIGN 5.1). The edge is on gt_is_valid(),
   // which is exactly "gt_cal_state() left CAL_UNSET".
   const uint8_t clock_now = gt_is_valid() ? 1u : 0u;
@@ -345,11 +345,10 @@ static void logic_tick(void)
       // On a device that has never been calibrated, gt_now() returns the uptime
       // (gametime.cpp seeds its estimate only from a >= NT_EPOCH_SANE_MIN
       // value), and logic_tick writes that uptime into NVS "t" every second.
-      // Subtracting it from a freshly-set epoch yields ~55 YEARS, which
-      // tier_for() resolves to ABS_GRAVE: -40 health plus the permanent,
-      // inheritable PF_SCAR, at the exact moment the owner finishes typing the
-      // date. Without a real baseline there is no truth to charge, so charge
-      // nothing.
+      // Subtracting it from a freshly-set epoch yields ~55 YEARS, which would
+      // be integrated as a 55-year absence at the exact moment the owner
+      // finishes typing the date. Without a real baseline there is no truth to
+      // charge, so charge nothing.
       if (g_boot_last_seen >= (uint32_t)NT_EPOCH_SANE_MIN) {
         truth = gt_elapsed_since(g_boot_last_seen, env.now_epoch);
       }
@@ -392,7 +391,7 @@ void loop()
   }
 
   // --- 3. per-loop pumps that own presentation timing ----------------------
-  ui_service();                   // auto-return, minigames, death staging
+  ui_service();                   // auto-return, minigames, the hatch ceremony
   god_service();                  // soak log, serial paste, synthetic BLE
 
   // --- 4. render ------------------------------------------------------------
@@ -405,7 +404,7 @@ void loop()
   // --- 5. radio ------------------------------------------------------------
   // NO POLICY HERE. The radio is OFF at boot and stays off (plan section 2 row
   // G4): the screen that needs it asks for it and releases it on the way out -
-  // S15 QR owns RADIO_WIFI, S8 SOCIAL owns RADIO_BLE. net_service() only pumps
+  // QR owns RADIO_WIFI, SOCIAL owns RADIO_BLE. net_service() only pumps
   // the state machine the screen put it in, including the settle timer that
   // replaced the blocking delay between the two stacks.
   net_service();

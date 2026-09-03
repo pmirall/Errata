@@ -3,14 +3,13 @@
 //  NVS persistence (Preferences), write-cadence policy, RTC_NOINIT boot nonce
 //  and reset-reason classification.
 //
-//  Namespace "notta", keys "t" / "save" / "anc" / "cfg" / "egg" / "ok" / "gl".
+//  Namespace "notta", keys "t" / "save" / "cfg" / "egg" / "ok" / "gl".
 //  Every key and the namespace are <= 15 chars (NVS_KEY_NAME_MAX_SIZE 16).
 //
-//  This is the ONLY module that talks to Preferences. It never interprets game
-//  rules beyond what it must stamp into an AncestorRecord: it validates blobs,
-//  rate-limits flash writes, and tells the rest of the firmware how this boot
-//  started so the absence mechanic never accuses the user of an abandonment
-//  that was really a crash.
+//  This is the ONLY module that talks to Preferences. It interprets no game
+//  rules at all: it validates blobs, rate-limits flash writes, and tells the
+//  rest of the firmware how this boot started so the absence mechanic never
+//  accuses the user of an abandonment that was really a crash.
 //
 //  Identifiers/comments English. No user-facing strings here (strings_es.h).
 // =============================================================================
@@ -25,13 +24,6 @@
 // Storage-local constants
 // -----------------------------------------------------------------------------
 
-// Slot-occupancy marker inside AncestorRecord.cause_flags.
-// nt_types.h assigns bits 3:0 = DeathCause, bit 6 = AR_RARE, bit 7 = AR_TAINTED.
-// Bit 5 (0x20) is unassigned by that contract and is claimed here so an empty
-// ring slot is distinguishable from a legitimate all-zero record.
-// Readers must keep masking the cause with AR_CAUSE_MK, which is unaffected.
-#define AR_SLOT_USED            0x20u
-
 // Flash-wear floors. These are wear policy, not game logic: they are measured
 // with millis() because the game clock may be unknown or may jump under SNTP.
 #define STORE_SAVE_MIN_GAP_MS   1000UL   // two "save" writes may not be closer
@@ -45,13 +37,13 @@
 #define STORE_E_SAVE_W          0x04u    // putBytes("save") short write
 #define STORE_E_LASTSEEN_W      0x08u    // putULong64("t") short write
 #define STORE_E_CFG_W           0x10u    // putBytes("cfg") short write
-#define STORE_E_ANC_W           0x20u    // putBytes("anc") short write
 #define STORE_E_EGG_W           0x40u    // putBytes("egg") short write
 #define STORE_E_SAVE_CRC        0x80u    // a "save" blob failed its CRC
-// The gain ledger has no bit of its own: all eight are assigned, store_error()
-// is a uint8_t the UI and god mode already read, and "gl" is written only as
-// part of a "save" transaction - so a failure there is reported as STORE_E_SAVE_W
-// with the label "gain", which is what the Serial line prints.
+// Bit 0x20 is retired with the ancestor ring. The gain ledger has no bit of its
+// own either: store_error() is a uint8_t the UI and god mode already read, and
+// "gl" is written only as part of a "save" transaction - so a failure there is
+// reported as STORE_E_SAVE_W with the label "gain", which is what the Serial
+// line prints.
 
 // -----------------------------------------------------------------------------
 // HOURLY-GAIN LEDGER  (PH3 finding 4 / PH4 section 6 item 1), NVS key "gl"
@@ -81,7 +73,8 @@ struct GainSave {
   uint32_t epoch;                    //  4  wall clock the snapshot was taken at,
                                      //     or 0 when there was no trustworthy one
   uint8_t  pts[NT_GAIN_SLOTS];       //  8  whole points still unspent, by StatId
-  uint8_t  reserved[3];              // 15
+  uint8_t  reserved[4];              // 14  grew by one when ST_DISCIPLINE went,
+                                     //     so the blob stays exactly 20 B
   uint16_t crc16;                    // 18  CRC-16/CCITT-FALSE over bytes 0..17
 };
 static_assert(sizeof(GainSave) == 20, "GainSave must be 20 B on the wire to NVS");
@@ -130,7 +123,7 @@ bool     store_load(PetSave& out);
 
 // Writes key "save". Unforced calls obey SAVE_FULL_PERIOD_S and are therefore
 // safe to make every tick. force=true means "state changed" (input, stage
-// transition, death); it still honours a STORE_SAVE_MIN_GAP_MS floor and defers
+// transition, hatch); it still honours a STORE_SAVE_MIN_GAP_MS floor and defers
 // to the next call rather than dropping the write. magic/version/crc16 are
 // stamped by this function; the caller never computes them.
 // Returns false only on a real NVS failure.
@@ -141,10 +134,6 @@ bool     store_save(const PetSave& s, bool force = false);
 // STORE_CLOCK_JUMP_S or more, which forces a write. Pass 0 to reuse the last
 // epoch this module was given. Safe to call every tick.
 bool     store_touch_lastseen(uint32_t epoch = 0);
-
-// Appends one AncestorRecord built from a dead pet to the 16-entry ring in key
-// "anc" and writes the whole 192 B blob. Call once, on death only.
-bool     store_push_ancestor(const PetSave& s);
 
 // Reads and validates key "cfg". On any failure 'out' is filled with the
 // defaults compiled in from the config.h user block and false is returned
@@ -197,10 +186,6 @@ uint32_t store_boot_count(void);
 void     store_rtc_mark_god(void);    // god mode was entered this power cycle
 bool     store_rtc_god_tainted(void);
 
-// Lineage ring, newest first: index 0 is the most recent ancestor.
-uint8_t  store_ancestor_count(void);
-bool     store_ancestor(uint8_t index_newest_first, AncestorRecord& out);
-
 // Pending BLE-mating egg, NVS key "egg" (nt_types.h section 4).
 bool     store_load_egg(PendingEgg& out);   // validates magic/version/EF_VALID/genome CRC
 bool     store_save_egg(const PendingEgg& e);
@@ -218,8 +203,5 @@ void     store_cfg_defaults(Config& c);
 // CRC-16/CCITT-FALSE over a blob: a thin wrapper on crc16_ccitt() (crc16.h),
 // the one CRC that guards PetSave, Config, GainSave, Genome and the BLE frames.
 uint16_t store_crc16(const void* data, size_t len);
-
-// CQ (0..1000) -> CareGrade, used to stamp AncestorRecord.form_grade.
-CareGrade store_grade_from_cq(int16_t cq);
 
 #endif // NT_STORAGE_H

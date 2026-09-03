@@ -41,35 +41,11 @@ enum Stage : uint8_t {
   STAGE_TEEN,
   STAGE_ADULT,
   STAGE_SENIOR,
-  STAGE_DEAD,
   STAGE_COUNT
 };
 
-// Adult branch (GAME_DESIGN 2.3). FORM_UNSET until the TEEN->ADULT transition.
-enum AdultForm : uint8_t {
-  FORM_BOLOTA = 0,
-  FORM_ZAMPASALTO,
-  FORM_BUHO,
-  FORM_PUNKI,
-  FORM_MOHO,
-  FORM_QUIMERA,
-  FORM_COUNT,
-  FORM_UNSET = 0xFF
-};
-
-enum DeathCause : uint8_t {
-  DEATH_NONE = 0,
-  DEATH_HUNGER,
-  DEATH_FILTH,
-  DEATH_ILLNESS,
-  DEATH_SADNESS,
-  DEATH_OLD_AGE,
-  DEATH_NEGLECT,
-  DEATH_ACCIDENT,
-  DEATH_COUNT
-};
-
-// Screen state machine S0..S15 (GAME_DESIGN 8.3).
+// Screen state machine. Renumbered when MEMORIAL and LINEAGE were removed, so
+// the S-numbers below are the current ones, not the historical ones.
 enum ScreenId : uint8_t {
   SCR_HOME = 0,      // S0
   SCR_MENU,          // S1  8-icon ring
@@ -78,16 +54,14 @@ enum ScreenId : uint8_t {
   SCR_GAME,          // S4  minigame active
   SCR_STATUS_A,      // S5  bars
   SCR_STATUS_B,      // S6  genome / ADN
-  SCR_LINEAGE,       // S7
-  SCR_SOCIAL,        // S8  BLE
-  SCR_SETTINGS,      // S9
-  SCR_CONFIRM,       // S10 modal, cursor defaults to NO
-  SCR_ALERT,         // S11 overlay
-  SCR_MEMORIAL,      // S12 locked
-  SCR_EGG,           // S13
-  SCR_GOD,           // S14
-  SCR_QR,            // S15
-  SCR_CLOCK,         // S16 on-device time entry (section 26)
+  SCR_SOCIAL,        // S7  BLE
+  SCR_SETTINGS,      // S8
+  SCR_CONFIRM,       // S9  modal, cursor defaults to NO
+  SCR_ALERT,         // S10 overlay
+  SCR_EGG,           // S11
+  SCR_GOD,           // S12
+  SCR_QR,            // S13
+  SCR_CLOCK,         // S14 on-device time entry
   SCR_COUNT
 };
 
@@ -100,9 +74,9 @@ enum Gesture : uint8_t {
   GST_DBL_L,
   GST_DBL_R,
   GST_HOLD_L,        // repeats every REPEAT_RATE_MS
-  GST_HOLD_R,        // BACK on every screen except S4 and S12
+  GST_HOLD_R,        // BACK on every screen except S4
   GST_BOTH,
-  GST_LONG_BOTH,     // HOME from anywhere except S12
+  GST_LONG_BOTH,     // HOME from anywhere
   GST_COUNT
 };
 
@@ -125,17 +99,6 @@ enum RadioMode : uint8_t {
   RADIO_COUNT
 };
 
-enum AbsenceTier : uint8_t {
-  ABS_NONE = 0,      // < 1 h
-  ABS_CORTA,         // 1-6 h
-  ABS_LARGA,         // 6-24 h
-  ABS_ABANDONO,      // 1-3 d
-  ABS_GRAVE,         // 3-7 d
-  ABS_MUERTO,        // the offline sim reached health <= 0
-  ABS_UNKNOWN,       // no clock: charge nothing, retro-fix once one arrives
-  ABS_COUNT
-};
-
 // Anything that mutates the pet goes through sim_apply_action(ActionId, ...).
 enum ActionId : uint8_t {
   ACT_NONE = 0,
@@ -145,7 +108,6 @@ enum ActionId : uint8_t {
   ACT_MEDICINE,
   ACT_PLAY,
   ACT_PET,
-  ACT_SCOLD,
   ACT_LIGHT_TOGGLE,
   ACT_SLEEP_TOGGLE,
   ACT_COUNT
@@ -159,9 +121,6 @@ enum ActionErr : uint8_t {
   AERR_NOT_SICK,
   AERR_NOTHING_TODO, // nothing to clean
   AERR_ASLEEP,
-  AERR_REFUSED,      // PUNKI 1-in-6, or sulking after an absence
-  AERR_SULKING,
-  AERR_DEAD,
   AERR_IS_EGG,
   AERR_BAD_ARG,      // -> 400 {"err":"arg"}
   AERR_COUNT
@@ -176,20 +135,9 @@ enum StatId : uint8_t {
   ST_HYGIENE,
   ST_HEALTH,
   ST_BOND,
-  ST_DISCIPLINE,
   ST_COUNT
 };
 #define ST_CORE_COUNT 4   // ST_HUNGER..ST_HYGIENE: the four "core" stats
-
-// Health-damage accumulators, one per attributable death cause.
-enum DmgId : uint8_t {
-  DMG_HUNGER = 0,
-  DMG_FILTH,
-  DMG_ILLNESS,
-  DMG_SADNESS,
-  DMG_OTHER,         // obesity, heat, storm SUSTO -> DEATH_ACCIDENT
-  DMG_COUNT
-};
 
 enum AlertId : uint8_t {
   AL_NONE = 0,
@@ -203,7 +151,6 @@ enum AlertId : uint8_t {
   AL_WISH,
   AL_EVOLVING,
   AL_BIRTHDAY,
-  AL_STORM,
   AL_MATE_FOUND,
   AL_COUNT
 };
@@ -228,16 +175,12 @@ enum WishId : uint8_t {
   WISH_COUNT
 };
 
-// On-device 2-button minigames (screen S4). Canonical for minigames_won.
+// On-device 2-button minigames (the GAME screen). Canonical for minigames_won.
 enum DevGameId : uint8_t {
   DG_REFLEX = 0,
   DG_MEMORY,
   DG_JUMP,
   DG_COUNT
-};
-
-enum CareGrade : uint8_t {
-  GRADE_A = 0, GRADE_B, GRADE_C, GRADE_D, GRADE_E, GRADE_F, GRADE_COUNT
 };
 
 // S0 TAP_R cycles this.
@@ -339,26 +282,29 @@ enum Temperament : uint8_t {
 #define PF_SICK          0x0001u
 #define PF_ASLEEP        0x0002u
 #define PF_LIGHT_ON      0x0004u
-#define PF_SCAR          0x0008u   // permanent, from ABS_GRAVE. Inherited as a pattern shift.
-#define PF_DEAD          0x0010u
-#define PF_BURIED        0x0020u
+// bits 0x0008 / 0x0010 / 0x0020 are retired (PF_SCAR / PF_DEAD / PF_BURIED).
 #define PF_COLD_EGG      0x0040u   // hatched from an egg older than EGG_COLD_AFTER_S
 #define PF_INBRED        0x0080u   // sick probability x1.25 for life
 #define PF_WISH_ACTIVE   0x0100u
 #define PF_WISH_DONE     0x0200u   // today's wish already resolved
-#define PF_ABS_UNKNOWN   0x0400u   // absence applied with no clock; retro-fix pending
+#define PF_ABS_UNKNOWN   0x0400u   // absence charged with no clock; retro-fix pending
 #define PF_SEEKING_MATE  0x0800u   // BLE beacon "seeking" bit
 #define PF_GOD_TAINTED   0x1000u   // mirror of Genome g2 bit 13, for cheap reads
-#define PF_HYBRID_ELIG   0x2000u   // parents had different species -> QUIMERA eligible
+// bit 0x2000 is retired (PF_HYBRID_ELIG).
 #define PF_SOUND_MUTE    0x4000u
 #define PF_EGG_PENDING   0x8000u   // a PendingEgg blob exists in NVS key "egg"
 
 // PetSave.events_done bits
 #define EV_VISITA        0x01u
-#define EV_STORM         0x02u
+// bit 0x02 is retired (EV_STORM). EV_BIRTHDAY_SH keeps its shift so a v1 blob
+// still reads its birthday count from the same bits.
 #define EV_BIRTHDAY_SH   2         // bits 7:2 = birthday count 0..63
 #define EV_BIRTHDAY_MK   0x3Fu
 
+//  Every field the death / lineage / punishment surgery retired became a pad_*
+//  member at its old offset instead of vanishing, so the 128 B budget and the
+//  five offsetof guards below still hold and a v1 blob still loads. NEVER reuse
+//  a pad_* for new data in Phase 2.
 struct PetSave {
   // --- header ---------------------------------------------------- 0 .. 3
   uint16_t magic;                  //  0  NT_SAVE_MAGIC
@@ -367,11 +313,12 @@ struct PetSave {
 
   // --- continuous stats, milli-points 0..100000 ------------------ 4 .. 31
   int32_t  stat[ST_COUNT];         //  4  indexed by StatId
+  int32_t  pad_stat;               // 28  was stat[ST_DISCIPLINE]
 
   // --- timestamps, game epoch (gt_now()) ------------------------ 32 .. 55
   uint32_t birth_epoch;            // 32  hatch time
   uint32_t last_seen_epoch;        // 36  mirrors NVS key "t"
-  uint32_t death_epoch;            // 40  0 while alive
+  uint32_t pad_death_epoch;        // 40  was death_epoch
   uint32_t egg_epoch;              // 44  when the current egg was created
   uint32_t last_interact_epoch;    // 48  drives loneliness_mult and T01
   uint32_t age_s;                  // 52  accumulated by the sim, clock-jump proof
@@ -381,28 +328,26 @@ struct PetSave {
 
   // --- fractional remainders for the milli-point ledger ---------- 72 .. 85
   int16_t  stat_rem[ST_COUNT];     // 72  0..3599, one per StatId
+  int16_t  pad_stat_rem;           // 84  was stat_rem[ST_DISCIPLINE]
 
   // --- int16 ledger ---------------------------------------------- 86 .. 111
   int16_t  cq;                     //  86 care quality 0..1000
-  int16_t  weight_dg;              //  88 decigrams, 50..990
-  uint16_t dmg_acc[DMG_COUNT];     //  90 lifetime health damage by source
-  uint16_t care_miss;              // 100
+  int16_t  pad_weight;             //  88 was weight_dg
+  uint8_t  pad_dmg[12];            //  90 was dmg_acc[DMG_COUNT] + care_miss
   uint16_t sick_episodes;          // 102
   uint16_t minigames_won;          // 104
-  uint16_t overfeed;               // 106
+  uint16_t pad_overfeed;           // 106 was overfeed
   uint16_t snacks_total;           // 108
   uint16_t wish_left_s;            // 110 seconds left in the wish window
 
   // --- flags + uint8 ledger -------------------------------------- 112 .. 125
   uint16_t flags;                  // 112 PF_*
-  uint8_t  adult_form;             // 114 AdultForm, FORM_UNSET until 48 h
+  uint8_t  pad_adult_form;         // 114 was adult_form
   uint8_t  minor_form;             // 115 bits3:0 child variant, bits7:4 teen variant
   uint8_t  poop_count;             // 116 0..POOP_MAX
-  int8_t   guilt_level;            // 117 0..6
-  uint8_t  absence_tier;           // 118 AbsenceTier of the last return
-  uint8_t  death_cause;            // 119 DeathCause
-  uint8_t  unjust_scolds;          // 120 saturating
-  uint8_t  happiness_avg;          // 121 running mean 0..100, for S_rebel
+  uint8_t  pad_ledger[4];          // 117 was guilt_level, absence_tier,
+                                   //     death_cause, unjust_scolds
+  uint8_t  happiness_avg;          // 121 running mean 0..100
   uint8_t  wish_id;                // 122 WishId
   uint8_t  events_done;            // 123 EV_* + birthday count
   uint8_t  reserved[2];            // 124 must be 0
@@ -416,6 +361,7 @@ static_assert(sizeof(PetSave) == 128, "PetSave layout drifted");
 static_assert(offsetof(PetSave, stat)     ==   4, "PetSave.stat moved");
 static_assert(offsetof(PetSave, genome)   ==  56, "PetSave.genome moved");
 static_assert(offsetof(PetSave, stat_rem) ==  72, "PetSave.stat_rem moved");
+static_assert(offsetof(PetSave, cq)       ==  86, "PetSave.cq moved");
 static_assert(offsetof(PetSave, flags)    == 112, "PetSave.flags moved");
 static_assert(offsetof(PetSave, crc16)    == 126, "PetSave.crc16 moved");
 #define PETSAVE_CRC_BYTES  126
@@ -424,7 +370,6 @@ static_assert(offsetof(PetSave, crc16)    == 126, "PetSave.crc16 moved");
 // 4. PENDING EGG - NVS key "egg", 24 B.
 //    A BLE mating produces an egg while the pet is still alive; it must survive
 //    a reboot without displacing the living pet, so it cannot live in PetSave.
-//    A death-egg does NOT use this: it replaces PetSave.genome directly.
 // -----------------------------------------------------------------------------
 #define NT_EGG_MAGIC     0x4745u   // 'E','G'
 #define NT_EGG_VERSION   1
@@ -432,7 +377,7 @@ static_assert(offsetof(PetSave, crc16)    == 126, "PetSave.crc16 moved");
 #define EF_FROM_MATING   0x02u
 #define EF_INBRED        0x04u
 #define EF_NEW_LINEAGE   0x08u     // "mutacion fundadora" -> NUEVA ESTIRPE
-#define EF_HYBRID        0x10u     // recombinant species -> QUIMERA eligible
+#define EF_HYBRID        0x10u     // recombinant species
 
 struct PendingEgg {
   uint16_t magic;          //  0
@@ -444,33 +389,9 @@ struct PendingEgg {
 static_assert(sizeof(PendingEgg) == 24, "PendingEgg must be 24 bytes");
 
 // -----------------------------------------------------------------------------
-// 5. ANCESTOR RECORD - 12 BYTES, ring buffer of ANCESTOR_MAX in NVS key "anc"
-// -----------------------------------------------------------------------------
-#define AR_FORM_MK       0x0Fu     // form_grade bits 3:0
-#define AR_GRADE_SH      4         // form_grade bits 7:4 = CareGrade
-#define AR_CAUSE_MK      0x0Fu     // cause_flags bits 3:0
-#define AR_RARE          0x40u     // cause_flags bit 6
-#define AR_TAINTED       0x80u     // cause_flags bit 7
-
-NT_PACK_PUSH
-struct NT_PACKED AncestorRecord {
-  uint8_t  generation;      //  0
-  uint8_t  form_grade;      //  1  AdultForm | CareGrade << 4
-  uint16_t lifespan_hours;  //  2
-  uint8_t  cause_flags;     //  4  DeathCause | AR_RARE | AR_TAINTED
-  uint16_t g0;              //  5  morphology, enough to redraw the 16x16 portrait
-  uint8_t  g1_lo;           //  7  appetite + metabolism
-  uint32_t birth_epoch;     //  8
-};
-NT_PACK_POP
-
-static_assert(sizeof(AncestorRecord) == 12, "AncestorRecord must be exactly 12 bytes");
-#define ANCESTOR_BLOB_BYTES (ANCESTOR_MAX * 12)   // 192
-
-// -----------------------------------------------------------------------------
-// 6. CONFIG - NVS key "cfg", 256 B.
+// 5. CONFIG - NVS key "cfg", 256 B.
 //    Seeded from the CFG_* defaults in config.h on first boot; editable at
-//    runtime from S9 SETTINGS and the captive portal.
+//    runtime from SETTINGS and the captive portal.
 //    reserved_a[] holds the retired Telegram token and chat id, reserved_b[]
 //    the retired weather coordinates and reserved_c the retired Telegram mode:
 //    the offsets of every field after them are frozen by the asserts below, so
@@ -511,8 +432,8 @@ static_assert(offsetof(Config, crc16)     == 254, "Config.crc16 moved");
 #define CONFIG_CRC_BYTES 254
 
 // -----------------------------------------------------------------------------
-// 7. RTC RETENTION - RTC_NOINIT_ATTR, survives soft reset, lost on power loss.
-//    The crash-vs-abandonment discriminator (GAME_DESIGN 5.1).
+// 6. RTC RETENTION - RTC_NOINIT_ATTR, survives soft reset, lost on power loss.
+//    The crash-vs-power-loss discriminator (GAME_DESIGN 5.1).
 // -----------------------------------------------------------------------------
 struct RtcKeep {
   uint32_t magic;             // RTC_NONCE_MAGIC
@@ -526,7 +447,7 @@ struct RtcKeep {
 static_assert(sizeof(RtcKeep) <= RTC_STRUCT_MAX_BYTES, "RtcKeep exceeds the RTC budget");
 
 // -----------------------------------------------------------------------------
-// 8. TRANSIENT SHARED STRUCTS (never persisted, no size contract)
+// 7. TRANSIENT SHARED STRUCTS (never persisted, no size contract)
 // -----------------------------------------------------------------------------
 
 // Result of sim_apply_action(). Deltas are WHOLE POINTS, already applied.
@@ -535,7 +456,6 @@ struct ActionResult {
   uint8_t  err;            // ActionErr
   uint16_t cooldown_s;     // seconds remaining when err == AERR_COOLDOWN
   int16_t  d[ST_COUNT];    // applied delta per StatId
-  int16_t  d_weight_dg;
   int16_t  d_cq;
   uint16_t str_id;         // StrId of the reaction line, 0 = none
 };
@@ -553,18 +473,13 @@ struct BlePeerInfo {
 
 // The absence report handed from sim_catch_up_ex() to the UI.
 struct AbsenceReport {
-  uint8_t  tier;           // AbsenceTier
-  uint8_t  died;           // 1 = the offline sim reached health <= 0
-  uint8_t  cause;          // DeathCause when died
-  uint8_t  clock_known;    // 0 = ABS_UNKNOWN path
+  uint8_t  clock_known;    // 0 = the unknown-clock path: nothing was charged
   uint32_t absence_s;      // exact, never rounded: the precision is the joke
-  uint32_t death_epoch;    // valid when died
   uint16_t steps;          // simulated steps actually run
-  uint16_t sulk_s;         // refusal timer to install
 };
 
 // -----------------------------------------------------------------------------
-// 9. SMALL SHARED HELPERS (pure, integer, host-safe)
+// 8. SMALL SHARED HELPERS (pure, integer, host-safe)
 // -----------------------------------------------------------------------------
 #define NT_MIN(a, b)          (((a) < (b)) ? (a) : (b))
 #define NT_MAX(a, b)          (((a) > (b)) ? (a) : (b))

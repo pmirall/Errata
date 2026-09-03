@@ -104,7 +104,7 @@ RadioMode   net_mode(void);
 // be torn down first, the driver needs RADIO_SETTLE_MS to itself: the phase
 // becomes NPH_SETTLING, the request returns true, and net_service() finishes
 // the bring-up when the timer expires. A caller that needs the stack resident
-// (S8 SOCIAL before ble_begin(), god mode's GBS_RADIO) must therefore POLL
+// (SOCIAL before ble_begin(), god mode's GBS_RADIO) must therefore POLL
 // net_mode() rather than assume the call was enough. RADIO_WIFI has always
 // only *started* associating - poll net_is_sta_up() / net_phase().
 // RADIO_OFF is the exception: it is always immediate and always succeeds.

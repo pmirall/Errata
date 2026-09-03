@@ -96,8 +96,8 @@ static_assert(PETFX_STAGE_L >= UI_HUD_L_END && PETFX_STAGE_R < UI_HUD_R_BEGIN,
 // itself if the caller forgot.
 void petfx_begin(void);
 
-// Reseed the automaton from this pet's identity. Call on boot, on hatch, on
-// death and whenever the pet changes. Seeding from lineage_id ^ genome makes
+// Reseed the automaton from this pet's identity. Call on boot, on hatch and
+// whenever the pet changes. Seeding from lineage_id ^ genome makes
 // the SAME pet always move the same way and siblings move differently, so
 // motion becomes a visible, heritable trait.
 void petfx_reset(const PetSave& p);
@@ -144,7 +144,7 @@ uint8_t petfx_body_h(void);
 //  NUDGES FROM THE OUTSIDE
 // =============================================================================
 
-// Lightning, a wall bump, a scolding: recoil away from where it was looking
+// A wall bump, a refused action: recoil away from where it was looking
 // and hold still for ms. Overrides whatever the automaton was doing.
 void petfx_startle(uint16_t ms);
 
@@ -156,7 +156,7 @@ void petfx_attention(void);
 // meeting). Enters a short TURN if that means turning round.
 void petfx_face_point(int16_t x);
 
-// Ceremonies (evolution, death, the birthday card) pin the pet in the centre
+// Ceremonies (evolution, hatch, the birthday card) pin the pet in the centre
 // so the choreography can rely on its position. 1 = pinned, 0 = free.
 void petfx_freeze(uint8_t on);
 

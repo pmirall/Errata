@@ -1,18 +1,18 @@
 // =============================================================================
 //  NOTTAMAGOCHI - ui.cpp
-//  The 16-screen state machine. GAME_DESIGN 8.2 (global invariants) and 8.3
-//  (per-screen gesture map), in full, for SCR_HOME .. SCR_QR.
+//  The screen state machine. GAME_DESIGN 8.2 (global invariants) and 8.3
+//  (per-screen gesture map), in full, for SCR_HOME .. SCR_CLOCK.
 //
 //  Invariants implemented literally (GAME_DESIGN 8.2):
-//    1. GST_HOLD_R == BACK on every screen except S4 GAME and S12 MEMORIAL.
-//    2. GST_LONG_BOTH == HOME from anywhere except S12.
-//    3. Every screen except S0 / S4 / S12 / S13 / S14 auto-returns to HOME
+//    1. GST_HOLD_R == BACK on every screen except GAME.
+//    2. GST_LONG_BOTH == HOME from anywhere.
+//    3. Every screen except HOME / GAME / EGG / GOD auto-returns to HOME
 //       after UI_AUTORETURN_MS, with a 3 px countdown bar in the last
 //       UI_COUNTDOWN_MS.
 //    4. Every menu is a ring.
 //    5. Every confirmation starts on NO.
-//    6. The affordances are always drawn in the bottom 8 px. (S15 QR is the
-//       one documented exception: BRIEF 1.4 gives the 62 px symbol box those
+//    6. The affordances are always drawn in the bottom 8 px. (QR is the one
+//       documented exception: BRIEF 1.4 gives the 62 px symbol box those
 //       rows, so the hint moves into the right-hand column.)
 //    7. An alert never steals a press: the first gesture only dismisses it.
 //
@@ -71,8 +71,8 @@ static_assert(UI_HDR_H >= 11, "t0_11b_tf accents clip in a shorter header");
 
 enum UiModal : uint8_t {
   MODAL_NONE = 0,
-  MODAL_ALERT,      // S11 overlay
-  MODAL_CONFIRM,    // S10 modal
+  MODAL_ALERT,      // ALERT overlay
+  MODAL_CONFIRM,    // CONFIRM modal
   MODAL_HELP        // BOTH on a list item, UI_MODAL_HELP_MS
 };
 
@@ -83,17 +83,6 @@ enum ConfirmId : uint8_t {
   CFM_MATE,
   CFM_WIPE1,
   CFM_WIPE2
-};
-
-// Death staging phases (GAME_DESIGN 9.2). Every duration is from config.h.
-enum DeathPhase : uint8_t {
-  DP_HEARTBEAT = 0,   //  0.0 .. 12.0 s   inputs ignored, 1 fps
-  DP_COLLAPSE,        // 12.0 .. 13.2 s   4 dither steps
-  DP_BLACK,           // 13.2 .. 16.2 s   nothing at all
-  DP_TEXT,            // 16.2 ..          one line per 1.2 s
-  DP_EPITAPH,         // 22.0 ..          inputs live; HOLD_R 3 s to bury
-  DP_LINEAGE,         // after burial: S7 held MEMORIAL_LINEAGE_MS
-  DP_EGG_FADE         // then S13 fades in over MEMORIAL_EGG_FADE_MS
 };
 
 enum SocPhase : uint8_t {
@@ -155,35 +144,26 @@ static uint32_t s_list_ms     = 0;
 static uint32_t s_trans_ms    = 0;
 
 // ---- welcome-back banner ----------------------------------------------------
-static uint32_t s_absence_ms  = 0;
-static uint32_t s_absence_s   = 0;
-static uint8_t  s_absence_tier = ABS_NONE;
+static uint32_t s_absence_ms   = 0;
+static uint32_t s_absence_s    = 0;
+static uint8_t  s_absence_known = 1;   // 0 = the clock could not measure the gap
 
-// ---- S6 ---------------------------------------------------------------------
+// ---- STATUS_B ---------------------------------------------------------------
 static uint32_t s_hex_ms      = 0;
 static char     s_hex[33];
 
-// ---- S7 ---------------------------------------------------------------------
-static uint8_t  s_lin_idx     = 0;
-static uint8_t  s_lin_detail  = 0;
-
-// ---- S9 ---------------------------------------------------------------------
+// ---- settings ---------------------------------------------------------------
 static Config*  s_cfg         = nullptr;
 static uint8_t  s_set_page    = 0;      // 0 = list, 1 = "Acerca de"
 
-// ---- S12 / S13 --------------------------------------------------------------
-static uint8_t  s_death_phase = DP_HEARTBEAT;
-static uint32_t s_death_ms    = 0;
-static uint32_t s_stage_ms    = 0;
+// ---- egg --------------------------------------------------------------------
 static uint8_t  s_rub_count   = 0;
 static uint8_t  s_rub_last    = 0xFF;
 static uint32_t s_rub_ms      = 0;
 
-// ---- S13 birth staging ------------------------------------------------------
-// The mirror image of DP_*. It lives on S13 rather than on a new ScreenId
-// because adding one would shift ScreenId for s_cursor[SCR_COUNT], and the
-// death staging already proves that a phase enum riding on an existing screen
-// is enough.
+// ---- birth staging ----------------------------------------------------------
+// A phase enum riding on the EGG screen rather than a ScreenId of its own,
+// because adding one would shift ScreenId for s_cursor[SCR_COUNT].
 enum HatchPhase : uint8_t {
   HP_NONE = 0,
   HP_WOBBLE,   //    0 .. 1200   the egg rocks, accelerating
@@ -200,11 +180,11 @@ static uint32_t s_hatch_ms    = 0;
 static uint8_t  s_hatch_jolts = 0;    // 0..3, one rd_shake() per jolt
 static uint8_t  s_hatch_look  = 0;    // 0 = not yet, 1 = left done, 2 = right done
 
-// Declared here, not in section 17a, because ui_fps() and ui_input_locked()
+// Declared here, not in section 16, because ui_fps() and ui_input_locked()
 // (section 6) are both above the ceremony and both have to know about it.
 static inline bool hatch_active(void) { return s_hatch_phase != HP_NONE; }
 
-// ---- S15 --------------------------------------------------------------------
+// ---- QR ---------------------------------------------------------------------
 static uint8_t  s_qr_mod[QR_BUF_BYTES];
 static uint8_t  s_qr_size     = 0;
 static uint8_t  s_qr_variant  = 0;      // 0 = URL, 1 = join-the-AP
@@ -212,7 +192,7 @@ static uint32_t s_qr_ms       = 0;
 static uint32_t s_qr_manual   = 0;      // suppress auto-alternation after a tap
 static char     s_qr_key[QR_TEXT_MAX];
 
-// ---- S8 ---------------------------------------------------------------------
+// ---- SOCIAL -----------------------------------------------------------------
 static uint8_t  s_soc_phase   = SOC_ENTER;
 static uint8_t  s_soc_prev    = RADIO_OFF;
 static uint16_t s_soc_err     = STR_EMPTY;
@@ -220,7 +200,7 @@ static uint32_t s_soc_ms      = 0;
 static uint8_t  s_soc_have_res = 0;
 static BleMateEvent s_soc_res;
 
-// ---- S4 ---------------------------------------------------------------------
+// ---- GAME -------------------------------------------------------------------
 struct GameState {
   uint8_t  id;
   uint8_t  phase;        // 0 = ready, 1 = running, 2 = result
@@ -318,7 +298,7 @@ static void fmt_apply(char* out, size_t cap, const char* tpl,
 }
 
 // GAME_DESIGN 9.3: the name is a pure function of (lineage_id, generation), so
-// an ancestor is called the same thing on every device, forever.
+// a given pet is called the same thing on every device, forever.
 void ui_name_for(uint32_t lineage_id, uint8_t generation, char* out, size_t cap) {
   if (!out || cap == 0) return;
   uint32_t h = lineage_id ^ 0x9E3779B9u;
@@ -335,10 +315,6 @@ void ui_pet_name(char* out, size_t cap) {
   ui_name_for(p->genome.lineage_id, p->genome.generation, out, cap);
 }
 
-static void lineage_tag(uint32_t lineage_id, char* out, size_t cap) {
-  snprintf(out, cap, "%04X", (unsigned)(lineage_id & 0xFFFFu));
-}
-
 // GAME_DESIGN 6.3's score -> face table, via webui's copy rather than a second
 // one here: two independent ladders would eventually disagree about the pet's
 // face. The policy moves into the render layer with the PetView struct.
@@ -353,8 +329,8 @@ static uint8_t mood_of(void) { return web_mood_index(sim_mood_score()); }
 //
 // It SNAPS, never animates, in three cases, because animating them is what
 // makes bars look like they are leaking rather than reporting:
-//   - the pet identity changed (hatch, burial, wipe): 7 bars would crawl from
-//     the dead pet's values to the newborn's,
+//   - the pet identity changed (hatch, wipe): the bars would crawl from the old
+//     pet's values to the newborn's,
 //   - ui_note_absence() landed: after 3 days away the bars ARE what they are,
 //   - more than UI_STAT_SNAP_GAP_MS passed between pumps (a long radio stall).
 // Integer throughout: percentages, no remainder, no float.
@@ -456,7 +432,7 @@ static bool cfg_flag(uint8_t bit) { return s_cfg && (s_cfg->flags & bit) != 0; }
 // survives a reboot - without this a power cycle would let a second mating
 // silently overwrite the egg the first one produced.
 // CACHED. store_load_egg() is a Preferences::getBytes(), and social_service()
-// asks this question once per frame at up to 20 fps for as long as S8 SOCIAL is
+// asks this question once per frame at up to 20 fps for as long as SOCIAL is
 // open - an NVS transaction inside the frame budget, for an answer that changes
 // only when THIS module writes the blob (PH3 finding 10). ui.cpp is the sole
 // caller of store_save_egg()/store_clear_egg(), and store_wipe() is reached
@@ -562,7 +538,7 @@ static bool do_action(ActionId a) {
     s_last_action = (uint8_t)a;
     if (a == ACT_PET) s_mimo_ms = now_ms();
     // Only a SUCCESSFUL action gets a film. A rejected one (cooldown, full,
-    // asleep, sulking) keeps its toast and nothing else, which is the honest
+    // asleep) keeps its toast and nothing else, which is the honest
     // reading: nothing happened to the pet, so nothing happens on screen.
     if (had) actfx_begin((uint8_t)a, before);
     if (r.str_id) ui_toast(r.str_id);
@@ -594,7 +570,6 @@ static void list_anim_reset(void);
 static bool screen_wants_transition(uint8_t s);
 
 uint8_t ui_fps(void) {
-  if (s_screen == SCR_MEMORIAL && s_death_phase <= DP_TEXT) return FPS_MEMORIAL;
   // The birth is 4.5 s of animation on a pet that has just been created: the
   // energy / PF_ASLEEP fallbacks below would be reading a state that did not
   // exist a moment ago, and a 4 fps hatch is not a hatch.
@@ -688,18 +663,16 @@ ScreenId ui_screen(void) {
 
 // Screens that never time out (invariant 3).
 static bool screen_is_sticky(uint8_t s) {
-  return s == SCR_HOME || s == SCR_GAME || s == SCR_MEMORIAL ||
-         s == SCR_EGG  || s == SCR_GOD;
+  return s == SCR_HOME || s == SCR_GAME || s == SCR_EGG || s == SCR_GOD;
 }
 
 bool ui_input_locked(void) {
-  // Birth is as unskippable as death. It is also short enough that locking the
+  // The birth ceremony is unskippable. It is also short enough that locking the
   // buttons costs the player nothing.
-  return (s_screen == SCR_MEMORIAL && s_death_phase < DP_EPITAPH) || hatch_active();
+  return hatch_active();
 }
 
 static uint8_t ring_next(uint8_t cur, uint8_t n) { return n ? (uint8_t)((cur + 1u) % n) : 0u; }
-static uint8_t ring_prev(uint8_t cur, uint8_t n) { return n ? (uint8_t)((cur + n - 1u) % n) : 0u; }
 
 // =============================================================================
 //  7. SHARED CHROME
@@ -734,8 +707,7 @@ static void draw_countdown(void) {
 }
 
 // ---- screen entry dissolve --------------------------------------------------
-// The same trick DP_COLLAPSE already proves, run backwards and much faster: the
-// new screen is drawn in full and then 75 % / 50 % / 25 % of its pixels are
+// The new screen is drawn in full and then 75 % / 50 % / 25 % of its pixels are
 // ERASED, so it materialises over three steps.
 //
 // TIME-based, not frame-counted. At FPS_NORMAL that is three frames; at
@@ -745,10 +717,9 @@ static void draw_countdown(void) {
 //
 // Cost: three frames that would have been drawn anyway. No extra sendBuffer().
 static bool screen_wants_transition(uint8_t s) {
-  // S4 GAME costs reaction time and the reflex game is scored in milliseconds.
-  // S12 MEMORIAL owns its own 22 s staging and dissolving into a heartbeat
-  // would read as a glitch. S14 GOD owns the whole frame by contract.
-  return s != SCR_GAME && s != SCR_MEMORIAL && s != SCR_GOD;
+  // GAME costs reaction time and the reflex game is scored in milliseconds.
+  // GOD owns the whole frame by contract.
+  return s != SCR_GAME && s != SCR_GOD;
 }
 
 static void draw_transition(void) {
@@ -774,7 +745,7 @@ static void draw_toast(void) {
 }
 
 // ---- sliding list cursor ----------------------------------------------------
-// draw_list() is SHARED by S2 FEED, S3 PLAY and S9 SETTINGS, so this state MUST
+// draw_list() is SHARED by FEED, PLAY and SETTINGS, so this state MUST
 // be reset on every screen change (ui_goto(), which nav_push/nav_back both
 // funnel through). Without that the highlight flies in from wherever the
 // previous list happened to leave it. The state itself lives in section 2.
@@ -855,7 +826,7 @@ static void draw_list(const char* const* items, uint8_t n, uint8_t cur,
 }
 
 // =============================================================================
-//  8. S0 HOME - the screen the user stares at for days
+//  8. HOME - the screen the user stares at for days
 // =============================================================================
 
 static void home_bar_icons(void) {
@@ -911,13 +882,13 @@ static void home_status_bar(void) {
 //
 // The pose window now belongs to actfx, not to a UI_EAT_POSE_MS constant: it is
 // the length of the FILM, so the pose and the bowl standing on the floor cannot
-// disagree about when the meal ended. A dead or sleeping pet keeps its own pose
-// whatever the choreography thinks - except that the sleeping case never asks,
-// because ACT_SLEEP_TOGGLE's film is carried entirely by actfx_body_dy().
+// disagree about when the meal ended. A sleeping pet keeps its own pose whatever
+// the choreography thinks - except that it never asks, because
+// ACT_SLEEP_TOGGLE's film is carried entirely by actfx_body_dy().
 static uint8_t home_pose(const PetSave* p) {
   if (!p) return POSE_IDLE;
   const uint8_t base = web_pose_of(*p);
-  if (p->stage >= STAGE_DEAD || (p->flags & PF_ASLEEP)) return base;
+  if (p->flags & PF_ASLEEP) return base;
   return actfx_pose(base);
 }
 
@@ -983,7 +954,7 @@ static int16_t emote_x(int16_t want, int16_t body_x, int16_t body_w, uint8_t ew)
 // deletion once the blit below stopped being opaque. While the emotes went out
 // in setBitmapMode(0) - drawXBM paints the zeros too - every clamped heart
 // stamped its whole 12x10 box across the face and took 61 px off ADULT_BUHO,
-// 54 off ADULT_QUIMERA and 46 off ADULT_PUNKI, on every caress, at every x.
+// 54 off the widest ADULT body and 46 off the next, on every caress, at every x.
 // That traded "the emote disappears" for "the actor is erased", which is the
 // one swap the scene contract in draw_home() exists to forbid.
 //
@@ -1068,9 +1039,7 @@ static void draw_pet_body(int16_t dy, int16_t dx, uint8_t frame) {
   // "does not fit" and reflects the emote to the other side of the body rather
   // than letting the badge quietly eat it.
   const int16_t ey = (int16_t)(y - 10);
-  if (sim_sulk_left_s() > 0) {
-    emote_spr((int16_t)(x - 9), ey, x, (int16_t)w, sprite_emote(EMO_ANGER));
-  } else if (sim_alert() != AL_NONE) {
+  if (sim_alert() != AL_NONE) {
     emote_spr((int16_t)(x - 8), (int16_t)(ey + (int16_t)((now_ms() / 250u) & 1u)),
               x, (int16_t)w, sprite_emote(EMO_EXCLAM));
   } else if (mood_of() >= MOOD_FELIZ && ((now_ms() / 1500u) & 1u)) {
@@ -1123,7 +1092,8 @@ static void draw_absence_banner(void) {
   char t[GT_ELAPSED_BUF], line[96];
   gt_format_elapsed(s_absence_s, t, sizeof(t));
   const FmtArg fa[1] = { { 't', t } };
-  fmt_apply(line, sizeof(line), S_ABSENCE(s_absence_tier), fa, 1);
+  fmt_apply(line, sizeof(line),
+            S(s_absence_known ? STR_ABS_AWAY : STR_ABS_UNKNOWN), fa, 1);
   U8G2& u = rd_u8g2();
   px_box(0, SPRITE_AREA_Y, OLED_W, 28);
   u.setDrawColor(0);
@@ -1261,7 +1231,7 @@ static void handle_home(Gesture g) {
 }
 
 // =============================================================================
-//  9. S1 MENU - eight-icon horizontal ring
+//  9. MENU - eight-icon horizontal ring
 // =============================================================================
 static const uint8_t kMenuIcon[MENU_ITEM_COUNT] = {
   ICO_MEAL, ICO_SOAP, ICO_BALL, ICO_MED, ICO_DNA, ICO_LAMP, ICO_BLE, ICO_GEAR
@@ -1371,7 +1341,7 @@ static void handle_menu(Gesture g) {
 }
 
 // =============================================================================
-//  10. S2 FEED / S3 PLAY - the shared vertical-list grammar
+//  10. FEED / PLAY - the shared vertical-list grammar
 // =============================================================================
 static const uint16_t kFeedItem[3] = { STR_ACT_FEED_MEAL, STR_ACT_FEED_SNACK, STR_ITEM_BACK };
 static const uint16_t kFeedHelp[3] = { STR_HLP_MEAL, STR_HLP_SNACK, STR_HLP_BACK };
@@ -1439,7 +1409,7 @@ static void handle_play(Gesture g) {
 }
 
 // =============================================================================
-//  11. S4 GAME - the three on-device 2-button minigames
+//  11. GAME - the three on-device 2-button minigames
 //
 //  Canonical for minigames_won (BRIEF 1.6): every result goes through
 //  sim_apply_play_result(), which owns the shared cooldown and hourly ledger,
@@ -1635,8 +1605,8 @@ static void jump_draw(void) {
   const uint8_t fr = (uint8_t)((now_ms() / 150u) & 1u);
   SpriteRef r = sprite_frame(SPR_BABY_BLOB, fr);
   if (p) {
-    const Stage st = (Stage)((p->stage == STAGE_EGG || p->stage >= STAGE_DEAD)
-                             ? (uint8_t)STAGE_BABY : p->stage);
+    const Stage st = (Stage)((p->stage == STAGE_EGG) ? (uint8_t)STAGE_BABY
+                                                     : p->stage);
     r = sprite_lookup_pose(gene_species(p->genome), (uint8_t)st,
                            sprite_form_of(*p, st), POSE_IDLE, fr);
   }
@@ -1740,7 +1710,7 @@ static void handle_game(Gesture g) {
 }
 
 // =============================================================================
-//  12. S5 STATUS_A / S6 STATUS_B
+//  12. STATUS_A / STATUS_B
 // =============================================================================
 static void draw_status_a(void) {
   char tag[10];
@@ -1749,7 +1719,7 @@ static void draw_status_a(void) {
 
   static const uint8_t kMic[ST_COUNT] = {
     MIC_HUNGER, MIC_HAPPY, MIC_ENERGY, MIC_HYGIENE,
-    MIC_HEALTH, MIC_BOND,  MIC_DISCIPLINE
+    MIC_HEALTH, MIC_BOND
   };
   // Two columns of four cells at an 11 px pitch: rows 12, 23, 34, 45.
   for (uint8_t i = 0; i < ST_COUNT; ++i) {
@@ -1766,7 +1736,7 @@ static void draw_status_a(void) {
     rd_text_right((int16_t)(x + 61), (int16_t)(y + 6), RD_FONT_TINY, n);
   }
 
-  // The eighth cell: age, in the same format the absence ladder uses.
+  // The last cell: age, in the same format the welcome-back banner uses.
   {
     const int16_t x = 65, y = (int16_t)(UI_CONTENT_Y + 1 + 3 * 11);
     char t[GT_ELAPSED_BUF];
@@ -1776,7 +1746,7 @@ static void draw_status_a(void) {
   }
 
   draw_countdown();
-  rd_affordance(S(STR_ST_TITLE_B), S(STR_LIN_TITLE));
+  rd_affordance(S(STR_ST_TITLE_B), nullptr);
 }
 
 static void draw_status_b(void) {
@@ -1798,7 +1768,7 @@ static void draw_status_b(void) {
     rd_text_center((int16_t)(UI_CONTENT_Y + 24), RD_FONT_TINY, b);
     px_frame(8, (int16_t)(UI_CONTENT_Y + 5), OLED_W - 16, 24);
     draw_countdown();
-    rd_affordance(S(STR_ST_TITLE_A), S(STR_LIN_TITLE));
+    rd_affordance(S(STR_ST_TITLE_A), nullptr);
     return;
   }
 
@@ -1839,7 +1809,7 @@ static void draw_status_b(void) {
   }
 
   draw_countdown();
-  rd_affordance(S(STR_ST_TITLE_A), S(STR_LIN_TITLE));
+  rd_affordance(S(STR_ST_TITLE_A), nullptr);
 }
 
 static void handle_status(Gesture g) {
@@ -1848,7 +1818,6 @@ static void handle_status(Gesture g) {
       s_hex_ms = 0;
       ui_goto(s_screen == SCR_STATUS_A ? SCR_STATUS_B : SCR_STATUS_A);
       break;
-    case GST_TAP_R: nav_push(SCR_LINEAGE); break;
     case GST_DBL_R: {
       const PetSave* p = pet();
       if (p) { genome_to_hex32(p->genome, s_hex); s_hex_ms = now_ms(); }
@@ -1859,116 +1828,7 @@ static void handle_status(Gesture g) {
 }
 
 // =============================================================================
-//  13. S7 LINEAGE
-// =============================================================================
-
-// The dynasty ribbon: one 4 px glyph per generation, oldest on the left.
-// Solid = vejez, dithered = abandono, hollow = everything else. The trophy
-// case and the shame board in the same strip (GAME_DESIGN 9.3).
-static void draw_dynasty_ribbon(int16_t y, uint8_t sel) {
-  const uint8_t n = store_ancestor_count();
-  if (n == 0) return;
-  const uint8_t shown = (n > 24u) ? 24u : n;
-  for (uint8_t i = 0; i < shown; ++i) {
-    const uint8_t slot = (uint8_t)(n - 1u - i);        // oldest first
-    AncestorRecord a;
-    if (!store_ancestor(slot, a)) continue;
-    const int16_t x = (int16_t)(2 + i * 5);
-    const uint8_t cause = (uint8_t)(a.cause_flags & AR_CAUSE_MK);
-    if      (cause == DEATH_OLD_AGE) px_box(x, y, 4, 4);
-    else if (cause == DEATH_NEGLECT) rd_dither_rect(x, y, 4, 4, RD_D50);
-    else                             px_frame(x, y, 4, 4);
-    if (slot == sel) px_hline(x, (int16_t)(y + 5), 4);
-  }
-}
-
-static void draw_lineage(void) {
-  const uint8_t  n = store_ancestor_count();
-  const PetSave* p = pet();
-
-  char title[26], tag[16];
-  if (p) {
-    char lt[8];
-    lineage_tag(p->genome.lineage_id, lt, sizeof(lt));
-    snprintf(title, sizeof(title), "%s %s", S(STR_LIN_TITLE), lt);
-  } else {
-    snprintf(title, sizeof(title), "%s", S(STR_LIN_TITLE));
-  }
-  if (n) snprintf(tag, sizeof(tag), "%u %s %u",
-                  (unsigned)(s_lin_idx + 1u), S(STR_LIN_OF), (unsigned)n);
-  else   tag[0] = '\0';
-  draw_header(title, tag);
-
-  if (n == 0) {
-    rd_text_center((int16_t)(UI_CONTENT_Y + 18), RD_FONT_NARR, S(STR_LIN_EMPTY));
-    draw_countdown();
-    rd_affordance(S(STR_AF_PREV), S(STR_AF_FWD));
-    return;
-  }
-
-  if (s_lin_idx >= n) s_lin_idx = (uint8_t)(n - 1u);
-  AncestorRecord a;
-  if (!store_ancestor(s_lin_idx, a)) {
-    rd_affordance(S(STR_AF_PREV), S(STR_AF_FWD));
-    return;
-  }
-
-  draw_dynasty_ribbon(UI_CONTENT_Y, s_lin_idx);
-
-  const uint8_t form  = (uint8_t)(a.form_grade & AR_FORM_MK);
-  const uint8_t grade = (uint8_t)(a.form_grade >> AR_GRADE_SH);
-  const uint8_t cause = (uint8_t)(a.cause_flags & AR_CAUSE_MK);
-
-  // The record keeps g0, which is exactly enough to redraw the portrait.
-  px_spr(2, 20, sprite_species_badge(GN_GET(a.g0, GN_SPECIES_SH, GN_SPECIES_MK)));
-
-  char name[16], line[52];
-  ui_name_for(p ? p->genome.lineage_id : 0u, a.generation, name, sizeof(name));
-  rd_text_fit(18, 27, 108, RD_FONT_NARR, name);
-
-  if (s_lin_detail) {
-    snprintf(line, sizeof(line), "g0 %04X g1 %02X gen %u",
-             (unsigned)a.g0, (unsigned)a.g1_lo, (unsigned)a.generation);
-    rd_text_fit(18, 36, 108, RD_FONT_TINY, line);
-    snprintf(line, sizeof(line), "%s %s", S(STR_LIN_GRADE),
-             (grade < GRADE_COUNT) ? S_GRADE(grade) : "-");
-    rd_text_fit(18, 45, 108, RD_FONT_BODY, line);
-    if (a.cause_flags & AR_TAINTED)
-      rd_text_fit(2, 54, 84, RD_FONT_BODY, S(STR_LIN_TAINTED));
-    if (a.cause_flags & AR_RARE)
-      rd_text_right(OLED_W - 2, 54, RD_FONT_BODY, S(STR_ST_RARE));
-  } else {
-    snprintf(line, sizeof(line), "%s %s %s",
-             (form < FORM_COUNT) ? S_FORM(form) : "-",
-             S(STR_LIN_GRADE), (grade < GRADE_COUNT) ? S_GRADE(grade) : "-");
-    rd_text_fit(18, 37, 108, RD_FONT_BODY, line);
-
-    char t[GT_ELAPSED_BUF];
-    gt_format_elapsed((uint32_t)a.lifespan_hours * 3600UL, t, sizeof(t));
-    snprintf(line, sizeof(line), "%s %s", S(STR_LIN_LIVED), t);
-    rd_text_fit(18, 45, 108, RD_FONT_BODY, line);
-
-    snprintf(line, sizeof(line), "%s %s", S(STR_LIN_DIED_OF), S_CAUSE(cause));
-    rd_text_fit(2, 54, 124, RD_FONT_BODY, line);
-  }
-
-  draw_countdown();
-  rd_affordance(S(STR_AF_PREV), S(STR_AF_FWD));
-}
-
-static void handle_lineage(Gesture g) {
-  const uint8_t n = store_ancestor_count();
-  switch (g) {
-    case GST_TAP_L:  s_lin_idx = ring_next(s_lin_idx, n); break;      // older
-    case GST_TAP_R:  s_lin_idx = ring_prev(s_lin_idx, n); break;      // newer
-    case GST_HOLD_L: if (n) s_lin_idx = (uint8_t)(n - 1u); break;     // gen 0
-    case GST_DBL_R:  s_lin_detail = (uint8_t)!s_lin_detail; break;
-    default: break;
-  }
-}
-
-// =============================================================================
-//  14. S8 SOCIAL - connectionless BLE mating
+//  13. SOCIAL - connectionless BLE mating
 // =============================================================================
 
 // Bring the BLE stack up and start advertising. net_request() no longer blocks
@@ -2016,9 +1876,9 @@ static void social_enter(void) {
 static void social_leave(void) {
 #if FEATURE_BLE
   if (ble_is_up()) ble_end();
-  // The radio is screen-owned (plan section 2 row G4). S8 took the stack, so
-  // S8 gives it back - to whatever was resident on the way in, which with no
-  // policy left in the entry point is RADIO_OFF unless S15 QR is below us.
+  // The radio is screen-owned (plan section 2 row G4). SOCIAL took the stack, so
+  // SOCIAL gives it back - to whatever was resident on the way in, which with no
+  // policy left in the entry point is RADIO_OFF unless QR is below us.
   if (net_mode() == RADIO_BLE) net_request((RadioMode)s_soc_prev);
 #endif
   s_soc_phase = SOC_ENTER;
@@ -2209,7 +2069,7 @@ static void handle_social(Gesture g) {
 }
 
 // =============================================================================
-//  15. S9 SETTINGS
+//  14. SETTINGS
 //      Everything a two-button UI can honestly edit. Anything needing text
 //      entry (SSID, password, pet name) belongs on the phone.
 // =============================================================================
@@ -2320,7 +2180,7 @@ static void handle_settings(Gesture g) {
 }
 
 // =============================================================================
-//  16. S15 QR
+//  15. QR
 //      BRIEF 1.4 geometry: a 62 px white box at (0,1) with a 3-module quiet
 //      zone. That box owns the rows the affordance strip would use, so the
 //      hint lives in the right-hand column instead.
@@ -2410,7 +2270,7 @@ static void handle_qr(Gesture g) {
 }
 
 // =============================================================================
-//  16b. S16 TIME ENTRY  (section 26 "ask for the time")
+//  15b. TIME ENTRY  (section 26 "ask for the time")
 //      The device has no radio policy and no SNTP any more, so the only way a
 //      Pebblebol learns what day it is on its own is a human typing it here.
 //      Five fields, two buttons:
@@ -2581,263 +2441,16 @@ static void handle_clock(Gesture g) {
 }
 
 // =============================================================================
-//  17. S12 MEMORIAL and S13 EGG
-//      GAME_DESIGN 9.2 is a script, not a suggestion. Nothing here is
-//      skippable and nothing here is softened.
-// =============================================================================
-
-static void death_begin(void) {
-  screen_leave(s_screen);                 // drops BLE / an in-flight minigame
-  s_death_phase = DP_HEARTBEAT;
-  s_death_ms    = now_ms();
-  s_sp          = 0;
-  s_modal       = MODAL_NONE;
-  s_alert_n     = 0;
-  s_alert_cur   = AL_NONE;
-  s_toast[0]    = '\0';
-  s_absence_ms  = 0;
-  s_screen      = SCR_MEMORIAL;
-  s_hatch_phase = HP_NONE;      // a death during a birth ceremony wins outright
-  s_trans_ms    = 0;
-  actfx_cancel();               // and it certainly does not finish its dinner
-  petfx_freeze(1);              // the corpse does not wander
-  s_enter_ms    = s_death_ms;
-  s_input_ms    = s_death_ms;
-  s_fps_want    = 0xFF;
-  apply_fps();
-  rd_request_frame();
-}
-
-// Burial: hand the dynasty on to the next egg, THEN stamp the ancestor.
+//  16. THE HATCH CEREMONY
 //
-// The order is load-bearing (PH3 finding 11). store_push_ancestor() writes NVS
-// key "anc" immediately, but the persisted PetSave keeps reading STAGE_DEAD
-// without PF_BURIED until the forced store_save() of the successor below. With
-// the push first, a brownout anywhere in between re-entered death_begin() on
-// the next boot and buried the same corpse twice: a duplicated row in the
-// 16-entry lineage ring AND a real ancestor evicted early, i.e. silent,
-// permanent data loss. With the push last, a brownout before it simply replays
-// the whole burial, which is idempotent. The residual window is the reverse and
-// strictly cheaper: a brownout between the save and the push loses one lineage
-// row and nothing else.
-static void death_bury(void) {
-  const PetSave* p = pet();
-  if (!p) return;
-
-  // Snapshot the corpse. sim_bury() and sim_new_pet() both rewrite the live
-  // PetSave, and the ancestor is now stamped after they have run.
-  const PetSave dead = *p;
-
-  sim_bury();
-
-  Genome  egg;
-  uint8_t cold = 0;
-  PendingEgg pe;
-  if (store_load_egg(pe) && (pe.flags & EF_VALID) && genome_valid(pe.genome)) {
-    egg = pe.genome;                                   // a BLE mating got there first
-    const uint32_t nowe = gt_now();
-    if (nowe > pe.created_epoch && (nowe - pe.created_epoch) >= EGG_COLD_AFTER_S) cold = 1;
-    store_clear_egg();
-    egg_cache_invalidate();
-  } else {
-    egg = genome_death_egg(dead.genome, dead.death_cause, dead.cq);
-  }
-
-  sim_new_pet(egg, gt_now(), cold);
-  const PetSave* np = pet();
-  if (np) {
-    store_save(*np, true);         // the corpse stops being a corpse HERE
-    petfx_reset(*np);              // and so does its body, gait and coat
-  }
-  petfx_freeze(0);
-
-  // Only now is the lineage row safe to append. force=true defers rather than
-  // drops if two saves land inside STORE_SAVE_MIN_GAP_MS, but nothing can force
-  // a save during the 22 s memorial sequence and the periodic one runs every
-  // SAVE_FULL_PERIOD_S (300 s), so the write is immediate in practice.
-  store_push_ancestor(dead);
-
-  s_lin_idx     = 0;
-  s_lin_detail  = 0;
-  s_death_phase = DP_LINEAGE;
-  s_stage_ms    = now_ms();
-  input_flush();                                        // AUDIT 15
-  s_fps_want    = 0xFF;
-  apply_fps();
-}
-
-static void death_service(void) {
-  const uint32_t el = since(s_death_ms);
-  switch (s_death_phase) {
-    case DP_HEARTBEAT:
-      if (el >= DEATH_HEARTBEAT_MS) s_death_phase = DP_COLLAPSE;
-      break;
-    case DP_COLLAPSE:
-      if (el >= DEATH_HEARTBEAT_MS + DEATH_COLLAPSE_MS) s_death_phase = DP_BLACK;
-      break;
-    case DP_BLACK:
-      if (el >= DEATH_TEXT_START_MS) {
-        s_death_phase = DP_TEXT;
-        s_fps_want = 0xFF;
-        rd_set_fps(FPS_LOW);
-        s_fps_want = FPS_LOW;
-      }
-      break;
-    case DP_TEXT:
-      if (el >= DEATH_INPUT_LOCK_MS) s_death_phase = DP_EPITAPH;
-      break;
-    case DP_EPITAPH:
-      // Exactly one way out, and it costs three deliberate seconds.
-      if (!input_raw(INPUT_BTN_L) && input_hold_ms(INPUT_BTN_R) >= MEMORIAL_BURY_HOLD_MS)
-        death_bury();
-      break;
-    case DP_LINEAGE:
-      if (since(s_stage_ms) >= MEMORIAL_LINEAGE_MS) {
-        s_death_phase = DP_EGG_FADE;
-        s_stage_ms    = now_ms();
-      }
-      break;
-    case DP_EGG_FADE:
-      if (since(s_stage_ms) >= MEMORIAL_EGG_FADE_MS) {
-        s_rub_count = 0;
-        s_rub_last  = 0xFF;
-        s_rub_ms    = 0;
-        ui_goto(SCR_EGG);
-      }
-      break;
-    default: break;
-  }
-}
-
-static void draw_egg(void);
-
-static void draw_memorial(void) {
-  U8G2& u = rd_u8g2();
-  const PetSave* p  = pet();
-  const uint32_t el = since(s_death_ms);
-
-  // ---- step 8: lineage, then the egg fading in -----------------------------
-  if (s_death_phase == DP_LINEAGE) {
-    draw_lineage();
-    px_box(0, RD_AFFORD_Y, OLED_W, AFFORDANCE_BAR_H);
-    u.setDrawColor(0);
-    rd_text_center(RD_AFFORD_BASELINE - 1, RD_FONT_BODY, S(STR_MEM_EGG_LEFT_3P));
-    u.setDrawColor(1);
-    return;
-  }
-  if (s_death_phase == DP_EGG_FADE) {
-    draw_egg();
-    const uint32_t t = since(s_stage_ms);
-    const uint8_t lvl = (uint8_t)(RD_DITHER_MAX -
-                        (t * RD_DITHER_MAX) / MEMORIAL_EGG_FADE_MS);
-    u.setDrawColor(0);
-    rd_dither_rect(0, 0, OLED_W, OLED_H, (lvl > RD_DITHER_MAX) ? 0u : lvl);
-    u.setDrawColor(1);
-    return;
-  }
-
-  // ---- step 2: the heartbeat, BPM ramping 60 -> 0 --------------------------
-  if (s_death_phase == DP_HEARTBEAT) {
-    // The period stretches linearly from 1.0 s to 3.2 s: the gaps get longer,
-    // and the player hears it stop rather than being told.
-    const uint32_t period = 1000UL + (el * 2200UL) / DEATH_HEARTBEAT_MS;
-    const uint32_t inbeat = el % period;
-    int16_t r = (inbeat < 140u) ? (int16_t)(6 - (int16_t)(inbeat / 28u)) : (int16_t)1;
-    if (r < 1) r = 1;
-    u.drawDisc((u8g2_uint_t)(OLED_W / 2), (u8g2_uint_t)(OLED_H / 2), (u8g2_uint_t)r);
-    return;
-  }
-
-  // ---- step 3: the collapse, four dither steps ----------------------------
-  if (s_death_phase == DP_COLLAPSE) {
-    if (p) {
-      const uint32_t t    = el - DEATH_HEARTBEAT_MS;
-      const uint8_t  step = (uint8_t)((t * 4u) / DEATH_COLLAPSE_MS);
-      const Stage st = (Stage)((p->stage >= STAGE_DEAD) ? (uint8_t)STAGE_ADULT : p->stage);
-      const SpriteRef r = sprite_lookup_pose(gene_species(p->genome), (uint8_t)st,
-                                             sprite_form_of(*p, st), POSE_IDLE, 0);
-      px_spr((int16_t)sprite_center_x(r.w), (int16_t)sprite_center_y(r.h), r);
-      u.setDrawColor(0);
-      rd_dither_rect(0, 0, OLED_W, OLED_H,
-                     (uint8_t)(((step > 3u ? 3u : step) + 1u) * (RD_DITHER_MAX / 4u)));
-      u.setDrawColor(1);
-    }
-    return;
-  }
-
-  // ---- step 4: three seconds of absolutely nothing ------------------------
-  if (s_death_phase == DP_BLACK) return;
-
-  // ---- step 5: the epitaph, one line per DEATH_TEXT_LINE_MS ---------------
-  const uint32_t st_ms  = (el > DEATH_TEXT_START_MS) ? (el - DEATH_TEXT_START_MS) : 0u;
-  const uint8_t  lines  = (uint8_t)(st_ms / DEATH_TEXT_LINE_MS + 1u);
-  const uint8_t  cause  = p ? p->death_cause : (uint8_t)DEATH_NONE;
-  char name[16], buf[80], tmp[GT_ELAPSED_BUF];
-
-  ui_pet_name(name, sizeof(name));
-
-  if (lines >= 1) {
-    const FmtArg fa[1] = { { 'n', name } };
-    fmt_apply(buf, sizeof(buf),
-              S(cause == DEATH_OLD_AGE ? STR_MEM_SLEPT : STR_MEM_DIED), fa, 1);
-    rd_text_center(21, RD_FONT_NARR, buf);
-  }
-  // The date and the dynasty are pure ASCII / hex, so 4x6_tr is legal for both
-  // and the two 6x10 lines below stay uncrowded.
-  if (lines >= 2 && p) {
-    char tagl[8];
-    lineage_tag(p->genome.lineage_id, tagl, sizeof(tagl));
-    snprintf(buf, sizeof(buf), "gen %02u %s", (unsigned)p->genome.generation, tagl);
-    rd_text(2, 7, RD_FONT_TINY, buf);
-    struct tm tmv;
-    gt_local_tm(tmv);
-    snprintf(buf, sizeof(buf), "%02u/%02u/%04u %02u:%02u",
-             (unsigned)(tmv.tm_mday % 100), (unsigned)((tmv.tm_mon + 1) % 100),
-             (unsigned)((tmv.tm_year + 1900) % 10000),
-             (unsigned)(tmv.tm_hour % 100), (unsigned)(tmv.tm_min % 100));
-    rd_text_right(OLED_W - 2, 7, RD_FONT_TINY, buf);
-  }
-  if (lines >= 3) {
-    gt_format_elapsed(p ? p->age_s : 0u, tmp, sizeof(tmp));
-    const FmtArg fa[1] = { { 't', tmp } };
-    fmt_apply(buf, sizeof(buf), S(STR_MEM_LIVED), fa, 1);
-    rd_text_center(33, RD_FONT_NARR, buf);
-  }
-  if (lines >= 4) {
-    const FmtArg fa[1] = { { 'c', S_CAUSE(cause) } };
-    fmt_apply(buf, sizeof(buf), S(STR_MEM_CAUSE), fa, 1);
-    rd_text_center(45, RD_FONT_NARR, buf);
-  }
-  if (lines >= 5 && cause == DEATH_NEGLECT)
-    rd_text_center(54, RD_FONT_BODY, S(STR_MEM_ALONE));
-
-  // ---- step 7: the only exit ----------------------------------------------
-  if (s_death_phase == DP_EPITAPH) {
-    const uint32_t hold = input_raw(INPUT_BTN_L) ? 0u : input_hold_ms(INPUT_BTN_R);
-    px_box(0, RD_AFFORD_Y, OLED_W, AFFORDANCE_BAR_H);
-    u.setDrawColor(0);
-    rd_text_center(RD_AFFORD_BASELINE - 1, RD_FONT_BODY,
-                   S(hold ? STR_AF_BURY : STR_MEM_BURY_HINT));
-    u.setDrawColor(1);
-    if (hold) {
-      int16_t w = (int16_t)((hold * (uint32_t)OLED_W) / MEMORIAL_BURY_HOLD_MS);
-      if (w > OLED_W) w = OLED_W;
-      rd_invert_rect(0, RD_AFFORD_Y, w, AFFORDANCE_BAR_H);
-    }
-  }
-}
-
-// =============================================================================
-//  17a. THE HATCH CEREMONY
-//
-//  GAME_DESIGN 9.2 gives death 22 seconds in seven phases. Birth had a toast.
-//  This is the same machine pointed the other way: one phase enum, one
-//  cumulative clock read from config.h, nothing skippable, no chrome.
+//  Birth used to be a toast. It is the only ceremony left, so it gets a real
+//  one: one phase enum, one cumulative clock read from config.h, nothing
+//  skippable, no chrome.
 //
 //  ORDERING IS THE WHOLE SAFETY ARGUMENT. sim_hatch() has ALREADY run and the
 //  PetSave has ALREADY been flushed to flash before the first frame below is
 //  drawn, so every phase here is pure presentation. A brownout half way through
-//  therefore reboots into ui_begin() -> STAGE_BABY -> S0 HOME with a perfectly
+//  therefore reboots into ui_begin() -> STAGE_BABY -> HOME with a perfectly
 //  ordinary baby: the player loses the show, never the pet. Deferring
 //  sim_hatch() to the END of the ceremony would do the opposite - a reboot at
 //  second 3 leaves a STAGE_EGG that the sim is simultaneously trying to hatch
@@ -2856,7 +2469,7 @@ static void hatch_begin(void) {
 
   store_save(*p, true);        // commit FIRST: everything below is presentation
 
-  screen_leave(s_screen);      // drops BLE / an in-flight minigame, like death
+  screen_leave(s_screen);      // drops BLE / an in-flight minigame
   s_sp          = 0;
   s_modal       = MODAL_NONE;
   s_alert_n     = 0;
@@ -2933,7 +2546,7 @@ static void hatch_service(void) {
         s_hatch_phase = HP_NONE;
         petfx_freeze(0);
         input_flush();      // a button held through the ceremony must not fire a
-        nav_home();         // stale gesture on the S0 it lands on (AUDIT 15)
+        nav_home();         // stale gesture on the HOME it lands on (AUDIT 15)
       }
       break;
 
@@ -3011,9 +2624,9 @@ static void draw_hatch(void) {
   petfx_draw_body(*p, POSE_IDLE, frame, 0);
 
   if (s_hatch_phase == HP_GROW) {
-    // DP_COLLAPSE run backwards, twice over: a window that opens outwards from
-    // the body's waist (so it reads as growing, not as wiping) and a dither
-    // that thins out (so it materialises, not pops).
+    // A window that opens outwards from the body's waist (so it reads as
+    // growing, not as wiping) and a dither that thins out (so it materialises,
+    // not pops).
     // Clamp t, NOT lvl. The old code clamped the RESULT: with t past
     // HATCH_GROW_MS the subtraction below underflows a uint8 to ~255 and a
     // "lvl > RD_DITHER_MAX" clamp pins it to RD_DITHER_MAX - a FULL erase of
@@ -3050,19 +2663,7 @@ static void draw_hatch(void) {
   rd_text_center(52, RD_FONT_BODY, S(STR_HATCH_LOOK));   // HP_LOOK
 }
 
-// ---- S13 EGG ----------------------------------------------------------------
-
-// The 10-minute mourning lock, derived from the egg's own epoch so it survives
-// a reboot. Generation 0 (the first egg on a virgin device) is exempt: the
-// lock is a consequence of a death, not of an egg.
-static uint32_t egg_mourn_left_s(void) {
-  const PetSave* p = pet();
-  if (!p || p->stage != STAGE_EGG || p->genome.generation == 0) return 0;
-  const uint32_t nowe = gt_now();
-  if (nowe <= p->egg_epoch) return EGG_MOURNING_LOCK_S;
-  const uint32_t el = nowe - p->egg_epoch;
-  return (el >= EGG_MOURNING_LOCK_S) ? 0u : (uint32_t)(EGG_MOURNING_LOCK_S - el);
-}
+// ---- THE EGG SCREEN ---------------------------------------------------------
 
 static void draw_egg(void) {
   const PetSave* p = pet();
@@ -3075,32 +2676,22 @@ static void draw_egg(void) {
   const SpriteRef r   = sprite_egg(phase, frame);
   px_spr((int16_t)((int16_t)sprite_center_x(r.w) + wob), (int16_t)(UI_CONTENT_Y + 2), r);
 
-  const uint32_t mourn = egg_mourn_left_s();
-  if (mourn) {
-    rd_text_center(46, RD_FONT_BODY, S(STR_EGG_MOURN));
-    char t[GT_ELAPSED_BUF];
-    gt_format_elapsed(mourn, t, sizeof(t));
-    rd_text_center(54, RD_FONT_TINY, t);
-    rd_affordance(nullptr, nullptr);
-  } else {
-    rd_text_center(45, RD_FONT_BODY, S(STR_EGG_RUB));
-    for (uint8_t i = 0; i < EGG_RUB_TAPS; ++i) {
-      const int16_t x = (int16_t)(OLED_W / 2 - EGG_RUB_TAPS * 3 + i * 6);
-      if (i < s_rub_count) px_box(x, 50, 5, 5);
-      else                 px_frame(x, 50, 5, 5);
-    }
-    rd_affordance(S(STR_AF_RUB), S(STR_AF_RUB));
+  rd_text_center(45, RD_FONT_BODY, S(STR_EGG_RUB));
+  for (uint8_t i = 0; i < EGG_RUB_TAPS; ++i) {
+    const int16_t x = (int16_t)(OLED_W / 2 - EGG_RUB_TAPS * 3 + i * 6);
+    if (i < s_rub_count) px_box(x, 50, 5, 5);
+    else                 px_frame(x, 50, 5, 5);
   }
+  rd_affordance(S(STR_AF_RUB), S(STR_AF_RUB));
 
   if (p->flags & PF_COLD_EGG)
-    rd_text_fit(2, 19, 124, RD_FONT_BODY, S(STR_MEM_EGG_COLD));
+    rd_text_fit(2, 19, 124, RD_FONT_BODY, S(STR_EGG_COLD));
   else if (p->genome.generation > 0 && (p->flags & PF_INBRED))
     rd_text_fit(2, 19, 124, RD_FONT_BODY, S(STR_EGG_KIN));
 }
 
 static void handle_egg(Gesture g) {
   if (g != GST_TAP_L && g != GST_TAP_R) { ui_toast(STR_EGG_NOT_YET); return; }
-  if (egg_mourn_left_s())               { ui_toast(STR_EGG_MOURN);   return; }
 
   const uint8_t side = (g == GST_TAP_L) ? 0u : 1u;
   if (s_rub_ms == 0 || since(s_rub_ms) > EGG_RUB_WINDOW_MS) {
@@ -3121,7 +2712,7 @@ static void handle_egg(Gesture g) {
 }
 
 // =============================================================================
-//  18. S10 CONFIRM / S11 ALERT overlays
+//  17. CONFIRM / ALERT overlays
 // =============================================================================
 static void confirm_commit(void) {
   const uint8_t which = s_confirm_id;
@@ -3226,7 +2817,7 @@ static void handle_alert(Gesture g) {
 }
 
 // =============================================================================
-//  19. SCREEN ENTER / LEAVE HOOKS
+//  18. SCREEN ENTER / LEAVE HOOKS
 // =============================================================================
 static void screen_enter(uint8_t s) {
   switch (s) {
@@ -3244,7 +2835,7 @@ static void screen_enter(uint8_t s) {
       break;
     case SCR_QR:
 #if FEATURE_WEB
-      // S15 is the screen that wants the station; there is no radio policy in
+      // QR is the screen that wants the station; there is no radio policy in
       // the entry point any more (plan section 2 row G4). It is released again
       // in screen_leave().
       if (net_mode() != RADIO_WIFI && cfg_flag(CF_WEB_ENABLED)) net_request(RADIO_WIFI);
@@ -3291,7 +2882,7 @@ static void screen_leave(uint8_t s) {
 }
 
 // =============================================================================
-//  20. PUBLIC ENTRY POINTS
+//  19. PUBLIC ENTRY POINTS
 // =============================================================================
 
 void ui_bind_config(Config* cfg) {
@@ -3322,8 +2913,6 @@ void ui_begin(void) {
   s_hex[0]      = '\0';
   s_qr_key[0]   = '\0';
   s_qr_size     = 0;
-  s_lin_idx     = 0;
-  s_lin_detail  = 0;
   s_menu_idx    = 0;
   s_last_action = ACT_NONE;
   s_absence_ms  = 0;
@@ -3351,12 +2940,6 @@ void ui_begin(void) {
 
   const PetSave* p = pet();
   if (p) petfx_reset(*p);            // AFTER petfx_begin(), BEFORE any draw
-  if (p && p->stage == STAGE_DEAD && !(p->flags & PF_BURIED)) {
-    // A death interrupted by a reboot still gets its full staging. The player
-    // sits through it either way; that is the entire point of the feature.
-    death_begin();
-    return;
-  }
   if (p && p->stage == STAGE_EGG) { ui_goto(SCR_EGG); return; }
   ui_goto(SCR_HOME);
 }
@@ -3368,18 +2951,16 @@ void ui_note_events(uint32_t ev) {
   const uint8_t offline = s_events_offline;
   s_events_offline = 0;
 
-  if (ev & SIM_EV_DIED) { death_begin(); return; }
-
   if (ev & SIM_EV_HATCHED) {
     ui_toast(STR_EGG_HATCHED);
     // Replaces the bare nav_home(). Reached from BOTH the age-driven hatch and
     // (one tick late) from the manual rub, so hatch_begin() is idempotent. When
     // the egg hatches while the player is on some other screen they get pulled
-    // into the ceremony, exactly as death_begin() pulls them into the memorial.
+    // into the ceremony.
     //
-    // UNLESS it happened while nobody was watching. EGG_AUTOHATCH_S is 900 s,
-    // so leaving the device off for a quarter of an hour is enough for the egg
-    // to hatch inside sim_catch_up_ex(); hatch_begin() would then clear
+    // UNLESS it happened while nobody was watching. An egg hatches at AGE_EGG_S
+    // (900 s), so leaving the device off for a quarter of an hour is enough for
+    // it to hatch inside sim_catch_up_ex(); hatch_begin() would then clear
     // s_absence_ms and s_alert_n and the welcome-back report - armed moments
     // earlier by ui_note_absence() - would be destroyed by a 4.5 s show about a
     // moment the player did not see. The ceremony is for when you are IN FRONT
@@ -3400,15 +2981,6 @@ void ui_note_events(uint32_t ev) {
     ui_alert(AL_EVOLVING);
     ui_toast(STR_RX_EVOLVE);
   }
-  if (ev & SIM_EV_ADULT_FORM) {
-    const PetSave* p = pet();
-    if (p && p->adult_form < FORM_COUNT) {
-      char buf[48];
-      const FmtArg fa[1] = { { 'f', S_FORM(p->adult_form) } };
-      fmt_apply(buf, sizeof(buf), S(STR_RX_NOW_FORM), fa, 1);
-      toast_text(buf);
-    }
-  }
   if (ev & SIM_EV_POOP)        ui_alert(AL_POOP);
   if (ev & SIM_EV_SICK_START)  ui_alert(AL_SICK);
   if (ev & SIM_EV_SICK_END)    ui_toast(STR_RX_MED);
@@ -3417,9 +2989,6 @@ void ui_note_events(uint32_t ev) {
   if (ev & SIM_EV_WISH_FAIL)   ui_toast(STR_WISH_FAIL);
   if (ev & SIM_EV_BIRTHDAY)  { ui_alert(AL_BIRTHDAY); ui_toast(STR_EV_BIRTHDAY); }
   if (ev & SIM_EV_VISITA)      ui_toast(STR_EV_VISITA);
-  if (ev & SIM_EV_STORM)     { ui_alert(AL_STORM); ui_toast(STR_EV_STORM); }
-  if (ev & SIM_EV_STORM_HURT)  ui_toast(STR_EV_SCARE);
-  if (ev & SIM_EV_OVERFED)     ui_toast(STR_RX_OVERFED);
   // PF_ASLEEP is already set / cleared by the time the event is delivered, so
   // bright_service() derives the target itself instead of taking it as an
   // argument. Calling it here rather than waiting for the next ui_service()
@@ -3442,22 +3011,21 @@ void ui_note_absence(const AbsenceReport& rep) {
 
   // After an absence the bars are simply what they are: animating 3 days of
   // decay would look like the pet was deflating in front of the player.
-  s_stat_ok      = 0;
-  s_absence_tier = (rep.tier < ABS_COUNT) ? rep.tier : (uint8_t)ABS_UNKNOWN;
-  s_absence_s    = rep.absence_s;
-  s_absence_ms   = now_ms();
-  if (rep.died) { s_absence_ms = 0; death_begin(); }
+  s_stat_ok       = 0;
+  s_absence_known = rep.clock_known ? 1u : 0u;
+  s_absence_s     = rep.absence_s;
+  s_absence_ms    = now_ms();
 }
 
 void ui_handle(Gesture g) {
   if (g == GST_NONE) return;
-  if (ui_input_locked()) return;                       // GAME_DESIGN 9.2 steps 2-6
+  if (ui_input_locked()) return;                       // the hatch ceremony
 
   s_input_ms  = now_ms();
   s_wiggle_ms = 0;
   // Any gesture, on any screen: the pet turns to look at the player. Placed
-  // after the ui_input_locked() gate above, so neither the memorial nor the
-  // hatch ceremony can be poked out of their staging.
+  // after the ui_input_locked() gate above, so the hatch ceremony cannot be
+  // poked out of its staging.
   petfx_attention();
   rd_request_frame();
 
@@ -3472,9 +3040,6 @@ void ui_handle(Gesture g) {
         // Leaves the SCREEN. god_active() may well still be true - watching an
         // accelerated life on the normal screens is the entire point.
         nav_home();
-        break;
-      case GOD_EVT_DIED:
-        death_begin();                                 // the full 22 s, always
         break;
       case GOD_EVT_WIPED: {
         egg_cache_invalidate();      // god mode ran store_wipe() behind us
@@ -3506,16 +3071,16 @@ void ui_handle(Gesture g) {
     return;
   }
 
-  // --- invariant 2: HOME from anywhere except S12 --------------------------
+  // --- invariant 2: HOME from anywhere -------------------------------------
   if (g == GST_LONG_BOTH) {
-    if (s_screen == SCR_MEMORIAL) return;              // locked
-    if (s_screen != SCR_HOME)     { nav_home(); return; }
+    if (s_screen != SCR_HOME) { nav_home(); return; }
   }
 
-  // --- invariant 1: BACK on every screen except S4, S12 and S16 ------------
-  // S16 needs a repeating right button to enter a date (see handle_clock); it
-  // is left with BOTH (cancel), HOLD L (save) and LONG BOTH (HOME) instead.
-  if (g == GST_HOLD_R && s_screen != SCR_GAME && s_screen != SCR_MEMORIAL &&
+  // --- invariant 1: BACK on every screen except GAME and CLOCK -------------
+  // The clock screen needs a repeating right button to enter a date (see
+  // handle_clock); it is left with BOTH (cancel), HOLD L (save) and LONG BOTH
+  // (HOME) instead.
+  if (g == GST_HOLD_R && s_screen != SCR_GAME &&
       s_screen != SCR_CLOCK) {
     if (s_screen == SCR_HOME) { s_wiggle_ms = now_ms(); return; }
     if (s_screen == SCR_SETTINGS && s_set_page == 1) { s_set_page = 0; return; }
@@ -3531,13 +3096,12 @@ void ui_handle(Gesture g) {
     case SCR_GAME:      handle_game(g);     break;
     case SCR_STATUS_A:
     case SCR_STATUS_B:  handle_status(g);   break;
-    case SCR_LINEAGE:   handle_lineage(g);  break;
     case SCR_SOCIAL:    handle_social(g);   break;
     case SCR_SETTINGS:  handle_settings(g); break;
     case SCR_EGG:       handle_egg(g);      break;
     case SCR_QR:        handle_qr(g);       break;
     case SCR_CLOCK:     handle_clock(g);    break;
-    default:            break;              // S12: only the bury hold gets out
+    default:            break;
   }
 }
 
@@ -3545,8 +3109,8 @@ void ui_service(void) {
   const uint32_t t = now_ms();
 
   // Above every early return below. The displayed stats and the body's own
-  // clock must keep running on S12 and S14 too, or leaving either screen shows
-  // a body frozen where it was minutes ago and seven bars oozing into place.
+  // clock must keep running on the god screen too, or leaving it shows a body
+  // frozen where it was minutes ago and six bars oozing into place.
   stat_service();
   bright_service();
   {
@@ -3569,8 +3133,7 @@ void ui_service(void) {
   // within one film (2.6 s worst case) even if every explicit actfx_cancel() in
   // this file were deleted. The five explicit ones are:
   //   screen_leave(SCR_HOME)  - leaving HOME by any route, back or home or push
-  //   death_begin()           - death, which may arrive on any screen
-  //   hatch_begin()           - the birth ceremony, same
+  //   hatch_begin()           - the birth ceremony, which may arrive on any screen
   //   the god-mode entry just below, which sets s_screen WITHOUT ui_goto() and
   //     therefore never reaches screen_leave() at all
   //   ui_begin()              - boot, and the wipe that re-runs it
@@ -3578,7 +3141,7 @@ void ui_service(void) {
   // is power-cycled, and it is the single most likely way this feature breaks.
   actfx_service(t);
 
-  // The undocumented S14 entry. godmode.cpp owns the hold timing and performs
+  // The undocumented GOD entry. godmode.cpp owns the hold timing and performs
   // the entry itself (including input_flush()); at 100 we only switch screen.
   s_god_prog = god_entry_progress(s_screen);
   if (s_god_prog >= 100u) {
@@ -3596,7 +3159,6 @@ void ui_service(void) {
 
   // god_service() is the entry point's to call; ui only owns the screen.
   if (s_screen == SCR_GOD) { if (!god_active()) nav_home(); return; }
-  if (s_screen == SCR_MEMORIAL) { death_service(); return; }
   // Returning here is what keeps the alert layer, the auto-return and the QR
   // pump off the ceremony's back for its whole 4.5 s.
   if (hatch_active()) { hatch_service(); return; }
@@ -3605,8 +3167,7 @@ void ui_service(void) {
   if (s_screen == SCR_CLOCK)      clock_service();
 
   // The alert layer surfaces only when nothing else owns the screen.
-  if (s_modal == MODAL_NONE && s_alert_n > 0 &&
-      s_screen != SCR_GAME && s_screen != SCR_MEMORIAL) {
+  if (s_modal == MODAL_NONE && s_alert_n > 0 && s_screen != SCR_GAME) {
     alert_pop();
   }
   if (s_modal == MODAL_HELP && since(s_modal_ms) >= UI_MODAL_HELP_MS) modal_close();
@@ -3647,21 +3208,10 @@ void ui_draw(void) {
     case SCR_GAME:     draw_game();     break;
     case SCR_STATUS_A: draw_status_a(); break;
     case SCR_STATUS_B: draw_status_b(); break;
-    case SCR_LINEAGE:  draw_lineage();  break;
     case SCR_SOCIAL:   draw_social();   break;
     case SCR_SETTINGS: draw_settings(); break;
-    // NO ECHO HERE. draw_memorial() reaches draw_lineage() / draw_egg(), which
-    // call rd_affordance() and so leave both halves marked live, and then paints
-    // its own px_box strip with its own text over the top. The echo would XOR
-    // the memorial's own footer. Worse, it would be tactile feedback for an
-    // input that does nothing: ui_handle() blocks LONG_BOTH and HOLD_R and has
-    // no case for SCR_MEMORIAL, so every button is dead on the one screen the
-    // design declares unskippable. rd_affordance_pressed() zeroes the
-    // accumulator at the top of the next frame, so skipping the echo leaks
-    // nothing into it.
-    case SCR_MEMORIAL: draw_memorial(); god_draw_marker(); return;
     case SCR_EGG:
-      // Owns the frame. Neither ceremony draws a strip, so the echo below finds
+      // The ceremony owns the frame and draws no strip, so the echo below finds
       // nothing to invert - it is called only to leave the per-frame state clean.
       if (hatch_active()) { draw_hatch(); rd_affordance_echo(); god_draw_marker(); return; }
       draw_egg();

@@ -1,7 +1,7 @@
 // =============================================================================
 //  NOTTAMAGOCHI - genome.h
 //  Pure genetics: CRC, genesis roll, gene accessors, gene->multiplier maps,
-//  two-parent breeding, single-parent death-egg drift, inbreeding check,
+//  two-parent breeding, inbreeding check,
 //  32-hex-char serialisation.
 //
 //  LAYERING (BRIEF 4): this module includes NO Arduino, WiFi, BLE, WebServer or
@@ -63,7 +63,7 @@ void     genome_seal(Genome& g);
 bool     genome_valid(const Genome& g);
 
 // -----------------------------------------------------------------------------
-// 3. CONSTRUCTION  (GAME_DESIGN 3.1 genesis, 4.2 mating, 4.3 death-egg)
+// 3. CONSTRUCTION  (GAME_DESIGN 3.1 genesis, 4.2 mating)
 // -----------------------------------------------------------------------------
 
 // Generation-0 roll. species in [0,7], numeric genes in [4,12] (luck [2,6] -
@@ -84,17 +84,6 @@ Genome   genome_genesis(void);
 Genome   genome_breed(const Genome& A, const Genome& B,
                       uint8_t cq_hi_a = 0, uint8_t cq_hi_b = 0,
                       uint8_t* out_flags = nullptr);
-
-// Single-parent parthenogenesis run when the pet dies. Much higher mutation
-// than mating, plus directed drift by cause of death, plus a forced-novelty
-// guarantee: g0 and g1 are ALWAYS different from the parent's.
-//   cause        : a DeathCause value (uint8_t so a PetSave field passes
-//                  straight through).
-//   cq_at_death  : care quality at death. Only used by the DEATH_OLD_AGE
-//                  branch, which needs cq >= 700 to grant its bonus.
-// lineage_id is always preserved: only BLE mating can break a dynasty.
-Genome   genome_death_egg(const Genome& parent, uint8_t cause,
-                          int16_t cq_at_death = 0);
 
 // -----------------------------------------------------------------------------
 // 4. INHERITANCE PRIMITIVES (exposed for god mode and for the host tests)

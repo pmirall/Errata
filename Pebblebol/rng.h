@@ -21,7 +21,7 @@
 #define RNG_DEFAULT_SEED 0x2545F491u
 
 enum RngStream : uint8_t {
-  RNG_CARE = 0,      // sim.cpp: sickness rolls, PUNKI refusals, wish draws
+  RNG_CARE = 0,      // sim.cpp: sickness rolls and the medicine second dose
   RNG_ENCOUNTER,     // wild encounters / peer discovery
   RNG_BATTLE,        // battle resolution
   RNG_BREEDING,      // genome genesis, mutation and mating rolls

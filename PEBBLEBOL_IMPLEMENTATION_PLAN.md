@@ -416,9 +416,9 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 - Acceptance: gate; device boots `RADIO_OFF` and stays there on HOME; `test_clock`/`test_overflow`/`test_input` green.
 
 **P2-C7 Remove death, memorial, lineage grade, absence ladder and the punishment mechanics (G5) — flat layout** — L
-- [ ] Execute §2 G5 in sim/ui/genome/storage/godmode/nt_types/config/strings; `health_step` floor (HEALTH ≥ 10 %, decays only while a core stat is 0 — §27 "inconveniently unhappy at worst"); keep the hatch ceremony (ui.cpp:2692-2917) for EVOLUTION; `PetSave` removed fields → `pad` (128 B assert holds).
-- [ ] `retune:` regenerate the golden (the ladder tail changed catch-up); body of the commit says why.
-- [ ] `test_care.cpp` (new): 30 days of neglect never reaches HEALTH 0 and never sets a death flag; string table guards (strings_es.h:1043-1064) updated in the same commit.
+- [x] Execute §2 G5 in sim/ui/genome/storage/godmode/nt_types/config/strings; `health_step` floor (HEALTH ≥ 10 %, decays only while a core stat is 0 — §27 "inconveniently unhappy at worst"); keep the hatch ceremony (ui.cpp:2692-2917) for EVOLUTION; `PetSave` removed fields → `pad` (128 B assert holds).
+- [x] `retune:` regenerate the golden (the ladder tail changed catch-up); body of the commit says why.
+- [x] `test_care.cpp` (new): 30 days of neglect never reaches HEALTH 0 and never sets a death flag; string table guards (strings_es.h:1043-1064) updated in the same commit.
 - Acceptance: gate; `test_care` green; `ScreenId` has no MEMORIAL/LINEAGE.
 
 **P2-C7b Strip the BLE mating protocol content (G6) — flat layout** — M

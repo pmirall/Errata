@@ -902,8 +902,8 @@ void rd_flash(uint16_t ms) {
   if (ms > RD_FX_FLASH_MAX_MS) ms = RD_FX_FLASH_MAX_MS;
   s_flash_until  = millis() + ms;
   s_flash_active = true;
-  // Without this a 120 ms flash armed at FPS_MEMORIAL (1 fps) could expire
-  // before any frame ever applied it, and nothing would be seen at all.
+  // Without this a 120 ms flash armed at FPS_LOW (4 fps) could expire before
+  // any frame ever applied it, and nothing would be seen at all.
   rd_request_frame();
 }
 

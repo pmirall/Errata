@@ -451,7 +451,6 @@ static uint16_t self_block_reason(void) {
   if (cooldown_live())                          return (uint16_t)STR_SO_COOLDOWN;
   if (s_self_flags & BLE_SELF_MATE_LOCK)        return (uint16_t)STR_SO_COOLDOWN;
   if (s_self_stage < (uint8_t)STAGE_TEEN)       return (uint16_t)STR_SO_YOUNG;
-  if (s_self_stage >= (uint8_t)STAGE_DEAD)      return (uint16_t)STR_AERR_DEAD;
   if (s_self_energy < BLE_MATE_MIN_ENERGY_PCT)  return (uint16_t)STR_SO_TIRED;
   if (!(s_self_flags & BLE_SELF_SEEKING))       return (uint16_t)STR_SO_LOSE;
   return 0;
@@ -463,7 +462,6 @@ static uint16_t peer_block_reason(uint8_t idx) {
   const BlePeerInfo &p = s_peers[idx];
   if (!peer_solid(idx))                                          return (uint16_t)STR_SO_FAR;
   if (p.stage < (uint8_t)STAGE_TEEN)                             return (uint16_t)STR_SO_YOUNG;
-  if (p.stage >= (uint8_t)STAGE_DEAD)                            return (uint16_t)STR_SO_LOSE;
   if (!(p.peer_flags & BLE_BF_SEEKING))                          return (uint16_t)STR_SO_LOSE;
   if (!genome_wire_ok(p.genome))                                 return (uint16_t)STR_ERR_GENOME;
   // A god-mode unit must not pollute a real dynasty. Tainted talks to tainted.
@@ -578,8 +576,8 @@ static void contagion_service(uint32_t dt_ms) {
 
     // Already sick: nothing to catch. Still age the meter so it is clean when
     // the pet recovers.
-    if (!contagious || (s_self_flags & BLE_SELF_SICK) || s_self_stage < (uint8_t)STAGE_BABY
-        || s_self_stage >= (uint8_t)STAGE_DEAD) {
+    if (!contagious || (s_self_flags & BLE_SELF_SICK)
+        || s_self_stage < (uint8_t)STAGE_BABY) {
       pv.exposure_ms = (pv.exposure_ms > dt_ms) ? (pv.exposure_ms - dt_ms) : 0;
       continue;
     }

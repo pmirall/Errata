@@ -31,8 +31,6 @@
 static_assert(sizeof(PetSave) == 128, "PetSave must be 128 B on the wire to NVS");
 static_assert(sizeof(Config) == 256, "Config must be 256 B on the wire to NVS");
 static_assert(sizeof(PendingEgg) == 24, "PendingEgg must be 24 B on the wire to NVS");
-static_assert(sizeof(AncestorRecord) == 12, "AncestorRecord must be 12 B");
-static_assert(ANCESTOR_BLOB_BYTES == ANCESTOR_MAX * 12, "ancestor blob size drifted");
 static_assert(sizeof(RtcKeep) <= RTC_STRUCT_MAX_BYTES, "RtcKeep exceeds the RTC budget");
 static_assert(PETSAVE_CRC_BYTES == 126, "PetSave CRC span drifted");
 static_assert(CONFIG_CRC_BYTES == 254, "Config CRC span drifted");
@@ -40,7 +38,6 @@ static_assert(CONFIG_CRC_BYTES == 254, "Config CRC span drifted");
 static_assert(sizeof(NVS_NS) <= 16, "NVS namespace too long");
 static_assert(sizeof(NVS_KEY_LASTSEEN) <= 16, "NVS key 't' too long");
 static_assert(sizeof(NVS_KEY_SAVE) <= 16, "NVS key 'save' too long");
-static_assert(sizeof(NVS_KEY_ANC) <= 16, "NVS key 'anc' too long");
 static_assert(sizeof(NVS_KEY_CFG) <= 16, "NVS key 'cfg' too long");
 static_assert(sizeof(NVS_KEY_EGG) <= 16, "NVS key 'egg' too long");
 static_assert(sizeof(NVS_KEY_CANARY) <= 16, "NVS key 'ok' too long");
@@ -51,9 +48,6 @@ static_assert(GAIN_CAP_HUNGER_H    <= 255, "GAIN_CAP_HUNGER_H no longer fits a b
 static_assert(GAIN_CAP_HAPPINESS_H <= 255, "GAIN_CAP_HAPPINESS_H no longer fits a byte");
 static_assert(GAIN_CAP_ENERGY_H    <= 255, "GAIN_CAP_ENERGY_H no longer fits a byte");
 static_assert(GAIN_CAP_HYGIENE_H   <= 255, "GAIN_CAP_HYGIENE_H no longer fits a byte");
-// AR_SLOT_USED must not collide with the bits nt_types.h already assigned.
-static_assert((AR_SLOT_USED & (AR_CAUSE_MK | AR_RARE | AR_TAINTED)) == 0,
-              "AR_SLOT_USED collides with the AncestorRecord bit map");
 
 // -----------------------------------------------------------------------------
 // Module state
@@ -82,10 +76,6 @@ static uint32_t s_last_t_ms        = 0;
 static bool     s_save_written     = false;
 static bool     s_t_written        = false;
 static bool     s_save_dirty       = false;   // a forced save was deferred by the floor
-
-static uint8_t  s_anc[ANCESTOR_BLOB_BYTES];
-static uint8_t  s_anc_count        = 0;
-static bool     s_anc_loaded       = false;
 
 // Hourly-gain ledger, key "gl". s_gain_last/-_epoch/-_sane mirror the blob that
 // is actually ON FLASH and drive the wear filter described at store_save_gain();
@@ -142,28 +132,6 @@ uint16_t store_crc16(const void* data, size_t len) {
   return crc16_ccitt(data, len);
 }
 
-// Six even bands over CQ_MIN..CQ_MAX, arranged so CQ_START (500, the neutral
-// value every pet begins with) lands exactly on the bottom of GRADE_C.
-CareGrade store_grade_from_cq(int16_t cq) {
-  int32_t v = NT_CLAMP((int32_t)cq, (int32_t)CQ_MIN, (int32_t)CQ_MAX);
-  if (v >= 800) {
-    return GRADE_A;
-  }
-  if (v >= 650) {
-    return GRADE_B;
-  }
-  if (v >= (int32_t)CQ_START) {
-    return GRADE_C;
-  }
-  if (v >= 350) {
-    return GRADE_D;
-  }
-  if (v >= 200) {
-    return GRADE_E;
-  }
-  return GRADE_F;
-}
-
 // -----------------------------------------------------------------------------
 // Boot classification
 // -----------------------------------------------------------------------------
@@ -205,112 +173,6 @@ static BootKind classify_boot(bool have_save, bool rtc_intact, uint8_t reason) {
       // abandonment however unhelpful the reason code is.
       return rtc_intact ? BOOT_SOFT_RESET : BOOT_UNKNOWN;
   }
-}
-
-// -----------------------------------------------------------------------------
-// Ancestor ring
-// -----------------------------------------------------------------------------
-static void anc_ensure(void) {
-  if (s_anc_loaded) {
-    return;
-  }
-  s_anc_loaded = true;
-  memset(s_anc, 0, sizeof(s_anc));
-  s_anc_count = 0;
-  if (!s_open) {
-    return;
-  }
-  size_t n = s_prefs.getBytes(NVS_KEY_ANC, s_anc, (size_t)ANCESTOR_BLOB_BYTES);
-  if (n != (size_t)ANCESTOR_BLOB_BYTES) {
-    memset(s_anc, 0, sizeof(s_anc));
-    return;
-  }
-  // Entries are stored oldest first and are contiguous from slot 0.
-  uint8_t c = 0;
-  for (uint8_t i = 0; i < ANCESTOR_MAX; i++) {
-    AncestorRecord r;
-    memcpy(&r, s_anc + (size_t)i * sizeof(AncestorRecord), sizeof(AncestorRecord));
-    if ((r.cause_flags & AR_SLOT_USED) == 0) {
-      break;
-    }
-    c++;
-  }
-  s_anc_count = c;
-  // Scrub anything past the last valid slot so a partially written blob cannot
-  // resurrect stale records later.
-  memset(s_anc + (size_t)c * sizeof(AncestorRecord), 0,
-         (size_t)(ANCESTOR_MAX - c) * sizeof(AncestorRecord));
-}
-
-uint8_t store_ancestor_count(void) {
-  anc_ensure();
-  return s_anc_count;
-}
-
-bool store_ancestor(uint8_t index_newest_first, AncestorRecord& out) {
-  anc_ensure();
-  memset(&out, 0, sizeof(out));
-  if (index_newest_first >= s_anc_count) {
-    return false;
-  }
-  uint8_t slot = (uint8_t)(s_anc_count - 1 - index_newest_first);
-  memcpy(&out, s_anc + (size_t)slot * sizeof(AncestorRecord), sizeof(AncestorRecord));
-  return true;
-}
-
-bool store_push_ancestor(const PetSave& s) {
-  anc_ensure();
-
-  AncestorRecord r;
-  memset(&r, 0, sizeof(r));
-  r.generation = s.genome.generation;
-
-  // adult_form is FORM_UNSET (0xFF) for anything that died before 48 h; 0x0F is
-  // outside AdultForm and reads as "never reached adult" on the lineage screen.
-  uint8_t form = (s.adult_form >= (uint8_t)FORM_COUNT)
-                   ? (uint8_t)AR_FORM_MK
-                   : (uint8_t)(s.adult_form & AR_FORM_MK);
-  uint8_t grade = (uint8_t)store_grade_from_cq(s.cq);
-  r.form_grade = (uint8_t)(form | (uint8_t)((grade & 0x0Fu) << AR_GRADE_SH));
-
-  uint32_t hours = s.age_s / 3600UL;
-  r.lifespan_hours = (uint16_t)((hours > 65535UL) ? 65535UL : hours);
-
-  uint8_t cf = (uint8_t)(s.death_cause & AR_CAUSE_MK);
-  cf |= AR_SLOT_USED;
-  if (GN_GET(s.genome.g2, GN_RARE_SH, GN_RARE_MK)) {
-    cf |= AR_RARE;
-  }
-  if (GN_GET(s.genome.g2, GN_TAINT_SH, GN_TAINT_MK)) {
-    cf |= AR_TAINTED;
-  }
-  r.cause_flags = cf;
-
-  r.g0 = s.genome.g0;
-  r.g1_lo = (uint8_t)(s.genome.g1 & 0x00FFu);
-  r.birth_epoch = s.birth_epoch;
-
-  if (s_anc_count >= ANCESTOR_MAX) {
-    // Drop the oldest. 180 B memmove, once per death.
-    memmove(s_anc, s_anc + sizeof(AncestorRecord),
-            (size_t)(ANCESTOR_MAX - 1) * sizeof(AncestorRecord));
-    s_anc_count = (uint8_t)(ANCESTOR_MAX - 1);
-  }
-  memcpy(s_anc + (size_t)s_anc_count * sizeof(AncestorRecord), &r, sizeof(r));
-  s_anc_count++;
-  memset(s_anc + (size_t)s_anc_count * sizeof(AncestorRecord), 0,
-         (size_t)(ANCESTOR_MAX - s_anc_count) * sizeof(AncestorRecord));
-
-  if (!s_open) {
-    store_fail(STORE_E_ANC_W, "anc(closed)", 0);
-    return false;
-  }
-  size_t n = s_prefs.putBytes(NVS_KEY_ANC, s_anc, (size_t)ANCESTOR_BLOB_BYTES);
-  if (n != (size_t)ANCESTOR_BLOB_BYTES) {
-    store_fail(STORE_E_ANC_W, "anc", (long)n);
-    return false;
-  }
-  return true;
 }
 
 // -----------------------------------------------------------------------------
@@ -770,8 +632,8 @@ void store_cfg_defaults(Config& c) {
   c.reserved_c = 0;
 
   // CF_WEB_ENABLED is DELIBERATELY CLEAR on a fresh device (plan section 2 row
-  // G4): the radio is off by default and the web server is opt-in from S9
-  // SETTINGS. CF_BLE_ENABLED stays on because S8 SOCIAL brings the stack up
+  // G4): the radio is off by default and the web server is opt-in from
+  // SETTINGS. CF_BLE_ENABLED stays on because SOCIAL brings the stack up
   // and down inside the screen.
   uint8_t f = 0;
 #if FEATURE_BLE
@@ -925,9 +787,6 @@ bool store_wipe(void) {
   s_have_save = false;
   s_nvs_last_seen = 0;
   s_cached_last_seen = 0;
-  s_anc_loaded = true;
-  s_anc_count = 0;
-  memset(s_anc, 0, sizeof(s_anc));
 
   uint32_t now_ms = millis();
   s_last_save_ms = now_ms;

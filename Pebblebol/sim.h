@@ -2,10 +2,10 @@
 //  NOTTAMAGOCHI - sim.h
 //  THE GAME. The only module allowed to mutate PetSave.
 //
-//  Implements GAME_DESIGN 0 / 1 / 2 / 5.2 : milli-point stat decay with
-//  remainder accumulators, health damage attribution, care quality, poop,
-//  sickness, stage transitions, adult branch scoring, action application and
-//  the offline catch-up.
+//  Milli-point stat decay with remainder accumulators, a floored health track,
+//  care quality, poop, sickness, stage transitions, action application and the
+//  offline catch-up. Nothing here can kill a pet: HEALTH bottoms out at
+//  HEALTH_FLOOR_PCT (spec section 27).
 //
 //  HARD CONSTRAINTS honoured by this module:
 //   - ZERO floating point on any path. int32_t milli-points + int16 remainders.
@@ -50,25 +50,18 @@ void sim_env_defaults(SimEnv& env);
 // -----------------------------------------------------------------------------
 #define SIM_EV_HATCHED      0x00000001u  // egg -> BABY
 #define SIM_EV_STAGE_UP     0x00000002u  // any stage transition (freeze + anim)
-#define SIM_EV_ADULT_FORM   0x00000004u  // TEEN -> ADULT, adult_form now valid
-#define SIM_EV_DIED         0x00000008u  // health <= 0 or age threshold
 #define SIM_EV_POOP         0x00000010u
 #define SIM_EV_SICK_START   0x00000020u
 #define SIM_EV_SICK_END     0x00000040u
 #define SIM_EV_SLEEP        0x00000080u
 #define SIM_EV_WAKE         0x00000100u
-#define SIM_EV_CARE_MISS    0x00000200u
 #define SIM_EV_ALERT        0x00000400u  // sim_alert() changed to a new need
 #define SIM_EV_WISH_START   0x00000800u
 #define SIM_EV_WISH_OK      0x00001000u
 #define SIM_EV_WISH_FAIL    0x00002000u
 #define SIM_EV_BIRTHDAY     0x00004000u
 #define SIM_EV_VISITA       0x00008000u
-#define SIM_EV_STORM        0x00010000u  // scripted night storm begins
-#define SIM_EV_STORM_HURT   0x00020000u  // storm ended without 3 mimos
-#define SIM_EV_OVERFED      0x00040000u
 #define SIM_EV_EVOLVE_MINOR 0x00080000u  // child/teen variant chosen
-#define SIM_EV_WEIGHT_OBESE 0x00100000u
 
 // -----------------------------------------------------------------------------
 // 3. MANDATORY PUBLIC INTERFACE (BRIEF 4, row 5)
@@ -113,17 +106,8 @@ void     sim_set_time_scale(uint32_t scale); // god mode: 1/6/60/360/3600
 // the GAME_DESIGN 5.4 cold-egg penalty (hatches at EGG_COLD_HEALTH_PCT health).
 void     sim_new_pet(const Genome& g, uint32_t now_epoch, uint8_t cold);
 
-// Hatch now (S13 "frotar el huevo" / auto-hatch). No-op unless STAGE_EGG.
+// Hatch now (the egg screen's rub gesture / auto-hatch). No-op unless STAGE_EGG.
 void     sim_hatch(void);
-
-// Marks the corpse buried (S12 -> lineage -> egg). No-op unless dead.
-void     sim_bury(void);
-
-// Seconds of age at which this pet dies of old age, form multiplier included.
-uint32_t sim_natural_death_s(void);
-
-// A..F from the care-quality accumulator. Feeds the lineage screen.
-uint8_t  sim_care_grade(void);
 
 // -----------------------------------------------------------------------------
 // 6. SHARED COOLDOWN / HOURLY-GAIN LEDGER
@@ -181,7 +165,7 @@ uint8_t  sim_play_window_count(void);
 // Rolling-window happiness payout scale, permille (1000 / 700 / 450 / ...).
 uint16_t sim_play_decay_permille(void);
 
-// An on-device (S4) minigame finished. win_permille 0..1000 is how well the
+// An on-device (GAME screen) minigame finished. win_permille 0..1000 is how well the
 // player did; >= 500 counts as a win for minigames_won and the branch score.
 bool     sim_apply_play_result(uint16_t win_permille, ActionResult& out);
 
@@ -191,45 +175,33 @@ bool     sim_apply_play_result(uint16_t win_permille, ActionResult& out);
 const PetSave* sim_save(void);          // read-only view for ui
 uint32_t sim_take_events(void);         // returns and CLEARS the event bitmask
 uint8_t  sim_alert(void);               // AlertId currently demanding attention
-uint16_t sim_sulk_left_s(void);         // post-absence refusal timer, 0 = none
 uint8_t  sim_is_asleep(void);
 uint8_t  sim_is_sick(void);
-uint8_t  sim_is_dead(void);
 uint32_t sim_age_s(void);
 uint32_t sim_now(void);                 // sim's own epoch cursor (offline-aware)
 
-// Full absence report (tier, death, exact elapsed, sulk timer).
-// clock_known = 0 takes the ABS_UNKNOWN path, which charges ZERO and arms
+// Runs the offline integration for `absence_s` and reports what it did.
+// clock_known = 0 takes the unknown-clock path, which charges ZERO and arms
 // PF_ABS_UNKNOWN for sim_absence_retrofix() (plan section 1.7).
 void     sim_catch_up_ex(uint32_t absence_s, uint8_t clock_known,
                          AbsenceReport& rep);
 
-// Retro-applies the truth once gt_set_epoch() lands after an ABS_UNKNOWN
-// return. Nothing was charged at boot, so this charges the whole tier.
+// Charges the truth once gt_set_epoch() lands after an unknown-clock return:
+// nothing was integrated at boot, so this integrates the whole absence. No-op
+// unless PF_ABS_UNKNOWN is armed.
 void     sim_absence_retrofix(uint32_t true_absence_s);
 
 // -----------------------------------------------------------------------------
 // 8. GOD MODE HOOKS (godmode.cpp is compiled always; sim owns the mutations)
 // -----------------------------------------------------------------------------
 void     sim_god_set_stat(StatId id, uint8_t pct);
-void     sim_god_set_stage(uint8_t stage);      // Stage; recomputes forms
-void     sim_god_set_form(uint8_t form);        // AdultForm
-void     sim_god_kill(uint8_t cause);           // DeathCause; never resurrects
+void     sim_god_set_stage(uint8_t stage);      // Stage; recomputes minor forms
 
 // Installs `g` into the live pet in place (genesis roll, pasted 32-hex genome,
 // per-gene editor, synthetic BLE child). The genome is RESEALED and the
 // god_tainted bit is FORCED on, so no path through god mode can produce an
-// untainted genome (GAME_DESIGN 10.2). Weight is re-clamped against the new
-// body_size gene; nothing else is disturbed, so the pet keeps its age, stats
-// and stage. No-op before sim_init().
+// untainted genome (GAME_DESIGN 10.2). Nothing else is disturbed, so the pet
+// keeps its age, stats and stage. No-op before sim_init().
 void     sim_god_set_genome(const Genome& g);
-
-// PF_SICK on/off, resetting the untreated-sickness attribution counter so a
-// forced illness is attributed from now, not from whenever the last real one
-// started.
-void     sim_god_set_sick(uint8_t on);
-
-// poop_count 0..POOP_MAX, resetting the poop cadence accumulator.
-void     sim_god_set_poop(uint8_t count);
 
 #endif // NT_SIM_H

@@ -18,7 +18,7 @@
 //    net.h and nt_types.h at the same time. Nothing below it may include
 //    webui.h expecting network types - this header pulls in NO network header
 //    at all (no WiFi.h, no WebServer.h), exactly like net.h, so ui.cpp can call
-//    web_pin() for the S15 QR screen without inheriting the WiFi stack.
+//    web_pin() for the QR screen without inheriting the WiFi stack.
 //
 //  OWNERSHIP
 //    - webui owns the web PIN. net_url(buf, cap, pin) (net.h) takes it as an
@@ -55,14 +55,14 @@
 // GATED ON CF_WEB_ENABLED when a Config is bound: with the flag clear the
 // routes are still registered (once, for the lifetime of the firmware) but no
 // socket is opened, and web_running() stays false. The port is remembered, so
-// web_service() opens it the moment the user turns S9 "WEB" back on.
+// web_service() opens it the moment the user turns the SETTINGS "WEB" toggle back on.
 bool     web_begin(uint16_t port = WEB_PORT);
 
 // Pump. Call once per loop(), unconditionally, right after net_service().
 // Never blocks: handleClient() returns immediately when no client is queued
 // because enableDelay(false) removed the delay(1).
 //
-// Also owns both edges of CF_WEB_ENABLED. The S9 toggle only fed the entry
+// Also owns both edges of CF_WEB_ENABLED. The SETTINGS toggle only fed the entry
 // point's radio policy, so whenever anything else kept the radio up the server
 // went on answering after the user had switched web access off. Turning the
 // flag off here calls web_stop(); turning it back on re-opens the socket on the
@@ -79,7 +79,7 @@ uint16_t web_port(void);
 // -----------------------------------------------------------------------------
 //  PIN  (boot PIN, cleartext on the wire, say so in the README)
 //    0000..9999. Nothing is PIN-gated yet because nothing mutates yet; spec S34
-//    requires the creator API of Phase 8 to be. The S15 QR screen embeds it via
+//    requires the creator API of Phase 8 to be. The QR screen embeds it via
 //    net_url(buf, cap, web_pin()).
 // -----------------------------------------------------------------------------
 uint16_t web_pin(void);
@@ -87,7 +87,7 @@ uint16_t web_pin(void);
 // -----------------------------------------------------------------------------
 //  CONFIG BINDING
 //    web_bind_config(&g_cfg) before web_begin() lets web_service() honour the
-//    S9 "WEB" toggle (CF_WEB_ENABLED) on the entry point's own Config. Unbound,
+//    SETTINGS "WEB" toggle (CF_WEB_ENABLED) on the entry point's own Config. Unbound,
 //    the module keeps serving unconditionally, which is what a standalone
 //    build wants.
 // -----------------------------------------------------------------------------

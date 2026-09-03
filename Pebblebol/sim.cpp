@@ -24,7 +24,7 @@
 // identical whether the caller ticks 1 s at a time or hands us 1800 s at once.
 #define SIM_SUBSTEP_S            60u
 
-// Auto-wake thresholds (see the note on "collapse" in section 6 below).
+// Auto-wake thresholds (see the note on "collapse" in sleep_machine()).
 #define SIM_WAKE_DAY_ENERGY_PCT  60
 #define SIM_ALERT_HEALTH_PCT     30
 
@@ -105,20 +105,11 @@ static uint32_t  g_acc_minute = 0;
 static uint32_t  g_poop_timer = 0;
 
 // fractional remainders that have no home in PetSave
-static int32_t   g_weight_frac = 0;   // sub-decigram part of weight_dg, 0..999
-static int32_t   g_weight_hrem = 0;   // the /3600 remainder of the weight rate
-static int32_t   g_dmg_rem[DMG_COUNT];
 static int32_t   g_hapavg_rem = 0;
-static int32_t   g_lightsleep_rem = 0;
 
-// alerts / care_miss
+// alerts
 static uint8_t   g_alert = AL_NONE;
 static uint32_t  g_alert_age_s = 0;
-static uint32_t  g_since_miss_s = 0;
-
-// post-absence grudge
-static uint32_t  g_sulk_left_s = 0;
-static uint32_t  g_absence_ctx_s = 0;     // length of the absence just applied
 
 // shared ledger
 static uint32_t  g_act_last[ACT_COUNT];
@@ -135,18 +126,11 @@ static uint32_t  g_mg_last_s = 0;
 static uint8_t   g_mg_seen = 0;
 
 // misc gameplay bookkeeping
-static uint8_t   g_force_feed = 0;        // consecutive refused FEED_MEAL
-static uint32_t  g_misbehave_s = 0;       // SCOLD justification window
-static uint8_t   g_misbehave = 0;
-static uint32_t  g_overfeed_until_s = 0;  // 3 overfeeds -> +10 %/h for 2 h
 static uint32_t  g_suppress_until_s = 0;  // 5th poop suppressed -> +12 %/h
 static uint16_t  g_cq_good_today = 0;
 static uint16_t  g_cq_game_today = 0;
 static uint16_t  g_day_stamp = 0xFFFFu;
-static uint32_t  g_storm_left_s = 0;
-static uint8_t   g_storm_pets = 0;
 static uint8_t   g_wish_pets = 0;
-static uint8_t   g_sick_hours = 0;        // untreated sickness, for attribution
 
 // =============================================================================
 // 2. SMALL INTEGER PRIMITIVES
@@ -221,39 +205,11 @@ static uint16_t today_stamp(void)
 }
 
 // =============================================================================
-// 3. ADULT FORM MODIFIER TABLE (GAME_DESIGN 2.3), all x1000
-//    QUIMERA takes the best value of every column, which is exactly the
-//    "inherits the better multiplier of each pair" rule with the parent forms
-//    unknown at runtime.
+// 3. STAGE / PAYOUT TABLES
 // =============================================================================
-struct FormMods {
-  uint16_t hun, hap, nrg, hyg, disc, regen, dmg, sick, life;
-};
-
-static const FormMods FORM_NEUTRAL =
-  { 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000 };
-
-static const FormMods FORM_MOD[FORM_COUNT] = {
-  /* BOLOTA     */ { 1350,  750, 1200, 1000, 1000, 1000, 1000, 1000,  900 },
-  /* ZAMPASALTO */ { 1000, 1200, 1250, 1000, 1000, 1400, 1000, 1000, 1050 },
-  /* BUHO       */ {  900,  900,  900,  900, 1000, 1000,  850, 1000, 1150 },
-  /* PUNKI      */ { 1000,  700, 1000, 1000, 2000, 1000, 1000, 1000, 1000 },
-  /* MOHO       */ { 1000, 1300, 1000, 1000, 1000, 1000, 1300, 1600,  750 },
-  /* QUIMERA    */ {  900,  700,  900,  900, 1000, 1400,  850, 1000, 1100 }
-};
-
-static const FormMods* form_of(void)
-{
-  if (g_pet->stage >= STAGE_ADULT && g_pet->stage < STAGE_DEAD &&
-      g_pet->adult_form < (uint8_t)FORM_COUNT) {
-    return &FORM_MOD[g_pet->adult_form];
-  }
-  return &FORM_NEUTRAL;
-}
-
 static const uint16_t STAGE_MULT[STAGE_COUNT] = {
   STAGE_MULT_EGG, STAGE_MULT_BABY, STAGE_MULT_CHILD, STAGE_MULT_TEEN,
-  STAGE_MULT_ADULT, STAGE_MULT_SENIOR, STAGE_MULT_DEAD
+  STAGE_MULT_ADULT, STAGE_MULT_SENIOR
 };
 
 static const uint16_t PLAY_DECAY[PLAY_DECAY_STEPS] = {
@@ -314,13 +270,6 @@ static int16_t stat_add(uint8_t id, int32_t points)
     if (g_gain_budget[id] > cap) g_gain_budget[id] = cap;
   }
   return (int16_t)(applied / 1000);
-}
-
-static void weight_add(int32_t dg)
-{
-  int32_t v = (int32_t)g_pet->weight_dg + dg;
-  g_pet->weight_dg = (int16_t)NT_CLAMP(v, (int32_t)WEIGHT_DG_MIN,
-                                          (int32_t)WEIGHT_DG_MAX);
 }
 
 static uint16_t cd_for(uint8_t action)
@@ -511,7 +460,7 @@ void sim_set_time_scale(uint32_t scale)
 uint32_t sim_step_seconds(void){ return g_scale; }
 
 // =============================================================================
-// 6. STAGE / FORM HELPERS
+// 6. STAGE HELPERS
 // =============================================================================
 static uint32_t stage_enter_s(uint8_t st)
 {
@@ -523,147 +472,6 @@ static uint32_t stage_enter_s(uint8_t st)
     case STAGE_SENIOR: return AGE_SENIOR_S;
     default:           return 0;
   }
-}
-
-uint32_t sim_natural_death_s(void)
-{
-  int32_t h = (int32_t)DEATH_NATURAL_BASE_H
-            + (((int32_t)g_pet->cq - (int32_t)CQ_START) / DEATH_NATURAL_CQ_DIV);
-  h = NT_CLAMP(h, (int32_t)DEATH_NATURAL_MIN_H, (int32_t)DEATH_NATURAL_MAX_H);
-  h = (int32_t)(((int64_t)h * (int64_t)form_of()->life) / 1000);
-  if (h < 1) h = 1;
-  return (uint32_t)h * 3600u;
-}
-
-uint8_t sim_care_grade(void)
-{
-  int16_t cq = g_pet->cq;
-  if (cq >= 850) return GRADE_A;
-  if (cq >= 700) return GRADE_B;
-  if (cq >= 550) return GRADE_C;
-  if (cq >= 400) return GRADE_D;
-  if (cq >= 250) return GRADE_E;
-  return GRADE_F;
-}
-
-// GAME_DESIGN 2.2 - branch scoring at TEEN -> ADULT.
-static uint8_t pick_adult_form(void)
-{
-  const PetSave& p = *g_pet;
-
-  // QUIMERA is a hard override: forced mutation load or a cross-species hybrid.
-  if (gene_mutations(p.genome) >= 3 || (p.flags & PF_HYBRID_ELIG)) {
-    return (uint8_t)FORM_QUIMERA;
-  }
-  // Neglect override: this one is unconditional per the spec.
-  if (p.cq < 200 || p.care_miss >= 12) return (uint8_t)FORM_MOHO;
-
-  int32_t disc = pct_milli(ST_DISCIPLINE);
-  int32_t bond = pct_milli(ST_BOND);
-  int32_t w    = (int32_t)p.weight_dg;
-
-  int32_t s_glut  = 3 * (int32_t)p.overfeed + 2 * (int32_t)p.snacks_total
-                  + NT_MAX((int32_t)0, (w - 450) / 10)
-                  - 2 * (int32_t)p.minigames_won;
-  int32_t s_athl  = 3 * (int32_t)p.minigames_won
-                  + NT_MAX((int32_t)0, (450 - w) / 10)
-                  + disc / 4 - 2 * (int32_t)p.overfeed;
-  int32_t s_wise  = disc / 2 + bond / 2 + (int32_t)p.cq / 20
-                  - 6 * (int32_t)p.care_miss - 4 * (int32_t)p.sick_episodes;
-  int32_t s_rebel = bond / 2 + (int32_t)p.happiness_avg / 2
-                  + 2 * (int32_t)p.unjust_scolds - disc / 2;
-  int32_t s_rot   = 6 * (int32_t)p.care_miss + 5 * (int32_t)p.sick_episodes
-                  + NT_MAX((int32_t)0, (500 - (int32_t)p.cq)) / 10;
-
-  const int32_t score[5] = { s_glut, s_athl, s_wise, s_rebel, s_rot };
-  const uint8_t form[5]  = { (uint8_t)FORM_BOLOTA, (uint8_t)FORM_ZAMPASALTO,
-                             (uint8_t)FORM_BUHO,   (uint8_t)FORM_PUNKI,
-                             (uint8_t)FORM_MOHO };
-
-  uint8_t best = 0;
-  uint8_t ties = 1;
-  for (uint8_t i = 1; i < 5; ++i) {
-    if (score[i] > score[best]) { best = i; ties = 1; }
-    else if (score[i] == score[best]) { ties++; }
-  }
-  if (ties > 1) {
-    // Ties broken by temperament parity (GAME_DESIGN 2.2).
-    uint8_t parity = (uint8_t)(gene_temperament(g_pet->genome) & 1u);
-    uint8_t seen = 0;
-    for (uint8_t i = 0; i < 5; ++i) {
-      if (score[i] == score[best]) {
-        if (parity == 0) { best = i; break; }
-        seen = i;                       // parity 1 -> take the LAST tied entry
-      }
-    }
-    if (parity != 0) best = seen;
-  }
-  return form[best];
-}
-
-// =============================================================================
-//  PH3 #6 - MUTATION LOAD RELIEF.  AMENDS GAME_DESIGN 2.3 row 5 / 4.3 step 6.
-//
-//  THE DEFECT. gene_mutations is monotonic: genome_death_egg adds +1
-//  unconditionally, genome_breed takes max(A,B)+1, and the cold-egg rule adds
-//  another. pick_adult_form() gates QUIMERA on `>= 3`. So generation 0/1/2 roll
-//  a form and generation 3 onward is unconditionally QUIMERA, forever - the
-//  branch-scoring block above becomes dead code about a week into play, the
-//  silhouette stops changing, and QUIMERA's modifiers (best-in-class regen,
-//  damage and lifespan) make the game monotonically easier from there on.
-//
-//  THE CHOICE. Of the three fixes on the table:
-//    * raising the threshold to 12 only postpones the plateau to generation 12;
-//      the counter is still monotonic, so every dynasty still ends up
-//      permanently QUIMERA and the form is still "survived long enough",
-//      not "earned";
-//    * a gate relative to the parent's count needs the parent's count stored,
-//      and Genome is a 16 B static_asserted struct broadcast verbatim over BLE
-//      (BRIEF 6.2) with no spare field - a wire-format change for a balance bug;
-//    * making the counter DECAY keeps the absolute `>= 3` gate the spec
-//      already specifies, needs no layout change, and is the only one of the
-//      three that restores the design intent, so that is what this is.
-//
-//  THE RULE. The mutation counter stops being an age counter and becomes a
-//  genetic LOAD that husbandry can pay off. Reaching ADULT relieves it by the
-//  care grade at that moment:  A (cq >= 850) -> -3,  B (cq >= 700) -> -2,
-//  C (cq >= 550) -> -1,  D/E/F -> 0. Against the +1 every death-egg adds
-//  (GAME_DESIGN 4.3 step 6, unchanged - the forced novelty guarantee stays),
-//  the steady state per generation is:
-//    grade A lineage  net -2 -> settles at 1, never QUIMERA;
-//    grade B lineage  net -1 -> recovers from any load, slowly;
-//    grade C lineage  net  0 -> plateaus wherever it is;
-//    grade D or worse net +1 -> reaches 3 and turns QUIMERA, and stays there
-//                               until the player raises a generation properly.
-//  A pet that dies BEFORE adulthood never collects any relief at all, so a
-//  lineage that keeps losing its young is the fastest route to a chimera.
-//  A chimera is therefore RARE (three consecutive badly-raised or short-lived
-//  generations, or the BLE cross-species route, which is untouched) and EARNED
-//  (by a genuinely turbulent lineage - which is what "chimeric halves,
-//  mismatched eyes, a 2 px offset seam" is meant to read as), and it is
-//  ESCAPABLE in two well-raised generations, so the 60 lines of branch scoring
-//  stay live for the whole life of the device instead of one week.
-//
-//  Applied AFTER pick_adult_form(): this pet's own form is decided by the load
-//  it was born with, which it did not choose. The relief is the reward its
-//  OFFSPRING inherit.
-// =============================================================================
-static void mutation_load_relief(void)
-{
-  PetSave& p = *g_pet;
-
-  uint8_t relief = 0;
-  const uint8_t grade = sim_care_grade();
-  if      (grade == GRADE_A) relief = 3;
-  else if (grade == GRADE_B) relief = 2;
-  else if (grade == GRADE_C) relief = 1;
-  if (relief == 0) return;
-
-  const uint8_t mc = gene_mutations(p.genome);
-  if (mc == 0) return;
-
-  // gene_set_mutations() re-seals the CRC, so the genome stays wire-valid.
-  gene_set_mutations(p.genome, (uint8_t)((mc > relief) ? (mc - relief) : 0u));
 }
 
 static void set_minor_form(uint8_t stage)
@@ -678,66 +486,23 @@ static void set_minor_form(uint8_t stage)
 }
 
 // =============================================================================
-// 7. DEATH
-// =============================================================================
-static uint8_t cause_from_damage(void)
-{
-  uint16_t best = 0;
-  uint8_t  bid  = DMG_HUNGER;
-  for (uint8_t i = 0; i < DMG_COUNT; ++i) {
-    if (g_pet->dmg_acc[i] > best) { best = g_pet->dmg_acc[i]; bid = i; }
-  }
-  switch (bid) {
-    case DMG_HUNGER:  return DEATH_HUNGER;
-    case DMG_FILTH:   return DEATH_FILTH;
-    case DMG_ILLNESS: return DEATH_ILLNESS;
-    case DMG_SADNESS: return DEATH_SADNESS;
-    default:          return DEATH_ACCIDENT;
-  }
-}
-
-static void do_death(uint8_t cause)
-{
-  PetSave& p = *g_pet;
-  if (p.stage == STAGE_DEAD) return;
-
-  // Neglect overrides every organic cause when the death happened inside an
-  // offline absence of >= 24 h (GAME_DESIGN 9.1).
-  if (g_offline && g_absence_ctx_s >= ABSENCE_NEGLECT_DEATH_S &&
-      cause != DEATH_OLD_AGE) {
-    cause = DEATH_NEGLECT;
-  }
-
-  p.stat[ST_HEALTH] = 0;
-  p.stat_rem[ST_HEALTH] = 0;
-  p.stage        = STAGE_DEAD;
-  p.death_cause  = cause;
-  p.death_epoch  = g_now;
-  p.flags       |= PF_DEAD;
-  p.flags       &= (uint16_t)~(PF_ASLEEP | PF_WISH_ACTIVE | PF_SEEKING_MATE);
-  g_alert        = AL_NONE;
-  g_sulk_left_s  = 0;
-  g_events      |= SIM_EV_DIED;
-}
-
-// =============================================================================
-// 8. SUB-STEP - one SIM_SUBSTEP_S (or shorter) slice of simulation
+// 7. SUB-STEP - one SIM_SUBSTEP_S (or shorter) slice of simulation
 // =============================================================================
 static uint8_t compute_alert(void)
 {
   const PetSave& p = *g_pet;
   if (p.stat[ST_HEALTH] < (int32_t)SIM_ALERT_HEALTH_PCT * 1000) return AL_LOW_HEALTH;
   if (p.flags & PF_SICK)                                        return AL_SICK;
-  if (p.stat[ST_HUNGER]    < (int32_t)CARE_MISS_ALERT_PCT * 1000) return AL_HUNGRY;
-  if (p.stat[ST_HYGIENE]   < (int32_t)CARE_MISS_ALERT_PCT * 1000) return AL_DIRTY;
-  if (p.stat[ST_ENERGY]    < (int32_t)CARE_MISS_ALERT_PCT * 1000) return AL_TIRED;
-  if (p.stat[ST_HAPPINESS] < (int32_t)CARE_MISS_ALERT_PCT * 1000) return AL_SAD;
+  if (p.stat[ST_HUNGER]    < (int32_t)ALERT_LOW_STAT_PCT * 1000) return AL_HUNGRY;
+  if (p.stat[ST_HYGIENE]   < (int32_t)ALERT_LOW_STAT_PCT * 1000) return AL_DIRTY;
+  if (p.stat[ST_ENERGY]    < (int32_t)ALERT_LOW_STAT_PCT * 1000) return AL_TIRED;
+  if (p.stat[ST_HAPPINESS] < (int32_t)ALERT_LOW_STAT_PCT * 1000) return AL_SAD;
   if (p.poop_count >= 3)                                          return AL_POOP;
   if (p.flags & PF_WISH_ACTIVE)                                   return AL_WISH;
   return AL_NONE;
 }
 
-static void sleep_machine(uint32_t dt)
+static void sleep_machine(void)
 {
   PetSave& p = *g_pet;
   uint8_t asleep = (p.flags & PF_ASLEEP) ? 1u : 0u;
@@ -752,8 +517,8 @@ static void sleep_machine(uint32_t dt)
   if (!asleep) {
     // Auto-sleep only at night with the light off. Energy hitting zero is a
     // COLLAPSE, not sleep: GAME_DESIGN 1.5 keeps the -1.5/h energy damage
-    // running from 11.11 h all the way to death at 19 h, which a regenerating
-    // sleep would cancel. Collapse is a render state, not a stat state.
+    // running for as long as energy stays at zero, which a regenerating sleep
+    // would cancel. Collapse is a render state, not a stat state.
     if (night && !light) {
       p.flags |= PF_ASLEEP;
       g_events |= SIM_EV_SLEEP;
@@ -765,15 +530,6 @@ static void sleep_machine(uint32_t dt)
     if (wake) {
       p.flags &= (uint16_t)~PF_ASLEEP;
       g_events |= SIM_EV_WAKE;
-    } else if (light) {
-      // Sleeping with the light on: +1 care_miss per hour (GAME_DESIGN 1.6)
-      g_lightsleep_rem += (int32_t)dt;
-      while (g_lightsleep_rem >= SEC_PER_HOUR) {
-        g_lightsleep_rem -= SEC_PER_HOUR;
-        if (p.care_miss < 0xFFFFu) p.care_miss++;
-        cq_add(CQ_D_CARE_MISS);
-        g_events |= SIM_EV_CARE_MISS;
-      }
     }
   }
 }
@@ -781,7 +537,6 @@ static void sleep_machine(uint32_t dt)
 static void decay_stats(uint32_t dt)
 {
   PetSave& p = *g_pet;
-  const FormMods* fm = form_of();
   const Genome& g = p.genome;
 
   uint16_t m_stage   = STAGE_MULT[p.stage];
@@ -805,13 +560,13 @@ static void decay_stats(uint32_t dt)
 
   // --- hunger (satiety) ---
   {
-    const uint16_t m[5] = { m_stage, m_app, m_sleep, fm->hun, m_off };
-    accum_stat(ST_HUNGER, rate_chain(RATE_HUNGER_MPH, m, 5), dt);
+    const uint16_t m[4] = { m_stage, m_app, m_sleep, m_off };
+    accum_stat(ST_HUNGER, rate_chain(RATE_HUNGER_MPH, m, 4), dt);
   }
   // --- happiness ---
   {
-    const uint16_t m[6] = { m_stage, m_lonely, m_soc, m_sleep, fm->hap, m_off };
-    accum_stat(ST_HAPPINESS, rate_chain(RATE_HAPPINESS_MPH, m, 6), dt);
+    const uint16_t m[5] = { m_stage, m_lonely, m_soc, m_sleep, m_off };
+    accum_stat(ST_HAPPINESS, rate_chain(RATE_HAPPINESS_MPH, m, 5), dt);
   }
   // --- energy ---
   if (p.flags & PF_ASLEEP) {
@@ -820,82 +575,43 @@ static void decay_stats(uint32_t dt)
     const uint16_t m[2] = { m_light, m_off };
     accum_stat(ST_ENERGY, rate_chain(RATE_ENERGY_ASLEEP_MPH, m, 2), dt);
   } else {
-    const uint16_t m[4] = { m_stage, m_met, fm->nrg, m_off };
-    accum_stat(ST_ENERGY, rate_chain(RATE_ENERGY_AWAKE_MPH, m, 4), dt);
+    const uint16_t m[3] = { m_stage, m_met, m_off };
+    accum_stat(ST_ENERGY, rate_chain(RATE_ENERGY_AWAKE_MPH, m, 3), dt);
   }
   // --- hygiene (base + per-poop) ---
   {
     int32_t base = RATE_HYGIENE_MPH
                  + (int32_t)p.poop_count * RATE_HYGIENE_POOP_MPH;
-    const uint16_t m[4] = { m_stage, m_sleep, fm->hyg, m_off };
-    accum_stat(ST_HYGIENE, rate_chain(base, m, 4), dt);
+    const uint16_t m[3] = { m_stage, m_sleep, m_off };
+    accum_stat(ST_HYGIENE, rate_chain(base, m, 3), dt);
   }
-  // --- bond (flat, doubled while the grudge is still running) ---
-  //     Gated on the sulk timer, not on absence_tier: the tier stays in the
-  //     save for the UI and the lineage, but the x2 bond bleed has to stop
-  //     once the pet has been forgiven, or it never recovers.
+  // --- bond (flat) ---
   {
-    uint16_t m_abs = (g_sulk_left_s > 0)
-                       ? (uint16_t)BOND_ABSENCE_DECAY_MULT : (uint16_t)MULT_ONE;
-    const uint16_t m[2] = { m_abs, m_off };
-    accum_stat(ST_BOND, rate_chain(RATE_BOND_MPH, m, 2), dt);
-  }
-  // --- discipline (flat) ---
-  {
-    const uint16_t m[2] = { fm->disc, m_off };
-    accum_stat(ST_DISCIPLINE, rate_chain(RATE_DISCIPLINE_MPH, m, 2), dt);
-  }
-  // --- weight, milli-decigrams per hour ---
-  {
-    const uint16_t m[2] = { m_met, m_off };
-    int32_t rate = rate_chain(RATE_WEIGHT_DG_MPH, m, 2);
-    // Two-level ledger, same no-drift contract as the stats: g_weight_hrem
-    // carries the /3600 remainder, g_weight_frac the sub-decigram part.
-    int32_t w = (int32_t)p.weight_dg * 1000 + g_weight_frac;
-    accum(w, g_weight_hrem, rate, dt, (int32_t)WEIGHT_DG_MIN * 1000,
-                                      (int32_t)WEIGHT_DG_MAX * 1000);
-    int32_t dg = w / 1000;
-    int32_t fr = w - dg * 1000;
-    if (fr < 0) { dg -= 1; fr += 1000; }
-    p.weight_dg   = (int16_t)dg;
-    g_weight_frac = fr;
+    const uint16_t m[1] = { m_off };
+    accum_stat(ST_BOND, rate_chain(RATE_BOND_MPH, m, 1), dt);
   }
 }
 
+// HEALTH is the one stat with a floor. It bleeds only while a CORE stat is
+// pinned at zero - illness merely blocks regeneration - and never falls below
+// HEALTH_FLOOR_PCT, so total neglect ends in a miserable pebble and never in a
+// dead one (spec section 27, "inconveniently unhappy at worst").
 static void health_step(uint32_t dt)
 {
   PetSave& p = *g_pet;
-  const FormMods* fm = form_of();
   uint16_t m_hardy = gene_hardiness_mult(p.genome);
   uint16_t m_off   = g_offline ? (uint16_t)MULT_OFFLINE_DECAY : (uint16_t)MULT_ONE;
 
-  // ---- damage, per source, so the death cause can be attributed -----------
-  int32_t src[DMG_COUNT];
-  memset(src, 0, sizeof(src));
+  int32_t src = 0;
+  if (p.stat[ST_HUNGER]    <= 0) src += DMG_HUNGER_ZERO_MPH;
+  if (p.stat[ST_HYGIENE]   <= 0) src += DMG_HYGIENE_ZERO_MPH;
+  if (p.stat[ST_HAPPINESS] <= 0) src += DMG_HAPPINESS_ZERO_MPH;
+  if (p.stat[ST_ENERGY]    <= 0) src += DMG_ENERGY_ZERO_MPH;
 
-  if (p.stat[ST_HUNGER]    <= 0) src[DMG_HUNGER]  += DMG_HUNGER_ZERO_MPH;
-  if (p.stat[ST_HYGIENE]   <= 0) src[DMG_FILTH]   += DMG_HYGIENE_ZERO_MPH;
-  if (p.stat[ST_HAPPINESS] <= 0) src[DMG_SADNESS] += DMG_HAPPINESS_ZERO_MPH;
-  if (p.stat[ST_ENERGY]    <= 0) src[DMG_SADNESS] += DMG_ENERGY_ZERO_MPH;
-  if (p.flags & PF_SICK)         src[DMG_ILLNESS] += DMG_SICK_MPH;
-  if (p.weight_dg > OBESE_WEIGHT_DG) {
-    src[DMG_OTHER] += DMG_OBESE_MPH;
-    g_events |= SIM_EV_WEIGHT_OBESE;
-  }
-  const uint16_t md[3] = { m_hardy, fm->dmg, m_off };
   int32_t total = 0;
-  for (uint8_t i = 0; i < DMG_COUNT; ++i) {
-    if (src[i] == 0) continue;
-    int32_t r = rate_chain(src[i], md, 3);
-    total += r;
-
-    // Per-source lifetime accumulator in WHOLE points (uint16, saturating).
-    int32_t whole = 0;
-    accum(whole, g_dmg_rem[i], r, dt, -1000000, 1000000);
-    if (whole > 0) {
-      uint32_t v = (uint32_t)p.dmg_acc[i] + (uint32_t)whole;
-      p.dmg_acc[i] = (v > 65535u) ? 65535u : (uint16_t)v;
-    }
+  if (src > 0) {
+    const uint16_t md[2] = { m_hardy, m_off };
+    total = rate_chain(src, md, 2);
   }
 
   // ---- regeneration -------------------------------------------------------
@@ -908,12 +624,19 @@ static void health_step(uint32_t dt)
     if (ok) {
       uint16_t m_sen = (p.stage == STAGE_SENIOR)
                          ? (uint16_t)SENIOR_REGEN_MULT : (uint16_t)MULT_ONE;
-      const uint16_t mr[3] = { fm->regen, m_sen, m_off };
-      regen = rate_chain(RATE_HEALTH_REGEN_MPH, mr, 3);
+      const uint16_t mr[2] = { m_sen, m_off };
+      regen = rate_chain(RATE_HEALTH_REGEN_MPH, mr, 2);
     }
   }
 
   accum_stat(ST_HEALTH, regen - total, dt);
+
+  // ---- the floor ----------------------------------------------------------
+  const int32_t floor_milli = (int32_t)HEALTH_FLOOR_PCT * 1000;
+  if (p.stat[ST_HEALTH] < floor_milli) {
+    p.stat[ST_HEALTH]     = floor_milli;
+    p.stat_rem[ST_HEALTH] = 0;
+  }
 
   // ---- senior health ceiling ---------------------------------------------
   if (p.stage == STAGE_SENIOR) {
@@ -948,12 +671,10 @@ static void poop_step(uint32_t dt)
     g_poop_timer -= period;
     if (p.poop_count < POOP_MAX) {
       p.poop_count++;
-      g_misbehave = 1;
-      g_misbehave_s = g_uptime_s;
       g_events |= SIM_EV_POOP;
     } else {
       // A 5th poop with nowhere to go raises the sickness risk instead.
-      g_suppress_until_s = g_uptime_s + SICK_OVERFEED_WINDOW_S;
+      g_suppress_until_s = g_uptime_s + SICK_SUPPRESS_WINDOW_S;
     }
   }
 }
@@ -965,23 +686,17 @@ static void sickness_step(uint32_t dt)
   while (g_acc_sick >= (uint32_t)SICK_ROLL_PERIOD_S) {
     g_acc_sick -= (uint32_t)SICK_ROLL_PERIOD_S;
 
-    if (p.flags & PF_SICK) {
-      // Untreated illness compounds into the DEATH_ILLNESS attribution.
-      if (g_sick_hours < 255) g_sick_hours++;
-      continue;
-    }
+    if (p.flags & PF_SICK) continue;
 
     int32_t pph = SICK_BASE_PPH
                 + (int32_t)p.poop_count * SICK_PER_POOP_PPH
                 + ((pct_milli(ST_HUNGER) < 15) ? SICK_HUNGRY_PPH : 0)
                 + ((pct_milli(ST_HEALTH) < 50) ? SICK_LOWHEALTH_PPH : 0);
-    if (g_uptime_s < g_overfeed_until_s) pph += SICK_OVERFEED_PPH;
     if (g_uptime_s < g_suppress_until_s) pph += POOP_SUPPRESSED_SICK_PCT * 10;
 
-    const FormMods* fm = form_of();
     uint16_t m_inb = (p.flags & PF_INBRED) ? (uint16_t)INBRED_SICK_MULT : (uint16_t)MULT_ONE;
-    const uint16_t ms[3] = { gene_hardiness_mult(p.genome), fm->sick, m_inb };
-    pph = rate_chain(pph, ms, 3);
+    const uint16_t ms[2] = { gene_hardiness_mult(p.genome), m_inb };
+    pph = rate_chain(pph, ms, 2);
     if (pph < 0) pph = 0;
 
     // p_hour / 6 evaluated every 10 minutes, in permille.
@@ -989,7 +704,6 @@ static void sickness_step(uint32_t dt)
       p.flags |= PF_SICK;
       if (p.sick_episodes < 0xFFFFu) p.sick_episodes++;
       cq_add(CQ_D_SICK_EPISODE);
-      g_sick_hours = 0;
       g_events |= SIM_EV_SICK_START;
     }
   }
@@ -1019,7 +733,7 @@ static void wish_step(uint32_t dt)
 {
   PetSave& p = *g_pet;
   if (!g_env.clock_valid || g_offline) return;
-  if (p.stage < STAGE_CHILD || p.stage >= STAGE_DEAD) return;
+  if (p.stage < STAGE_CHILD) return;
 
   if (p.flags & PF_WISH_ACTIVE) {
     uint32_t left = p.wish_left_s;
@@ -1027,7 +741,6 @@ static void wish_step(uint32_t dt)
       p.wish_left_s = 0;
       p.flags &= (uint16_t)~PF_WISH_ACTIVE;
       p.flags |= PF_WISH_DONE;
-      if (p.care_miss < 0xFFFFu) p.care_miss++;
       cq_add(CQ_D_WISH_FAIL);
       g_events |= SIM_EV_WISH_FAIL;
     } else {
@@ -1052,7 +765,7 @@ static void wish_step(uint32_t dt)
   }
 }
 
-static void events_step(uint32_t dt)
+static void events_step(void)
 {
   PetSave& p = *g_pet;
   uint32_t age_h = p.age_s / 3600u;
@@ -1063,26 +776,6 @@ static void events_step(uint32_t dt)
       stat_add(ST_HAPPINESS, EVENT_VISITA_HAPPINESS);
     }
     g_events |= SIM_EV_VISITA;
-  }
-
-  if (!(p.events_done & EV_STORM) && age_h >= (uint32_t)EVENT_STORM_H) {
-    p.events_done |= EV_STORM;
-    g_storm_left_s = EVENT_STORM_DUR_S;
-    g_storm_pets   = 0;
-    g_events |= SIM_EV_STORM;
-  }
-  if (g_storm_left_s > 0) {
-    if (dt >= g_storm_left_s) {
-      g_storm_left_s = 0;
-      if (g_storm_pets < EVENT_STORM_PETS_NEEDED) {
-        stat_add(ST_HEALTH, EVENT_STORM_HEALTH);
-        uint32_t v = (uint32_t)p.dmg_acc[DMG_OTHER] + 8u;
-        p.dmg_acc[DMG_OTHER] = (v > 65535u) ? 65535u : (uint16_t)v;
-        g_events |= SIM_EV_STORM_HURT;
-      }
-    } else {
-      g_storm_left_s -= dt;
-    }
   }
 
   uint32_t bdays_due = age_h / (uint32_t)EVENT_BIRTHDAY_H;
@@ -1108,36 +801,14 @@ static void stage_step(uint32_t dt)
     g_events |= SIM_EV_STAGE_UP;
     if (p.stage == STAGE_CHILD || p.stage == STAGE_TEEN) {
       set_minor_form(p.stage);
-    } else if (p.stage == STAGE_ADULT) {
-      p.adult_form = pick_adult_form();
-      mutation_load_relief();     // PH3 #6, after the form is decided
-      g_events |= SIM_EV_ADULT_FORM;
     }
-    // Per-stage counters snapshot then reset (GAME_DESIGN 2.1).
-    p.care_miss     = 0;
+    // Per-stage counter snapshot then reset (GAME_DESIGN 2.1).
     p.sick_episodes = 0;
-  }
-
-  if (p.age_s >= sim_natural_death_s()) {
-    do_death(DEATH_OLD_AGE);
-    return;
-  }
-
-  // Accident: 0.15 %/day after ADULT, only with a poor care record.
-  if (p.stage >= STAGE_ADULT && p.cq < ACCIDENT_CQ_MAX) {
-    uint32_t p_ppm = ((uint32_t)ACCIDENT_PPM_PER_DAY * (uint32_t)STAGE_CHECK_PERIOD_S)
-                     / 86400u;
-    if (p_ppm > 0 && rnd_below(1000000u) < p_ppm) {
-      uint32_t v = (uint32_t)p.dmg_acc[DMG_OTHER] + 100u;
-      p.dmg_acc[DMG_OTHER] = (v > 65535u) ? 65535u : (uint16_t)v;
-      do_death(DEATH_ACCIDENT);
-    }
   }
 }
 
 static void alert_step(uint32_t dt)
 {
-  PetSave& p = *g_pet;
   uint8_t a = compute_alert();
 
   if (a == AL_NONE) {
@@ -1150,16 +821,7 @@ static void alert_step(uint32_t dt)
     g_events |= SIM_EV_ALERT;
   } else {
     g_alert_age_s += dt;
-    if (g_alert_age_s >= CARE_MISS_GRACE_S &&
-        g_since_miss_s >= CARE_MISS_MIN_GAP_S) {
-      if (p.care_miss < 0xFFFFu) p.care_miss++;
-      cq_add(CQ_D_CARE_MISS);
-      g_since_miss_s = 0;
-      g_alert_age_s  = 0;
-      g_events |= SIM_EV_CARE_MISS;
-    }
   }
-  g_since_miss_s += dt;
 }
 
 static void hatch_now(void)
@@ -1169,7 +831,6 @@ static void hatch_now(void)
   p.age_s        = 0;
   p.birth_epoch  = g_now;
   p.last_interact_epoch = g_now;
-  p.adult_form   = FORM_UNSET;
   p.minor_form   = 0;
   p.poop_count   = 0;
   g_poop_timer   = 0;
@@ -1180,8 +841,6 @@ static void hatch_now(void)
   if (p.flags & PF_COLD_EGG) {
     p.stat[ST_HEALTH] = (int32_t)EGG_COLD_HEALTH_PCT * 1000;
   }
-  p.weight_dg = (int16_t)NT_CLAMP((int32_t)gene_weight_ideal_dg(p.genome),
-                                  (int32_t)WEIGHT_DG_MIN, (int32_t)WEIGHT_DG_MAX);
   if (gene_tainted(p.genome)) p.flags |= PF_GOD_TAINTED;
   g_events |= SIM_EV_HATCHED | SIM_EV_STAGE_UP;
 }
@@ -1197,8 +856,6 @@ static void sub_step(uint32_t dt)
   g_sod       = (g_sod + dt) % 86400u;
   gain_refill(dt);
 
-  if (p.stage == STAGE_DEAD) { p.last_seen_epoch = g_now; return; }
-
   p.last_seen_epoch = g_now;
 
   // Eggs are immortal and never decay: they only age toward hatching.
@@ -1210,9 +867,6 @@ static void sub_step(uint32_t dt)
 
   p.age_s = sat_add_u32(p.age_s, dt);
 
-  // grudge timer
-  if (g_sulk_left_s > 0) g_sulk_left_s = (dt >= g_sulk_left_s) ? 0 : (g_sulk_left_s - dt);
-
   // day rollover: daily caps and the once-a-day wish
   uint16_t d = today_stamp();
   if (d != g_day_stamp) {
@@ -1222,14 +876,14 @@ static void sub_step(uint32_t dt)
     p.flags        &= (uint16_t)~PF_WISH_DONE;
   }
 
-  sleep_machine(dt);
+  sleep_machine();
   decay_stats(dt);
   poop_step(dt);
   sickness_step(dt);
   health_step(dt);
   cq_step(dt);
   wish_step(dt);
-  events_step(dt);
+  events_step();
   alert_step(dt);
 
   // running happiness mean, for S_rebel
@@ -1244,16 +898,10 @@ static void sub_step(uint32_t dt)
   }
 
   stage_step(dt);
-
-  if (p.stage != STAGE_DEAD && p.stat[ST_HEALTH] <= 0) {
-    uint8_t cause = cause_from_damage();
-    if (g_sick_hours >= 36) cause = DEATH_ILLNESS;   // untreated > 6 h
-    do_death(cause);
-  }
 }
 
 // =============================================================================
-// 9. PUBLIC TICK / QUERIES
+// 8. PUBLIC TICK / QUERIES
 // =============================================================================
 void sim_tick(uint32_t seconds)
 {
@@ -1262,12 +910,6 @@ void sim_tick(uint32_t seconds)
     uint32_t dt = (seconds > SIM_SUBSTEP_S) ? SIM_SUBSTEP_S : seconds;
     sub_step(dt);
     seconds -= dt;
-    if (g_pet->stage == STAGE_DEAD) {
-      // keep the clock moving but stop simulating a corpse
-      if (seconds > 0) { g_now += seconds; g_uptime_s += seconds;
-                         g_pet->last_seen_epoch = g_now; }
-      return;
-    }
   }
 }
 
@@ -1291,15 +933,13 @@ uint8_t sim_mood_score(void)
 const PetSave* sim_save(void)        { return g_pet; }
 uint32_t sim_take_events(void)       { uint32_t e = g_events; g_events = 0; return e; }
 uint8_t  sim_alert(void)             { return g_alert; }
-uint16_t sim_sulk_left_s(void)       { return (uint16_t)NT_MIN(g_sulk_left_s, 65535u); }
 uint8_t  sim_is_asleep(void)         { return (g_pet && (g_pet->flags & PF_ASLEEP)) ? 1u : 0u; }
 uint8_t  sim_is_sick(void)           { return (g_pet && (g_pet->flags & PF_SICK)) ? 1u : 0u; }
-uint8_t  sim_is_dead(void)           { return (g_pet && g_pet->stage == STAGE_DEAD) ? 1u : 0u; }
 uint32_t sim_age_s(void)             { return g_pet ? g_pet->age_s : 0u; }
 uint32_t sim_now(void)               { return g_now; }
 
 // =============================================================================
-// 10. LIFE CYCLE / INIT
+// 9. LIFE CYCLE / INIT
 // =============================================================================
 // PH3 #4. `fresh` distinguishes the two callers:
 //   1 - sim_new_pet(): a creature that has never been interacted with. Every
@@ -1321,16 +961,9 @@ static void reset_ram_state(uint8_t fresh)
   g_events = 0;
   g_acc_stage = g_acc_cq = g_acc_sick = g_acc_minute = 0;
   g_poop_timer = 0;
-  g_weight_frac = 0;
-  g_weight_hrem = 0;
-  memset(g_dmg_rem, 0, sizeof(g_dmg_rem));
   g_hapavg_rem = 0;
-  g_lightsleep_rem = 0;
   g_alert = AL_NONE;
   g_alert_age_s = 0;
-  g_since_miss_s = CARE_MISS_MIN_GAP_S;
-  g_sulk_left_s = 0;
-  g_absence_ctx_s = 0;
   // Cooldowns: "seen at g_uptime_s == 0". On a reload that means the residual
   // cooldown is (cd - elapsed), clamped at 0 by sim_action_cooldown_s(), so a
   // reboot buys nothing and costs at most ACT_CD_MED_S (30 s) of friction.
@@ -1349,18 +982,11 @@ static void reset_ram_state(uint8_t fresh)
   g_pet_n = 0;
   g_mg_last_s = 0;
   g_mg_seen = fresh ? 0u : 1u;
-  g_force_feed = 0;
-  g_misbehave_s = 0;
-  g_misbehave = 0;
-  g_overfeed_until_s = 0;
   g_suppress_until_s = 0;
   g_cq_good_today = 0;
   g_cq_game_today = 0;
   g_day_stamp = 0xFFFFu;
-  g_storm_left_s = 0;
-  g_storm_pets = 0;
   g_wish_pets = 0;
-  g_sick_hours = 0;
   g_uptime_s = 0;
   g_offline = 0;
 }
@@ -1376,14 +1002,9 @@ void sim_init(PetSave& save)
     p.stat[i]     = NT_CLAMP(p.stat[i], STAT_MILLI_MIN, STAT_MILLI_MAX);
     p.stat_rem[i] = (int16_t)NT_CLAMP((int32_t)p.stat_rem[i], (int32_t)-3599, (int32_t)3599);
   }
-  p.cq        = (int16_t)NT_CLAMP((int32_t)p.cq, (int32_t)CQ_MIN, (int32_t)CQ_MAX);
-  p.weight_dg = (int16_t)NT_CLAMP((int32_t)p.weight_dg,
-                                  (int32_t)WEIGHT_DG_MIN, (int32_t)WEIGHT_DG_MAX);
+  p.cq = (int16_t)NT_CLAMP((int32_t)p.cq, (int32_t)CQ_MIN, (int32_t)CQ_MAX);
   if (p.poop_count > POOP_MAX) p.poop_count = POOP_MAX;
   if (p.stage >= STAGE_COUNT) p.stage = STAGE_EGG;
-  if (p.guilt_level < 0) p.guilt_level = 0;
-  if (p.guilt_level > 6) p.guilt_level = 6;
-  if (p.stage == STAGE_DEAD) p.flags |= PF_DEAD;
 
   g_now = (p.last_seen_epoch != 0) ? p.last_seen_epoch : 0u;
   g_sod = 0;
@@ -1407,12 +1028,6 @@ void sim_new_pet(const Genome& g, uint32_t now_epoch, uint8_t cold)
   p.last_interact_epoch = now_epoch;
   p.age_s               = 0;
   p.cq                  = CQ_START;
-  p.weight_dg           = (int16_t)NT_CLAMP((int32_t)gene_weight_ideal_dg(g),
-                                            (int32_t)WEIGHT_DG_MIN,
-                                            (int32_t)WEIGHT_DG_MAX);
-  p.adult_form          = FORM_UNSET;
-  p.absence_tier        = ABS_NONE;
-  p.death_cause         = DEATH_NONE;
   p.flags               = PF_LIGHT_ON;
   if (cold) p.flags |= PF_COLD_EGG;
   if (gene_tainted(g)) p.flags |= PF_GOD_TAINTED;
@@ -1427,14 +1042,8 @@ void sim_hatch(void)
   hatch_now();
 }
 
-void sim_bury(void)
-{
-  if (!g_pet || g_pet->stage != STAGE_DEAD) return;
-  g_pet->flags |= PF_BURIED;
-}
-
 // =============================================================================
-// 11. ACTIONS
+// 10. ACTIONS
 // =============================================================================
 static void result_begin(ActionResult& out, int32_t* snap)
 {
@@ -1443,12 +1052,11 @@ static void result_begin(ActionResult& out, int32_t* snap)
 }
 
 static void result_end(ActionResult& out, const int32_t* snap,
-                       int32_t w_before, int16_t cq_before, uint16_t str_id)
+                       int16_t cq_before, uint16_t str_id)
 {
   for (uint8_t i = 0; i < ST_COUNT; ++i) {
     out.d[i] = (int16_t)((g_pet->stat[i] - snap[i]) / 1000);
   }
-  out.d_weight_dg = (int16_t)((int32_t)g_pet->weight_dg - w_before);
   out.d_cq        = (int16_t)(g_pet->cq - cq_before);
   out.str_id      = str_id;
   out.ok          = 1;
@@ -1473,12 +1081,11 @@ static void note_interaction(uint8_t action)
   g_any_act_seen     = 1;
 
   // GAME_DESIGN 7.1: only a MEANINGFUL interaction (feed / clean / play /
-  // medicine / mimo) resets the guilt ladder and the loneliness clock.
+  // medicine / mimo) resets the loneliness clock.
   // Flipping the light or the sleep switch is housekeeping, not company.
   if (action == ACT_LIGHT_TOGGLE || action == ACT_SLEEP_TOGGLE) return;
 
   p.last_interact_epoch = g_now;
-  p.guilt_level = 0;
   g_alert = AL_NONE;               // any real interaction addresses the alert
   g_alert_age_s = 0;
 }
@@ -1516,14 +1123,8 @@ bool sim_apply_action(ActionId action, ActionResult& out)
   if (action == ACT_NONE || action >= ACT_COUNT) { fail(out, AERR_BAD_ARG, 0); return false; }
 
   PetSave& p = *g_pet;
-  if (p.stage == STAGE_DEAD)  { fail(out, AERR_DEAD, 0);   return false; }
   if (p.stage == STAGE_EGG)   { fail(out, AERR_IS_EGG, 0); return false; }
 
-  // The grudge: only a mimo gets through, and it buys forgiveness.
-  if (g_sulk_left_s > 0 && action != ACT_PET) {
-    fail(out, AERR_SULKING, (uint16_t)NT_MIN(g_sulk_left_s, 65535u));
-    return false;
-  }
   if ((p.flags & PF_ASLEEP) &&
       action != ACT_SLEEP_TOGGLE && action != ACT_LIGHT_TOGGLE) {
     fail(out, AERR_ASLEEP, 0);
@@ -1533,18 +1134,7 @@ bool sim_apply_action(ActionId action, ActionResult& out)
   uint16_t cd = sim_action_cooldown_s(action);
   if (cd > 0) { fail(out, AERR_COOLDOWN, cd); return false; }
 
-  // PUNKI refuses one command in six (GAME_DESIGN 2.3).
-  if (p.stage >= STAGE_ADULT && p.adult_form == FORM_PUNKI &&
-      action != ACT_LIGHT_TOGGLE && action != ACT_SLEEP_TOGGLE &&
-      rnd_below(6u) == 0u) {
-    g_misbehave = 1;
-    g_misbehave_s = g_uptime_s;
-    fail(out, AERR_REFUSED, 0);
-    return false;
-  }
-
   int32_t snap[ST_COUNT];
-  int32_t w_before  = g_pet->weight_dg;
   int16_t cq_before = g_pet->cq;
   uint16_t str_id   = 0;
   result_begin(out, snap);
@@ -1553,22 +1143,13 @@ bool sim_apply_action(ActionId action, ActionResult& out)
 
     case ACT_FEED_MEAL: {
       if (pct_milli(ST_HUNGER) > ACT_MEAL_REFUSE_PCT) {
-        g_force_feed++;
-        if (g_force_feed >= ACT_FORCE_FEED_LIMIT) {
-          g_force_feed = 0;
-          stat_add(ST_BOND, ACT_FORCE_FEED_BOND);
-        }
         fail(out, AERR_FULL, 0);
         return false;
       }
       // The hourly satiety budget is the real anti-farm ceiling. A meal that
-      // cannot deliver any satiety is refused outright instead of silently
-      // fattening the pet for nothing.
+      // cannot deliver any satiety is refused outright.
       if (sim_gain_left(ST_HUNGER) == 0) { fail(out, AERR_FULL, 0); return false; }
-      g_force_feed = 0;
-      int16_t got = stat_add(ST_HUNGER, ACT_MEAL_HUNGER);
-      // Weight follows the calories that actually landed, not the button press.
-      weight_add(((int32_t)ACT_MEAL_WEIGHT_DG * (int32_t)got) / ACT_MEAL_HUNGER);
+      stat_add(ST_HUNGER, ACT_MEAL_HUNGER);
       cq_add(ACT_MEAL_CQ);
       g_poop_timer = 0;                       // next poop 90 min after the meal
       str_id = STR_RX_MEAL;
@@ -1576,20 +1157,10 @@ bool sim_apply_action(ActionId action, ActionResult& out)
     }
 
     case ACT_FEED_SNACK: {
-      uint8_t over = (pct_milli(ST_HUNGER) > ACT_SNACK_OVERFEED_PCT) ? 1u : 0u;
       stat_add(ST_HUNGER, ACT_SNACK_HUNGER);
       stat_add(ST_HAPPINESS, ACT_SNACK_HAPPINESS);
-      weight_add(ACT_SNACK_WEIGHT_DG);
       if (p.snacks_total < 0xFFFFu) p.snacks_total++;
       str_id = STR_RX_SNACK;
-      if (over) {
-        if (p.overfeed < 0xFFFFu) p.overfeed++;
-        if ((p.overfeed % OVERFEED_TRIGGER) == 0u) {
-          g_overfeed_until_s = g_uptime_s + SICK_OVERFEED_WINDOW_S;
-          g_events |= SIM_EV_OVERFED;
-          str_id = STR_RX_OVERFED;
-        }
-      }
       break;
     }
 
@@ -1610,7 +1181,6 @@ bool sim_apply_action(ActionId action, ActionResult& out)
                         rnd_below(100u) < (uint32_t)ACT_MED_SECOND_DOSE_PCT) ? 1u : 0u;
       if (!second) {
         p.flags &= (uint16_t)~PF_SICK;
-        g_sick_hours = 0;
         g_events |= SIM_EV_SICK_END;
       }
       stat_add(ST_HAPPINESS, ACT_MED_HAPPINESS);
@@ -1629,7 +1199,6 @@ bool sim_apply_action(ActionId action, ActionResult& out)
                       * (int32_t)sim_play_decay_permille()) / 1000;
       stat_add(ST_HAPPINESS, gain);
       stat_add(ST_ENERGY, ACT_PLAY_ENERGY);
-      weight_add(ACT_PLAY_WEIGHT_DG);
       if (p.minigames_won < 0xFFFFu) p.minigames_won++;
       if (g_cq_game_today < CQ_MINIGAME_DAILY_CAP) {
         cq_add(CQ_D_MINIGAME);
@@ -1647,31 +1216,7 @@ bool sim_apply_action(ActionId action, ActionResult& out)
       stat_add(ST_BOND, (int32_t)bonus);
       stat_add(ST_HAPPINESS, (bonus > 0) ? ACT_PET_HAPPINESS : 0);
       pet_window_push();
-      if (g_sulk_left_s > 0) {
-        g_sulk_left_s = (g_sulk_left_s > (uint32_t)SULK_PET_FORGIVE_S)
-                          ? (g_sulk_left_s - (uint32_t)SULK_PET_FORGIVE_S) : 0u;
-      }
-      if (g_storm_left_s > 0 && g_storm_pets < 255) g_storm_pets++;
       str_id = STR_RX_PET;
-      break;
-    }
-
-    case ACT_SCOLD: {
-      uint8_t just = (g_misbehave &&
-                      (g_uptime_s - g_misbehave_s) <= (uint32_t)ACT_SCOLD_WINDOW_S) ? 1u : 0u;
-      if (just) {
-        g_misbehave = 0;
-        stat_add(ST_DISCIPLINE, ACT_SCOLD_DISCIPLINE);
-        stat_add(ST_HAPPINESS, ACT_SCOLD_HAPPINESS);
-        cq_add(ACT_SCOLD_CQ);
-        str_id = STR_RX_SCOLD_OK;
-      } else {
-        stat_add(ST_BOND, ACT_SCOLD_UNJUST_BOND);
-        stat_add(ST_HAPPINESS, ACT_SCOLD_UNJUST_HAP);
-        cq_add(ACT_SCOLD_UNJUST_CQ);
-        if (p.unjust_scolds < 255) p.unjust_scolds++;
-        str_id = STR_RX_SCOLD_BAD;
-      }
       break;
     }
 
@@ -1695,19 +1240,17 @@ bool sim_apply_action(ActionId action, ActionResult& out)
 
   note_interaction((uint8_t)action);
   wish_check((uint8_t)action);
-  result_end(out, snap, w_before, cq_before, str_id);
+  result_end(out, snap, cq_before, str_id);
   return true;
 }
 
 // =============================================================================
-// 12. MINIGAMES - the on-device (S4) games and their shared ledger
+// 11. MINIGAMES - the on-device games and their shared ledger
 // =============================================================================
 static bool minigame_guard(ActionResult& out)
 {
   if (!g_pet)                { fail(out, AERR_BAD_ARG, 0); return false; }
-  if (g_pet->stage == STAGE_DEAD) { fail(out, AERR_DEAD, 0);   return false; }
   if (g_pet->stage == STAGE_EGG)  { fail(out, AERR_IS_EGG, 0); return false; }
-  if (g_sulk_left_s > 0)     { fail(out, AERR_SULKING, (uint16_t)NT_MIN(g_sulk_left_s, 65535u)); return false; }
   if (g_pet->flags & PF_ASLEEP) { fail(out, AERR_ASLEEP, 0); return false; }
   if (pct_milli(ST_ENERGY) < ACT_PLAY_MIN_ENERGY_PCT) { fail(out, AERR_TIRED, 0); return false; }
   uint16_t cd = sim_minigame_cooldown_s();
@@ -1735,7 +1278,6 @@ bool sim_apply_play_result(uint16_t win_permille, ActionResult& out)
   if (win_permille > 1000u) win_permille = 1000u;
 
   int32_t snap[ST_COUNT];
-  int32_t w_before  = g_pet->weight_dg;
   int16_t cq_before = g_pet->cq;
   result_begin(out, snap);
 
@@ -1744,72 +1286,52 @@ bool sim_apply_play_result(uint16_t win_permille, ActionResult& out)
 
   stat_add(ST_HAPPINESS, gain);
   stat_add(ST_ENERGY, ACT_PLAY_ENERGY);
-  weight_add(ACT_PLAY_WEIGHT_DG);
 
   minigame_commit((win_permille >= 500u) ? 1u : 0u);
-  result_end(out, snap, w_before, cq_before,
+  result_end(out, snap, cq_before,
              (win_permille >= 500u) ? (uint16_t)STR_GM_WIN : (uint16_t)STR_GM_LOSE);
   wish_check((uint8_t)ACT_PLAY);
   return true;
 }
 
 // =============================================================================
-// 13. OFFLINE CATCH-UP  (GAME_DESIGN 5.2 / 5.3 / 5.4)
+// 12. OFFLINE CATCH-UP  (GAME_DESIGN 5.2 / 5.3 / 5.4)
+//     The escalation ladder is gone: an absence costs exactly what the
+//     integration says it costs, at MULT_OFFLINE_DECAY, and nothing more.
 // =============================================================================
-static uint8_t tier_for(uint32_t absence_s)
+
+// Integrates `absence_s` at the offline rate starting from g_now. Returns the
+// number of OFFLINE_STEP_S blocks actually run.
+static uint32_t run_offline(uint32_t absence_s)
 {
-  if (absence_s <  ABSENCE_CORTA_S)     return ABS_NONE;
-  if (absence_s <  ABSENCE_LARGA_S)     return ABS_CORTA;
-  if (absence_s <  ABSENCE_ABANDONO_S)  return ABS_LARGA;
-  if (absence_s <  ABSENCE_GRAVE_S)     return ABS_ABANDONO;
-  return ABS_GRAVE;
-}
-
-static void apply_tier(uint8_t tier, AbsenceReport& rep)
-{
-  PetSave& p = *g_pet;
-  int32_t dbond = 0, dhap = 0, dhea = 0, dcq = 0;
-  uint16_t misses = 0, sulk = 0;
-
-  switch (tier) {
-    case ABS_CORTA:
-      dbond = ABS_CORTA_BOND; dhap = ABS_CORTA_HAP; dhea = ABS_CORTA_HEA;
-      break;
-    case ABS_LARGA:
-      dbond = ABS_LARGA_BOND; dhap = ABS_LARGA_HAP; dhea = ABS_LARGA_HEA;
-      sulk = SULK_LARGA_S;
-      break;
-    case ABS_ABANDONO:
-      dbond = ABS_ABANDONO_BOND; dhap = ABS_ABANDONO_HAP; dhea = ABS_ABANDONO_HEA;
-      dcq = CQ_D_ABANDONO; misses = ABS_ABANDONO_MISSES; sulk = SULK_ABANDONO_S;
-      break;
-    case ABS_GRAVE:
-      dbond = ABS_GRAVE_BOND; dhap = ABS_GRAVE_HAP; dhea = ABS_GRAVE_HEA;
-      dcq = CQ_D_ABANDONO_GRAVE; misses = ABS_GRAVE_MISSES; sulk = SULK_GRAVE_S;
-      p.flags |= PF_SCAR;                       // permanent, inherited
-      break;
-    default:
-      break;
+  uint32_t steps = absence_s / OFFLINE_STEP_S;
+  uint32_t tail  = absence_s % OFFLINE_STEP_S;
+  if (steps > (uint32_t)OFFLINE_MAX_STEPS) {
+    // Beyond 41.7 days the extra decay would land on stats that bottomed out
+    // long ago, so the remainder is simply not simulated.
+    steps = OFFLINE_MAX_STEPS;
+    tail  = 0;
   }
 
-  // Deltas are applied raw (not through the gain ledger: they are penalties)
-  // and clamped at 0, never negative.
-  if (dbond) { p.stat[ST_BOND]      = NT_CLAMP(p.stat[ST_BOND]      + dbond * 1000, STAT_MILLI_MIN, STAT_MILLI_MAX); }
-  if (dhap)  { p.stat[ST_HAPPINESS] = NT_CLAMP(p.stat[ST_HAPPINESS] + dhap  * 1000, STAT_MILLI_MIN, STAT_MILLI_MAX); }
-  if (dhea)  {
-    p.stat[ST_HEALTH] = NT_CLAMP(p.stat[ST_HEALTH] + dhea * 1000, STAT_MILLI_MIN, STAT_MILLI_MAX);
-    uint32_t v = (uint32_t)p.dmg_acc[DMG_OTHER] + (uint32_t)(-dhea);
-    p.dmg_acc[DMG_OTHER] = (v > 65535u) ? 65535u : (uint16_t)v;
+  g_offline = 1;
+  uint32_t done = 0;
+  for (uint32_t i = 0; i < steps; ++i) {
+    uint32_t left = OFFLINE_STEP_S;
+    while (left > 0) {
+      uint32_t dt = (left > SIM_SUBSTEP_S) ? SIM_SUBSTEP_S : left;
+      sub_step(dt);
+      left -= dt;
+    }
+    done++;
   }
-  if (dcq)    cq_add(dcq);
-  if (misses) {
-    uint32_t v = (uint32_t)p.care_miss + misses;
-    p.care_miss = (v > 65535u) ? 65535u : (uint16_t)v;
+  uint32_t left = tail;
+  while (left > 0) {
+    uint32_t dt = (left > SIM_SUBSTEP_S) ? SIM_SUBSTEP_S : left;
+    sub_step(dt);
+    left -= dt;
   }
-
-  g_sulk_left_s = sulk;
-  rep.sulk_s    = sulk;
-  p.absence_tier = tier;
+  g_offline = 0;
+  return done;
 }
 
 void sim_catch_up_ex(uint32_t absence_s, uint8_t clock_known, AbsenceReport& rep)
@@ -1835,9 +1357,7 @@ void sim_catch_up_ex(uint32_t absence_s, uint8_t clock_known, AbsenceReport& rep
   // section 1.7). The device cannot measure the gap, so it does not get to
   // invent one; PF_ABS_UNKNOWN flags the save and the truth is charged in full
   // by sim_absence_retrofix() the moment gt_set_epoch() lands.
-  uint8_t unknown = 0;
   if (!clock_known || absence_s > ABSENCE_MAX_S) {
-    unknown   = 1;
     absence_s = 0;
     p.flags  |= PF_ABS_UNKNOWN;
     rep.clock_known = 0;
@@ -1846,17 +1366,6 @@ void sim_catch_up_ex(uint32_t absence_s, uint8_t clock_known, AbsenceReport& rep
   }
 
   rep.absence_s = absence_s;
-  g_absence_ctx_s = absence_s;
-
-  if (p.stage == STAGE_DEAD) {
-    rep.tier = ABS_MUERTO;
-    rep.died = 1;
-    rep.cause = p.death_cause;
-    rep.death_epoch = p.death_epoch;
-    p.absence_tier = ABS_MUERTO;
-    g_absence_ctx_s = 0;
-    return;
-  }
 
   // Wind the simulation clock back to when we last saw the player.
   uint32_t start_epoch = (g_env.now_epoch > absence_s)
@@ -1867,78 +1376,11 @@ void sim_catch_up_ex(uint32_t absence_s, uint8_t clock_known, AbsenceReport& rep
   g_sod = (uint32_t)(((uint64_t)sod_now + 86400ull * 4ull
                       - (uint64_t)(absence_s % 86400u)) % 86400ull);
 
-  uint32_t steps = absence_s / OFFLINE_STEP_S;
-  uint32_t tail  = absence_s % OFFLINE_STEP_S;
-  uint8_t  overrun = 0;
-  if (steps > (uint32_t)OFFLINE_MAX_STEPS) {
-    steps = OFFLINE_MAX_STEPS;
-    tail  = 0;
-    overrun = 1;                        // beyond 41.7 days: straight to death
-  }
-
-  g_offline = 1;
-  uint32_t done = 0;
-  for (uint32_t i = 0; i < steps && p.stage != STAGE_DEAD; ++i) {
-    uint32_t left = OFFLINE_STEP_S;
-    while (left > 0 && p.stage != STAGE_DEAD) {
-      uint32_t dt = (left > SIM_SUBSTEP_S) ? SIM_SUBSTEP_S : left;
-      sub_step(dt);
-      left -= dt;
-    }
-    done++;
-    if (p.stage == STAGE_DEAD) break;
-  }
-  if (p.stage != STAGE_DEAD && tail > 0) {
-    uint32_t left = tail;
-    while (left > 0 && p.stage != STAGE_DEAD) {
-      uint32_t dt = (left > SIM_SUBSTEP_S) ? SIM_SUBSTEP_S : left;
-      sub_step(dt);
-      left -= dt;
-    }
-  }
-  if (overrun && p.stage != STAGE_DEAD) {
-    do_death(DEATH_NEGLECT);
-  }
-  g_offline = 0;
-
-  rep.steps = (uint16_t)NT_MIN(done, 65535u);
-
-  if (p.stage == STAGE_DEAD) {
-    rep.tier  = ABS_MUERTO;
-    rep.died  = 1;
-    rep.cause = p.death_cause;
-    // The corpse does not keep decaying: death_epoch is the instant it happened.
-    rep.death_epoch = p.death_epoch;
-    p.absence_tier  = ABS_MUERTO;
-    // NOT PF_EGG_PENDING: that flag means a PendingEgg blob is sitting in NVS
-    // key "egg" from a BLE mating. A death-egg has no blob - genome.cpp builds
-    // it from this corpse and sim_new_pet() overwrites PetSave.genome in place.
-    g_absence_ctx_s = 0;
-    // Snap the clock forward so the UI shows "the egg has been waiting {t}".
-    g_now = start_epoch + absence_s;
-    p.last_seen_epoch = g_now;
-    return;
-  }
-
-  // Alive: apply the escalation ladder on top of the integration - unless the
-  // clock is unknown, in which case there is no integration (absence_s is 0
-  // above) and no ladder either: charging ZERO means charging zero, not
-  // charging ABS_LARGA under another name.
-  //
-  // p.absence_tier is left at ABS_NONE, which is both true (nothing was
-  // charged) and load-bearing: sim_absence_retrofix() charges the DIFFERENCE
-  // against it and refuses any tier that is not strictly worse, so a stored
-  // ABS_UNKNOWN (6, above every real tier) would disable the retro-fix
-  // outright. rep.tier still reports ABS_UNKNOWN so the UI says "I do not know
-  // how long it has been" instead of "you were away for no time at all".
-  uint8_t tier = unknown ? (uint8_t)ABS_NONE : tier_for(absence_s);
-  apply_tier(tier, rep);
-  rep.tier = unknown ? (uint8_t)ABS_UNKNOWN : tier;
+  rep.steps = (uint16_t)NT_MIN(run_offline(absence_s), 65535u);
 
   g_now = start_epoch + absence_s;
   g_sod = sod_now;
   p.last_seen_epoch = g_now;
-  g_absence_ctx_s = 0;
 }
 
 void sim_absence_retrofix(uint32_t true_absence_s)
@@ -1948,33 +1390,25 @@ void sim_absence_retrofix(uint32_t true_absence_s)
   if (!(p.flags & PF_ABS_UNKNOWN)) return;
   p.flags &= (uint16_t)~PF_ABS_UNKNOWN;
 
-  uint8_t was = p.absence_tier;
-  uint8_t now = tier_for(true_absence_s);
-  if (now <= was) return;                 // never make it better retroactively
+  // Nothing was integrated at boot, so the whole absence is charged here. The
+  // sim clock is already at "now": rewind it, integrate, and put it back.
+  if (true_absence_s == 0u || true_absence_s > ABSENCE_MAX_S) return;
 
-  // Apply only the difference between what was already charged (nothing, on an
-  // unknown clock) and the truth.
-  // Indexed by AbsenceTier: NONE, CORTA, LARGA, ABANDONO, GRAVE, MUERTO, UNKNOWN
-  const int32_t bond[ABS_COUNT] = { 0, ABS_CORTA_BOND, ABS_LARGA_BOND,
-                                    ABS_ABANDONO_BOND, ABS_GRAVE_BOND, 0, 0 };
-  const int32_t hap[ABS_COUNT]  = { 0, ABS_CORTA_HAP, ABS_LARGA_HAP,
-                                    ABS_ABANDONO_HAP, ABS_GRAVE_HAP, 0, 0 };
-  const int32_t hea[ABS_COUNT]  = { 0, ABS_CORTA_HEA, ABS_LARGA_HEA,
-                                    ABS_ABANDONO_HEA, ABS_GRAVE_HEA, 0, 0 };
+  const uint32_t end_epoch = g_now;
+  const uint32_t end_sod   = g_sod;
+  g_now = (end_epoch > true_absence_s) ? (end_epoch - true_absence_s) : 0u;
+  g_sod = (uint32_t)(((uint64_t)end_sod + 86400ull * 4ull
+                      - (uint64_t)(true_absence_s % 86400u)) % 86400ull);
 
-  int32_t dbond = bond[now] - bond[was];
-  int32_t dhap  = hap[now]  - hap[was];
-  int32_t dhea  = hea[now]  - hea[was];
+  (void)run_offline(true_absence_s);
 
-  p.stat[ST_BOND]      = NT_CLAMP(p.stat[ST_BOND]      + dbond * 1000, STAT_MILLI_MIN, STAT_MILLI_MAX);
-  p.stat[ST_HAPPINESS] = NT_CLAMP(p.stat[ST_HAPPINESS] + dhap  * 1000, STAT_MILLI_MIN, STAT_MILLI_MAX);
-  p.stat[ST_HEALTH]    = NT_CLAMP(p.stat[ST_HEALTH]    + dhea  * 1000, STAT_MILLI_MIN, STAT_MILLI_MAX);
-  if (now == ABS_GRAVE) p.flags |= PF_SCAR;
-  p.absence_tier = now;
+  g_now = end_epoch;
+  g_sod = end_sod;
+  p.last_seen_epoch = g_now;
 }
 
 // =============================================================================
-// 14. GOD MODE HOOKS
+// 13. GOD MODE HOOKS
 // =============================================================================
 void sim_god_set_stat(StatId id, uint8_t pct)
 {
@@ -1991,35 +1425,11 @@ void sim_god_set_stage(uint8_t stage)
   PetSave& p = *g_pet;
   p.flags |= PF_GOD_TAINTED;
 
-  if (stage == STAGE_DEAD) { do_death(DEATH_NONE); return; }
-
-  p.stage  = stage;
-  p.flags &= (uint16_t)~PF_DEAD;
+  p.stage = stage;
   if (stage == STAGE_EGG) { p.age_s = 0; return; }
   p.age_s = stage_enter_s(stage);
-  if (stage >= STAGE_ADULT) {
-    if (p.adult_form >= FORM_COUNT) p.adult_form = pick_adult_form();
-  } else {
-    p.adult_form = FORM_UNSET;
-    if (stage == STAGE_CHILD || stage == STAGE_TEEN) set_minor_form(stage);
-  }
+  if (stage == STAGE_CHILD || stage == STAGE_TEEN) set_minor_form(stage);
   g_events |= SIM_EV_STAGE_UP;
-}
-
-void sim_god_set_form(uint8_t form)
-{
-  if (!g_pet || form >= FORM_COUNT) return;
-  g_pet->adult_form = form;
-  g_pet->flags |= PF_GOD_TAINTED;
-  g_events |= SIM_EV_ADULT_FORM;
-}
-
-void sim_god_kill(uint8_t cause)
-{
-  if (!g_pet) return;
-  if (cause >= DEATH_COUNT) cause = DEATH_ACCIDENT;
-  g_pet->flags |= PF_GOD_TAINTED;
-  do_death(cause);
 }
 
 void sim_god_set_genome(const Genome& g)
@@ -2029,33 +1439,6 @@ void sim_god_set_genome(const Genome& g)
   p.genome = g;
   gene_set_tainted(p.genome, 1);        // masks, stamps magic_ver and reseals
   p.flags |= PF_GOD_TAINTED;
-  // Nothing in this module caches a genome-derived value except the weight,
-  // which is bounded by the (possibly new) body_size gene.
-  p.weight_dg = (int16_t)NT_CLAMP((int32_t)p.weight_dg,
-                                  (int32_t)WEIGHT_DG_MIN, (int32_t)WEIGHT_DG_MAX);
-}
-
-void sim_god_set_sick(uint8_t on)
-{
-  if (!g_pet) return;
-  PetSave& p = *g_pet;
-  if (on) {
-    if (!(p.flags & PF_SICK)) { p.sick_episodes++; g_events |= SIM_EV_SICK_START; }
-    p.flags |= PF_SICK;
-  } else {
-    if (p.flags & PF_SICK) g_events |= SIM_EV_SICK_END;
-    p.flags &= (uint16_t)~PF_SICK;
-  }
-  g_sick_hours = 0;
-  p.flags |= PF_GOD_TAINTED;
-}
-
-void sim_god_set_poop(uint8_t count)
-{
-  if (!g_pet) return;
-  if (count > POOP_MAX) count = POOP_MAX;
-  if (count > g_pet->poop_count) g_events |= SIM_EV_POOP;
-  g_pet->poop_count = count;
-  g_poop_timer      = 0;
-  g_pet->flags |= PF_GOD_TAINTED;
+  // Nothing in this module caches a genome-derived value, so installing a new
+  // genome disturbs nothing else: the pet keeps its age, stats and stage.
 }

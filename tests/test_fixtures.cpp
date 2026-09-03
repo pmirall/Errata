@@ -6,6 +6,9 @@
 //  crc16 field against crc16_ccitt() over the v1 CRC span, and a whole-file
 //  CRC so an accidental regeneration is noticed. The SaveSchema v2 migration
 //  (P2-C9) reads these same files.
+//
+//  P2-C7 retired several PetSave fields into pad_* members at the same offsets,
+//  so the v1 bytes are unchanged and are read back through the pads here.
 // =============================================================================
 #include "nt_test.h"
 
@@ -43,9 +46,9 @@ TEST(fixture_petsave_v1_adult) {
   CHECK_EQ(p.magic, NT_SAVE_MAGIC);
   CHECK_EQ(p.version, NT_SAVE_VERSION);
   CHECK_EQ(p.stage, STAGE_ADULT);
-  CHECK_EQ(p.adult_form, FORM_BOLOTA);
+  CHECK_EQ(p.pad_adult_form, 0);            // v1 adult_form = FORM_BOLOTA
   CHECK_EQ(p.stat[ST_HUNGER], 73000);
-  CHECK_EQ(p.stat[ST_DISCIPLINE], 55000);
+  CHECK_EQ(p.pad_stat, 55000);              // v1 stat[ST_DISCIPLINE]
   CHECK_EQ(p.age_s, 200000u);
   CHECK_EQ(p.cq, 640);
   CHECK_EQ(p.flags, PF_LIGHT_ON);
@@ -65,10 +68,11 @@ TEST(fixture_petsave_v1_egg) {
   CHECK_EQ(p.magic, NT_SAVE_MAGIC);
   CHECK_EQ(p.version, NT_SAVE_VERSION);
   CHECK_EQ(p.stage, STAGE_EGG);
-  CHECK_EQ(p.adult_form, FORM_UNSET);
+  CHECK_EQ(p.pad_adult_form, 0xFF);         // v1 adult_form = FORM_UNSET
   CHECK_EQ(p.age_s, 0u);
   CHECK_EQ(p.egg_epoch, 1700000000u);
   for (int i = 0; i < ST_COUNT; i++) CHECK_EQ(p.stat[i], STAT_MILLI_MAX);
+  CHECK_EQ(p.pad_stat, STAT_MILLI_MAX);     // v1 stat[ST_DISCIPLINE]
   CHECK_EQ(p.genome.lineage_id, 0x00C0FFEEu);
   CHECK_EQ(p.genome.crc16, crc16_ccitt(&p.genome, GENOME_CRC_BYTES));
   CHECK_EQ(p.crc16, crc16_ccitt(&p, PETSAVE_CRC_BYTES));
@@ -105,7 +109,7 @@ TEST(fixture_gainsave_v1) {
   memcpy(&g, s_blob, sizeof g);
   CHECK_EQ(g.magic, NT_GAIN_MAGIC);
   CHECK_EQ(g.version, NT_GAIN_VERSION);
-  CHECK_EQ(g.slots, ST_COUNT);
+  CHECK_EQ(g.slots, 7);                     // the v1 blob carried seven StatIds
   CHECK_EQ(g.epoch, 1700200000u);
   CHECK_EQ(g.pts[ST_HUNGER], 30);
   CHECK_EQ(g.pts[ST_HYGIENE], 25);
@@ -119,7 +123,7 @@ TEST(fixture_crc_rejects_a_corrupted_byte) {
   const size_t n = load("fixtures/petsave_v1_adult.bin");
   CHECK_EQ(n, 128);
   if (n != sizeof(PetSave)) return;
-  s_blob[40] ^= 0x01;                                       // death_epoch, bit 0
+  s_blob[40] ^= 0x01;                                       // v1 death_epoch, bit 0
   PetSave p;
   memcpy(&p, s_blob, sizeof p);
   CHECK(p.crc16 != crc16_ccitt(&p, PETSAVE_CRC_BYTES));
