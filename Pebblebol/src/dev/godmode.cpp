@@ -12,10 +12,45 @@
 // =============================================================================
 #include "godmode.h"
 
-#if GOD_MODE_ENABLED
-
 #include <Arduino.h>
 #include <stdio.h>
+
+// =============================================================================
+//  0. HEAP TREND (plan P2-C12)
+//  The phase-exit heap baseline. One Serial line every GOD_HEAP_PERIOD_MS with
+//  the free heap and the low-water mark since boot, emitted on EVERY screen,
+//  with god mode OFF, and in the GOD_MODE_ENABLED == 0 build as well - the
+//  bench soak it exists for is "one hour on HOME with the radio OFF, look for a
+//  flat line", which is precisely the configuration where nothing else prints.
+//  This block therefore sits OUTSIDE the console's own #if.
+//
+//  Format, stable and greppable:  DIAG,heap,<uptime_s>,<free_b>,<min_free_b>
+//  ESP.getMinFreeHeap() is the IDF's own low-water mark since boot, so a leak
+//  shows up as a falling min even when the instantaneous free heap looks calm.
+// =============================================================================
+static uint32_t s_heap_last_ms = 0;
+
+static void heap_trend_begin(void)
+{
+  // Back-date the timer by one full period so the first god_service() prints
+  // the t=0 sample instead of leaving the trend without an origin.
+  s_heap_last_ms = (uint32_t)millis() - (uint32_t)GOD_HEAP_PERIOD_MS;
+  Serial.printf("DIAG#,heap,uptime_s,free_b,min_free_b\r\n");
+}
+
+static void heap_trend_service(void)
+{
+  const uint32_t now = (uint32_t)millis();
+  if ((uint32_t)(now - s_heap_last_ms) < (uint32_t)GOD_HEAP_PERIOD_MS) return;
+  s_heap_last_ms = now;
+  Serial.printf("DIAG,heap,%lu,%lu,%lu\r\n",
+                (unsigned long)(now / 1000UL),
+                (unsigned long)ESP.getFreeHeap(),
+                (unsigned long)ESP.getMinFreeHeap());
+}
+
+#if GOD_MODE_ENABLED
+
 #include <string.h>
 #include <time.h>
 
@@ -514,6 +549,7 @@ void god_begin(void)
   s_hex_show[0] = '\0';
 
   sim_set_time_scale(1u);
+  heap_trend_begin();
 
   if (boot_god_tainted()) {
     // The RTC nonce survived a soft reset that happened inside god mode. Do NOT
@@ -611,6 +647,7 @@ void god_service(void)
   // The bench console is not gated on god mode being ON: a stall has to be
   // reachable from a plain serial terminal on a freshly flashed board.
   cmd_service();
+  heap_trend_service();
 
   if (!s_active) return;
 
@@ -1195,8 +1232,8 @@ GodEvt   god_handle(Gesture g)                  { (void)g; return GOD_EVT_NONE; 
 void     god_draw(void)                         { }
 uint32_t god_time_scale(void)                   { return 1u; }
 void     god_dump_line(void)                    { }
-void     god_begin(void)                        { }
-void     god_service(void)                      { }
+void     god_begin(void)                        { heap_trend_begin(); }
+void     god_service(void)                      { heap_trend_service(); }
 uint8_t  god_entry_progress(uint8_t screen_id)  { (void)screen_id; return 0; }
 void     god_enter(void)                        { }
 void     god_exit(void)                         { }

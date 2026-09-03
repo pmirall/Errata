@@ -52,6 +52,15 @@
 #define GOD_DUMP_PERIOD_MS     10000UL
 #endif
 
+// Heap-trend cadence (plan P2-C12). One "DIAG,heap," line per this many REAL
+// milliseconds, printed on EVERY screen whether or not god mode is on, and in
+// the GOD_MODE_ENABLED == 0 build too - it is the phase-exit baseline for the
+// bench soak ("flat line on HOME with radio OFF"), so it must survive the
+// release configuration and must not require entering the console.
+#ifndef GOD_HEAP_PERIOD_MS
+#define GOD_HEAP_PERIOD_MS     60000UL
+#endif
+
 // How long an on-screen confirmation line stays up.
 #ifndef GOD_TOAST_MS
 #define GOD_TOAST_MS           1600UL
@@ -127,12 +136,14 @@ void     god_dump_line(void);
 //     be pumped, and cannot keep its promise of being unmistakable.
 // =============================================================================
 
-// Reset every console variable and force the time scale back to x1. Call once
-// from setup(), AFTER kv_begin() and sim_init(). Never enters god mode.
+// Reset every console variable and force the time scale back to x1, and arm the
+// heap trend so the first god_service() emits the t=0 sample. Call once from
+// setup(), AFTER kv_begin() and sim_init(). Never enters god mode.
 void     god_begin(void);
 
 // Pump. Call once per loop(), on every screen, whether or not god mode is on:
-// it drives the soak log and the Serial genome paste. Cheap and non-blocking.
+// it drives the soak log, the Serial genome paste and the GOD_HEAP_PERIOD_MS
+// heap-trend line. Cheap and non-blocking.
 void     god_service(void);
 
 // The undocumented entry gesture. Call every loop() with the id of the screen

@@ -112,8 +112,63 @@ Recorded here for traceability; each is one commit to reverse.
 |---|---|---|
 | Worst-case offline catch-up (`sim_catch_up_ex`, 400 days) | **8.4 ms** on the host at `-O1`; **~421 ms** projected on a 160 MHz ESP32-C3 using the plan's 50x factor | Comfortably under the 1 s threshold and 12x under the 5 s Task WDT, so catch-up does **not** need to be made resumable. Plan risk 25 closed by measurement (P2-C10, 2026-09-03). |
 
+## Phase-2 exit (P2-C12, 2026-09-03)
+
+**Variant matrix.** `tools/build_matrix.sh` compiles all seven feature variants with
+`--warnings all` and fails on any warning pointing into the sketch. Result at the
+`v0.2.0-core` tag, every variant at **0 project warnings**:
+
+| Variant | Overrides | Flash (B) | Static RAM (B) |
+|---|---|---|---|
+| baseline | — | 1,881,376 | 70,276 |
+| no-ble | `FEATURE_BLE=0` | 1,168,978 | 46,780 |
+| no-web | `FEATURE_WEB=0` | 1,251,972 | 49,332 |
+| no-god | `GOD_MODE_ENABLED=0` | 1,869,150 | 70,116 |
+| sh1106 | `DISPLAY_IS_SH1106=1` | 1,881,376 | 70,276 |
+| all-off | every `FEATURE_*`=0 + `GOD_MODE_ENABLED=0` | 480,766 | 22,024 |
+| **release** | `GOD_MODE_ENABLED=0 FEATURE_BLE=0` (D2) | **1,156,866** | **46,620** |
+
+Baseline flash is down from the 2,105,548 B measured on the source commit `b53cfe4`
+(−224,172 B) and the release configuration is 1,156,866 B, i.e. 37 % of the 3,145,728 B
+`app0` slot. `sh1106` compiles to the same size as `baseline` because U8g2's two
+`_F_HW_I2C` classes differ only in which init sequence is linked and those are the same
+length; the variant still proves the alternate driver builds and links (D5).
+
+**D3 outcome.** Closed in P2-C9b and recorded in the table above: the persisted namespace
+is `"pbbl"`, `kv_begin()` performs the one-shot import of a legacy `"notta"` save, the
+folder rename landed in P2-C1 and mDNS was deleted in P2-C5. Nothing about D3 is left open
+at the phase boundary; the AP prefix (`PEBBLEBOL-`) is the only remaining piece and it is
+scheduled for P8-C2, where the AP itself is built.
+
+**Heap trend instrumentation.** `dev/godmode.cpp` now prints one line on Serial every
+`GOD_HEAP_PERIOD_MS` (60,000 ms):
+
+```
+DIAG#,heap,uptime_s,free_b,min_free_b
+DIAG,heap,<uptime_s>,<ESP.getFreeHeap()>,<ESP.getMinFreeHeap()>
+```
+
+It is deliberately outside the console's `#if GOD_MODE_ENABLED`: the soak it exists for is
+"one hour on HOME with the radio OFF", which is the configuration where god mode is off and
+the release build is what is flashed, so the line must appear there too. `god_begin()`
+back-dates the timer by one period so the first `god_service()` emits the t=0 origin
+sample. Cost: 262 B of flash and 8 B of static RAM in the release variant.
+
+**Soak NOT run — no hardware.** The 1 h heap soak the plan asks for cannot be executed:
+this project has still never run on a physical board (no ESP32-C3, no panel, no cells), and
+free heap on the host has no relationship to the IDF allocator's. There is no honest way to
+substitute a host measurement here the way P2-C10 substituted one for the catch-up budget,
+because the quantity under test *is* the device allocator. The Phase-2 exit is therefore
+recorded as: instrumentation in place and building in every variant, measurement pending
+first flash. The soak is listed below with the other first-hardware measurements.
+
 ## Measurements to record when hardware exists (P2-C0)
 
+- **1 h heap soak (P2-C12).** Boot to HOME, radio OFF, god mode OFF, leave it for an hour
+  and capture the `DIAG,heap,` lines. Pass = `free_b` flat within allocator noise and
+  `min_free_b` reaching a floor early and then not falling. A `min_free_b` that keeps
+  sliding is a leak; the per-frame render path and the 1 Hz save policy are the first two
+  suspects.
 - Real boot free heap vs the author's 179,836 B (`net.cpp:5-7`).
 - Real `sendBuffer()` frame time vs the ≈ 24 ms estimate at 400 kHz.
 - I2C probe result (0x3C / 0x3D / bus sweep) and panel variant (D5). LED polarity is moot while `PIN_LED 5` points at an unpopulated pin (see D1 consequences).

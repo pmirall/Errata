@@ -4,7 +4,7 @@
 |---|---|
 | Title | Pebblebol implementation plan (spec §69 second deliverable; task checklist for §52 Phases 1-10) |
 | Date | 2026-09-02 |
-| Status | Plan complete. Phase 1 (archaeology + housekeeping) done; Phases 2-10 open. |
+| Status | Plan complete. Phase 1 (archaeology + housekeeping) and **Phase 2 (core engine, tag `v0.2.0-core`)** done; Phases 3-10 open. The two **P2-C0** boxes (first flash, on-device measurements) stay open by construction: D1 is deferred and no board exists, so the on-device half of the Phase-2 exit criteria is unverified. |
 | Source commit | `b53cfe4` ("first commit", the only commit; `docs/` and the audit are untracked) |
 | Inputs | Audit: `/home/user/Pebblebol/PEBBLEBOL_IMPLEMENTATION_AUDIT.md` (669 lines). Spec: `/home/user/Pebblebol/docs/PEBBLEBOL_PRODUCT_SYSTEM_SPEC.md` (2,708 lines; §5 architecture, §6 states, §52 phases, §67 done, §68 rules, §69 audit items). Three plan drafts (buildable / reuse / spec-purist) and two judge verdicts, merged here. |
 | Firmware | `/home/user/Pebblebol/sketch_aug30b/` — "Nottamagochi" `FW_VERSION "1.0.0"`, 26,703 lines in 16 `.cpp` + 1 `.ino` + 21 `.h` |
@@ -466,8 +466,8 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 - Acceptance: each sub-commit passes the gate; after the last one `grep -c "case SCR_" ui.cpp` == 0 for the three old switches; `test_statemachine` + `test_screens` green.
 
 **P2-C12 Phase-2 exit** — S
-- [ ] `tools/build_matrix.sh` warning-free in every variant; tag `v0.2.0-core`; `docs/decisions.md` records D3 outcome.
-- [ ] Heap trend baseline: DIAG prints free heap and min-free-heap every 60 s; 1 h soak on the bench (when hardware exists) shows a flat line on HOME with radio OFF; numbers recorded in `docs/decisions.md`.
+- [x] `tools/build_matrix.sh` warning-free in every variant; tag `v0.2.0-core`; `docs/decisions.md` records D3 outcome. All seven variants at 0 project warnings; release (`GOD_MODE_ENABLED=0 FEATURE_BLE=0`) is **1,156,866 B flash / 46,620 B static RAM**, baseline 1,881,376 / 70,276 (down 224,172 B from the `b53cfe4` baseline). The per-variant table is in `docs/decisions.md`; D3 was already closed in P2-C9b and the exit section names the one piece still scheduled (AP prefix, P8-C2). Root `CHANGELOG.md` written (Keep a Changelog, `0.2.0-core — Unreleased`).
+- [x] Heap trend baseline: DIAG prints free heap and min-free-heap every 60 s (`DIAG,heap,<uptime_s>,<free_b>,<min_free_b>` from `dev/godmode.cpp`, deliberately outside `#if GOD_MODE_ENABLED` so the release build and a soak with god mode OFF both print it; +262 B flash / +8 B static RAM). **The 1 h bench soak is NOT run and no numbers exist: nothing has ever run on hardware, and free heap on the host is not the IDF allocator's, so there is no honest host substitute the way P2-C10 had one for catch-up.** Recorded as such in `docs/decisions.md`, with the pass criterion and the first two leak suspects, under "Measurements to record when hardware exists".
 - Exit criterion (audit §20 Phase 2): compile 0 warnings; tests green; boots to HOME with a Box holding the starter; state persists across power-cycle; a corrupted `pb00` recovers from `pb01`; both corrupted show SAVE ERROR with two choices; radio OFF on HOME.
 - Commit message: `phase-2: core engine — schema v2 with pairs + nvs2 checkpoint, host tests, screen table, radio off by default, clock calibration, no cloud code`
 
