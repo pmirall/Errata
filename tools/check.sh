@@ -43,7 +43,40 @@ if [ $DO_TESTS -eq 1 ]; then
   make -C "$ROOT/tests" check || fail "host tests"
 fi
 
-# --- grep gates (each line is enabled by the plan commit that makes it true) ---
+# --- grep gates (each is enabled by the plan commit that makes it true) ---
+# The screen state machine owns navigation. Scoped to ui/ and app/ ON PURPOSE:
+# dev/godmode.cpp has its own unrelated `static uint8_t s_screen` for the
+# console sub-screen (33 hits), so the plan's tree-wide wording would fail on
+# false positives and teach the next person to disable the gate. True since
+# P2-C11c.
+if [ -d "$SKETCH/src/ui" ]; then
+  # `|| true` on BOTH greps: this script runs under `set -o pipefail`, so a grep
+  # that finds nothing returns 1, fails the pipeline and — with `set -e` — kills
+  # the run at the exact moment the gate should be approving. A gate must not be
+  # able to abort the thing it guards.
+  n=$( { grep -rE 's_screen[[:space:]]*=' "$SKETCH/src/ui" "$SKETCH/src/app" --include='*.cpp' || true; } \
+        | { grep -v 'app/state_machine\.cpp' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "navigation assigned outside app/state_machine.cpp ($n)"
+fi
+
+# The ui.cpp monolith no longer dispatches screens; the table does. True since P2-C11c.
+if [ -f "$SKETCH/src/ui/ui.cpp" ]; then
+  n=$(grep -c 'case SCR_' "$SKETCH/src/ui/ui.cpp" || true)
+  [ "${n:-0}" -eq 0 ] || fail "ui.cpp still switches on ScreenId ($n cases)"
+fi
+
+# Rendering reads views, not models (audit risk 9). True since P2-C11c.
+# NOTE the `if`: `grep -q ... && fail ...` looks equivalent but returns grep's
+# exit status when it finds nothing, which under `set -e` kills this script in
+# the PASSING case — a gate that aborts the run instead of approving it.
+for f in petfx actfx; do
+  if [ -f "$SKETCH/src/ui/$f.cpp" ]; then
+    if grep -qE '#include.*(sim|genome)\.h' "$SKETCH/src/ui/$f.cpp"; then
+      fail "$f.cpp reaches past PetView into the model"
+    fi
+  fi
+done
+
 # P5-C1: no station association anywhere (scan-only Wi-Fi, spec §68 r5)
 # if [ -d "$SKETCH/src" ]; then
 #   n=$(grep -rn "WiFi\.begin(" "$SKETCH/src" | grep -v creator_server | wc -l); [ "$n" -eq 0 ] || fail "WiFi.begin outside creator_server ($n)"
