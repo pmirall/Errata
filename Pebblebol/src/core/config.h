@@ -177,7 +177,7 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 #define UI_EVOLVE_FREEZE_MS     4000UL
 #define UI_HEX_DUMP_MS          5000UL       // DBL_R on S5/S6
 #define UI_ALERT_MIN_MS         1200UL
-#define MENU_ITEM_COUNT         8
+#define MENU_ITEM_COUNT         7
 
 // --- birth staging: 4.5 s in 7 phases ----------------------------------------
 #define HATCH_WOBBLE_MS      1200UL

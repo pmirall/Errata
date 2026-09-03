@@ -38,15 +38,26 @@ enum StrId : uint16_t {
   STR_BOOT_DIZZY,
   STR_BOOT_FIRST,
 
-  // --- 2. main menu ring -------------------------- <= 10 chars @ t0_11b -----
+  // --- 2. main menu ring, spec section 8 order ---- <= 10 chars @ t0_11b -----
+  //     PEBBLE CARE PLAY BOX NETWORK LINK SETTINGS
+  //     S_MENU(i) indexes exactly these seven, in this order, and the guard at
+  //     the bottom of the file ties them to MENU_ITEM_COUNT.
+  STR_MENU_PEBBLE,
+  STR_MENU_CARE,
+  STR_MENU_PLAY,
+  STR_MENU_BOX,
+  STR_MENU_NETWORK,
+  STR_MENU_LINK,
+  STR_MENU_SETTINGS,
+  //     Labels the ring no longer carries. They are still named one at a time
+  //     by the CARE list, the SETTINGS list and the god console, so they stay -
+  //     outside the indexed block, where nothing counts them.
   STR_MENU_FEED,
   STR_MENU_CLEAN,
-  STR_MENU_PLAY,
   STR_MENU_HEALTH,
   STR_MENU_STATUS,
   STR_MENU_LIGHT,
   STR_MENU_SOCIAL,
-  STR_MENU_SETTINGS,
 
   // --- 3. affordance strip + generic words -------- <= 9 chars @ 5x8 ---------
   STR_AF_NEXT,
@@ -195,6 +206,9 @@ enum StrId : uint16_t {
   STR_ST_RARE,
   STR_ST_SEX_O,
   STR_ST_SEX_X,
+  STR_ST_LEVEL,
+  STR_ST_XP,
+  STR_ST_HP,
 
   // --- 25. social / BLE --------------------------- <= 25 chars @ 5x8 --------
   STR_SO_TITLE,
@@ -272,6 +286,7 @@ enum StrId : uint16_t {
   // --- 33a. affordance labels the base set did not carry -- <= 9 ch @ 5x8 ---
   STR_AF_MENU,
   STR_AF_VIEW,
+  STR_AF_PET,
   STR_AF_QUIT,
   STR_AF_RUB,
 
@@ -286,6 +301,8 @@ enum StrId : uint16_t {
   STR_HLP_STATUS,
   STR_HLP_LIGHT,
   STR_HLP_SOCIAL,
+  STR_HLP_BOX,
+  STR_HLP_NETWORK,
   STR_HLP_SETTINGS,
   STR_HLP_SOUND,
   STR_HLP_WEB,
@@ -316,6 +333,7 @@ enum StrId : uint16_t {
   STR_UI_NOBODY,
   STR_UI_GOD_HOLD,
   STR_UI_NO_CLOCK,
+  STR_UI_SOON,
 
   // --- 33f. time entry ---------------------------- <= 16 chars --------------
   STR_SET_CLOCK,
@@ -411,14 +429,19 @@ inline constexpr const char* const ES[] = {
   /* STR_BOOT_FIRST */            "Hola. Soy nuevo aquí.",
 
   /* --- 2. main menu ring --- */
+  /* STR_MENU_PEBBLE */           "PEBBLE",
+  /* STR_MENU_CARE */             "CUIDAR",
+  /* STR_MENU_PLAY */             "JUGAR",
+  /* STR_MENU_BOX */              "CAJA",
+  /* STR_MENU_NETWORK */          "RED",
+  /* STR_MENU_LINK */             "ENLACE",
+  /* STR_MENU_SETTINGS */         "AJUSTES",
   /* STR_MENU_FEED */             "COMER",
   /* STR_MENU_CLEAN */            "LIMPIAR",
-  /* STR_MENU_PLAY */             "JUGAR",
   /* STR_MENU_HEALTH */           "SALUD",
   /* STR_MENU_STATUS */           "ESTADO",
   /* STR_MENU_LIGHT */            "LUZ",
   /* STR_MENU_SOCIAL */           "SOCIAL",
-  /* STR_MENU_SETTINGS */         "AJUSTES",
 
   /* --- 3. affordances + generic --- */
   /* STR_AF_NEXT */               "SIG.",
@@ -566,6 +589,9 @@ inline constexpr const char* const ES[] = {
   /* STR_ST_RARE */               "RARO",
   /* STR_ST_SEX_O */              "o",
   /* STR_ST_SEX_X */              "x",
+  /* STR_ST_LEVEL */              "Nv",
+  /* STR_ST_XP */                 "XP",
+  /* STR_ST_HP */                 "PV",
 
   /* --- 25. social / BLE --- */
   /* STR_SO_TITLE */              "SOCIAL",
@@ -636,6 +662,7 @@ inline constexpr const char* const ES[] = {
   /* --- 33a. affordance labels --- */
   /* STR_AF_MENU */               "MENÚ",
   /* STR_AF_VIEW */               "VISTA",
+  /* STR_AF_PET */                "MIMO",
   /* STR_AF_QUIT */               "SALIR",
   /* STR_AF_RUB */                "FROTAR",
 
@@ -649,6 +676,8 @@ inline constexpr const char* const ES[] = {
   /* STR_HLP_STATUS */            "Cómo va por dentro.",
   /* STR_HLP_LIGHT */             "Apágala para dormir.",
   /* STR_HLP_SOCIAL */            "Buscar otros bichos.",
+  /* STR_HLP_BOX */               "Tus Pebbles guardados.",
+  /* STR_HLP_NETWORK */           "Salir a explorar la red.",
   /* STR_HLP_SETTINGS */          "Cosas de mayores.",
   /* STR_HLP_SOUND */             "Zumbido al avisar.",
   /* STR_HLP_WEB */               "Página y QR en el móvil.",
@@ -673,6 +702,7 @@ inline constexpr const char* const ES[] = {
   /* STR_UI_NOBODY */             "Aquí no hay nadie.",
   /* STR_UI_GOD_HOLD */           "···",
   /* STR_UI_NO_CLOCK */           "Sin hora fiable.",
+  /* STR_UI_SOON */               "Aún no está listo.",
 
   /* --- 33f. time entry --- */
   /* STR_SET_CLOCK */             "Poner hora",
@@ -749,7 +779,7 @@ inline constexpr const char* const ES[] = {
 #define S_AERR(e)      (ES[STR_AERR_NONE      + (uint16_t)(e)])   // ActionErr
 #define S_ALERT(a)     (ES[STR_AL_NONE        + (uint16_t)(a)])   // AlertId
 #define S_WISH(w)      (ES[STR_WISH_NONE      + (uint16_t)(w)])   // WishId
-#define S_MENU(i)      (ES[STR_MENU_FEED      + (uint16_t)(i)])   // 0..7
+#define S_MENU(i)      (ES[STR_MENU_PEBBLE    + (uint16_t)(i)])   // 0..6
 #define S_SYL_A(i)     (ES[STR_SYL_A00        + (uint16_t)((i) % 12u)])  // name syllable 1
 #define S_SYL_B(i)     (ES[STR_SYL_B00        + (uint16_t)((i) % 12u)])  // name syllable 2
 
@@ -769,10 +799,10 @@ static_assert(STR_ACT_SLEEP       - STR_ACT_NONE    + 1 == (int)ACT_COUNT,     "
 static_assert(STR_AERR_BAD_ARG    - STR_AERR_NONE   + 1 == (int)AERR_COUNT,    "action errors");
 static_assert(STR_AL_MATE_FOUND   - STR_AL_NONE     + 1 == (int)AL_COUNT,      "alert lines");
 static_assert(STR_WISH_PET3       - STR_WISH_NONE   + 1 == (int)WISH_COUNT,    "wish lines");
-static_assert(STR_MENU_SETTINGS   - STR_MENU_FEED   + 1 == MENU_ITEM_COUNT,    "menu labels");
+static_assert(STR_MENU_SETTINGS   - STR_MENU_PEBBLE + 1 == MENU_ITEM_COUNT,    "menu labels");
 static_assert(STR_SYL_A11         - STR_SYL_A00     + 1 == 12,                 "name syllables A");
 static_assert(STR_SYL_B11         - STR_SYL_B00     + 1 == 12,                 "name syllables B");
-static_assert(STR_HLP_BACK        - STR_HLP_FEED    + 1 == 17,                 "ui help block");
+static_assert(STR_HLP_BACK        - STR_HLP_FEED    + 1 == 19,                 "ui help block");
 static_assert(STR_AF_ADD          - STR_SET_CLOCK   + 1 == 12,                 "time entry block");
 
 #endif // NT_STRINGS_ES_H

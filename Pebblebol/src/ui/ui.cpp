@@ -1,7 +1,11 @@
 // =============================================================================
 //  NOTTAMAGOCHI - ui/ui.cpp
-//  The screen state machine. GAME_DESIGN 8.2 (global invariants) and 8.3
-//  (per-screen gesture map), in full, for SCR_HOME .. SCR_CLOCK.
+//  GAME_DESIGN 8.2 (global invariants) and 8.3 (per-screen gesture map), for
+//  the screens that have not yet moved into the screen table: GAME, SOCIAL,
+//  QR, EGG and the modal layer. Everything else is a ScreenDef row in
+//  ui/screen_*.cpp, and what those rows need from the device - the animated
+//  HOME stage, the diagnostics page, the clock, the simulation, the modals -
+//  is bound and forwarded from section 20 of this file.
 //
 //  Invariants implemented literally (GAME_DESIGN 8.2):
 //    1. GST_HOLD_R == BACK on every screen except GAME.
@@ -51,8 +55,18 @@
 #include "../dev/godmode.h"    // GodEvt, god_active/handle/draw/entry_progress/marker
 #include "petfx.h"      // the body's own presentation layer: floor, position, gaze
 #include "actfx.h"      // the choreography of every action the player can take
+#include "../game/box.h"          // the active slot: level, xp, hp for the view
+#include "../data/species_table.h" // and the base_hp hp_max is derived from
+#include "gfx.h"           // the header bar, the countdown and the list widgets
 #include "screen.h"        // the ScreenDef table this file is being dissolved into
 #include "screen_error.h"  // the ERROR screen moved out first (P2-C11a)
+// P2-C11b moved HOME, MENU, CARE, PLAY, both STATUS pages, SETTINGS and TIME
+// out. What is left here is the DEVICE half each of them needs - the animated
+// body layer, the diagnostics page, the minigame start - which this file binds
+// and hands over. It draws none of them.
+#include "screen_home.h"
+#include "screen_settings.h"
+#include "screen_view.h"
 // app/ sits ABOVE ui/, and this include points the wrong way on purpose: the
 // strangler is moving the state machine out of this file, not wiring a new
 // dependency into it. Every one of these calls disappears with the switch that
@@ -75,6 +89,21 @@ static_assert(UI_AFFORD_Y == RD_AFFORD_Y,
 static_assert(UI_LIST_ROWS * UI_LIST_PITCH <= UI_CONTENT_H + 1,
               "the vertical list does not fit under the header");
 static_assert(UI_HDR_H >= 11, "t0_11b_tf accents clip in a shorter header");
+
+// ui/screen_home.h has to name the stage geometry without including petfx.h
+// (a migrated screen is a pure translation unit and petfx.h is not one). This
+// is where the two are tied together: if petfx ever moves the floor or the
+// HUD keep-out, HOME's meters and its static-body fallback move with it or
+// this stops compiling.
+static_assert(HOME_FLOOR_Y   == PETFX_FLOOR_Y,  "HOME and petfx disagree about the floor");
+static_assert(HOME_STAGE_Y   == SPRITE_AREA_Y,  "HOME and config disagree about the stage top");
+static_assert(HOME_METER_X   == UI_HUD_R_BEGIN, "HOME's meters would stand on the stage");
+static_assert(HOME_METER_W   == UI_HUD_BADGE_W, "HOME's meters are wider than the HUD column");
+static_assert(HOME_METER_X   > PETFX_STAGE_R,   "HOME's meters would stand on the stage");
+// Three meters at HOME_METER_PITCH, the last one's bar included, must clear
+// the floor line the body stands on.
+static_assert(HOME_METER_Y0 + 2 * HOME_METER_PITCH + 12 <= HOME_FLOOR_Y,
+              "HOME's third meter overlaps the floor");
 
 // =============================================================================
 //  2. LOCAL TYPES AND STATE
@@ -109,9 +138,7 @@ static uint32_t s_wiggle_ms   = 0;
 static uint8_t  s_fps_want    = FPS_NORMAL;
 static uint8_t  s_god_prog    = 0;      // god_entry_progress(), 0..100
 
-// ---- per-screen cursors -----------------------------------------------------
-static uint8_t  s_cursor[SCR_COUNT];
-static uint8_t  s_menu_idx    = 0;
+// ---- the last accepted action, replayed by the MENU's DBL_R -----------------
 static uint8_t  s_last_action = ACT_NONE;
 
 // ---- modal layer ------------------------------------------------------------
@@ -133,22 +160,14 @@ static char     s_toast[72];
 static uint32_t s_toast_ms    = 0;
 
 // ---- home -------------------------------------------------------------------
-static uint8_t  s_bar_mode    = SBAR_ICONS;
 static uint32_t s_mimo_ms     = 0;
 static uint32_t s_evolve_ms   = 0;
 
-// ---- interface motion (menu carousel, list cursor, screen dissolve) --------
-// Defined HERE, above everything that touches them, because a file-scope
-// static cannot be declared in one place and defined in another in C++ (a
-// tentative definition is C only). ui_goto() sits above the widgets that
-// animate them and is the one place that has to cut them, so the values live
-// with the rest of the state and only the two reset FUNCTIONS are forward
-// declared in section 6.
-static int16_t  s_ring_from   = 0;    // px still to travel, 0 = settled
-static uint32_t s_ring_ms     = 0;
-static int16_t  s_list_from   = 0;
-static int16_t  s_list_to     = -1;   // -1 = nothing drawn yet: snap, do not slide
-static uint32_t s_list_ms     = 0;
+// ---- screen entry dissolve --------------------------------------------------
+// The carousel and list interpolators moved into ui/gfx_widgets.cpp and
+// ui/screen_menu.cpp with the screens that animate them (P2-C11b); what is
+// left here is the dissolve, which belongs to the navigation and not to any
+// one screen.
 static uint32_t s_trans_ms    = 0;
 
 // ---- welcome-back banner ----------------------------------------------------
@@ -156,13 +175,8 @@ static uint32_t s_absence_ms   = 0;
 static uint32_t s_absence_s    = 0;
 static uint8_t  s_absence_known = 1;   // 0 = the clock could not measure the gap
 
-// ---- STATUS_B ---------------------------------------------------------------
-static uint32_t s_hex_ms      = 0;
-static char     s_hex[33];
-
 // ---- settings ---------------------------------------------------------------
 static Config*  s_cfg         = nullptr;
-static uint8_t  s_set_page    = 0;      // 0 = list, 1 = "Acerca de"
 
 // ---- egg --------------------------------------------------------------------
 static uint8_t  s_rub_count   = 0;
@@ -170,8 +184,8 @@ static uint8_t  s_rub_last    = 0xFF;
 static uint32_t s_rub_ms      = 0;
 
 // ---- birth staging ----------------------------------------------------------
-// A phase enum riding on the EGG screen rather than a ScreenId of its own,
-// because adding one would shift ScreenId for s_cursor[SCR_COUNT].
+// A phase enum riding on the EGG screen rather than a ScreenId of its own.
+// P2-C11's renumbering bullet is where the ceremony gets an id of its own.
 enum HatchPhase : uint8_t {
   HP_NONE = 0,
   HP_WOBBLE,   //    0 .. 1200   the egg rocks, accelerating
@@ -201,6 +215,9 @@ static uint32_t s_qr_manual   = 0;      // suppress auto-alternation after a tap
 static char     s_qr_key[QR_TEXT_MAX];
 
 // ---- SOCIAL -----------------------------------------------------------------
+// The old s_cursor[SCR_COUNT] went with the screens that used it; SOCIAL is
+// the only one left in this file that has a list.
+static uint8_t  s_soc_cursor  = 0;
 static uint8_t  s_soc_phase   = SOC_ENTER;
 static uint8_t  s_soc_prev    = RADIO_OFF;
 static uint16_t s_soc_err     = STR_EMPTY;
@@ -429,8 +446,6 @@ static void bright_service(void) {
   rd_contrast_ramp(want, ms);
 }
 
-static bool cfg_flag(uint8_t bit) { return s_cfg && (s_cfg->flags & bit) != 0; }
-
 // =============================================================================
 //  4. TOASTS, ALERTS, MODALS
 // =============================================================================
@@ -541,7 +556,6 @@ static void screen_leave(uint8_t s);
 // all of them and is the one place that has to cut them. Only the FUNCTIONS
 // are forward declared: the state they move is defined once in section 2,
 // because a file-scope static cannot be declared then defined in C++.
-static void list_anim_reset(void);
 static bool screen_wants_transition(uint8_t s);
 
 uint8_t ui_fps(void) {
@@ -586,8 +600,7 @@ void ui_nav_enter(uint8_t to)   { screen_enter(to); }
 
 void ui_nav_reset(void) {
   modal_close();
-  list_anim_reset();
-  s_ring_from = 0;
+  gfx_list_reset();
 }
 
 void ui_nav_arrived(uint8_t to) {
@@ -646,32 +659,17 @@ static uint8_t ring_next(uint8_t cur, uint8_t n) { return n ? (uint8_t)((cur + 1
 //  7. SHARED CHROME
 // =============================================================================
 
-// Inverted title bar, rows 0..UI_HDR_H-1. The tag is right-aligned and the
-// title is fitted into whatever is left, so the two can never collide.
+// The header bar and the auto-return countdown are gfx_widgets.cpp's now, so
+// the migrated screens and the four that are still here draw the identical
+// thing. draw_countdown() keeps the sticky test, which is navigation state and
+// not a drawing decision.
 static void draw_header(const char* title, const char* tag) {
-  U8G2& u = rd_u8g2();
-  px_box(0, 0, OLED_W, UI_HDR_H);
-  u.setDrawColor(0);
-  int16_t avail = OLED_W - 4;
-  if (tag && tag[0]) {
-    const int16_t tw = (int16_t)rd_text_width(RD_FONT_BODY, tag);
-    rd_text_right(OLED_W - 2, UI_HDR_BASE, RD_FONT_BODY, tag);
-    avail = (int16_t)(avail - tw - 4);
-  }
-  rd_text_fit(2, UI_HDR_BASE, avail, RD_FONT_HEAD, title ? title : "");
-  u.setDrawColor(1);
+  gfx_header(title, tag);
 }
 
-// Invariant 3: a 3 px bar that drains right to left in the last 5 seconds.
-// XORed so it stays visible over whatever the screen already drew.
 static void draw_countdown(void) {
   if (sm_is_sticky()) return;
-  const uint32_t el = sm_idle_ms();
-  if (el + UI_COUNTDOWN_MS < UI_AUTORETURN_MS) return;
-  const uint32_t left = (el >= UI_AUTORETURN_MS) ? 0u : (UI_AUTORETURN_MS - el);
-  int16_t w = (int16_t)((left * (uint32_t)OLED_W) / UI_COUNTDOWN_MS);
-  if (w > OLED_W) w = OLED_W;
-  if (w > 0) rd_invert_rect(0, UI_CONTENT_BOTTOM - 2, w, 3);
+  gfx_countdown(sm_idle_ms());
 }
 
 // ---- screen entry dissolve --------------------------------------------------
@@ -712,136 +710,14 @@ static void draw_toast(void) {
   u.setDrawColor(1);
 }
 
-// ---- sliding list cursor ----------------------------------------------------
-// draw_list() is SHARED by FEED, PLAY and SETTINGS, so this state MUST
-// be reset on every screen change (ui_goto(), which nav_push/nav_back both
-// funnel through). Without that the highlight flies in from wherever the
-// previous list happened to leave it. The state itself lives in section 2.
-static void list_anim_reset(void) { s_list_from = 0; s_list_to = -1; s_list_ms = 0; }
-
-// Where the highlight is RIGHT NOW, and retarget if the selection moved.
-// Linear: the travel is one 11 px row and an ease over 120 px/s would read as
-// sluggish rather than smooth.
-static int16_t list_cursor_y(int16_t want) {
-  int16_t cur;
-  if (s_list_to < 0) {
-    cur = want;
-    s_list_from = want;
-    s_list_to   = want;
-    s_list_ms   = now_ms();
-  } else {
-    const uint32_t el = since(s_list_ms);
-    if (el >= UI_LIST_SLIDE_MS) {
-      cur = s_list_to;
-    } else {
-      cur = (int16_t)(s_list_from +
-            ((int32_t)(s_list_to - s_list_from) * (int32_t)el) / (int32_t)UI_LIST_SLIDE_MS);
-    }
-  }
-  if (want != s_list_to) {          // a new target: leave from where we ARE
-    s_list_from = cur;
-    s_list_to   = want;
-    s_list_ms   = now_ms();
-  }
-  return cur;
-}
-
-// Vertical list: UI_LIST_ROWS rows of UI_LIST_PITCH px under the header.
-static void draw_list(const char* const* items, uint8_t n, uint8_t cur,
-                      const char* const* values) {
-  if (n == 0 || !items) return;
-  uint8_t first = 0;
-  if (n > UI_LIST_ROWS) {
-    if (cur + 2u > UI_LIST_ROWS) first = (uint8_t)(cur + 2u - UI_LIST_ROWS);
-    if ((uint16_t)first + UI_LIST_ROWS > n) first = (uint8_t)(n - UI_LIST_ROWS);
-  }
-  const int16_t x_end = (n > UI_LIST_ROWS) ? (OLED_W - 5) : OLED_W;
-
-  // Every row is painted in colour 1 and the highlight is XORed on top
-  // afterwards, instead of pre-filling the selected row and drawing its text in
-  // colour 0. That inversion is what lets the highlight sit BETWEEN two rows
-  // while it slides: whatever it covers inverts, glyphs included, in one pass
-  // and with no mask. Settled, the result is pixel-identical to the old code.
-  int16_t sel_y = -1;
-  for (uint8_t i = 0; i < UI_LIST_ROWS && (uint16_t)(first + i) < n; ++i) {
-    const uint8_t idx = (uint8_t)(first + i);
-    const int16_t y   = (int16_t)(UI_CONTENT_Y + i * UI_LIST_PITCH);
-    if (idx == cur) sel_y = y;
-    if (values && values[idx]) {
-      const int16_t vw = (int16_t)rd_text_width(RD_FONT_BODY, values[idx]);
-      rd_text_fit(3, (int16_t)(y + 8), (int16_t)(x_end - 9 - vw), RD_FONT_NARR, items[idx]);
-      rd_text((int16_t)(x_end - 3 - vw), (int16_t)(y + 8), RD_FONT_BODY, values[idx]);
-    } else {
-      rd_text_fit(3, (int16_t)(y + 8), (int16_t)(x_end - 6), RD_FONT_NARR, items[idx]);
-    }
-  }
-  // Only when the cursor is on a VISIBLE row. When a long list scrolls, `first`
-  // moves with `cur` and the target y does not change at all - correctly, no
-  // animation is started.
-  if (sel_y >= 0)
-    rd_invert_rect(0, list_cursor_y(sel_y), x_end, UI_LIST_PITCH - 1);
-
-  if (n > UI_LIST_ROWS) {
-    const int16_t track_h = UI_LIST_ROWS * UI_LIST_PITCH - 1;
-    px_frame(OLED_W - 4, UI_CONTENT_Y, 4, track_h);
-    int16_t th = (int16_t)((int32_t)(track_h - 2) * UI_LIST_ROWS / n);
-    if (th < 3) th = 3;
-    const int16_t span = (int16_t)(track_h - 2 - th);
-    const int16_t ty   = (int16_t)(UI_CONTENT_Y + 1 +
-                                   ((int32_t)span * first) / (int32_t)(n - UI_LIST_ROWS));
-    px_box(OLED_W - 3, ty, 2, th);
-  }
-}
-
 // =============================================================================
 //  8. HOME - the screen the user stares at for days
 // =============================================================================
 
-static void home_bar_icons(void) {
-  static const uint8_t kMic[4]  = { MIC_HUNGER, MIC_HAPPY, MIC_ENERGY, MIC_HYGIENE };
-  static const uint8_t kStat[4] = { ST_HUNGER, ST_HAPPINESS, ST_ENERGY, ST_HYGIENE };
-  for (uint8_t i = 0; i < 4; ++i) {
-    const int16_t x = (int16_t)(i * 24);
-    px_spr(x, 0, sprite_mini(kMic[i]));
-    rd_bar((int16_t)(x + 9), 2, 13, 5, ui_stat_shown((StatId)kStat[i]));
-  }
-  uint8_t f[6];
-  uint8_t n = 0;
-  const SimView* p = pet();
-  if (p && (p->flags & PF_SICK))    f[n++] = MIC_SICK;
-  if (p && p->poop_count)           f[n++] = MIC_POOP;
-  if (sim_alert() != AL_NONE)       f[n++] = MIC_ALERT;
-  if (p && (p->flags & PF_ASLEEP))  f[n++] = MIC_SLEEP;
-  if (n < 6 && net_is_sta_up())     f[n++] = MIC_WIFI;
-  else if (n < 6 && net_mode() == RADIO_BLE) f[n++] = MIC_BLE;
-  if (n < 6 && cfg_flag(CF_MUTE))   f[n++] = MIC_MUTE;
-  if (n > 4) n = 4;
-  for (uint8_t i = 0; i < n; ++i)
-    px_spr((int16_t)(OLED_W - 8 - i * 8), 0, sprite_mini(f[n - 1u - i]));
-}
-
-static void home_bar_bars(void) {
-  static const uint8_t kStat[5] = { ST_HUNGER, ST_HAPPINESS, ST_ENERGY,
-                                    ST_HYGIENE, ST_HEALTH };
-  for (uint8_t i = 0; i < 5; ++i)
-    rd_bar((int16_t)(1 + i * 25), 1, 24, 7, ui_stat_shown((StatId)kStat[i]));
-}
-
-static void home_bar_text(void) {
-  char name[16];
-  ui_pet_name(name, sizeof(name));
-  rd_text_fit(1, 7, 70, RD_FONT_BODY, name);
-  rd_text_right(OLED_W - 1, 7, RD_FONT_BODY, S_MOOD(mood_of()));
-}
-
-static void home_status_bar(void) {
-  switch (s_bar_mode) {
-    case SBAR_BARS: home_bar_bars(); break;
-    case SBAR_TEXT: home_bar_text(); break;
-    default:        home_bar_icons(); break;
-  }
-  px_hline(0, STATUS_BAR_H - 1, OLED_W);
-}
+// The three status-bar modes are gone with the legacy HOME: ui/screen_home.cpp
+// draws the one strip spec section 8 asks for (name, level, HP, hunger,
+// happiness, XP) and it has no modes to cycle. Config.statusbar_mode is left
+// in the persisted struct - the layout is frozen - and nothing reads it.
 
 // POSE_EAT, and the POSE_SICK the medicine film borrows, are device-only
 // transients: the web mirror caches sprite sets by id and would have to refetch
@@ -1071,18 +947,18 @@ static void draw_absence_banner(void) {
   px_frame(0, SPRITE_AREA_Y, OLED_W, 28);
 }
 
-static void draw_home(void) {
+// The animated stage layer HOME asks for through home_bind_body(). Everything
+// in it reaches the panel through render.h - petfx's wandering automaton, the
+// action choreography, the emotes, the welcome-back banner - which is exactly
+// why it cannot live in the pure screen and is bound instead.
+//
+// Returns false when there is no pet at all, so HOME draws its own empty
+// frame rather than a floor with nothing standing on it.
+static bool home_body(uint8_t frame) {
   const SimView* p = pet();
-  home_status_bar();
-
-  if (!p) {
-    rd_text_center(34, RD_FONT_NARR, S(STR_UI_NOBODY));
-    rd_affordance(nullptr, nullptr);
-    return;
-  }
+  if (!p) return false;
 
   static const int8_t kBob[8] = { 0, 0, 1, 1, 0, 0, -1, -1 };
-  const uint8_t frame = (uint8_t)((now_ms() / UI_ANIM_FRAME_MS) & 1u);
 
   // ONE OWNER OF THE BODY'S OFFSET AT A TIME.
   //
@@ -1159,222 +1035,27 @@ static void draw_home(void) {
   actfx_draw_props();
   draw_pet_body(dy, dx, frame);
 
-  // The 12x12 mood badge goes down AFTER the body, opaque, and that is now
-  // safe: render.cpp leaves the panel in setBitmapMode(0), where drawXBM paints
-  // the WHOLE box - the 1 bits in the draw colour and the 0 bits in the inverse
-  // - so a badge is a 12x12 rectangle stamped over whatever was there. The body
-  // cannot reach columns 0..13 or 114..127, so there is nothing of it to stamp
-  // over. It is HUD: it goes on top and it always reads.
-  // The origin comes from config.h, and so does the width it assumes. The art
-  // is a 12x12 atlas (sprite_mood_face() hands back 12x12), so if that ever
-  // changes this stops compiling here rather than quietly pushing the badge
-  // into the stage.
-  static_assert(UI_HUD_BADGE_W == 12, "the HUD keep-out assumes 12 px badge art");
-  px_spr(UI_HUD_R_X, (int16_t)(SPRITE_AREA_Y + 1), sprite_mood_face(mood_of()));
-
+  // The mood badge that used to stand in the right-hand HUD column is gone:
+  // the column now carries HOME's three meters (ui/screen_home.cpp), and the
+  // mood score itself is on the PEBBLE page where the rest of the numbers are.
+  // The keep-out contract is unchanged, so an emote still cannot be eaten by
+  // whatever occupies those columns.
   draw_absence_banner();
-  rd_affordance(S(STR_AF_MENU), S(STR_AF_VIEW));
+  return true;
 }
 
-static void handle_home(Gesture g) {
-  switch (g) {
-    case GST_TAP_L: nav_push(SCR_MENU); break;
-    case GST_TAP_R:
-      s_bar_mode = ring_next(s_bar_mode, SBAR_COUNT);
-      if (s_cfg) s_cfg->statusbar_mode = s_bar_mode;   // persisted on the next save
-      break;
-    case GST_DBL_R: act_and_show(ACT_PET); break;   // already HOME: no jump
-    case GST_HOLD_L: nav_push(SCR_STATUS_A); break;
-    case GST_HOLD_R: s_wiggle_ms = now_ms(); break;    // already home: "nope"
-    case GST_BOTH:
-      if (s_cfg) {
-        s_cfg->flags = (uint8_t)(s_cfg->flags ^ CF_MUTE);
-        cfg_persist();
-        ui_toast(cfg_flag(CF_MUTE) ? STR_SET_MUTE_ON : STR_SET_MUTE_OFF);
-      }
-      break;
-    case GST_LONG_BOTH: nav_push(SCR_SETTINGS); break;
-    default: break;
-  }
-}
+// Leaving HOME by ANY route ends the film and, far more importantly, releases
+// the petfx_hold() it took. Bound as HOME's leave hook.
+static void home_leave_layer(void) { actfx_cancel(); }
 
 // =============================================================================
-//  9. MENU - eight-icon horizontal ring
+//  9-10. MENU, CARE and PLAY moved to ui/screen_menu.cpp and ui/screen_care.cpp
+//        (P2-C11b). What the lists still need from this file - starting a
+//        minigame, opening a confirmation, replaying the last action - is
+//        reached through the ui.h seams in section 19.
 // =============================================================================
-static const uint8_t kMenuIcon[MENU_ITEM_COUNT] = {
-  ICO_MEAL, ICO_SOAP, ICO_BALL, ICO_MED, ICO_DNA, ICO_LAMP, ICO_BLE, ICO_GEAR
-};
-static const uint16_t kMenuHelp[MENU_ITEM_COUNT] = {
-  STR_HLP_FEED, STR_HLP_CLEAN, STR_HLP_PLAY, STR_HLP_HEALTH,
-  STR_HLP_STATUS, STR_HLP_LIGHT, STR_HLP_SOCIAL, STR_HLP_SETTINGS
-};
-
-// ---- carousel inertia -------------------------------------------------------
-// The ring is drawn one full slot BEHIND the model right after a step and
-// closes the gap over UI_RING_MS. Only single steps animate: GST_DBL_L jumps to
-// item 0 from an arbitrary distance, and easing that would fly the whole ring
-// across the screen. The state itself lives in section 2.
-//
-// Quadratic ease-out, (T-t)^2 / T^2: leaves fast, settles slow. A linear slide
-// reads as a scroll; this reads as weight. Integer only - amp <= 24 and
-// T = 140, so the numerator peaks at 24 * 19600 and stays inside int32.
-static int16_t ring_offset_px(void) {
-  if (s_ring_from == 0) return 0;
-  const uint32_t el = since(s_ring_ms);
-  if (el >= UI_RING_MS) { s_ring_from = 0; return 0; }
-  const uint32_t left = UI_RING_MS - el;
-  return (int16_t)(((int32_t)s_ring_from * (int32_t)(left * left)) /
-                   (int32_t)(UI_RING_MS * UI_RING_MS));
-}
-
-static void draw_menu(void) {
-  U8G2& u = rd_u8g2();
-  draw_header(S(STR_APP_NAME), nullptr);
-
-  const int16_t cx   = OLED_W / 2;
-  const int16_t cy   = UI_CONTENT_Y + 8;             // 19: icon rows 19..30
-  const int16_t ring = ring_offset_px();
-  // Five slots, d = -2..2. A sixth at d = -3 was tried to plug the hole the
-  // inertia opens at the left edge and it CANNOT work: rd_dither_rect() clips,
-  // but px_spr() DISCARDS - it drops any sprite with a negative origin outright
-  // (see px_spr()). The d = -3 icon sits at x = ring - 14, so it is thrown away
-  // for every ring below 14, and the ease-out is quadratic: ring stays under 14
-  // for about three quarters of the 140 ms slide, which is exactly when the gap
-  // shows. An honest cheap gap beats a slot that is paid for and does nothing.
-  for (int8_t d = -2; d <= 2; ++d) {
-    const uint8_t idx = (uint8_t)((s_menu_idx + MENU_ITEM_COUNT * 2 + d) % MENU_ITEM_COUNT);
-    const int16_t x   = (int16_t)(cx - 6 + d * 24 + ring);
-    px_spr(x, cy, sprite_icon(kMenuIcon[idx]));
-    if (d == 0) {
-      px_frame((int16_t)(x - 4), (int16_t)(cy - 4), 20, 20);
-    } else {
-      // Neighbours fade out with distance: erase 50 % then 75 % of their pixels.
-      u.setDrawColor(0);
-      rd_dither_rect(x, cy, 12, 12, (d == -1 || d == 1) ? RD_D50 : RD_D75);
-      u.setDrawColor(1);
-    }
-  }
-
-  rd_text_center((int16_t)(cy + 30), RD_FONT_HEAD, S_MENU(s_menu_idx));
-
-  for (uint8_t i = 0; i < MENU_ITEM_COUNT; ++i) {
-    const int16_t x = (int16_t)(cx - MENU_ITEM_COUNT * 2 + i * 4);
-    if (i == s_menu_idx) px_box(x, UI_CONTENT_BOTTOM - 2, 3, 3);
-    else                 px_box((int16_t)(x + 1), UI_CONTENT_BOTTOM - 1, 1, 1);
-  }
-
-  draw_countdown();
-  rd_affordance(S(STR_AF_NEXT), S(STR_AF_SEL));
-}
-
-static void menu_select(void) {
-  switch (s_menu_idx) {
-    case 0: nav_push(SCR_FEED); break;
-    case 1: act_and_show(ACT_CLEAN); break;          // BRIEF D: go and watch it
-    case 2: nav_push(SCR_PLAY); break;
-    case 3: confirm_open(CFM_MEDICINE, STR_CF_SURE); break;
-    case 4: nav_push(SCR_STATUS_A); break;
-    // The documented exception to BRIEF D, in both places it is reachable from
-    // (here and SET_LIGHT). The light's whole choreography is a register flash
-    // plus the contrast ramp ui.cpp already runs; both are PANEL-wide and read
-    // perfectly from the carousel or the settings list, and on SET_LIGHT the
-    // player is CONFIGURING, not caring for the pet, so throwing them out of the
-    // screen they are editing would be a bug and not a feature.
-    case 5: do_action(ACT_LIGHT_TOGGLE); break;
-    case 6: nav_push(SCR_SOCIAL); break;
-    default: nav_push(SCR_SETTINGS); break;
-  }
-}
-
-static void handle_menu(Gesture g) {
-  switch (g) {
-    case GST_TAP_L:
-    case GST_HOLD_L:
-      s_menu_idx  = ring_next(s_menu_idx, MENU_ITEM_COUNT);
-      // The new centre starts one slot to the RIGHT and slides in. HOLD_L
-      // repeats every REPEAT_RATE_MS (220 ms) > UI_RING_MS, so a held button
-      // still gets a full settle between steps instead of a smear.
-      s_ring_from = UI_RING_STEP_PX;
-      s_ring_ms   = now_ms();
-      break;
-    case GST_TAP_R:  menu_select(); break;
-    case GST_DBL_L:  s_menu_idx = 0; s_ring_from = 0; break;   // a jump, not a step
-    case GST_DBL_R:
-      if (s_last_action != ACT_NONE) act_and_show((ActionId)s_last_action);
-      else ui_toast(STR_AERR_BAD_ARG);
-      break;
-    case GST_BOTH:   help_open(kMenuHelp[s_menu_idx]); break;
-    default: break;
-  }
-}
-
-// =============================================================================
-//  10. FEED / PLAY - the shared vertical-list grammar
-// =============================================================================
-static const uint16_t kFeedItem[3] = { STR_ACT_FEED_MEAL, STR_ACT_FEED_SNACK, STR_ITEM_BACK };
-static const uint16_t kFeedHelp[3] = { STR_HLP_MEAL, STR_HLP_SNACK, STR_HLP_BACK };
-
-static const uint16_t kPlayItem[4] = { STR_DG_REFLEX, STR_DG_MEMORY, STR_DG_JUMP, STR_ITEM_BACK };
-static const uint16_t kPlayHelp[4] = { STR_DG_REFLEX_HINT, STR_DG_MEMORY_HINT,
-                                       STR_DG_JUMP_HINT, STR_HLP_BACK };
-
-static void draw_str_list(uint16_t title, const uint16_t* ids, uint8_t n, uint8_t cur) {
-  const char* items[8];
-  if (n > 8) n = 8;
-  for (uint8_t i = 0; i < n; ++i) items[i] = S(ids[i]);
-  draw_header(S(title), nullptr);
-  draw_list(items, n, cur, nullptr);
-  draw_countdown();
-  rd_affordance(S(STR_AF_NEXT), S(STR_AF_SEL));
-}
 
 static void game_start(uint8_t dev_id);
-
-static void list_common(Gesture g, uint8_t n, const uint16_t* help) {
-  uint8_t& cur = s_cursor[sm_current()];
-  switch (g) {
-    case GST_TAP_L:
-    case GST_HOLD_L: cur = ring_next(cur, n); break;
-    case GST_DBL_L:  cur = 0; break;
-    case GST_DBL_R:  cur = (uint8_t)(n - 1u); break;
-    case GST_BOTH:   if (help) help_open(help[cur]); break;
-    default: break;
-  }
-}
-
-static void handle_feed(Gesture g) {
-  if (g == GST_TAP_R) {
-    const uint8_t cur = s_cursor[SCR_FEED];
-    // This is the line the whole brief was written about: it used to feed the
-    // pet and then nav_back() to the carousel, so the player fed it and never
-    // saw it eat. A fed pet goes HOME to be watched; a REJECTED feed keeps the
-    // old destination, because there is no film and the toast reads fine from
-    // the list it came from.
-    if      (cur == 0) { if (!act_and_show(ACT_FEED_MEAL))  nav_back(); }
-    else if (cur == 1) { if (!act_and_show(ACT_FEED_SNACK)) nav_back(); }
-    else                 nav_back();
-    return;
-  }
-  list_common(g, 3, kFeedHelp);
-}
-
-static void handle_play(Gesture g) {
-  if (g == GST_TAP_R) {
-    const uint8_t cur = s_cursor[SCR_PLAY];
-    if (cur >= 3) { nav_back(); return; }
-    const uint16_t cd = sim_minigame_cooldown_s();
-    if (cd) {
-      char buf[48];
-      snprintf(buf, sizeof(buf), "%s %u s", S(STR_GM_COOLDOWN), (unsigned)cd);
-      toast_text(buf);
-      return;
-    }
-    if (sim_stat_pct(ST_ENERGY) < ACT_PLAY_MIN_ENERGY_PCT) { ui_toast(STR_AERR_TIRED); return; }
-    game_start(cur);
-    return;
-  }
-  list_common(g, 4, kPlayHelp);
-}
 
 // =============================================================================
 //  11. GAME - the three on-device 2-button minigames
@@ -1678,122 +1359,9 @@ static void handle_game(Gesture g) {
 }
 
 // =============================================================================
-//  12. STATUS_A / STATUS_B
+//  12. STATUS_A / STATUS_B moved to ui/screen_status.cpp (P2-C11b). The god
+//      entry bar the genome page paints is reported through ui_god_progress().
 // =============================================================================
-static void draw_status_a(void) {
-  char tag[10];
-  snprintf(tag, sizeof(tag), "%u%%", (unsigned)sim_mood_score());
-  draw_header(S(STR_ST_TITLE_A), tag);
-
-  static const uint8_t kMic[ST_COUNT] = {
-    MIC_HUNGER, MIC_HAPPY, MIC_ENERGY, MIC_HYGIENE,
-    MIC_HEALTH, MIC_BOND
-  };
-  // Two columns of four cells at an 11 px pitch: rows 12, 23, 34, 45.
-  for (uint8_t i = 0; i < ST_COUNT; ++i) {
-    const int16_t x   = (int16_t)(1 + (i / 4) * 64);
-    const int16_t y   = (int16_t)(UI_CONTENT_Y + 1 + (i % 4) * 11);
-    // Bar AND number come from the same smoothed value: if the digits jumped
-    // while the bar crawled, the screen would be arguing with itself for a
-    // quarter of a second. The number counting up is the whole point.
-    const uint8_t pct = ui_stat_shown((StatId)i);
-    px_spr(x, y, sprite_mini(kMic[i]));
-    rd_bar((int16_t)(x + 10), (int16_t)(y + 1), 36, 6, pct);
-    char n[6];
-    snprintf(n, sizeof(n), "%u", (unsigned)pct);
-    rd_text_right((int16_t)(x + 61), (int16_t)(y + 6), RD_FONT_TINY, n);
-  }
-
-  // The last cell: age, in the same format the welcome-back banner uses.
-  {
-    const int16_t x = 65, y = (int16_t)(UI_CONTENT_Y + 1 + 3 * 11);
-    char t[GT_ELAPSED_BUF];
-    gt_format_elapsed(sim_age_s(), t, sizeof(t));
-    px_spr(x, y, sprite_mini(MIC_CLOCK));
-    rd_text_fit((int16_t)(x + 10), (int16_t)(y + 6), 51, RD_FONT_TINY, t);
-  }
-
-  draw_countdown();
-  rd_affordance(S(STR_ST_TITLE_B), nullptr);
-}
-
-static void draw_status_b(void) {
-  U8G2& u = rd_u8g2();
-  const SimView* p = pet();
-  draw_header(S(STR_ST_TITLE_B), nullptr);
-  if (!p) {
-    rd_text_center(34, RD_FONT_NARR, S(STR_UI_NOBODY));
-    rd_affordance(S(STR_ST_TITLE_A), nullptr);
-    return;
-  }
-
-  // DBL_R: the raw genome, 32 hex chars over two lines, UI_HEX_DUMP_MS long.
-  if (s_hex_ms && since(s_hex_ms) < UI_HEX_DUMP_MS) {
-    char a[17], b[17];
-    memcpy(a, s_hex, 16);      a[16] = '\0';
-    memcpy(b, s_hex + 16, 16); b[16] = '\0';
-    rd_text_center((int16_t)(UI_CONTENT_Y + 14), RD_FONT_TINY, a);
-    rd_text_center((int16_t)(UI_CONTENT_Y + 24), RD_FONT_TINY, b);
-    px_frame(8, (int16_t)(UI_CONTENT_Y + 5), OLED_W - 16, 24);
-    draw_countdown();
-    rd_affordance(S(STR_ST_TITLE_A), nullptr);
-    return;
-  }
-
-  const Genome& g = p->genome;
-  char line[48];
-
-  px_spr(2, 13, sprite_species_badge(gene_species(g)));
-  rd_text_fit(17, 20, 108, RD_FONT_NARR, S_SPECIES(gene_species(g)));
-  rd_text_fit(17, 30, 108, RD_FONT_BODY, S_PATTERN(gene_pattern(g)));
-
-  snprintf(line, sizeof(line), "%s %u   %s %s",
-           S(STR_ST_GEN), (unsigned)g.generation,
-           S(STR_ST_SEX), gene_sex(g) ? S(STR_ST_SEX_X) : S(STR_ST_SEX_O));
-  rd_text_fit(2, 39, 124, RD_FONT_BODY, line);
-
-  snprintf(line, sizeof(line), "%s %u   %s %u",
-           S(STR_ST_LUCK), (unsigned)gene_luck(g),
-           S(STR_ST_MUTATIONS), (unsigned)gene_mutations(g));
-  rd_text_fit(2, 47, 124, RD_FONT_BODY, line);
-
-  rd_text_fit(2, 54, 80, RD_FONT_BODY, S_TEMPER(gene_temper_class(g)));
-  if (gene_rare(g))    rd_text_right(OLED_W - 2, 54, RD_FONT_BODY, S(STR_ST_RARE));
-  if (gene_tainted(g)) rd_text_right(OLED_W - 2, 39, RD_FONT_BODY, "*");
-
-  // God-mode entry: BOTH held GOD_ENTER_HOLD_MS. godmode.cpp owns the timing
-  // and the entry itself; ui only paints the "..." fill bar it reports.
-  // Nothing on screen hints at any of this until the hold actually starts.
-  if (s_god_prog) {
-    const int16_t full = OLED_W - 20;
-    int16_t w = (int16_t)(((uint32_t)s_god_prog * (uint32_t)full) / 100u);
-    if (w > full) w = full;
-    u.setDrawColor(0);
-    px_box(6, 42, OLED_W - 12, 14);
-    u.setDrawColor(1);
-    px_frame(9, 48, (int16_t)(full + 2), 7);
-    px_box(10, 49, w, 5);
-    rd_text_center(47, RD_FONT_BODY, S(STR_UI_GOD_HOLD));
-  }
-
-  draw_countdown();
-  rd_affordance(S(STR_ST_TITLE_A), nullptr);
-}
-
-static void handle_status(Gesture g) {
-  switch (g) {
-    case GST_TAP_L:
-      s_hex_ms = 0;
-      ui_goto(sm_current() == SCR_STATUS_A ? SCR_STATUS_B : SCR_STATUS_A);
-      break;
-    case GST_DBL_R: {
-      const SimView* p = pet();
-      if (p) { genome_to_hex32(p->genome, s_hex); s_hex_ms = now_ms(); }
-      break;
-    }
-    default: break;
-  }
-}
 
 // =============================================================================
 //  13. SOCIAL - connectionless BLE discovery
@@ -1841,7 +1409,7 @@ static void social_try_bringup(void) {
 static void social_enter(void) {
   s_soc_phase          = SOC_ENTER;
   s_soc_err            = STR_EMPTY;
-  s_cursor[SCR_SOCIAL] = 0;
+  s_soc_cursor = 0;
   s_soc_prev           = (uint8_t)net_mode();
 
   social_try_bringup();
@@ -1904,13 +1472,13 @@ static void draw_social(void) {
     rd_text_wrap(3, (int16_t)(UI_CONTENT_Y + 38), OLED_W - 6, RD_LINE_BODY, 2,
                  RD_FONT_BODY, S(STR_SO_NOBODY));
   } else {
-    if (s_cursor[SCR_SOCIAL] >= n) s_cursor[SCR_SOCIAL] = 0;
+    if (s_soc_cursor >= n) s_soc_cursor = 0;
     const uint8_t rows = (n < SOC_LIST_ROWS) ? n : (uint8_t)SOC_LIST_ROWS;
     for (uint8_t i = 0; i < rows; ++i) {
       const BlePeerInfo* pi = ble_peer(i);
       if (!pi) continue;
       const int16_t y   = (int16_t)(SOC_LIST_Y + i * UI_LIST_PITCH);
-      const bool    sel = (i == s_cursor[SCR_SOCIAL]);
+      const bool    sel = (i == s_soc_cursor);
       if (sel) px_box(0, y, OLED_W, UI_LIST_PITCH - 1);
       u.setDrawColor(sel ? 0 : 1);
       char nm[16];
@@ -1940,124 +1508,19 @@ static void handle_social(Gesture g) {
 #endif
   switch (g) {
     case GST_TAP_L:
-    case GST_HOLD_L: s_cursor[SCR_SOCIAL] = ring_next(s_cursor[SCR_SOCIAL], n); break;
-    case GST_DBL_L:  s_cursor[SCR_SOCIAL] = 0; break;
-    case GST_DBL_R:  if (n) s_cursor[SCR_SOCIAL] = (uint8_t)(n - 1u); break;
+    case GST_HOLD_L: s_soc_cursor = ring_next(s_soc_cursor, n); break;
+    case GST_DBL_L:  s_soc_cursor = 0; break;
+    case GST_DBL_R:  if (n) s_soc_cursor = (uint8_t)(n - 1u); break;
     case GST_BOTH:   help_open(STR_HLP_PEER); break;
     default: break;
   }
 }
 
 // =============================================================================
-//  14. SETTINGS
-//      Everything a two-button UI can honestly edit. Anything needing text
-//      entry (SSID, password, pet name) belongs on the phone.
+//  14. SETTINGS moved to ui/screen_settings.cpp (P2-C11b). The five lines of
+//      its "Acerca de" page are device facts, so they are still produced here
+//      and handed over by ui_info_lines().
 // =============================================================================
-enum SetRow : uint8_t {
-  SET_SOUND = 0, SET_WEB, SET_BRIGHT,
-  SET_LIGHT, SET_QR, SET_CLOCK, SET_INFO, SET_RESET, SET_BACK, SET_ROWS
-};
-
-static const uint16_t kSetLabel[SET_ROWS] = {
-  STR_SET_SOUND,  STR_SET_WEB,   STR_SET_BRIGHT,
-  STR_MENU_LIGHT, STR_WEB_TITLE, STR_SET_CLOCK, STR_SET_INFO, STR_SET_RESET,
-  STR_ITEM_BACK
-};
-static const uint16_t kSetHelp[SET_ROWS] = {
-  STR_HLP_SOUND,  STR_HLP_WEB,   STR_HLP_BRIGHT,
-  STR_HLP_LIGHT,  STR_HLP_WEB,   STR_HLP_CLOCK, STR_HLP_INFO, STR_HLP_RESET,
-  STR_HLP_BACK
-};
-static const uint8_t kBrightSteps[5] = {
-  OLED_CONTRAST_DIM, 90, OLED_CONTRAST_DEFAULT, 200, 255
-};
-
-static const char* set_value(uint8_t row) {
-  const SimView* p = pet();
-  switch (row) {
-    case SET_SOUND:   return cfg_flag(CF_MUTE)        ? S(STR_OFF) : S(STR_ON);
-    case SET_WEB:     return cfg_flag(CF_WEB_ENABLED) ? S(STR_ON)  : S(STR_OFF);
-    case SET_LIGHT:   return (p && (p->flags & PF_LIGHT_ON)) ? S(STR_ON) : S(STR_OFF);
-    default:          return nullptr;
-  }
-}
-
-static void draw_settings_info(void) {
-  draw_header(S(STR_SET_INFO), nullptr);
-  char line[44];
-  snprintf(line, sizeof(line), "%s %s", FW_NAME, FW_VERSION);
-  rd_text(2, 19, RD_FONT_TINY, line);
-  snprintf(line, sizeof(line), "IP %s  rssi %d", net_ip(), (int)net_rssi());
-  rd_text(2, 27, RD_FONT_TINY, line);
-  snprintf(line, sizeof(line), "PIN %04u  spr rev %u",
-           (unsigned)(web_pin() % 10000u), (unsigned)SPRITE_REV);
-  rd_text(2, 35, RD_FONT_TINY, line);
-  snprintf(line, sizeof(line), "heap %lu  nvs %02X",
-           (unsigned long)ESP.getFreeHeap(), (unsigned)kv_error());
-  rd_text(2, 43, RD_FONT_TINY, line);
-  if (gt_is_valid()) {
-    char t[GT_ELAPSED_BUF];
-    gt_format_elapsed(sim_age_s(), t, sizeof(t));
-    snprintf(line, sizeof(line), "age %s", t);
-    rd_text(2, 51, RD_FONT_TINY, line);
-  } else {
-    rd_text_fit(2, 53, 124, RD_FONT_BODY, S(STR_UI_NO_CLOCK));
-  }
-  draw_countdown();
-  rd_affordance(nullptr, S(STR_AF_BACK));
-}
-
-static void draw_settings(void) {
-  if (s_set_page == 1) { draw_settings_info(); return; }
-  const char* items[SET_ROWS];
-  const char* vals[SET_ROWS];
-  for (uint8_t i = 0; i < SET_ROWS; ++i) {
-    items[i] = S(kSetLabel[i]);
-    vals[i]  = set_value(i);
-  }
-  draw_header(S(STR_SET_TITLE), s_cfg ? nullptr : "!");
-  draw_list(items, SET_ROWS, s_cursor[SCR_SETTINGS], vals);
-  draw_countdown();
-  rd_affordance(S(STR_AF_NEXT), S(STR_AF_SEL));
-}
-
-static void settings_select(void) {
-  const uint8_t row = s_cursor[SCR_SETTINGS];
-  switch (row) {
-    case SET_BACK:  nav_back();                              return;
-    case SET_INFO:  s_set_page = 1; sm_note_input();          return;
-    case SET_QR:    nav_push(SCR_QR);                        return;
-    case SET_CLOCK: nav_push(SCR_CLOCK);                     return;
-    case SET_LIGHT: do_action(ACT_LIGHT_TOGGLE);             return;
-    case SET_RESET: confirm_open(CFM_WIPE1, STR_CF_WIPE);    return;
-    default: break;
-  }
-  if (!s_cfg) { ui_toast(STR_ERR_BUSY); return; }
-  switch (row) {
-    case SET_SOUND:   s_cfg->flags = (uint8_t)(s_cfg->flags ^ CF_MUTE);        break;
-    case SET_WEB:     s_cfg->flags = (uint8_t)(s_cfg->flags ^ CF_WEB_ENABLED); break;
-    case SET_BRIGHT: {
-      uint8_t i = 0;
-      while (i < 5u && kBrightSteps[i] <= s_cfg->brightness) ++i;
-      if (i >= 5u) i = 0;
-      s_cfg->brightness = kBrightSteps[i];
-      // Through the arbiter, not straight to the panel: while the pet is asleep
-      // the dim override still wins and the new setting takes effect on waking.
-      // rd_set_contrast() here would cancel the sleep ramp for good.
-      s_bright_base = s_cfg->brightness;
-      bright_service();
-      break;
-    }
-    default: break;
-  }
-  cfg_persist();
-}
-
-static void handle_settings(Gesture g) {
-  if (s_set_page == 1) { s_set_page = 0; return; }
-  if (g == GST_TAP_R)  { settings_select(); return; }
-  list_common(g, SET_ROWS, kSetHelp);
-}
 
 // =============================================================================
 //  15. QR
@@ -2150,175 +1613,10 @@ static void handle_qr(Gesture g) {
 }
 
 // =============================================================================
-//  15b. TIME ENTRY  (section 26 "ask for the time")
-//      The device has no radio policy and no SNTP any more, so the only way a
-//      Pebblebol learns what day it is on its own is a human typing it here.
-//      Five fields, two buttons:
-//        TAP L / HOLD L (repeating)  next field
-//        TAP R                       +1 on the current field, wrapping
-//        HOLD R                      +1 auto-repeat (see below)
-//        BOTH                        leave without saving
-//        LONG BOTH                   HOME (invariant 2, untouched)
-//      HOLD R is BACK everywhere else, and ui_handle() exempts THIS screen and
-//      only this screen, because the recogniser deliberately never repeats
-//      HOLD_R (input.cpp note 2) and a date entered one tap at a time is
-//      unusable: the repeat is driven here from input_hold_ms(INPUT_BTN_R).
-//      Confirming is a HOLD, so a stray tap can never commit a wrong date.
+//  15b. TIME ENTRY moved to ui/screen_time.cpp (P2-C11b). The clock itself is
+//       still reached through gametime.h, from the ui_get_clock() /
+//       ui_set_clock() seams in section 19.
 // =============================================================================
-enum ClkField : uint8_t {
-  CLK_YEAR = 0, CLK_MONTH, CLK_DAY, CLK_HOUR, CLK_MIN, CLK_FIELDS
-};
-
-#define CLK_YEAR_MIN  2020
-#define CLK_YEAR_MAX  2099
-
-static uint16_t s_clk[CLK_FIELDS];      // year, month, day, hour, minute
-static uint8_t  s_clk_field = 0;
-static uint32_t s_clk_rep_ms = 0;       // last auto-repeat increment
-
-static uint8_t clk_days_in_month(uint16_t year, uint16_t month) {
-  static const uint8_t kDays[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-  if (month < 1 || month > 12) return 31;
-  if (month == 2) {
-    const bool leap = ((year % 4u) == 0u && (year % 100u) != 0u) || ((year % 400u) == 0u);
-    return leap ? 29u : 28u;
-  }
-  return kDays[month - 1];
-}
-
-// Keep the day inside the month the user just selected, so 31 January -> March
-// never leaves an impossible 31 February on screen.
-static void clk_clamp_day(void) {
-  const uint8_t dim = clk_days_in_month(s_clk[CLK_YEAR], s_clk[CLK_MONTH]);
-  if (s_clk[CLK_DAY] > dim) s_clk[CLK_DAY] = dim;
-  if (s_clk[CLK_DAY] < 1u)  s_clk[CLK_DAY] = 1u;
-}
-
-static void clock_enter(void) {
-  struct tm lt;
-  const bool known = gt_local_tm(lt);
-  if (known && lt.tm_year + 1900 >= CLK_YEAR_MIN && lt.tm_year + 1900 <= CLK_YEAR_MAX) {
-    s_clk[CLK_YEAR]  = (uint16_t)(lt.tm_year + 1900);
-    s_clk[CLK_MONTH] = (uint16_t)(lt.tm_mon + 1);
-    s_clk[CLK_DAY]   = (uint16_t)lt.tm_mday;
-    s_clk[CLK_HOUR]  = (uint16_t)lt.tm_hour;
-    s_clk[CLK_MIN]   = (uint16_t)lt.tm_min;
-  } else {
-    // Nothing trustworthy to start from: a round, obviously-a-placeholder date.
-    s_clk[CLK_YEAR]  = CLK_YEAR_MIN;
-    s_clk[CLK_MONTH] = 1;
-    s_clk[CLK_DAY]   = 1;
-    s_clk[CLK_HOUR]  = 12;
-    s_clk[CLK_MIN]   = 0;
-  }
-  clk_clamp_day();
-  s_clk_field  = CLK_YEAR;
-  s_clk_rep_ms = 0;
-}
-
-static void clk_bump(void) {
-  switch (s_clk_field) {
-    case CLK_YEAR:
-      s_clk[CLK_YEAR] = (s_clk[CLK_YEAR] >= CLK_YEAR_MAX) ? CLK_YEAR_MIN
-                                                          : (uint16_t)(s_clk[CLK_YEAR] + 1);
-      clk_clamp_day();
-      break;
-    case CLK_MONTH:
-      s_clk[CLK_MONTH] = (uint16_t)((s_clk[CLK_MONTH] % 12u) + 1u);
-      clk_clamp_day();
-      break;
-    case CLK_DAY: {
-      const uint8_t dim = clk_days_in_month(s_clk[CLK_YEAR], s_clk[CLK_MONTH]);
-      s_clk[CLK_DAY] = (uint16_t)((s_clk[CLK_DAY] % dim) + 1u);
-      break;
-    }
-    case CLK_HOUR: s_clk[CLK_HOUR] = (uint16_t)((s_clk[CLK_HOUR] + 1u) % 24u); break;
-    case CLK_MIN:  s_clk[CLK_MIN]  = (uint16_t)((s_clk[CLK_MIN]  + 1u) % 60u); break;
-    default: break;
-  }
-  sm_note_input();
-}
-
-// The whole point of the screen. gt_set_epoch() with CAL_USER is the one source
-// allowed to move the clock backwards, so a user correcting a wrong date is
-// never refused; gs_touch_lastseen() then rewrites the persisted baseline so
-// the next boot measures its absence from the truth and not from an uptime.
-static void clock_commit(void) {
-  const uint32_t e = gt_epoch_from_local((int)s_clk[CLK_YEAR], (uint8_t)s_clk[CLK_MONTH],
-                                         (uint8_t)s_clk[CLK_DAY], (uint8_t)s_clk[CLK_HOUR],
-                                         (uint8_t)s_clk[CLK_MIN]);
-  if (e == 0 || !gt_set_epoch(e, CAL_USER)) {
-    ui_toast(STR_CLK_BAD);
-    input_flush();        // as on the success path: a held L must not re-commit
-    return;
-  }
-  gs_touch_lastseen(gt_now());
-  ui_toast(STR_CLK_SAVED);
-  input_flush();          // the release of the confirming hold must not fire below
-  nav_back();
-}
-
-static void draw_clock(void) {
-  draw_header(S(STR_CLK_TITLE), nullptr);
-
-  static const uint16_t kClkLabel[CLK_FIELDS] = {
-    STR_CLK_YEAR, STR_CLK_MONTH, STR_CLK_DAY, STR_CLK_HOUR, STR_CLK_MIN
-  };
-  char val[8];
-  snprintf(val, sizeof(val), (s_clk_field == CLK_YEAR) ? "%u" : "%02u",
-           (unsigned)s_clk[s_clk_field]);
-
-  rd_text_fit(2, 22, 124, RD_FONT_BODY, S(kClkLabel[s_clk_field]));
-  rd_text(2, 42, RD_FONT_BIGNUM, val);
-
-  // The whole stamp, so the field being edited always has its context.
-  char stamp[32];
-  snprintf(stamp, sizeof(stamp), "%04u-%02u-%02u %02u:%02u",
-           (unsigned)s_clk[CLK_YEAR], (unsigned)s_clk[CLK_MONTH],
-           (unsigned)s_clk[CLK_DAY],  (unsigned)s_clk[CLK_HOUR],
-           (unsigned)s_clk[CLK_MIN]);
-  rd_text_fit(2, 51, 124, RD_FONT_TINY, stamp);
-  rd_text_fit(2, 58, 124, RD_FONT_TINY, S(STR_CLK_HOLD));
-
-  rd_affordance(S(STR_AF_NEXT), S(STR_AF_ADD));
-}
-
-// Auto-repeat for the right button. GST_HOLD_R fires once at HOLD_MS and the
-// recogniser never repeats it, so the sustained increment is timed here against
-// the debounced press instant the recogniser already owns.
-static void clock_service(void) {
-  if (!input_raw(INPUT_BTN_R)) { s_clk_rep_ms = 0; return; }
-  const uint32_t held = input_hold_ms(INPUT_BTN_R);
-  if (held < (uint32_t)REPEAT_START_MS) return;
-  const uint32_t t = now_ms();
-  if (s_clk_rep_ms != 0 && (uint32_t)(t - s_clk_rep_ms) < (uint32_t)REPEAT_RATE_MS) return;
-  s_clk_rep_ms = t;
-  clk_bump();
-}
-
-static void handle_clock(Gesture g) {
-  switch (g) {
-    case GST_TAP_R:
-      clk_bump();
-      break;
-    case GST_HOLD_R:                     // first increment of the auto-repeat
-      s_clk_rep_ms = now_ms();
-      clk_bump();
-      break;
-    case GST_TAP_L:
-    case GST_HOLD_L:
-      // HOLD_L confirms; a tap only moves on. Both are L so the thumb never
-      // leaves the button it is already on.
-      if (g == GST_HOLD_L) { clock_commit(); return; }
-      s_clk_field = (uint8_t)((s_clk_field + 1u) % (uint8_t)CLK_FIELDS);
-      break;
-    case GST_BOTH:
-      nav_back();
-      break;
-    default:
-      break;
-  }
-}
 
 // =============================================================================
 //  16. THE HATCH CEREMONY
@@ -2713,17 +2011,11 @@ static void handle_alert(Gesture g) {
 // =============================================================================
 //  18. SCREEN ENTER / LEAVE HOOKS
 // =============================================================================
+// Only the screens that have NOT moved into the table reach these two: a
+// migrated row carries its own enter / leave hooks and state_machine.cpp calls
+// those instead (state_machine.cpp, sm_goto).
 static void screen_enter(uint8_t s) {
   switch (s) {
-    case SCR_FEED:
-    case SCR_PLAY:
-    case SCR_SETTINGS:
-      s_cursor[s] = 0;
-      if (s == SCR_SETTINGS) s_set_page = 0;
-      break;
-    case SCR_STATUS_B:
-      s_hex_ms = 0;
-      break;
     case SCR_SOCIAL:
       social_enter();
       break;
@@ -2732,16 +2024,19 @@ static void screen_enter(uint8_t s) {
       // QR is the screen that wants the station; there is no radio policy in
       // the entry point any more (plan section 2 row G4). It is released again
       // in screen_leave().
-      if (net_mode() != RADIO_WIFI && cfg_flag(CF_WEB_ENABLED)) net_request(RADIO_WIFI);
+      // Was cfg_flag(CF_WEB_ENABLED). The helper had exactly this one caller
+      // left once SETTINGS and the HOME status bar moved out, and that caller
+      // is inside #if FEATURE_WEB - so in the no-web variant the function was
+      // defined and never used, which is a warning and this build treats as an
+      // error. Read the flag here instead of keeping a helper for one site.
+      if (net_mode() != RADIO_WIFI && s_cfg && (s_cfg->flags & CF_WEB_ENABLED) != 0)
+        net_request(RADIO_WIFI);
 #endif
       s_qr_variant = net_is_ap_up() ? 1u : 0u;
       s_qr_key[0]  = '\0';
       s_qr_ms      = now_ms();
       s_qr_manual  = 0;
       qr_build();
-      break;
-    case SCR_CLOCK:
-      clock_enter();
       break;
     case SCR_EGG:
       s_rub_count = 0;
@@ -2754,11 +2049,8 @@ static void screen_enter(uint8_t s) {
 }
 
 static void screen_leave(uint8_t s) {
-  // A choreography only exists on HOME: actfx_draw_props() and
-  // actfx_draw_over() are called from draw_home() and from nowhere else, so
-  // leaving HOME ends the film and, far more importantly, releases the
-  // petfx_hold() it took. See the enumeration in ui_service().
-  if (s == SCR_HOME)   actfx_cancel();
+  // HOME's own leave hook (home_leave_layer) is what ends the choreography
+  // now; this one only sees the screens still living in this file.
   if (s == SCR_SOCIAL) social_leave();
 #if FEATURE_WEB
   // Radio OFF by default: the QR screen is the only owner of RADIO_WIFI, so
@@ -2782,7 +2074,6 @@ static void screen_leave(uint8_t s) {
 void ui_bind_config(Config* cfg) {
   s_cfg = cfg;
   if (!s_cfg) return;
-  if (s_cfg->statusbar_mode < SBAR_COUNT) s_bar_mode = s_cfg->statusbar_mode;
   s_bright_base  = s_cfg->brightness ? s_cfg->brightness : (uint8_t)OLED_CONTRAST_DEFAULT;
   s_bright_valid = 0;             // force the first write, whatever the value
   bright_service();
@@ -2806,19 +2097,25 @@ void ui_note_brightness(uint8_t contrast) {
   bright_service();
 }
 
+// Defined with the rest of the seams in section 20; ui_begin() binds it.
+static const PebbleView* ui_fill_view(void);
+
 void ui_begin(void) {
-  memset(s_cursor, 0, sizeof(s_cursor));
   memset(&s_g,     0, sizeof(s_g));
+  // The screens P2-C11b migrated read the pet through this snapshot and draw
+  // the animated stage through the bound layer. Both bindings are re-made on
+  // every ui_begin(), which is also what a factory reset runs.
+  ui_bind_view(&ui_fill_view);
+  home_bind_body(&home_body, &home_leave_layer);
   memset(s_raw_prev, 0, sizeof(s_raw_prev));
   sm_begin();
   s_modal       = MODAL_NONE;
   s_alert_n     = 0;
   s_alert_cur   = AL_NONE;
   s_toast[0]    = '\0';
-  s_hex[0]      = '\0';
   s_qr_key[0]   = '\0';
   s_qr_size     = 0;
-  s_menu_idx    = 0;
+  s_soc_cursor  = 0;
   s_last_action = ACT_NONE;
   s_absence_ms  = 0;
   s_soc_phase   = SOC_ENTER;
@@ -2826,8 +2123,7 @@ void ui_begin(void) {
   s_hatch_phase = HP_NONE;
   s_hatch_ms    = 0;
   s_trans_ms    = 0;
-  list_anim_reset();
-  s_ring_from   = 0;
+  gfx_list_reset();
   s_bright_valid = 0;                // force the first contrast decision
   petfx_begin();
   actfx_cancel();                    // nothing survives a reboot or a wipe
@@ -2988,13 +2284,13 @@ void ui_handle(Gesture g) {
     // --- invariant 2: HOME from anywhere ----------------------------------
     if (g == GST_LONG_BOTH && scr != SCR_HOME) { nav_home(); return; }
 
-    // --- invariant 1: BACK on every screen except GAME and CLOCK ----------
-    // The clock screen needs a repeating right button to enter a date (see
-    // handle_clock); it is left with BOTH (cancel), HOLD L (save) and LONG
-    // BOTH (HOME) instead.
-    if (g == GST_HOLD_R && scr != SCR_GAME && scr != SCR_CLOCK) {
+    // --- invariant 1: BACK on every screen except GAME -------------------
+    // The TIME screen needs a repeating right button to enter a date, and it
+    // says so through SF_LOCK_INPUT rather than through a name checked here.
+    if (g == GST_HOLD_R && scr != SCR_GAME) {
       if (scr == SCR_HOME) { s_wiggle_ms = now_ms(); return; }
-      if (scr == SCR_SETTINGS && s_set_page == 1) { s_set_page = 0; return; }
+      // On the "Acerca de" page BACK closes the page, not the screen.
+      if (scr == SCR_SETTINGS && settings_page() == 1) { settings_close_page(); return; }
       nav_back();
       return;
     }
@@ -3004,18 +2300,10 @@ void ui_handle(Gesture g) {
   if (def) return;             // migrated, and this row takes no input at all
 
   switch (scr) {
-    case SCR_HOME:      handle_home(g);     break;
-    case SCR_MENU:      handle_menu(g);     break;
-    case SCR_FEED:      handle_feed(g);     break;
-    case SCR_PLAY:      handle_play(g);     break;
     case SCR_GAME:      handle_game(g);     break;
-    case SCR_STATUS_A:
-    case SCR_STATUS_B:  handle_status(g);   break;
     case SCR_SOCIAL:    handle_social(g);   break;
-    case SCR_SETTINGS:  handle_settings(g); break;
     case SCR_EGG:       handle_egg(g);      break;
     case SCR_QR:        handle_qr(g);       break;
-    case SCR_CLOCK:     handle_clock(g);    break;
     default:            break;
   }
 }
@@ -3073,7 +2361,6 @@ void ui_service(void) {
   if (hatch_active()) { hatch_service(); return; }
   if (sm_current() == SCR_GAME)   game_service();
   if (sm_current() == SCR_SOCIAL) social_service();
-  if (sm_current() == SCR_CLOCK)  clock_service();
 
   // The alert layer surfaces only when nothing else owns the screen.
   if (s_modal == MODAL_NONE && s_alert_n > 0 && sm_current() != SCR_GAME) {
@@ -3117,15 +2404,8 @@ void ui_draw(void) {
   }
   // Not migrated yet: the old switch, one case shorter every commit.
   else switch (sm_current()) {
-    case SCR_HOME:     draw_home();     break;
-    case SCR_MENU:     draw_menu();     break;
-    case SCR_FEED:     draw_str_list(STR_MENU_FEED, kFeedItem, 3, s_cursor[SCR_FEED]); break;
-    case SCR_PLAY:     draw_str_list(STR_MENU_PLAY, kPlayItem, 4, s_cursor[SCR_PLAY]); break;
     case SCR_GAME:     draw_game();     break;
-    case SCR_STATUS_A: draw_status_a(); break;
-    case SCR_STATUS_B: draw_status_b(); break;
     case SCR_SOCIAL:   draw_social();   break;
-    case SCR_SETTINGS: draw_settings(); break;
     case SCR_EGG:
       // The ceremony owns the frame and draws no strip, so the echo below finds
       // nothing to invert - it is called only to leave the per-frame state clean.
@@ -3133,9 +2413,11 @@ void ui_draw(void) {
       draw_egg();
       break;
     case SCR_QR:       draw_qr();       break;
-    case SCR_CLOCK:    draw_clock();    break;
     case SCR_GOD:      god_draw();      rd_affordance_echo(); return;  // god owns the frame
-    default:           draw_home();     break;
+    // Every remaining id is either migrated (handled above) or a modal that
+    // has no base frame of its own. Drawing nothing is the honest answer: the
+    // modal layer below still runs.
+    default:           break;
   }
 
   if (s_modal == MODAL_CONFIRM)      draw_confirm();
@@ -3168,4 +2450,153 @@ void ui_draw(void) {
   // godmode.h: the "GOD xN" marker goes LAST on every screen, so the state can
   // never hide behind a modal. It is a no-op while god mode is off.
   god_draw_marker();
+}
+
+// =============================================================================
+//  20. THE SCREEN SEAMS (P2-C11b)
+//
+//  A migrated screen is a pure translation unit. Everything it needs that is
+//  not pure - the wall clock, the navigation machine, the modal layer, the
+//  simulation, the panel contrast, the radio, the NVS error word - arrives
+//  through these one-line forwarders, which is what lets test_screens.cpp
+//  compile and render every one of those screens on the host.
+// =============================================================================
+
+uint32_t ui_now_ms(void)   { return now_ms(); }
+uint32_t ui_idle_ms(void)  { return sm_idle_ms(); }
+
+void ui_push(ScreenId s)   { sm_push(s); }
+void ui_back(void)         { sm_back(); }
+void ui_note_input(void)   { sm_note_input(); }
+
+Config* ui_cfg(void)       { return s_cfg; }
+void ui_cfg_changed(void)  { cfg_persist(); }
+
+void ui_apply_brightness(uint8_t contrast) {
+  s_bright_base = contrast ? contrast : (uint8_t)OLED_CONTRAST_DEFAULT;
+  bright_service();
+}
+
+bool ui_do_action(uint8_t action) {
+  return (action < (uint8_t)ACT_COUNT) ? do_action((ActionId)action) : false;
+}
+
+bool ui_act_and_show(uint8_t action) {
+  return (action < (uint8_t)ACT_COUNT) ? act_and_show((ActionId)action) : false;
+}
+
+void ui_repeat_last_action(void) {
+  if (s_last_action != ACT_NONE) act_and_show((ActionId)s_last_action);
+  else                           ui_toast(STR_AERR_BAD_ARG);
+}
+
+void ui_help(uint16_t str_id)    { help_open(str_id); }
+void ui_confirm_medicine(void)   { confirm_open(CFM_MEDICINE, STR_CF_SURE); }
+
+void ui_start_minigame(uint8_t idx) {
+  const uint16_t cd = sim_minigame_cooldown_s();
+  if (cd) {
+    char buf[48];
+    snprintf(buf, sizeof(buf), "%s %u s", S(STR_GM_COOLDOWN), (unsigned)cd);
+    toast_text(buf);
+    return;
+  }
+  if (sim_stat_pct(ST_ENERGY) < ACT_PLAY_MIN_ENERGY_PCT) { ui_toast(STR_AERR_TIRED); return; }
+  game_start(idx);
+}
+
+uint8_t ui_god_progress(void) { return s_god_prog; }
+
+void ui_info_lines(char lines[UI_INFO_LINES][UI_INFO_CAP]) {
+  for (uint8_t i = 0; i < UI_INFO_LINES; ++i) lines[i][0] = '\0';
+  snprintf(lines[0], UI_INFO_CAP, "%s %s", FW_NAME, FW_VERSION);
+  snprintf(lines[1], UI_INFO_CAP, "IP %s  rssi %d", net_ip(), (int)net_rssi());
+  snprintf(lines[2], UI_INFO_CAP, "PIN %04u  spr rev %u",
+           (unsigned)(web_pin() % 10000u), (unsigned)SPRITE_REV);
+  snprintf(lines[3], UI_INFO_CAP, "heap %lu  nvs %02X",
+           (unsigned long)ESP.getFreeHeap(), (unsigned)kv_error());
+  if (gt_is_valid()) {
+    char t[GT_ELAPSED_BUF];
+    gt_format_elapsed(sim_age_s(), t, sizeof(t));
+    snprintf(lines[4], UI_INFO_CAP, "age %s", t);
+  } else {
+    snprintf(lines[4], UI_INFO_CAP, "%s", S(STR_UI_NO_CLOCK));
+  }
+}
+
+bool ui_get_clock(uint16_t* year, uint8_t* month, uint8_t* day,
+                  uint8_t* hour, uint8_t* minute) {
+  struct tm lt;
+  if (!year || !month || !day || !hour || !minute) return false;
+  if (!gt_local_tm(lt)) return false;
+  *year   = (uint16_t)(lt.tm_year + 1900);
+  *month  = (uint8_t)(lt.tm_mon + 1);
+  *day    = (uint8_t)lt.tm_mday;
+  *hour   = (uint8_t)lt.tm_hour;
+  *minute = (uint8_t)lt.tm_min;
+  return true;
+}
+
+// gt_set_epoch(CAL_USER) is the one source allowed to move the clock BACKWARDS,
+// so a user correcting a wrong date is never refused; gs_touch_lastseen() then
+// rewrites the persisted baseline so the next boot measures its absence from
+// the truth and not from an uptime.
+bool ui_set_clock(uint16_t year, uint8_t month, uint8_t day,
+                  uint8_t hour, uint8_t minute) {
+  const uint32_t e = gt_epoch_from_local((int)year, month, day, hour, minute);
+  if (e == 0 || !gt_set_epoch(e, CAL_USER)) return false;
+  gs_touch_lastseen(gt_now());
+  return true;
+}
+
+void     ui_input_flush(void)            { input_flush(); }
+bool     ui_btn_down(uint8_t btn)        { return input_raw(btn); }
+uint32_t ui_btn_hold_ms(uint8_t btn)     { return input_hold_ms(btn); }
+
+// -----------------------------------------------------------------------------
+//  THE SCREEN VIEW. One snapshot per frame, derived and never stored: the
+//  smoothed care percentages this file already computes, the identity the Box
+//  holds, and the two numbers spec section 8 asks for that Phases 3 and 4 will
+//  fill in properly (hp_max is derived from the species base, and the XP curve
+//  is a flat placeholder until P3-C2 lands XP_TABLE[31]).
+// -----------------------------------------------------------------------------
+static PebbleView s_view;
+
+static const PebbleView* ui_fill_view(void) {
+  memset(&s_view, 0, sizeof(s_view));
+  const SimView* p = pet();
+  if (!p) return &s_view;                        // present == 0
+
+  s_view.present = 1;
+  ui_pet_name(s_view.name, sizeof(s_view.name));
+  s_view.genome     = p->genome;
+  s_view.stage      = p->stage;
+  s_view.minor_form = p->minor_form;
+  s_view.pose       = home_pose(p);
+  s_view.poop_count = p->poop_count;
+  s_view.flags      = p->flags;
+  s_view.age_s      = sim_age_s();
+  gt_format_elapsed(s_view.age_s, s_view.age_txt, sizeof(s_view.age_txt));
+
+  for (uint8_t i = 0; i < ST_COUNT; ++i) s_view.care_pct[i] = ui_stat_shown((StatId)i);
+  s_view.mood_pct  = (uint8_t)sim_mood_score();
+  s_view.mood_face = mood_of();
+
+  const uint8_t slot = box_active();
+  const PebbleInstance* pb = (slot == BOX_ACTIVE_NONE) ? nullptr : box_peek(slot);
+  if (pb) {
+    s_view.species_id = pb->species_id;
+    s_view.level      = pb->level;
+    s_view.xp         = pb->xp;
+    s_view.hp_cur     = pb->hp_cur;
+    const SpeciesDef* sp = species_get(pb->species_id);
+    // hp_max = 10 + 2*base_hp + level (plan 1.5.1), recomputed and never
+    // stored. With no species row there is nothing honest to show, so the
+    // meter reports the current value as full rather than inventing a maximum.
+    s_view.hp_max = sp ? (uint16_t)(10u + 2u * (uint16_t)sp->base_hp + (uint16_t)pb->level)
+                       : pb->hp_cur;
+  }
+  if (s_view.level == 0) s_view.level = 1;
+  s_view.xp_next = (uint16_t)PB_XP_PER_LEVEL_PLACEHOLDER;
+  return &s_view;
 }

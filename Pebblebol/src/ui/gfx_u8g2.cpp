@@ -22,12 +22,14 @@ static_assert(GFX_LINE_BODY == RD_LINE_BODY, "gfx/render font metrics drifted (b
 static_assert(GFX_LINE_NARR == RD_LINE_NARR, "gfx/render font metrics drifted (narrow pitch)");
 static_assert(GFX_LINE_HEAD == RD_LINE_HEAD, "gfx/render font metrics drifted (head pitch)");
 static_assert(GFX_LINE_TINY == RD_LINE_TINY, "gfx/render font metrics drifted (tiny pitch)");
+static_assert(GFX_ASC_BIG   == RD_ASC_BIGNUM, "gfx/render font metrics drifted (bignum ascent)");
 
 static const uint8_t* font_of(GfxFont f) {
   switch (f) {
     case GF_NARR: return RD_FONT_NARR;
     case GF_HEAD: return RD_FONT_HEAD;
     case GF_TINY: return RD_FONT_TINY;
+    case GF_BIG:  return RD_FONT_BIGNUM;
     default:      return RD_FONT_BODY;
   }
 }

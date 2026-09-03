@@ -81,9 +81,15 @@ $(BIN)/test_persistence: $(OBJ)/save_manager.o $(OBJ)/migration.o \
 $(BIN)/test_game_state: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o
 # The screen table's migrated rows are pure translation units, so they compile
-# here exactly as they do in the firmware; gfx_fb.o is the host end of gfx.h.
+# here exactly as they do in the firmware; gfx_fb.o is the host end of gfx.h
+# and gfx_widgets.o is the SHARED half of it, linked into both.
 $(BIN)/test_screens:    $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
-                        $(OBJ)/screen_error.o $(OBJ)/gfx_fb.o
+                        $(OBJ)/screen_error.o $(OBJ)/screen_home.o \
+                        $(OBJ)/screen_menu.o $(OBJ)/screen_care.o \
+                        $(OBJ)/screen_status.o $(OBJ)/screen_settings.o \
+                        $(OBJ)/screen_time.o $(OBJ)/screen_view.o \
+                        $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
 $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@

@@ -42,6 +42,7 @@ enum GfxFont : uint8_t {
   GF_NARR,          // 6x10_tf     Latin-1
   GF_HEAD,          // t0_11b_tf   Latin-1, bold
   GF_TINY,          // 4x6_tr      ASCII ONLY
+  GF_BIG,           // logisoso16_tn  DIGITS ONLY, 9x19
   GF_COUNT
 };
 
@@ -58,14 +59,23 @@ enum GfxFont : uint8_t {
 #define GFX_ASC_NARR    7
 #define GFX_ASC_HEAD    8
 #define GFX_ASC_TINY    5
+// GF_BIG is the digits-only face the TIME entry screen shows the field being
+// edited in. Its ascent is asserted against RD_ASC_BIGNUM in gfx_u8g2.cpp; the
+// ADVANCE is the nominal 9 px cell plus its 1 px side bearing, so - exactly as
+// with the proportional GF_HEAD - a host golden containing GF_BIG text is
+// LAYOUT-approximate rather than glyph-exact. Nothing is laid out against it
+// other than the value itself, which is left-aligned.
+#define GFX_ASC_BIG    16
 #define GFX_LINE_BODY   8
 #define GFX_LINE_NARR  10
 #define GFX_LINE_HEAD  11
 #define GFX_LINE_TINY   7
+#define GFX_LINE_BIG   20
 #define GFX_ADV_BODY    5
 #define GFX_ADV_NARR    6
 #define GFX_ADV_HEAD    6
 #define GFX_ADV_TINY    4
+#define GFX_ADV_BIG    10
 
 // Metrics, shared by both backends so a screen can lay itself out without
 // knowing which one it is linked against.
@@ -74,6 +84,7 @@ inline uint8_t gfx_font_asc(GfxFont f) {
     case GF_NARR: return GFX_ASC_NARR;
     case GF_HEAD: return GFX_ASC_HEAD;
     case GF_TINY: return GFX_ASC_TINY;
+    case GF_BIG:  return GFX_ASC_BIG;
     default:      return GFX_ASC_BODY;
   }
 }
@@ -82,6 +93,7 @@ inline uint8_t gfx_font_line(GfxFont f) {
     case GF_NARR: return GFX_LINE_NARR;
     case GF_HEAD: return GFX_LINE_HEAD;
     case GF_TINY: return GFX_LINE_TINY;
+    case GF_BIG:  return GFX_LINE_BIG;
     default:      return GFX_LINE_BODY;
   }
 }
@@ -90,6 +102,7 @@ inline uint8_t gfx_font_adv(GfxFont f) {
     case GF_NARR: return GFX_ADV_NARR;
     case GF_HEAD: return GFX_ADV_HEAD;
     case GF_TINY: return GFX_ADV_TINY;
+    case GF_BIG:  return GFX_ADV_BIG;
     default:      return GFX_ADV_BODY;
   }
 }
@@ -142,5 +155,53 @@ void gfx_invert_rect(int16_t x, int16_t y, int16_t w, int16_t h);
 // side also carries the pressed-button echo bookkeeping (render.h), which a
 // re-implementation on top of the primitives would silently break.
 void gfx_affordance(const char* left, const char* right);
+
+// =============================================================================
+//  WIDGETS (ui/gfx_widgets.cpp)
+//
+//  Composites every migrated screen shares. They are implemented ONCE, on top
+//  of the primitives above, in a translation unit that is linked into both the
+//  firmware and the host test binary - so the panel and the golden cannot
+//  disagree about a header bar, a stat bar or a list row.
+// =============================================================================
+
+// Dither levels, n/16. Same numbers render.h publishes as RD_D*.
+#define GFX_D25          4
+#define GFX_D50          8
+#define GFX_D75         12
+#define GFX_DITHER_MAX  16
+
+// gfx_bar() styles. AUTO hatches a value at or below GFX_BAR_LOW_PCT so
+// "nearly empty" is unmistakable at 3 px tall.
+#define GFX_BAR_AUTO     0
+#define GFX_BAR_SOLID    1
+#define GFX_BAR_DITHER   2
+#define GFX_BAR_LOW_PCT 20
+
+// Stat bar: 1 px frame + fill, pct 0..100. Legible down to h = 5.
+void gfx_bar(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t pct,
+             uint8_t style = GFX_BAR_AUTO);
+
+// The inverted title bar, rows 0..UI_HDR_H-1 (screen.h). The tag is
+// right-aligned and the title is fitted into whatever is left, so the two can
+// never collide. Either may be NULL.
+void gfx_header(const char* title, const char* tag);
+
+// Navigation invariant 3: the 3 px bar that drains right to left over the last
+// UI_COUNTDOWN_MS of the auto-return. XORed, so it stays visible over whatever
+// the screen already drew. Draws nothing until the window opens, and nothing
+// at all on a screen that never times out - an SF_STICKY screen simply does
+// not call it. `idle_ms` is the time since the last gesture (ui_idle_ms()).
+void gfx_countdown(uint32_t idle_ms);
+
+// The shared vertical list: UI_LIST_ROWS rows of UI_LIST_PITCH px under the
+// header, an optional right-aligned value per row, a scrollbar when the list
+// is longer than the window, and a highlight that SLIDES between rows over
+// UI_LIST_SLIDE_MS. `now_ms` drives that slide; gfx_list_reset() cuts it and
+// must be called on every screen change, or the highlight flies in from
+// whatever row the previous list left it on.
+void gfx_list(const char* const* items, uint8_t n, uint8_t cur,
+              const char* const* values, uint32_t now_ms);
+void gfx_list_reset(void);
 
 #endif  // NT_GFX_H

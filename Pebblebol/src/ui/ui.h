@@ -184,6 +184,87 @@ void     ui_nav_reset(void);
 void     ui_nav_enter(uint8_t to);
 void     ui_nav_arrived(uint8_t to);
 
+
+// -----------------------------------------------------------------------------
+//  SCREEN SEAMS (P2-C11b)
+//
+//  A migrated screen is a PURE translation unit: gfx.h, strings, and pure data
+//  headers. Everything it needs that is NOT pure - the wall clock, the
+//  navigation machine, the modal layer, the simulation, the panel contrast -
+//  reaches it through the calls below, which ui.cpp implements in one line
+//  each and tests/test_screens.cpp records. Same pattern the ERROR screen
+//  already uses for ui_toast() / ui_goto() / ui_confirm_wipe().
+// -----------------------------------------------------------------------------
+
+// The PRESENTATION clock (millis) and the time since the last gesture. The
+// second one is what gfx_countdown() draws invariant 3's drain bar from.
+uint32_t ui_now_ms(void);
+uint32_t ui_idle_ms(void);
+
+// Navigation, forwarded to app/state_machine.cpp. ui_note_input() restarts the
+// auto-return without moving.
+void     ui_push(ScreenId s);
+void     ui_back(void);
+void     ui_note_input(void);
+
+// The live Config the SETTINGS screen edits, or NULL when nothing is bound
+// (ui_bind_config()). ui_cfg_changed() stamps and persists it with a toast.
+Config*  ui_cfg(void);
+void     ui_cfg_changed(void);
+
+// The user's brightness choice, through ui.cpp's arbiter rather than straight
+// to the panel: while the pet is asleep the dim override still wins and the new
+// setting takes effect on waking.
+void     ui_apply_brightness(uint8_t contrast);
+
+// sim_apply_action() plus the toast, the choreography and the save.
+// ui_act_and_show() additionally sends the player HOME to watch a film that
+// actually started (BRIEF D); both return whether the action was accepted.
+bool     ui_do_action(uint8_t action);
+bool     ui_act_and_show(uint8_t action);
+
+// The MENU's "do that again": replays the last accepted action, or explains
+// that there is not one yet.
+void     ui_repeat_last_action(void);
+
+// The modal layer. ui_help() is the one-line hint BOTH opens on a list row;
+// ui_confirm_medicine() opens the confirmation the medicine costs.
+void     ui_help(uint16_t str_id);
+void     ui_confirm_medicine(void);
+
+// Start minigame `idx` (the PLAY list order), refusing with a toast when the
+// cooldown or the energy floor says no. The GAME screen itself is still
+// ui.cpp's until P3-C4.
+void     ui_start_minigame(uint8_t idx);
+
+// The undocumented god-mode entry hold, 0..100, painted by the PEBBLE screen's
+// genome page. 0 whenever no hold is in progress, which is almost always.
+uint8_t  ui_god_progress(void);
+
+// The "Acerca de" page's five diagnostic lines (IP, heap, PIN, NVS error,
+// age). Every one of them is a device fact, so ui.cpp fills them in and the
+// SETTINGS screen only lays them out.
+#define UI_INFO_LINES  5
+#define UI_INFO_CAP   40
+void     ui_info_lines(char lines[UI_INFO_LINES][UI_INFO_CAP]);
+
+// The TIME screen commits through here: gt_set_epoch(CAL_USER) plus the
+// persisted baseline rewrite. Returns false when the stamp is not a real
+// instant, in which case nothing moved.
+bool     ui_set_clock(uint16_t year, uint8_t month, uint8_t day,
+                      uint8_t hour, uint8_t minute);
+// What the clock currently believes, for the screen to start editing from.
+// Returns false when there is nothing trustworthy to start from.
+bool     ui_get_clock(uint16_t* year, uint8_t* month, uint8_t* day,
+                      uint8_t* hour, uint8_t* minute);
+// Drop whatever the recogniser is holding, so the release of a confirming hold
+// cannot fire again on the screen underneath.
+void     ui_input_flush(void);
+// Is that button physically down, and for how long? The TIME screen drives its
+// own auto-repeat from this (the recogniser deliberately never repeats HOLD_R).
+bool     ui_btn_down(uint8_t btn);
+uint32_t ui_btn_hold_ms(uint8_t btn);
+
 // True while the hatch ceremony owns the buttons. The ceremony is
 // unskippable, so every gesture is dropped for its duration.
 // The entry point must keep pumping input_poll() anyway - ui_handle() drops
