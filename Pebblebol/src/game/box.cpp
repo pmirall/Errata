@@ -9,7 +9,8 @@
 
 #include <string.h>
 
-#include "../core/config.h"                // BOX_RECOVER_MPH, ABSENCE_MAX_S
+#include "../core/config.h"                // SEC_PER_HOUR, ABSENCE_MAX_S
+#include "../data/balance.h"               // BOX_RECOVER_MPH
 #include "../data/species_table.h"         // SpeciesDef, species_get()
 
 static GameState* s_gs = nullptr;

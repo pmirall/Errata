@@ -17,6 +17,7 @@
 #include "genome.h"
 #include "../core/rng.h"
 #include "../core/strings_es.h"
+#include "../data/balance.h"   // every care rate, gain, cooldown and cap
 
 #include <string.h>
 
@@ -127,6 +128,10 @@ struct CareCtx {
   uint32_t acc_minute;
   uint32_t poop_timer;
   int32_t  hapavg_rem;
+  // How long at least one CORE stat has been pinned at zero. Health bleeds
+  // only past CARE_ZERO_GRACE_S of this (spec section 27); it is RAM-only, so
+  // a reboot forgives the dwell, which is the player-favouring direction.
+  uint32_t zero_dwell_s;
 
   // --- PER-PEBBLE: alerts ---------------------------------------------------
   uint8_t  alert;
@@ -301,12 +306,20 @@ static uint16_t today_stamp(void)
 }
 
 // =============================================================================
-// 3. STAGE / PAYOUT TABLES
+// 3. PAYOUT TABLES
+//    There is no stage multiplier table any more (P3-C1): decay depends on the
+//    species and the genome, never on the creature's age.
+//
+//    CARE_DECAY_MPH is indexed by CareId, so pin that order here - balance.h is
+//    a plain data header and cannot see the enum.
 // =============================================================================
-static const uint16_t STAGE_MULT[STAGE_COUNT] = {
-  STAGE_MULT_EGG, STAGE_MULT_BABY, STAGE_MULT_CHILD, STAGE_MULT_TEEN,
-  STAGE_MULT_ADULT, STAGE_MULT_SENIOR
-};
+static_assert((int)CARE_HUNGER      == 0 &&
+              (int)CARE_HAPPINESS   == 1 &&
+              (int)CARE_HEALTH      == 2 &&
+              (int)CARE_CLEANLINESS == 3 &&
+              (int)CARE_ENERGY      == 4 &&
+              (int)CARE_COUNT       == PB_BALANCE_CARE_COUNT,
+              "CARE_DECAY_MPH is indexed by CareId and the order moved");
 
 static const uint16_t PLAY_DECAY[PLAY_DECAY_STEPS] = {
   PLAY_DECAY_0, PLAY_DECAY_1, PLAY_DECAY_2, PLAY_DECAY_3,
@@ -632,7 +645,6 @@ static void decay_stats(uint32_t dt)
 {
   const Genome& gen = g.pb->genome;
 
-  uint16_t m_stage   = STAGE_MULT[g.view.stage];
   uint16_t m_app     = gene_appetite_mult(gen);
   uint16_t m_met     = gene_metabolism_mult(gen);
   uint16_t m_soc     = gene_sociability_mult(gen);
@@ -653,57 +665,63 @@ static void decay_stats(uint32_t dt)
 
   // --- hunger (satiety) ---
   {
-    const uint16_t m[4] = { m_stage, m_app, m_sleep, m_off };
-    accum_stat(ST_HUNGER, rate_chain(RATE_HUNGER_MPH, m, 4), dt);
+    const uint16_t m[3] = { m_app, m_sleep, m_off };
+    accum_stat(ST_HUNGER, rate_chain(CARE_DECAY_MPH[CARE_HUNGER], m, 3), dt);
   }
   // --- happiness ---
   {
-    const uint16_t m[5] = { m_stage, m_lonely, m_soc, m_sleep, m_off };
-    accum_stat(ST_HAPPINESS, rate_chain(RATE_HAPPINESS_MPH, m, 5), dt);
+    const uint16_t m[4] = { m_lonely, m_soc, m_sleep, m_off };
+    accum_stat(ST_HAPPINESS, rate_chain(CARE_DECAY_MPH[CARE_HAPPINESS], m, 4), dt);
   }
   // --- energy ---
   if (g.view.flags & PF_ASLEEP) {
     uint16_t m_light = (g.view.flags & PF_LIGHT_ON)
                          ? (uint16_t)MULT_LIGHT_ON_SLEEP : (uint16_t)MULT_ONE;
     const uint16_t m[2] = { m_light, m_off };
-    accum_stat(ST_ENERGY, rate_chain(RATE_ENERGY_ASLEEP_MPH, m, 2), dt);
+    accum_stat(ST_ENERGY, rate_chain(CARE_ENERGY_ASLEEP_MPH, m, 2), dt);
   } else {
-    const uint16_t m[3] = { m_stage, m_met, m_off };
-    accum_stat(ST_ENERGY, rate_chain(RATE_ENERGY_AWAKE_MPH, m, 3), dt);
+    const uint16_t m[2] = { m_met, m_off };
+    accum_stat(ST_ENERGY, rate_chain(CARE_DECAY_MPH[CARE_ENERGY], m, 2), dt);
   }
   // --- hygiene (base + per-poop) ---
   {
-    int32_t base = RATE_HYGIENE_MPH
-                 + (int32_t)g.view.poop_count * RATE_HYGIENE_POOP_MPH;
-    const uint16_t m[3] = { m_stage, m_sleep, m_off };
-    accum_stat(ST_HYGIENE, rate_chain(base, m, 3), dt);
+    int32_t base = CARE_DECAY_MPH[CARE_CLEANLINESS]
+                 + (int32_t)g.view.poop_count * CARE_HYGIENE_POOP_MPH;
+    const uint16_t m[2] = { m_sleep, m_off };
+    accum_stat(ST_HYGIENE, rate_chain(base, m, 2), dt);
   }
   // --- bond (flat) ---
   {
     const uint16_t m[1] = { m_off };
-    accum_stat(ST_BOND, rate_chain(RATE_BOND_MPH, m, 1), dt);
+    accum_stat(ST_BOND, rate_chain(CARE_BOND_MPH, m, 1), dt);
   }
 }
 
-// HEALTH is the one stat with a floor. It bleeds only while a CORE stat is
-// pinned at zero - illness merely blocks regeneration - and never falls below
-// HEALTH_FLOOR_PCT, so total neglect ends in a miserable pebble and never in a
-// dead one (spec section 27, "inconveniently unhappy at worst").
+// HEALTH is the one stat with a floor. It bleeds only while a CORE stat has
+// been pinned at zero for CARE_ZERO_GRACE_S - illness merely blocks
+// regeneration - and never falls below HEALTH_FLOOR_PCT, so total neglect ends
+// in a miserable pebble and never in a dead one (spec section 27,
+// "inconveniently unhappy at worst").
+//
+// P3-C1 replaced the four per-stat damage rates with ONE rate behind a two-hour
+// grace: a player who lets a bar touch bottom on the way home has done no
+// damage at all, and a player who never comes back still needs 45 h of bleeding
+// to reach a floor the model then refuses to cross.
 static void health_step(uint32_t dt)
 {
   uint16_t m_hardy = gene_hardiness_mult(g.pb->genome);
   uint16_t m_off   = g.offline ? (uint16_t)MULT_OFFLINE_DECAY : (uint16_t)MULT_ONE;
 
-  int32_t src = 0;
-  if (stat_v(ST_HUNGER)    <= 0) src += DMG_HUNGER_ZERO_MPH;
-  if (stat_v(ST_HYGIENE)   <= 0) src += DMG_HYGIENE_ZERO_MPH;
-  if (stat_v(ST_HAPPINESS) <= 0) src += DMG_HAPPINESS_ZERO_MPH;
-  if (stat_v(ST_ENERGY)    <= 0) src += DMG_ENERGY_ZERO_MPH;
+  uint8_t any_zero = 0;
+  for (uint8_t i = 0; i < ST_CORE_COUNT; ++i) {
+    if (stat_v(i) <= 0) { any_zero = 1; break; }
+  }
+  g.zero_dwell_s = any_zero ? sat_add_u32(g.zero_dwell_s, dt) : 0u;
 
   int32_t total = 0;
-  if (src > 0) {
+  if (any_zero && g.zero_dwell_s >= (uint32_t)CARE_ZERO_GRACE_S) {
     const uint16_t md[2] = { m_hardy, m_off };
-    total = rate_chain(src, md, 2);
+    total = rate_chain(-CARE_DECAY_MPH[CARE_HEALTH], md, 2);
   }
 
   // ---- regeneration -------------------------------------------------------
@@ -717,7 +735,7 @@ static void health_step(uint32_t dt)
       uint16_t m_sen = (g.view.stage == STAGE_SENIOR)
                          ? (uint16_t)SENIOR_REGEN_MULT : (uint16_t)MULT_ONE;
       const uint16_t mr[2] = { m_sen, m_off };
-      regen = rate_chain(RATE_HEALTH_REGEN_MPH, mr, 2);
+      regen = rate_chain(CARE_HEALTH_REGEN_MPH, mr, 2);
     }
   }
 
@@ -1105,6 +1123,7 @@ static void reset_pebble_state(uint8_t fresh)
   g.acc_stage = g.acc_cq = g.acc_sick = g.acc_minute = 0;
   g.poop_timer = 0;
   g.hapavg_rem = 0;
+  g.zero_dwell_s = 0;
   g.alert = AL_NONE;
   g.alert_age_s = 0;
   // Cooldowns: "seen right now". On a reload or a Box swap that means the

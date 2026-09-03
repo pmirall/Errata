@@ -210,43 +210,14 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 #define STAT_MILLI_MIN          0L
 #define SEC_PER_HOUR            3600L
 
-// Base decay rates, ADULT, awake, all genes = 8.
-// Negative = decays. Units: milli-points per hour.
-#define RATE_HUNGER_MPH         (-12000L)
-#define RATE_HAPPINESS_MPH      (-8000L)
-#define RATE_ENERGY_AWAKE_MPH   (-9000L)
-#define RATE_ENERGY_ASLEEP_MPH  (+20000L)
-#define RATE_HYGIENE_MPH        (-2000L)
-#define RATE_HYGIENE_POOP_MPH   (-6000L)     // additional, per poop on screen
-#define RATE_BOND_MPH           (-800L)
-#define RATE_HEALTH_REGEN_MPH   (+4000L)
-#define HEALTH_REGEN_MIN_PCT    55           // all four core stats >= 55 and !sick
-
-// Box recovery (spec section 9 / plan P2-C10): a Pebble that is NOT the active
-// one neither decays nor is simulated. It only heals, at one stored rate toward
-// 100 %, integrated from its own last_updated_epoch with the same remainder
-// carry the live model uses. The initial value is the health regeneration rate
-// generalised to every care stat; P3-C1 retunes it to BOX_RECOVER_MPH +4200
-// (spec section 27, "a stored Pebble is full again after about a day").
-#define BOX_RECOVER_MPH         (+4000L)
-
-// Health damage per hour (milli-points), additive while the condition holds.
-// Health is the ONLY stat that cannot be driven to zero: it bleeds solely while
-// a core stat is pinned at 0 and never below HEALTH_FLOOR_PCT, so neglect ends
-// in an inconveniently unhappy pebble, never in a dead one (spec section 27).
-#define DMG_HUNGER_ZERO_MPH     (3000L)
-#define DMG_HYGIENE_ZERO_MPH    (2500L)
-#define DMG_ENERGY_ZERO_MPH     (1500L)
-#define DMG_HAPPINESS_ZERO_MPH  (1000L)
-#define HEALTH_FLOOR_PCT        10
-
-// Stage multipliers, x1000 (integer). Index by Stage.
-#define STAGE_MULT_EGG          0
-#define STAGE_MULT_BABY         2200
-#define STAGE_MULT_CHILD        1500
-#define STAGE_MULT_TEEN         1150
-#define STAGE_MULT_ADULT        1000
-#define STAGE_MULT_SENIOR       850
+// The decay rates themselves, the health floor, the Box recovery rate, the
+// action gains, the action cooldowns and the hourly gain caps live in
+// src/data/balance.h (plan P3-C1): config.h keeps pins, timings, feature flags,
+// size caps and versions, balance.h keeps everything a designer retunes.
+//
+// There are NO stage multipliers any more. Decay is a property of the species
+// and of the genome, never of how old the creature is, so a fresh baby and a
+// week-old veteran get exactly the same hours-scale rates (spec section 27).
 
 // Contextual multipliers, x1000
 #define MULT_SLEEP              350          // hunger/happiness/hygiene while asleep
@@ -301,32 +272,7 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 // Alerts
 #define ALERT_LOW_STAT_PCT      25           // a stat crossing below this raises an alert
 
-// Action deltas, in whole points (converted to milli by the sim).
-#define ACT_MEAL_HUNGER         30
-#define ACT_MEAL_CQ             2
-#define ACT_MEAL_REFUSE_PCT     90           // refused above this satiety
-#define ACT_SNACK_HUNGER        10
-#define ACT_SNACK_HAPPINESS     12
-#define ACT_CLEAN_HYGIENE       25
-#define ACT_MED_HAPPINESS       (-10)
-#define ACT_MED_SECOND_DOSE_PCT 30           // if health < 25
-#define ACT_PLAY_HAPPINESS_MAX  6
-#define ACT_PLAY_ENERGY         (-8)
-#define ACT_PLAY_MIN_ENERGY_PCT 12
-#define ACT_PET_HAPPINESS       3
-
-// Diminishing returns on minigame happiness, permille, rolling 3 h window.
-#define PLAY_DECAY_WINDOW_S     10800UL
-#define PLAY_DECAY_0            1000
-#define PLAY_DECAY_1            700
-#define PLAY_DECAY_2            450
-#define PLAY_DECAY_3            250
-#define PLAY_DECAY_4            100
-#define PLAY_DECAY_5            0
-#define PLAY_DECAY_STEPS        6
-
-// Mimo (PET) decay per hour: 4/3/2/1/0
-#define PET_DECAY_STEPS         5
+// The action deltas and the play/mimo decay windows live in data/balance.h.
 
 // =============================================================================
 // 8. LIFE STAGES - seconds since hatch
@@ -421,7 +367,7 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 #define BLE_QUEUE_CAP           8            // onResult runs on the BTC task: post, never draw
 
 // =============================================================================
-// 12. CREATOR SERVER + ACTION COOLDOWNS
+// 12. CREATOR SERVER
 //    The web half is the server shell only: page budget, response buffer, PIN
 //    and rate limiter. The Phase 8 creator API grows back on top of it.
 // =============================================================================
@@ -434,24 +380,8 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 #define WEB_COST_READ           1
 #define WEB_COST_MUTATE         2
 
-// Per-action cooldowns, seconds. These are the DEVICE action cooldowns: they
-// were named WEB_CD_* when the phone was the only surface that could hit them,
-// but sim.cpp has always applied them to the S1/S2/S3 menu actions too.
-#define ACT_CD_GLOBAL_S         2
-#define ACT_CD_FEED_S           20
-#define ACT_CD_CLEAN_S          15
-#define ACT_CD_SLEEP_S          10
-#define ACT_CD_PLAY_S           25
-#define ACT_CD_MED_S            30
-
-// Shared cooldown for the on-device (S4) minigames.
-#define MG_COOLDOWN_S           120
-
-// Per-stat hourly gain budget (whole points). The real anti-farm ceiling.
-#define GAIN_CAP_HUNGER_H       60
-#define GAIN_CAP_HYGIENE_H      80
-#define GAIN_CAP_ENERGY_H       90
-#define GAIN_CAP_HAPPINESS_H    40
+// The DEVICE action cooldowns (ACT_CD_*, named WEB_CD_* until P2-C5), the
+// minigame cooldown and the hourly gain caps live in data/balance.h.
 
 // =============================================================================
 // 13. QR

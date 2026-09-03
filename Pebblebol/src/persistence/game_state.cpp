@@ -16,6 +16,7 @@
 #include "../core/config.h"
 #include "../core/crc16.h"
 #include "../core/rng.h"           // the device id of spec section 43
+#include "../data/balance.h"       // GAIN_CAP_*: the ledger the caps are asserted against
 
 // The single live game state. 1,936 B of .bss, exactly the sum of the persisted
 // blobs (save_schema.h section 8).

@@ -79,7 +79,10 @@ $(BIN)/test_crc16:      $(OBJ)/crc16.o
 $(BIN)/test_rng:        $(OBJ)/rng.o
 $(BIN)/test_genome:     $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_sim_golden: $(OBJ)/sim.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
-$(BIN)/test_care:       $(OBJ)/sim.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+# box.o comes along for the "seven days stored comes back full" case: box_recover
+# is the OTHER half of the care model (spec section 9) and P3-C1 tunes both.
+$(BIN)/test_care:       $(OBJ)/sim.o $(OBJ)/box.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_box:        $(OBJ)/box.o
 # The Box <-> sim seam: the real box.cpp and the real sim.cpp together, which
 # is the only way to see a swap move sim's raw pointer off its creature.

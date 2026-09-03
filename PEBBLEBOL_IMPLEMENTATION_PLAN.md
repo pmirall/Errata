@@ -474,9 +474,9 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 ### Phase 3 — Virtual pet — size L — goal: care, XP, level, minigame framework, 5 minigames, evolution
 
 **P3-C1 `retune:` care to §27 + stored recovery** — M
-- [ ] `data/balance.h`: `CARE_DECAY_MPH[5]` (hours-scale: hunger −4,200/h ≈ 24 h full→empty, happiness −3,000, cleanliness −2,000, energy −6,000 awake / +20,000 asleep, health −2,000 only while a core stat is 0 for ≥ 2 h, floor 10 %), `BOX_RECOVER_MPH +4,200` toward 100, action gains, `ACT_CD_*`, anti-farm caps (`GAIN_CAP_*` kept; refusals are friendly toasts, never penalties).
-- [ ] Remove `STAGE_MULT_*` age-based decay multipliers (config.h:262-268) — decay depends on species/traits only.
-- [ ] `test_care.cpp` += "ignored 8 h stays > 60 % happiness", "24 h neglect never below floor", "stored 7 days → full", catch-up chunk equivalence (3600 s in one call == 60 x 60 s), sleep window halves decay; regenerate golden (`retune:`).
+- [x] `data/balance.h`: `CARE_DECAY_MPH[5]` (hours-scale: hunger −4,200/h ≈ 24 h full→empty, happiness −3,000, cleanliness −2,000, energy −6,000 awake / +20,000 asleep, health −2,000 only while a core stat is 0 for ≥ 2 h, floor 10 %), `BOX_RECOVER_MPH +4,200` toward 100, action gains, `ACT_CD_*`, anti-farm caps (`GAIN_CAP_*` kept; refusals are friendly toasts, never penalties).
+- [x] Remove `STAGE_MULT_*` age-based decay multipliers (config.h:262-268) — decay depends on species/traits only.
+- [x] `test_care.cpp` += "ignored 8 h stays > 60 % happiness", "24 h neglect never below floor", "stored 7 days → full", catch-up chunk equivalence (3600 s in one call == 60 x 60 s), sleep window halves decay; regenerate golden (`retune:`).
 - Acceptance: gate; §67 "Care works", "Stored Pebbles recover".
 
 **P3-C2 XP and levels** — M
@@ -765,8 +765,8 @@ Invocation everywhere: `make -C tests check [ARGS="--seed N --filter battle"]`; 
 - [ ] Active Pebble can be selected. — P2-C11 (`box_set_active` + `sim_switch`)
 
 ### Pet
-- [ ] Care works. — P3-C1
-- [ ] Stored Pebbles recover. — P2-C10 (`box_recover`), P3-C1 (rates)
+- [x] Care works. — P3-C1
+- [x] Stored Pebbles recover. — P2-C10 (`box_recover`), P3-C1 (rates)
 - [ ] Time-based calculations work across reboot. — P2-C6 (clock model), P2-C10 (catch-up), P6-C3 (sleep)
 - [ ] XP and leveling work. — P3-C2
 - [ ] Evolution works. — P3-C3

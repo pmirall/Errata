@@ -12,7 +12,11 @@
 //  flags -> the SimView word), so the bytes hashed are the same bytes in the
 //  same order and the golden file did NOT change. This is not a retune.
 //
-//  The golden was recorded from the pre-refactor sim.cpp / genome.cpp. Only a
+//  P3-C1 RE-RECORDED IT. That commit moved care onto the hours scale of spec
+//  section 27 (hunger -12.000 -> -4.200 milli/h, happiness -8.000 -> -3.000,
+//  energy awake -9.000 -> -6.000, per-poop cleanliness -6.000 -> -1.000, one
+//  gated health bleed instead of four instant ones) and deleted the age-based
+//  STAGE_MULT_* multipliers, so every hashed minute after t=000 moved. Only a
 //  `retune:` commit may regenerate it:  make -C tests golden
 //  (or ./bin/test_sim_golden --record).
 // =============================================================================

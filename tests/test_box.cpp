@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "core/config.h"
+#include "data/balance.h"
 #include "game/box.h"
 #include "data/species_table.h"
 #include "persistence/save_schema.h"

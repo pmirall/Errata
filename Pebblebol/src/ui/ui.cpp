@@ -42,6 +42,7 @@
 #include "../core/nt_types.h"
 #include "../core/strings_es.h"
 #include "../data/sprites.h"
+#include "../data/balance.h"   // ACT_PLAY_MIN_ENERGY_PCT for the PLAY entry
 #include "render.h"
 #include "../hardware/input.h"
 #include "../game/sim.h"
