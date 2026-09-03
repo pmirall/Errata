@@ -153,10 +153,6 @@ bool schema_is_foreign_newer(uint8_t version) {
   return version > (uint8_t)SAVE_SCHEMA_VERSION;
 }
 
-bool pebble_is_empty(const PebbleInstance& p) {
-  return p.species_id == 0 && p.id == 0;
-}
-
 // --- defaults ----------------------------------------------------------------
 void pebble_clear(PebbleInstance& p) {
   memset(&p, 0, sizeof p);

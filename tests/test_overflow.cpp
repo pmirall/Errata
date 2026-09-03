@@ -62,13 +62,20 @@ TEST(overflow_estimated_epoch_is_monotonic_across_the_millis_wrap) {
 // -----------------------------------------------------------------------------
 #define OVF_EPOCH0  1700000000u
 
-static PetSave g_ovf;
+// The plan P2-C10 field map, restated here so the test can look at the
+// remainders that live in PebbleInstance.care_rem[] under their CareId names.
+static const uint8_t CARE_OF_ST[ST_COUNT] = {
+  (uint8_t)CARE_HUNGER, (uint8_t)CARE_HAPPINESS, (uint8_t)CARE_ENERGY,
+  (uint8_t)CARE_CLEANLINESS, (uint8_t)CARE_HEALTH, 0xFFu /* ST_BOND: RAM only */
+};
+
+static PebbleInstance g_ovf;
 
 static void ovf_pet(void) {
   genome_seed(0xABCDEF01u);
   sim_seed(0xABCDEF01u);
   memset(&g_ovf, 0, sizeof(g_ovf));
-  sim_init(g_ovf);
+  sim_bind(g_ovf);
   sim_new_pet(genome_genesis(), OVF_EPOCH0, 0);
   sim_hatch();
 
@@ -84,28 +91,36 @@ static void ovf_pet(void) {
 
 TEST(overflow_unknown_clock_charges_zero_absence) {
   ovf_pet();
-  const PetSave before = g_ovf;
+  int32_t before_stat[ST_COUNT];
+  int16_t before_rem[ST_COUNT];
+  for (uint8_t i = 0; i < (uint8_t)ST_COUNT; ++i) {
+    before_stat[i] = sim_stat_milli((StatId)i);
+    before_rem[i]  = (i == (uint8_t)ST_BOND) ? (int16_t)0 : g_ovf.care_rem[CARE_OF_ST[i]];
+  }
+  const uint16_t before_flags = sim_view()->flags;
   AbsenceReport rep;
   sim_catch_up_ex(6u * 3600u, 0 /* clock unknown */, rep);
 
   CHECK_EQ(rep.clock_known, 0);
   CHECK_EQ(rep.absence_s, 0);                        // nothing invented
   CHECK_EQ(rep.steps, 0);                            // nothing integrated
-  CHECK((g_ovf.flags & PF_ABS_UNKNOWN) != 0);        // retro-fix armed instead
+  CHECK((sim_view()->flags & PF_ABS_UNKNOWN) != 0);        // retro-fix armed instead
 
   // ZERO means zero: the device cannot measure the gap, so it does not get to
   // charge one. Every stat is exactly where it was.
   for (uint8_t i = 0; i < ST_COUNT; ++i) {
-    CHECK_EQ(g_ovf.stat[i], before.stat[i]);
-    CHECK_EQ(g_ovf.stat_rem[i], before.stat_rem[i]);
+    CHECK_EQ(sim_stat_milli((StatId)i), before_stat[i]);
+    if (i != (uint8_t)ST_BOND) {
+      CHECK_EQ(g_ovf.care_rem[CARE_OF_ST[i]], before_rem[i]);
+    }
   }
   // PF_ABS_UNKNOWN is the only flag that may move.
-  CHECK_EQ(g_ovf.flags & (uint16_t)~PF_ABS_UNKNOWN, before.flags);
+  CHECK_EQ(sim_view()->flags & (uint16_t)~PF_ABS_UNKNOWN, before_flags);
 }
 
 TEST(overflow_retrofix_after_an_unknown_boot_charges_the_whole_absence) {
   ovf_pet();
-  const PetSave before = g_ovf;
+  const int32_t hunger_before = sim_stat_milli(ST_HUNGER);
   AbsenceReport rep;
   sim_catch_up_ex(6u * 3600u, 0 /* clock unknown */, rep);
 
@@ -113,13 +128,13 @@ TEST(overflow_retrofix_after_an_unknown_boot_charges_the_whole_absence) {
   // boot integrated nothing, so the whole two hours are integrated now.
   sim_absence_retrofix(2u * 3600u);
 
-  CHECK(g_ovf.stat[ST_HUNGER] < before.stat[ST_HUNGER]);
-  CHECK((g_ovf.flags & PF_ABS_UNKNOWN) == 0);        // and the flag is spent
+  CHECK(sim_stat_milli(ST_HUNGER) < hunger_before);
+  CHECK((sim_view()->flags & PF_ABS_UNKNOWN) == 0);        // and the flag is spent
 
   // Spent means spent: a second calibration does not charge the gap twice.
-  const int32_t hunger_after = g_ovf.stat[ST_HUNGER];
+  const int32_t hunger_after = sim_stat_milli(ST_HUNGER);
   sim_absence_retrofix(3u * 86400u);
-  CHECK_EQ(g_ovf.stat[ST_HUNGER], hunger_after);
+  CHECK_EQ(sim_stat_milli(ST_HUNGER), hunger_after);
 }
 
 TEST(overflow_absence_beyond_the_400_day_ceiling_is_unknown) {
@@ -129,7 +144,7 @@ TEST(overflow_absence_beyond_the_400_day_ceiling_is_unknown) {
 
   CHECK_EQ(rep.clock_known, 0);                      // a nonsense clock, not a gap
   CHECK_EQ(rep.absence_s, 0);
-  CHECK((g_ovf.flags & PF_ABS_UNKNOWN) != 0);
+  CHECK((sim_view()->flags & PF_ABS_UNKNOWN) != 0);
 }
 
 TEST(overflow_absence_exactly_at_the_ceiling_is_charged) {
@@ -139,7 +154,7 @@ TEST(overflow_absence_exactly_at_the_ceiling_is_charged) {
 
   CHECK_EQ(rep.clock_known, 1);
   CHECK_EQ(rep.absence_s, ABSENCE_MAX_S);
-  CHECK((g_ovf.flags & PF_ABS_UNKNOWN) == 0);        // measured, so nothing to fix
+  CHECK((sim_view()->flags & PF_ABS_UNKNOWN) == 0);        // measured, so nothing to fix
 }
 
 TEST(overflow_known_zero_absence_does_not_arm_the_retrofix) {
@@ -149,7 +164,7 @@ TEST(overflow_known_zero_absence_does_not_arm_the_retrofix) {
 
   CHECK_EQ(rep.clock_known, 1);                      // a true zero is knowledge
   CHECK_EQ(rep.absence_s, 0);
-  CHECK((g_ovf.flags & PF_ABS_UNKNOWN) == 0);
+  CHECK((sim_view()->flags & PF_ABS_UNKNOWN) == 0);
 }
 
 // -----------------------------------------------------------------------------

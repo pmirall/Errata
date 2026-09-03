@@ -3,9 +3,14 @@
 //  Pins the care trajectory of the legacy simulation (plan P2-C2, §4.2).
 //
 //  Fixed seeds, a fixed SimEnv and a scripted six hours: a meal every hour,
-//  CLEAN at 2 h, PLAY at 3 h. Every simulated minute the test hashes
-//  PetSave.stat[] + PetSave.flags and appends one line; the whole transcript
-//  must match tests/golden/sim_v1.txt byte for byte.
+//  CLEAN at 2 h, PLAY at 3 h. Every simulated minute the test hashes the six
+//  stats in StatId order plus the legacy PF_* word and appends one line; the
+//  whole transcript must match tests/golden/sim_v1.txt byte for byte.
+//
+//  P2-C10 moved the sim onto PebbleInstance. The hash is re-derived THROUGH the
+//  field map (stat[] -> care[] under CareId, ST_BOND -> the sim's RAM copy,
+//  flags -> the SimView word), so the bytes hashed are the same bytes in the
+//  same order and the golden file did NOT change. This is not a retune.
 //
 //  The golden was recorded from the pre-refactor sim.cpp / genome.cpp. Only a
 //  `retune:` commit may regenerate it:  make -C tests golden
@@ -35,23 +40,28 @@ static uint32_t fnv1a(uint32_t h, const void* p, size_t n) {
   return h;
 }
 
-static uint32_t hash_pet(const PetSave& p) {
+static uint32_t hash_pet(void) {
+  int32_t stat[ST_COUNT];
+  for (uint8_t i = 0; i < (uint8_t)ST_COUNT; ++i) {
+    stat[i] = sim_stat_milli((StatId)i);          // the v1 stat[] order, exactly
+  }
+  const uint16_t flags = sim_view()->flags;
   uint32_t h = 2166136261u;
-  h = fnv1a(h, p.stat, sizeof(p.stat));
-  h = fnv1a(h, &p.flags, sizeof(p.flags));
+  h = fnv1a(h, stat, sizeof(stat));
+  h = fnv1a(h, &flags, sizeof(flags));
   return h;
 }
 
 // Appends one transcript line. `act` is 0 when no action was attempted.
-static void emit(char* text, size_t cap, uint32_t minute, const PetSave& p,
+static void emit(char* text, size_t cap, uint32_t minute,
                  uint32_t ev, uint8_t act, const ActionResult* r) {
   char line[GOLDEN_LINE_MAX];
   if (act == 0) {
     snprintf(line, sizeof line, "t=%03u h=%08X ev=%08X act=-\n",
-             (unsigned)minute, (unsigned)hash_pet(p), (unsigned)ev);
+             (unsigned)minute, (unsigned)hash_pet(), (unsigned)ev);
   } else {
     snprintf(line, sizeof line, "t=%03u h=%08X ev=%08X act=%u:%u/%u\n",
-             (unsigned)minute, (unsigned)hash_pet(p), (unsigned)ev,
+             (unsigned)minute, (unsigned)hash_pet(), (unsigned)ev,
              (unsigned)act, (unsigned)r->ok, (unsigned)r->err);
   }
   const size_t used = strlen(text);
@@ -66,9 +76,9 @@ static void golden_run(char* text, size_t cap) {
   const Genome g = genome_genesis();
   sim_seed(GOLDEN_SEED);
 
-  static PetSave save;
+  static PebbleInstance save;
   memset(&save, 0, sizeof(save));
-  sim_init(save);
+  sim_bind(save);
   sim_new_pet(g, GOLDEN_EPOCH0, 0);
   sim_hatch();
 
@@ -87,7 +97,7 @@ static void golden_run(char* text, size_t cap) {
   snprintf(head, sizeof head, "sim_v1 seed=%08X genome=%s\n", (unsigned)GOLDEN_SEED, hex);
   strcat(text, head);
 
-  emit(text, cap, 0, save, sim_take_events(), 0, nullptr);
+  emit(text, cap, 0, sim_take_events(), 0, nullptr);
 
   for (uint32_t m = 1; m <= GOLDEN_MINUTES; m++) {
     sim_tick(60);
@@ -104,7 +114,7 @@ static void golden_run(char* text, size_t cap) {
     memset(&r, 0, sizeof(r));
     if (act != 0) (void)sim_apply_action((ActionId)act, r);
 
-    emit(text, cap, m, save, sim_take_events(), act, act ? &r : nullptr);
+    emit(text, cap, m, sim_take_events(), act, act ? &r : nullptr);
   }
 }
 

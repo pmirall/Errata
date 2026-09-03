@@ -579,7 +579,7 @@ void actfx_cancel(void) {
   s_fired = 0;
 }
 
-void actfx_begin(uint8_t action, const PetSave& before) {
+void actfx_begin(uint8_t action, const SimView& before) {
   actfx_cancel();                       // no queue: the newest action wins
 
   // The light switch has no film. It is one register flash on top of the

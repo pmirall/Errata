@@ -132,7 +132,7 @@ enum ActionErr : uint8_t {
   AERR_COUNT
 };
 
-// Continuous stats. PetSave.stat[] / stat_rem[] are indexed by this, so the
+// Continuous stats. The sim's stat accessors are indexed by this, so the
 // order is contractual and shared with sim, ui, webui and godmode.
 enum StatId : uint8_t {
   ST_HUNGER = 0,     // satiety: 100 = full. Do NOT invert.
@@ -282,13 +282,15 @@ enum Temperament : uint8_t {
 #define TEMPER_CLASS(v) ((uint8_t)((v) >> 2))
 
 // -----------------------------------------------------------------------------
-// 3. PET SAVE - NVS key "save". EXACTLY 128 BYTES, naturally aligned.
-//    Only sim.cpp may mutate this. Refuse to load a foreign version.
+// 3. THE LIVE PET FLAG WORD
+//    P2-C10 deleted the v1 `PetSave` struct: the persisted truth is
+//    PebbleInstance (persistence/save_schema.h) and the only surviving
+//    description of the 128 B v1 blob is persistence/legacy_v1.h, which the
+//    migration reads. What is left here is the flag word game/sim.cpp still
+//    works in and publishes through SimView; the four bits that reach flash
+//    are mirrored into PebbleInstance.status / .flags by the sim.
 // -----------------------------------------------------------------------------
-#define NT_SAVE_MAGIC    0x544Eu   // 'N','T'
-#define NT_SAVE_VERSION  1
-
-// PetSave.flags bits
+// SimView.flags bits
 #define PF_SICK          0x0001u
 #define PF_ASLEEP        0x0002u
 #define PF_LIGHT_ON      0x0004u
@@ -304,82 +306,18 @@ enum Temperament : uint8_t {
 #define PF_SOUND_MUTE    0x4000u
 #define PF_EGG_PENDING   0x8000u   // a PendingEgg blob exists in NVS key "egg"
 
-// PetSave.events_done bits
+// The sim's events_done bits (RAM only since P2-C10)
 #define EV_VISITA        0x01u
 // bit 0x02 is retired (EV_STORM). EV_BIRTHDAY_SH keeps its shift so a v1 blob
 // still reads its birthday count from the same bits.
 #define EV_BIRTHDAY_SH   2         // bits 7:2 = birthday count 0..63
 #define EV_BIRTHDAY_MK   0x3Fu
 
-//  Every field the death / lineage / punishment surgery retired became a pad_*
-//  member at its old offset instead of vanishing, so the 128 B budget and the
-//  five offsetof guards below still hold and a v1 blob still loads. NEVER reuse
-//  a pad_* for new data in Phase 2.
-struct PetSave {
-  // --- header ---------------------------------------------------- 0 .. 3
-  uint16_t magic;                  //  0  NT_SAVE_MAGIC
-  uint8_t  version;                //  2  NT_SAVE_VERSION
-  uint8_t  stage;                  //  3  Stage
-
-  // --- continuous stats, milli-points 0..100000 ------------------ 4 .. 31
-  int32_t  stat[ST_COUNT];         //  4  indexed by StatId
-  int32_t  pad_stat;               // 28  was stat[ST_DISCIPLINE]
-
-  // --- timestamps, game epoch (gt_now()) ------------------------ 32 .. 55
-  uint32_t birth_epoch;            // 32  hatch time
-  uint32_t last_seen_epoch;        // 36  mirrors NVS key "t"
-  uint32_t pad_death_epoch;        // 40  was death_epoch
-  uint32_t egg_epoch;              // 44  when the current egg was created
-  uint32_t last_interact_epoch;    // 48  drives loneliness_mult and T01
-  uint32_t age_s;                  // 52  accumulated by the sim, clock-jump proof
-
-  // --- genome ---------------------------------------------------- 56 .. 71
-  Genome   genome;                 // 56  the living pet (or the egg, if STAGE_EGG)
-
-  // --- fractional remainders for the milli-point ledger ---------- 72 .. 85
-  int16_t  stat_rem[ST_COUNT];     // 72  0..3599, one per StatId
-  int16_t  pad_stat_rem;           // 84  was stat_rem[ST_DISCIPLINE]
-
-  // --- int16 ledger ---------------------------------------------- 86 .. 111
-  int16_t  cq;                     //  86 care quality 0..1000
-  int16_t  pad_weight;             //  88 was weight_dg
-  uint8_t  pad_dmg[12];            //  90 was dmg_acc[DMG_COUNT] + care_miss
-  uint16_t sick_episodes;          // 102
-  uint16_t minigames_won;          // 104
-  uint16_t pad_overfeed;           // 106 was overfeed
-  uint16_t snacks_total;           // 108
-  uint16_t wish_left_s;            // 110 seconds left in the wish window
-
-  // --- flags + uint8 ledger -------------------------------------- 112 .. 125
-  uint16_t flags;                  // 112 PF_*
-  uint8_t  pad_adult_form;         // 114 was adult_form
-  uint8_t  minor_form;             // 115 bits3:0 child variant, bits7:4 teen variant
-  uint8_t  poop_count;             // 116 0..POOP_MAX
-  uint8_t  pad_ledger[4];          // 117 was guilt_level, absence_tier,
-                                   //     death_cause, unjust_scolds
-  uint8_t  happiness_avg;          // 121 running mean 0..100
-  uint8_t  wish_id;                // 122 WishId
-  uint8_t  events_done;            // 123 EV_* + birthday count
-  uint8_t  reserved[2];            // 124 must be 0
-
-  // --- integrity -------------------------------------------------- 126
-  uint16_t crc16;                  // 126 CRC-16/CCITT-FALSE over bytes 0..125
-};
-
-static_assert(sizeof(PetSave) <= 128, "PetSave must fit the 128 B NVS budget");
-static_assert(sizeof(PetSave) == 128, "PetSave layout drifted");
-static_assert(offsetof(PetSave, stat)     ==   4, "PetSave.stat moved");
-static_assert(offsetof(PetSave, genome)   ==  56, "PetSave.genome moved");
-static_assert(offsetof(PetSave, stat_rem) ==  72, "PetSave.stat_rem moved");
-static_assert(offsetof(PetSave, cq)       ==  86, "PetSave.cq moved");
-static_assert(offsetof(PetSave, flags)    == 112, "PetSave.flags moved");
-static_assert(offsetof(PetSave, crc16)    == 126, "PetSave.crc16 moved");
-#define PETSAVE_CRC_BYTES  126
 
 // -----------------------------------------------------------------------------
 // 4. PENDING EGG - NVS key "egg", 24 B.
 //    An egg produced while the pet is still alive must survive a reboot without
-//    displacing the living pet, so it cannot live in PetSave. Nothing writes
+//    displacing the living pet, so it cannot live on the Pebble. Nothing writes
 //    this blob today: breeding comes back in Phase 7.
 // -----------------------------------------------------------------------------
 #define NT_EGG_MAGIC     0x4745u   // 'E','G'

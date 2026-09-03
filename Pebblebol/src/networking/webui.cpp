@@ -142,7 +142,7 @@ static void send_throttled(void)
 //  5. SPRITE / MOOD POLICY  (shared with ui so both panels agree)
 // =============================================================================
 
-uint8_t web_pose_of(const PetSave& p)
+uint8_t web_pose_of(const SimView& p)
 {
   if (p.flags & PF_ASLEEP)     return POSE_SLEEP;
   if (p.flags & PF_SICK)       return POSE_SICK;
@@ -309,7 +309,7 @@ bool     web_running(void)            { return false; }
 uint16_t web_port(void)               { return 0; }
 uint16_t web_pin(void)                { return 0; }
 void     web_bind_config(Config*)     {}
-uint8_t  web_pose_of(const PetSave&)  { return POSE_IDLE; }
+uint8_t  web_pose_of(const SimView&)  { return POSE_IDLE; }
 uint8_t  web_mood_index(uint8_t)      { return MOOD_NEUTRO; }
 
 #endif // FEATURE_WEB

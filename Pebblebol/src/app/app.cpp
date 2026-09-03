@@ -23,7 +23,9 @@
 #include "../game/genome.h"
 #include "../core/rng.h"
 #include "../game/sim.h"
-#include "../persistence/save_compat.h"
+#include "../persistence/game_state.h"
+#include "../game/box.h"
+#include "../data/species_table.h"
 #include "../persistence/save_manager.h"
 #include "../hardware/boot.h"
 #include "../hardware/kv_nvs.h"
@@ -49,12 +51,12 @@
 
 // =============================================================================
 //  MODULE-OWNED STATE
-//  The app.cpp owns exactly two long-lived objects: the PetSave the simulation is
-//  bound to and the Config every other module reads through a pointer. Both
-//  must outlive setup(), hence file scope (and never a function-local static -
-//  see trap 2 above).
+//  The live Pebbles belong to persistence/game_state.cpp and the active one is
+//  an INDEX into that Box (plan 1.5.3), so the only long-lived object here is
+//  the Config every other module reads through a pointer. It must outlive
+//  setup(), hence file scope (and never a function-local static - see trap 2
+//  above).
 // =============================================================================
-static PetSave  g_pet;
 static Config   g_cfg;
 
 static uint32_t g_tick_ms        = 0;      // scheduler cursor for the 1 Hz tick
@@ -91,7 +93,7 @@ static void apply_config(void)
   g_cfg_crc = g_cfg.crc16;
 }
 
-// True when someone rewrote Config since the last call. compat_save_cfg() is
+// True when someone rewrote Config since the last call. gs_save_cfg() is
 // what re-seals the CRC, so this fires exactly once per persisted change.
 static bool config_changed(void)
 {
@@ -138,11 +140,11 @@ static void build_env(SimEnv& env)
 //  cadence and knows nothing about game rules. This file is the only place
 //  allowed to join them.
 //
-//  save_compat calls this at the instant it commits a pet, so the snapshot is
+//  game_state calls this at the instant it commits a Pebble, so the snapshot is
 //  the live one - ui.cpp forces a save right after every successful action, and
 //  the points that action spent have to be inside the blob that write produces.
 // =============================================================================
-static bool gain_source(uint8_t pts[COMPAT_GAIN_SLOTS], uint32_t& epoch)
+static bool gain_source(uint8_t pts[GS_GAIN_SLOTS], uint32_t& epoch)
 {
   sim_gain_snapshot(pts);
   const uint32_t now = sim_now();
@@ -158,55 +160,79 @@ static bool gain_source(uint8_t pts[COMPAT_GAIN_SLOTS], uint32_t& epoch)
 }
 
 // =============================================================================
-//  BOOT: PET
-//  persistence decides whether there is anything to load; genome/sim decide
-//  what a fresh pet is. The app.cpp only sequences them.
+//  BOOT: THE BOX AND THE ACTIVE PEBBLE
+//  persistence decides whether there is anything to load; game/box.cpp decides
+//  which slot is active and what a brand new Pebble is; the app.cpp only
+//  sequences them.
 //
 //  NEVER an auto-wipe. A load that refused to touch flash (LOAD_CORRUPT,
-//  LOAD_FOREIGN_NEWER) leaves the session read-only: the placeholder pet below
-//  runs in RAM and no write can reach the save the user still owns. P2-C9c
-//  turns that state into the SAVE ERROR screen and its two choices.
+//  LOAD_FOREIGN_NEWER) leaves the session read-only: the placeholder Pebble
+//  below runs in RAM and no write can reach the save the user still owns.
 // =============================================================================
-static void boot_pet(void)
+static bool bind_active(void)
 {
-  if (compat_have_pet()) {
-    sim_init(g_pet);
-    // sim_init() seeded the hourly gain budget to 0 - safe, but a lie
-    // to anyone who just had a power cut ("esta lleno" at 19 % satiety for the
-    // first minute, no full meal for 29 min). Replace it with what was actually
-    // left at the last save, aged forward to the moment the device was last
-    // alive. boot_absence()'s catch-up then refills the rest of the interval,
+  const uint8_t act = box_active();
+  if (act >= (uint8_t)BOX_SLOTS) return false;
+  PebbleInstance* p = box_slot(act);
+  if (!p) return false;
+  sim_bind(*p);
+  return true;
+}
+
+static void boot_box(void)
+{
+  box_bind(gs_state());
+
+  if (gs_have_pebble() && bind_active()) {
+    // sim_bind() seeded the hourly gain budget to 0 - safe, but a lie to anyone
+    // who just had a power cut ("esta llena" at 19 % satiety for the first
+    // minute, no full meal for 29 min). Replace it with what was actually left
+    // at the last save, aged forward to the moment the device was last alive.
+    // boot_absence()'s catch-up then refills the rest of the interval,
     // [last_seen, now], through its own gain_refill() - the two terms compose
     // into min(cap, saved + (now - saved_epoch) * cap / 3600), to within the
     // one milli-point that the two integer divisions can differ by.
-    // A missing or corrupt blob leaves sim_init()'s 0 in place.
-    uint8_t  gpts[COMPAT_GAIN_SLOTS];
+    // A missing or corrupt blob leaves sim_bind()'s 0 in place.
+    uint8_t  gpts[GS_GAIN_SLOTS];
     uint32_t gepoch = 0;
-    if (compat_load_gain(gpts, gepoch)) {
-      (void)sim_gain_restore(gpts, COMPAT_GAIN_SLOTS, gepoch, g_pet.last_seen_epoch);
+    if (gs_load_gain(gpts, gepoch)) {
+      (void)sim_gain_restore(gpts, GS_GAIN_SLOTS, gepoch,
+                             sim_pebble()->last_updated_epoch);
     }
     return;
   }
-  // Nothing loadable: a brand new generation-0 egg rather than a garbage pet.
-  // On a read-only session this egg is never written; it exists only so the
+
+  // FIRST BOOT (or a Box that lost every slot): the starter of plan P2-C10 -
+  // species 1, level 1, ORIGIN_STARTER - into slot 0. Not an egg any more: v2
+  // has levels, and the hatch ceremony becomes the evolution shell in P2-C11.
+  // On a read-only session this Pebble is never written; it exists only so the
   // renderer has something to draw behind the error the user is about to see.
-  sim_init(g_pet);
-  sim_new_pet(genome_genesis(), gt_now(), 0);
+  const uint32_t now  = gt_now();
+  const uint8_t  slot = box_new_pebble((uint8_t)SPECIES_ID_STARTER, 1,
+                                       (uint8_t)ORIGIN_STARTER,
+                                       genome_genesis(), rng_u32(RNG_MISC), now);
+  if (slot != (uint8_t)BOX_SLOT_NONE) {
+    (void)box_set_active(slot);
+  }
+  (void)bind_active();               // false only when the Box could not be made
 }
 
 // =============================================================================
 //  SAVE RECOVERY
 //  The SAVE ERROR screen's "Recuperar", bound into ui.cpp. It lives here and
-//  not in ui.cpp because recovery ends with a DIFFERENT pet in g_pet, and
+//  not in ui.cpp because recovery ends with a DIFFERENT Pebble in the Box, and
 //  rebinding the simulation is the entry point's job. False means "there was no
 //  checkpoint": nothing was written and the session stays read-only.
 // =============================================================================
 static bool app_recover_save(void)
 {
-  if (compat_recover(g_pet, g_cfg) != LOAD_RECOVERED_CKPT) {
+  if (gs_recover(g_cfg) != LOAD_RECOVERED_CKPT) {
     return false;
   }
-  sim_init(g_pet);
+  box_bind(gs_state());
+  if (!bind_active()) {
+    return false;
+  }
   apply_config();
   g_boot_last_seen = save_last_seen();
   return true;
@@ -249,13 +275,20 @@ static void boot_absence(void)
     }
   }
 
+  // The nine stored Pebbles do not live: they only recover, each from its own
+  // last_updated_epoch (spec section 9, plan P2-C10). The active one gets the
+  // full simulation instead.
+  if (known && now >= (uint32_t)NT_EPOCH_SANE_MIN) {
+    (void)box_recover_all(now);
+  }
+
   AbsenceReport rep;
   sim_catch_up_ex(absence_s, known, rep);
   g_absence_unknown = rep.clock_known ? 0u : 1u;
 
   ui_note_absence(rep);
   ui_note_events(sim_take_events());
-  (void)compat_save_pet(g_pet, true);
+  (void)gs_save_active(true);
 }
 
 // =============================================================================
@@ -296,8 +329,8 @@ void app_setup(void)
   // its estimate from save_last_seen() and its timezone from the persisted
   // config, and both are answers this call produces.
   save_set_clock(&clock_ms, &clock_epoch);
-  const LoadResult load = compat_load(g_pet, g_cfg);
-  boot_note_save(compat_have_pet());
+  const LoadResult load = gs_load(g_cfg);
+  boot_note_save(gs_have_pebble());
   const BootKind boot = boot_kind();
 
   // The RTC mirror survives a crash that key "t" is up to 60 s behind.
@@ -313,8 +346,8 @@ void app_setup(void)
   // Bind the ledger provider BEFORE the first pet write: boot_absence() forces
   // one, and that write is what retires a stale snapshot on a unit whose clock
   // is gone.
-  compat_bind_gain(&gain_source);
-  boot_pet();
+  gs_bind_gain(&gain_source);
+  boot_box();
 
   // --- everything that reads Config or the pet ------------------------------
   input_begin();
@@ -350,16 +383,17 @@ void app_setup(void)
   // nothing on the way there wipes it (audit risk 3).
   ui_note_load((uint8_t)load);
 
-  if (!compat_readonly() && boot == BOOT_FIRST_RUN && gt_cal_state() == CAL_UNSET) {
+  if (!gs_readonly() && boot == BOOT_FIRST_RUN && gt_cal_state() == CAL_UNSET) {
     ui_goto(SCR_CLOCK);
   }
 
   g_tick_ms        = millis();
   g_clock_was_valid = gt_is_valid() ? 1u : 0u;
 
-  Serial.printf("[nt] boot=%u nvs=%u load=%u stage=%u free=%u\r\n",
+  Serial.printf("[nt] boot=%u nvs=%u load=%u slot=%u stage=%u free=%u\r\n",
                 (unsigned)boot, (unsigned)g_nvs_ok, (unsigned)load,
-                (unsigned)g_pet.stage, (unsigned)ESP.getFreeHeap());
+                (unsigned)box_active(), (unsigned)sim_view()->stage,
+                (unsigned)ESP.getFreeHeap());
 }
 
 // =============================================================================
@@ -378,8 +412,8 @@ static void logic_tick(void)
   const uint32_t ev = sim_take_events();
   ui_note_events(ev);
 
-  compat_touch_lastseen(env.now_epoch);
-  (void)compat_save_pet(g_pet, false);   // rate-limited by save_manager inside
+  gs_touch_lastseen(env.now_epoch);
+  (void)gs_save_active(false);           // rate-limited by save_manager inside
   save_service();                        // flushes a write the 1 s floor deferred
 
   // The nvs2 checkpoint (D6). Daily, plus the events that change what the pet
@@ -388,7 +422,7 @@ static void logic_tick(void)
   // transition, so that is what forces one here. P2-C10 and P7 add the rest at
   // the same call.
   const bool grew = (ev & (SIM_EV_HATCHED | SIM_EV_STAGE_UP | SIM_EV_EVOLVE_MINOR)) != 0;
-  if (!compat_readonly()) {
+  if (!gs_readonly()) {
     (void)save_checkpoint_service(env.now_epoch, grew);
   }
 

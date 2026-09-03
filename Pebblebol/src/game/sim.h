@@ -1,6 +1,8 @@
 // =============================================================================
-//  NOTTAMAGOCHI - game/sim.h
-//  THE GAME. The only module allowed to mutate PetSave.
+//  PEBBLEBOL - game/sim.h
+//  THE GAME. The only module allowed to mutate the care half of a
+//  PebbleInstance (plan 1.5.1: care[], care_rem[], status, flags,
+//  last_updated_epoch, age_s).
 //
 //  Milli-point stat decay with remainder accumulators, a floored health track,
 //  care quality, poop, sickness, stage transitions, action application and the
@@ -23,6 +25,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "../core/nt_types.h"
+#include "../persistence/save_schema.h"   // PebbleInstance, CareId
 
 // -----------------------------------------------------------------------------
 // 1. SIM ENVIRONMENT
@@ -64,13 +67,45 @@ void sim_env_defaults(SimEnv& env);
 #define SIM_EV_EVOLVE_MINOR 0x00080000u  // child/teen variant chosen
 
 // -----------------------------------------------------------------------------
+// 2b. THE PRESENTATION VIEW
+//     Everything the renderer and the screens read that is NOT a care number.
+//     Four of its members mirror the bound PebbleInstance (genome, birth_epoch,
+//     age_s and, through the legacy PF_* word, status/flags); the rest are the
+//     v1 mechanics - life stage, care quality, poop, the minor form - that
+//     SaveSchema v2 does not carry and that P3-C1 retires. They live in RAM for
+//     as long as a Pebble is the active one and are re-derived on sim_bind().
+//     P2-C11 replaces this struct with ui/pet_view.h's PetView.
+// -----------------------------------------------------------------------------
+struct SimView {
+  Genome   genome;         // mirror of PebbleInstance.genome
+  uint32_t birth_epoch;    // mirror of PebbleInstance.birth_epoch
+  uint32_t age_s;          // mirror of PebbleInstance.age_s
+  uint16_t flags;          // the legacy PF_* word; the persisted bits mirror
+                           // into PebbleInstance.status / .flags
+  int16_t  cq;             // care quality 0..1000 (RAM only)
+  uint8_t  stage;          // Stage, derived from PebbleInstance.level on bind
+  uint8_t  minor_form;     // child/teen variant nibbles (RAM only)
+  uint8_t  poop_count;     // 0..POOP_MAX (RAM only)
+  uint8_t  pad;            // keeps the struct's size stable
+};
+
+// -----------------------------------------------------------------------------
 // 3. MANDATORY PUBLIC INTERFACE
 // -----------------------------------------------------------------------------
 
-// Binds the simulation to a PetSave the caller owns (app.cpp). Clamps every
-// field into its legal range and resets the RAM-only cadence accumulators.
-// The pointer must stay valid for as long as the sim runs.
-void     sim_init(PetSave& save);
+// Binds the simulation to the ACTIVE PebbleInstance the caller owns (the Box,
+// through app.cpp). Clamps every care field into its legal range, re-derives
+// the view from the persisted fields and resets BOTH the per-Pebble
+// accumulators and the device-wide anti-farm ledger: a bind is a boot.
+// The reference must stay valid for as long as the sim runs.
+void     sim_bind(PebbleInstance& pebble);
+
+// Makes `next` the active Pebble WITHOUT restarting the device-wide anti-farm
+// gain ledger (plan P2-C10). Only the per-Pebble accumulators - cadence,
+// cooldowns, play windows, care quality, poop, the day counters - are reset, so
+// swapping the active slot cannot be used to farm: the hourly point ceiling is
+// a property of the device and of real time, not of the creature holding it.
+void     sim_switch(PebbleInstance& next);
 
 // Advances the simulation by `seconds` simulated seconds. Internally sub-steps
 // at SIM_SUBSTEP_S so thresholds, poop, sickness and stage checks land on the
@@ -91,6 +126,11 @@ uint8_t  sim_mood_score(void);
 // 0..100 whole-point projection of a stat.
 uint8_t  sim_stat_pct(StatId id);
 
+// The raw milli-point value of a stat, 0..100000. ST_BOND has no home in
+// SaveSchema v2 and lives in RAM; every other StatId is one of the five care[]
+// entries under the CareId name (plan P2-C10 field map).
+int32_t  sim_stat_milli(StatId id);
+
 // -----------------------------------------------------------------------------
 // 4. ENVIRONMENT FEED  (sim owns no clock and no RNG)
 // -----------------------------------------------------------------------------
@@ -102,8 +142,10 @@ void     sim_set_time_scale(uint32_t scale); // god mode: 1/6/60/360/3600
 // -----------------------------------------------------------------------------
 // 5. LIFE CYCLE
 // -----------------------------------------------------------------------------
-// Initialises the bound save to a brand new egg carrying `g`. cold != 0 applies
-// the cold-egg penalty (hatches at EGG_COLD_HEALTH_PCT health).
+// Initialises the bound Pebble to a brand new egg carrying `g`. cold != 0
+// applies the cold-egg penalty (hatches at EGG_COLD_HEALTH_PCT health). The
+// live first boot no longer takes this path - it creates a level-1 starter
+// through game/box.h - but god mode and the tests still do.
 void     sim_new_pet(const Genome& g, uint32_t now_epoch, uint8_t cold);
 
 // Hatch now (the egg screen's rub gesture / auto-hatch). No-op unless STAGE_EGG.
@@ -143,7 +185,7 @@ void     sim_gain_snapshot(uint8_t out_pts[ST_COUNT]);
 // hour refills the whole cap, so anything longer is the same answer and the
 // clamp is what makes an elapsed of years harmless).
 //
-// Call it once, immediately after sim_init(), BEFORE the boot's catch-up: the
+// Call it once, immediately after sim_bind(), BEFORE the boot's catch-up: the
 // catch-up's own refill then covers the absence [last_seen, now] on top, which
 // is exactly the remaining term of the same expression.
 //
@@ -172,7 +214,8 @@ bool     sim_apply_play_result(uint16_t win_permille, ActionResult& out);
 // -----------------------------------------------------------------------------
 // 7. QUERIES
 // -----------------------------------------------------------------------------
-const PetSave* sim_save(void);          // read-only view for ui
+const SimView*        sim_view(void);   // read-only presentation view for ui
+const PebbleInstance* sim_pebble(void); // the bound Pebble, read-only
 uint32_t sim_take_events(void);         // returns and CLEARS the event bitmask
 uint8_t  sim_alert(void);               // AlertId currently demanding attention
 uint8_t  sim_is_asleep(void);
@@ -195,13 +238,14 @@ void     sim_absence_retrofix(uint32_t true_absence_s);
 // 8. GOD MODE HOOKS (godmode.cpp is compiled always; sim owns the mutations)
 // -----------------------------------------------------------------------------
 void     sim_god_set_stat(StatId id, uint8_t pct);
+void     sim_god_set_sick(uint8_t sick);        // clears/sets PF_SICK by hand
 void     sim_god_set_stage(uint8_t stage);      // Stage; recomputes minor forms
 
 // Installs `g` into the live pet in place (genesis roll, pasted 32-hex genome,
 // per-gene editor, synthetic BLE child). The genome is RESEALED and the
 // god_tainted bit is FORCED on, so no path through god mode can produce an
 // untainted genome. Nothing else is disturbed, so the pet
-// keeps its age, stats and stage. No-op before sim_init().
+// keeps its age, stats and stage. No-op before sim_bind().
 void     sim_god_set_genome(const Genome& g);
 
 #endif // NT_SIM_H

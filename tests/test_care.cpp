@@ -12,19 +12,20 @@
 #include "core/config.h"
 #include "game/sim.h"
 #include "game/genome.h"
+#include "persistence/save_schema.h"
 
 #define CARE_SEED    0x5EED0C7Au
 #define CARE_EPOCH0  1700000000u
 #define CARE_DAYS    30u
 
-static PetSave g_care;
+static PebbleInstance g_care;
 
 // A hatched baby at 10:00 local with a valid clock, and nothing else.
 static void care_pet(void) {
   genome_seed(CARE_SEED);
   sim_seed(CARE_SEED);
   memset(&g_care, 0, sizeof(g_care));
-  sim_init(g_care);
+  sim_bind(g_care);
   sim_new_pet(genome_genesis(), CARE_EPOCH0, 0);
   sim_hatch();
 
@@ -59,31 +60,31 @@ TEST(care_thirty_days_of_neglect_never_kills_the_pet) {
   care_pet();
   SimEnv env = sim_env();
 
-  const uint8_t stage0 = g_care.stage;
+  const uint8_t stage0 = sim_view()->stage;
   uint8_t min_health = 100;
 
   for (uint32_t m = 0; m < CARE_DAYS * 24u * 60u; ++m) {
     care_minute(env);
 
     // The floor holds on EVERY minute, not merely at the end.
-    CHECK(g_care.stat[ST_HEALTH] >= (int32_t)HEALTH_FLOOR_PCT * 1000);
+    CHECK(sim_stat_milli(ST_HEALTH) >= (int32_t)HEALTH_FLOOR_PCT * 1000);
     const uint8_t h = sim_stat_pct(ST_HEALTH);
     if (h < min_health) min_health = h;
   }
 
-  CHECK(g_care.stat[ST_HEALTH] > 0);
+  CHECK(sim_stat_milli(ST_HEALTH) > 0);
   CHECK(sim_stat_pct(ST_HEALTH) >= HEALTH_FLOOR_PCT);
   // Inconveniently unhappy: the neglect really did bite, it just did not kill.
   CHECK_EQ((int)min_health, (int)HEALTH_FLOOR_PCT);
   CHECK_EQ(sim_stat_pct(ST_HUNGER), 0);
   CHECK_EQ(sim_stat_pct(ST_HAPPINESS), 0);
   // And it grew up regardless: a neglected pebble is still a pebble.
-  CHECK(g_care.stage > stage0);
-  CHECK(g_care.stage < STAGE_COUNT);
+  CHECK(sim_view()->stage > stage0);
+  CHECK(sim_view()->stage < STAGE_COUNT);
 }
 
 // -----------------------------------------------------------------------------
-//  2. No death flag survives anywhere in PetSave
+//  2. No death flag survives anywhere in the live pet
 //     PF_DEAD / PF_BURIED / PF_SCAR were bits 0x0008 / 0x0010 / 0x0020 and are
 //     retired. Nothing may set them again, and there is no STAGE_DEAD to reach.
 // -----------------------------------------------------------------------------
@@ -95,8 +96,8 @@ TEST(care_neglect_sets_no_death_flag) {
 
   for (uint32_t m = 0; m < CARE_DAYS * 24u * 60u; ++m) {
     care_minute(env);
-    CHECK((g_care.flags & CARE_RETIRED_DEATH_FLAGS) == 0);
-    CHECK(g_care.stage < STAGE_COUNT);
+    CHECK((sim_view()->flags & CARE_RETIRED_DEATH_FLAGS) == 0);
+    CHECK(sim_view()->stage < STAGE_COUNT);
   }
 
   // sim_take_events() has been accumulating for a month: no event bit above
@@ -121,9 +122,9 @@ TEST(care_a_month_offline_also_stops_at_the_floor) {
 
   CHECK_EQ(rep.clock_known, 1);
   CHECK(rep.steps > 0);
-  CHECK(g_care.stat[ST_HEALTH] >= (int32_t)HEALTH_FLOOR_PCT * 1000);
-  CHECK((g_care.flags & CARE_RETIRED_DEATH_FLAGS) == 0);
-  CHECK(g_care.stage < STAGE_COUNT);
+  CHECK(sim_stat_milli(ST_HEALTH) >= (int32_t)HEALTH_FLOOR_PCT * 1000);
+  CHECK((sim_view()->flags & CARE_RETIRED_DEATH_FLAGS) == 0);
+  CHECK(sim_view()->stage < STAGE_COUNT);
 }
 
 // -----------------------------------------------------------------------------
@@ -136,15 +137,60 @@ TEST(care_health_regenerates_after_the_neglect_ends) {
   SimEnv env = sim_env();
 
   for (uint32_t m = 0; m < 7u * 24u * 60u; ++m) care_minute(env);
-  const int32_t rock_bottom = g_care.stat[ST_HEALTH];
+  const int32_t rock_bottom = sim_stat_milli(ST_HEALTH);
   CHECK_EQ(rock_bottom, (int32_t)HEALTH_FLOOR_PCT * 1000);
 
   // The owner comes back and does the one thing the model cannot do for itself.
   for (uint8_t i = 0; i < ST_CORE_COUNT; ++i) {
     sim_god_set_stat((StatId)i, 100);
   }
-  g_care.flags &= (uint16_t)~PF_SICK;
+  sim_god_set_sick(0);
 
   for (uint32_t m = 0; m < 120u; ++m) care_minute(env);
-  CHECK(g_care.stat[ST_HEALTH] > rock_bottom);
+  CHECK(sim_stat_milli(ST_HEALTH) > rock_bottom);
+}
+
+// -----------------------------------------------------------------------------
+//  5. Swapping the active Pebble is not a way to farm (plan P2-C10)
+//     sim_switch() resets the PER-PEBBLE accumulators and keeps the DEVICE-WIDE
+//     hourly gain ledger, so ten Pebbles share one hour's points.
+// -----------------------------------------------------------------------------
+static PebbleInstance g_other;
+
+TEST(care_switching_the_active_pebble_keeps_the_gain_ledger) {
+  care_pet();
+
+  // Spend the satiety budget down on the pet we are holding.
+  sim_god_set_stat(ST_HUNGER, 0);
+  ActionResult r;
+  CHECK(sim_apply_action(ACT_FEED_MEAL, r));
+  const uint16_t left_after_meal = sim_gain_left(ST_HUNGER);
+  CHECK(left_after_meal < (uint16_t)GAIN_CAP_HUNGER_H);
+
+  // A second Pebble, straight out of the Box.
+  memset(&g_other, 0, sizeof g_other);
+  g_other.magic      = (uint16_t)PEBBLE_MAGIC;
+  g_other.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  g_other.species_id = 1;
+  g_other.id         = 0x2222u;
+  g_other.level      = 1;
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    g_other.care[i] = (int32_t)PB_CARE_MILLI_MAX;
+  }
+  g_other.care[CARE_HUNGER] = 0;
+
+  sim_switch(g_other);
+  CHECK_EQ(sim_pebble(), &g_other);
+
+  // The ledger did NOT restart with the new creature: that is the whole point.
+  CHECK_EQ(sim_gain_left(ST_HUNGER), left_after_meal);
+
+  // Per-Pebble state DID: the new Pebble carries no care quality, no poop and
+  // no wish of the old one.
+  CHECK_EQ((int)sim_view()->poop_count, 0);
+  CHECK_EQ((int)sim_view()->cq, (int)CQ_START);
+
+  // And switching back and forth cannot mint points either.
+  sim_switch(g_care);
+  CHECK_EQ(sim_gain_left(ST_HUNGER), left_after_meal);
 }

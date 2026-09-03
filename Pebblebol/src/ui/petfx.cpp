@@ -454,7 +454,7 @@ static int16_t  s_ink_x0 = 44, s_ink_y0 = 12, s_ink_x1 = 83, s_ink_y1 = 51;
 
 // The identity petfx_draw_body() last drew, kept ONLY so petfx_pose_ink_x() can
 // answer "how wide would this animal be in pose X" without the caller having to
-// carry a PetSave into a query. Written where set_id is derived, three lines
+// carry a SimView into a query. Written where set_id is derived, three lines
 // below, so the two cannot drift apart.
 static uint8_t  s_qry_ok      = 0;
 static uint8_t  s_qry_species = 0;
@@ -489,7 +489,7 @@ static inline int16_t pf_stage_hi(uint8_t w) {
   return (hi < (int16_t)PETFX_STAGE_L) ? (int16_t)PETFX_STAGE_L : hi;
 }
 
-static uint32_t pf_identity(const PetSave& p) {
+static uint32_t pf_identity(const SimView& p) {
   return p.genome.lineage_id
        ^ ((uint32_t)p.genome.g0 << 16)
        ^ (uint32_t)p.genome.g1
@@ -514,10 +514,10 @@ static uint32_t pf_identity(const PetSave& p) {
 // live pose instead would fix the overlap but move the wall in the middle of a
 // stroll, which is the same jump wearing a different hat; the maximum is stable
 // for as long as the stage is, which is what a clamp has to be.
-static uint8_t pf_width_of(const PetSave& p) {
+static uint8_t pf_width_of(const SimView& p) {
   static const uint8_t kPoses[] = { POSE_IDLE, POSE_SLEEP, POSE_SICK, POSE_EAT };
   const uint8_t species = gene_species(p.genome);
-  const uint8_t form    = sprite_form_of(p, (Stage)p.stage);
+  const uint8_t form    = sprite_form_of(p.genome, p.minor_form, (Stage)p.stage);
   uint8_t w = 0;
   for (uint8_t i = 0; i < (uint8_t)(sizeof(kPoses) / sizeof(kPoses[0])); i++) {
     const uint8_t id = sprite_set_id(species, p.stage, form, kPoses[i]);
@@ -646,7 +646,7 @@ static void pf_cache_sync(uint8_t set_id, uint8_t mirrored) {
 // Where the pet would like to end up. Sociable pets come to the middle where
 // the player is looking; unsociable ones pick a side and hug it. The side is
 // chosen from the lineage, not from a coin toss, so it is part of the pet.
-static void pf_derive(const PetSave& p) {
+static void pf_derive(const SimView& p) {
   const Genome& g = p.genome;
 
   s_temper = gene_temper_class(g);
@@ -843,7 +843,7 @@ void petfx_begin(void) {
   s_obst_w     = 0;
 }
 
-void petfx_reset(const PetSave& p) {
+void petfx_reset(const SimView& p) {
   if (!s_began) petfx_begin();
 
   s_seeded   = 1;
@@ -880,7 +880,7 @@ void petfx_reset(const PetSave& p) {
   pf_schedule_blink();
 }
 
-void petfx_service(const PetSave& p, uint32_t now_ms) {
+void petfx_service(const SimView& p, uint32_t now_ms) {
   if (!s_began) petfx_begin();
 
   s_now = now_ms;
@@ -1058,7 +1058,7 @@ static void pf_draw_shadow(int16_t cx, uint8_t ink_w, int16_t lift) {
   if (sw >= 10) rd_dither_rect((int16_t)(sx + 2), (int16_t)(PETFX_SHADOW_Y + 1), (int16_t)(sw - 4), 1, RD_D50);
 }
 
-void petfx_draw_body(const PetSave& p, uint8_t pose, uint8_t frame, int16_t dy,
+void petfx_draw_body(const SimView& p, uint8_t pose, uint8_t frame, int16_t dy,
                      int16_t dx) {
   U8G2& u = rd_u8g2();
   const uint8_t entry_color = u.getDrawColor();   // restored on the way out
@@ -1077,7 +1077,7 @@ void petfx_draw_body(const PetSave& p, uint8_t pose, uint8_t frame, int16_t dy,
     // comes from the species gene and child/teen variants live in minor_form.
     s_qry_species = gene_species(p.genome);
     s_qry_stage   = p.stage;
-    s_qry_form    = sprite_form_of(p, (Stage)p.stage);
+    s_qry_form    = sprite_form_of(p.genome, p.minor_form, (Stage)p.stage);
     s_qry_ok      = 1;
     set_id = sprite_set_id(s_qry_species, s_qry_stage, s_qry_form, pose);
   }

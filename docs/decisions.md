@@ -106,6 +106,12 @@ Recorded here for traceability; each is one commit to reverse.
 | T12 | UI strings stay Spanish; identifiers, comments and docs English; Spanish docs archived under `docs/legacy/`. | P2-C8, P10-C5 |
 | T13 | Roster sprites 24x24, 2 frames, XBM (72 B/frame); creator sprites use the same format. | P9-C3 |
 
+## Measured, not estimated (running record)
+
+| What | Measurement | Consequence |
+|---|---|---|
+| Worst-case offline catch-up (`sim_catch_up_ex`, 400 days) | **8.4 ms** on the host at `-O1`; **~421 ms** projected on a 160 MHz ESP32-C3 using the plan's 50x factor | Comfortably under the 1 s threshold and 12x under the 5 s Task WDT, so catch-up does **not** need to be made resumable. Plan risk 25 closed by measurement (P2-C10, 2026-09-03). |
+
 ## Measurements to record when hardware exists (P2-C0)
 
 - Real boot free heap vs the author's 179,836 B (`net.cpp:5-7`).

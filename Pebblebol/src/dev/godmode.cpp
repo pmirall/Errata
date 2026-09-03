@@ -3,7 +3,7 @@
 //  The debug console (GAME_DESIGN 10). See godmode.h for the contract.
 //
 //  Everything the console mutates goes through the owning module's own API:
-//  sim_god_*() for the pet, gt_skew_add() for time, compat_*() for NVS. This
+//  sim_god_*() for the pet, gt_skew_add() for time, gs_*() for NVS. This
 //  file mutates NOTHING directly - which is exactly why a test run through it
 //  exercises the real code paths.
 //
@@ -23,7 +23,7 @@
 #include "../core/strings_es.h"
 #include "../game/sim.h"
 #include "../game/genome.h"
-#include "../persistence/save_compat.h"
+#include "../persistence/game_state.h"
 #include "../hardware/boot.h"
 #include "../hardware/kv_nvs.h"
 #include "../hardware/gametime.h"
@@ -192,7 +192,7 @@ static uint8_t  s_cmdlen      = 0;
 // =============================================================================
 //  5. SMALL HELPERS
 // =============================================================================
-static inline const PetSave* pet(void) { return sim_save(); }
+static inline const SimView* pet(void) { return sim_view(); }
 
 static void toast(uint16_t str_id)
 {
@@ -222,8 +222,8 @@ static uint8_t win_top(uint8_t cur, uint8_t count, uint8_t rows)
 // One CSV line after every state change, plus a forced save (GAME_DESIGN 10.2).
 static void changed(void)
 {
-  const PetSave* p = pet();
-  if (p) compat_save_pet(*p, true);
+  const SimView* p = pet();
+  if (p) gs_save_active(true);
   god_dump_line();
 }
 
@@ -297,7 +297,7 @@ static void run_absence(uint32_t secs)
   sim_catch_up_ex(secs, 1u, s_abs_rep);
   s_abs_done = true;
 
-  compat_touch_lastseen(gt_now());
+  gs_touch_lastseen(gt_now());
   changed();
   GOD_LOGF("[god] absence %lus known=%u steps=%u\n",
            (unsigned long)secs, (unsigned)s_abs_rep.clock_known,
@@ -310,15 +310,15 @@ static void run_absence(uint32_t secs)
 // -----------------------------------------------------------------------------
 static bool run_wipe(void)
 {
-  const bool ok = compat_factory_reset();
+  const bool ok = gs_factory_reset();
   Genome g = genome_genesis();
   sim_new_pet(g, gt_now(), 0);
   // GAME_DESIGN 10.2: everything god mode produces carries the taint, and this
   // egg was produced inside god mode. A factory reset resets the save, not the
   // honesty of the dynasty ribbon.
   sim_god_set_genome(g);
-  const PetSave* p = pet();
-  if (p) compat_save_pet(*p, true);
+  const SimView* p = pet();
+  if (p) gs_save_active(true);
   GOD_LOGF("[god] wipe ok=%u\n", (unsigned)ok);
   return ok;
 }
@@ -330,7 +330,7 @@ static bool run_wipe(void)
 static void install_genome(const Genome& g)
 {
   sim_god_set_genome(g);
-  const PetSave* p = pet();
+  const SimView* p = pet();
   if (p) genome_to_hex32(p->genome, s_hex_show);
   changed();
   toast((uint16_t)STR_GOD_DONE);
@@ -446,7 +446,7 @@ static void dump_header(void)
 
 void god_dump_line(void)
 {
-  const PetSave* p = pet();
+  const SimView* p = pet();
   if (!p) { Serial.println(F("GOD,0,,,,,,,,,")); return; }
 
   char hex[33];
@@ -536,7 +536,7 @@ void god_enter(void)
   set_scale(0);                                  // acceleration is opt-in
 
   // The taint is permanent, on the living pet and on everything it produces.
-  const PetSave* p = pet();
+  const SimView* p = pet();
   if (p) {
     Genome g = p->genome;
     gene_set_tainted(g, 1);
@@ -555,7 +555,7 @@ void god_exit(void)
   if (!s_active) return;
 
   // The accumulated skew is deliberately NOT undone. gametime.h offers the
-  // undo, but every timestamp the forced absences wrote into PetSave is in
+  // undo, but every timestamp the forced absences wrote into SimView is in
   // skewed time; rewinding gt_now() would leave last_seen_epoch in the future
   // and the next absence computation would underflow. The skew is reported on
   // the RELOJ panel and in the CSV instead, so a soak log stays interpretable.
@@ -567,8 +567,8 @@ void god_exit(void)
   s_active   = false;
   s_screen   = GSC_MENU;
 
-  const PetSave* p = pet();
-  if (p) compat_save_pet(*p, true);
+  const SimView* p = pet();
+  if (p) gs_save_active(true);
   god_dump_line();
   GOD_LOGF("[god] EXIT %s\n", S(STR_GOD_EXIT));
 }
@@ -731,7 +731,7 @@ static GodEvt select_sub(void)
           s_screen   = GSC_GENE;
           break;
         case GD_GEN_DUMP: {
-          const PetSave* p = pet();
+          const SimView* p = pet();
           if (p) {
             genome_to_hex32(p->genome, s_hex_show);
             GOD_LOGF("GENOME,%s\n", s_hex_show);
@@ -751,7 +751,7 @@ static GodEvt select_sub(void)
       return GOD_EVT_NONE;
 
     case GSC_GENE: {
-      const PetSave* p = pet();
+      const SimView* p = pet();
       if (!p) { toast((uint16_t)STR_GOD_NOPET); return GOD_EVT_NONE; }
       const GodGene& gg = GD_GENES[s_gene_idx % GOD_GENE_COUNT];
       Genome g = p->genome;
@@ -832,7 +832,7 @@ GodEvt god_handle(Gesture g)
       // On the gene editor this is the decrement; everywhere else it is the
       // vertical-list "jump to last item" of GAME_DESIGN 8.3.
       if (s_screen == GSC_GENE) {
-        const PetSave* p = pet();
+        const SimView* p = pet();
         if (p) {
           const GodGene& gg = GD_GENES[s_gene_idx % GOD_GENE_COUNT];
           Genome gn = p->genome;
@@ -1009,7 +1009,7 @@ static void draw_absence(void)
 
 static void draw_gene(void)
 {
-  const PetSave* p = pet();
+  const SimView* p = pet();
   draw_title(S(STR_GOD_GENOME));
   if (!p) { rd_text_fit(3, 32, OLED_W - 6, RD_FONT_BODY, S(STR_GOD_NOPET)); rd_affordance(0, S(STR_AF_BACK)); return; }
 
@@ -1085,7 +1085,7 @@ static void draw_sys(void)
     }
     case GD_SYS_PET: {
       draw_title(S(STR_MENU_STATUS));
-      const PetSave* p = pet();
+      const SimView* p = pet();
       if (!p) { rd_text_fit(2, 32, OLED_W - 4, RD_FONT_BODY, S(STR_GOD_NOPET)); break; }
       snprintf(b, sizeof(b), "%u/%u/%u/%u/%u hp",
                (unsigned)sim_stat_pct(ST_HUNGER),   (unsigned)sim_stat_pct(ST_HAPPINESS),

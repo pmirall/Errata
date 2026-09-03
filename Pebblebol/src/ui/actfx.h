@@ -68,6 +68,7 @@
 
 #include "../core/config.h"
 #include "../core/nt_types.h"
+#include "../game/sim.h"      // SimView, the sim's read-only presentation view
 
 // -----------------------------------------------------------------------------
 //  LIFECYCLE
@@ -83,7 +84,7 @@
 // copy taken afterwards has nothing left to dissolve. Every caller has to take
 // the copy first. Only a SUCCESSFUL action may be announced here; a rejected
 // one (cooldown, full, asleep) gets its toast and no film.
-void    actfx_begin(uint8_t action, const PetSave& before);
+void    actfx_begin(uint8_t action, const SimView& before);
 
 // Advance the clock. MUST be called once per loop() from ui_service(), above
 // every early return in it and regardless of which screen is up. That is what

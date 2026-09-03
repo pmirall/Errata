@@ -24,7 +24,7 @@
   #include <sys/time.h>       // settimeofday()
   #include "esp_timer.h"      // esp_timer_get_time() - the exact 64-bit uptime
   #include "../persistence/save_manager.h"    // save_last_seen() - read only
-  #include "../persistence/save_compat.h"     // compat_boot_tz() - read only
+  #include "../persistence/game_state.h"     // gs_boot_tz() - read only
 #else
   // Host builds supply the 32-bit millisecond tick themselves so the wrap
   // extension below can be driven across a rollover boundary by a unit test.
@@ -152,12 +152,12 @@ static void gt_apply_tz(void)
 //                        device whose clock was never calibrated still reports
 //                        plausible, monotonically increasing epochs and an
 //                        absence of ~0 instead of inventing one.
-//   compat_boot_tz()  -> the persisted ConfigV2.tz, so a timezone changed from
+//   gs_boot_tz()  -> the persisted ConfigV2.tz, so a timezone changed from
 //                        SETTINGS is honoured on the next boot with no network
 //                        at all. Empty when nothing is persisted, in which case
 //                        the compiled-in CFG_TZ_STRING stands.
 //
-// ORDERING: compat_load() must run before gt_begin(). That is safe and one-way
+// ORDERING: gs_load() must run before gt_begin(). That is safe and one-way
 // - persistence never calls into gametime; it takes its clocks as function
 // pointers. If gt_begin() is called first, the seed is simply empty and the
 // estimated clock starts at the epoch, which gt_is_valid() already reports as
@@ -182,7 +182,7 @@ static void gt_load_seed(void)
   // power cut would charge no absence at all, however long it really was.
   uint8_t  cal   = (uint8_t)CAL_UNSET;
   uint32_t known = 0;
-  compat_boot_cal(cal, known);
+  gs_boot_cal(cal, known);
   if (known > s_est_base_s && known >= (uint32_t)GT_EPOCH_SANE_MIN) {
     s_est_base_s = known;           // ConfigV2 kept a newer mirror than key "t"
   }
@@ -191,7 +191,7 @@ static void gt_load_seed(void)
   }
 
   char tz[CFGV2_TZ_CAP];
-  compat_boot_tz(tz, sizeof(tz));
+  gs_boot_tz(tz, sizeof(tz));
   if (tz[0] != '\0') {
     snprintf(s_tz, sizeof(s_tz), "%s", tz);
   }
@@ -298,7 +298,7 @@ bool gt_set_epoch(uint32_t epoch, TimeCal src)
   // next boot needs to know a real clock once existed here before it may call
   // its own estimate CAL_ESTIMATED and charge an absence with it.
 #if defined(ARDUINO)
-  compat_note_time_cal(s_cal, epoch);
+  gs_note_time_cal(s_cal, epoch);
 #endif
   return true;
 }

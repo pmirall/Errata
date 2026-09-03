@@ -57,13 +57,13 @@
 
 // -----------------------------------------------------------------------------
 // gt_begin()
-//   Call once from setup(), AFTER compat_load() and BEFORE anything asks for a
+//   Call once from setup(), AFTER gs_load() and BEFORE anything asks for a
 //   timestamp. Never blocks, never touches the radio, never writes anything.
 //   - Installs the POSIX TZ string (the persisted Config.tz when storage has
 //     one, otherwise CFG_TZ_STRING) via setenv+tzset, so local time is already
 //     correct on a device that will never see the internet.
 //   - Seeds the ESTIMATED clock from save_last_seen().
-//   The compat_load() ordering is a one-way dependency: persistence never calls
+//   The gs_load() ordering is a one-way dependency: persistence never calls
 //   into gametime, it takes its clocks as function pointers. Calling gt_begin() first is
 //   not fatal - the estimate simply starts at the epoch, and gt_is_valid()
 //   already reports that as untrustworthy.

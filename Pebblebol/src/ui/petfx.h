@@ -23,6 +23,7 @@
 
 #include "../core/config.h"
 #include "../core/nt_types.h"
+#include "../game/sim.h"      // SimView, the sim's read-only presentation view
 
 // -----------------------------------------------------------------------------
 // THE GROUND LINE.
@@ -100,13 +101,13 @@ void petfx_begin(void);
 // whenever the pet changes. Seeding from lineage_id ^ genome makes
 // the SAME pet always move the same way and siblings move differently, so
 // motion becomes a visible, heritable trait.
-void petfx_reset(const PetSave& p);
+void petfx_reset(const SimView& p);
 
 // Advance the behaviour automaton. Call once per loop() from ui_service().
 // Cheap (a few hundred cycles) and never blocks; it is time-based, so calling
 // it at an irregular rate is fine, and a stall longer than 250 ms is clamped
 // so the pet walks instead of teleporting.
-void petfx_service(const PetSave& p, uint32_t now_ms);
+void petfx_service(const SimView& p, uint32_t now_ms);
 
 // =============================================================================
 //  DRAWING  (inside a rd_begin_frame() / rd_end_frame() pair)
@@ -130,7 +131,7 @@ void petfx_draw_floor(void);
 // body into the HUD columns however hard the caller pushes.
 //
 // It defaults to 0 so the ceremonies, which have no lunge, are unchanged.
-void petfx_draw_body(const PetSave& p, uint8_t pose, uint8_t frame, int16_t dy,
+void petfx_draw_body(const SimView& p, uint8_t pose, uint8_t frame, int16_t dy,
                      int16_t dx = 0);
 
 // Where the body actually landed this frame, so the caller can hang emotes

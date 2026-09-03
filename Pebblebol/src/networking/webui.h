@@ -26,7 +26,7 @@
 //    - webui does NOT own the radio. It never calls WiFi.*, never starts the
 //      captive DNSServer (net.cpp owns that); it only answers the HTTP half of
 //      the captive-portal probe with a redirect.
-//    - webui does NOT mutate PetSave. No route can: none of them writes.
+//    - webui does NOT mutate the pet. No route can: none of them writes.
 //
 //  All identifiers and comments English.
 // =============================================================================
@@ -36,7 +36,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "../core/nt_types.h"   // -> config.h (Config, PetSave, WEB_* constants)
+#include "../core/nt_types.h"   // -> config.h (Config, WEB_* constants)
+#include "../game/sim.h"        // SimView
 
 // -----------------------------------------------------------------------------
 //  LIFECYCLE
@@ -99,7 +100,7 @@ void     web_bind_config(Config* cfg);
 //    last remnants of the phone mirror and move into the render layer when the
 //    PetView struct lands (audit risk 9).
 // -----------------------------------------------------------------------------
-uint8_t  web_pose_of(const PetSave& p);      // SpritePose
+uint8_t  web_pose_of(const SimView& p);      // SpritePose
 
 // 0..100 mood score -> enum Mood ordinal, using the nt_types.h bands.
 uint8_t  web_mood_index(uint8_t score_0_100);

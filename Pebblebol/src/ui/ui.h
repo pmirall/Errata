@@ -6,9 +6,9 @@
 //
 //  LAYERING
 //  --------
-//  ui owns NO game state. Everything it shows comes from sim_save() /
+//  ui owns NO game state. Everything it shows comes from sim_view() /
 //  sim_*() / ble_peer(); everything it changes goes through
-//  sim_apply_action(), compat_save_cfg() or net_request().
+//  sim_apply_action(), gs_save_cfg() or net_request().
 //  It never includes WiFi.h / BLEDevice.h / WebServer.h (net.h and
 //  ble_social.h are deliberately network-header-free) and it never constructs
 //  a U8G2: the single instance comes from rd_u8g2().

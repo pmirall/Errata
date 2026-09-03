@@ -10,7 +10,7 @@
 //  is the subject of the commit. Every field is set explicitly so the output
 //  is a pure function of this file (no clock, no RNG).
 //
-//  P2-C7 retired several PetSave fields into pad_* members at the SAME offsets
+//  P2-C7 retired several LegacyPetSave fields into pad_* members at the SAME offsets
 //  and dropped ST_DISCIPLINE from StatId. The v1 bytes did not move, so this
 //  file writes the retired values through the pads and the blobs it emits are
 //  still byte-identical to the committed ones.
@@ -19,11 +19,11 @@
 #include <string.h>
 
 #include "core/nt_types.h"
-#include "persistence/legacy_v1.h"    // LegacyGainSave: the frozen v1 "gl" layout
+#include "persistence/legacy_v1.h"    // the frozen v1 PetSave / Config / GainSave
 #include "game/genome.h"
 #include "core/crc16.h"
 
-static_assert(sizeof(PetSave) == 128, "legacy PetSave is 128 B");
+static_assert(sizeof(LegacyPetSave) == 128, "legacy PetSave is 128 B");
 static_assert(sizeof(Config) == 256, "legacy Config is 256 B");
 static_assert(sizeof(LegacyGainSave) == 20, "legacy GainSave is 20 B");
 
@@ -55,11 +55,11 @@ static Genome fixture_genome(uint32_t lineage) {
   return g;
 }
 
-static PetSave petsave_adult(void) {
-  PetSave p;
+static LegacyPetSave petsave_adult(void) {
+  LegacyPetSave p;
   memset(&p, 0, sizeof p);
-  p.magic   = NT_SAVE_MAGIC;
-  p.version = NT_SAVE_VERSION;
+  p.magic   = LEGACY_SAVE_MAGIC;
+  p.version = LEGACY_SAVE_VERSION;
   p.stage   = STAGE_ADULT;
   static const int32_t stats[ST_COUNT] = { 73000, 61000, 88000, 45000, 92000, 70000 };
   memcpy(p.stat, stats, sizeof stats);
@@ -99,15 +99,15 @@ static PetSave petsave_adult(void) {
   p.happiness_avg  = 66;
   p.wish_id        = 0;
   p.events_done    = (uint8_t)(EV_VISITA | (2u << EV_BIRTHDAY_SH));
-  p.crc16 = crc16_ccitt(&p, PETSAVE_CRC_BYTES);
+  p.crc16 = crc16_ccitt(&p, LEGACY_PETSAVE_CRC_BYTES);
   return p;
 }
 
-static PetSave petsave_egg(void) {
-  PetSave p;
+static LegacyPetSave petsave_egg(void) {
+  LegacyPetSave p;
   memset(&p, 0, sizeof p);
-  p.magic   = NT_SAVE_MAGIC;
-  p.version = NT_SAVE_VERSION;
+  p.magic   = LEGACY_SAVE_MAGIC;
+  p.version = LEGACY_SAVE_VERSION;
   p.stage   = STAGE_EGG;
   for (uint8_t i = 0; i < ST_COUNT; i++) p.stat[i] = STAT_MILLI_MAX;
   p.pad_stat            = STAT_MILLI_MAX;   // v1 stat[ST_DISCIPLINE]
@@ -121,7 +121,7 @@ static PetSave petsave_egg(void) {
   p.pad_weight          = (int16_t)gene_weight_ideal_dg(p.genome);
   p.flags               = PF_LIGHT_ON;
   p.pad_adult_form      = 0xFF;             // v1 adult_form = FORM_UNSET
-  p.crc16 = crc16_ccitt(&p, PETSAVE_CRC_BYTES);
+  p.crc16 = crc16_ccitt(&p, LEGACY_PETSAVE_CRC_BYTES);
   return p;
 }
 
@@ -181,8 +181,8 @@ static int write_blob(const char* dir, const char* name, const void* p, size_t n
 int main(int argc, char** argv) {
   const char* dir = (argc > 1) ? argv[1] : "fixtures";
   int rc = 0;
-  const PetSave  adult = petsave_adult();
-  const PetSave  egg   = petsave_egg();
+  const LegacyPetSave  adult = petsave_adult();
+  const LegacyPetSave  egg   = petsave_egg();
   const Config   cfg   = config_v1();
   const LegacyGainSave gain = gainsave_v1();
   rc |= write_blob(dir, "petsave_v1_adult.bin", &adult, sizeof adult);

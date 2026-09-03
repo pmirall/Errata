@@ -1,27 +1,17 @@
 // =============================================================================
-//  PEBBLEBOL - persistence/save_compat.cpp
-//  *** TEMPORARY. P2-C10 DELETES THIS FILE. *** See save_compat.h.
-//
-//  Two maps and no policy:
-//    pet_to_pebble()  the live PetSave -> PebbleInstance slot 0. It is exactly
-//                     the v1 -> v2 field map, so it CALLS migrate_v1_to_v2()
-//                     rather than restating it: the live PetSave and Config
-//                     still have the frozen v1 layouts (legacy_v1.h), which is
-//                     the whole reason this transition commit is possible.
-//    pet_from_state() the inverse, used only when the companion blob is gone
-//                     (a migration, or a checkpoint recovery). The v1 fields
-//                     v2 does not carry get the documented defaults below.
+//  PEBBLEBOL - persistence/game_state.cpp
+//  The live GameState, the Config view of ConfigV2, the "gl" anti-farm ledger
+//  and the device identity. See game_state.h for what P2-C10 removed.
 //
 //  No Arduino include of its own: every clock comes from save_set_clock() and
 //  the RTC mirror through hardware/boot.h. It is NOT one of the host-compiled
 //  pure modules (plan 1.3 rule 2) and nothing may start treating it as one.
 // =============================================================================
-#include "save_compat.h"
+#include "game_state.h"
 
 #include <string.h>
 
 #include "kv_store.h"
-#include "migration.h"
 #include "../hardware/boot.h"      // the free RTC mirror of the last-seen epoch
 #include "../core/config.h"
 #include "../core/crc16.h"
@@ -31,10 +21,10 @@
 // blobs (save_schema.h section 8).
 static GameState s_gs;
 
-static bool         s_have_pet   = false;
+static bool         s_have_pebble = false;
 static bool         s_readonly   = false;
-static CompatGainFn s_gain_fn    = nullptr;
-static uint8_t      s_gain_last[COMPAT_GAIN_SLOTS];
+static GsGainFn s_gain_fn    = nullptr;
+static uint8_t      s_gain_last[GS_GAIN_SLOTS];
 static uint32_t     s_gain_epoch = 0;
 static bool         s_gain_known = false;
 static bool         s_gain_sane  = false;
@@ -45,11 +35,11 @@ static bool         s_gain_sane  = false;
 static uint32_t s_box_sig      = 0;
 static bool     s_box_sig_seen = false;
 
-void compat_set_readonly(bool ro) { s_readonly = ro; }
-bool compat_readonly(void)        { return s_readonly; }
+void gs_set_readonly(bool ro) { s_readonly = ro; }
+bool gs_readonly(void)        { return s_readonly; }
 
-GameState& compat_state(void)  { return s_gs; }
-bool       compat_have_pet(void) { return s_have_pet; }
+GameState& gs_state(void)  { return s_gs; }
+bool       gs_have_pebble(void) { return s_have_pebble; }
 
 static uint32_t box_signature(const BoxHeader& b) {
   return ((uint32_t)b.slot_mask << 16) ^ ((uint32_t)b.active_slot << 8) ^
@@ -57,24 +47,8 @@ static uint32_t box_signature(const BoxHeader& b) {
          ((uint32_t)b.flags << 24);
 }
 
-// -----------------------------------------------------------------------------
-// The pet, forwards. The caller's struct is sealed into a local first: the map
-// runs through migrate_v1_to_v2(), which validates magic/version/CRC exactly as
-// it would for a blob read out of a v1 unit's flash.
-// -----------------------------------------------------------------------------
-static void pet_seal(PetSave& p) {
-  p.magic       = NT_SAVE_MAGIC;
-  p.version     = NT_SAVE_VERSION;
-  p.reserved[0] = 0;
-  p.reserved[1] = 0;
-  p.crc16       = crc16_ccitt(&p, PETSAVE_CRC_BYTES);
-}
-
-static bool pet_blob_ok(const PetSave& p) {
-  return p.magic == NT_SAVE_MAGIC && p.version == NT_SAVE_VERSION &&
-         p.crc16 == crc16_ccitt(&p, PETSAVE_CRC_BYTES);
-}
-
+// The v1 Config the UI still reads is sealed exactly as v1 sealed it: app.cpp
+// watches its CRC to notice a settings change.
 static void cfg_seal(Config& c) {
   c.magic       = NT_CFG_MAGIC;
   c.version     = NT_CFG_VERSION;
@@ -88,90 +62,6 @@ static void cfg_seal(Config& c) {
   c.crc16 = crc16_ccitt(&c, CONFIG_CRC_BYTES);
 }
 
-// Maps the sealed pet into slot 0. Identity fields the v1 pet never had - the
-// Pebble id, the creation seed, the XP and the battle counters - are PRESERVED
-// from the slot when it already holds this pet, so a save cannot renumber it.
-static void pet_to_pebble(const PetSave& sealed, const Config& cfg) {
-  static GameState scratch;            // 1,936 B; too big for the loop stack
-  if (migrate_v1_to_v2((const uint8_t*)&sealed, (const uint8_t*)&cfg, scratch) != MIGRATE_OK) {
-    return;
-  }
-  PebbleInstance mapped = scratch.pebbles[0];
-  const PebbleInstance& old = s_gs.pebbles[0];
-
-  if (!pebble_is_empty(old)) {
-    mapped.id            = old.id;
-    mapped.creation_seed = old.creation_seed;
-    mapped.xp            = old.xp;
-    mapped.evo_state     = old.evo_state;
-    mapped.hp_cur        = old.hp_cur;
-    mapped.battles_won   = old.battles_won;
-    mapped.battles_lost  = old.battles_lost;
-    mapped.evolutions    = old.evolutions;
-    mapped.trades        = old.trades;
-    mapped.origin        = old.origin;
-    mapped.trait_id      = old.trait_id;
-    mapped.custom_sprite = old.custom_sprite;
-    memcpy(mapped.moves, old.moves, sizeof mapped.moves);
-    mapped.flags = (uint8_t)((old.flags & (uint8_t)~PBF_GOD_TAINTED) | mapped.flags);
-  }
-  s_gs.pebbles[0] = mapped;
-  s_gs.box.slot_mask  |= 0x0001u;
-  s_gs.box.active_slot = 0;
-  if (s_gs.box.next_id_counter < 2u) {
-    s_gs.box.next_id_counter = 2u;
-  }
-}
-
-// The inverse. Only the fields SaveSchema v2 actually carries can be restored;
-// the rest get these defaults, which are the neutral middle of their range:
-//   stat[ST_BOND]  50 %      v2 folds bonding into care, not a stat of its own
-//   cq             500       "average care" out of 1000
-//   happiness_avg  derived from the restored happiness
-//   wish / poop / snacks / events   zero: a fresh day, never a punishment
-// A v1 EGG becomes a BABY, because level 1 is the lowest v2 records.
-static void pet_from_state(PetSave& out) {
-  const PebbleInstance& p = s_gs.pebbles[0];
-  memset(&out, 0, sizeof out);
-
-  out.stage = (p.level >= 20u) ? (uint8_t)STAGE_SENIOR
-            : (p.level >= 15u) ? (uint8_t)STAGE_ADULT
-            : (p.level >= 10u) ? (uint8_t)STAGE_TEEN
-            : (p.level >=  5u) ? (uint8_t)STAGE_CHILD
-                               : (uint8_t)STAGE_BABY;
-
-  out.stat[ST_HUNGER]    = p.care[CARE_HUNGER];
-  out.stat[ST_HAPPINESS] = p.care[CARE_HAPPINESS];
-  out.stat[ST_ENERGY]    = p.care[CARE_ENERGY];
-  out.stat[ST_HYGIENE]   = p.care[CARE_CLEANLINESS];
-  out.stat[ST_HEALTH]    = p.care[CARE_HEALTH];
-  out.stat[ST_BOND]      = PB_CARE_MILLI_MAX / 2;
-
-  out.stat_rem[ST_HUNGER]    = p.care_rem[CARE_HUNGER];
-  out.stat_rem[ST_HAPPINESS] = p.care_rem[CARE_HAPPINESS];
-  out.stat_rem[ST_ENERGY]    = p.care_rem[CARE_ENERGY];
-  out.stat_rem[ST_HYGIENE]   = p.care_rem[CARE_CLEANLINESS];
-  out.stat_rem[ST_HEALTH]    = p.care_rem[CARE_HEALTH];
-
-  out.birth_epoch         = p.birth_epoch;
-  out.last_seen_epoch     = p.last_updated_epoch;
-  out.last_interact_epoch = p.last_updated_epoch;
-  out.egg_epoch           = p.birth_epoch;
-  out.age_s               = p.age_s;
-  out.genome              = p.genome;
-  out.minigames_won       = p.minigames_won;
-  out.cq                  = 500;
-  out.happiness_avg       = (uint8_t)(p.care[CARE_HAPPINESS] / (PB_CARE_MILLI_MAX / 100));
-
-  if (p.status & PBS_SICK)     out.flags |= PF_SICK;
-  if (p.status & PBS_ASLEEP)   out.flags |= PF_ASLEEP;
-  if (p.status & PBS_LIGHT_ON) out.flags |= PF_LIGHT_ON;
-  if (p.flags  & PBF_GOD_TAINTED) out.flags |= PF_GOD_TAINTED;
-  if (s_gs.cfg.flags & CFGV2_F_MUTE) out.flags |= PF_SOUND_MUTE;
-
-  pet_seal(out);
-}
-
 // -----------------------------------------------------------------------------
 // The config, both ways. Wi-Fi credentials are deliberately NOT persisted any
 // more: the product never associates to a station (spec section 68 r5) and
@@ -179,7 +69,7 @@ static void pet_from_state(PetSave& out) {
 // designing in a dead field. They keep their compiled-in defaults each session.
 // -----------------------------------------------------------------------------
 static void cfg_from_v2(const ConfigV2& v2, Config& out) {
-  compat_cfg_defaults(out);
+  gs_cfg_defaults(out);
   out.brightness  = v2.brightness ? v2.brightness : (uint8_t)OLED_CONTRAST_DEFAULT;
   out.saved_epoch = v2.last_known_epoch;
   memcpy(out.tz, v2.tz, sizeof v2.tz);
@@ -229,7 +119,7 @@ static void cfg_to_v2(const Config& c, ConfigV2& v2) {
   v2.device_name[n] = '\0';
 }
 
-void compat_cfg_defaults(Config& c) {
+void gs_cfg_defaults(Config& c) {
   memset(&c, 0, sizeof c);
   size_t i = 0;
   const char* tz = CFG_TZ_STRING;
@@ -251,17 +141,25 @@ void compat_cfg_defaults(Config& c) {
 // -----------------------------------------------------------------------------
 // Load
 // -----------------------------------------------------------------------------
-LoadResult compat_load(PetSave& pet, Config& cfg) {
+// True when any slot holds a Pebble. The header's slot_mask is only an index;
+// the slots themselves are the truth (plan 1.5.4).
+static bool any_pebble(void) {
+  for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
+    if (!pebble_is_empty(s_gs.pebbles[i])) return true;
+  }
+  return false;
+}
+
+LoadResult gs_load(Config& cfg) {
   const LoadResult r = save_load_all(s_gs);
 
-  memset(&pet, 0, sizeof pet);
-  s_have_pet = false;
+  s_have_pebble = false;
   s_box_sig_seen = false;
   s_readonly = (r == LOAD_CORRUPT || r == LOAD_FOREIGN_NEWER);
 
   if (s_readonly) {
     // Nothing has been written and nothing may be: the user chooses.
-    compat_cfg_defaults(cfg);
+    gs_cfg_defaults(cfg);
     return r;
   }
 
@@ -288,42 +186,32 @@ LoadResult compat_load(PetSave& pet, Config& cfg) {
 
   cfg_from_v2(s_gs.cfg, cfg);
   if (r == LOAD_FRESH) {
-    return r;
+    return r;                       // an empty Box: app.cpp files the starter
   }
 
-  // The companion blob first: it is the only copy of the v1 fields v2 does not
-  // carry. A missing or rotten one is not a failure - the pet is rebuilt from
-  // slot 0, which IS the authoritative save.
-  PetSave blob;
-  if (kv_get(KV_MAIN, KEY_COMPAT_PET, &blob, sizeof blob) == (int)sizeof blob &&
-      pet_blob_ok(blob)) {
-    pet = blob;
-    s_have_pet = true;
-  } else if (!pebble_is_empty(s_gs.pebbles[0])) {
-    pet_from_state(pet);
-    s_have_pet = true;
-  }
-
-  if (s_have_pet) {
-    // Key "t" and the RTC mirror are both newer than the blob's own stamp.
+  s_have_pebble = any_pebble();
+  if (s_have_pebble) {
+    // Key "t" and the RTC mirror are both newer than the active slot's own
+    // stamp, and the catch-up measures the absence from it.
+    const uint8_t  act  = (s_gs.box.active_slot < (uint8_t)BOX_SLOTS)
+                            ? s_gs.box.active_slot : (uint8_t)0;
     const uint32_t seen = save_last_seen();
-    if (seen > pet.last_seen_epoch) {
-      pet.last_seen_epoch = seen;
+    if (seen > s_gs.pebbles[act].last_updated_epoch) {
+      s_gs.pebbles[act].last_updated_epoch = seen;
     }
-    pet_seal(pet);
   }
   return r;
 }
 
-uint32_t compat_device_id(void) { return s_gs.cfg.device_id; }
+uint32_t gs_device_id(void) { return s_gs.cfg.device_id; }
 
-void compat_boot_cal(uint8_t& state, uint32_t& epoch) {
+void gs_boot_cal(uint8_t& state, uint32_t& epoch) {
   state = (s_gs.cfg.time_cal_state < (uint8_t)CAL_COUNT) ? s_gs.cfg.time_cal_state
                                                          : (uint8_t)CAL_UNSET;
   epoch = s_gs.cfg.last_known_epoch;
 }
 
-void compat_note_time_cal(uint8_t state, uint32_t epoch) {
+void gs_note_time_cal(uint8_t state, uint32_t epoch) {
   if (state >= (uint8_t)CAL_COUNT) return;
   if (s_gs.cfg.time_cal_state == state && s_gs.cfg.time_cal_epoch == epoch) return;
   s_gs.cfg.time_cal_state = state;
@@ -333,26 +221,18 @@ void compat_note_time_cal(uint8_t state, uint32_t epoch) {
   save_config(s_gs.cfg);
 }
 
-LoadResult compat_recover(PetSave& pet, Config& cfg) {
+LoadResult gs_recover(Config& cfg) {
   if (!save_restore_checkpoint(s_gs)) {
     return LOAD_CORRUPT;            // no copy: nothing written, still read-only
   }
-  // The companion blob belongs to the save that just lost, not to the copy that
-  // replaced it, so it goes: the pet is rebuilt from the recovered slot 0.
-  kv_erase(KV_MAIN, KEY_COMPAT_PET);
-
   s_readonly     = false;
   s_box_sig_seen = false;
   cfg_from_v2(s_gs.cfg, cfg);
-  memset(&pet, 0, sizeof pet);
-  s_have_pet = !pebble_is_empty(s_gs.pebbles[0]);
-  if (s_have_pet) {
-    pet_from_state(pet);
-  }
+  s_have_pebble = any_pebble();
   return LOAD_RECOVERED_CKPT;
 }
 
-void compat_boot_tz(char* out, size_t cap) {
+void gs_boot_tz(char* out, size_t cap) {
   if (!out || cap == 0) return;
   out[0] = '\0';
   size_t i = 0;
@@ -376,25 +256,25 @@ static_assert(GAIN_CAP_HAPPINESS_H <= 255, "GAIN_CAP_HAPPINESS_H no longer fits 
 static_assert(GAIN_CAP_ENERGY_H    <= 255, "GAIN_CAP_ENERGY_H no longer fits a byte");
 static_assert(GAIN_CAP_HYGIENE_H   <= 255, "GAIN_CAP_HYGIENE_H no longer fits a byte");
 
-void compat_bind_gain(CompatGainFn fn) { s_gain_fn = fn; }
+void gs_bind_gain(GsGainFn fn) { s_gain_fn = fn; }
 
-bool compat_load_gain(uint8_t pts[COMPAT_GAIN_SLOTS], uint32_t& epoch) {
-  memset(pts, 0, (size_t)COMPAT_GAIN_SLOTS);
+bool gs_load_gain(uint8_t pts[GS_GAIN_SLOTS], uint32_t& epoch) {
+  memset(pts, 0, (size_t)GS_GAIN_SLOTS);
   epoch = 0;
 
   LegacyGainSave g;
   if (kv_get(KV_MAIN, KEY_GAIN, &g, sizeof g) != (int)sizeof g) return false;
   if (g.magic != (uint16_t)LEGACY_GAIN_MAGIC) return false;
   if (g.version != (uint8_t)LEGACY_GAIN_VERSION) return false;
-  if (g.slots != COMPAT_GAIN_SLOTS) return false;      // StatId changed under us
+  if (g.slots != GS_GAIN_SLOTS) return false;      // StatId changed under us
   if (g.crc16 != crc16_ccitt(&g, LEGACY_GAINSAVE_CRC_BYTES)) return false;
 
-  memcpy(pts, g.pts, (size_t)COMPAT_GAIN_SLOTS);
+  memcpy(pts, g.pts, (size_t)GS_GAIN_SLOTS);
   epoch = g.epoch;
   return true;
 }
 
-static bool gain_at_cap(const uint8_t pts[COMPAT_GAIN_SLOTS]) {
+static bool gain_at_cap(const uint8_t pts[GS_GAIN_SLOTS]) {
   return pts[ST_HUNGER]    == (uint8_t)GAIN_CAP_HUNGER_H    &&
          pts[ST_HAPPINESS] == (uint8_t)GAIN_CAP_HAPPINESS_H &&
          pts[ST_ENERGY]    == (uint8_t)GAIN_CAP_ENERGY_H    &&
@@ -404,7 +284,7 @@ static bool gain_at_cap(const uint8_t pts[COMPAT_GAIN_SLOTS]) {
 static void gain_commit(void) {
   if (!s_gain_fn) return;
 
-  uint8_t  pts[COMPAT_GAIN_SLOTS];
+  uint8_t  pts[GS_GAIN_SLOTS];
   uint32_t epoch = 0;
   memset(pts, 0, sizeof pts);
   if (!s_gain_fn(pts, epoch)) return;
@@ -422,7 +302,7 @@ static void gain_commit(void) {
   memset(&g, 0, sizeof g);
   g.magic   = (uint16_t)LEGACY_GAIN_MAGIC;
   g.version = (uint8_t)LEGACY_GAIN_VERSION;
-  g.slots   = COMPAT_GAIN_SLOTS;
+  g.slots   = GS_GAIN_SLOTS;
   g.epoch   = wire;
   memcpy(g.pts, pts, sizeof pts);
   g.crc16 = crc16_ccitt(&g, LEGACY_GAINSAVE_CRC_BYTES);
@@ -438,43 +318,49 @@ static void gain_commit(void) {
 // -----------------------------------------------------------------------------
 // Writes
 // -----------------------------------------------------------------------------
-bool compat_save_pet(const PetSave& pet, bool force) {
+bool gs_save_box(void) {
   if (s_readonly) return false;
-  PetSave sealed = pet;
-  pet_seal(sealed);
+  const uint32_t sig = box_signature(s_gs.box);
+  if (s_box_sig_seen && sig == s_box_sig) return true;   // nothing changed
+  if (!save_box_header(s_gs.box)) return false;
+  s_box_sig      = sig;
+  s_box_sig_seen = true;
+  return true;
+}
 
-  Config live;
-  cfg_from_v2(s_gs.cfg, live);
-  pet_to_pebble(sealed, live);
+bool gs_save_slot(uint8_t slot, bool force) {
+  if (s_readonly) return false;
+  if (slot >= (uint8_t)BOX_SLOTS) return false;
+  if (!save_pebble(slot, s_gs.pebbles[slot], force)) return false;
+  if (!save_pebble_landed()) return true;   // filtered or deferred: nothing else
+  s_have_pebble = any_pebble();
+  (void)gs_save_box();
+  return true;
+}
 
-  if (!save_pebble(0, s_gs.pebbles[0], force)) {
+bool gs_save_active(bool force) {
+  if (s_readonly) return false;
+  const uint8_t act = s_gs.box.active_slot;
+  if (act >= (uint8_t)BOX_SLOTS) return false;
+
+  if (!save_pebble(act, s_gs.pebbles[act], force)) {
     return false;
   }
   if (!save_pebble_landed()) {
     return true;                    // filtered or deferred: nothing to mirror
   }
-
-  // The companion blob rides the pet's cadence exactly, so it can never be more
-  // than one write behind slot 0.
-  (void)kv_put(KV_MAIN, KEY_COMPAT_PET, &sealed, sizeof sealed);
-
-  const uint32_t sig = box_signature(s_gs.box);
-  if (!s_box_sig_seen || sig != s_box_sig) {
-    if (save_box_header(s_gs.box)) {
-      s_box_sig      = sig;
-      s_box_sig_seen = true;
-    }
-  }
-
+  s_have_pebble = true;
+  (void)gs_save_box();
   gain_commit();
 
-  if (sealed.last_seen_epoch != 0) {
-    compat_touch_lastseen(sealed.last_seen_epoch);
+  const uint32_t stamp = s_gs.pebbles[act].last_updated_epoch;
+  if (stamp != 0) {
+    gs_touch_lastseen(stamp);
   }
   return true;
 }
 
-bool compat_save_cfg(Config& c) {
+bool gs_save_cfg(Config& c) {
   // Sealed IN THE CALLER'S STRUCT, before any store test: app.cpp watches
   // c.crc16 to notice a settings change and re-apply what lives outside the
   // blob (panel contrast), and a unit running RAM-only must still apply its
@@ -485,7 +371,7 @@ bool compat_save_cfg(Config& c) {
   return save_config(s_gs.cfg);
 }
 
-void compat_touch_lastseen(uint32_t epoch) {
+void gs_touch_lastseen(uint32_t epoch) {
   if (s_readonly) return;
   // The RTC mirror is free and happens on every call: it is what makes a crash
   // reboot report an absence of ~0 instead of one whole "t" period.
@@ -496,10 +382,10 @@ void compat_touch_lastseen(uint32_t epoch) {
   }
 }
 
-bool compat_factory_reset(void) {
+bool gs_factory_reset(void) {
   const bool ok = save_factory_reset();
   s_readonly     = false;
-  s_have_pet     = false;
+  s_have_pebble     = false;
   s_box_sig_seen = false;
   s_gain_known   = false;
   s_gain_sane    = false;
@@ -507,6 +393,7 @@ bool compat_factory_reset(void) {
   memset(s_gain_last, 0, sizeof s_gain_last);
   memset(&s_gs, 0, sizeof s_gs);
   save_load_all(s_gs);              // back to sealed defaults, nothing written
+  s_have_pebble  = any_pebble();
   boot_rearm();
   return ok;
 }

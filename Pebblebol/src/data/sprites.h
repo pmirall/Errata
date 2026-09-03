@@ -1180,26 +1180,29 @@ static_assert(SPRITE_DATA_BYTES <= 14336, "sprite art over the flash budget");
 #define SPRITE_ADULT_BODIES 6
 
 // -----------------------------------------------------------------------------
-//  sprite_form_of(pet, stage) - THE ONLY correct source of the `form` argument.
+//  sprite_form_of(genome, minor_form, stage) - THE ONLY correct source of `form`.
 //
 //  `form` means two different things depending on the stage:
 //      ADULT / SENIOR : one of SPRITE_ADULT_BODIES, chosen by the species gene
 //                       and therefore fixed for the pet's whole life.
-//      TEEN           : PetSave.minor_form bits 7:4
-//      CHILD          : PetSave.minor_form bits 3:0
+//      TEEN           : minor_form bits 7:4
+//      CHILD          : minor_form bits 3:0
 //                       (0 = bueno, 1 = descuidado)
 //      EGG / BABY     : unused; the species gene picks the body.
 //
 //  Always feed sprite_lookup_pose() from here: reading minor_form for an adult
 //  (or the other way round) picks the wrong body for the pet's whole life.
 // -----------------------------------------------------------------------------
-inline uint8_t sprite_form_of(const PetSave& p, Stage stage) {
+// data/ may not depend on game/, so this takes the two numbers it needs rather
+// than the live view they come from.
+inline uint8_t sprite_form_of(const Genome& genome, uint8_t minor_form,
+                              Stage stage) {
   if (stage >= STAGE_ADULT) {
-    return (uint8_t)(GN_GET(p.genome.g0, GN_SPECIES_SH, GN_SPECIES_MK)
+    return (uint8_t)(GN_GET(genome.g0, GN_SPECIES_SH, GN_SPECIES_MK)
                      % SPRITE_ADULT_BODIES);
   }
-  if (stage == STAGE_TEEN)  return (uint8_t)(p.minor_form >> 4);
-  if (stage == STAGE_CHILD) return (uint8_t)(p.minor_form & 0x0Fu);
+  if (stage == STAGE_TEEN)  return (uint8_t)(minor_form >> 4);
+  if (stage == STAGE_CHILD) return (uint8_t)(minor_form & 0x0Fu);
   return 0;
 }
 

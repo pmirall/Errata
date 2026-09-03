@@ -41,7 +41,7 @@
 #include "../game/sim.h"
 #include "../game/genome.h"
 #include "../core/rng.h"
-#include "../persistence/save_compat.h"
+#include "../persistence/game_state.h"
 #include "../hardware/kv_nvs.h"      // kv_error(), for the DIAG line
 #include "../hardware/gametime.h"
 #include "qr.h"
@@ -255,7 +255,7 @@ static uint8_t  s_raw_prev[INPUT_BTN_N];
 
 static inline uint32_t now_ms(void) { return millis(); }
 static inline uint32_t since(uint32_t t) { return (uint32_t)(millis() - t); }
-static inline const PetSave* pet(void) { return sim_save(); }
+static inline const SimView* pet(void) { return sim_view(); }
 
 // u8g2 coordinates are unsigned: a negative value wraps to ~65500 and paints
 // at the far edge. Everything the UI computes goes through these.
@@ -322,7 +322,7 @@ void ui_name_for(uint32_t lineage_id, uint8_t generation, char* out, size_t cap)
 void ui_pet_name(char* out, size_t cap) {
   if (!out || cap == 0) return;
   if (s_cfg && s_cfg->pet_name[0] != '\0') { snprintf(out, cap, "%s", s_cfg->pet_name); return; }
-  const PetSave* p = pet();
+  const SimView* p = pet();
   if (!p) { snprintf(out, cap, "%s", S(STR_EGG_TITLE)); return; }
   ui_name_for(p->genome.lineage_id, p->genome.generation, out, cap);
 }
@@ -351,13 +351,13 @@ static uint32_t s_stat_ms  = 0;
 static uint32_t s_stat_key = 0;
 static uint8_t  s_stat_ok  = 0;      // 0 = nothing shown yet -> snap on first use
 
-static uint32_t stat_identity(const PetSave* p) {
+static uint32_t stat_identity(const SimView* p) {
   if (!p) return 0;
   return p->genome.lineage_id ^ ((uint32_t)p->genome.generation << 24) ^ p->birth_epoch;
 }
 
 static void stat_snap(void) {
-  const PetSave* p = pet();
+  const SimView* p = pet();
   for (uint8_t i = 0; i < ST_COUNT; ++i)
     s_stat_shown[i] = p ? sim_stat_pct((StatId)i) : 0u;
   s_stat_key = stat_identity(p);
@@ -366,7 +366,7 @@ static void stat_snap(void) {
 }
 
 static void stat_service(void) {
-  const PetSave* p   = pet();
+  const SimView* p   = pet();
   const uint32_t key = stat_identity(p);
   if (!s_stat_ok || key != s_stat_key)  { stat_snap(); return; }
   const uint32_t el = since(s_stat_ms);
@@ -418,7 +418,7 @@ static uint8_t s_bright_now   = OLED_CONTRAST_DEFAULT;  // last value handed to 
 static uint8_t s_bright_valid = 0;
 
 static void bright_service(void) {
-  const PetSave* p = pet();
+  const SimView* p = pet();
   const uint8_t want = (p && (p->flags & PF_ASLEEP)) ? (uint8_t)OLED_CONTRAST_DIM
                                                      : s_bright_base;
   if (s_bright_valid && want == s_bright_now) return;
@@ -453,7 +453,7 @@ void ui_toast(uint16_t str_id) {
 static void cfg_persist(void) {
   if (!s_cfg) return;
   s_cfg->saved_epoch = gt_now();
-  compat_save_cfg(*s_cfg);
+  gs_save_cfg(*s_cfg);
   ui_toast(STR_SET_SAVED);
 }
 
@@ -506,8 +506,8 @@ static bool do_action(ActionId a) {
   // choreography to dissolve; ACT_SLEEP_TOGGLE has the same problem with
   // PF_ASLEEP, where "before" is the only thing that says which way round the
   // animation goes. 128 bytes of stack, once per button press.
-  PetSave        before;
-  const PetSave* p0  = pet();
+  SimView        before;
+  const SimView* p0  = pet();
   const bool     had = (p0 != nullptr);
   if (had) before = *p0;
 
@@ -521,8 +521,8 @@ static bool do_action(ActionId a) {
     // reading: nothing happened to the pet, so nothing happens on screen.
     if (had) actfx_begin((uint8_t)a, before);
     if (r.str_id) ui_toast(r.str_id);
-    const PetSave* p = pet();
-    if (p) compat_save_pet(*p, true);
+    const SimView* p = pet();
+    if (p) gs_save_active(true);
   } else if (r.err == AERR_COOLDOWN && r.cooldown_s) {
     // The base line has no {t}; the countdown is appended so the wait is honest.
     char buf[64];
@@ -559,7 +559,7 @@ uint8_t ui_fps(void) {
   // a sleeping pet and an exhausted one, are exactly the ones ACT_SLEEP_TOGGLE
   // and a feed are aimed at.
   if (actfx_active()) return FPS_NORMAL;
-  const PetSave* p = pet();
+  const SimView* p = pet();
   if (p && (p->flags & PF_ASLEEP)) return FPS_LOW;
   if (p && sim_stat_pct(ST_ENERGY) < FPS_LOW_ENERGY_PCT) return FPS_LOW;
   return FPS_NORMAL;
@@ -822,7 +822,7 @@ static void home_bar_icons(void) {
   }
   uint8_t f[6];
   uint8_t n = 0;
-  const PetSave* p = pet();
+  const SimView* p = pet();
   if (p && (p->flags & PF_SICK))    f[n++] = MIC_SICK;
   if (p && p->poop_count)           f[n++] = MIC_POOP;
   if (sim_alert() != AL_NONE)       f[n++] = MIC_ALERT;
@@ -868,7 +868,7 @@ static void home_status_bar(void) {
 // disagree about when the meal ended. A sleeping pet keeps its own pose whatever
 // the choreography thinks - except that it never asks, because
 // ACT_SLEEP_TOGGLE's film is carried entirely by actfx_body_dy().
-static uint8_t home_pose(const PetSave* p) {
+static uint8_t home_pose(const SimView* p) {
   if (!p) return POSE_IDLE;
   const uint8_t base = web_pose_of(*p);
   if (p->flags & PF_ASLEEP) return base;
@@ -967,7 +967,7 @@ static void emote_spr(int16_t want_x, int16_t want_y, int16_t body_x,
 }
 
 static void draw_pet_body(int16_t dy, int16_t dx, uint8_t frame) {
-  const PetSave* p = pet();
+  const SimView* p = pet();
   if (!p) return;
 
   // petfx owns WHERE the body is (wandering, orientation, coat pattern, shadow)
@@ -1062,7 +1062,7 @@ static const int16_t kPoopX[POOP_MAX] = { 2, 114, 17, 99 };
 // petfx treats a poop as a wall, so the pet walks up to it, stops and turns
 // round instead of standing inside it. Behaviour, not draw order.
 static void draw_poop(void) {
-  const PetSave* p = pet();
+  const SimView* p = pet();
   if (!p || p->poop_count == 0) return;
   const uint8_t n = (p->poop_count > POOP_MAX) ? (uint8_t)POOP_MAX : p->poop_count;
   const int16_t py = (int16_t)(RD_AFFORD_Y - 12);        // icon rows 44..55
@@ -1087,7 +1087,7 @@ static void draw_absence_banner(void) {
 }
 
 static void draw_home(void) {
-  const PetSave* p = pet();
+  const SimView* p = pet();
   home_status_bar();
 
   if (!p) {
@@ -1420,8 +1420,8 @@ static void game_finish(void) {
   const uint16_t permille = (s_g.score > 1000u) ? 1000u : s_g.score;
   sim_apply_play_result(permille, r);
   s_last_action = ACT_PLAY;
-  const PetSave* p = pet();
-  if (p) compat_save_pet(*p, true);
+  const SimView* p = pet();
+  if (p) gs_save_active(true);
   s_g.phase = 2;
   s_g.t0    = now_ms();
   ui_toast(permille >= 500u ? STR_GM_WIN : STR_GM_LOSE);
@@ -1584,14 +1584,14 @@ static void jump_step(void) {
 
 static void jump_draw(void) {
   px_hline(0, JUMP_GROUND_Y + 2, OLED_W);
-  const PetSave* p = pet();
+  const SimView* p = pet();
   const uint8_t fr = (uint8_t)((now_ms() / 150u) & 1u);
   SpriteRef r = sprite_frame(SPR_BABY_BLOB, fr);
   if (p) {
     const Stage st = (Stage)((p->stage == STAGE_EGG) ? (uint8_t)STAGE_BABY
                                                      : p->stage);
     r = sprite_lookup_pose(gene_species(p->genome), (uint8_t)st,
-                           sprite_form_of(*p, st), POSE_IDLE, fr);
+                           sprite_form_of(p->genome, p->minor_form, st), POSE_IDLE, fr);
   }
   int16_t py = (int16_t)(JUMP_GROUND_Y + 2 - (int16_t)r.h + s_g.pet_dy);
   if (py < UI_CONTENT_Y) py = UI_CONTENT_Y;
@@ -1734,7 +1734,7 @@ static void draw_status_a(void) {
 
 static void draw_status_b(void) {
   U8G2& u = rd_u8g2();
-  const PetSave* p = pet();
+  const SimView* p = pet();
   draw_header(S(STR_ST_TITLE_B), nullptr);
   if (!p) {
     rd_text_center(34, RD_FONT_NARR, S(STR_UI_NOBODY));
@@ -1802,7 +1802,7 @@ static void handle_status(Gesture g) {
       ui_goto(s_screen == SCR_STATUS_A ? SCR_STATUS_B : SCR_STATUS_A);
       break;
     case GST_DBL_R: {
-      const PetSave* p = pet();
+      const SimView* p = pet();
       if (p) { genome_to_hex32(p->genome, s_hex); s_hex_ms = now_ms(); }
       break;
     }
@@ -1844,7 +1844,7 @@ static void social_try_bringup(void) {
                                                            : (uint16_t)STR_ERR_BUSY;
     return;
   }
-  const PetSave* p = pet();
+  const SimView* p = pet();
   if (p) ble_advertise_beacon(p->genome, p->stage, (uint8_t)(p->cq >> 2));
   s_soc_phase = SOC_SCAN;
 #else
@@ -1879,7 +1879,7 @@ static void social_service(void) {
   if (s_soc_phase == SOC_ENTER && !ble_is_up()) { social_try_bringup(); return; }
   if (!ble_is_up()) return;
 
-  const PetSave* p = pet();
+  const SimView* p = pet();
   uint8_t self = BLE_SELF_SEEKING;
   if (p && (p->flags & PF_GOD_TAINTED)) self = (uint8_t)(self | BLE_SELF_GOD);
   ble_set_self(self);
@@ -1988,7 +1988,7 @@ static const uint8_t kBrightSteps[5] = {
 };
 
 static const char* set_value(uint8_t row) {
-  const PetSave* p = pet();
+  const SimView* p = pet();
   switch (row) {
     case SET_SOUND:   return cfg_flag(CF_MUTE)        ? S(STR_OFF) : S(STR_ON);
     case SET_WEB:     return cfg_flag(CF_WEB_ENABLED) ? S(STR_ON)  : S(STR_OFF);
@@ -2256,7 +2256,7 @@ static void clk_bump(void) {
 
 // The whole point of the screen. gt_set_epoch() with CAL_USER is the one source
 // allowed to move the clock backwards, so a user correcting a wrong date is
-// never refused; compat_touch_lastseen() then rewrites the persisted baseline so
+// never refused; gs_touch_lastseen() then rewrites the persisted baseline so
 // the next boot measures its absence from the truth and not from an uptime.
 static void clock_commit(void) {
   const uint32_t e = gt_epoch_from_local((int)s_clk[CLK_YEAR], (uint8_t)s_clk[CLK_MONTH],
@@ -2267,7 +2267,7 @@ static void clock_commit(void) {
     input_flush();        // as on the success path: a held L must not re-commit
     return;
   }
-  compat_touch_lastseen(gt_now());
+  gs_touch_lastseen(gt_now());
   ui_toast(STR_CLK_SAVED);
   input_flush();          // the release of the confirming hold must not fire below
   nav_back();
@@ -2343,7 +2343,7 @@ static void handle_clock(Gesture g) {
 //  skippable, no chrome.
 //
 //  ORDERING IS THE WHOLE SAFETY ARGUMENT. sim_hatch() has ALREADY run and the
-//  PetSave has ALREADY been flushed to flash before the first frame below is
+//  SimView has ALREADY been flushed to flash before the first frame below is
 //  drawn, so every phase here is pure presentation. A brownout half way through
 //  therefore reboots into ui_begin() -> STAGE_BABY -> HOME with a perfectly
 //  ordinary baby: the player loses the show, never the pet. Deferring
@@ -2357,12 +2357,12 @@ static void handle_clock(Gesture g) {
 // one birth; the second call must do nothing. The s_hatch_ms window also covers
 // an event that arrives after the ceremony has already finished.
 static void hatch_begin(void) {
-  const PetSave* p = pet();
+  const SimView* p = pet();
   if (!p || p->stage != STAGE_BABY) return;
   if (hatch_active()) return;
   if (s_hatch_ms != 0 && since(s_hatch_ms) < HATCH_TOTAL_MS + 3000UL) return;
 
-  compat_save_pet(*p, true);   // commit FIRST: everything below is presentation
+  gs_save_active(true);   // commit FIRST: everything below is presentation
 
   screen_leave(s_screen);      // drops BLE / an in-flight minigame
   s_sp          = 0;
@@ -2459,7 +2459,7 @@ static const int8_t kShardDY[6] = { -2, -2,  1,  1,  3,  3 };
 // no countdown. Chrome would turn a birth into a screen.
 static void draw_hatch(void) {
   U8G2& u = rd_u8g2();
-  const PetSave* p     = pet();
+  const SimView* p     = pet();
   const uint32_t el    = since(s_hatch_ms);
   const uint8_t  frame = (uint8_t)((now_ms() / 120u) & 1u);   // fast: it is straining
 
@@ -2561,7 +2561,7 @@ static void draw_hatch(void) {
 // ---- THE EGG SCREEN ---------------------------------------------------------
 
 static void draw_egg(void) {
-  const PetSave* p = pet();
+  const SimView* p = pet();
   draw_header(S(STR_EGG_TITLE), nullptr);
   if (!p) { rd_affordance(nullptr, nullptr); return; }
 
@@ -2662,7 +2662,7 @@ static void error_recover(void) {
   s_err_kind = ERRK_NONE;
   s_stat_ok  = 0;
   s_sp       = 0;
-  const PetSave* p = pet();
+  const SimView* p = pet();
   if (p) petfx_reset(*p);
   ui_goto(SCR_HOME);
 }
@@ -2704,12 +2704,12 @@ static void confirm_commit(void) {
     case CFM_MEDICINE: act_and_show(ACT_MEDICINE); break;   // BRIEF D
     case CFM_WIPE1:    confirm_open(CFM_WIPE2, STR_CF_WIPE2); break;   // two dialogs
     case CFM_WIPE2: {
-      compat_factory_reset();
-      if (s_cfg) { compat_cfg_defaults(*s_cfg); compat_save_cfg(*s_cfg); }
+      gs_factory_reset();
+      if (s_cfg) { gs_cfg_defaults(*s_cfg); gs_save_cfg(*s_cfg); }
       const Genome g0 = genome_genesis();
       sim_new_pet(g0, gt_now(), 0);
-      const PetSave* p = pet();
-      if (p) { compat_save_pet(*p, true); petfx_reset(*p); }
+      const SimView* p = pet();
+      if (p) { gs_save_active(true); petfx_reset(*p); }
       s_stat_ok  = 0;                // a wiped device shows the truth at once
       s_sp       = 0;
       s_err_kind = ERRK_NONE;        // the save the ERROR screen was about is gone
@@ -2943,7 +2943,7 @@ void ui_begin(void) {
   // thrown away. One table, three consumers, no copy to drift.
   actfx_bind_poop_layout(kPoopX, (uint8_t)POOP_MAX);
 
-  const PetSave* p = pet();
+  const SimView* p = pet();
   if (p) petfx_reset(*p);            // AFTER petfx_begin(), BEFORE any draw
   if (p && p->stage == STAGE_EGG) { ui_goto(SCR_EGG); return; }
   ui_goto(SCR_HOME);
@@ -3047,8 +3047,8 @@ void ui_handle(Gesture g) {
         nav_home();
         break;
       case GOD_EVT_WIPED: {
-        if (s_cfg) compat_cfg_defaults(*s_cfg);
-        const PetSave* np = pet();
+        if (s_cfg) gs_cfg_defaults(*s_cfg);
+        const SimView* np = pet();
         if (np) petfx_reset(*np);    // god handed us a different animal entirely
         s_stat_ok = 0;
         s_sp = 0;
@@ -3125,7 +3125,7 @@ void ui_service(void) {
   stat_service();
   bright_service();
   {
-    const PetSave* p = pet();
+    const SimView* p = pet();
     if (p) {
       // The props go in BEFORE the automaton steps, and from here rather than
       // from draw_home(): the body keeps walking on loops that never draw a

@@ -69,6 +69,7 @@ $(BIN)/test_rng:        $(OBJ)/rng.o
 $(BIN)/test_genome:     $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_sim_golden: $(OBJ)/sim.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_care:       $(OBJ)/sim.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+$(BIN)/test_box:        $(OBJ)/box.o
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 $(BIN)/test_qr:         $(OBJ)/qr.o
 $(BIN)/test_clock:      $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o
@@ -77,7 +78,7 @@ $(BIN)/test_overflow:   $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o \
 $(BIN)/test_fixtures:   $(OBJ)/crc16.o
 $(BIN)/test_persistence: $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/crc16.o
-$(BIN)/test_compat:     $(OBJ)/save_compat.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
+$(BIN)/test_game_state: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
 $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)

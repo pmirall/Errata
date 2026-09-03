@@ -38,6 +38,7 @@
 #define PB_CARE_COUNT            5      // HUNGER HAPPINESS HEALTH CLEANLINESS ENERGY
 #define PB_MOVE_COUNT            4
 #define PB_NICKNAME_CAP         13      // NAME_MAX_LEN 12 + NUL
+#define PB_LEVEL_MAX            30      // spec section 11: levels 1..30
 #define CUSTOM_SPECIES_SLOTS    10      // cs0..cs9
 #define COOLDOWN_SLOTS          32
 #define INVENTORY_SLOTS          7      // see the note on the Inventory layout
@@ -83,7 +84,7 @@ enum PebbleOrigin : uint8_t {
 // -----------------------------------------------------------------------------
 // 1. PebbleInstance - 128 B, NVS keys "pb<slot><copy>" (pair), plan 1.5.1
 //
-//    Same size as the legacy PetSave, so the NVS entry arithmetic is known.
+//    Same size as the legacy v1 PetSave, so the NVS entry arithmetic is known.
 //    Twelve reserved bytes buy small additions without a schema bump.
 //    Nothing derived is stored (spec section 10): hp_max, atk, def and spd are
 //    recomputed from the species base, the level and the genome on every read.
@@ -420,13 +421,6 @@ static_assert(sizeof(GameState) == 1936, "GameState is no longer the sum of its 
 #define KEY_CK_CFG              "ck_cfg"
 #define KEY_CK_PEBBLE_PREFIX    "ck_pb"   // ck_pb0..ck_pb9
 
-// TEMPORARY, P2-C9 .. P2-C10 (persistence/save_compat.h). The live simulation
-// still runs on the v1 PetSave, whose care-quality / wish / poop / event fields
-// PebbleInstance does not carry. The pet is written verbatim under this key as
-// well as into slot 0, so one commit of transition costs nothing. P2-C10 moves
-// the sim onto PebbleInstance and deletes both the key and its writer.
-#define KEY_COMPAT_PET          "lgpet"
-
 // Legacy v1 keys, namespace "notta". Read once by the migration, then erased.
 #define KEY_V1_SAVE             "save"
 #define KEY_V1_CFG              "cfg"
@@ -470,7 +464,11 @@ bool trade_blob_ok(const PendingTrade& t);
 bool schema_is_foreign_newer(uint8_t version);
 
 // True when the slot holds no Pebble at all (species_id and id both zero).
-bool pebble_is_empty(const PebbleInstance& p);
+// Inline: game/box.cpp asks this question on every slot walk and is a pure
+// module that must not link persistence/save_manager.cpp (plan 1.3 rule 2).
+inline bool pebble_is_empty(const PebbleInstance& p) {
+  return p.species_id == 0 && p.id == 0;
+}
 
 // Zeroes the struct and stamps magic/version/defaults. Used for a fresh unit
 // and for every "the blob was absent, use defaults" path.

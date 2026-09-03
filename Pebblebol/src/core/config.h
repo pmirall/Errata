@@ -204,7 +204,7 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 // =============================================================================
 // 7. SIMULATION  -- all integer, milli-points
 //    Stats are int32 milli-points 0..100000. Rates are in milli-points/hour.
-//    per_tick = rate_mph / 3600, remainder carried in PetSave.stat_rem[].
+//    per_tick = rate_mph / 3600, remainder carried in care_rem[].
 // =============================================================================
 #define STAT_MILLI_MAX          100000L
 #define STAT_MILLI_MIN          0L
@@ -221,6 +221,14 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 #define RATE_BOND_MPH           (-800L)
 #define RATE_HEALTH_REGEN_MPH   (+4000L)
 #define HEALTH_REGEN_MIN_PCT    55           // all four core stats >= 55 and !sick
+
+// Box recovery (spec section 9 / plan P2-C10): a Pebble that is NOT the active
+// one neither decays nor is simulated. It only heals, at one stored rate toward
+// 100 %, integrated from its own last_updated_epoch with the same remainder
+// carry the live model uses. The initial value is the health regeneration rate
+// generalised to every care stat; P3-C1 retunes it to BOX_RECOVER_MPH +4200
+// (spec section 27, "a stored Pebble is full again after about a day").
+#define BOX_RECOVER_MPH         (+4000L)
 
 // Health damage per hour (milli-points), additive while the condition holds.
 // Health is the ONLY stat that cannot be driven to zero: it bleeds solely while
