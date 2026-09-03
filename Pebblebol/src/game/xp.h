@@ -20,7 +20,8 @@
 //      xp_ledger_snapshot()/xp_ledger_restore(), whose round trip can only
 //      UNDER-report the budget - never invent a point.
 //
-//  PURE MODULE. stdint plus the save schema, the species table and balance.h.
+//  PURE MODULE. stdint plus the save schema, the species table, balance.h and
+//  game/evolution.h (the level gate behind EVO_STATE_PENDING - see xp_add()).
 //  No Arduino, no clock, no RNG, no I/O: the caller feeds elapsed seconds in
 //  and carries the persisted bytes out. tests/test_xp.cpp compiles it directly.
 // =============================================================================
@@ -79,11 +80,35 @@ uint16_t xp_for_level(uint8_t level);
 // award, a source with no budget left and a Pebble already at XP_LEVEL_MAX all
 // return false, and the last of those also pins xp at 0: past the top of the
 // curve there is nothing for it to mean.
+//
+// It also raises EVO_STATE_PENDING (game/evolution.h) whenever the award
+// leaves the Pebble at or past the level its evolution rule asks for. THE
+// LEVEL GATE IS ALL THIS MODULE CAN SEE - it is pure, with no happiness, no
+// item and no activity score - so the bit means "the level requirement is
+// met", NOT "it will evolve". Whoever consumes it re-evaluates the whole rule
+// with real context and leaves the bit set when the condition does not hold.
 bool xp_add(PebbleInstance& p, uint16_t amount, XpSource src, uint8_t* levels_gained);
 
 // What each source pays, before metering.
 uint16_t xp_care_action_amount(void);
 uint16_t xp_minigame_amount(uint16_t win_permille);   // permille * 8 / 1000
+
+// -----------------------------------------------------------------------------
+//  THE DERIVED HP RULE - shared with game/evolution.cpp
+//
+//  hp_max = 10 + 2*base_hp + level (plan 1.5.1): derived, never stored. Two
+//  things move it under a creature that is standing still - a level-up, which
+//  is this module's, and an evolution, which is game/evolution.cpp's - and both
+//  must rescale hp_cur the SAME way, so there is exactly one rescale in the
+//  firmware and it is xp_hp_rescale().
+// -----------------------------------------------------------------------------
+uint16_t xp_hp_max(uint8_t base_hp, uint8_t level);
+
+// A full Pebble stays full, a hurt one keeps its fraction, nothing over-heals
+// and nothing lands above the new maximum. Integer and truncating: the lost
+// fraction is under one HP and always in the honest direction. A zero
+// hp_max_before leaves hp_cur alone - there is no fraction to keep.
+void xp_hp_rescale(PebbleInstance& p, uint16_t hp_max_before, uint16_t hp_max_after);
 
 // -----------------------------------------------------------------------------
 //  THE LEDGER

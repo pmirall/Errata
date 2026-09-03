@@ -16,9 +16,15 @@
 // The legacy family map. v1 had no species roster: appearance came out of the
 // genome's four-bit species gene. Grouping it modulo 8 gives the eight legacy
 // families, and each maps onto one of the eight starter Pebbles of the v2
-// roster. The roster itself lands in P9 (src/data/species_table.h); until then
-// these are the reserved built-in ids 1..8, which is exactly what a migrated
-// pet should be: a starter of the right family, not a random monster.
+// roster. The roster itself lands in P4-C1 (src/data/species_table.h); until
+// then these are the reserved built-in ids 1..8, which is exactly what a
+// migrated pet should be: a starter of the right family, not a random monster.
+//
+// P4-C1 MUST REVISIT THIS MAP. P3-C3 filled ids 1..3 with the three EVOLUTION
+// STAGES of family 1, not with three different families, so ids 2 and 3 no
+// longer mean what this table assumes; ids 4..8 still resolve to nothing at
+// all. Once the 12-species roster exists, every legacy family must land on the
+// BASE-stage species of its family.
 // -----------------------------------------------------------------------------
 static const uint8_t LEGACY_FAMILY_SPECIES[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
 

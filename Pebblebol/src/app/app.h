@@ -27,4 +27,19 @@ void app_loop(void);
 // logic tick for carried time; P4/P5/P6 add battles, captures and items here.
 bool app_award_xp(uint16_t amount, XpSource src);
 
+// -----------------------------------------------------------------------------
+//  EVOLUTION (spec section 18, plan P3-C3). Two doors, and the ORDER between
+//  them is the safety argument written at the top of ui/ceremony.h.
+// -----------------------------------------------------------------------------
+// Should the player be asked? True when the active Pebble carries
+// EVO_STATE_PENDING *and* the whole rule - level and condition - holds against
+// the context this build can actually supply. Reads nothing, writes nothing.
+bool app_evolution_offer(void);
+
+// Performs the evolution the player just confirmed and COMMITS it: the Pebble
+// reaches flash and the nvs2 checkpoint before this returns, so the caller may
+// start the ceremony knowing a brownout mid-show reboots into the evolved
+// creature. False when nothing evolved, in which case nothing was written.
+bool app_evolve_active(void);
+
 #endif  // PB_APP_H

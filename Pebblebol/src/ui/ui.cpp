@@ -148,6 +148,9 @@ static uint32_t s_toast_ms    = 0;
 // ---- home -------------------------------------------------------------------
 static uint32_t s_mimo_ms     = 0;
 static uint32_t s_evolve_ms   = 0;
+// When the section 18 evolution question was last put. 0 = never asked this
+// session. See the offer in ui_service() and UI_EVOLVE_ASK_MS.
+static uint32_t s_evo_ask_ms  = 0;
 
 // ---- screen entry dissolve --------------------------------------------------
 // The carousel and list interpolators moved into ui/gfx_widgets.cpp and
@@ -1371,7 +1374,18 @@ static bool diag_gesture(Gesture g) {
 // this is reached twice for one birth. ceremony_begin() holds the guard.
 static void ceremony_start(uint8_t kind) {
   const SimView* p = pet();
-  if (!p || p->stage != STAGE_BABY) return;
+  if (!p) return;
+  // THE GATE IS KIND-AWARE. A hatch is only ever the moment a baby appears, so
+  // it still demands STAGE_BABY. An evolution happens to a creature that is
+  // already standing there and may be any age, so it demands only that there IS
+  // one and that it is not still inside its shell.
+  if (kind == CEREMONY_HATCH) {
+    if (p->stage != STAGE_BABY) return;
+  } else if (kind == CEREMONY_EVOLVE) {
+    if (p->stage == STAGE_EGG) return;
+  } else {
+    return;
+  }
 
   gs_save_active(true);   // commit FIRST: everything below is presentation
 
@@ -1423,6 +1437,17 @@ static void dialog_commit(uint8_t which) {
       game_finish();                                   // counts as a loss
       break;
     case CFM_MEDICINE: act_and_show(ACT_MEDICINE); break;   // BRIEF D
+    // Spec section 18. app_evolve_active() performs the change and flushes it -
+    // the Pebble AND the nvs2 checkpoint - before it returns, so by the time
+    // ceremony_start() arms the show there is nothing left to lose to a
+    // brownout. That order is ui/ceremony.h's argument and it is why the call
+    // is here and not after the show.
+    case CFM_EVOLVE:
+      if (app_evolve_active()) {
+        ui_toast(STR_RX_EVOLVE);          // cleared by the show, as a hatch's is
+        ceremony_start(CEREMONY_EVOLVE);
+      }
+      break;
     case CFM_WIPE1:    dialog_open_confirm(CFM_WIPE2, STR_CF_WIPE2); break;  // two dialogs
     // The Box release, behind the same two dialogs and for the same reason:
     // it is the one action in the game that destroys a Pebble (spec section 9,
@@ -1538,6 +1563,7 @@ void ui_begin(void) {
   s_toast[0]    = '\0';
   s_last_action = ACT_NONE;
   s_absence_ms  = 0;
+  s_evo_ask_ms  = 0;                 // a boot or a wipe re-offers a pending evolution
   s_stat_ok     = 0;                 // boot: show the truth, do not animate to it
   ceremony_reset();
   s_trans_ms    = 0;
@@ -1730,6 +1756,19 @@ void ui_service(void) {
     const ScreenDef* d = sm_def();
     const bool owns_frame = (d != nullptr) && ((d->flags & SF_OWNS_FRAME) != 0u);
     (void)dialog_service(t, sm_current() != SCR_GAME && !owns_frame);
+  }
+
+  // SECTION 18's CONFIRMATION. An evolution is offered, never imposed, and the
+  // question goes up only on HOME with nothing else on top of it. Invariant 5
+  // starts the cursor on NO, so a stray press is a decline; a decline costs
+  // nothing, leaves EVO_STATE_PENDING set and simply comes back in
+  // UI_EVOLVE_ASK_MS. app_evolution_offer() is what knows whether the whole
+  // rule holds - this file never evaluates one.
+  if (dialog_modal() == MODAL_NONE && sm_current() == SCR_HOME &&
+      (s_evo_ask_ms == 0 || since(s_evo_ask_ms) >= UI_EVOLVE_ASK_MS) &&
+      app_evolution_offer()) {
+    s_evo_ask_ms = (t == 0u) ? 1u : t;   // 0 is the "never asked" sentinel
+    dialog_open_confirm(CFM_EVOLVE, STR_CF_EVOLVE);
   }
 
   // Invariant 3, plus the update hook of a migrated screen. A modal freezes

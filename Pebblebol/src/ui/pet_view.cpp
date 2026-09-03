@@ -159,9 +159,14 @@ void pet_view_fill(PetView& out, const PebbleInstance& inst,
 
   // hp_max = 10 + 2*base_hp + level (plan 1.5.1), derived and never stored.
   const uint16_t hp_max = (uint16_t)(10u + 2u * (uint16_t)sp.base_hp + (uint16_t)out.level);
-  out.hp_pct = (uint8_t)((hp_max == 0u) ? 0u
-                        : ((uint32_t)inst.hp_cur * 100u) / (uint32_t)hp_max);
-  if (out.hp_pct > 100u) out.hp_pct = 100u;
+  // CLAMP BEFORE THE CAST. A record claiming far more HP than its maximum -
+  // hp_cur 60000 against an hp_max of 23 - divides to 260,869 %, and narrowing
+  // THAT to a uint8 first wraps it to 5 %: a "> 100" test after the cast can
+  // never see it. P3-C3 found this the moment the starter's base_hp moved.
+  uint32_t hp_pct = (hp_max == 0u) ? 0u
+                                   : ((uint32_t)inst.hp_cur * 100u) / (uint32_t)hp_max;
+  if (hp_pct > 100u) hp_pct = 100u;
+  out.hp_pct = (uint8_t)hp_pct;
 
   for (uint8_t i = 0; i < PB_CARE_COUNT; ++i) {
     int32_t v = inst.care[i];

@@ -175,6 +175,11 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 #define UI_MODAL_HELP_MS        3000UL       // BOTH on a list = 1 line of help
 #define UI_TOAST_MS             1800UL
 #define UI_EVOLVE_FREEZE_MS     4000UL
+// How long a declined evolution offer stays declined. The pending bit is NOT
+// cleared by a "no" (spec section 27: no punishment, and a no now is not a no
+// for ever), so this is the only thing standing between the player and the
+// same question on the very next frame.
+#define UI_EVOLVE_ASK_MS        300000UL     // 5 min
 #define UI_HEX_DUMP_MS          5000UL       // DBL_R on S5/S6
 #define UI_ALERT_MIN_MS         1200UL
 #define MENU_ITEM_COUNT         7

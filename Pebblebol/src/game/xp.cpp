@@ -10,6 +10,7 @@
 
 #include "../core/config.h"            // NT_EPOCH_SANE_MIN
 #include "../data/species_table.h"     // species_get(): base_hp, for the hp rescale
+#include "evolution.h"                 // the level gate behind EVO_STATE_PENDING
 
 // -----------------------------------------------------------------------------
 //  THE METER TABLE. One row per metered source, in XpSource order; a window of
@@ -54,6 +55,22 @@ uint16_t xp_for_level(uint8_t level)
 }
 
 uint16_t xp_care_action_amount(void) { return (uint16_t)XP_CARE_ACTION; }
+
+// hp_max = 10 + 2*base_hp + level (plan 1.5.1), derived and never stored. The
+// widest possible input is base_hp 255 with level 255, which is 775: no u16
+// overflow is reachable however badly a content pack is edited.
+uint16_t xp_hp_max(uint8_t base_hp, uint8_t level)
+{
+  return (uint16_t)(10u + 2u * (uint16_t)base_hp + (uint16_t)level);
+}
+
+void xp_hp_rescale(PebbleInstance& p, uint16_t hp_max_before, uint16_t hp_max_after)
+{
+  if (hp_max_before == 0u) return;
+  uint32_t hp = ((uint32_t)p.hp_cur * (uint32_t)hp_max_after) / (uint32_t)hp_max_before;
+  if (hp > (uint32_t)hp_max_after) hp = (uint32_t)hp_max_after;
+  p.hp_cur = (uint16_t)hp;
+}
 
 uint16_t xp_minigame_amount(uint16_t win_permille)
 {
@@ -117,23 +134,23 @@ bool xp_add(PebbleInstance& p, uint16_t amount, XpSource src, uint8_t* levels_ga
   p.level = lv;
   p.xp    = (uint16_t)acc;
 
+  // EVOLVE_PENDING, on every award rather than only on a level-up: a Pebble
+  // that reached the gate before this rule existed, or whose owner declined an
+  // offer, must still be able to raise the bit. Only the LEVEL half of the rule
+  // is visible from here (see xp.h), and the bit is never CLEARED here either -
+  // clearing it belongs to evolution_apply().
+  if (evolution_level_ready(p)) p.evo_state |= (uint8_t)EVO_STATE_PENDING;
+
   if (ups == 0u) return false;
 
-  // hp_max = 10 + 2*base_hp + level (plan 1.5.1), derived and never stored, so
-  // a level-up widens the bar under a creature that is standing still. Rescale
-  // hp_cur by the same ratio: a level-up is not a heal (it would make levelling
-  // mid-battle a free potion) and it must not leave hp_cur above the new max
-  // either. Integer, truncating: the fraction lost is under one HP and always
-  // in the honest direction.
+  // A level-up widens the derived hp_max under a creature that is standing
+  // still, so hp_cur is rescaled by the same ratio: a level-up is not a heal
+  // (it would make levelling mid-battle a free potion) and it must not leave
+  // hp_cur above the new maximum either. xp_hp_rescale() is THE rescale, shared
+  // with game/evolution.cpp so the two paths can never drift apart.
   const SpeciesDef* sp = species_get(p.species_id);
   if (sp) {
-    const uint32_t max0 = 10u + 2u * (uint32_t)sp->base_hp + (uint32_t)level0;
-    const uint32_t max1 = 10u + 2u * (uint32_t)sp->base_hp + (uint32_t)lv;
-    if (max0 > 0u) {
-      uint32_t hp = ((uint32_t)p.hp_cur * max1) / max0;
-      if (hp > max1) hp = max1;
-      p.hp_cur = (uint16_t)hp;
-    }
+    xp_hp_rescale(p, xp_hp_max(sp->base_hp, level0), xp_hp_max(sp->base_hp, lv));
   }
 
   if (levels_gained) *levels_gained = ups;

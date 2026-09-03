@@ -17,7 +17,9 @@
 #include "data/species_table.h"
 #include "data/sprites.h"
 #include "game/box.h"
+#include "game/evolution.h"
 #include "game/sim.h"
+#include "game/xp.h"
 #include "persistence/save_schema.h"
 #include "ui/pet_view.h"
 
@@ -152,4 +154,54 @@ TEST(pose_and_mood_ladders) {
   // higher one.
   for (uint8_t s = 1; s <= 100; s++)
     CHECK(pet_mood_index(s) >= pet_mood_index((uint8_t)(s - 1u)));
+}
+
+// =============================================================================
+//  P3-C3: AN EVOLUTION IS A VISIBLE CHANGE
+//
+//  This is the only place the claim can be checked. ui/ceremony.cpp is a DEVICE
+//  translation unit (it drives the panel's flash and shake registers through
+//  render.h), so its frames cannot be rendered on the host - but what the
+//  ceremony reveals is a PetView, and a PetView is exactly what this file
+//  builds. If evolving a Pebble did not move anything petfx reads, the section
+//  18 show would be 4.5 seconds of animation ending on the same body.
+// =============================================================================
+TEST(an_evolution_changes_the_body_the_view_describes) {
+  PebbleInstance p;
+  memset(&p, 0, sizeof p);
+  p.magic      = (uint16_t)PEBBLE_MAGIC;
+  p.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.species_id = 1;
+  p.id         = 0x11223344u;
+  p.level      = 8;                       // the level family 1's first rule asks for
+  const SpeciesDef* s1 = species_get(p.species_id);
+  CHECK(s1 != nullptr);
+  if (!s1) return;
+  p.hp_cur = xp_hp_max(s1->base_hp, p.level);
+
+  PetView before;
+  pet_view_fill(before, p, *s1, POSE_IDLE);
+
+  EvoContext ctx;
+  evo_context_clear(ctx);                 // the shipped rules need no input
+  CHECK(evolution_apply(p, ctx));
+
+  const SpeciesDef* s2 = species_get(p.species_id);
+  CHECK(s2 != nullptr);
+  if (!s2) return;
+  PetView after;
+  pet_view_fill(after, p, *s2, POSE_IDLE);
+
+  // A different species, drawn with a different form: pet_view.cpp feeds
+  // evo_state's stage bits to sprite_form_of(), so the stage bit the evolution
+  // set is what changes the sprite the ceremony hands back.
+  CHECK(after.species_id != before.species_id);
+  CHECK(after.form != before.form);
+  CHECK_EQ(after.stage, before.stage);    // the LIFE stage follows the level only
+
+  // And the numbers under it: hp_max moved with the species, and a full Pebble
+  // came out of the ceremony full rather than hurt.
+  CHECK(xp_hp_max(s2->base_hp, p.level) != xp_hp_max(s1->base_hp, p.level));
+  CHECK_EQ(after.hp_pct, (uint8_t)100);
+  CHECK_EQ(before.hp_pct, (uint8_t)100);
 }

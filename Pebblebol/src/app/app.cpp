@@ -27,6 +27,7 @@
 #include "../persistence/game_state.h"
 #include "../game/box.h"
 #include "../game/xp.h"
+#include "../game/evolution.h"
 #include "../data/species_table.h"
 #include "../persistence/save_manager.h"
 #include "../hardware/boot.h"
@@ -220,6 +221,74 @@ bool app_award_xp(uint16_t amount, XpSource src)
     (void)gs_save_active(true);
   }
   return leveled;
+}
+
+// =============================================================================
+//  EVOLUTION (spec section 18, plan P3-C3)
+//
+//  ui.cpp asks app_evolution_offer() whether to put the question, and if the
+//  player answers yes it calls app_evolve_active() BEFORE it starts the show.
+//  The model change and BOTH of its flushes are therefore finished before the
+//  first ceremony frame is drawn: a brownout half way through the 4.5 s reboots
+//  into the evolved creature, never into a half-applied one. That ordering is
+//  the whole argument at the top of ui/ceremony.h and it must not be relaxed.
+//
+//  THE CONTEXT IS BUILT HERE because this is where a PebbleInstance can be
+//  read. Happiness comes off the care array and corruption off the status byte;
+//  items and the activity score do not exist until P6, so their EVOCTX_* bits
+//  are left CLEAR and any rule that needs one REFUSES (game/evolution.h). An
+//  unsupplied input that answered "true" would evolve a creature on a
+//  requirement nobody checked.
+// =============================================================================
+static void evo_context_of(const PebbleInstance& p, EvoContext& ctx)
+{
+  evo_context_clear(ctx);
+
+  int32_t happy = p.care[CARE_HAPPINESS];
+  if (happy < 0)                  happy = 0;
+  if (happy > PB_CARE_MILLI_MAX)  happy = PB_CARE_MILLI_MAX;
+  ctx.happiness = (uint16_t)(happy / (PB_CARE_MILLI_MAX / 100L));   // milli -> %
+  ctx.have |= EVOCTX_HAPPINESS;
+
+  ctx.corrupted = (uint8_t)((p.status & PBS_CORRUPTED) != 0u);
+  ctx.have |= EVOCTX_CORRUPTED;
+}
+
+bool app_evolution_offer(void)
+{
+  if (gs_readonly()) return false;          // a read-only session offers nothing
+  const uint8_t act = box_active();
+  if (act >= (uint8_t)BOX_SLOTS) return false;
+  const PebbleInstance* p = box_peek(act);
+  if (!p) return false;
+  // The bit game/xp.cpp raised. It says the LEVEL requirement is met and
+  // nothing more, so the whole rule is re-evaluated below with real context.
+  if (!(p->evo_state & (uint8_t)EVO_STATE_PENDING)) return false;
+
+  EvoContext ctx;
+  evo_context_of(*p, ctx);
+  return evolution_ready(*p, ctx) != 0u;
+}
+
+bool app_evolve_active(void)
+{
+  if (gs_readonly()) return false;
+  const uint8_t act = box_active();
+  if (act >= (uint8_t)BOX_SLOTS) return false;
+  PebbleInstance* p = box_slot(act);
+  if (!p) return false;
+
+  EvoContext ctx;
+  evo_context_of(*p, ctx);
+  if (!evolution_apply(*p, ctx)) return false;
+
+  // COMMIT, both copies, before anything animates. game/sim.cpp holds a raw
+  // pointer at this same record and nothing moved it, so the simulation needs
+  // no re-bind: species_id and hp_cur are not mirrored into its SimView, and
+  // the stage it does mirror is derived from the level, which did not change.
+  (void)gs_save_active(true);
+  (void)save_checkpoint_all();
+  return true;
 }
 
 // =============================================================================
@@ -533,8 +602,9 @@ static void logic_tick(void)
 
   // The nvs2 checkpoint (D6). Daily, plus the events that change what the pet
   // IS. The plan's list is level-up / evolution / capture / trade; P3-C2 added
-  // the first of them, evolution is still spelled as a stage transition until
-  // P3-C3, and P5/P7 add capture and trade at the same call.
+  // the first of them, P3-C3 checkpoints a real evolution from
+  // app_evolve_active() above rather than from an event, and P5/P7 add capture
+  // and trade at the same call.
   const bool grew = (ev & (SIM_EV_HATCHED | SIM_EV_STAGE_UP | SIM_EV_EVOLVE_MINOR |
                           SIM_EV_LEVEL_UP)) != 0;
   if (!gs_readonly()) {

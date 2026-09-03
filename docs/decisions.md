@@ -206,3 +206,39 @@ first flash. The soak is listed below with the other first-hardware measurements
 - **P3-C5's soak criterion is unblocked for energy** and still cannot hold for hunger and
   happiness, which empty in about a day of total neglect by design. The P3-C5 bullet now
   says so.
+
+## D14 — the species roster stops at family 1 (recorded 2026-09-03, P3-C3)
+
+- **What shipped.** `data/species_table.h` grew from one placeholder row to the THREE REAL
+  rows of family 1 — Paketo (id 1, base stage), Fragmar (2, mid), Rafagón (3, final) — copied
+  verbatim from the verified content pack, plus `data/evolution_table.h` with the two rules
+  that join them (`{1,2,8}` and `{2,3,18}`, both `EVOC_NONE`).
+- **Why it stops there.** The roster's contiguity guard (`id == index + 1`) makes it
+  **all-or-nothing in whole family blocks**: there is no way to ship family 4 without also
+  shipping families 2 and 3. And family 4 is the first one that carries a real evolution
+  CONDITION, so "add one family with a condition in it" is in fact "pull P4-C1's entire
+  12-species roster, its attack table and its generator forward into P3-C3". The conditions
+  are covered by `tests/test_evolution.cpp` instead, which drives all five `EvoCond` kinds
+  through hand-built rules — including the case no shipped rule can reach, an input the
+  build cannot supply, which must REFUSE.
+- **The rows are final, not placeholder.** They are the ids, stats, moves and strings the
+  content pack already holds, so P4-C1's `tools/gen_content.py` will emit them byte for byte
+  and nothing recorded against ids 1..3 in Phase 3 has to be re-recorded. Two fields inside
+  them are still placeholders and say so in the header: `moves` names attack ids that no
+  table resolves until P4-C1 (deliberately — they are the FINAL ids, so P4-C1 adds the table
+  and the cross-reference guard without touching these rows), and `sprite_id` is placeholder
+  art until the P10 art pass.
+- **Consequence: the starter's base_hp moved from 5 to 4**, so a fresh Pebble's derived
+  `hp_max` at level 1 is 19 rather than 21. Everything reads it through `species_get()`, so
+  no test hard-codes it — but it did expose a real defect in `ui/pet_view.cpp`, where the
+  `> 100` clamp on `hp_pct` ran AFTER the narrowing cast and a corrupt `hp_cur` of 60,000
+  wrapped to 5 % instead of clamping to 100 %. Fixed in the same commit.
+- **Consequence: `persistence/migration.cpp`'s legacy family map is now visibly wrong** and
+  is commented as such. It maps the eight v1 families onto ids 1..8; ids 2 and 3 are now the
+  mid and final STAGES of family 1 rather than other families, and 4..8 still resolve to
+  nothing. P4-C1 must land every legacy family on the BASE-stage species of its family. Not
+  fixed here: with only one family in the roster there is no correct answer to move it to.
+- **Section 18's fourth item, sound, is NOT here.** The plan sequences `hardware/audio.{h,cpp}`
+  in P6, and the ceremony's phase edges in `ui/ceremony.cpp` are where those calls slot in
+  (one per phase transition, armed exactly once, next to `rd_flash()` / `rd_shake()`). No
+  tone engine was invented in P3.

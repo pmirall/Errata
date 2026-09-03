@@ -1134,6 +1134,20 @@ TEST(snapshot_confirm) {
   snapshot_fn(&render_confirm, "confirm_wipe");
 }
 
+// Section 18's evolution offer. THE CEREMONY ITSELF CANNOT BE SNAPSHOTTED
+// HERE: ui/ceremony.cpp is a device translation unit - it drives the panel's
+// flash and shake registers through render.h and draws the body through petfx -
+// so what this file can render of the P3-C3 flow is its PURE half, the modal
+// that asks. (The other half of the claim, that the body on the far side of the
+// show is a different one, is tests/test_pet_view.cpp's.)
+TEST(snapshot_confirm_evolve) {
+  seams2_reset();
+  dialog_open_confirm(CFM_EVOLVE, STR_CF_EVOLVE);
+  CHECK_EQ(dialog_confirm_id(), (uint8_t)CFM_EVOLVE);
+  CHECK_EQ(dialog_confirm_yes(), (uint8_t)0);   // invariant 5: it starts on NO
+  snapshot_fn(&render_confirm, "confirm_evolve");
+}
+
 TEST(snapshot_confirm_yes) {
   seams2_reset();
   dialog_open_confirm(CFM_WIPE1, STR_CF_WIPE);

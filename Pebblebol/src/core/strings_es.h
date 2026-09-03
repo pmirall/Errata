@@ -237,6 +237,7 @@ enum StrId : uint16_t {
   STR_CF_QUIT_GAME,
   STR_CF_WIPE,
   STR_CF_WIPE2,
+  STR_CF_EVOLVE,
 
   // --- 29. minigames ------------------------------ <= 12 chars --------------
   STR_DG_REFLEX,
@@ -454,6 +455,20 @@ enum StrId : uint16_t {
   STR_PHASE_7,
   STR_PHASE_10,
 
+  // --- 34. species roster, data/species_table.h --------------------------
+  //     Names <= 10 chars @ t0_11b; flavor lines <= 25 chars @ 5x8.
+  //     ONE PAIR PER SPECIES ID, in roster order: SpeciesDef.name_idx and
+  //     .flavor_idx hold these StrIds directly, so the block grows with the
+  //     roster and P4-C1's generator appends to it rather than renumbering.
+  //     Appended at the END of the enum on purpose: every id above keeps the
+  //     value it already had.
+  STR_SPC_NAME_1,      // species 1, Paketo
+  STR_SPC_FLAV_1,
+  STR_SPC_NAME_2,      // species 2, Fragmar
+  STR_SPC_FLAV_2,
+  STR_SPC_NAME_3,      // species 3, Rafagon
+  STR_SPC_FLAV_3,
+
   STR_COUNT
 };
 
@@ -461,7 +476,7 @@ enum StrId : uint16_t {
 //  THE TABLE. Index-parallel to StrId above. Keep them in lockstep.
 //
 //  `inline constexpr`, not `static` (C++17, the pattern sprites.h already
-//  uses): 347 pointers = 1,388 B of .rodata, and with internal linkage EVERY
+//  uses): 359 pointers = 1,436 B of .rodata, and with internal linkage EVERY
 //  translation unit that includes this header pays for its own copy. The
 //  string bytes themselves are deduplicated by the linker (.rodata.str1.1 is
 //  a MERGE|STRINGS section) but the pointer array is not. As an inline
@@ -667,6 +682,7 @@ inline constexpr const char* const ES[] = {
   /* STR_CF_QUIT_GAME */          "¿Abandonar? Pierdes la partida.",
   /* STR_CF_WIPE */               "¿Borrar todo? No hay vuelta.",
   /* STR_CF_WIPE2 */              "¿De verdad? Última oportunidad.",
+  /* STR_CF_EVOLVE */             "¿Evolucionar ahora?",
 
   /* --- 29. minigames --- */
   /* STR_DG_REFLEX */             "REFLEJOS",
@@ -849,7 +865,15 @@ inline constexpr const char* const ES[] = {
   /* STR_PHASE_5 */               "Fase 5",
   /* STR_PHASE_6 */               "Fase 6",
   /* STR_PHASE_7 */               "Fase 7",
-  /* STR_PHASE_10 */              "Fase 10"
+  /* STR_PHASE_10 */              "Fase 10",
+
+  /* --- 34. species roster --- */
+  /* STR_SPC_NAME_1 */            "Paketo",
+  /* STR_SPC_FLAV_1 */            "Reparte cartas sin parar.",
+  /* STR_SPC_NAME_2 */            "Fragmar",
+  /* STR_SPC_FLAV_2 */            "Se parte para colarse.",
+  /* STR_SPC_NAME_3 */            "Rafagón",
+  /* STR_SPC_FLAV_3 */            "Mil trozos, una tormenta"
 };
 
 // -----------------------------------------------------------------------------

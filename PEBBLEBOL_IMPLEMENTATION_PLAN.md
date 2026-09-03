@@ -499,8 +499,9 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 - Acceptance: gate; D13 closed in `docs/decisions.md`.
 
 **P3-C3 Evolution** — M
-- [ ] `game/evolution.{h,cpp}` on `EvolutionRule` (`data/evolution_table.h`, §18 optional conditions); `EVOLVE_PENDING` set by `xp_add`, consumed by the `EVOLUTION` state reusing the hatch ceremony (`ceremony.cpp`) with `rd_flash/rd_shake/rd_dither_rect` dissolve; A confirms (§18); `evolution_apply` committed **before** the first frame (ui.cpp:2700-2708 ordering); `save_checkpoint_all()` after.
-- [ ] `test_evolution.cpp` (rule lookup, condition flags, apply recomputes stats, final stage never evolves, invalid target rejected by the validator).
+- [x] `game/evolution.{h,cpp}` (pure) on `EvolutionRule` (`data/evolution_table.h`, all five §18 `EvoCond` kinds); `EVOLVE_PENDING` set by `xp_add`, consumed by the `EVOLUTION` state reusing the ceremony P2-C11c already parameterised (`CEREMONY_EVOLVE` starts at `HATCH_T_FLASH` and throws sparks); A confirms through a `CFM_EVOLVE` modal (§18) and a decline leaves the bit set (§27: no punishment); `evolution_apply` **and both its flushes** run inside `app_evolve_active()` **before** `ceremony_start()` arms the first frame — the ordering argument at the top of `ui/ceremony.h` — with `save_checkpoint_all()` in the same call. **The context carries a VALIDITY MASK**: a condition whose input this phase cannot supply REFUSES, never passes. `hp_cur` is rescaled by `xp_hp_rescale()`, the level-up path's own rescale, factored out so there is exactly one.
+- [x] The roster grew from one placeholder row to the three REAL rows of family 1 (decision **D14**): Paketo/Fragmar/Rafagón, ids 1..3, with their six `strings_es.h` entries. It stops at family 1 because the contiguity guard makes the roster all-or-nothing in family blocks and the first family with a real condition is family 4. §18's fourth item, SOUND, arrives with `hardware/audio.{h,cpp}` in P6 — the ceremony's phase edges are where those calls slot in.
+- [x] `test_evolution.cpp` (rule lookup, the level gate below/at/above, every condition kind satisfied / unsatisfied / **input-not-supplied refuses**, apply recomputes stats, final stage never evolves, a failing condition neither evolves nor clears the pending bit, the counter saturates, the whole family walk, and every compile-time guard re-checked at runtime). `test_pet_view` proves the body the view describes really changes; `test_screens` snapshots the confirmation.
 - Acceptance: gate; §67 "Evolution works".
 
 **P3-C4 Minigame framework + input latency fix** — L
@@ -786,7 +787,7 @@ Invocation everywhere: `make -C tests check [ARGS="--seed N --filter battle"]`; 
 - [x] Stored Pebbles recover. — P2-C10 (`box_recover`), P3-C1 (rates)
 - [ ] Time-based calculations work across reboot. — P2-C6 (clock model), P2-C10 (catch-up), P6-C3 (sleep)
 - [x] XP and leveling work. — P3-C2
-- [ ] Evolution works. — P3-C3
+- [x] Evolution works. — P3-C3
 
 ### Games
 - [ ] At least 5 minigames. — P3-C4 (6 games)

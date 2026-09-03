@@ -81,6 +81,15 @@ bool ceremony_begin(uint8_t kind, uint32_t now_ms) {
 
 // -----------------------------------------------------------------------------
 //  PHASE EDGES
+//
+//  WHERE THE SOUND GOES (spec section 18's fourth item). The plan sequences
+//  hardware/audio.{h,cpp} in P6, so there is no tone engine to call yet - but
+//  this function is where the calls belong when there is one, beside the
+//  rd_flash() / rd_shake() lines below: it is the ONE place a phase edge is
+//  crossed, and every effect here is armed exactly once. Doing it from
+//  ceremony_draw() would re-trigger on every frame. P6 adds one cue per edge
+//  (the crack jolts, the flash, the reveal, the name) and nothing else here
+//  has to move.
 // -----------------------------------------------------------------------------
 void ceremony_service(uint32_t now_ms) {
   if (!ceremony_active()) return;

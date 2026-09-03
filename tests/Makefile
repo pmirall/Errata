@@ -89,7 +89,12 @@ $(BIN)/test_daylight:   $(OBJ)/daylight.o
 $(BIN)/test_box:        $(OBJ)/box.o
 # xp.cpp is pure: the curve, the level carry and the anti-farm ledger, with
 # species_table.h (header-only) for the base_hp the hp rescale needs.
-$(BIN)/test_xp:         $(OBJ)/xp.o
+# evolution.o comes with it because the two call each other: xp_add() asks
+# evolution_level_ready() whether to raise EVO_STATE_PENDING, and
+# evolution_apply() calls back into xp_hp_rescale() so there is ONE rescale.
+$(BIN)/test_xp:         $(OBJ)/xp.o $(OBJ)/evolution.o
+# The other half of that pair. Both objects, for the same reason.
+$(BIN)/test_evolution:  $(OBJ)/evolution.o $(OBJ)/xp.o
 # The Box <-> sim seam: the real box.cpp and the real sim.cpp together, which
 # is the only way to see a swap move sim's raw pointer off its creature.
 $(BIN)/test_box_sim:    $(OBJ)/box_sim.o $(OBJ)/box.o $(OBJ)/sim.o \
@@ -131,8 +136,11 @@ $(BIN)/test_statemachine: $(SCREEN_OBJS) $(OBJ)/state_machine.o \
 # pet_view.cpp is the model->view seam petfx and actfx read (P2-C11c). It is
 # pure, so it compiles here; sim.o comes with it because the live fill reads
 # sim_stat_pct() / sim_mood_score().
+# evolution.o + xp.o as well: the view is where "the body changed" is provable,
+# so the P3-C3 case evolves a Pebble and re-fills its PetView.
 $(BIN)/test_pet_view:   $(OBJ)/pet_view.o $(OBJ)/sim.o $(OBJ)/daylight.o \
-                        $(OBJ)/box.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+                        $(OBJ)/box.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o
 
 $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
