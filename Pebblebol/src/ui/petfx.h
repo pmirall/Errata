@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - ui/petfx.h
+//  PEBBLEBOL - ui/petfx.h
 //  "The creature layer": everything that turns a centred 2-frame sprite into
 //  something that looks alive. Owns the pet's X position, its facing, the
 //  ground it stands on, its shadow, its blink and the cosmetic genes that had

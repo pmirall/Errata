@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - ui/qr.cpp
+//  PEBBLEBOL - ui/qr.cpp
 //  QR Code encoder (v1-v4, ECC L, byte mode) + OLED renderer.
 //
 //  PART 1 (lines below, up to the "#ifdef ARDUINO" fence) is PORTABLE C++:

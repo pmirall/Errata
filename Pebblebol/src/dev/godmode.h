@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - dev/godmode.h
+//  PEBBLEBOL - dev/godmode.h
 //  The debug console. The GOD screen plus the persistent state
 //  that makes the rest of the firmware testable in minutes instead of a week:
 //  the time-scale multiplier, forced absences, a forced stage,

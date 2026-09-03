@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - ui/ui.h
+//  PEBBLEBOL - ui/ui.h
 //  The screen state machine S0..S14, the navigation
 //  grammar, the 20 s auto-return, the modal + alert layers, the on-device
 //  minigames and the hatch ceremony.

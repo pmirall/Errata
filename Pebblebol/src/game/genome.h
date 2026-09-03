@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - game/genome.h
+//  PEBBLEBOL - game/genome.h
 //  Pure genetics: CRC, genesis roll, gene accessors, gene->multiplier maps,
 //  two-parent breeding, inbreeding check,
 //  32-hex-char serialisation.

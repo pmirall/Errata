@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - ui/render.cpp
+//  PEBBLEBOL - ui/render.cpp
 //  The single U8G2 instance, the frame scheduler, and every drawing primitive.
 //  No network headers here, ever (layering rule, BRIEF section 4).
 // =============================================================================

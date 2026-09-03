@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - core/strings_es.h
+//  PEBBLEBOL - core/strings_es.h
 //  EVERY user-facing string in the product. Nothing else may contain a Spanish
 //  literal. UTF-8, no BOM.
 //

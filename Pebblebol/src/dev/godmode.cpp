@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - dev/godmode.cpp
+//  PEBBLEBOL - dev/godmode.cpp
 //  The debug console (GAME_DESIGN 10). See godmode.h for the contract.
 //
 //  Everything the console mutates goes through the owning module's own API:

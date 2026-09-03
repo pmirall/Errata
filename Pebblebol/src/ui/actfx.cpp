@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - ui/actfx.cpp
+//  PEBBLEBOL - ui/actfx.cpp
 //  Eight choreographies, one clock, one pixel writer. See actfx.h for the seam.
 //
 //  THE DESIGN DECISION THE WHOLE FILE HANGS OFF: THE PROP COMES TO THE PET.

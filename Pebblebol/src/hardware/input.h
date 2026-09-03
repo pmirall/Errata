@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - hardware/input.h
+//  PEBBLEBOL - hardware/input.h
 //  Debounce + gesture recogniser for the two buttons.
 //  No screen knowledge, no game logic, no allocation.
 //

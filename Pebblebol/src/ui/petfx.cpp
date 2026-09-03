@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - ui/petfx.cpp
+//  PEBBLEBOL - ui/petfx.cpp
 //  The creature layer. Three things live here and they only barely touch:
 //
 //   1. A pixel core (mirroring, ink bounds, eyelids). Pure bit twiddling on

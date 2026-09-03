@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - networking/ble_social.h
+//  PEBBLEBOL - networking/ble_social.h
 //  Connectionless BLE discovery: advertisement-only identity beacon plus a
 //  passive scan that keeps a table of the pets currently in the room.
 //

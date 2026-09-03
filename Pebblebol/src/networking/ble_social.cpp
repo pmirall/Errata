@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - networking/ble_social.cpp
+//  PEBBLEBOL - networking/ble_social.cpp
 //  Connectionless BLE discovery: identity beacon plus passive scan.
 //
 //  ARCHITECTURE NOTES THAT ARE LOAD-BEARING

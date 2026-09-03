@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - ui/qr.h
+//  PEBBLEBOL - ui/qr.h
 //  QR Code encoder (versions 1-4, ECC level L, byte mode) + OLED renderer.
 //
 //  LAYERING

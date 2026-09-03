@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - ui/ui.cpp
+//  PEBBLEBOL - ui/ui.cpp
 //  GAME_DESIGN 8.2 (global invariants) and 8.3 (per-screen gesture map), for
 //  the screens that have not yet moved into the screen table: GAME, SOCIAL,
 //  QR, EGG and the modal layer. Everything else is a ScreenDef row in

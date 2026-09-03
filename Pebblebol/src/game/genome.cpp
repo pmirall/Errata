@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - game/genome.cpp
+//  PEBBLEBOL - game/genome.cpp
 //  Implementation of GAME_DESIGN 3 (16-byte field map) and 4 (inheritance).
 //  Pure C++: <stdint.h> / <string.h> only. No Arduino, no I/O, no float.
 // =============================================================================

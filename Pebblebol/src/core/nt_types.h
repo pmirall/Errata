@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - core/nt_types.h
+//  PEBBLEBOL - core/nt_types.h
 //  Every POD struct and enum shared across modules, plus compile-time size
 //  guards. NOT named types.h on purpose (libc shadowing).
 //

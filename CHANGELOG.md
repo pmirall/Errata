@@ -137,4 +137,8 @@ The plan cuts tags from Phase 2 onward, so Phase 1 has no `v0.1.0` tag; it is co
 - Repository archaeology: audit of the inherited sketch, the ten-phase implementation
   plan, the decisions log, and a CI skeleton.
 
-[0.2.0-core]: https://github.com/pmirall/Pebblebol/releases/tag/v0.2.0-core
+[0.2.0-core]: https://github.com/pmirall/Pebblebol/commit/db3feb3
+<!-- The annotated tag v0.2.0-core exists in the local repository but this
+     environment's git remote refuses tag pushes (send-pack disconnects), so
+     the link points at the commit, which does resolve. Create the release
+     from that commit on GitHub to restore a tag URL. -->

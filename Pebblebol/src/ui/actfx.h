@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - ui/actfx.h
+//  PEBBLEBOL - ui/actfx.h
 //  "The action layer": the choreography of every single thing the player can
 //  DO to the pet. Feeding it, washing it, medicating it, stroking it, telling
 //  it off, playing with it, putting it to bed, hitting the light.

@@ -1,5 +1,5 @@
 // =============================================================================
-//  NOTTAMAGOCHI - ui/render.h
+//  PEBBLEBOL - ui/render.h
 //  Owns THE single U8G2 instance, the frame scheduler and every drawing
 //  primitive. No other translation unit may construct a U8G2 object: the
 //  128x64 full-buffer constructors share one function-local static 1024 B
