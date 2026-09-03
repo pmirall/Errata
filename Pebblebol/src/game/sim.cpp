@@ -56,7 +56,7 @@
 //      sim_gain_snapshot()  hands the live budget out, truncated toward zero
 //      sim_gain_restore()   seeds min(cap, saved + elapsed*cap/3600)
 //
-//    This module still does NO I/O (BRIEF section 4). storage.cpp owns the 20 B
+//    This module still does NO I/O (BRIEF section 4). persistence owns the 20 B
 //    blob and NVS key "gl", the entry point calls sim_gain_restore() right
 //    after sim_init() and binds a snapshot provider that storage calls at the
 //    instant it commits a "save"; the ledger rides that write and adds no NVS

@@ -128,7 +128,7 @@ void     god_dump_line(void);
 // =============================================================================
 
 // Reset every console variable and force the time scale back to x1. Call once
-// from setup(), AFTER store_begin() and sim_init(). Never enters god mode.
+// from setup(), AFTER kv_begin() and sim_init(). Never enters god mode.
 void     god_begin(void);
 
 // Pump. Call once per loop(), on every screen, whether or not god mode is on:

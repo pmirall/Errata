@@ -45,13 +45,10 @@
 // The ordering is deliberate: everything above CAL_UNSET is trustworthy enough
 // to charge an absence with.
 // -----------------------------------------------------------------------------
-enum TimeCal : uint8_t {
-  CAL_UNSET = 0,
-  CAL_ESTIMATED,
-  CAL_USER,
-  CAL_PHONE,
-  CAL_COUNT
-};
+// The enum itself lives in persistence/save_schema.h, because the value is
+// PERSISTED (ConfigV2.time_cal_state) and a persisted encoding has exactly one
+// owner. This header only documents what the four values mean to the clock.
+#include "../persistence/save_schema.h"
 
 // Rollback guard (plan section 1.7): a calibration that moves the clock more
 // than this far BACKWARDS is refused unless it came from CAL_USER, who is
@@ -60,14 +57,14 @@ enum TimeCal : uint8_t {
 
 // -----------------------------------------------------------------------------
 // gt_begin()
-//   Call once from setup(), AFTER store_begin() and BEFORE anything asks for a
+//   Call once from setup(), AFTER compat_load() and BEFORE anything asks for a
 //   timestamp. Never blocks, never touches the radio, never writes anything.
 //   - Installs the POSIX TZ string (the persisted Config.tz when storage has
 //     one, otherwise CFG_TZ_STRING) via setenv+tzset, so local time is already
 //     correct on a device that will never see the internet.
-//   - Seeds the ESTIMATED clock from store_last_seen().
-//   The store_begin() ordering is a one-way dependency: storage.cpp never calls
-//   into gametime, it takes epochs as arguments. Calling gt_begin() first is
+//   - Seeds the ESTIMATED clock from save_last_seen().
+//   The compat_load() ordering is a one-way dependency: persistence never calls
+//   into gametime, it takes its clocks as function pointers. Calling gt_begin() first is
 //   not fatal - the estimate simply starts at the epoch, and gt_is_valid()
 //   already reports that as untrustworthy.
 // -----------------------------------------------------------------------------

@@ -155,12 +155,16 @@ enum AlertId : uint8_t {
   AL_COUNT
 };
 
-// How this boot started (storage.cpp: esp_reset_reason() + RTC nonce).
+// How this boot started (hardware/boot.cpp: esp_reset_reason() + RTC nonce).
 enum BootKind : uint8_t {
-  BOOT_FIRST_RUN = 0,  // no valid save in NVS
+  BOOT_FIRST_RUN = 0,  // nothing loadable in NVS
   BOOT_POWER_LOSS,     // ESP_RST_POWERON / _BROWNOUT -> absence path
   BOOT_CRASH,          // ESP_RST_PANIC / _TASK_WDT + RTC nonce intact
-  BOOT_SOFT_RESET,     // ESP_RST_SW + RTC nonce intact
+  BOOT_SOFT_RESET,     // ESP_RST_SW / _EXT / _USB / _JTAG + RTC nonce intact
+  BOOT_DEEPSLEEP,      // ESP_RST_DEEPSLEEP + RTC nonce intact. Split out of
+                       // SOFT_RESET in P2-C9b: a timed wake is not a restart,
+                       // and unlike a restart its interval IS elapsed time the
+                       // absence path may charge.
   BOOT_UNKNOWN,
   BOOT_COUNT
 };

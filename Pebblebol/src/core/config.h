@@ -368,27 +368,14 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 #define EGG_COLD_HEALTH_PCT     90
 
 // =============================================================================
-// 10. PERSISTENCE - NVS keys are max 15 chars
+// 10. PERSISTENCE - the write CADENCE only
+//
+// Every NVS key and both namespaces moved out of this file in P2-C9b: the key
+// table is persistence/save_schema.h section 9 (one place, spelled once), the
+// namespace "pbbl" and the "nvs2" partition label are hardware/kv_nvs.h, and
+// the anti-farm ledger's 20 B layout is persistence/legacy_v1.h. What is left
+// here is what belongs here - the two periods a designer might retune.
 // =============================================================================
-#define NVS_NS                  "notta"
-#define NVS_KEY_LASTSEEN        "t"
-#define NVS_KEY_SAVE            "save"
-#define NVS_KEY_CFG             "cfg"
-#define NVS_KEY_EGG             "egg"        // pending egg blob (see nt_types.h)
-#define NVS_KEY_CANARY          "ok"         // store_selftest()
-#define NVS_KEY_GAIN            "gl"         // hourly-gain ledger (storage.h GainSave)
-
-// PH4 6.1. The hourly gain budget is the anti-farm ceiling (section 12 below),
-// and until now it lived only in RAM, so a power cut either restored it for
-// free (farmable) or zeroed it (a 19 % pet told "esta lleno" for 29 minutes).
-// It is persisted as its own 20 B blob rather than inside PetSave: PetSave is
-// exactly 128 B, static_assert-ed with five offsetof guards, and reserved[] has
-// two bytes left - changing that wire format would refuse every existing save.
-// A separate key costs one extra NVS entry and rides the "save" write, so it
-// adds no write cadence of its own.
-#define NT_GAIN_MAGIC           0x474Cu      // 'G','L' little-endian
-#define NT_GAIN_VERSION         1
-
 #define SAVE_LASTSEEN_PERIOD_S  60UL         // do NOT lower: NVS wear
 #define SAVE_FULL_PERIOD_S      300UL
 

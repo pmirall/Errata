@@ -67,7 +67,7 @@ void sim_env_defaults(SimEnv& env);
 // 3. MANDATORY PUBLIC INTERFACE
 // -----------------------------------------------------------------------------
 
-// Binds the simulation to a PetSave the caller owns (storage.cpp). Clamps every
+// Binds the simulation to a PetSave the caller owns (app.cpp). Clamps every
 // field into its legal range and resets the RAM-only cadence accumulators.
 // The pointer must stay valid for as long as the sim runs.
 void     sim_init(PetSave& save);
@@ -125,7 +125,7 @@ uint16_t sim_gain_left(StatId id);
 // -----------------------------------------------------------------------------
 // LEDGER PERSISTENCE SEAM  (PH3 finding 4 / PH4 section 6 item 1)
 // sim.cpp does no I/O. These two calls are how the hourly gain
-// budget survives a power cut: storage.cpp owns the bytes and the NVS key, the
+// budget survives a power cut: persistence owns the bytes and the NVS key, the
 // entry point wires them together, and nothing here knows that NVS exists.
 // -----------------------------------------------------------------------------
 

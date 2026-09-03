@@ -41,7 +41,8 @@
 #include "../game/sim.h"
 #include "../game/genome.h"
 #include "../core/rng.h"
-#include "../persistence/storage.h"
+#include "../persistence/save_compat.h"
+#include "../hardware/kv_nvs.h"      // kv_error(), for the DIAG line
 #include "../hardware/gametime.h"
 #include "qr.h"
 #include "../networking/net.h"
@@ -195,7 +196,10 @@ static uint8_t  s_soc_prev    = RADIO_OFF;
 static uint16_t s_soc_err     = STR_EMPTY;
 
 // ---- GAME -------------------------------------------------------------------
-struct GameState {
+// MinigameState, not GameState: SaveSchema v2 owns that name for the whole
+// persisted world (persistence/save_schema.h section 8). This is the transient
+// state of the minigame currently on screen and never reaches flash.
+struct MinigameState {
   uint8_t  id;
   uint8_t  phase;        // 0 = ready, 1 = running, 2 = result
   uint8_t  round;
@@ -215,7 +219,7 @@ struct GameState {
   uint32_t step_ms;
   uint32_t jump_ms;      // jump: 0 = grounded, else takeoff timestamp
 };
-static GameState s_g;
+static MinigameState s_g;
 static uint8_t  s_raw_prev[INPUT_BTN_N];
 
 #define GAME_STEP_MS       25UL
@@ -435,7 +439,7 @@ void ui_toast(uint16_t str_id) {
 static void cfg_persist(void) {
   if (!s_cfg) return;
   s_cfg->saved_epoch = gt_now();
-  store_save_cfg(*s_cfg);
+  compat_save_cfg(*s_cfg);
   ui_toast(STR_SET_SAVED);
 }
 
@@ -504,7 +508,7 @@ static bool do_action(ActionId a) {
     if (had) actfx_begin((uint8_t)a, before);
     if (r.str_id) ui_toast(r.str_id);
     const PetSave* p = pet();
-    if (p) store_save(*p, true);
+    if (p) compat_save_pet(*p, true);
   } else if (r.err == AERR_COOLDOWN && r.cooldown_s) {
     // The base line has no {t}; the countdown is appended so the wait is honest.
     char buf[64];
@@ -1399,7 +1403,7 @@ static void game_finish(void) {
   sim_apply_play_result(permille, r);
   s_last_action = ACT_PLAY;
   const PetSave* p = pet();
-  if (p) store_save(*p, true);
+  if (p) compat_save_pet(*p, true);
   s_g.phase = 2;
   s_g.t0    = now_ms();
   ui_toast(permille >= 500u ? STR_GM_WIN : STR_GM_LOSE);
@@ -1986,7 +1990,7 @@ static void draw_settings_info(void) {
            (unsigned)(web_pin() % 10000u), (unsigned)SPRITE_REV);
   rd_text(2, 35, RD_FONT_TINY, line);
   snprintf(line, sizeof(line), "heap %lu  nvs %02X",
-           (unsigned long)ESP.getFreeHeap(), (unsigned)store_error());
+           (unsigned long)ESP.getFreeHeap(), (unsigned)kv_error());
   rd_text(2, 43, RD_FONT_TINY, line);
   if (gt_is_valid()) {
     char t[GT_ELAPSED_BUF];
@@ -2234,7 +2238,7 @@ static void clk_bump(void) {
 
 // The whole point of the screen. gt_set_epoch() with CAL_USER is the one source
 // allowed to move the clock backwards, so a user correcting a wrong date is
-// never refused; store_touch_lastseen() then rewrites the persisted baseline so
+// never refused; compat_touch_lastseen() then rewrites the persisted baseline so
 // the next boot measures its absence from the truth and not from an uptime.
 static void clock_commit(void) {
   const uint32_t e = gt_epoch_from_local((int)s_clk[CLK_YEAR], (uint8_t)s_clk[CLK_MONTH],
@@ -2245,7 +2249,7 @@ static void clock_commit(void) {
     input_flush();        // as on the success path: a held L must not re-commit
     return;
   }
-  store_touch_lastseen(gt_now());
+  compat_touch_lastseen(gt_now());
   ui_toast(STR_CLK_SAVED);
   input_flush();          // the release of the confirming hold must not fire below
   nav_back();
@@ -2340,7 +2344,7 @@ static void hatch_begin(void) {
   if (hatch_active()) return;
   if (s_hatch_ms != 0 && since(s_hatch_ms) < HATCH_TOTAL_MS + 3000UL) return;
 
-  store_save(*p, true);        // commit FIRST: everything below is presentation
+  compat_save_pet(*p, true);   // commit FIRST: everything below is presentation
 
   screen_leave(s_screen);      // drops BLE / an in-flight minigame
   s_sp          = 0;
@@ -2598,12 +2602,12 @@ static void confirm_commit(void) {
     case CFM_MEDICINE: act_and_show(ACT_MEDICINE); break;   // BRIEF D
     case CFM_WIPE1:    confirm_open(CFM_WIPE2, STR_CF_WIPE2); break;   // two dialogs
     case CFM_WIPE2: {
-      store_wipe();
-      if (s_cfg) { store_cfg_defaults(*s_cfg); store_save_cfg(*s_cfg); }
+      compat_factory_reset();
+      if (s_cfg) { compat_cfg_defaults(*s_cfg); compat_save_cfg(*s_cfg); }
       const Genome g0 = genome_genesis();
       sim_new_pet(g0, gt_now(), 0);
       const PetSave* p = pet();
-      if (p) { store_save(*p, true); petfx_reset(*p); }
+      if (p) { compat_save_pet(*p, true); petfx_reset(*p); }
       s_stat_ok = 0;                 // a wiped device shows the truth at once
       s_sp = 0;
       ui_goto(SCR_EGG);
@@ -2912,7 +2916,7 @@ void ui_handle(Gesture g) {
         nav_home();
         break;
       case GOD_EVT_WIPED: {
-        if (s_cfg) store_load_cfg(*s_cfg);
+        if (s_cfg) compat_cfg_defaults(*s_cfg);
         const PetSave* np = pet();
         if (np) petfx_reset(*np);    // god handed us a different animal entirely
         s_stat_ok = 0;

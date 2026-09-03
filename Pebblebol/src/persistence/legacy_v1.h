@@ -11,9 +11,10 @@
 //  these three layouts (tests/legacy/mkfixtures.cpp).
 //
 //  These are deliberately separate types from nt_types.h's live PetSave/Config
-//  and storage.h's GainSave: those three are still the running v1 code today
-//  and are deleted in P2-C9b/P2-C10, at which point this file is the only
-//  surviving description of the old format.
+//  and the v1 GainSave: the first two are still the running v1 code today and
+//  are deleted in P2-C10, at which point this file is the only surviving
+//  description of the old format. The gain ledger already reads its bytes
+//  through LegacyGainSave below (P2-C9b).
 //
 //  Pure header: stdint/stddef plus Genome, which survives into v2 unchanged.
 // =============================================================================

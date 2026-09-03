@@ -23,7 +23,10 @@
 #include "../game/genome.h"
 #include "../core/rng.h"
 #include "../game/sim.h"
-#include "../persistence/storage.h"
+#include "../persistence/save_compat.h"
+#include "../persistence/save_manager.h"
+#include "../hardware/boot.h"
+#include "../hardware/kv_nvs.h"
 #include "../hardware/gametime.h"
 #include "../hardware/input.h"
 #include "../ui/render.h"
@@ -55,11 +58,20 @@ static PetSave  g_pet;
 static Config   g_cfg;
 
 static uint32_t g_tick_ms        = 0;      // scheduler cursor for the 1 Hz tick
-static uint32_t g_boot_last_seen = 0;      // store_last_seen() as found at boot
+static uint32_t g_boot_last_seen = 0;      // save_last_seen() as found at boot
 static uint16_t g_cfg_crc        = 0;      // change detector for Config
 static uint8_t  g_absence_unknown = 0;     // boot took the unknown-clock path
 static uint8_t  g_clock_was_valid = 0;     // edge detector for a landing calibration
 static uint8_t  g_nvs_ok          = 0;
+
+// =============================================================================
+//  THE TWO CLOCKS persistence/save_manager.cpp CANNOT COMPUTE ITSELF
+//  A monotonic millisecond counter for the flash-wear filter, and the wall
+//  clock for saved_epoch. Injecting them is what keeps the save policy pure and
+//  host-testable (save_manager.h).
+// =============================================================================
+static uint32_t clock_ms(void)    { return millis(); }
+static uint32_t clock_epoch(void) { return gt_now(); }
 
 // =============================================================================
 //  CONFIG SIDE EFFECTS
@@ -79,7 +91,7 @@ static void apply_config(void)
   g_cfg_crc = g_cfg.crc16;
 }
 
-// True when someone rewrote Config since the last call. store_save_cfg() is
+// True when someone rewrote Config since the last call. compat_save_cfg() is
 // what re-seals the CRC, so this fires exactly once per persisted change.
 static bool config_changed(void)
 {
@@ -122,15 +134,15 @@ static void build_env(SimEnv& env)
 // =============================================================================
 //  HOURLY-GAIN LEDGER SEAM
 //  Two modules, neither of which may know about the other: sim.cpp owns the
-//  anti-farm budget and does no I/O, storage.cpp owns the NVS
-//  key and the write cadence and knows nothing about game rules. This file is
-//  the only place allowed to join them.
+//  anti-farm budget and does no I/O, persistence owns the NVS key and the write
+//  cadence and knows nothing about game rules. This file is the only place
+//  allowed to join them.
 //
-//  storage calls this at the instant it commits a "save", so the snapshot is
+//  save_compat calls this at the instant it commits a pet, so the snapshot is
 //  the live one - ui.cpp forces a save right after every successful action, and
 //  the points that action spent have to be inside the blob that write produces.
 // =============================================================================
-static bool gain_source(uint8_t pts[NT_GAIN_SLOTS], uint32_t& epoch)
+static bool gain_source(uint8_t pts[COMPAT_GAIN_SLOTS], uint32_t& epoch)
 {
   sim_gain_snapshot(pts);
   const uint32_t now = sim_now();
@@ -147,12 +159,17 @@ static bool gain_source(uint8_t pts[NT_GAIN_SLOTS], uint32_t& epoch)
 
 // =============================================================================
 //  BOOT: PET
-//  storage decides whether there is anything to load; genome/sim decide what a
-//  fresh pet is. The app.cpp only sequences them.
+//  persistence decides whether there is anything to load; genome/sim decide
+//  what a fresh pet is. The app.cpp only sequences them.
+//
+//  NEVER an auto-wipe. A load that refused to touch flash (LOAD_CORRUPT,
+//  LOAD_FOREIGN_NEWER) leaves the session read-only: the placeholder pet below
+//  runs in RAM and no write can reach the save the user still owns. P2-C9c
+//  turns that state into the SAVE ERROR screen and its two choices.
 // =============================================================================
 static void boot_pet(void)
 {
-  if (store_load(g_pet)) {
+  if (compat_have_pet()) {
     sim_init(g_pet);
     // sim_init() seeded the hourly gain budget to 0 - safe, but a lie
     // to anyone who just had a power cut ("esta lleno" at 19 % satiety for the
@@ -163,15 +180,16 @@ static void boot_pet(void)
     // into min(cap, saved + (now - saved_epoch) * cap / 3600), to within the
     // one milli-point that the two integer divisions can differ by.
     // A missing or corrupt blob leaves sim_init()'s 0 in place.
-    uint8_t  gpts[NT_GAIN_SLOTS];
+    uint8_t  gpts[COMPAT_GAIN_SLOTS];
     uint32_t gepoch = 0;
-    if (store_load_gain(gpts, gepoch)) {
-      (void)sim_gain_restore(gpts, NT_GAIN_SLOTS, gepoch, g_pet.last_seen_epoch);
+    if (compat_load_gain(gpts, gepoch)) {
+      (void)sim_gain_restore(gpts, COMPAT_GAIN_SLOTS, gepoch, g_pet.last_seen_epoch);
     }
     return;
   }
-  // No save, foreign version or a failed CRC: a brand new generation-0 egg
-  // rather than a garbage pet.
+  // Nothing loadable: a brand new generation-0 egg rather than a garbage pet.
+  // On a read-only session this egg is never written; it exists only so the
+  // renderer has something to draw behind the error the user is about to see.
   sim_init(g_pet);
   sim_new_pet(genome_genesis(), gt_now(), 0);
 }
@@ -184,11 +202,11 @@ static void boot_pet(void)
 //  we arm the retro-fix for the moment gt_set_epoch() lands.
 //
 //  "gt_is_valid() is false" alone is NOT evidence of an absence. The
-//  crash-vs-abandonment discriminator storage.cpp already computes is the
+//  crash-vs-abandonment discriminator hardware/boot.cpp already computes is the
 //  missing input: BOOT_FIRST_RUN has nobody to have abandoned, and BOOT_CRASH /
 //  BOOT_SOFT_RESET are explicitly not absences (the same reason the toast below
 //  says "dizzy" rather than "abandoned"). On top of that the baseline itself
-//  has to be a real wall clock: on a never-calibrated device store_last_seen()
+//  has to be a real wall clock: on a never-calibrated device save_last_seen()
 //  returns the PREVIOUS boot's uptime, which cannot describe a gap at all.
 // =============================================================================
 static void boot_absence(void)
@@ -203,7 +221,7 @@ static void boot_absence(void)
 
   uint8_t known = (gt_cal_state() != CAL_UNSET) ? 1u : 0u;
   if (!known) {
-    const BootKind bk       = store_boot_kind();
+    const BootKind bk       = boot_kind();
     const bool     real_gap = (g_boot_last_seen >= (uint32_t)NT_EPOCH_SANE_MIN) &&
                               (absence_s != 0u);
     if (bk == BOOT_FIRST_RUN || bk == BOOT_CRASH || bk == BOOT_SOFT_RESET ||
@@ -219,7 +237,7 @@ static void boot_absence(void)
 
   ui_note_absence(rep);
   ui_note_events(sim_take_events());
-  (void)store_save(g_pet, true);
+  (void)compat_save_pet(g_pet, true);
 }
 
 // =============================================================================
@@ -242,27 +260,40 @@ void app_setup(void)
 
   // --- entropy --------------------------------------------------------------
   // The ONE esp_random() call of the firmware (plan §1.4): it seeds every
-  // rng.h stream before storage draws its RTC nonce and canary pattern.
+  // rng.h stream before boot draws its RTC nonce and kv its canary pattern.
   // Without it every unit would hatch a bit-identical pet.
   rng_seed_all(esp_random());
 
-  // --- persistence ----------------------------------------------------------
-  g_nvs_ok = store_begin() ? 1u : 0u;
-  if (g_nvs_ok && !store_selftest()) {
+  // --- how this boot started, then the store it will read -------------------
+  boot_begin();                   // reads the RTC nonce BEFORE re-arming it
+  g_nvs_ok = kv_begin() ? 1u : 0u;
+  if (g_nvs_ok && !kv_selftest()) {
     g_nvs_ok = 0;                 // canary failed: run RAM-only, tell the user
   }
-  const BootKind boot = store_boot_kind();
-  g_boot_last_seen    = store_last_seen();
 
-  // --- settings + clock -----------------------------------------------------
-  (void)store_load_cfg(g_cfg);    // false only means "compiled-in defaults"
+  // --- the save -------------------------------------------------------------
+  // The whole load pipeline runs here, before the clock: gt_begin() bootstraps
+  // its estimate from save_last_seen() and its timezone from the persisted
+  // config, and both are answers this call produces.
+  save_set_clock(&clock_ms, &clock_epoch);
+  const LoadResult load = compat_load(g_pet, g_cfg);
+  boot_note_save(compat_have_pet());
+  const BootKind boot = boot_kind();
+
+  // The RTC mirror survives a crash that key "t" is up to 60 s behind.
+  if (boot_rtc_last_seen() > save_last_seen()) {
+    save_touch_lastseen(boot_rtc_last_seen());
+  }
+  g_boot_last_seen = save_last_seen();
+
+  // --- clock ----------------------------------------------------------------
   gt_begin();                     // installs the TZ; never blocks, no radio
 
   // --- the pet --------------------------------------------------------------
-  // Bind the ledger provider BEFORE the first store_save(): boot_absence()
-  // forces one, and that write is what retires a stale snapshot on a unit
-  // whose clock is gone.
-  store_bind_gain(&gain_source);
+  // Bind the ledger provider BEFORE the first pet write: boot_absence() forces
+  // one, and that write is what retires a stale snapshot on a unit whose clock
+  // is gone.
+  compat_bind_gain(&gain_source);
   boot_pet();
 
   // --- everything that reads Config or the pet ------------------------------
@@ -281,7 +312,10 @@ void app_setup(void)
   rd_splash();
   boot_absence();
 
-  if (!g_nvs_ok) {
+  if (!g_nvs_ok || compat_readonly()) {
+    // A refused load (LOAD_CORRUPT / LOAD_FOREIGN_NEWER) is a read-only
+    // session: nothing has been written and nothing will be. P2-C9c replaces
+    // this toast with the SAVE ERROR screen and its two choices.
     ui_toast(STR_ERR_NVS);
   } else if (boot == BOOT_FIRST_RUN) {
     ui_toast(STR_BOOT_FIRST);
@@ -300,8 +334,8 @@ void app_setup(void)
   g_tick_ms        = millis();
   g_clock_was_valid = gt_is_valid() ? 1u : 0u;
 
-  Serial.printf("[nt] boot=%u nvs=%u stage=%u free=%u\r\n",
-                (unsigned)boot, (unsigned)g_nvs_ok,
+  Serial.printf("[nt] boot=%u nvs=%u load=%u stage=%u free=%u\r\n",
+                (unsigned)boot, (unsigned)g_nvs_ok, (unsigned)load,
                 (unsigned)g_pet.stage, (unsigned)ESP.getFreeHeap());
 }
 
@@ -320,8 +354,9 @@ static void logic_tick(void)
   sim_tick(sim_step_seconds());
   ui_note_events(sim_take_events());
 
-  store_touch_lastseen(env.now_epoch);
-  (void)store_save(g_pet, false); // rate-limited to SAVE_FULL_PERIOD_S inside
+  compat_touch_lastseen(env.now_epoch);
+  (void)compat_save_pet(g_pet, false);   // rate-limited by save_manager inside
+  save_service();                        // flushes a write the 1 s floor deferred
 
   // gt_set_epoch() landed after an unknown-clock boot: the boot charged nothing,
   // so charge the truth now. The edge is on gt_is_valid(),

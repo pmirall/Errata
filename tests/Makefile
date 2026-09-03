@@ -77,6 +77,8 @@ $(BIN)/test_overflow:   $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o \
 $(BIN)/test_fixtures:   $(OBJ)/crc16.o
 $(BIN)/test_persistence: $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/crc16.o
+$(BIN)/test_compat:     $(OBJ)/save_compat.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
+                        $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o
 
 $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@

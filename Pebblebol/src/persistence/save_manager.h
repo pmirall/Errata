@@ -88,6 +88,12 @@ LoadResult save_load_all(GameState& gs);
 // DEFERRING the write to save_service(), never by dropping it.
 bool save_pebble(uint8_t slot, const PebbleInstance& p, bool force);
 
+// True when the LAST save_pebble() call actually reached flash, rather than
+// being dropped by the period filter or deferred to save_service(). A caller
+// that mirrors a pebble write elsewhere (the P2-C9 compatibility blob) uses it
+// to inherit this module's cadence instead of inventing a second one.
+bool save_pebble_landed(void);
+
 bool save_box_header(const BoxHeader& b);
 bool save_config(ConfigV2& c);            // seals into the caller's struct
 bool save_inventory(const Inventory& i);

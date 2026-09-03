@@ -8,7 +8,7 @@
 //  --------
 //  ui owns NO game state. Everything it shows comes from sim_save() /
 //  sim_*() / ble_peer(); everything it changes goes through
-//  sim_apply_action(), store_save_cfg() or net_request().
+//  sim_apply_action(), compat_save_cfg() or net_request().
 //  It never includes WiFi.h / BLEDevice.h / WebServer.h (net.h and
 //  ble_social.h are deliberately network-header-free) and it never constructs
 //  a U8G2: the single instance comes from rd_u8g2().
@@ -68,7 +68,7 @@
 // =============================================================================
 
 // Reset the state machine to S0 HOME (or straight into the EGG screen when the
-// loaded save is still an egg). Call once from setup(), AFTER store_begin(),
+// loaded save is still an egg). Call once from setup(), AFTER kv_begin(),
 // gt_begin(), sim_init() and rd_begin().
 void     ui_begin(void);
 

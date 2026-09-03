@@ -3,7 +3,7 @@
 //  The debug console (GAME_DESIGN 10). See godmode.h for the contract.
 //
 //  Everything the console mutates goes through the owning module's own API:
-//  sim_god_*() for the pet, gt_skew_add() for time, store_*() for NVS. This
+//  sim_god_*() for the pet, gt_skew_add() for time, compat_*() for NVS. This
 //  file mutates NOTHING directly - which is exactly why a test run through it
 //  exercises the real code paths.
 //
@@ -23,7 +23,9 @@
 #include "../core/strings_es.h"
 #include "../game/sim.h"
 #include "../game/genome.h"
-#include "../persistence/storage.h"
+#include "../persistence/save_compat.h"
+#include "../hardware/boot.h"
+#include "../hardware/kv_nvs.h"
 #include "../hardware/gametime.h"
 #include "../hardware/input.h"
 #include "../networking/net.h"
@@ -221,7 +223,7 @@ static uint8_t win_top(uint8_t cur, uint8_t count, uint8_t rows)
 static void changed(void)
 {
   const PetSave* p = pet();
-  if (p) store_save(*p, true);
+  if (p) compat_save_pet(*p, true);
   god_dump_line();
 }
 
@@ -295,7 +297,7 @@ static void run_absence(uint32_t secs)
   sim_catch_up_ex(secs, 1u, s_abs_rep);
   s_abs_done = true;
 
-  store_touch_lastseen(gt_now());
+  compat_touch_lastseen(gt_now());
   changed();
   GOD_LOGF("[god] absence %lus known=%u steps=%u\n",
            (unsigned long)secs, (unsigned)s_abs_rep.clock_known,
@@ -308,7 +310,7 @@ static void run_absence(uint32_t secs)
 // -----------------------------------------------------------------------------
 static bool run_wipe(void)
 {
-  const bool ok = store_wipe();
+  const bool ok = compat_factory_reset();
   Genome g = genome_genesis();
   sim_new_pet(g, gt_now(), 0);
   // GAME_DESIGN 10.2: everything god mode produces carries the taint, and this
@@ -316,7 +318,7 @@ static bool run_wipe(void)
   // honesty of the dynasty ribbon.
   sim_god_set_genome(g);
   const PetSave* p = pet();
-  if (p) store_save(*p, true);
+  if (p) compat_save_pet(*p, true);
   GOD_LOGF("[god] wipe ok=%u\n", (unsigned)ok);
   return ok;
 }
@@ -513,7 +515,7 @@ void god_begin(void)
 
   sim_set_time_scale(1u);
 
-  if (store_rtc_god_tainted()) {
+  if (boot_god_tainted()) {
     // The RTC nonce survived a soft reset that happened inside god mode. Do NOT
     // silently resume acceleration - say so and start at x1.
     GOD_LOGF("[god] previous boot was tainted\n");
@@ -530,7 +532,7 @@ void god_enter(void)
   s_abs_done = false;
   s_dump_last = millis();
 
-  store_rtc_mark_god();
+  boot_mark_god();
   set_scale(0);                                  // acceleration is opt-in
 
   // The taint is permanent, on the living pet and on everything it produces.
@@ -566,7 +568,7 @@ void god_exit(void)
   s_screen   = GSC_MENU;
 
   const PetSave* p = pet();
-  if (p) store_save(*p, true);
+  if (p) compat_save_pet(*p, true);
   god_dump_line();
   GOD_LOGF("[god] EXIT %s\n", S(STR_GOD_EXIT));
 }
@@ -1074,7 +1076,7 @@ static void draw_sys(void)
                kCal[(uint8_t)gt_cal_state() < (uint8_t)CAL_COUNT
                       ? (uint8_t)gt_cal_state() : 0u]);
       rd_text(2, 35, RD_FONT_TINY, b);
-      snprintf(b, sizeof(b), "seen=%lu", (unsigned long)store_last_seen());
+      snprintf(b, sizeof(b), "seen=%lu", (unsigned long)save_last_seen());
       rd_text(2, 43, RD_FONT_TINY, b);
       snprintf(b, sizeof(b), "skew=%lds frz=%02u:%02u", (long)s_skew_total,
                (unsigned)s_frozen_h, (unsigned)s_frozen_m);
@@ -1129,14 +1131,14 @@ static void draw_sys(void)
     }
     default: {
       draw_title(S(STR_GOD_STORE));
-      snprintf(b, sizeof(b), "nvs %s err=%02X", store_healthy() ? "OK" : "BAD",
-               (unsigned)store_error());
+      snprintf(b, sizeof(b), "nvs %s err=%02X", kv_healthy(KV_MAIN) ? "OK" : "BAD",
+               (unsigned)kv_error());
       rd_text(2, 27, RD_FONT_TINY, b);
-      snprintf(b, sizeof(b), "boot=%u rst=%u n=%lu", (unsigned)store_boot_kind(),
-               (unsigned)store_reset_reason(), (unsigned long)store_boot_count());
+      snprintf(b, sizeof(b), "boot=%u rst=%u n=%lu", (unsigned)boot_kind(),
+               (unsigned)boot_reset_reason(), (unsigned long)boot_count());
       rd_text(2, 35, RD_FONT_TINY, b);
       snprintf(b, sizeof(b), "fails=%u rtc=%u",
-               (unsigned)store_write_fails(), (unsigned)(store_rtc_intact() ? 1u : 0u));
+               (unsigned)kv_write_fails(), (unsigned)(boot_rtc_intact() ? 1u : 0u));
       rd_text(2, 43, RD_FONT_TINY, b);
       snprintf(b, sizeof(b), "%s  %s", FW_VERSION, s_dump_on ? "LOG" : "---");
       rd_text(2, 51, RD_FONT_TINY, b);

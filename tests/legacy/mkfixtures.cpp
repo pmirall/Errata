@@ -2,7 +2,7 @@
 //  Pebblebol host tests - legacy/mkfixtures.cpp
 //  Writes the v1 persistence fixtures the SaveSchema v2 migration (P2-C9) is
 //  tested against: byte images of the legacy PetSave / Config / GainSave
-//  structs exactly as storage.cpp v1 puts them into NVS.
+//  structs exactly as the v1 firmware put them into NVS.
 //
 //      make -C tests fixtures        ->  tests/fixtures/*.bin
 //
@@ -19,13 +19,13 @@
 #include <string.h>
 
 #include "core/nt_types.h"
-#include "persistence/storage.h"     // GainSave (host-includable: nt_types.h only)
+#include "persistence/legacy_v1.h"    // LegacyGainSave: the frozen v1 "gl" layout
 #include "game/genome.h"
 #include "core/crc16.h"
 
 static_assert(sizeof(PetSave) == 128, "legacy PetSave is 128 B");
 static_assert(sizeof(Config) == 256, "legacy Config is 256 B");
-static_assert(sizeof(GainSave) == 20, "legacy GainSave is 20 B");
+static_assert(sizeof(LegacyGainSave) == 20, "legacy GainSave is 20 B");
 
 static void copy_str(char* dst, size_t cap, const char* src) {
   snprintf(dst, cap, "%s", src);
@@ -151,18 +151,18 @@ static Config config_v1(void) {
   return c;
 }
 
-static GainSave gainsave_v1(void) {
-  GainSave g;
+static LegacyGainSave gainsave_v1(void) {
+  LegacyGainSave g;
   memset(&g, 0, sizeof g);
-  g.magic   = NT_GAIN_MAGIC;
-  g.version = NT_GAIN_VERSION;
+  g.magic   = LEGACY_GAIN_MAGIC;
+  g.version = LEGACY_GAIN_VERSION;
   g.slots   = 7;                            // the v1 blob carried seven StatIds
   g.epoch   = 1700200000u;
   // v1 pts[7] = { 30, 20, 10, 25, 0, 0, 0 }. The seventh byte is reserved[0]
   // now and memset() above already wrote the same zero there.
-  static const uint8_t pts[NT_GAIN_SLOTS] = { 30, 20, 10, 25, 0, 0 };
+  static const uint8_t pts[LEGACY_STAT_COUNT] = { 30, 20, 10, 25, 0, 0 };
   memcpy(g.pts, pts, sizeof pts);
-  g.crc16 = crc16_ccitt(&g, GAINSAVE_CRC_BYTES);
+  g.crc16 = crc16_ccitt(&g, LEGACY_GAINSAVE_CRC_BYTES);
   return g;
 }
 
@@ -184,7 +184,7 @@ int main(int argc, char** argv) {
   const PetSave  adult = petsave_adult();
   const PetSave  egg   = petsave_egg();
   const Config   cfg   = config_v1();
-  const GainSave gain  = gainsave_v1();
+  const LegacyGainSave gain = gainsave_v1();
   rc |= write_blob(dir, "petsave_v1_adult.bin", &adult, sizeof adult);
   rc |= write_blob(dir, "petsave_v1_egg.bin",   &egg,   sizeof egg);
   rc |= write_blob(dir, "config_v1.bin",        &cfg,   sizeof cfg);

@@ -15,7 +15,7 @@
 #include <string.h>
 
 #include "core/nt_types.h"
-#include "persistence/storage.h"     // GainSave + GAINSAVE_CRC_BYTES (host-includable)
+#include "persistence/legacy_v1.h"    // LegacyGainSave: the frozen v1 "gl" layout
 #include "core/crc16.h"
 
 static uint8_t s_blob[512];
@@ -104,18 +104,18 @@ TEST(fixture_config_v1) {
 TEST(fixture_gainsave_v1) {
   const size_t n = load("fixtures/gainsave_v1.bin");
   CHECK_EQ(n, 20);
-  if (n != sizeof(GainSave)) return;
-  GainSave g;
+  if (n != sizeof(LegacyGainSave)) return;
+  LegacyGainSave g;
   memcpy(&g, s_blob, sizeof g);
-  CHECK_EQ(g.magic, NT_GAIN_MAGIC);
-  CHECK_EQ(g.version, NT_GAIN_VERSION);
+  CHECK_EQ(g.magic, LEGACY_GAIN_MAGIC);
+  CHECK_EQ(g.version, LEGACY_GAIN_VERSION);
   CHECK_EQ(g.slots, 7);                     // the v1 blob carried seven StatIds
   CHECK_EQ(g.epoch, 1700200000u);
-  CHECK_EQ(g.pts[ST_HUNGER], 30);
-  CHECK_EQ(g.pts[ST_HYGIENE], 25);
-  CHECK_EQ(g.pts[ST_HEALTH], 0);
-  CHECK_EQ(g.crc16, crc16_ccitt(&g, GAINSAVE_CRC_BYTES));
-  CHECK_EQ(u16_at(offsetof(GainSave, crc16)), 0x77F0);
+  CHECK_EQ(g.pts[LV1_ST_HUNGER], 30);
+  CHECK_EQ(g.pts[LV1_ST_HYGIENE], 25);
+  CHECK_EQ(g.pts[LV1_ST_HEALTH], 0);
+  CHECK_EQ(g.crc16, crc16_ccitt(&g, LEGACY_GAINSAVE_CRC_BYTES));
+  CHECK_EQ(u16_at(offsetof(LegacyGainSave, crc16)), 0x77F0);
   CHECK_EQ(crc16_ccitt(s_blob, n), 0x6360);
 }
 

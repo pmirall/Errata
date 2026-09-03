@@ -23,7 +23,8 @@
   #include <Arduino.h>        // millis()
   #include <sys/time.h>       // settimeofday()
   #include "esp_timer.h"      // esp_timer_get_time() - the exact 64-bit uptime
-  #include "../persistence/storage.h"        // store_last_seen(), store_load_cfg() - read only
+  #include "../persistence/save_manager.h"    // save_last_seen() - read only
+  #include "../persistence/save_compat.h"     // compat_boot_tz() - read only
 #else
   // Host builds supply the 32-bit millisecond tick themselves so the wrap
   // extension below can be driven across a rollover boundary by a unit test.
@@ -144,21 +145,21 @@ static void gt_apply_tz(void)
 }
 
 // -----------------------------------------------------------------------------
-// Bootstrap from persistence, through storage.h - read only, no writes, no NVS
-// handle of our own (storage.cpp is the single owner of Preferences).
-//   store_last_seen() -> newest of NVS "t", PetSave.last_seen_epoch and the
-//                        RTC mirror. This is the base of the ESTIMATED clock,
-//                        so a device whose clock was never calibrated still
-//                        reports plausible, monotonically increasing epochs
-//                        and an absence of ~0 instead of inventing one.
-//   store_load_cfg()  -> Config.tz, so a timezone changed from SETTINGS is
-//                        honoured on the next boot with no
-//                        network at all. Returns false (and fills the
-//                        CFG_TZ_STRING defaults) when nothing is persisted.
+// Bootstrap from persistence - read only, no writes, no NVS handle of our own
+// (hardware/kv_nvs.cpp is the single owner of Preferences).
+//   save_last_seen()  -> newest of NVS "t", the Box's saved_epoch and the RTC
+//                        mirror. This is the base of the ESTIMATED clock, so a
+//                        device whose clock was never calibrated still reports
+//                        plausible, monotonically increasing epochs and an
+//                        absence of ~0 instead of inventing one.
+//   compat_boot_tz()  -> the persisted ConfigV2.tz, so a timezone changed from
+//                        SETTINGS is honoured on the next boot with no network
+//                        at all. Empty when nothing is persisted, in which case
+//                        the compiled-in CFG_TZ_STRING stands.
 //
-// ORDERING: store_begin() must run before gt_begin(). That is safe and
-// one-way - storage.cpp never calls into gametime; it takes epochs as
-// arguments. If gt_begin() is called first, the seed is simply empty and the
+// ORDERING: compat_load() must run before gt_begin(). That is safe and one-way
+// - persistence never calls into gametime; it takes its clocks as function
+// pointers. If gt_begin() is called first, the seed is simply empty and the
 // estimated clock starts at the epoch, which gt_is_valid() already reports as
 // untrustworthy.
 // -----------------------------------------------------------------------------
@@ -169,18 +170,15 @@ static void gt_load_seed(void)
   s_est_base_s = 0;
 
 #if defined(ARDUINO)
-  const uint32_t seen = store_last_seen();
+  const uint32_t seen = save_last_seen();
   if (seen >= (uint32_t)GT_EPOCH_SANE_MIN) {
     s_est_base_s = seen;
   }
 
-  Config c;
-  memset(&c, 0, sizeof(c));
-  if (store_load_cfg(c)) {
-    c.tz[TZ_MAX_LEN] = '\0';        // a short/odd blob must not run off the end
-    if (c.tz[0] != '\0') {
-      snprintf(s_tz, sizeof(s_tz), "%s", c.tz);
-    }
+  char tz[CFGV2_TZ_CAP];
+  compat_boot_tz(tz, sizeof(tz));
+  if (tz[0] != '\0') {
+    snprintf(s_tz, sizeof(s_tz), "%s", tz);
   }
 #endif
 }

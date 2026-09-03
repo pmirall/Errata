@@ -216,6 +216,7 @@ static uint32_t s_lastseen      = 0;
 static uint32_t s_lastseen_ms   = 0;
 static bool     s_lastseen_sent = false;
 static bool     s_migrated      = false;
+static bool     s_landed        = false;   // the last save_pebble() reached flash
 
 void save_set_clock(SaveClockFn now_ms, SaveClockFn now_epoch) {
   s_now_ms    = now_ms;
@@ -339,7 +340,10 @@ static bool single_load(KvPart part, const char* key, const BlobOps& o, void* ou
 // =============================================================================
 //  PART 4 - writing
 // =============================================================================
+bool save_pebble_landed(void) { return s_landed; }
+
 bool save_pebble(uint8_t slot, const PebbleInstance& p, bool force) {
+  s_landed = false;
   if (slot >= BOX_SLOTS) return false;
 
   if (s_now_ms && s_have_written[slot]) {
@@ -361,6 +365,7 @@ bool save_pebble(uint8_t slot, const PebbleInstance& p, bool force) {
   s_last_write_ms[slot] = now_ms();
   s_have_written[slot]  = true;
   s_pending_mask &= (uint16_t)~(1u << slot);
+  s_landed = true;
   return true;
 }
 
@@ -387,7 +392,7 @@ bool save_config(ConfigV2& c) {
   // Sealed IN THE CALLER'S STRUCT: the entry point watches cfg.crc16 to notice
   // that a setting changed and re-apply the ones that live outside the blob
   // (panel contrast). Sealing into a private copy froze that detector forever
-  // in v1 (storage.h, store_save_cfg).
+  // in v1 (the retired storage.h, store_save_cfg).
   return pair_write(KV_MAIN, KEY_CFG_PREFIX, OPS_CFG, &c);
 }
 

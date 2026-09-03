@@ -209,6 +209,9 @@ static_assert(BOX_SLOTS <= 16, "slot_mask is 16 bits");
 #define CFGV2_F_SH1106          0x0002u   // panel controller override
 #define CFGV2_F_SBAR_MASK       0x000Cu   // StatusBarMode, 2 bits at shift 2
 #define CFGV2_F_SBAR_SH         2
+#define CFGV2_F_WEB             0x0010u   // the creator server is opt-in (radio off
+                                          // by default, spec section 68 r5)
+#define CFGV2_F_BLE             0x0020u   // the short-range radio may be brought up
 
 struct ConfigV2 {
   uint16_t magic;                        //   0  CFGV2_MAGIC
@@ -416,6 +419,13 @@ static_assert(sizeof(GameState) == 1936, "GameState is no longer the sum of its 
 #define KEY_CK_BOX              "ck_box"
 #define KEY_CK_CFG              "ck_cfg"
 #define KEY_CK_PEBBLE_PREFIX    "ck_pb"   // ck_pb0..ck_pb9
+
+// TEMPORARY, P2-C9 .. P2-C10 (persistence/save_compat.h). The live simulation
+// still runs on the v1 PetSave, whose care-quality / wish / poop / event fields
+// PebbleInstance does not carry. The pet is written verbatim under this key as
+// well as into slot 0, so one commit of transition costs nothing. P2-C10 moves
+// the sim onto PebbleInstance and deletes both the key and its writer.
+#define KEY_COMPAT_PET          "lgpet"
 
 // Legacy v1 keys, namespace "notta". Read once by the migration, then erased.
 #define KEY_V1_SAVE             "save"
