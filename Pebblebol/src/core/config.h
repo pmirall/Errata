@@ -11,6 +11,8 @@
 
 #include <stdint.h>
 
+#include "version.h"   // FW_VERSION + the schema/protocol version numbers
+
 // #############################################################################
 // ##                                                                         ##
 // ##   USER CONFIGURATION BLOCK                                              ##
@@ -61,7 +63,9 @@
 // 1. IDENTITY / VERSION
 // =============================================================================
 #define FW_NAME                 "Pebblebol"
-#define FW_VERSION              "0.2.0-dev"
+// FW_VERSION and the four wire/schema version numbers live in core/version.h
+// (plan section 1.4), which is included above so every existing user of
+// FW_VERSION keeps compiling with exactly one definition in the tree.
 
 // =============================================================================
 // 2. GPIO ASSIGNMENT

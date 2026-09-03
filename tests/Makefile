@@ -48,6 +48,13 @@ $(OBJ)/%.o: $(SRC_ROOT)/hardware/%.cpp | $(OBJ)
 $(OBJ)/%.o: $(SRC_ROOT)/ui/%.cpp | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
+$(OBJ)/%.o: $(SRC_ROOT)/persistence/%.cpp | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+# Host fakes for the device seams (kv_store, later gfx).
+$(OBJ)/%.o: fakes/%.cpp fakes/%.h | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
 # gametime pinned to the estimated-clock path so test_clock can drive the
 # millis() wrap extension across 2^32 on a machine whose wall clock is right.
 $(OBJ)/gametime_nevervalid.o: $(SRC_ROOT)/hardware/gametime.cpp | $(OBJ)
@@ -68,6 +75,8 @@ $(BIN)/test_clock:      $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o
 $(BIN)/test_overflow:   $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o \
                         $(OBJ)/sim.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_fixtures:   $(OBJ)/crc16.o
+$(BIN)/test_persistence: $(OBJ)/save_manager.o $(OBJ)/migration.o \
+                        $(OBJ)/kv_mem.o $(OBJ)/crc16.o
 
 $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
