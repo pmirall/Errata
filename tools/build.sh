@@ -14,7 +14,18 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SKETCH="${SKETCH:-$ROOT/Pebblebol}"
+# PARTITIONS (decision D6). Pebblebol/partitions.csv is the table that is
+# actually flashed: arduino-cli copies a sketch-local partitions.csv into the
+# build directory and esptool writes THAT, whatever the board menu says. What
+# the menu still controls is the SIZE CHECK - upload.maximum_size comes from the
+# selected PartitionScheme, and dropping the option here (P2-C9d's first attempt)
+# left the check at the default scheme's 1,310,720 B and failed a 1.87 MB build
+# that fits app0 perfectly well. So PartitionScheme=huge_app stays, and its
+# 3,145,728 B ceiling is exactly app0's size in the CSV - which the two gates
+# below pin: the app maximum must be that number, and the table that will be
+# flashed must contain the private nvs2 partition the checkpoint lives in.
 FQBN="${FQBN:-esp32:esp32:esp32c3:PartitionScheme=huge_app,CDCOnBoot=cdc}"
+EXPECT_APP_MAX="${EXPECT_APP_MAX:-3145728}"
 VARIANT="baseline"
 BUILD_PATH=""
 QUIET=0
@@ -63,6 +74,7 @@ set -e
 PROJ_WARN="$(grep -E "warning:" "$LOG" | grep -F "$SRC/" || true)"
 PROJ_WARN_N="$(printf '%s' "$PROJ_WARN" | grep -c . || true)"
 FLASH="$(grep -oE "Sketch uses [0-9]+ bytes" "$LOG" | grep -oE "[0-9]+" || echo 0)"
+APPMAX="$(grep -oE "Maximum is [0-9]+ bytes" "$LOG" | head -1 | grep -oE "[0-9]+" || echo 0)"
 GLOBALS="$(grep -oE "Global variables use [0-9]+ bytes" "$LOG" | grep -oE "[0-9]+" || echo 0)"
 
 if [ $RC -ne 0 ]; then
@@ -70,6 +82,19 @@ if [ $RC -ne 0 ]; then
   echo "BUILD FAIL variant=$VARIANT (arduino-cli exit $RC) — full log: see above" >&2
   exit 1
 fi
+# D6 gates. (1) the app ceiling still matches app0 in partitions.csv; (2) the
+# table that will be flashed is the sketch's, i.e. it has the nvs2 partition.
+if [ "$APPMAX" != "$EXPECT_APP_MAX" ]; then
+  echo "BUILD FAIL variant=$VARIANT: app maximum is $APPMAX bytes, expected $EXPECT_APP_MAX" >&2
+  echo "  (the app0 size in Pebblebol/partitions.csv and the FQBN's PartitionScheme disagree - see D6)" >&2
+  exit 1
+fi
+if ! grep -qE "^[[:space:]]*nvs2[[:space:]]*," "$BUILD_PATH/partitions.csv" 2>/dev/null; then
+  echo "BUILD FAIL variant=$VARIANT: the flashed partition table has no nvs2 partition" >&2
+  echo "  (Pebblebol/partitions.csv was not picked up - see D6)" >&2
+  exit 1
+fi
+
 if [ "$PROJ_WARN_N" -gt 0 ]; then
   [ $QUIET -eq 1 ] || printf '%s\n' "$PROJ_WARN" >&2
   echo "BUILD FAIL variant=$VARIANT: $PROJ_WARN_N project warning(s) with --warnings all" >&2

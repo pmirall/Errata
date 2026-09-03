@@ -756,6 +756,35 @@ TEST(a_rotten_v1_blob_is_corrupt_not_a_fresh_pet) {
   CHECK_EQ(migrate_v1_to_v2(nullptr, nullptr, gs), MIGRATE_NONE);
 }
 
+TEST(the_checkpoint_cadence_is_daily_and_event_driven) {
+  begin();
+  GameState gs;
+  save_load_all(gs);
+  gs.pebbles[0] = sample_pebble(0);
+  gs.box.slot_mask = 1; gs.box.active_slot = 0;
+  CHECK(save_pebble(0, gs.pebbles[0], true));
+  CHECK(save_box_header(gs.box));
+
+  // First call on a unit with no checkpoint at all: writes immediately.
+  CHECK(save_checkpoint_service(s_epoch, false));
+  CHECK(kv_mem_exists(KV_CKPT, KEY_CK_BOX));
+
+  // Same day: nothing.
+  CHECK(!save_checkpoint_service(s_epoch + 3600u, false));
+  CHECK(!save_checkpoint_service(s_epoch + SAVE_CKPT_PERIOD_S - 1u, false));
+
+  // An event writes one whatever the clock says ...
+  const uint32_t puts_before = kv_mem_puts();
+  CHECK(save_checkpoint_service(s_epoch + 3600u, true));
+  CHECK(kv_mem_puts() > puts_before);
+
+  // ... and a day later the ordinary cadence fires again.
+  CHECK(save_checkpoint_service(s_epoch + SAVE_CKPT_PERIOD_S + 3600u, false));
+
+  // An epoch that is not a date never triggers the daily write.
+  CHECK(!save_checkpoint_service(1000u, false));
+}
+
 TEST(the_gain_ledger_is_left_alone_by_the_migration) {
   begin();
   uint8_t gain[sizeof(LegacyGainSave)];

@@ -113,6 +113,16 @@ void save_service(void);
 // the Arduino core's wholesale erase of "nvs" cannot reach (decision D6).
 bool save_checkpoint_all(void);
 
+// The checkpoint CADENCE. Safe to call every tick with the wall clock: it
+// writes at most once per SAVE_CKPT_PERIOD_S, and force=true is the event path
+// (level-up, evolution, capture, trade - the things that change what a Pebble
+// is). Returns true when a checkpoint was actually written. An epoch below
+// NT_EPOCH_SANE_MIN is not a date and never triggers the daily write; a forced
+// one still goes through, because the event happened whatever the clock says.
+// The first call after a boot adopts the stored checkpoint's own saved_epoch,
+// so a unit that is power-cycled ten times a day still writes one checkpoint.
+bool save_checkpoint_service(uint32_t now_epoch, bool force);
+
 // EXPLICIT RECOVERY - the SAVE ERROR screen's "Recuperar" and nothing else.
 // Loads the nvs2 checkpoint into 'gs' and commits it over KV_MAIN. Returns
 // false when there is no usable checkpoint, and then writes NOTHING, so a user

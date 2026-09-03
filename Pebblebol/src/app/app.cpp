@@ -375,11 +375,22 @@ static void logic_tick(void)
   sim_set_env(env);               // every tick, not once at boot
 
   sim_tick(sim_step_seconds());
-  ui_note_events(sim_take_events());
+  const uint32_t ev = sim_take_events();
+  ui_note_events(ev);
 
   compat_touch_lastseen(env.now_epoch);
   (void)compat_save_pet(g_pet, false);   // rate-limited by save_manager inside
   save_service();                        // flushes a write the 1 s floor deferred
+
+  // The nvs2 checkpoint (D6). Daily, plus the events that change what the pet
+  // IS. The plan's list is level-up / evolution / capture / trade; of those only
+  // evolution exists before P3 and P7, and its v1 spelling is a stage
+  // transition, so that is what forces one here. P2-C10 and P7 add the rest at
+  // the same call.
+  const bool grew = (ev & (SIM_EV_HATCHED | SIM_EV_STAGE_UP | SIM_EV_EVOLVE_MINOR)) != 0;
+  if (!compat_readonly()) {
+    (void)save_checkpoint_service(env.now_epoch, grew);
+  }
 
   // gt_set_epoch() landed after an unknown-clock boot: the boot charged nothing,
   // so charge the truth now. The edge is on gt_is_valid(),

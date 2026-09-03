@@ -217,6 +217,8 @@ static uint32_t s_lastseen_ms   = 0;
 static bool     s_lastseen_sent = false;
 static bool     s_migrated      = false;
 static bool     s_landed        = false;   // the last save_pebble() reached flash
+static uint32_t s_ckpt_epoch    = 0;       // wall clock of the last checkpoint
+static bool     s_ckpt_known    = false;   // ... and whether we have looked yet
 
 void save_set_clock(SaveClockFn now_ms, SaveClockFn now_epoch) {
   s_now_ms    = now_ms;
@@ -462,6 +464,24 @@ bool save_checkpoint_all(void) {
   return ok;
 }
 
+bool save_checkpoint_service(uint32_t now_epoch, bool force) {
+  if (!force) {
+    if (now_epoch < NT_EPOCH_SANE_MIN) return false;
+    if (!s_ckpt_known) {
+      // What is already on nvs2 decides when the next one is due, so a unit
+      // that reboots often does not rewrite the checkpoint on every boot.
+      BoxHeader ck;
+      s_ckpt_epoch = single_load(KV_CKPT, KEY_CK_BOX, OPS_BOX, &ck) ? ck.saved_epoch : 0u;
+      s_ckpt_known = true;
+    }
+    if (s_ckpt_epoch != 0 && now_epoch < s_ckpt_epoch + SAVE_CKPT_PERIOD_S) return false;
+  }
+  if (!save_checkpoint_all()) return false;
+  s_ckpt_known = true;
+  if (now_epoch >= NT_EPOCH_SANE_MIN) s_ckpt_epoch = now_epoch;
+  return true;
+}
+
 // Fills 'gs' from the checkpoint. False when there is no usable checkpoint.
 static bool checkpoint_load(GameState& gs) {
   BoxHeader box;
@@ -697,5 +717,7 @@ bool save_factory_reset(void) {
   s_lastseen      = 0;
   s_lastseen_sent = false;
   s_migrated      = false;
+  s_ckpt_epoch    = 0;
+  s_ckpt_known    = true;      // the partition was just wiped: nothing to read
   return a && b;
 }

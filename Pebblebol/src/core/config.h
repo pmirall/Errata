@@ -378,6 +378,10 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 // =============================================================================
 #define SAVE_LASTSEEN_PERIOD_S  60UL         // do NOT lower: NVS wear
 #define SAVE_FULL_PERIOD_S      300UL
+// The nvs2 checkpoint (D6). Daily, plus the events that change what a Pebble
+// IS rather than how it feels - a lost day of care is a bad afternoon, a lost
+// evolution or trade is a different animal.
+#define SAVE_CKPT_PERIOD_S      86400UL
 
 // =============================================================================
 // 11. RADIO / NETWORK
