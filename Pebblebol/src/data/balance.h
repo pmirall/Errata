@@ -228,4 +228,73 @@ static_assert(XP_WIN_CARRY_S    % XP_CAP_CARRY    == 0, "carry refill step is no
 static_assert(XP_CAP_CARE < 256 && XP_CAP_MINIGAME < 256 && XP_CAP_CARRY < 256,
               "a ledger bucket is persisted as one byte (Inventory.xp_ledger)");
 
+// =============================================================================
+// 5. DAYLIGHT AND SLEEP  -- when it is dark, and what wakes the creature
+//    (plan P3-C2b, decision D13)
+//
+//    THIS TABLE IS AN APPROXIMATION AND SAYS SO. A true sunrise needs a
+//    latitude; there is no latitude anywhere in this firmware and there is not
+//    going to be one (it went with the weather module, and spec section 44 is
+//    explicit that the Wi-Fi scanner is a sensor, not a geolocator). What the
+//    device has is the local wall clock and the day of the year, so
+//    game/daylight.cpp interpolates the twelve pairs below by day of year and
+//    calls the result sunrise and sunset.
+//
+//    The values describe mid-northern latitudes - about 40 deg N, peninsular
+//    Spain, where the default CFG_TZ_STRING points - in LOCAL OFFICIAL TIME.
+//    The TZ string has ALREADY applied daylight saving, so nothing downstream
+//    may apply it again; that is why the March -> April and the
+//    October -> November steps below are an hour wide. A player at another
+//    latitude sees a drift (too early a bedtime in a Nordic June, too much
+//    seasonal swing near the equator). That cost was accepted with the
+//    mechanic: it is a deliberate approximation, not an oversight.
+//
+//        month  sunrise  sunset        month  sunrise  sunset
+//        Jan     08:35    18:00        Jul     07:00    21:40
+//        Feb     08:10    18:35        Aug     07:30    21:10
+//        Mar     07:25    19:10        Sep     08:00    20:20
+//        Apr     07:30    21:00        Oct     08:30    19:30
+//        May     06:50    21:30        Nov     08:10    17:55
+//        Jun     06:45    21:45        Dec     08:30    17:50
+//
+//    Each pair is anchored at the MIDDLE of its month and interpolated
+//    linearly to its neighbours, December wrapping into January, so the curve
+//    is continuous every day of the year - a table read as one constant per
+//    month would jump by half an hour on the 1st.
+// =============================================================================
+#define PB_DAYLIGHT_MONTHS      12
+#define PB_MINUTES_PER_DAY      1440u
+
+// Day of year (0-based, non-leap) of the 15th of each month: the anchor each
+// sample below is taken at.
+inline constexpr uint16_t DAYLIGHT_ANCHOR_DOY[PB_DAYLIGHT_MONTHS] = {
+   14,  45,  73, 104, 134, 165, 195, 226, 257, 287, 318, 348
+};
+// Minutes from local midnight.
+inline constexpr uint16_t DAYLIGHT_SUNRISE_MIN[PB_DAYLIGHT_MONTHS] = {
+  515, 490, 445, 450, 410, 405, 420, 450, 480, 510, 490, 510
+};
+inline constexpr uint16_t DAYLIGHT_SUNSET_MIN[PB_DAYLIGHT_MONTHS] = {
+ 1080,1115,1150,1260,1290,1305,1300,1270,1220,1170,1075,1070
+};
+
+// Nothing falls asleep the instant the sun sets. Bedtime is sunset plus this,
+// and the creature wakes at sunrise.
+#define SLEEP_AFTER_DUSK_MIN    90
+
+// INSISTENCE WAKES IT (spec section 27 forbids punishment, and a player who
+// wants to play at 23:00 should be able to). While the creature is asleep the
+// first gesture does not act: it shows that the pet is asleep and counts as
+// one nudge. WAKE_NUDGES gestures inside WAKE_NUDGE_WINDOW_S wake it, and the
+// window is what stops idle taps hours apart from ever accumulating. Waking
+// costs NO stat: energy already drains while awake, which is cost enough.
+#define WAKE_NUDGES             3
+#define WAKE_NUDGE_WINDOW_S     10u
+
+// ...and it goes back to sleep on its own after this long with no interaction,
+// as long as the night window is still open. The same number decides when it
+// first goes to bed: at dusk it waits until the player has been quiet this
+// long, so bedtime never interrupts somebody mid-caress.
+#define SLEEP_RELAPSE_S         300u
+
 #endif // PB_BALANCE_H

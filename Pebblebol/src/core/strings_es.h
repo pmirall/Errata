@@ -56,7 +56,6 @@ enum StrId : uint16_t {
   STR_MENU_CLEAN,
   STR_MENU_HEALTH,
   STR_MENU_STATUS,
-  STR_MENU_LIGHT,
   STR_MENU_SOCIAL,
 
   // --- 3. affordance strip + generic words -------- <= 9 chars @ 5x8 ---------
@@ -125,7 +124,6 @@ enum StrId : uint16_t {
   STR_ACT_MEDICINE,
   STR_ACT_PLAY,
   STR_ACT_PET,
-  STR_ACT_LIGHT,
   STR_ACT_SLEEP,
 
   // --- 14. reactions to actions ------------------- <= 25 chars @ 5x8 --------
@@ -135,8 +133,6 @@ enum StrId : uint16_t {
   STR_RX_MED,
   STR_RX_PLAY,
   STR_RX_PET,
-  STR_RX_LIGHT_ON,
-  STR_RX_LIGHT_OFF,
   STR_RX_SLEEP,
   STR_RX_WAKE,
   STR_RX_EVOLVE,
@@ -300,7 +296,6 @@ enum StrId : uint16_t {
   STR_HLP_PLAY,
   STR_HLP_HEALTH,
   STR_HLP_STATUS,
-  STR_HLP_LIGHT,
   STR_HLP_SOCIAL,
   STR_HLP_BOX,
   STR_HLP_NETWORK,
@@ -492,7 +487,6 @@ inline constexpr const char* const ES[] = {
   /* STR_MENU_CLEAN */            "LIMPIAR",
   /* STR_MENU_HEALTH */           "SALUD",
   /* STR_MENU_STATUS */           "ESTADO",
-  /* STR_MENU_LIGHT */            "LUZ",
   /* STR_MENU_SOCIAL */           "SOCIAL",
 
   /* --- 3. affordances + generic --- */
@@ -561,7 +555,6 @@ inline constexpr const char* const ES[] = {
   /* STR_ACT_MEDICINE */          "Medicina",
   /* STR_ACT_PLAY */              "Jugar",
   /* STR_ACT_PET */               "Mimo",
-  /* STR_ACT_LIGHT */             "Luz",
   /* STR_ACT_SLEEP */             "Dormir",
 
   /* --- 14. reactions --- */
@@ -571,8 +564,6 @@ inline constexpr const char* const ES[] = {
   /* STR_RX_MED */                "Sabe a castigo. Sirve.",
   /* STR_RX_PLAY */               "¡Venga! A ver si puedes.",
   /* STR_RX_PET */                "Vale. No te emociones.",
-  /* STR_RX_LIGHT_ON */           "Luz. Qué maravilla.",
-  /* STR_RX_LIGHT_OFF */          "Luz fuera. Por fin.",
   /* STR_RX_SLEEP */              "Buenas noches. Supongo.",
   /* STR_RX_WAKE */               "Estaba bien dormido.",
   /* STR_RX_EVOLVE */             "¡Estoy cambiando!",
@@ -727,7 +718,6 @@ inline constexpr const char* const ES[] = {
   /* STR_HLP_PLAY */              "Sube el ánimo. Cansa.",
   /* STR_HLP_HEALTH */            "Medicina si está malo.",
   /* STR_HLP_STATUS */            "Cómo va por dentro.",
-  /* STR_HLP_LIGHT */             "Apágala para dormir.",
   /* STR_HLP_SOCIAL */            "Buscar otros bichos.",
   /* STR_HLP_BOX */               "Tus Pebbles guardados.",
   /* STR_HLP_NETWORK */           "Salir a explorar la red.",
@@ -900,7 +890,8 @@ static_assert(STR_WISH_PET3       - STR_WISH_NONE   + 1 == (int)WISH_COUNT,    "
 static_assert(STR_MENU_SETTINGS   - STR_MENU_PEBBLE + 1 == MENU_ITEM_COUNT,    "menu labels");
 static_assert(STR_SYL_A11         - STR_SYL_A00     + 1 == 12,                 "name syllables A");
 static_assert(STR_SYL_B11         - STR_SYL_B00     + 1 == 12,                 "name syllables B");
-static_assert(STR_HLP_BACK        - STR_HLP_FEED    + 1 == 19,                 "ui help block");
+// 19 -> 18: STR_HLP_LIGHT went with the light mechanic (P3-C2b).
+static_assert(STR_HLP_BACK        - STR_HLP_FEED    + 1 == 18,                 "ui help block");
 static_assert(STR_AF_ADD          - STR_SET_CLOCK   + 1 == 12,                 "time entry block");
 
 #endif // NT_STRINGS_ES_H

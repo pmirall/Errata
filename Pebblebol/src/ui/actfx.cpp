@@ -112,10 +112,8 @@
 #define AF_PET_HOP_MS       1150u
 #define AF_PET_MS           1400u
 
-// ---- C6 ACT_LIGHT_TOGGLE ---------------------------------------------------
-// The entire choreography is one register flash fired at begin(), on top of the
-// contrast ramp ui.cpp already runs. It arms no film - see actfx_begin().
-#define AF_LIGHT_FLASH_MS     60u
+// ---- C6 was ACT_LIGHT_TOGGLE. P3-C2b deleted the light mechanic; the number
+//      is left as a gap so C7 and C8 below still mean what the notes say.
 
 // ---- C7 ACT_SLEEP_TOGGLE ---------------------------------------------------
 #define AF_YAWN_MS           900u   // falling asleep: one slow, big stretch
@@ -581,12 +579,6 @@ void actfx_cancel(void) {
 
 void actfx_begin(uint8_t action, const PetView& before) {
   actfx_cancel();                       // no queue: the newest action wins
-
-  // The light switch has no film. It is one register flash on top of the
-  // contrast ramp ui.cpp already runs, which is what a switch looks like - and
-  // arming a 600 ms choreography for it would only give ui.cpp a reason to drag
-  // the player out of the settings screen they are standing in.
-  if (action == ACT_LIGHT_TOGGLE) { rd_flash(AF_LIGHT_FLASH_MS); return; }
 
   uint16_t dur = 0;
   switch (action) {

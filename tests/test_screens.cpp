@@ -784,12 +784,6 @@ TEST(care_actions_and_the_rejected_path) {
   care_input(GST_HOLD_R);
   CHECK_EQ(g_medicine, 1);
 
-  care_input(GST_TAP_L);                        // light: no film, so no journey
-  g_shown = ACT_NONE;
-  care_input(GST_HOLD_R);
-  CHECK_EQ(g_action, (uint8_t)ACT_LIGHT_TOGGLE);
-  CHECK_EQ(g_shown, (uint8_t)ACT_NONE);
-
   care_input(GST_TAP_L);                        // volver
   g_backs = 0;
   care_input(GST_HOLD_R);

@@ -223,7 +223,6 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 #define MULT_SLEEP              350          // hunger/happiness/hygiene while asleep
 #define MULT_LONELY             1500         // after LONELY_AFTER_S with no interaction
 #define MULT_OFFLINE_DECAY      550          // offline x0.55
-#define MULT_LIGHT_ON_SLEEP     300          // energy regen while light is on
 #define MULT_ONE                1000
 #define LONELY_AFTER_S          21600UL      // 6 h
 
@@ -235,9 +234,10 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 #define GENE_HARDY_BASE         1300
 #define GENE_HARDY_STEP         (-40)
 
-// Sleep window (local hours). Honoured online and offline.
-#define SLEEP_HOUR_START        23
-#define SLEEP_HOUR_END          7
+// The sleep window is NOT a pair of fixed hours any more. P3-C2b drives it
+// from the approximated daylight table in data/balance.h, read through
+// game/daylight.h: bedtime is sunset + SLEEP_AFTER_DUSK_MIN and the creature
+// wakes at sunrise, both interpolated by day of year.
 
 // Poop
 #define POOP_MAX                4

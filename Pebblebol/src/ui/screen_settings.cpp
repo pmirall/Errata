@@ -15,17 +15,16 @@
 #include "../core/strings_es.h"
 #include "gfx.h"
 #include "screen.h"
-#include "screen_view.h"
 #include "ui.h"
 
 static const uint16_t kLabel[SET_ROWS] = {
-  STR_SET_SOUND,  STR_SET_WEB,   STR_SET_BRIGHT,
-  STR_MENU_LIGHT, STR_WEB_TITLE, STR_SET_CLOCK, STR_SET_INFO, STR_SET_RESET,
+  STR_SET_SOUND, STR_SET_WEB,   STR_SET_BRIGHT,
+  STR_WEB_TITLE, STR_SET_CLOCK, STR_SET_INFO,  STR_SET_RESET,
   STR_ITEM_BACK
 };
 static const uint16_t kHelp[SET_ROWS] = {
-  STR_HLP_SOUND,  STR_HLP_WEB,   STR_HLP_BRIGHT,
-  STR_HLP_LIGHT,  STR_HLP_WEB,   STR_HLP_CLOCK, STR_HLP_INFO, STR_HLP_RESET,
+  STR_HLP_SOUND, STR_HLP_WEB,   STR_HLP_BRIGHT,
+  STR_HLP_WEB,   STR_HLP_CLOCK, STR_HLP_INFO,  STR_HLP_RESET,
   STR_HLP_BACK
 };
 static const uint8_t kBrightSteps[5] = {
@@ -49,10 +48,6 @@ static const char* set_value(uint8_t row) {
   switch (row) {
     case SET_SOUND: return cfg_flag(CF_MUTE)        ? S(STR_OFF) : S(STR_ON);
     case SET_WEB:   return cfg_flag(CF_WEB_ENABLED) ? S(STR_ON)  : S(STR_OFF);
-    case SET_LIGHT: {
-      const PebbleView* v = ui_view();
-      return (v && v->present && (v->flags & PF_LIGHT_ON)) ? S(STR_ON) : S(STR_OFF);
-    }
     default: return nullptr;
   }
 }
@@ -89,7 +84,6 @@ static void settings_select(void) {
     case SET_INFO:  s_page = 1; ui_note_input(); return;
     case SET_QR:    ui_push(SCR_CREATOR);            return;
     case SET_CLOCK: ui_push(SCR_TIME);         return;
-    case SET_LIGHT: ui_do_action(ACT_LIGHT_TOGGLE); return;
     case SET_RESET: ui_confirm_wipe();          return;
     default: break;
   }

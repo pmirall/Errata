@@ -265,6 +265,9 @@ void     ui_apply_brightness(uint8_t contrast);
 // sim_apply_action() plus the toast, the choreography and the save.
 // ui_act_and_show() additionally sends the player HOME to watch a film that
 // actually started (BRIEF D); both return whether the action was accepted.
+// No screen calls ui_do_action() since P3-C2b took the light switch away - it
+// was the one action with no film - but it stays as the seam for an action
+// that must NOT move the player, and the screens' tests still drive it.
 bool     ui_do_action(uint8_t action);
 bool     ui_act_and_show(uint8_t action);
 

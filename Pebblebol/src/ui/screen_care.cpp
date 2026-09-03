@@ -18,11 +18,11 @@
 
 static const uint16_t kCareItem[CARE_ROWS] = {
   STR_ACT_FEED_MEAL, STR_ACT_FEED_SNACK, STR_MENU_CLEAN,
-  STR_MENU_HEALTH,   STR_MENU_LIGHT,     STR_ITEM_BACK
+  STR_MENU_HEALTH,   STR_ITEM_BACK
 };
 static const uint16_t kCareHelp[CARE_ROWS] = {
   STR_HLP_MEAL, STR_HLP_SNACK, STR_HLP_CLEAN,
-  STR_HLP_HEALTH, STR_HLP_LIGHT, STR_HLP_BACK
+  STR_HLP_HEALTH, STR_HLP_BACK
 };
 
 static const uint16_t kPlayItem[PLAY_ROWS] = {
@@ -81,10 +81,6 @@ void care_input(Gesture g) {
     case CARE_SNACK:    if (!ui_act_and_show(ACT_FEED_SNACK)) ui_back(); break;
     case CARE_CLEAN:    if (!ui_act_and_show(ACT_CLEAN))      ui_back(); break;
     case CARE_MEDICINE: ui_confirm_medicine(); break;
-    // The documented exception to BRIEF D. The light's whole choreography is a
-    // register flash plus the contrast ramp, both PANEL-wide, and both read
-    // perfectly from the list the player is standing in.
-    case CARE_LIGHT:    ui_do_action(ACT_LIGHT_TOGGLE); break;
     default:            ui_back(); break;
   }
 }

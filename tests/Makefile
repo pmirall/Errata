@@ -78,11 +78,14 @@ $(OBJ)/host_shims.o: host_shims.cpp host_shims.h | $(OBJ)
 $(BIN)/test_crc16:      $(OBJ)/crc16.o
 $(BIN)/test_rng:        $(OBJ)/rng.o
 $(BIN)/test_genome:     $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
-$(BIN)/test_sim_golden: $(OBJ)/sim.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+$(BIN)/test_sim_golden: $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
 # box.o comes along for the "seven days stored comes back full" case: box_recover
 # is the OTHER half of the care model (spec section 9) and P3-C1 tunes both.
-$(BIN)/test_care:       $(OBJ)/sim.o $(OBJ)/box.o $(OBJ)/genome.o \
-                        $(OBJ)/crc16.o $(OBJ)/rng.o
+$(BIN)/test_care:       $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+# daylight.cpp is pure arithmetic over the balance.h table: no clock, no state.
+$(BIN)/test_daylight:   $(OBJ)/daylight.o
 $(BIN)/test_box:        $(OBJ)/box.o
 # xp.cpp is pure: the curve, the level carry and the anti-farm ledger, with
 # species_table.h (header-only) for the base_hp the hp rescale needs.
@@ -90,12 +93,14 @@ $(BIN)/test_xp:         $(OBJ)/xp.o
 # The Box <-> sim seam: the real box.cpp and the real sim.cpp together, which
 # is the only way to see a swap move sim's raw pointer off its creature.
 $(BIN)/test_box_sim:    $(OBJ)/box_sim.o $(OBJ)/box.o $(OBJ)/sim.o \
-                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+                        $(OBJ)/daylight.o $(OBJ)/genome.o $(OBJ)/crc16.o \
+                        $(OBJ)/rng.o
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 $(BIN)/test_qr:         $(OBJ)/qr.o
 $(BIN)/test_clock:      $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o
 $(BIN)/test_overflow:   $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o \
-                        $(OBJ)/sim.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+                        $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_fixtures:   $(OBJ)/crc16.o
 $(BIN)/test_persistence: $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/crc16.o
@@ -126,8 +131,8 @@ $(BIN)/test_statemachine: $(SCREEN_OBJS) $(OBJ)/state_machine.o \
 # pet_view.cpp is the model->view seam petfx and actfx read (P2-C11c). It is
 # pure, so it compiles here; sim.o comes with it because the live fill reads
 # sim_stat_pct() / sim_mood_score().
-$(BIN)/test_pet_view:   $(OBJ)/pet_view.o $(OBJ)/sim.o $(OBJ)/box.o \
-                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+$(BIN)/test_pet_view:   $(OBJ)/pet_view.o $(OBJ)/sim.o $(OBJ)/daylight.o \
+                        $(OBJ)/box.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
 $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@

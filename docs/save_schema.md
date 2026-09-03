@@ -245,7 +245,7 @@ branch. The only row today is v1 → v2, whose field map is:
 | `Genome` | copied whole |
 | `pet_name`, else the deterministic dynasty name | `nickname` |
 | `birth_epoch`, `last_seen`, `age_s` | `birth_epoch`, `last_updated_epoch`, `age_s` |
-| `flags` SICK/ASLEEP/LIGHT_ON | `status`; GOD_TAINTED → `flags` |
+| `flags` SICK/ASLEEP | `status`; GOD_TAINTED → `flags`; LIGHT_ON is dropped (P3-C2b deleted the light mechanic; `status` bit 0x10 is reserved) |
 | `Config.tz/brightness/mute/statusbar` | `ConfigV2` |
 | `gl` | untouched: same key, same 20 B layout |
 

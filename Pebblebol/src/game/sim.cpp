@@ -14,6 +14,7 @@
 //    * ZERO floating point anywhere in this file
 // =============================================================================
 #include "sim.h"
+#include "daylight.h"
 #include "genome.h"
 #include "../core/rng.h"
 #include "../core/strings_es.h"
@@ -149,6 +150,18 @@ struct CareCtx {
   uint32_t mg_last_s;
   uint8_t  mg_seen;
 
+  // --- PER-PEBBLE: the sleep window (P3-C2b) --------------------------------
+  // hold_s is when the player was last busy with this creature: bedtime waits
+  // SLEEP_RELAPSE_S past it, and so does the relapse after a nudge woke the
+  // pet in the middle of the night. hold_seen is 0 until the player does
+  // ANYTHING, so a boot at 03:00 shows a sleeping pebble at once instead of
+  // holding it awake for five minutes.
+  uint32_t hold_s;
+  uint8_t  hold_seen;
+  // The nudge counter: nudge_n gestures refused since nudge_t0_s.
+  uint32_t nudge_t0_s;
+  uint8_t  nudge_n;
+
   // --- PER-PEBBLE: the v1 mechanics SaveSchema v2 does not carry ------------
   int32_t  bond;                    // ST_BOND, milli-points
   int16_t  bond_rem;
@@ -222,11 +235,12 @@ static inline void stat_rem_set(uint8_t id, int16_t v)
 static void status_sync(void)
 {
   if (!g.pb) return;
-  uint8_t st = (uint8_t)(g.pb->status &
-                         (uint8_t)~(PBS_SICK | PBS_ASLEEP | PBS_LIGHT_ON));
+  // PBS_RESERVED_LIGHT (bit 0x10) is deliberately absent from both the clear
+  // mask and the set: P3-C2b retired it, so whatever an older save carries
+  // there is left exactly as it was and nothing new is ever written into it.
+  uint8_t st = (uint8_t)(g.pb->status & (uint8_t)~(PBS_SICK | PBS_ASLEEP));
   if (g.view.flags & PF_SICK)     st |= (uint8_t)PBS_SICK;
   if (g.view.flags & PF_ASLEEP)   st |= (uint8_t)PBS_ASLEEP;
-  if (g.view.flags & PF_LIGHT_ON) st |= (uint8_t)PBS_LIGHT_ON;
   g.pb->status = st;
   if (g.view.flags & PF_GOD_TAINTED) g.pb->flags |= (uint8_t)PBF_GOD_TAINTED;
 }
@@ -389,8 +403,7 @@ static uint16_t cd_for(uint8_t action)
     case ACT_CLEAN:        return ACT_CD_CLEAN_S;
     case ACT_MEDICINE:     return ACT_CD_MED_S;
     case ACT_PLAY:         return ACT_CD_PLAY_S;
-    case ACT_SLEEP_TOGGLE:
-    case ACT_LIGHT_TOGGLE: return ACT_CD_SLEEP_S;
+    case ACT_SLEEP_TOGGLE: return ACT_CD_SLEEP_S;
     default:               return 0;
   }
 }
@@ -610,31 +623,51 @@ static uint8_t compute_alert(void)
   return AL_NONE;
 }
 
+// Is the sun down where the player probably is? P3-C2b replaced the fixed
+// SLEEP_HOUR_START/END pair with the interpolated daylight table of
+// data/balance.h: bedtime is sunset + SLEEP_AFTER_DUSK_MIN, morning is
+// sunrise, both moving with the day of the year. With no trustworthy clock
+// there is no window at all, exactly as before.
+static uint8_t is_night(void)
+{
+  if (!g.env.clock_valid) return 0;
+  return daylight_is_night(g.env.day_of_year, (uint16_t)(g.sod / 60u));
+}
+
+// The player has been quiet long enough for the creature to (go back to)
+// sleep. Before the FIRST interaction there is nothing to wait for, so a boot
+// inside the night window puts the pebble straight to bed.
+static uint8_t settled_enough(void)
+{
+  if (!g.hold_seen) return 1;
+  const uint32_t gone = (g.uptime_s > g.hold_s) ? (g.uptime_s - g.hold_s) : 0u;
+  return (gone >= (uint32_t)SLEEP_RELAPSE_S) ? 1u : 0u;
+}
+
 static void sleep_machine(void)
 {
-  uint8_t asleep = (g.view.flags & PF_ASLEEP) ? 1u : 0u;
-  uint8_t light  = (g.view.flags & PF_LIGHT_ON) ? 1u : 0u;
-
-  uint8_t night = 0;
-  if (g.env.clock_valid) {
-    uint32_t h = g.sod / 3600u;
-    night = (h >= (uint32_t)SLEEP_HOUR_START || h < (uint32_t)SLEEP_HOUR_END) ? 1u : 0u;
-  }
+  const uint8_t asleep = (g.view.flags & PF_ASLEEP) ? 1u : 0u;
+  const uint8_t night  = is_night();
 
   if (!asleep) {
-    // Auto-sleep only at night with the light off. Energy hitting zero is a
-    // COLLAPSE, not sleep: GAME_DESIGN 1.5 keeps the -1.5/h energy damage
-    // running for as long as energy stays at zero, which a regenerating sleep
-    // would cancel. Collapse is a render state, not a stat state.
-    if (night && !light) {
+    // Bedtime, and the relapse after a nudge woke it, are the SAME rule: it is
+    // dark and nobody has touched the device for SLEEP_RELAPSE_S. Energy
+    // hitting zero is a COLLAPSE, not sleep: GAME_DESIGN 1.5 keeps the energy
+    // damage running for as long as energy stays at zero, which a regenerating
+    // sleep would cancel. Collapse is a render state, not a stat state.
+    if (night && settled_enough()) {
       g.view.flags |= PF_ASLEEP;
       g.events |= SIM_EV_SLEEP;
     }
   } else {
-    uint8_t wake = 0;
-    if (stat_v(ST_ENERGY) >= STAT_MILLI_MAX) wake = 1;
-    if (!night && pct_milli(ST_ENERGY) >= SIM_WAKE_DAY_ENERGY_PCT) wake = 1;
-    if (wake) {
+    // NOTHING WAKES IT WHILE THE WINDOW IS OPEN except the player (the nudge
+    // counter in sim_apply_action, or the explicit ACT_SLEEP_TOGGLE). The old
+    // "wake as soon as energy is full" rule predates a real window: energy
+    // refills in 5 h and a winter night is 13 h long, so it woke the creature
+    // at 00:30 and the bedtime rule immediately put it back - a SLEEP/WAKE
+    // event pair every substep until dawn. By day the rule stands: a nap ends
+    // once the battery is back up.
+    if (!night && pct_milli(ST_ENERGY) >= SIM_WAKE_DAY_ENERGY_PCT) {
       g.view.flags &= (uint16_t)~PF_ASLEEP;
       g.events |= SIM_EV_WAKE;
     }
@@ -675,10 +708,8 @@ static void decay_stats(uint32_t dt)
   }
   // --- energy ---
   if (g.view.flags & PF_ASLEEP) {
-    uint16_t m_light = (g.view.flags & PF_LIGHT_ON)
-                         ? (uint16_t)MULT_LIGHT_ON_SLEEP : (uint16_t)MULT_ONE;
-    const uint16_t m[2] = { m_light, m_off };
-    accum_stat(ST_ENERGY, rate_chain(CARE_ENERGY_ASLEEP_MPH, m, 2), dt);
+    const uint16_t m[1] = { m_off };
+    accum_stat(ST_ENERGY, rate_chain(CARE_ENERGY_ASLEEP_MPH, m, 1), dt);
   } else {
     const uint16_t m[2] = { m_met, m_off };
     accum_stat(ST_ENERGY, rate_chain(CARE_DECAY_MPH[CARE_ENERGY], m, 2), dt);
@@ -1141,6 +1172,10 @@ static void reset_pebble_state(uint8_t fresh)
   g.pet_n = 0;
   g.mg_last_s = g.uptime_s;
   g.mg_seen = fresh ? 0u : 1u;
+  g.hold_s = g.uptime_s;
+  g.hold_seen = 0;              // a boot inside the night window sleeps at once
+  g.nudge_t0_s = 0;
+  g.nudge_n = 0;
   g.suppress_until_s = 0;
   g.cq_good_today = 0;
   g.cq_game_today = 0;
@@ -1173,7 +1208,6 @@ static void derive_view(void)
   g.view.flags = 0;
   if (g.pb->status & PBS_SICK)         g.view.flags |= PF_SICK;
   if (g.pb->status & PBS_ASLEEP)       g.view.flags |= PF_ASLEEP;
-  if (g.pb->status & PBS_LIGHT_ON)     g.view.flags |= PF_LIGHT_ON;
   if (g.pb->flags  & PBF_GOD_TAINTED)  g.view.flags |= PF_GOD_TAINTED;
 
   g.view.stage      = stage_of_level(g.pb->level);
@@ -1273,7 +1307,7 @@ void sim_new_pet(const Genome& gn, uint32_t now_epoch, uint8_t cold)
   g.bond                   = STAT_MILLI_MAX;
   g.bond_rem               = 0;
   g.happiness_avg          = 0;
-  g.view.flags             = PF_LIGHT_ON;
+  g.view.flags             = 0;
   if (cold) g.view.flags |= PF_COLD_EGG;
   if (gene_tainted(gn)) g.view.flags |= PF_GOD_TAINTED;
 
@@ -1320,8 +1354,36 @@ static void fail(ActionResult& out, uint8_t err, uint16_t cd)
   out.str_id     = (uint16_t)(STR_AERR_NONE + err);
 }
 
+// One refused gesture against a sleeping pebble. Returns 1 when this is the
+// WAKE_NUDGES-th inside the window, having woken the creature.
+static uint8_t nudge(uint32_t now_s)
+{
+  const uint32_t gone = (now_s > g.nudge_t0_s) ? (now_s - g.nudge_t0_s) : 0u;
+  if (g.nudge_n == 0u || gone > (uint32_t)WAKE_NUDGE_WINDOW_S) {
+    g.nudge_t0_s = now_s;
+    g.nudge_n    = 1;
+  } else if (g.nudge_n < 0xFFu) {
+    g.nudge_n++;
+  }
+  if (g.nudge_n < (uint8_t)WAKE_NUDGES) return 0;
+
+  g.nudge_n = 0;
+  g.view.flags &= (uint16_t)~PF_ASLEEP;
+  g.events |= SIM_EV_WAKE;
+  // Hold it awake for SLEEP_RELAPSE_S even if the action that woke it then
+  // fails on a cooldown: the player asked for the pebble, not for a race.
+  g.hold_s    = now_s;
+  g.hold_seen = 1;
+  status_sync();
+  return 1;
+}
+
 static void note_interaction(uint8_t action)
 {
+  // Any interaction at all - including the two toggles - postpones bedtime.
+  g.hold_s    = g.uptime_s;
+  g.hold_seen = 1;
+
   g.act_last[action] = g.uptime_s;
   g.act_seen[action] = 1;
   g.last_any_act_s   = g.uptime_s;
@@ -1329,8 +1391,8 @@ static void note_interaction(uint8_t action)
 
   // GAME_DESIGN 7.1: only a MEANINGFUL interaction (feed / clean / play /
   // medicine / mimo) resets the loneliness clock.
-  // Flipping the light or the sleep switch is housekeeping, not company.
-  if (action == ACT_LIGHT_TOGGLE || action == ACT_SLEEP_TOGGLE) return;
+  // Flipping the sleep switch is housekeeping, not company.
+  if (action == ACT_SLEEP_TOGGLE) return;
 
   g.last_interact_epoch = g.now;
   g.alert = AL_NONE;               // any real interaction addresses the alert
@@ -1370,10 +1432,18 @@ bool sim_apply_action(ActionId action, ActionResult& out)
 
   if (g.view.stage == STAGE_EGG)   { fail(out, AERR_IS_EGG, 0); return false; }
 
-  if ((g.view.flags & PF_ASLEEP) &&
-      action != ACT_SLEEP_TOGGLE && action != ACT_LIGHT_TOGGLE) {
-    fail(out, AERR_ASLEEP, 0);
-    return false;
+  // ASLEEP: THE PLAYER CAN INSIST (P3-C2b). The first gesture does not act -
+  // it says the pebble is asleep and counts as one nudge - but WAKE_NUDGES of
+  // them inside WAKE_NUDGE_WINDOW_S wake it, and then this very gesture goes
+  // through like any other. The window is what keeps idle taps hours apart
+  // from ever adding up, and waking costs NO stat: spec section 27 forbids
+  // punishing the player, and the energy that now drains awake is cost enough.
+  // ACT_SLEEP_TOGGLE is the explicit switch and never needs a nudge.
+  if ((g.view.flags & PF_ASLEEP) && action != ACT_SLEEP_TOGGLE) {
+    if (!nudge(g.uptime_s)) {
+      fail(out, AERR_ASLEEP, 0);
+      return false;
+    }
   }
 
   uint16_t cd = sim_action_cooldown_s(action);
@@ -1462,12 +1532,6 @@ bool sim_apply_action(ActionId action, ActionResult& out)
       stat_add(ST_HAPPINESS, (bonus > 0) ? ACT_PET_HAPPINESS : 0);
       pet_window_push();
       str_id = STR_RX_PET;
-      break;
-    }
-
-    case ACT_LIGHT_TOGGLE: {
-      g.view.flags ^= PF_LIGHT_ON;
-      str_id = (g.view.flags & PF_LIGHT_ON) ? STR_RX_LIGHT_ON : STR_RX_LIGHT_OFF;
       break;
     }
 

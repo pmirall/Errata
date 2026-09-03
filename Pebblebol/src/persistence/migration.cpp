@@ -141,7 +141,9 @@ MigrateResult migrate_v1_to_v2(const uint8_t* petsave128, const uint8_t* cfg256,
 
   if (old.flags & LV1_PF_SICK)      p.status |= PBS_SICK;
   if (old.flags & LV1_PF_ASLEEP)    p.status |= PBS_ASLEEP;
-  if (old.flags & LV1_PF_LIGHT_ON)  p.status |= PBS_LIGHT_ON;
+  // LV1_PF_LIGHT_ON is deliberately DROPPED (P3-C2b): the light mechanic no
+  // longer exists, so carrying its bit forward would only put a meaning that
+  // nothing implements into a fresh v2 save.
   if (old.flags & LV1_PF_GOD_TAINTED) p.flags |= PBF_GOD_TAINTED;
 
   // The name: an explicit v1 pet_name wins, otherwise the dynasty name the v1

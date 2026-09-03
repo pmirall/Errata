@@ -23,7 +23,7 @@ may override), **CLOSED** (decided; commit named).
 | **D10** | Battery sense divider on GPIO0 | OPEN | Spec §26 wants NORMAL/LOW/CRITICAL levels. `PIN_VBAT_ADC 0` is already reserved and GPIO0 is ADC1_CH0, so this needs only two resistors. Without it those levels cannot exist and a flat pack corrupts a save instead of warning. | Two resistors; the firmware side lands with the power states in P6-C3. | P6-C3 | — |
 | **D11** | Boost module quiescent current | **OPEN — now the single biggest factor in battery life** | With the voltage window solved and the power LED gone, the dominant idle load is whatever the boost module draws doing nothing. Cheap PFM modules range from ~20 µA to ~2 mA, a 100× spread that decides the runtime outright. Budget from ~680 mAh of usable energy at 3.3 V and the spec's 60 min/day profile: 25 µA idle → ~26 days · 200 µA → ~23 days · 1 mA → ~14 days · 2 mA → ~9 days. | Measure it: multimeter in series with the cells, ESP32 in deep sleep, OLED off, radios off. Anything above ~200 µA and the ≥30-day target needs a different module, not firmware work. | Battery-life target | — |
 | **D12** | Bulk capacitor on the boost output | OPEN | The ESP32-C3 pulls ~350 mA in Wi-Fi TX. Drawn through a boost from 2.4 V cells that have ~0.3 Ω internal resistance, that transient can collapse the rail and trip exactly the reset the hardware checklist §30 asks about ("Wi-Fi scan does not cause resets"). | A 100–470 µF electrolytic across the boost output, for a few cents. Firmware already helps: the scanner is specified `passive=true` (plan P5-C1), so it listens rather than sending probe requests, which is the cheap half of a scan. | P5-C1 bench test | — |
-| **D13** | Light ON by default, and what it does to a hands-off player | **OPEN — product decision, behaviour left unchanged** | `sim_new_pet()` sets `PF_LIGHT_ON`, and `sleep_machine()` auto-sleeps only when it is night AND the light is off. A player who never finds the light toggle therefore owns a Pebble that **never sleeps**: energy pins at 0 after 16.7 h, the 2 h zero-dwell grace starts, and health bleeds to the 10 % floor at about 64 h. It is spec-compliant (section 27: inconveniently unhappy, never destroyed) but it is the WORST case reachable, and it is reached by doing nothing — the opposite of what "fun even if you ignore it for hours" is meant to feel like. Measured during P3-C1's retune. | Behaviour untouched: this is a visible v1 mechanic and P3-C1's scope was the decay rates. Two one-line fixes exist if the owner wants one: default the light OFF, or auto-clear it when the sleep window opens. | P3-C5's soak criterion (which cannot hold as written while this stands) | — |
+| **D13** | Light ON by default, and what it does to a hands-off player | **CLOSED — delete the light (2026-09-03, owner)** | `sim_new_pet()` set `PF_LIGHT_ON`, and `sleep_machine()` auto-slept only when it was night AND the light was off. A player who never found the light toggle therefore owned a Pebble that **never slept**: energy pinned at 0 after 16.7 h, the 2 h zero-dwell grace started, and health bled to the 10 % floor at about 64 h. Spec-compliant (section 27: inconveniently unhappy, never destroyed) but the WORST case reachable, and reached by doing nothing — the opposite of what "fun even if you ignore it for hours" is meant to feel like. Measured during P3-C1's retune. | — (superseded) | P3-C5's soak criterion | **The light mechanic is deleted, not defaulted (P3-C2b).** The owner's judgement was that the switch "doesn't add anything": neither of the two one-line fixes was taken. Sleep now follows an approximated daylight table and a player who insists can wake the creature. See the consequences below the table. |
 
 ## D1 — consequences of deferring (recorded 2026-09-02)
 
@@ -174,3 +174,35 @@ first flash. The soak is listed below with the other first-hardware measurements
 - Real `sendBuffer()` frame time vs the ≈ 24 ms estimate at 400 kHz.
 - I2C probe result (0x3C / 0x3D / bus sweep) and panel variant (D5). LED polarity is moot while `PIN_LED 5` points at an unpopulated pin (see D1 consequences).
 - USB-CDC port name.
+
+## D13 — consequences of deleting the light (recorded 2026-09-03)
+
+- **There is no light any more.** `PF_LIGHT_ON`, `ACT_LIGHT_TOGGLE`, `MULT_LIGHT_ON_SLEEP`,
+  the CARE row, the SETTINGS row and the five `STR_*_LIGHT` strings are gone. Bit 0x0004
+  of the live flag word and bit 0x10 of `PebbleInstance.status` (`PBS_RESERVED_LIGHT`) are
+  **reserved**: never reused, never written, and no other bit moved — the 128 B layout is
+  pinned by `offsetof` asserts and the save schema is versioned. The v1 migration DROPS the
+  old light bit rather than carrying it into a v2 save.
+- **Sleep follows the sun, approximately and openly.** `data/balance.h` §5 holds twelve
+  sunrise/sunset pairs in minutes from local midnight, interpolated by day of year in
+  `game/daylight.cpp`. Bedtime is sunset + 90 min; morning is sunrise. In mid-January that
+  is 19:30 → 08:35 and in mid-July 23:10 → 07:00.
+- **It is an approximation and the header says so.** A true sunrise needs a latitude and
+  there is none in this firmware — it went with the weather module, and spec §44 is explicit
+  that the Wi-Fi scanner is a sensor, not a geolocator. The table describes ~40° N
+  (peninsular Spain, where the default `CFG_TZ_STRING` points) in LOCAL OFFICIAL time: the
+  TZ string has already applied daylight saving, so nothing downstream may apply it twice.
+  A player at another latitude sees a drift. That cost was accepted with the mechanic.
+- **Insistence wakes it, and costs nothing.** The first gesture against a sleeping pebble
+  does not act; three inside ten seconds wake it and the third one then lands. The counter
+  decays, so taps hours apart never accumulate. Five quiet minutes put it back to sleep
+  while the window is still open. No happiness or health is charged for waking — §27 forbids
+  punishing the player, and the energy that drains while awake is cost enough.
+- **One rule changed at the boundary, deliberately.** "Wake as soon as energy is full" is
+  now a DAYTIME rule only. Energy refills in 5 h and a winter night is 13 h long, so at
+  night the old rule woke the creature at about 00:30 and the window put it straight back —
+  a `SIM_EV_SLEEP`/`SIM_EV_WAKE` pair every substep until dawn. Nothing else about the decay
+  inside the window moved: P3-C1's rates are untouched.
+- **P3-C5's soak criterion is unblocked for energy** and still cannot hold for hunger and
+  happiness, which empty in about a day of total neglect by design. The P3-C5 bullet now
+  says so.

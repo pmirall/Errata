@@ -98,7 +98,11 @@ enum PebbleOrigin : uint8_t {
 #define PBS_ASLEEP              0x02u
 #define PBS_CORRUPTED           0x04u     // spec section 55
 #define PBS_FAINTED             0x08u
-#define PBS_LIGHT_ON            0x10u
+// Bit 0x10 was PBS_LIGHT_ON. P3-C2b deleted the light mechanic, so the bit is
+// RESERVED: nothing writes it and nothing reads it, and it is deliberately NOT
+// recycled for a new meaning - a v2 save written before that commit may still
+// carry it set, and the 128 B layout is pinned by offsetof asserts either way.
+#define PBS_RESERVED_LIGHT      0x10u
 
 // PebbleInstance.flags
 #define PBF_CUSTOM              0x01u

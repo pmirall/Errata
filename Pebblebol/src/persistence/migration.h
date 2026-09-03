@@ -50,7 +50,8 @@ bool migration_needed(uint8_t found);
 //   birth_epoch    -> birth_epoch
 //   last_seen      -> last_updated_epoch
 //   age_s          -> age_s
-//   flags          SICK/ASLEEP/LIGHT_ON -> status, GOD_TAINTED -> flags
+//   flags          SICK/ASLEEP -> status, GOD_TAINTED -> flags; LIGHT_ON is
+//                  dropped (P3-C2b deleted the light mechanic)
 //   minigames_won  -> minigames_won
 //   Config.tz/brightness/mute/statusbar -> ConfigV2
 //   the "gl" gain ledger is NOT touched: it keeps its own key and layout

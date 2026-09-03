@@ -51,7 +51,7 @@ TEST(fixture_petsave_v1_adult) {
   CHECK_EQ(p.pad_stat, 55000);              // v1 stat[ST_DISCIPLINE]
   CHECK_EQ(p.age_s, 200000u);
   CHECK_EQ(p.cq, 640);
-  CHECK_EQ(p.flags, PF_LIGHT_ON);
+  CHECK_EQ(p.flags, LV1_PF_LIGHT_ON);   // the frozen v1 bit, not a live one
   CHECK_EQ(p.genome.lineage_id, 0x0BADCAFEu);
   CHECK_EQ(p.genome.crc16, crc16_ccitt(&p.genome, GENOME_CRC_BYTES));
   CHECK_EQ(p.crc16, crc16_ccitt(&p, LEGACY_PETSAVE_CRC_BYTES));

@@ -3,10 +3,11 @@
 //  The two vertical lists MENU opens: CARE and PLAY.
 //
 //  CARE is the old FEED list widened into the whole of spec section 27's verb
-//  set - meal, snack, clean, medicine, light - so the ring does not have to
-//  carry one entry per verb any more. PLAY is unchanged: the three on-device
-//  minigames plus the way out, until P3-C4 replaces them with the section 29
-//  set.
+//  set - meal, snack, clean, medicine - so the ring does not have to carry one
+//  entry per verb any more. The light row went with the light mechanic itself
+//  (P3-C2b): the creature sleeps by the sun now, not by a switch. PLAY is
+//  unchanged: the three on-device minigames plus the way out, until P3-C4
+//  replaces them with the section 29 set.
 //
 //  They share one grammar (navigation invariant 4, and the BOTH-for-help rule)
 //  and therefore one input handler.
@@ -24,7 +25,6 @@ enum CareRow : uint8_t {
   CARE_SNACK,
   CARE_CLEAN,
   CARE_MEDICINE,
-  CARE_LIGHT,
   CARE_BACK,
   CARE_ROWS
 };

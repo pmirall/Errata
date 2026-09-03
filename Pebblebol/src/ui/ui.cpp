@@ -435,8 +435,8 @@ void ui_alert(AlertId a) { dialog_alert((uint8_t)a); }
 // =============================================================================
 //  5. ACTIONS
 // =============================================================================
-// The care actions experience is paid for. LIGHT and SLEEP are toggles: they
-// change what the Pebble is doing, not how well it is being looked after.
+// The care actions experience is paid for. SLEEP is a toggle: it changes what
+// the Pebble is doing, not how well it is being looked after.
 static bool act_earns_xp(ActionId a) {
   switch (a) {
     case ACT_FEED_MEAL:
@@ -557,12 +557,10 @@ void ui_nav_arrived(uint8_t to) {
 //
 // The test is actfx_active() and NOT a list of ActionIds, so an action that
 // gains or loses a film changes this behaviour by changing actfx.cpp and
-// nothing else. Two things therefore never navigate, both deliberately:
-//   * ACT_LIGHT_TOGGLE, which arms no film - its whole choreography is a
-//     register flash plus the contrast ramp, and both are PANEL-wide and read
-//     perfectly from wherever the player is standing;
-//   * a REJECTED action, which has no film to watch. The caller keeps whatever
-//     destination it had, and the toast explains itself where the player is.
+// nothing else. One thing therefore never navigates, deliberately: a REJECTED
+// action, which has no film to watch - including the first nudges against a
+// sleeping pebble. The caller keeps whatever destination it had, and the toast
+// explains itself where the player is standing.
 static bool act_and_show(ActionId a) {
   const bool ok = do_action(a);
   // ALREADY HOME IS NOT A NAVIGATION, and calling ui_goto(SCR_HOME) as if it

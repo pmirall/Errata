@@ -11,6 +11,12 @@
 //  comes back full, one big catch-up equals many small ones, and the sleep
 //  window really does at least halve the decay. Plus one the plan implies and
 //  the balance table states outright: a refused action is a toast, not a fine.
+//
+//  P3-C2b deleted the light mechanic and put the sleep window on the
+//  approximated daylight table (game/daylight.h). Sections 12 to 15 below are
+//  the behaviour that replaces it: the pebble sleeps by the sun, three nudges
+//  inside ten seconds wake it for a player who wants to play at night, it
+//  relapses when left alone again, and none of that costs a stat.
 // =============================================================================
 #include "nt_test.h"
 
@@ -30,8 +36,10 @@
 
 static PebbleInstance g_care;
 
-// A hatched baby with a valid clock at `hour` local, and nothing else.
-static void care_pet_at(PebbleInstance& p, uint8_t hour) {
+// A hatched baby with a valid clock at `hour` local on day `doy`, and nothing
+// else. Day 100 is mid-April: sunrise about 07:20, sunset about 20:55, so
+// bedtime lands about 22:25 (game/daylight.h).
+static void care_pet_at_day(PebbleInstance& p, uint8_t hour, uint16_t doy) {
   genome_seed(CARE_SEED);
   sim_seed(CARE_SEED);
   memset(&p, 0, sizeof(PebbleInstance));
@@ -45,8 +53,12 @@ static void care_pet_at(PebbleInstance& p, uint8_t hour) {
   env.clock_valid = 1;
   env.local_hour  = hour;
   env.local_min   = 0;
-  env.day_of_year = 100;
+  env.day_of_year = doy;
   sim_set_env(env);
+}
+
+static void care_pet_at(PebbleInstance& p, uint8_t hour) {
+  care_pet_at_day(p, hour, 100);
 }
 
 // The original fixture: the same pebble, at 10:00.
@@ -229,10 +241,11 @@ TEST(care_eight_ignored_hours_stay_above_sixty_percent_happiness) {
 // -----------------------------------------------------------------------------
 //  7. A full day of neglect never crosses the floor
 //     A day of silence is the worst a single absence can do. Hunger is only
-//     just empty by then, and the one bar that does bottom out early - energy,
-//     because a fresh pebble is left with its light ON and so never auto-sleeps
-//     - costs health nothing for the first CARE_ZERO_GRACE_S and then bleeds so
-//     slowly that a whole day still ends far above the floor.
+//     just empty by then, and a bar that does bottom out costs health nothing
+//     for the first CARE_ZERO_GRACE_S and then bleeds so slowly that a whole
+//     day still ends far above the floor. Since P3-C2b the day also contains a
+//     night, which the pebble spends asleep recharging, so this is now the
+//     easier case rather than the harder one.
 // -----------------------------------------------------------------------------
 TEST(care_twentyfour_hours_of_neglect_never_crosses_the_floor) {
   care_pet();
@@ -346,12 +359,9 @@ static PebbleInstance g_awake;
 static PebbleInstance g_asleep;
 
 TEST(care_the_sleep_window_at_least_halves_the_decay) {
-  ActionResult r;
-
   // Awake: 10:00 -> 11:00, broad daylight.
   care_pet_at(g_awake, 10);
   sim_god_set_stat(ST_ENERGY, 50);          // below the auto-wake ceiling
-  CHECK(sim_apply_action(ACT_LIGHT_TOGGLE, r));   // light off, as at night
   SimEnv env_a = sim_env();
   const int32_t hunger_a0 = sim_stat_milli(ST_HUNGER);
   const int32_t happy_a0  = sim_stat_milli(ST_HAPPINESS);
@@ -362,12 +372,10 @@ TEST(care_the_sleep_window_at_least_halves_the_decay) {
   CHECK(hunger_awake > 0);
   CHECK(happy_awake  > 0);
 
-  // Asleep: 23:00 -> 00:00, inside SLEEP_HOUR_START..SLEEP_HOUR_END. A fresh
-  // pebble is handed over with its light ON, and auto-sleep needs it off.
+  // Asleep: 23:00 -> 00:00, past mid-April's 22:25 bedtime. Nothing has to be
+  // switched off first any more - the sun going down is the whole condition.
   care_pet_at(g_asleep, 23);
   sim_god_set_stat(ST_ENERGY, 50);
-  CHECK(sim_apply_action(ACT_LIGHT_TOGGLE, r));
-  CHECK((sim_view()->flags & PF_LIGHT_ON) == 0);
   SimEnv env_s = sim_env();
   const int32_t hunger_s0 = sim_stat_milli(ST_HUNGER);
   const int32_t happy_s0  = sim_stat_milli(ST_HAPPINESS);
@@ -409,4 +417,212 @@ TEST(care_a_refused_action_costs_the_player_nothing) {
   // And a refusal does not even start the cooldown it would have charged.
   CHECK_EQ((int)sim_action_cooldown_s(ACT_FEED_MEAL), 0);
   CHECK_EQ((int)sim_action_cooldown_s(ACT_MEDICINE), 0);
+}
+
+// -----------------------------------------------------------------------------
+// 12. The sleep window follows the sun, not a pair of fixed hours (P3-C2b)
+//     Day 14 is mid-January (sunrise 08:35, sunset 18:00) and day 195 is
+//     mid-July (07:00 / 21:40). Both are night at 03:00 and day at 10:00, and
+//     the pebble has to agree with the table in both.
+// -----------------------------------------------------------------------------
+static PebbleInstance g_jan;
+static PebbleInstance g_jul;
+
+TEST(care_sleeps_at_three_in_the_morning_in_january_and_in_july) {
+  SimEnv env;
+
+  care_pet_at_day(g_jan, 3, 14);
+  env = sim_env();
+  care_minute(env);
+  CHECK((sim_view()->flags & PF_ASLEEP) != 0);
+
+  care_pet_at_day(g_jul, 3, 195);
+  env = sim_env();
+  care_minute(env);
+  CHECK((sim_view()->flags & PF_ASLEEP) != 0);
+}
+
+TEST(care_is_awake_at_ten_in_the_morning_in_january_and_in_july) {
+  SimEnv env;
+
+  care_pet_at_day(g_jan, 10, 14);
+  env = sim_env();
+  for (uint32_t m = 0; m < 60u; ++m) care_minute(env);
+  CHECK((sim_view()->flags & PF_ASLEEP) == 0);
+
+  care_pet_at_day(g_jul, 10, 195);
+  env = sim_env();
+  for (uint32_t m = 0; m < 60u; ++m) care_minute(env);
+  CHECK((sim_view()->flags & PF_ASLEEP) == 0);
+}
+
+// A January evening is night at 21:00 and a July evening is not: bedtime is
+// 19:30 in January and 23:10 in July. This is the whole point of the table.
+TEST(care_goes_to_bed_earlier_in_january_than_in_july) {
+  SimEnv env;
+
+  care_pet_at_day(g_jan, 21, 14);
+  env = sim_env();
+  care_minute(env);
+  CHECK((sim_view()->flags & PF_ASLEEP) != 0);
+
+  care_pet_at_day(g_jul, 21, 195);
+  env = sim_env();
+  care_minute(env);
+  CHECK((sim_view()->flags & PF_ASLEEP) == 0);
+}
+
+// -----------------------------------------------------------------------------
+// 13. Insistence wakes it, and only insistence (P3-C2b)
+// -----------------------------------------------------------------------------
+static PebbleInstance g_nudge;
+
+// Puts the pebble to sleep at 23:00 in mid-April and returns the live SimEnv.
+static SimEnv care_sleeping_pet(PebbleInstance& p) {
+  care_pet_at(p, 23);
+  SimEnv env = sim_env();
+  care_minute(env);
+  CHECK((sim_view()->flags & PF_ASLEEP) != 0);
+  return env;
+}
+
+TEST(care_three_nudges_inside_the_window_wake_the_pet) {
+  SimEnv env = care_sleeping_pet(g_nudge);
+  ActionResult r;
+
+  // The first two gestures do not act. They say "asleep" and cost nothing.
+  CHECK(!sim_apply_action(ACT_PET, r));
+  CHECK_EQ((int)r.err, (int)AERR_ASLEEP);
+  CHECK((sim_view()->flags & PF_ASLEEP) != 0);
+
+  CHECK(!sim_apply_action(ACT_PET, r));
+  CHECK_EQ((int)r.err, (int)AERR_ASLEEP);
+  CHECK((sim_view()->flags & PF_ASLEEP) != 0);
+
+  // The third one wakes it AND lands: the player asked three times.
+  CHECK(sim_apply_action(ACT_PET, r));
+  CHECK_EQ((int)r.err, (int)AERR_NONE);
+  CHECK((sim_view()->flags & PF_ASLEEP) == 0);
+  CHECK((sim_take_events() & SIM_EV_WAKE) != 0u);
+
+  // Awake, a care action that AERR_ASLEEP would have refused now works.
+  sim_god_set_stat(ST_HUNGER, 10);
+  for (uint32_t m = 0; m < 2u; ++m) care_minute(env);   // clear the global cooldown
+  CHECK(sim_apply_action(ACT_FEED_MEAL, r));
+  CHECK_EQ((int)r.err, (int)AERR_NONE);
+}
+
+static PebbleInstance g_nudge_slow;
+
+TEST(care_three_nudges_spread_over_an_hour_do_not_wake_the_pet) {
+  SimEnv env = care_sleeping_pet(g_nudge_slow);
+  ActionResult r;
+
+  for (uint8_t i = 0; i < 3u; ++i) {
+    CHECK(!sim_apply_action(ACT_PET, r));
+    CHECK_EQ((int)r.err, (int)AERR_ASLEEP);
+    CHECK((sim_view()->flags & PF_ASLEEP) != 0);
+    for (uint32_t m = 0; m < 20u; ++m) care_minute(env);   // 20 min apart
+  }
+  CHECK((sim_view()->flags & PF_ASLEEP) != 0);
+
+  // The counter decayed, so the very next burst still needs its full three.
+  CHECK(!sim_apply_action(ACT_PET, r));
+  CHECK(!sim_apply_action(ACT_PET, r));
+  CHECK((sim_view()->flags & PF_ASLEEP) != 0);
+  CHECK(sim_apply_action(ACT_PET, r));
+  CHECK((sim_view()->flags & PF_ASLEEP) == 0);
+}
+
+// Waking is free. Spec section 27 forbids punishing the player, and the energy
+// that drains while awake is cost enough - CLEAN on a spotless pebble is the
+// gesture that proves it, because the wake is then the ONLY thing that happened
+// and the action itself is refused on its own merits, not on AERR_ASLEEP.
+static PebbleInstance g_nudge_free;
+
+TEST(care_waking_the_pet_costs_no_stat) {
+  care_sleeping_pet(g_nudge_free);
+
+  int32_t before[PB_CARE_COUNT];
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) before[i] = g_nudge_free.care[i];
+  const int16_t cq_before = sim_view()->cq;
+
+  ActionResult r;
+  CHECK(!sim_apply_action(ACT_CLEAN, r));
+  CHECK_EQ((int)r.err, (int)AERR_ASLEEP);
+  CHECK(!sim_apply_action(ACT_CLEAN, r));
+  CHECK_EQ((int)r.err, (int)AERR_ASLEEP);
+  CHECK(!sim_apply_action(ACT_CLEAN, r));
+  CHECK_EQ((int)r.err, (int)AERR_NOTHING_TODO);   // awake, and nothing to clean
+
+  CHECK((sim_view()->flags & PF_ASLEEP) == 0);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    CHECK_EQ(g_nudge_free.care[i], before[i]);
+  }
+  CHECK_EQ((int)sim_view()->cq, (int)cq_before);
+}
+
+// -----------------------------------------------------------------------------
+// 14. ...and it goes back to sleep when left alone again (P3-C2b)
+// -----------------------------------------------------------------------------
+static PebbleInstance g_relapse;
+
+TEST(care_goes_back_to_sleep_after_the_relapse_period) {
+  SimEnv env = care_sleeping_pet(g_relapse);
+  ActionResult r;
+
+  CHECK(!sim_apply_action(ACT_PET, r));
+  CHECK(!sim_apply_action(ACT_PET, r));
+  CHECK(sim_apply_action(ACT_PET, r));
+  CHECK((sim_view()->flags & PF_ASLEEP) == 0);
+
+  // Still awake a minute before the relapse period is up...
+  for (uint32_t m = 0; m < (SLEEP_RELAPSE_S / 60u) - 1u; ++m) care_minute(env);
+  CHECK((sim_view()->flags & PF_ASLEEP) == 0);
+
+  // ...and back under the covers a minute after, with the night still young.
+  for (uint32_t m = 0; m < 2u; ++m) care_minute(env);
+  CHECK((sim_view()->flags & PF_ASLEEP) != 0);
+  CHECK_EQ((int)sim_env().local_hour, 23);
+}
+
+// -----------------------------------------------------------------------------
+// 15. THE REGRESSION DECISION D13 EXISTED FOR
+//     A whole day with zero interaction: the pebble must spend the night
+//     asleep, recharge while it is there, and cross the boundary exactly once
+//     in each direction. Before P3-C2b it never slept at all (a fresh pebble
+//     was handed over with its light ON), so energy pinned at 0 after 16.7 h
+//     and health bled to the floor by about 64 h - the worst outcome in the
+//     game, reached by doing nothing.
+// -----------------------------------------------------------------------------
+static PebbleInstance g_night;
+
+TEST(care_a_full_night_of_neglect_is_spent_asleep_and_recharging) {
+  care_pet_at(g_night, 10);          // 10:00 -> 10:00 the next morning
+  sim_god_set_stat(ST_ENERGY, 30);
+  SimEnv env = sim_env();
+
+  uint16_t sleeps = 0, wakes = 0;
+  uint16_t asleep_minutes = 0;
+  (void)sim_take_events();
+
+  for (uint32_t m = 0; m < 24u * 60u; ++m) {
+    care_minute(env);
+    const uint32_t ev = sim_take_events();
+    if (ev & SIM_EV_SLEEP) sleeps++;
+    if (ev & SIM_EV_WAKE)  wakes++;
+    if (sim_view()->flags & PF_ASLEEP) asleep_minutes++;
+  }
+
+  // Once asleep, ONCE awake. The old rule woke the pebble the moment energy
+  // filled and the window put it straight back, which flip-flopped every
+  // substep for the rest of the night.
+  CHECK_EQ((int)sleeps, 1);
+  CHECK_EQ((int)wakes, 1);
+  // Mid-April: bedtime about 22:25, sunrise about 07:20, so about 9 h of it.
+  CHECK(asleep_minutes > 8u * 60u);
+  CHECK(asleep_minutes < 11u * 60u);
+  // And the night did its job: a pebble nobody touched wakes up rested.
+  CHECK((sim_view()->flags & PF_ASLEEP) == 0);
+  CHECK(sim_stat_pct(ST_ENERGY) > 60);
 }

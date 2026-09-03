@@ -129,7 +129,6 @@ enum ActionId : uint8_t {
   ACT_MEDICINE,
   ACT_PLAY,
   ACT_PET,
-  ACT_LIGHT_TOGGLE,
   ACT_SLEEP_TOGGLE,
   ACT_COUNT
 };
@@ -308,7 +307,9 @@ enum Temperament : uint8_t {
 // SimView.flags bits
 #define PF_SICK          0x0001u
 #define PF_ASLEEP        0x0002u
-#define PF_LIGHT_ON      0x0004u
+// bit 0x0004 is retired (PF_LIGHT_ON). P3-C2b deleted the light mechanic: the
+// sleep window comes from the daylight table (game/daylight.h) and insistence
+// is what wakes the creature, so there is no switch left to remember.
 // bits 0x0008 / 0x0010 / 0x0020 are retired (PF_SCAR / PF_DEAD / PF_BURIED).
 #define PF_COLD_EGG      0x0040u   // hatched from an egg older than EGG_COLD_AFTER_S
 #define PF_INBRED        0x0080u   // sick probability x1.25 for life

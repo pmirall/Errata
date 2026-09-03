@@ -64,7 +64,7 @@ static PebbleInstance sample_pebble(uint8_t slot) {
     p.care_rem[i] = (int16_t)(100 + i);
   }
   p.hp_cur            = 33;
-  p.status            = PBS_LIGHT_ON | PBS_SICK;
+  p.status            = PBS_RESERVED_LIGHT | PBS_SICK;   // 0x10 is reserved (P3-C2b)
   p.flags             = PBF_RARE;
   p.moves[0] = 1; p.moves[1] = 2; p.moves[2] = 3; p.moves[3] = 4;
   p.origin            = ORIGIN_WILD;
@@ -681,7 +681,9 @@ TEST(v1_fixtures_migrate_with_the_documented_field_map) {
   CHECK_EQ(p.last_updated_epoch, 1700200000u);
   CHECK_EQ(p.age_s, 200000u);
   CHECK_EQ(p.minigames_won, 7);
-  CHECK((p.status & PBS_LIGHT_ON) != 0);
+  // P3-C2b: the light mechanic is gone, so LV1_PF_LIGHT_ON is DROPPED rather
+  // than migrated into the reserved bit 0x10.
+  CHECK((p.status & PBS_RESERVED_LIGHT) == 0);
   CHECK((p.status & PBS_SICK) == 0);
   CHECK(p.id != 0);
   CHECK(pebble_blob_ok(p));

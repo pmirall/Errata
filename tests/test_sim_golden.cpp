@@ -12,13 +12,22 @@
 //  flags -> the SimView word), so the bytes hashed are the same bytes in the
 //  same order and the golden file did NOT change. This is not a retune.
 //
+//  P3-C2b RE-RECORDED IT, AND THE CARE NUMBERS DID NOT MOVE. That commit
+//  deleted the light mechanic, so PF_LIGHT_ON (bit 0x0004) - which
+//  sim_new_pet() used to set and which is part of the hashed flags word -
+//  is gone from every line. Verified before recording by hashing the six
+//  stats WITHOUT the flags word on both sides of the change: the transcripts
+//  were byte-identical, events and action results included. The scripted six
+//  hours run 10:00 -> 16:00, which is broad daylight on day 100 under the new
+//  daylight window too, so nothing here ever sleeps and no rate changed.
+//
 //  P3-C1 RE-RECORDED IT. That commit moved care onto the hours scale of spec
 //  section 27 (hunger -12.000 -> -4.200 milli/h, happiness -8.000 -> -3.000,
 //  energy awake -9.000 -> -6.000, per-poop cleanliness -6.000 -> -1.000, one
 //  gated health bleed instead of four instant ones) and deleted the age-based
 //  STAGE_MULT_* multipliers, so every hashed minute after t=000 moved. Only a
-//  `retune:` commit may regenerate it:  make -C tests golden
-//  (or ./bin/test_sim_golden --record).
+//  `retune:` commit - or one that changes what is HASHED, as P3-C2b did - may
+//  regenerate it:  make -C tests golden  (or ./bin/test_sim_golden --record).
 // =============================================================================
 #include "nt_test.h"
 
