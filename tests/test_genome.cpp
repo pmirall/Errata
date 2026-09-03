@@ -7,9 +7,9 @@
 
 #include <string.h>
 
-#include "genome.h"
-#include "crc16.h"
-#include "rng.h"
+#include "game/genome.h"
+#include "core/crc16.h"
+#include "core/rng.h"
 
 static bool in_range(int v, int lo, int hi) { return v >= lo && v <= hi; }
 

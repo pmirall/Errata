@@ -11,11 +11,11 @@
 
 #include <string.h>
 
-#include "config.h"
-#include "gametime.h"
+#include "core/config.h"
+#include "hardware/gametime.h"
 #include "host_shims.h"
-#include "sim.h"
-#include "genome.h"
+#include "game/sim.h"
+#include "game/genome.h"
 
 // -----------------------------------------------------------------------------
 //  1. Clamped epoch deltas: now < last_seen charges ZERO

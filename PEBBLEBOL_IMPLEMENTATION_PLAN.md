@@ -426,10 +426,10 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 - Acceptance: gate with `FEATURE_BLE=0` and `=1`; `grep -c MATE ble_social.cpp` == 0.
 
 **P2-C8 Skeleton compile, then the mechanical move into `src/` (G7)** — S
-- [ ] **Skeleton compile first**: move only `config.h`/`nt_types.h`/`strings_es.h` to `src/core/` with relative includes plus one trivial `src/app/app.cpp`; confirm arduino-cli compiles `src/**` and resolves `"../core/nt_types.h"` before moving anything else.
-- [ ] `git mv` every remaining file into the §1.2 tree (names unchanged); rewrite includes to relative paths; `Pebblebol.ino` = 3 lines; `app.cpp` receives `setup/loop/logic_tick/boot_*` verbatim; `index_html.h` included from exactly one TU (`creator_server.cpp`, ex webui.cpp:63).
-- [ ] `src/core/config.h` §2: the five pins in one `// DECISION D1 PENDING` block, values verbatim, plus `#ifdef PB_PINS_CONFIRMED static_assert(PIN_SDA != PIN_LED …); static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 && PIN_BTN_R != 2 && …) #endif`.
-- [ ] G7: translate the Spanish block config.h:15-76 to English; delete stale GAME_DESIGN/BRIEF references (genome.h:67, input.h:3, godmode.h:3, ui.h:1-24) and petfx.cpp:1 `#line`; `tests/Makefile -I../Pebblebol/src` updated, no test changes.
+- [x] **Skeleton compile first**: move only `config.h`/`nt_types.h`/`strings_es.h` to `src/core/` with relative includes plus one trivial `src/app/app.cpp`; confirm arduino-cli compiles `src/**` and resolves `"../core/nt_types.h"` before moving anything else.
+- [x] `git mv` every remaining file into the §1.2 tree (names unchanged); rewrite includes to relative paths; `Pebblebol.ino` = 3 lines; `app.cpp` receives `setup/loop/logic_tick/boot_*` verbatim; `index_html.h` included from exactly one TU (`creator_server.cpp`, ex webui.cpp:63).
+- [x] `src/core/config.h` §2: the five pins in one `// DECISION D1 PENDING` block, values verbatim, plus `#ifdef PB_PINS_CONFIRMED static_assert(PIN_SDA != PIN_LED …); static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 && PIN_BTN_R != 2 && …) #endif`.
+- [x] G7: translate the Spanish block config.h:15-76 to English; delete stale GAME_DESIGN/BRIEF references (genome.h:67, input.h:3, godmode.h:3, ui.h:1-24) and petfx.cpp:1 `#line`; `tests/Makefile -I../Pebblebol/src` updated, no test changes.
 - Acceptance: gate; flash/RAM **byte-identical** to P2-C7b (a pure move must not change the binary; a diff means an include changed a macro); golden unchanged.
 
 **P2-C9 SaveSchema v2, KvStore split, migration, tri-state load, pairs, `nvs2` checkpoint, SAVE ERROR (four sub-commits)** — L

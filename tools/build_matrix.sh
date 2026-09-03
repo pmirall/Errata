@@ -8,7 +8,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 B="$ROOT/tools/build.sh"
 
-CFG="$ROOT/Pebblebol/config.h"; [ -f "$CFG" ] || CFG="$ROOT/Pebblebol/src/core/config.h"
+CFG="$ROOT/Pebblebol/src/core/config.h"
 has() { grep -qE "^#define[[:space:]]+$1[[:space:]]+[0-9]+" "$CFG"; }
 
 # name|defines (space separated). Macros that no longer exist are skipped.

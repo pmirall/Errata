@@ -9,7 +9,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "gametime.h"
+#include "hardware/gametime.h"
 #include "host_shims.h"
 
 static const char* fmt(uint32_t s, char* buf) {

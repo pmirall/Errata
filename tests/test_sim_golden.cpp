@@ -15,8 +15,8 @@
 
 #include <string.h>
 
-#include "sim.h"
-#include "genome.h"
+#include "game/sim.h"
+#include "game/genome.h"
 
 #define GOLDEN_REL_PATH   "golden/sim_v1.txt"
 #define GOLDEN_SEED       0xC0FFEEu

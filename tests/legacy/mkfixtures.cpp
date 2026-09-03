@@ -18,10 +18,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "nt_types.h"
-#include "storage.h"     // GainSave (host-includable: nt_types.h only)
-#include "genome.h"
-#include "crc16.h"
+#include "core/nt_types.h"
+#include "persistence/storage.h"     // GainSave (host-includable: nt_types.h only)
+#include "game/genome.h"
+#include "core/crc16.h"
 
 static_assert(sizeof(PetSave) == 128, "legacy PetSave is 128 B");
 static_assert(sizeof(Config) == 256, "legacy Config is 256 B");

@@ -9,9 +9,9 @@
 
 #include <string.h>
 
-#include "config.h"
-#include "sim.h"
-#include "genome.h"
+#include "core/config.h"
+#include "game/sim.h"
+#include "game/genome.h"
 
 #define CARE_SEED    0x5EED0C7Au
 #define CARE_EPOCH0  1700000000u

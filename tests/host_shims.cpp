@@ -7,8 +7,8 @@
 // =============================================================================
 #include "host_shims.h"
 
-#include "config.h"   // BTN_ACTIVE_LEVEL
-#include "input.h"    // INPUT_BTN_N
+#include "core/config.h"   // BTN_ACTIVE_LEVEL
+#include "hardware/input.h"    // INPUT_BTN_N
 
 static uint32_t s_ms = 0;
 static bool     s_pressed[INPUT_BTN_N] = { false, false };

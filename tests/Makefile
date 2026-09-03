@@ -5,11 +5,12 @@
 #   make -C tests golden     re-record tests/golden/* (only from a `retune:` commit)
 #   make -C tests fixtures   rebuild tests/fixtures/*.bin from legacy/mkfixtures.cpp
 #
-# Layout: the sketch is flat in ../Pebblebol until P2-C8 moves it under
-# ../Pebblebol/src/**; only SRC_ROOT and the object paths below change then.
+# Layout: the sketch lives under ../Pebblebol/src/<layer>/ (plan section 1.2).
+# SRC_ROOT is that src/ directory, so a test includes "game/sim.h" exactly as
+# the firmware does, and the pattern rules below find the .cpp in its layer.
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O1
-SRC_ROOT ?= ../Pebblebol
+SRC_ROOT ?= ../Pebblebol/src
 BIN      ?= bin
 OBJ      := $(BIN)/obj
 
@@ -33,12 +34,23 @@ $(BIN) $(OBJ):
 	mkdir -p $@
 
 # --- sketch sources compiled for the host -----------------------------------
-$(OBJ)/%.o: $(SRC_ROOT)/%.cpp | $(OBJ)
+# One pattern rule per layer that holds a host-compilable .cpp; make picks the
+# rule whose prerequisite exists, so objects keep their flat basenames.
+$(OBJ)/%.o: $(SRC_ROOT)/core/%.cpp | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(OBJ)/%.o: $(SRC_ROOT)/game/%.cpp | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(OBJ)/%.o: $(SRC_ROOT)/hardware/%.cpp | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(OBJ)/%.o: $(SRC_ROOT)/ui/%.cpp | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # gametime pinned to the estimated-clock path so test_clock can drive the
 # millis() wrap extension across 2^32 on a machine whose wall clock is right.
-$(OBJ)/gametime_nevervalid.o: $(SRC_ROOT)/gametime.cpp | $(OBJ)
+$(OBJ)/gametime_nevervalid.o: $(SRC_ROOT)/hardware/gametime.cpp | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -DGT_HOST_NEVER_VALID -c $< -o $@
 
 $(OBJ)/host_shims.o: host_shims.cpp host_shims.h | $(OBJ)

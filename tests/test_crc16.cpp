@@ -6,7 +6,7 @@
 // =============================================================================
 #include "nt_test.h"
 
-#include "crc16.h"
+#include "core/crc16.h"
 
 TEST(crc16_check_value_is_ccitt_false) {
   // The catalogue check value (also quoted in genome.h).

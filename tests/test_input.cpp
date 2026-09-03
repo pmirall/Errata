@@ -7,8 +7,8 @@
 // =============================================================================
 #include "nt_test.h"
 
-#include "config.h"
-#include "input.h"
+#include "core/config.h"
+#include "hardware/input.h"
 #include "host_shims.h"
 
 #define GOT_MAX 32

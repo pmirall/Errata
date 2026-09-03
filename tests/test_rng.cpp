@@ -6,7 +6,7 @@
 // =============================================================================
 #include "nt_test.h"
 
-#include "rng.h"
+#include "core/rng.h"
 
 // First outputs of the legacy genome.cpp/sim.cpp xorshift32 from its default
 // seed 0x2545F491 (computed independently). If these move, every golden moves.

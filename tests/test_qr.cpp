@@ -8,7 +8,7 @@
 
 #include <string.h>
 
-#include "qr.h"
+#include "ui/qr.h"
 
 static uint8_t s_mod[QR_BUF_BYTES];
 

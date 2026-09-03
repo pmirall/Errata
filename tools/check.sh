@@ -23,8 +23,7 @@ done
 
 fail() { echo "GATE FAIL: $*" >&2; exit 1; }
 
-CFG="$SKETCH/config.h"
-[ -f "$CFG" ] || CFG="$SKETCH/src/core/config.h"
+CFG="$SKETCH/src/core/config.h"
 [ -f "$CFG" ] || fail "config.h not found under $SKETCH"
 
 gate_flash="$(grep -oE "^#define[[:space:]]+GATE_FLASH_MAX[[:space:]]+[0-9]+" "$CFG" | grep -oE "[0-9]+$")"

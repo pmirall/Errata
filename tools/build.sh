@@ -42,8 +42,7 @@ SRC="$SKETCH"
 if [ ${#DEFINES[@]} -gt 0 ]; then
   SRC="$WORK/$(basename "$SKETCH")"
   cp -r "$SKETCH" "$SRC"
-  CFG="$SRC/config.h"
-  [ -f "$CFG" ] || CFG="$SRC/src/core/config.h"
+  CFG="$SRC/src/core/config.h"
   for kv in "${DEFINES[@]}"; do
     k="${kv%%=*}"; v="${kv##*=}"
     if ! grep -qE "^#define[[:space:]]+$k[[:space:]]+[0-9]+" "$CFG"; then

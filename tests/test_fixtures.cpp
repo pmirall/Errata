@@ -14,9 +14,9 @@
 
 #include <string.h>
 
-#include "nt_types.h"
-#include "storage.h"     // GainSave + GAINSAVE_CRC_BYTES (host-includable)
-#include "crc16.h"
+#include "core/nt_types.h"
+#include "persistence/storage.h"     // GainSave + GAINSAVE_CRC_BYTES (host-includable)
+#include "core/crc16.h"
 
 static uint8_t s_blob[512];
 
