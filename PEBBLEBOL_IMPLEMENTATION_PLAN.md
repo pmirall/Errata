@@ -422,7 +422,7 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 - Acceptance: gate; `test_care` green; `ScreenId` has no MEMORIAL/LINEAGE.
 
 **P2-C7b Strip the BLE mating protocol content (G6) — flat layout** — M
-- [ ] Execute §2 G6; keep the radio handoff (ui.cpp:2010-2047), the peer list rendering (:2184-2207) and the ble_social plumbing (:121-130, :216-311, :358-421, :646-703); `genome_wire_ok` (:186-193) pattern noted for `proto_decode`.
+- [x] Execute §2 G6; keep the radio handoff (ui.cpp:2010-2047), the peer list rendering (:2184-2207) and the ble_social plumbing (:121-130, :216-311, :358-421, :646-703); `genome_wire_ok` (:186-193) pattern noted for `proto_decode`.
 - Acceptance: gate with `FEATURE_BLE=0` and `=1`; `grep -c MATE ble_social.cpp` == 0.
 
 **P2-C8 Skeleton compile, then the mechanical move into `src/` (G7)** — S

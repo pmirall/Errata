@@ -71,7 +71,7 @@ bool     genome_valid(const Genome& g);
 // god_tainted 0, lineage_id a non-zero random dynasty id.
 Genome   genome_genesis(void);
 
-// Two-parent BLE mating. Numeric genes average then mutate at p=8%;
+// Two-parent breeding. Numeric genes average then mutate at p=8%;
 // categoricals cross over 50/50 then re-roll at p=3%; different species have a
 // 12% chance of producing a recombinant from the hybrid table; 6% chance of a
 // brand-new lineage ("mutacion fundadora").

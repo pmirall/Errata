@@ -368,8 +368,9 @@ static_assert(offsetof(PetSave, crc16)    == 126, "PetSave.crc16 moved");
 
 // -----------------------------------------------------------------------------
 // 4. PENDING EGG - NVS key "egg", 24 B.
-//    A BLE mating produces an egg while the pet is still alive; it must survive
-//    a reboot without displacing the living pet, so it cannot live in PetSave.
+//    An egg produced while the pet is still alive must survive a reboot without
+//    displacing the living pet, so it cannot live in PetSave. Nothing writes
+//    this blob today: breeding comes back in Phase 7.
 // -----------------------------------------------------------------------------
 #define NT_EGG_MAGIC     0x4745u   // 'E','G'
 #define NT_EGG_VERSION   1

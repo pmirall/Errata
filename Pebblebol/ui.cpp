@@ -80,7 +80,6 @@ enum ConfirmId : uint8_t {
   CFM_NONE = 0,
   CFM_QUIT_GAME,
   CFM_MEDICINE,
-  CFM_MATE,
   CFM_WIPE1,
   CFM_WIPE2
 };
@@ -88,8 +87,6 @@ enum ConfirmId : uint8_t {
 enum SocPhase : uint8_t {
   SOC_ENTER = 0,
   SOC_SCAN,
-  SOC_COURT,
-  SOC_RESULT,
   SOC_ERROR
 };
 
@@ -196,9 +193,6 @@ static char     s_qr_key[QR_TEXT_MAX];
 static uint8_t  s_soc_phase   = SOC_ENTER;
 static uint8_t  s_soc_prev    = RADIO_OFF;
 static uint16_t s_soc_err     = STR_EMPTY;
-static uint32_t s_soc_ms      = 0;
-static uint8_t  s_soc_have_res = 0;
-static BleMateEvent s_soc_res;
 
 // ---- GAME -------------------------------------------------------------------
 struct GameState {
@@ -422,39 +416,6 @@ static void bright_service(void) {
 }
 
 static bool cfg_flag(uint8_t bit) { return s_cfg && (s_cfg->flags & bit) != 0; }
-
-// True when a BLE-mating egg is already waiting in NVS.
-//
-// PF_EGG_PENDING cannot be consulted for this: only sim.cpp may mutate PetSave
-// (BRIEF 4 layering), so ui can persist the PendingEgg blob but can never raise
-// the mirror flag, and the flag therefore reads 0 forever. Asking storage
-// directly is the honest test, and unlike the in-RAM ble_mate_cooldown it
-// survives a reboot - without this a power cycle would let a second mating
-// silently overwrite the egg the first one produced.
-// CACHED. store_load_egg() is a Preferences::getBytes(), and social_service()
-// asks this question once per frame at up to 20 fps for as long as SOCIAL is
-// open - an NVS transaction inside the frame budget, for an answer that changes
-// only when THIS module writes the blob (PH3 finding 10). ui.cpp is the sole
-// caller of store_save_egg()/store_clear_egg(), and store_wipe() is reached
-// only from the two paths below, so invalidating at those four points is
-// exhaustive. 0 = not yet asked, 1 = no egg, 2 = an egg is waiting.
-static uint8_t s_egg_cache = 0;
-
-static void egg_cache_invalidate(void) { s_egg_cache = 0; }
-
-// Only the BLE mating path asks; with FEATURE_BLE off nothing can create a
-// pending egg, so the query has no caller and is not compiled.
-#if FEATURE_BLE
-static bool egg_pending(void) {
-  if (s_egg_cache == 0) {
-    PendingEgg pe;
-    const bool have = store_load_egg(pe) && (pe.flags & EF_VALID) &&
-                      genome_valid(pe.genome);
-    s_egg_cache = have ? 2u : 1u;
-  }
-  return s_egg_cache == 2u;
-}
-#endif
 
 // =============================================================================
 //  4. TOASTS, ALERTS, MODALS
@@ -1828,8 +1789,16 @@ static void handle_status(Gesture g) {
 }
 
 // =============================================================================
-//  13. SOCIAL - connectionless BLE mating
+//  13. SOCIAL - connectionless BLE discovery
+//      Discovery only: the screen owns the radio (request on enter, release on
+//      leave) and lists the pets it can hear. Everything a user can DO with a
+//      peer - trade, battle, breed - is the Phase 7 LINK screen; until then
+//      this screen says so.
 // =============================================================================
+
+// How many peer rows fit under the placeholder line.
+#define SOC_LIST_ROWS   3
+#define SOC_LIST_Y      (UI_CONTENT_Y + 7)
 
 // Bring the BLE stack up and start advertising. net_request() no longer blocks
 // (net.cpp replaced delay(RADIO_SETTLE_MS) by the NPH_SETTLING phase), so the
@@ -1865,8 +1834,6 @@ static void social_try_bringup(void) {
 static void social_enter(void) {
   s_soc_phase          = SOC_ENTER;
   s_soc_err            = STR_EMPTY;
-  s_soc_ms             = now_ms();
-  s_soc_have_res       = 0;
   s_cursor[SCR_SOCIAL] = 0;
   s_soc_prev           = (uint8_t)net_mode();
 
@@ -1892,72 +1859,9 @@ static void social_service(void) {
 
   const PetSave* p = pet();
   uint8_t self = BLE_SELF_SEEKING;
-  if (p) {
-    if (p->flags & PF_SICK)         self = (uint8_t)(self | BLE_SELF_SICK);
-    if (p->flags & PF_GOD_TAINTED)  self = (uint8_t)(self | BLE_SELF_GOD);
-  }
-  if (egg_pending()) self = (uint8_t)(self | BLE_SELF_MATE_LOCK);
-  ble_set_self(sim_stat_pct(ST_ENERGY), self);
+  if (p && (p->flags & PF_GOD_TAINTED)) self = (uint8_t)(self | BLE_SELF_GOD);
+  ble_set_self(self);
   ble_scan_service();
-
-  if (ble_take_contagion()) ui_alert(AL_SICK);
-
-  BleMateEvent ev;
-  if (ble_mate_take(ev)) {
-    s_soc_res      = ev;
-    s_soc_have_res = 1;
-    s_soc_phase    = SOC_RESULT;
-    s_soc_ms       = now_ms();
-    if (ev.ok) {
-      // The egg flags are derived from the child itself, so the responder and
-      // the initiator stamp identical blobs without re-running genome_breed().
-      PendingEgg pe;
-      memset(&pe, 0, sizeof(pe));
-      pe.magic   = NT_EGG_MAGIC;
-      pe.version = NT_EGG_VERSION;
-      pe.flags   = (uint8_t)(EF_VALID | EF_FROM_MATING);
-      if (p && ev.child.lineage_id != p->genome.lineage_id) pe.flags |= EF_NEW_LINEAGE;
-      if (gene_species(ev.child) >= GENESIS_SPECIES_MAX + 5) pe.flags |= EF_HYBRID;
-      pe.genome        = ev.child;
-      pe.created_epoch = gt_now();
-      store_save_egg(pe);
-      egg_cache_invalidate();
-      ui_toast(STR_SO_EGG_MADE);
-    } else {
-      ui_toast(ev.str_id ? ev.str_id : (uint16_t)STR_SO_LOSE);
-    }
-    return;
-  }
-
-  const uint8_t st = ble_mate_state();
-  if (st == BLE_MATE_OFFERING || st == BLE_MATE_ACKING) s_soc_phase = SOC_COURT;
-  else if (s_soc_phase == SOC_COURT)                    s_soc_phase = SOC_SCAN;
-#endif
-}
-
-static void social_court(void) {
-#if FEATURE_BLE
-  const PetSave* p = pet();
-  if (!p) return;
-  if (p->stage < STAGE_TEEN)                             { ui_toast(STR_SO_YOUNG);    return; }
-  if (sim_stat_pct(ST_ENERGY) < BLE_MATE_MIN_ENERGY_PCT) { ui_toast(STR_SO_TIRED);    return; }
-  if (ble_mate_cooldown_left_s() > 0)                    { ui_toast(STR_SO_COOLDOWN); return; }
-  if (egg_pending())                                     { ui_toast(STR_SO_COOLDOWN); return; }
-
-  const uint8_t n   = ble_peer_count();
-  const uint8_t idx = s_cursor[SCR_SOCIAL];
-  if (idx >= n) { ui_toast(STR_SO_NOBODY); return; }
-  const BlePeerInfo* peer = ble_peer(idx);
-  if (!peer)                                       { ui_toast(STR_SO_NOBODY);  return; }
-  if (peer->rssi < BLE_RSSI_MIN)                   { ui_toast(STR_SO_FAR);     return; }
-  if (!genome_valid(peer->genome))                 { ui_toast(STR_ERR_GENOME); return; }
-  if (!genome_can_mate(p->genome, peer->genome))   { ui_toast(STR_SO_LOSE);    return; }
-
-  const Genome child = genome_breed(p->genome, peer->genome,
-                                    (uint8_t)(p->cq >> 2), peer->cq_hi, nullptr);
-  ble_advertise_offer(child, &peer->mac[3]);
-  s_soc_phase = SOC_COURT;
-  s_soc_ms    = now_ms();
 #endif
 }
 
@@ -1978,55 +1882,27 @@ static void draw_social(void) {
     return;
   }
 
-  if (s_soc_phase == SOC_COURT) {
-    rd_text_center((int16_t)(UI_CONTENT_Y + 14), RD_FONT_NARR, S(STR_SO_ASK));
-    const uint8_t dots = (uint8_t)((now_ms() / 350u) % 4u);
-    for (uint8_t i = 0; i < 3; ++i) {
-      const int16_t x = (int16_t)(OLED_W / 2 - 10 + i * 8);
-      if (i < dots) px_box(x, (int16_t)(UI_CONTENT_Y + 22), 5, 5);
-      else          px_frame(x, (int16_t)(UI_CONTENT_Y + 22), 5, 5);
-    }
-    // The three-frame handshake, spelled out so a stall is diagnosable.
-    rd_text_center((int16_t)(UI_CONTENT_Y + 40), RD_FONT_TINY, "BEACON > OFFER > ACK");
-    draw_countdown();
-    rd_affordance(nullptr, S(STR_AF_CANCEL));
-    return;
-  }
-
-  if (s_soc_phase == SOC_RESULT && s_soc_have_res) {
-    rd_text_center((int16_t)(UI_CONTENT_Y + 12), RD_FONT_NARR,
-                   S(s_soc_res.ok ? STR_SO_WIN : STR_SO_LOSE));
-    if (s_soc_res.ok) {
-      px_spr((int16_t)(OLED_W / 2 - 6), (int16_t)(UI_CONTENT_Y + 18), sprite_icon(ICO_EGG));
-      char nm[16];
-      ui_name_for(s_soc_res.child.lineage_id, s_soc_res.child.generation, nm, sizeof(nm));
-      rd_text_center((int16_t)(UI_CONTENT_Y + 42), RD_FONT_BODY, nm);
-    } else if (s_soc_res.str_id && s_soc_res.str_id < (uint16_t)STR_COUNT) {
-      rd_text_wrap(3, (int16_t)(UI_CONTENT_Y + 24), OLED_W - 6, RD_LINE_BODY, 2,
-                   RD_FONT_BODY, S(s_soc_res.str_id));
-    }
-    draw_countdown();
-    rd_affordance(nullptr, S(STR_AF_OK));
-    return;
-  }
+  // The screen is honest about what it is: a radio that finds neighbours and
+  // nothing else yet.
+  rd_text_center((int16_t)(UI_CONTENT_Y + 5), RD_FONT_TINY, S(STR_SO_LINK_SOON));
 
 #if FEATURE_BLE
   U8G2& u = rd_u8g2();
   const uint8_t n = ble_peer_count();
   if (n == 0) {
-    rd_text_center((int16_t)(UI_CONTENT_Y + 14), RD_FONT_NARR, S(STR_SO_SEARCHING));
+    rd_text_center((int16_t)(UI_CONTENT_Y + 18), RD_FONT_NARR, S(STR_SO_SEARCHING));
     const uint8_t dots = (uint8_t)((now_ms() / 400u) % 4u);
     for (uint8_t i = 0; i < dots; ++i)
-      px_box((int16_t)(OLED_W / 2 - 8 + i * 6), (int16_t)(UI_CONTENT_Y + 20), 4, 4);
-    rd_text_wrap(3, (int16_t)(UI_CONTENT_Y + 36), OLED_W - 6, RD_LINE_BODY, 2,
+      px_box((int16_t)(OLED_W / 2 - 8 + i * 6), (int16_t)(UI_CONTENT_Y + 24), 4, 4);
+    rd_text_wrap(3, (int16_t)(UI_CONTENT_Y + 38), OLED_W - 6, RD_LINE_BODY, 2,
                  RD_FONT_BODY, S(STR_SO_NOBODY));
   } else {
     if (s_cursor[SCR_SOCIAL] >= n) s_cursor[SCR_SOCIAL] = 0;
-    const uint8_t rows = (n < UI_LIST_ROWS) ? n : (uint8_t)UI_LIST_ROWS;
+    const uint8_t rows = (n < SOC_LIST_ROWS) ? n : (uint8_t)SOC_LIST_ROWS;
     for (uint8_t i = 0; i < rows; ++i) {
       const BlePeerInfo* pi = ble_peer(i);
       if (!pi) continue;
-      const int16_t y   = (int16_t)(UI_CONTENT_Y + i * UI_LIST_PITCH);
+      const int16_t y   = (int16_t)(SOC_LIST_Y + i * UI_LIST_PITCH);
       const bool    sel = (i == s_cursor[SCR_SOCIAL]);
       if (sel) px_box(0, y, OLED_W, UI_LIST_PITCH - 1);
       u.setDrawColor(sel ? 0 : 1);
@@ -2046,7 +1922,7 @@ static void draw_social(void) {
   }
 #endif
   draw_countdown();
-  rd_affordance(S(STR_AF_NEXT), S(STR_AF_MATE));
+  rd_affordance(S(STR_AF_NEXT), nullptr);
 }
 
 static void handle_social(Gesture g) {
@@ -2055,12 +1931,9 @@ static void handle_social(Gesture g) {
 #else
   const uint8_t n = 0;
 #endif
-  if (s_soc_phase == SOC_RESULT) { s_soc_have_res = 0; s_soc_phase = SOC_SCAN; return; }
-  if (s_soc_phase == SOC_COURT)  return;            // let the handshake resolve
   switch (g) {
     case GST_TAP_L:
     case GST_HOLD_L: s_cursor[SCR_SOCIAL] = ring_next(s_cursor[SCR_SOCIAL], n); break;
-    case GST_TAP_R:  confirm_open(CFM_MATE, STR_SO_ASK); break;
     case GST_DBL_L:  s_cursor[SCR_SOCIAL] = 0; break;
     case GST_DBL_R:  if (n) s_cursor[SCR_SOCIAL] = (uint8_t)(n - 1u); break;
     case GST_BOTH:   help_open(STR_HLP_PEER); break;
@@ -2723,11 +2596,9 @@ static void confirm_commit(void) {
       game_finish();                                   // counts as a loss
       break;
     case CFM_MEDICINE: act_and_show(ACT_MEDICINE); break;   // BRIEF D
-    case CFM_MATE:     social_court();          break;
     case CFM_WIPE1:    confirm_open(CFM_WIPE2, STR_CF_WIPE2); break;   // two dialogs
     case CFM_WIPE2: {
       store_wipe();
-      egg_cache_invalidate();        // the whole namespace went, "egg" with it
       if (s_cfg) { store_cfg_defaults(*s_cfg); store_save_cfg(*s_cfg); }
       const Genome g0 = genome_genesis();
       sim_new_pet(g0, gt_now(), 0);
@@ -2903,7 +2774,6 @@ void ui_begin(void) {
   memset(s_cursor, 0, sizeof(s_cursor));
   memset(s_stack,  0, sizeof(s_stack));
   memset(&s_g,     0, sizeof(s_g));
-  memset(&s_soc_res, 0, sizeof(s_soc_res));
   memset(s_raw_prev, 0, sizeof(s_raw_prev));
   s_sp          = 0;
   s_modal       = MODAL_NONE;
@@ -3042,7 +2912,6 @@ void ui_handle(Gesture g) {
         nav_home();
         break;
       case GOD_EVT_WIPED: {
-        egg_cache_invalidate();      // god mode ran store_wipe() behind us
         if (s_cfg) store_load_cfg(*s_cfg);
         const PetSave* np = pet();
         if (np) petfx_reset(*np);    // god handed us a different animal entirely

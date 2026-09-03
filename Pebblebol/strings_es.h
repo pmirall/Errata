@@ -200,15 +200,8 @@ enum StrId : uint16_t {
   STR_SO_TITLE,
   STR_SO_SEARCHING,
   STR_SO_NOBODY,
-  STR_SO_ASK,
-  STR_SO_WIN,
-  STR_SO_LOSE,
-  STR_SO_COOLDOWN,
-  STR_SO_FAR,
-  STR_SO_TIRED,
-  STR_SO_YOUNG,
   STR_SO_CAP,
-  STR_SO_EGG_MADE,
+  STR_SO_LINK_SOON,
 
   // --- 26. web / QR ------------------------------- <= 25 chars @ 5x8 --------
   STR_WEB_TITLE,
@@ -251,7 +244,6 @@ enum StrId : uint16_t {
   STR_GOD_SETSTAT,
   STR_GOD_STAGE,
   STR_GOD_GENOME,
-  STR_GOD_BLE,
   STR_GOD_CLOCK,
   STR_GOD_WIPE,
   STR_GOD_RANDOM,
@@ -282,7 +274,6 @@ enum StrId : uint16_t {
   STR_AF_VIEW,
   STR_AF_QUIT,
   STR_AF_RUB,
-  STR_AF_MATE,
 
   // --- 33b. one-line help, BOTH on a list item (GAME_DESIGN 8.3, 3 s) -------
   //          <= 25 chars @ 5x8
@@ -356,13 +347,9 @@ enum StrId : uint16_t {
   STR_GOD_PASTE,
   STR_GOD_DONE,
   STR_GOD_FAILED,
-  STR_GOD_MATING,
-  STR_GOD_CHILD_OK,
-  STR_GOD_CHILD_NO,
   STR_GOD_NOPET,
   STR_GOD_DUMP_ON,
   STR_GOD_DUMP_OFF,
-  STR_GOD_NEED_BLE,
 
   // --- 34c. gene names, index-parallel to godmode.cpp's editor table --------
   //          <= 10 chars @ 5x8. Guarded by a static_assert in godmode.h.
@@ -562,15 +549,8 @@ inline constexpr const char* const ES[] = {
   /* STR_SO_TITLE */              "SOCIAL",
   /* STR_SO_SEARCHING */          "Buscando...",
   /* STR_SO_NOBODY */             "Nadie cerca. Como siempre.",
-  /* STR_SO_ASK */                "¿Emparejar?",
-  /* STR_SO_WIN */                "Ha salido bien.",
-  /* STR_SO_LOSE */               "No ha cuajado.",
-  /* STR_SO_COOLDOWN */           "Espera 24 h. Hay normas.",
-  /* STR_SO_FAR */                "Demasiado lejos.",
-  /* STR_SO_TIRED */              "No tengo energía para esto.",
-  /* STR_SO_YOUNG */              "Aún soy muy joven.",
-  /* STR_SO_CAP */                "Reinicia para seguir emparejando.",
-  /* STR_SO_EGG_MADE */           "Va a haber huevo.",
+  /* STR_SO_CAP */                "Reinicia para seguir buscando.",
+  /* STR_SO_LINK_SOON */          "LINK - Fase 7",
 
   /* --- 26. web / QR --- */
   /* STR_WEB_TITLE */             "MÓVIL",
@@ -613,7 +593,6 @@ inline constexpr const char* const ES[] = {
   /* STR_GOD_SETSTAT */           "FIJAR STAT",
   /* STR_GOD_STAGE */             "FORZAR ETAPA",
   /* STR_GOD_GENOME */            "GENOMA",
-  /* STR_GOD_BLE */               "BLE FALSO",
   /* STR_GOD_CLOCK */             "RELOJ",
   /* STR_GOD_WIPE */              "BORRAR TODO",
   /* STR_GOD_RANDOM */            "ALEATORIO",
@@ -637,7 +616,6 @@ inline constexpr const char* const ES[] = {
   /* STR_AF_VIEW */               "VISTA",
   /* STR_AF_QUIT */               "SALIR",
   /* STR_AF_RUB */                "FROTAR",
-  /* STR_AF_MATE */               "CORTEJAR",
 
   /* --- 33b. one-line help --- */
   /* STR_HLP_FEED */              "Darle de comer.",
@@ -698,13 +676,9 @@ inline constexpr const char* const ES[] = {
   /* STR_GOD_PASTE */             "Pega 32 hex y ENTER.",
   /* STR_GOD_DONE */              "Hecho.",
   /* STR_GOD_FAILED */            "No se pudo.",
-  /* STR_GOD_MATING */            "Buscando pareja...",
-  /* STR_GOD_CHILD_OK */          "Cría lista. SEL la pone.",
-  /* STR_GOD_CHILD_NO */          "Sin cría.",
   /* STR_GOD_NOPET */             "No hay bicho todavía.",
   /* STR_GOD_DUMP_ON */           "Volcado serie: ON",
   /* STR_GOD_DUMP_OFF */          "Volcado serie: OFF",
-  /* STR_GOD_NEED_BLE */          "Necesito la radio BLE.",
 
   /* --- 34c. god mode: gene names --- */
   /* STR_GN_SPECIES */            "ESPECIE",

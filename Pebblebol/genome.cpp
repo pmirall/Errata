@@ -378,7 +378,7 @@ Genome genome_genesis(void) {
 }
 
 // =============================================================================
-// 8. BLE MATING - TWO PARENTS (GAME_DESIGN 4.2)
+// 8. BREEDING - TWO PARENTS (GAME_DESIGN 4.2)
 //    Averages and mixes: pulls a dynasty back toward the middle and injects
 //    foreign categoricals.
 // =============================================================================

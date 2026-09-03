@@ -186,7 +186,8 @@ uint32_t store_boot_count(void);
 void     store_rtc_mark_god(void);    // god mode was entered this power cycle
 bool     store_rtc_god_tainted(void);
 
-// Pending BLE-mating egg, NVS key "egg" (nt_types.h section 4).
+// Pending egg blob, NVS key "egg" (nt_types.h section 4). No caller produces
+// one today; breeding comes back in Phase 7.
 bool     store_load_egg(PendingEgg& out);   // validates magic/version/EF_VALID/genome CRC
 bool     store_save_egg(const PendingEgg& e);
 bool     store_clear_egg(void);

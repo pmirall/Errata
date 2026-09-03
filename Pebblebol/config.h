@@ -49,7 +49,7 @@
 
 // --- Interruptores generales ------------------------------------------------
 // Pon un 0 en cualquiera de estos si quieres apagar esa parte del juego.
-#define FEATURE_BLE         1   // Emparejarse con otros bichos por Bluetooth
+#define FEATURE_BLE         1   // Ver otros bichos cerca por Bluetooth
 #define FEATURE_WEB         1   // Página web + QR + minijuegos en el móvil
 #define GOD_MODE_ENABLED    1   // Menú de trampas escondido (para probar cosas)
 
@@ -355,7 +355,7 @@
 #define NVS_KEY_LASTSEEN        "t"
 #define NVS_KEY_SAVE            "save"
 #define NVS_KEY_CFG             "cfg"
-#define NVS_KEY_EGG             "egg"        // pending BLE-mating egg (see nt_types.h)
+#define NVS_KEY_EGG             "egg"        // pending egg blob (see nt_types.h)
 #define NVS_KEY_CANARY          "ok"         // store_selftest()
 #define NVS_KEY_GAIN            "gl"         // hourly-gain ledger (storage.h GainSave)
 
@@ -391,8 +391,6 @@
 #define BLE_COMPANY_ID          0xFFFF
 #define BLE_MSD_LEN             22           // company_id(2) + frame_type(1) + payload(19)
 #define BLE_FRAME_BEACON        0x01
-#define BLE_FRAME_MATE_OFFER    0x02
-#define BLE_FRAME_MATE_ACK      0x03
 #define BLE_ADV_MIN_RAW         0x0640       // RAW 0.625 ms units = 1000 ms
 #define BLE_ADV_MAX_RAW         0x0C80       // RAW 0.625 ms units = 2000 ms
 #define BLE_SCAN_INTERVAL_MS    1000         // BLEScan::setInterval - MILLISECONDS
@@ -402,11 +400,6 @@
 #define BLE_PEER_CAP            8
 #define BLE_PEER_TTL_S          60
 #define BLE_SESSION_CAP         32           // deinit/init leaks ~672 B per cycle
-#define BLE_MATE_COOLDOWN_S     86400UL      // 24 h per unit
-#define BLE_MATE_FAIL_COOLDOWN_S 2700UL      // 45 min
-#define BLE_MATE_MIN_ENERGY_PCT 30
-#define BLE_MATE_P_MIN_PCT      25
-#define BLE_MATE_P_MAX_PCT      90
 #define BLE_QUEUE_CAP           8            // onResult runs on the BTC task: post, never draw
 
 // =============================================================================
@@ -478,7 +471,7 @@
 #define GOD_SCALE_4             3600
 #define GOD_SCALE_COUNT         5
 #define GOD_ABSENCE_COUNT       6            // 1 h, 6 h, 24 h, 72 h, 168 h, 720 h
-#define GOD_CMD_COUNT           8
+#define GOD_CMD_COUNT           7
 #define GOD_BAR_H               9
 
 // =============================================================================

@@ -3,8 +3,8 @@
 //  The debug console. The GOD screen (GAME_DESIGN 10) plus the persistent state
 //  that makes the rest of the firmware testable in minutes instead of a week:
 //  the time-scale multiplier, forced absences, a forced stage,
-//  a genome editor with hex dump and paste-in, a synthetic BLE partner, a live
-//  heap panel and a CSV soak log over Serial.
+//  a genome editor with hex dump and paste-in, a live heap panel and a CSV
+//  soak log over Serial.
 //
 //  COMPILED ALWAYS (BRIEF 4, row 20). Entry is undocumented in the product:
 //  SCR_STATUS_B + both buttons held GOD_ENTER_HOLD_MS. With GOD_MODE_ENABLED
@@ -22,9 +22,8 @@
 //     and read "GOD xN". It is impossible to leave it on by accident.
 //
 //  LAYERING: no WiFi.h / BLEDevice.h / WebServer.h here. The heap panel reads
-//  net.h's accessors (which pull in no network header) and the synthetic mating
-//  drives ble_social.h (likewise). Only render.h brings in U8g2, which this
-//  module needs because it draws.
+//  net.h's accessors, which pull in no network header. Only render.h brings in
+//  U8g2, which this module needs because it draws.
 //
 //  Identifiers and comments: English. Every user-facing string: strings_es.h.
 // =============================================================================
@@ -64,15 +63,6 @@
 #define GOD_HEX_LINE_MAX       48
 #endif
 
-// Synthetic-mating pacing: one step of the fake handshake per this many ms, and
-// the whole flow gives up after the timeout.
-#ifndef GOD_BLE_STEP_MS
-#define GOD_BLE_STEP_MS        300UL
-#endif
-#ifndef GOD_BLE_TIMEOUT_MS
-#define GOD_BLE_TIMEOUT_MS     25000UL
-#endif
-
 // -----------------------------------------------------------------------------
 // 2. SHAPE CONSTANTS
 // -----------------------------------------------------------------------------
@@ -83,7 +73,7 @@
 // "FIJAR STAT" offers 0 / 25 / 50 / 100 (GAME_DESIGN 10.1 command 3).
 #define GOD_STATVAL_COUNT      4
 
-// The root list is the eight surviving GAME_DESIGN 10.1 commands plus an
+// The root list is the seven surviving GAME_DESIGN 10.1 commands plus an
 // explicit exit row. HOLD_R leaves the SCREEN (god mode stays on, and stays visible); the
 // exit row leaves the MODE.
 #define GOD_MENU_ROWS          (GOD_CMD_COUNT + 1)
@@ -142,8 +132,7 @@ void     god_dump_line(void);
 void     god_begin(void);
 
 // Pump. Call once per loop(), on every screen, whether or not god mode is on:
-// it drives the soak log, the Serial genome paste and the synthetic BLE
-// handshake. Cheap and non-blocking.
+// it drives the soak log and the Serial genome paste. Cheap and non-blocking.
 void     god_service(void);
 
 // The undocumented entry gesture. Call every loop() with the id of the screen
@@ -165,7 +154,7 @@ uint8_t  god_entry_progress(uint8_t screen_id);
 
 // Enter / leave god mode explicitly. god_enter() taints the genome forever,
 // marks the RTC and prints the CSV header. god_exit() puts the time scale back
-// to x1, drops any BLE session the console opened and forces a save.
+// to x1 and forces a save.
 void     god_enter(void);
 void     god_exit(void);
 
@@ -188,7 +177,7 @@ bool     god_dump_enabled(void);
 static_assert(GOD_SCALE_COUNT == 5, "godmode.h: the speed ring is five wide");
 static_assert(GOD_SCALE_0 == 1, "godmode.h: index 0 must be real time");
 static_assert(GOD_ABSENCE_COUNT == 6, "godmode.h: six forced-absence durations");
-static_assert(GOD_CMD_COUNT == 8, "godmode.h: 8 commands after the death surgery");
+static_assert(GOD_CMD_COUNT == 7, "godmode.h: 7 commands after the BLE mating surgery");
 static_assert(GOD_BAR_H <= STATUS_BAR_H, "god marker must fit the status bar rows");
 
 #endif // NT_GODMODE_H

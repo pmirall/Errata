@@ -3,9 +3,9 @@
 //  The debug console (GAME_DESIGN 10). See godmode.h for the contract.
 //
 //  Everything the console mutates goes through the owning module's own API:
-//  sim_god_*() for the pet, gt_skew_add() for time,
-//  ble_debug_inject_*() for the fake partner, store_*() for NVS. This file mutates NOTHING directly - which is exactly
-//  why a test run through it exercises the real code paths.
+//  sim_god_*() for the pet, gt_skew_add() for time, store_*() for NVS. This
+//  file mutates NOTHING directly - which is exactly why a test run through it
+//  exercises the real code paths.
 //
 //  ZERO floating point. Every number rendered here is an integer formatted
 //  with snprintf into a fixed stack buffer. No String, no heap.
@@ -27,7 +27,6 @@
 #include "gametime.h"
 #include "input.h"
 #include "net.h"
-#include "ble_social.h"
 
 // The gene-name block in strings_es.h 34c must stay index-parallel to GENES[].
 static_assert((int)STR_GN_RARE - (int)STR_GN_SPECIES + 1 == GOD_GENE_COUNT,
@@ -63,8 +62,7 @@ enum GodScreen : uint8_t {
   GSC_GENOME,     // 5  GENOMA root
   GSC_GENE,       // 5  GENOMA / EDITAR
   GSC_HEX,        // 5  GENOMA / VOLCAR + CARGAR
-  GSC_BLE,        // 6  BLE FALSO
-  GSC_SYS,        // 7  RELOJ + the heap / radio / storage panels
+  GSC_SYS,        // 6  RELOJ + the heap / radio / storage panels
   GSC_CONFIRM,    // shared modal, cursor defaults to NO
   GSC_COUNT
 };
@@ -78,17 +76,6 @@ enum GodConfirm : uint8_t {
 
 // GSC_HEX has two jobs.
 enum GodHexMode : uint8_t { GHX_DUMP = 0, GHX_LOAD };
-
-// Synthetic-mating sub-machine (command 6, BLE FALSO).
-enum GodBleStep : uint8_t {
-  GBS_IDLE = 0,
-  GBS_RADIO,      // asking net for RADIO_BLE, then ble_begin()
-  GBS_SEED,       // injecting BLE_PEER_MIN_HITS synthetic BEACON frames
-  GBS_OFFER,      // child bred, MATE_OFFER on air
-  GBS_ACK,        // synthetic MATE_ACK injected, waiting for the latch
-  GBS_DONE,
-  GBS_ERROR
-};
 
 // =============================================================================
 //  3. STATIC TABLES
@@ -105,15 +92,15 @@ static const uint32_t GD_ABSENCES[GOD_ABSENCE_COUNT] = {
 
 static const uint8_t GD_STATVALS[GOD_STATVAL_COUNT] = { 0, 25, 50, 100 };
 
-// The root list. Eight commands, then the explicit exit row.
+// The root list. Seven commands, then the explicit exit row.
 static constexpr uint16_t GD_MENU_STR[GOD_MENU_ROWS] = {
   (uint16_t)STR_GOD_SPEED,    (uint16_t)STR_GOD_ABSENCE, (uint16_t)STR_GOD_SETSTAT,
-  (uint16_t)STR_GOD_STAGE,    (uint16_t)STR_GOD_GENOME,  (uint16_t)STR_GOD_BLE,
+  (uint16_t)STR_GOD_STAGE,    (uint16_t)STR_GOD_GENOME,
   (uint16_t)STR_GOD_CLOCK,    (uint16_t)STR_GOD_WIPE,    (uint16_t)STR_AF_QUIT
 };
 
 // The two root rows draw_menu() prints a live value next to.
-enum : uint8_t { GD_ROW_SPEED = 0, GD_ROW_CLOCK = 6 };
+enum : uint8_t { GD_ROW_SPEED = 0, GD_ROW_CLOCK = 5 };
 static_assert(GD_MENU_STR[GD_ROW_SPEED] == (uint16_t)STR_GOD_SPEED,
               "GD_ROW_SPEED no longer names the speed row");
 static_assert(GD_MENU_STR[GD_ROW_CLOCK] == (uint16_t)STR_GOD_CLOCK,
@@ -199,16 +186,6 @@ static char     s_hex_show[33];           // last dumped/loaded genome, 32 + NUL
 // Serial bench console (the `stall` command).
 static char     s_cmd[24];
 static uint8_t  s_cmdlen      = 0;
-
-// Synthetic mating.
-static uint8_t  s_bs          = GBS_IDLE;
-static uint32_t s_bs_next_ms  = 0;
-static uint32_t s_bs_deadline = 0;
-static uint8_t  s_bs_hits     = 0;
-static Genome   s_bs_partner;
-static Genome   s_bs_child;
-static bool     s_bs_child_ok = false;
-static uint16_t s_bs_str      = (uint16_t)STR_EMPTY;
 
 // =============================================================================
 //  5. SMALL HELPERS
@@ -355,138 +332,6 @@ static void install_genome(const Genome& g)
   if (p) genome_to_hex32(p->genome, s_hex_show);
   changed();
   toast((uint16_t)STR_GOD_DONE);
-}
-
-// =============================================================================
-//  6. SYNTHETIC BLE MATING (command 6, BLE FALSO)
-//     One board, the whole three-frame handshake. Everything below drives the
-//     real ble_social state machine; only the packets are fabricated.
-// =============================================================================
-static void ble_flow_abort(void)
-{
-  if (s_bs != GBS_IDLE) {
-    if (ble_is_up()) ble_end();
-    if (net_mode() == RADIO_BLE) net_request(RADIO_OFF);
-  }
-  s_bs = GBS_IDLE;
-}
-
-static void ble_flow_start(void)
-{
-  const PetSave* p = pet();
-  if (!p) { toast((uint16_t)STR_GOD_NOPET); return; }
-
-  s_bs_child_ok = false;
-  s_bs_hits     = 0;
-  s_bs_str      = (uint16_t)STR_GOD_MATING;
-  s_bs_next_ms  = millis();
-  s_bs_deadline = millis() + GOD_BLE_TIMEOUT_MS;
-
-  // A partner that is guaranteed to be genetically legal: opposite sex, high
-  // sociability so the success roll is worth watching rather than a coin flip.
-  s_bs_partner = genome_genesis();
-  gene_set_sex(s_bs_partner, (uint8_t)(gene_sex(p->genome) ^ 1u));
-  gene_set_sociability(s_bs_partner, 14);
-
-  s_bs = GBS_RADIO;
-}
-
-static void ble_flow_service(void)
-{
-  if (s_bs == GBS_IDLE || s_bs == GBS_DONE || s_bs == GBS_ERROR) return;
-
-  const uint32_t now = millis();
-  if ((int32_t)(now - s_bs_deadline) >= 0) {
-    ble_flow_abort();                      // parks s_bs at GBS_IDLE...
-    s_bs     = GBS_ERROR;                  // ...so the verdict is set AFTER it
-    s_bs_str = (uint16_t)STR_GOD_CHILD_NO;
-    return;
-  }
-  if ((int32_t)(now - s_bs_next_ms) < 0) return;
-  s_bs_next_ms = now + GOD_BLE_STEP_MS;
-
-  const PetSave* p = pet();
-  if (!p) { s_bs = GBS_ERROR; s_bs_str = (uint16_t)STR_GOD_NOPET; return; }
-
-  switch (s_bs) {
-    case GBS_RADIO: {
-      if (net_mode() != RADIO_BLE) {
-        if (!net_request(RADIO_BLE)) {
-          s_bs = GBS_ERROR; s_bs_str = (uint16_t)STR_GOD_NEED_BLE;
-          return;
-        }
-        return;                                  // give the stack one step
-      }
-      if (!ble_is_up() && !ble_begin()) {
-        s_bs = GBS_ERROR; s_bs_str = (uint16_t)STR_GOD_NEED_BLE;
-        return;
-      }
-      ble_set_self((uint8_t)sim_stat_pct(ST_ENERGY),
-                   (uint8_t)(BLE_SELF_SEEKING | BLE_SELF_GOD));
-      ble_advertise_beacon(p->genome, p->stage, (uint8_t)(p->cq >> 2));
-      s_bs = GBS_SEED;
-      return;
-    }
-
-    case GBS_SEED: {
-      // One injection is one packet: a peer must be heard BLE_PEER_MIN_HITS
-      // times before ble_social will court it, exactly like a real one.
-      ble_debug_inject_beacon(s_bs_partner, (uint8_t)STAGE_ADULT,
-                              (uint8_t)200, (uint8_t)BLE_BF_SEEKING, (int8_t)-45);
-      ble_scan_service();
-      if (++s_bs_hits < (uint8_t)BLE_PEER_MIN_HITS) return;
-
-      const BlePeerInfo* peer = (ble_peer_count() > 0) ? ble_peer(0) : 0;
-      if (!peer) { s_bs = GBS_ERROR; s_bs_str = (uint16_t)STR_GOD_CHILD_NO; return; }
-
-      uint8_t eflags = 0;
-      s_bs_child = genome_breed(p->genome, peer->genome,
-                                (uint8_t)(p->cq >> 2), peer->cq_hi, &eflags);
-      GOD_LOGF("[god] bred child eflags=%02X\n", (unsigned)eflags);
-      ble_advertise_offer(s_bs_child, peer->mac + 3);
-      s_bs = GBS_OFFER;
-      return;
-    }
-
-    case GBS_OFFER: {
-      ble_scan_service();
-      BleMateEvent ev;
-      if (ble_mate_take(ev)) {                   // instant refusal, or done
-        s_bs_child_ok = (ev.ok != 0);
-        if (ev.ok) {
-          s_bs_child = ev.child;
-          genome_to_hex32(s_bs_child, s_hex_show);
-        }
-        s_bs_str = ev.str_id ? ev.str_id
-                             : (uint16_t)(ev.ok ? STR_GOD_CHILD_OK : STR_GOD_CHILD_NO);
-        s_bs     = GBS_DONE;
-        return;
-      }
-      if (ble_mate_state() == (uint8_t)BLE_MATE_OFFERING && ble_debug_inject_ack()) {
-        s_bs = GBS_ACK;
-      }
-      return;
-    }
-
-    case GBS_ACK: {
-      ble_scan_service();
-      BleMateEvent ev;
-      if (ble_mate_take(ev)) {
-        s_bs_child_ok = (ev.ok != 0);
-        if (ev.ok) {
-          s_bs_child = ev.child;
-          genome_to_hex32(s_bs_child, s_hex_show);
-          GOD_LOGF("[god] fake mate child=%s\n", s_hex_show);
-        }
-        s_bs_str = ev.str_id ? ev.str_id
-                             : (uint16_t)(ev.ok ? STR_GOD_CHILD_OK : STR_GOD_CHILD_NO);
-        s_bs     = GBS_DONE;
-      }
-      return;
-    }
-
-    default: return;
-  }
 }
 
 // =============================================================================
@@ -665,9 +510,6 @@ void god_begin(void)
   s_hexlen      = 0;
   s_hex[0]      = '\0';
   s_hex_show[0] = '\0';
-  s_bs          = GBS_IDLE;
-  s_bs_child_ok = false;
-  s_bs_str      = (uint16_t)STR_EMPTY;
 
   sim_set_time_scale(1u);
 
@@ -718,7 +560,6 @@ void god_exit(void)
   // (It is RAM-only: a reboot does drop it, and the pet then looks like it was
   //  saved in the future until the next real absence catches up. Known, and the
   //  reason the wipe command exists.)
-  ble_flow_abort();
   set_scale(0);
   s_frozen = false;
   s_active   = false;
@@ -772,7 +613,6 @@ void god_service(void)
   if (!s_active) return;
 
   hex_paste_service();
-  ble_flow_service();
 
   const uint32_t now = millis();
 
@@ -821,10 +661,8 @@ static GodEvt open_command(uint8_t row)
     case  2: s_screen = GSC_STATPICK; break;
     case  3: s_screen = GSC_STAGE;    break;
     case  4: s_screen = GSC_GENOME;   break;
-    case  5: s_screen = GSC_BLE;      s_bs = GBS_IDLE; s_bs_child_ok = false;
-             s_bs_str = (uint16_t)STR_EMPTY; break;
-    case  6: s_screen = GSC_SYS;      s_sys_page = GD_SYS_CLOCK; break;
-    case  7: open_confirm((uint16_t)STR_CF_WIPE, GCF_WIPE1); break;
+    case  5: s_screen = GSC_SYS;      s_sys_page = GD_SYS_CLOCK; break;
+    case  6: open_confirm((uint16_t)STR_CF_WIPE, GCF_WIPE1); break;
     default:
       god_exit();
       return GOD_EVT_LEAVE;
@@ -926,15 +764,6 @@ static GodEvt select_sub(void)
       if (s_hex_mode == GHX_DUMP && s_hex_show[0]) GOD_LOGF("GENOME,%s\n", s_hex_show);
       return GOD_EVT_NONE;
 
-    case GSC_BLE:
-      if (s_bs == GBS_DONE && s_bs_child_ok) {
-        install_genome(s_bs_child);              // test inheritance on one board
-        s_bs_child_ok = false;
-      } else if (s_bs == GBS_IDLE || s_bs == GBS_DONE || s_bs == GBS_ERROR) {
-        ble_flow_start();
-      }
-      return GOD_EVT_NONE;
-
     default:
       return GOD_EVT_NONE;
   }
@@ -981,7 +810,6 @@ GodEvt god_handle(Gesture g)
   // ---- every sub-screen ----------------------------------------------------
   switch (g) {
     case GST_HOLD_R:
-      if (s_screen == GSC_BLE)   ble_flow_abort();
       if (s_screen == GSC_STATVAL) { s_screen = GSC_STATPICK; s_sub_cur = s_pick; }
       else if (s_screen == GSC_GENE || s_screen == GSC_HEX) { s_screen = GSC_GENOME; s_sub_cur = 0; }
       else                       { s_screen = GSC_MENU; }
@@ -1216,38 +1044,6 @@ static void draw_hex(void)
   }
 }
 
-static void draw_ble(void)
-{
-  draw_title(S(STR_GOD_BLE));
-  char b[32];
-
-  const char* phase = "-";
-  switch (s_bs) {
-    case GBS_RADIO: phase = "RADIO"; break;
-    case GBS_SEED:  phase = "BEACON"; break;
-    case GBS_OFFER: phase = "OFFER"; break;
-    case GBS_ACK:   phase = "ACK"; break;
-    case GBS_DONE:  phase = "DONE"; break;
-    case GBS_ERROR: phase = "ERR"; break;
-    default: break;
-  }
-  snprintf(b, sizeof(b), "%s  peers=%u  ses=%u", phase,
-           (unsigned)ble_peer_count(), (unsigned)net_ble_sessions_used());
-  rd_text(3, 27, RD_FONT_TINY, b);
-
-  if (s_bs_str != (uint16_t)STR_EMPTY)
-    rd_text_fit(3, 37, OLED_W - 6, RD_FONT_BODY, S(s_bs_str));
-
-  if (s_bs == GBS_DONE && s_bs_child_ok && s_hex_show[0]) {
-    char half[17];
-    memcpy(half, s_hex_show, 16); half[16] = '\0';
-    rd_text_center_in(0, OLED_W, 46, RD_FONT_TINY, half);
-    memcpy(half, s_hex_show + 16, 16); half[16] = '\0';
-    rd_text_center_in(0, OLED_W, 54, RD_FONT_TINY, half);
-  }
-  rd_affordance(0, S(STR_AF_SEL));
-}
-
 static void draw_sys(void)
 {
   char b[34];
@@ -1379,7 +1175,6 @@ void god_draw(void)
     case GSC_GENOME:   draw_simple_list(S(STR_GOD_GENOME),  GD_GEN_ROWS,               lbl_genome);   break;
     case GSC_GENE:     draw_gene(); break;
     case GSC_HEX:      draw_hex(); break;
-    case GSC_BLE:      draw_ble(); break;
     case GSC_SYS:      draw_sys(); break;
     case GSC_CONFIRM:  draw_confirm(); break;
     default:           draw_menu(); break;

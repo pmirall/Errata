@@ -392,7 +392,7 @@ void loop()
 
   // --- 3. per-loop pumps that own presentation timing ----------------------
   ui_service();                   // auto-return, minigames, the hatch ceremony
-  god_service();                  // soak log, serial paste, synthetic BLE
+  god_service();                  // soak log, serial genome paste
 
   // --- 4. render ------------------------------------------------------------
   rd_set_fps(ui_fps());
