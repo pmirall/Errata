@@ -12,7 +12,7 @@ may override), **CLOSED** (decided; commit named).
 | # | Decision | Status | Evidence | Default in force | Blocks | Outcome |
 |---|---|---|---|---|---|---|
 | **D1** | GPIO map (pin conflict) | **DEFERRED BY OWNER (2026-09-02)** — keep the values the repository already carries; revisit later | `config.h` compiles `PIN_SDA 8, PIN_SCL 9, PIN_BTN_L 10, PIN_BTN_R 2, PIN_LED 5` with the human comments "tu cableado actual del TinyLLM" / "OBLIGATORIO cambiarlo: 8 ya es SDA". README §2, CHANGELOG, `render.h`, `render.cpp` all document the other map (SDA=6, SCL=7, BTN_L=3, BTN_R=4, LED=8) and warn that GPIO2/8/9 are strapping pins. Nothing has ever run on hardware. | **Values stay exactly as committed.** `PB_PINS_CONFIRMED` is NOT defined, so the guard `static_assert`s added in P2-C8 stay dormant. | P2-C0 first flash (hardware track only), P6-C3 deep sleep | Owner defers; consequences recorded below the table. |
-| **D2** | Peer-session transport: BLE vs Wi-Fi (ESP-NOW) | **CLOSED — ESP-NOW (2026-09-02, owner)** | The legacy BLE advert carries 19 B/frame and cannot carry the §15 message set; GATT was rejected by the original author for stability; each BLE bring-up burns one of 32 sessions with a claimed ~672 B Bluedroid leak; BLE costs 721,632 B flash / 23,688 B static RAM. ESP-NOW ships in the core (250 B/frame, unicast + send-callback ACK) and needs the same `WIFI_STA` residency the §40 scanner already requires. | ESP-NOW is the transport, behind the §59 `Transport` seam. `FEATURE_BLE 0` in the release build. | P7-C1 | Decided: ESP-NOW. See the consequences below the table. |
+| **D2** | Peer-session transport: BLE vs Wi-Fi (ESP-NOW) | **CLOSED — ESP-NOW (2026-09-02, owner)** | The legacy BLE advert carries 19 B/frame and cannot carry the §15 message set; GATT was rejected by the original author for stability; each BLE bring-up burns one of 32 sessions with a claimed ~672 B Bluedroid leak; BLE costs 721,632 B flash / 23,688 B static RAM **as measured in phase 1 — re-measured at the phase-4 exit as 712,466 B / 23,504 B (baseline minus `no-ble`); the phase-1 pair is kept because it is what the owner decided on, and the correction is worked through under "D2 — consequences"**. ESP-NOW ships in the core (250 B/frame, unicast + send-callback ACK) and needs the same `WIFI_STA` residency the §40 scanner already requires. | ESP-NOW is the transport, behind the §59 `Transport` seam. `FEATURE_BLE 0` in the release build. | P7-C1 | Decided: ESP-NOW. See the consequences below the table. |
 | **D3** | Sketch folder rename and product identity in persisted names | DEFAULT | `sketch_aug30b/` → `Pebblebol/`; `NVS_NS "notta"`, AP prefix `NOTTAMAGOCHI-`, mDNS `nottamagochi.local`. No device has ever run this firmware, so renaming orphans nothing real. | Folder renamed in P2-C1; NVS namespace `"pbbl"` in P2-C9 with a one-shot import of a legacy `"notta"` save; AP prefix `PEBBLEBOL-` in P8-C2; mDNS deleted in P2-C5. | P2-C1, P2-C9 | **CLOSED (P2-C9b, 2026-09-03).** Namespace is `"pbbl"` (`hardware/kv_nvs.h`, `PB_NVS_NAMESPACE`). `kv_begin()` performs a ONE-SHOT import: the raw v1 blobs (`save`, `cfg`, `gl`, `t`) are copied out of `"notta"` under their old key names into `"pbbl"`, where `persistence/migration.cpp` finds them, and `"notta"` is then cleared so a later factory reset cannot resurrect a deleted pet. It runs only when `"pbbl"` holds neither a v2 Box nor an already-imported v1 save, so it can never overwrite live state, and it is idempotent across a power cut in the middle. Verified by `tests/test_compat.cpp` (`compat_migrates_a_v1_save_into_the_live_pet`) and `tests/test_persistence.cpp` (the v1 fixtures). AP prefix and mDNS are unaffected (mDNS was deleted in P2-C5). |
 | **D4** | Language of user-facing UI strings | DEFAULT | Spanish `strings_es.h` (439 strings, `StrId` mechanism) vs English. Spec header allows Spanish UI. | Keep Spanish; new BOX/BATTLE/NET/LINK/CREATOR/ERROR/TIME blocks written in Spanish in the same mechanism. An `strings_en.h` twin is a one-file swap later. | P2-C11 | — |
 | **D5** | Panel variant SSD1306 vs SH1106 | DEFAULT | `DISPLAY_IS_SH1106` (`config.h:64`); both drivers verified to link. | Keep 0 (SSD1306). Flip only with the panel in front of you (README §3 symptoms). | P2-C0 | — |
@@ -614,20 +614,52 @@ and 2,328 B of static RAM** on the baseline. Caps are `GATE_FLASH_MAX` 2,400,000
 (484,346 B free) and **80.8 % of the globals cap** (17,324 B free); the release build is
 1,191,426 B, **37.9 %** of the 3,145,728 B `app0` slot, where it has been since phase 2.
 
-**Where the phase-4 cost actually landed.** Per-commit, from each commit's own recorded size
-line: P4-C1 and P4-C2 moved the baseline not at all (1,896,094 / 70,348 — the content tables
-and the engine are compiled but nothing on the device called them yet); P4-C4a +164 B;
-**P4-C4 +18,780 B of flash and +2,304 B of globals**, which is the battle screen's file-scope
-statics (`s_setup` 780 B, `s_st` 212 B, `s_ring` 576 B, `s_ai` 8 B and the rest,
-`ui/screen_battle.cpp:72-101`); P4-C5a +658 B; P4-C5 and its follow-up 0 B. **P4-C6 itself is
-−42 B of flash** on every variant and −16 B of globals on `release`, from deleting four
-write-only view fields and the dead mood-badge chain (below).
+**Where the phase-4 cost actually landed.** Per-commit, every delta the difference of two
+adjacent commits' own recorded `flash=`/`globals=` lines, and **the eleven deltas —
+`git log --oneline v0.3.0-pet..d21f20f` is exactly eleven commits — sum to the
++22,582 / +2,328 in the table above** — which is the check the first version of this
+paragraph failed:
+
+| commit | chunk | flash | globals | after |
+|---|---|---|---|---|
+| `993e3b0` | P4-C1 content pack + roster | **+3,022** | 0 | 1,896,094 / 70,348 |
+| `532ceff` `9997ed4` `61b42d2` | P4-C2, P4-C3, their follow-up | 0 | 0 | 1,896,094 / 70,348 |
+| `c9c64f3` | P4-C4a species→body | +164 | 0 | 1,896,258 / 70,348 |
+| `a440a4d` | P4-C4 battle screen | **+18,780** | **+2,304** | 1,915,038 / 72,652 |
+| `ee75076` | P4-C4 follow-up | −124 | 0 | 1,914,914 / 72,652 |
+| `66993bb` | P4-C5a validator + codec | +782 | +24 | 1,915,696 / 72,676 |
+| `ab6ecfe` `250f73e` | P4-C5, its follow-up | 0 | 0 | 1,915,696 / 72,676 |
+| `d21f20f` | P4-C6 exit | −42 | 0 | 1,915,654 / 72,676 |
+| | **phase 4** | **+22,582** | **+2,328** | |
+
+Two corrections are folded into that table and named here rather than quietly applied,
+because the first version of this ledger was the seventh wide sentence of the kind this
+exit exists to catch. It said **"P4-C1 and P4-C2 moved the baseline not at all"**: that is
+true of GLOBALS and **false of flash**, where P4-C1 cost **+3,022 B**, exactly as
+`git log -1 993e3b0` and `PEBBLEBOL_IMPLEMENTATION_PLAN.md:529` both record in bold. One
+axis's true number had been generalised onto both, and the missing 3,022 B — 13.4 % of the
+phase's whole flash bill — was left attributed to nothing. It also gave P4-C5a as **+658 B**,
+which is 1,915,696 − 1,915,038, i.e. measured across the skipped `ee75076` follow-up rather
+than from the adjacent commit; P4-C5a's own cost is **+782 B** and the follow-up's is
+**−124 B**. What survives unchanged is the shape of the bill: **P4-C4, the battle screen, is
++18,780 B of flash and +2,304 B of globals** — the file-scope statics (`s_setup` 780 B,
+`s_st` 212 B, `s_ring` 576 B, `s_ai` 8 B and the rest, `ui/screen_battle.cpp:72-101`) — and
+phase 4's globals bill starts at P4-C4, not at the roster, because the tables are
+`constexpr`/`.rodata` and a roster is a flash cost. **P4-C6 itself is −42 B of flash** and
+−16 B of globals on `release`, from deleting four write-only view fields and the dead
+mood-badge chain (below). **The "every variant" half is now measured rather than asserted**:
+the P4-C6 follow-up ran `build_matrix.sh` at `250f73e` (baseline 1,915,696 · no-ble
+1,203,230 · no-web 1,286,170 · no-god 1,903,812 · sh1106 1,915,696 · all-off 515,310 ·
+release 1,191,468) and again on its own tree, which reproduces the exit's seven figures
+exactly — **−42 B of flash on all seven**, and −16 B of globals on `release` alone
+(49,020 → 49,004), the other six unchanged.
 
 **Globals is the tight axis, and this is what the trend leaves for phases 5–10.** 17,324 B
 free with six phases to go is 2,887 B a phase; phase 4 spent 2,328 B, so six more at
 phase-4's rate lands at 86,644 of 90,000 — inside the cap with 3,356 B of margin, which is
 not comfortable, and P7 and P8 are each larger in scope than P4. Three things make it
-survivable and all three are measured rather than hoped:
+survivable. Two of the three are measured; the third is arithmetic over art that does not
+exist yet, and it is labelled as such rather than carried inside the word "measured":
 
 - **P7's session state is 468 B**, not a phase. `sizeof(Session)` compiled with
   `riscv32-esp-elf-g++` is 340 B and `sizeof(LinkEvent)` is 8 B, so a 16-entry ring is
@@ -635,21 +667,48 @@ survivable and all three are measured rather than hoped:
 - **Phases 5 and 7 cost 0 new globals for their persisted state.** `Inventory` (32 B),
   `CooldownTable` (272 B) and `PendingTrade` (64 B) are already members of the one 1,936 B
   `GameState` that `persistence/game_state.cpp` already declares.
-- **Phase 9's content growth is flash, not globals** (36 → 60 species is +576 B of
-  `SPECIES_TABLE`), and P10's sprite atlas is 8,640 B against 484,346 B free.
+- **Phase 9's content growth is flash, not globals** — 36 → 60 species is **+576 B** of
+  `SPECIES_TABLE`, measured: `sizeof(SpeciesDef)` under `riscv32-esp-elf-g++` is 24 B.
+  **P10's sprite atlas is a PROJECTION, not a measurement**: 8,640 B is plan T13's
+  arithmetic (60 species × 2 frames × 72 B XBM) for pixels nobody has drawn, against
+  484,346 B free. The arithmetic is right; the art is hypothetical, and calling it measured
+  would be the same move this exit corrected in the cost ledger above.
+
+**And the 2,887 B-a-phase line is PESSIMISTIC FOR PHASE 5 SPECIFICALLY, measured at the
+P4-C6 follow-up.** Phase 4's 2,328 B is not a phase's worth of state spread thin: it is
+**one object**. `riscv32-esp-elf-nm` over the sketch objects gives `screen_battle.cpp.o`
+**2,206 B** of `.bss`+`.data` (`s_setup` 780, `s_ring` 576, `s_st` 212, three `draw_*` row
+caches 400, the rest) against **670 B for the other sixteen screens put together**
+(`screen_box` 333, `screen_creator` 219, `screen_status` 38, median **8**). Phase 5's
+persisted state is genuinely free — `s_gs` is already a linked **1,936 B** global
+(`nm`: `s_gs` size `0x790`) and `Inventory` and `CooldownTable` are members of it, with
+save, load, defaults and quarantine already wired in `save_manager.cpp` — so what phase 5
+actually adds is a `ScanResult` buffer (6 B packed, 8 B aligned, × the scan cap) and two
+screens at non-battle scale. **The pressure is P7** (a 340 B `Session`, a 128 B ring, and
+ESP-NOW driver buffers that are not ours to size) **and P8**, not P5. The 2,887 B average
+stays as the budget line because averaging is the honest way to plan six unknown phases;
+this paragraph is why it should not be read as a forecast for the next one.
 
 **And the relief D2 already bought is large:** compiling BLE out recovers **712,466 B of
 flash and 23,504 B of static RAM**, measured here as baseline minus `no-ble`. The build that
 ships sits at 54.4 % of the globals cap with 40,996 B free.
 
-**THE CAVEAT, and it is load-bearing: none of P4-C5 is linked yet.** `riscv32-esp-elf-nm` on
-the baseline ELF finds zero `proto_`, `session_`, `pbw_`, `loopback_` or `transport_loopback`
-symbols and none of `battle_link.cpp`'s five function names, because nothing under `app/`,
-`ui/` or `persistence/` calls them and `--gc-sections` drops them. 3,333 lines of networking
-cost 0 B today. The 468 B above is a `sizeof`, not a measurement of a linked build.
+**THE CAVEAT, and it is load-bearing: none of P4-C5's NETWORKING is linked yet.** The
+heading used to read "none of P4-C5 is linked", which is wider than the evidence under it:
+P4-C5a's other half, `game/validate.cpp`, **is** linked — `riscv32-esp-elf-nm -C` on the
+baseline ELF shows `T validate_pebble(PebbleInstance const&)`, reached from
+`persistence/save_manager.cpp:610`. It is also, by elimination, where P4-C5a's **+782 B**
+went: that chunk shipped the validator and the codec, and `--gc-sections` drops every symbol
+of the codec, so the only half of it in the image is this one.
 
-**Host suite.** 31 binaries, **603 tests, 728,778 checks** (phase 3 shipped 21 / 328 /
-350,214). Phase 4 added 10 binaries, 275 tests and 378,564 checks, and grew 6 existing
+**What follows is about `src/networking` only.** `riscv32-esp-elf-nm` on the baseline ELF
+finds zero `proto_`, `session_`, `pbw_`, `loopback_` or `transport_loopback` symbols and
+none of `battle_link.cpp`'s five function names, because nothing under `app/`, `ui/` or
+`persistence/` calls them and `--gc-sections` drops them. The 3,333 lines phase 4 added
+under `src/networking` cost 0 B today. The 468 B above is a `sizeof`, not a measurement of a linked build.
+
+**Host suite.** 31 binaries, **603 tests, 728,779 checks** (phase 3 shipped 21 / 328 /
+350,214). Phase 4 added 10 binaries, 275 tests and 378,565 checks, and grew 6 existing
 binaries. Goldens went 48 → **55** screen frames plus `tests/golden/battle_v1.txt`, a
 22-round transcript — the only artifact in the tree that can catch a duration off-by-one
 that both the Python model and `battle.cpp` share.
@@ -714,6 +773,16 @@ recovers **712,466 B / 23,504 B**, not the phase-1 audit's 721,632 / 23,688.
   both sides. So no percentage anywhere in this repository is a statement about what the
   device plays, and none is quoted at this exit. **P9-C4** is the chunk that produces real
   ones (`tests/tools/balance_matrix.cpp`, 60×60 AI-vs-AI at 1,000 seeded battles a pair).
+- **Four figures in this exit are HISTORICAL REVIEW MEASUREMENTS with no harness left in the
+  tree**, and the P4-C6 follow-up could not re-derive them by running anything. They are
+  internally consistent and each is recorded identically in every file that repeats it, but
+  they rest on the reviewer's word rather than on a command a reader can re-run: **594 wins
+  of 600** for maximum genome against minimum (200 + 200 + 194 across three configurations;
+  `docs/protocol.md` LIMIT 4 and `game/validate.h`), **198 encoder-emitted frames its own
+  decoder refused in 2,000,000** and the **35** the shipped case reproduces, **1,019
+  injections over seventeen hours** on the RX budget, and the P4-C5b bug counts
+  **263/472/88/18**. Everything else in this document was re-derived by running a command at
+  this exit or at the follow-up.
 - **Battery life.** D11 is still OPEN and is the single biggest open factor.
 - **The 1 h heap soak (P2-C12) and the ×3600 neglect soak (P3-C5)** are still pending first
   flash. **This firmware has still never run on a physical board.**

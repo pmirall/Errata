@@ -31,13 +31,22 @@ forward:
   **1,191,426 / 49,004**, 37.9 % of the `app0` slot. Almost the whole bill is one chunk:
   P4-C4, the battle screen, is +18,780 B of flash and +2,304 B of globals, and it is all
   file-scope statics, which is the same fact as "no per-frame heap".
-- **Host suite:** 21 → **31 binaries, 328 → 603 tests, 350,214 → 728,778 checks.** Screen
+- **Host suite:** 21 → **31 binaries, 328 → 603 tests, 350,214 → 728,779 checks.** Screen
   goldens 48 → 55, plus `tests/golden/battle_v1.txt`, a 22-round transcript.
 - **The lossy-link acceptance run:** **3,000 trials over six fault arms, 2,971 completed and
-  agreed, 0 silent divergences, and no trial wrote a Box it should not have.** The five 10 %
-  arms complete 500 of 500; the harsh arm (30 % drop, 20 % reorder) completes 471, loses 28
-  by name and half-pays 1 — which is what makes "or aborts cleanly" a measured half of the
-  promise rather than a decoration.
+  agreed, 0 silent divergences, and no trial left either Box changed.** The **clean arm and
+  the four 10 % arms** complete 500 of 500. This entry first said "the five 10 % arms", which
+  counted the UNFAULTED arm as a fault arm and inflated the run's fault coverage by a whole
+  arm; there are four (drop, duplicate, reorder w4, and all three together), each at 100 ‰.
+  The harsh arm (30 % drop, **10 % duplicate**, 20 % reorder — `hard.dup_permille = 100u`
+  in `the_acceptance_run_completes_or_aborts_by_name_and_never_diverges_in_silence`; the
+  printed arm label names only two of its three faults) completes 471, loses 28 by name
+  and half-pays 1 — which is what makes "or aborts cleanly" a measured half of the promise
+  rather than a decoration.
+  The Box assertion is a **guard, not a discovery**: `boxes_untouched()` memcmps both
+  endpoints' Boxes across every trial, and at this commit nothing under `app/`, `ui/` or
+  `persistence/` links the session module at all, so there is no code path that could have
+  written one. It is waiting for P7.
 - **Sanitizers:** ALL PASS 31/31 under `-fsanitize=address,undefined
   -fno-sanitize-recover=all`, zero reports, with exactly one line neutralised for a
   pre-existing GCC 13.3 `constexpr` fold.
@@ -111,8 +120,9 @@ project warnings, size caps, and `make -C tests check`.
   explicit shifts** — never a struct memcpy — and one golden frame plus one golden 48 B
   record are pinned byte for byte, because a grep cannot express that rule and a
   memory-image codec would make the host test prove nothing about the device.
-- **`tests/test_validate.cpp` (24 cases) and `tests/test_protocol.cpp` (24 cases)**, plus
-  a `networking/` pattern rule in `tests/Makefile` — until now `grep -c networking
+- **`tests/test_validate.cpp` (25 cases, 3,566 checks) and `tests/test_protocol.cpp`
+  (25 cases, 234,356 checks)**, plus a `networking/` pattern rule in `tests/Makefile` —
+  until now `grep -c networking
   tests/Makefile` was **0** and nothing under `src/networking` could link on the host at
   all. Totality is swept rather than sampled: every truncation length of every type, every
   single-bit flip at every bit position of every type (3,680 flips), every truncation
@@ -161,7 +171,7 @@ project warnings, size caps, and `make -C tests check`.
   The loopback is two in-process queues with configurable drop / duplicate / reorder-window
   percentages and a scripted "kill the next N frames of this named type" fault, all drawn
   from **one seeded `Rng`**, so a failing acceptance trial reproduces from its printed seed.
-- **`tests/test_session.cpp` (36 cases, 1,053 checks) and `docs/protocol.md`.** The
+- **`tests/test_session.cpp` (41 cases, 2,493 checks) and `docs/protocol.md`.** The
   acceptance census runs 500 trials per arm over six fault models and asserts that **no
   trial ever diverges in silence** — 0 in 3,000 — while requiring the clean arm to complete
   every trial and the harsh arm to show **both** a completion and a clean abort, because a
@@ -282,9 +292,12 @@ project warnings, size caps, and `make -C tests check`.
   points of atk/def/spd is not a rounding error, and the clause says so now.
 - The acceptance census records the **instrument's own error bar**: the loopback's 24-deep
   queue counts a send onto a full queue as a drop, so an arm's effective loss is its
-  declared loss plus 0 / 283 / 192 / 540 / 43 overflows of 70,298 / 109,656 / 88,042 /
-  120,856 / 157,896 sends. It now asserts that an unfaulted link overflows nothing and
-  that no arm lets overflow become its dominant fault. It also states that the harness
+  declared loss plus that. **All six arms, named** — the first listing gave five unnamed
+  pairs for six arms and silently dropped the duplicate arm: clean 0 of 70,298; 10 % drop
+  283 of 109,656; 10 % duplicate 0 of 70,298; 10 % reorder w4 192 of 88,042; all three at
+  10 % 540 of 120,856; harsh 43 of 157,896. It now asserts that an unfaulted link overflows
+  nothing and that no arm lets overflow become its dominant fault. It also states that the
+  harness
   advances its virtual clock only on a poll round in which no frame moved anywhere, so the
   census measures session logic under loss and not a duty cycle.
 - The harsh acceptance arm reads **471/500** (was 474): three trials had been completing on
@@ -710,8 +723,10 @@ project warnings, size caps, and `make -C tests check`.
 - **`session_state_name()` and `session_detail_name()` shipped with no caller and no test**,
   while their three siblings (`proto_err_name`, `validate_reject_name`,
   `session_reason_name`) all had both. They are wired into the acceptance census now — a
-  hung trial names the state each endpoint stopped in, and every arm prints its terminal
-  `SessionDetail` distribution by name instead of by number — and
+  hung trial names the state each endpoint stopped in, and an arm that loses a trial names
+  the `SessionDetail` each non-completing pair carried instead of numbering it (the print
+  is per-detail and conditional, so the five arms that complete 500 of 500 print none at
+  all and the harsh arm prints `SD_NONE=58`, which is 29 trials x 2 endpoints) — and
   `every_session_state_and_detail_has_a_distinct_english_name_and_the_lookup_is_total`
   gives all three enums the totality case only two of them had.
 - **`docs/protocol.md` carried false test counts one commit after they changed.** Its header
@@ -754,14 +769,75 @@ project warnings, size caps, and `make -C tests check`.
   `game_state.cpp`'s slot-0 (rather than active-slot) name source is recorded as the latent
   P5-C4 bug it is, in the chunk that will be able to write a failing test for it.
 
+### Fixed (P4-C6 follow-up — what four hostile verifiers found in the exit itself)
+
+The exit above was written against phase 3's failure — four false numbers that a later audit
+caught — and then reproduced two of its shapes. Every item here was confirmed against the
+tree before it was touched, and every one was **narrowed** rather than deleted.
+
+- **The phase-4 cost ledger in `docs/decisions.md` did not add up, and its first item was
+  contradicted by the commit it cited.** "P4-C1 and P4-C2 moved the baseline not at all" is
+  true of GLOBALS and **false of flash**: P4-C1 cost **+3,022 B**, which `993e3b0`'s own
+  message and `PEBBLEBOL_IMPLEMENTATION_PLAN.md:529` both state in bold, and which the
+  P4-C1 section of this same entry states three hundred lines above ("Flash does not bind:
+  +3,022 B"). One axis's true number had been generalised
+  onto both — the phase-3 shape exactly — and the consequence was arithmetic: the deltas the
+  paragraph listed summed to **19,560 B** against the **+22,582 B** it stated four lines
+  earlier, leaving 13.4 % of the phase's flash bill attributed to nothing. It also
+  understated P4-C5a by measuring it across a skipped follow-up (+658 rather than +782 and
+  −124). It is a per-commit table now, and **the eleven deltas sum to the phase total**.
+- **The "nothing is lost" sentence the exit struck from `migration.cpp` survived verbatim in
+  `migration.h`** — the same sentence, born in the same commit (`ee75076`), in the header
+  that points the reader at the file that now says the opposite. This is precisely the
+  phase-3 exit's documented failure (a struck sentence surviving in other places), recurring
+  in the exit written to prevent it. `ui_pet_name()` reaches the dynasty rung only when
+  `pet_species_name(species_id)` is null, and `migrate_species_of()` always returns a real
+  roster id, so a migrated pet never reaches it; the header now says what `migration.cpp`,
+  `docs/save_schema.md` §8 and two cases in `tests/test_persistence.cpp` already said.
+- **Three numbers in this entry were wrong and one of them was a number this entry announces
+  it corrected elsewhere.** "The five 10 % arms complete 500 of 500" counted the CLEAN arm
+  as a fault arm; `tests/test_validate.cpp` and `tests/test_protocol.cpp` were given as 24
+  cases each and `tests/test_session.cpp` as 36 cases / 1,053 checks — the very counts the
+  Fixed section above says were corrected in `docs/protocol.md` one commit after they
+  changed. Measured: **25 / 3,566**, **25 / 234,356**, **41 / 2,493**. The harsh arm's label
+  names two of its three faults (it duplicates at 10 % as well), and the queue-overflow
+  error bar listed five unnamed pairs for six arms, dropping the duplicate arm.
+- **A test asserted a hole that a future commit could close without failing.**
+  `tests/test_content.cpp`'s SPECIAL case said it "will FAIL when P5-C3 fills it"; every
+  assertion in it was about the ENCOUNTER rows, so a payload table could have landed beside
+  them with the case still green. It pins the pack hash (`CONTENT_VERSION 0x5B4A`) now, and
+  the comment states both what that catches (any pack edit) and what it misses.
+- **Three more plan §5 module-contract rows described APIs that do not exist, and one was
+  made false by the exit commit itself**: `game/pebble.h` (`pebble_new()`,
+  `pebble_identity()`, `pebble_display_name()` — zero definitions tree-wide),
+  `game/box.h` (`bool box_add(Box&, …, uint8_t*)` against the tree's
+  `uint8_t box_add(const PebbleInstance&)`), and `ui/pet_view.h`, which still declared the
+  `mood`, `asleep` and `sick` fields the Removed section above deletes, plus a
+  `pet_view_fill()` that P4-C4a deleted.
+- **Four claims were wider than their evidence and are narrowed**: "all 3,333 lines of
+  `src/networking`" (3,333 is what phase 4 ADDED; the directory is 5,247 lines and
+  `ble_social`/`net`/`webui` **are** linked); "none of P4-C5 is linked" (`game/validate.cpp`
+  is — `riscv32-esp-elf-nm -C` shows `T validate_pebble(PebbleInstance const&)`, reached
+  from `save_manager.cpp:610`, and by elimination that is where P4-C5a's +782 B went, the
+  codec half being dropped entirely by `--gc-sections`); "every arm prints
+  its `SessionDetail` distribution" (only an arm with a non-completing pair prints anything
+  — today just the harsh one); and "all three are measured rather than hoped" in
+  `decisions.md`, where P10's 8,640 B sprite atlas is arithmetic for art nobody has drawn.
+- **`−42 B on every variant` is now a measurement rather than an inheritance.**
+  `build_matrix.sh` was run at `250f73e` and compared variant by variant against the exit:
+  **−42 B of flash on all seven**, **−16 B of globals on `release` alone**.
+
 ### Not verified
 
 **This firmware has still never run on a physical board.** No ESP32-C3, no panel, no cells.
 Every number above is a host measurement or a compile result.
 
-**There is no radio.** All 3,333 lines of `src/networking` are proven over an in-process
-loopback and are not linked into any build: `riscv32-esp-elf-nm` finds none of them in the
-ELF, so they cost 0 B today and the 468 B forecast for P7 is a `sizeof`, not a measurement.
+**There is no radio.** All **3,333 lines phase 4 added** under `src/networking`
+(`git diff --stat v0.3.0-pet..HEAD` — the directory itself is 5,247 lines, and the other
+1,914 are `ble_social`/`net`/`webui`, device modules that ARE linked) are proven over an
+in-process loopback and are not linked into any build: `riscv32-esp-elf-nm` finds none of
+the new ones in the ELF, so they cost 0 B today and the 468 B forecast for P7 is a
+`sizeof`, not a measurement.
 A real ESP-NOW link is bursty and correlated where the loopback's fault model is an
 independent Bernoulli draw, so the completion rates above describe the model, not the air.
 
@@ -1150,7 +1226,18 @@ The plan cuts tags from Phase 2 onward, so Phase 1 has no `v0.1.0` tag; it is co
      OF PHASE 4's SUBSTANCE - the P4-C5 follow-up - and NOT the P4-C6 exit
      commit, because the exit commit is the one that adds this line and no
      commit can carry its own SHA before it exists. The tag v0.4.0-battle points
-     at the exit commit; a reader following this link lands one commit earlier,
-     before the exit's own document corrections. Repoint it at the exit commit's
-     SHA in the first commit after the tag, which is how the 0.3.0-pet link came
-     to point where it does. -->
+     one commit later than this link; a reader following it lands before the
+     exit's own document corrections.
+
+     THE REPOINT IS DELIBERATELY STILL NOT DONE, and the reason changed at the
+     P4-C6 follow-up. The paragraph above used to say "repoint it at the exit
+     commit's SHA in the first commit after the tag" - and the follow-up IS that
+     commit, so this is where it would have happened. It did not, because
+     `git rev-parse origin/claude/repo-exploration-sync-bbonku` is still
+     250f73e: the exit commit d21f20f and this follow-up exist on ONE MACHINE.
+     Only TAG pushes are refused here; the branch push works, and until somebody
+     runs it a link to d21f20f would 404 where the current one resolves. So the
+     link stays at the last commit the remote actually has, and the repoint
+     belongs in the FIRST COMMIT AFTER THE BRANCH IS PUSHED - at which point it
+     should point at the exit commit, the way the 0.3.0-pet link points at
+     e2004e7. -->

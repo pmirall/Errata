@@ -246,7 +246,7 @@ on the same 500 seeds per arm, changing only the two constants:**
 |---|---|---|
 | 10 % drop | 483 completed, 17 `SE_LOST` | **500 completed, 0 lost** |
 | 10 % drop + dup + reorder | 482 completed, 18 lost | **500 completed, 0 lost** |
-| 30 % drop, 20 % reorder | 108 completed, 391 lost, 1 half-paid | **471 completed, 28 lost, 1 half-paid** |
+| 30 % drop, 10 % duplicate, 20 % reorder | 108 completed, 391 lost, 1 half-paid | **471 completed, 28 lost, 1 half-paid** |
 
 The design predicted worse than that for three rungs — it reasoned that an
 obligation needs its frame out and the clearing reply back (≈0.81 per attempt),
@@ -638,15 +638,19 @@ sees.
 13. **Completion is not promised at arbitrary loss — only "completes or aborts
     named".** Measured over 500 trials per arm: clean 500/500, 10 % duplicate
     500/500, 10 % reorder (window 4) 500/500, 10 % drop 500/500, 10 % of all
-    three together 500/500, and **30 % drop with 20 % reorder 471 completed, 28
-    clean `SE_LOST` and 1 half-paid**. Silent divergences: **0 in all 3,000
-    trials**, and not one trial wrote a Box byte. **Two things about the
-    instrument, said here rather than left to be re-derived.** (a) The loopback's
-    queue is `LB_QUEUE_CAP 24` deep and a send onto a full queue is counted as a
-    drop, so an arm's *effective* loss is its declared loss **plus** that:
-    measured 0 of 70,298 sends on the clean arm, 283 of 109,656 at 10 % drop, 192
-    of 88,042 on the reorder arm, 540 of 120,856 with all three and 43 of 157,896
-    on the harsh arm — under half a percent everywhere, and the census now
+    three together 500/500, and **30 % drop, 10 % duplicate and 20 % reorder
+    471 completed, 28 clean `SE_LOST` and 1 half-paid**. Silent divergences:
+    **0 in all 3,000 trials**, and not one trial left either Box changed — which
+    is a guard for P7 rather than a discovery, because nothing under `app/`,
+    `ui/` or `persistence/` links this module yet, so no path exists that could
+    write one. **Two things about the instrument, said here rather than left to
+    be re-derived.** (a) The loopback's queue is `LB_QUEUE_CAP 24` deep and a
+    send onto a full queue is counted as a drop, so an arm's *effective* loss is
+    its declared loss **plus** that: measured 0 of 70,298 sends on the clean arm,
+    283 of 109,656 at 10 % drop, 0 of 70,298 on the duplicate arm, 192 of 88,042
+    on the reorder arm, 540 of 120,856 with all three and 43 of 157,896 on the
+    harsh arm — all six, because listing five for six leaves the reader to guess
+    which one is missing; under half a percent everywhere, and the census now
     asserts both that an unfaulted link overflows nothing and that no arm lets
     overflow become its dominant fault. (b) The harness advances its virtual
     clock only on a poll round in which **no frame moved anywhere in the

@@ -1546,8 +1546,10 @@ static void arm(const char* name, const LoopbackFault& f, uint32_t trials,
   // THE INSTRUMENT'S OWN ERROR BAR, REPORTED RATHER THAN ASSUMED AWAY, and it
   // is NOT zero. A send onto a full LB_QUEUE_CAP queue is counted as a drop, so
   // an arm's EFFECTIVE loss rate is its declared one plus this. MEASURED at this
-  // commit: 0 of 70,298 sends on the clean arm, 283 of 109,656 at 10 % drop, 192
-  // of 88,042 on the reorder arm, 540 of 120,856 with all three, 43 of 157,896
+  // commit, ALL SIX ARMS (the first version of this list gave five and left the
+  // duplicate arm out): 0 of 70,298 sends on the clean arm, 283 of 109,656 at
+  // 10 % drop, 0 of 70,298 at 10 % duplicate, 192 of 88,042 on the reorder arm,
+  // 540 of 120,856 with all three, 43 of 157,896
   // on the harsh arm - i.e. under half a percent everywhere, which is why the
   // arms still measure roughly what they say. Both halves are asserted: an
   // UNFAULTED link must overflow exactly nothing (or the harness itself is
@@ -1606,6 +1608,10 @@ TEST(the_acceptance_run_completes_or_aborts_by_name_and_never_diverges_in_silenc
   hard.drop_permille = 300u; hard.dup_permille = 100u;
   hard.reorder_permille = 200u; hard.reorder_window = 4u;
   memset(tally, 0, sizeof tally);
+  // THE PRINTED NAME IS SHORT, NOT COMPLETE: this arm also duplicates at 10 %
+  // (dup_permille above), and the two-fault label it prints has been copied into
+  // three documents as if it were the whole fault model. The full model is
+  // 30 % drop / 10 % duplicate / 20 % reorder in a window of 4.
   arm("30% drop, 20% reorder", hard, N, tally, ARM_MIXED);
 }
 

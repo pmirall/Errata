@@ -72,8 +72,21 @@ bool migrate_v1_present(void);
 // migrate_default_name() was here and is deleted (P4-C4 follow-up). It wrote
 // the v1 dynasty name into a nickname the owner had never typed, which pinned
 // every migrated device to the first rung of ui_pet_name()'s ladder and stopped
-// the species name from ever appearing. ui.cpp's ui_name_for() still produces
-// exactly that word as the ladder's LAST rung, so nothing is lost. See the
+// the species name from ever appearing.
+//
+// THIS USED TO END "ui.cpp's ui_name_for() still produces exactly that word as
+// the ladder's LAST rung, so nothing is lost" (P4-C6 struck the same sentence
+// from migration.cpp and left its twin here - both were born in ee75076).
+// IT IS FALSE, and the tree already says so in three other places
+// (docs/save_schema.md section 8, and two cases in tests/test_persistence.cpp).
+// ui_pet_name() reaches ui_name_for() only when pet_species_name(species_id)
+// is nullptr, and migrate_species_of() always returns a real roster id: it
+// indexes SPECIES_BASE_OF_FAMILY with (legacy & 7) % 12, so the eight
+// destinations it can reach are {1, 4, 7, 10, 13, 16, 19, 22} and every one of
+// them is a shipped stage-0 row - so a migrated pet NEVER reaches that rung.
+// The v1 dynasty word is gone from the device for good, and V1 has no rename
+// screen to type it back.
+// It is still the right trade, and the trade is argued where it is made: the
 // nickname block in migration.cpp.
 
 // Legacy family (gene species & 7) -> v2 species id. Exposed so the test can

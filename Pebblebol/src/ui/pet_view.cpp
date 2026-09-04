@@ -47,10 +47,14 @@ uint8_t pet_mood_index(uint8_t score) {
 // -----------------------------------------------------------------------------
 //  IDENTITY
 //
-//  plan 1.4: pebble_identity() == id ^ creation_seed. game/pebble.h does not
-//  exist (P2-C9 filed its contents into game/box.cpp and
-//  persistence/save_schema.h instead), so the rule lives here, where the only
-//  two callers - petfx's automaton seed and the BOX screen - can both see it.
+//  plan 1.4: pebble_identity() == id ^ creation_seed. NARROWED IN THE P4-C6
+//  FOLLOW-UP - this said "game/pebble.h does not exist", which was true when it
+//  was written and stopped being true in P4-C1. The header exists; it carries
+//  the STAT derivation (pebble_derive_stats, pebble_stats_of) and no identity
+//  function, because P2-C9 filed the rest of plan 1.4's pebble.h into
+//  game/box.cpp and persistence/save_schema.h. So the rule still lives here,
+//  where the only two callers - petfx's automaton seed and the BOX screen - can
+//  both see it, and plan section 5's game/pebble.h row now says the same.
 //
 //  The genome fallback below is what petfx used to compute for itself
 //  (pf_identity): it is what an egg that has never been filed into the Box

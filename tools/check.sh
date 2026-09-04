@@ -396,9 +396,19 @@ if [ -d "$SKETCH/src/networking" ]; then
   [ "$n" -eq 0 ] || fail "src/networking mentions repairing ($n) - the wire path refuses, it never mends"
 fi
 
-# P5-C1: no station association anywhere (scan-only Wi-Fi, spec §68 r5)
+# P5-C1: no station association anywhere (scan-only Wi-Fi, spec section 68 r5).
+# Still dormant on purpose - it cannot pass until P5-C1 deletes the station path
+# (networking/net.cpp:280 is the one call site today, reached from net.cpp:440).
+#
+# THE CARVE-OUT IS GONE (P4-C6 follow-up). This read `| grep -v creator_server`,
+# an exception the plan does not authorise: plan line 72 specifies the gate as
+# `grep -c "WiFi.begin" src/` == 0 flat. It also excused a file that does not
+# exist - the creator server is `networking/webui.cpp` and P8-C3 renames it -
+# and it would have excused nothing anyway, because the AP portal uses
+# WiFi.softAP() (net.cpp:297) and never WiFi.begin(). An exception no rule
+# authorises, for a file nothing has, is how a gate quietly stops gating.
 # if [ -d "$SKETCH/src" ]; then
-#   n=$(grep -rn "WiFi\.begin(" "$SKETCH/src" | grep -v creator_server | wc -l); [ "$n" -eq 0 ] || fail "WiFi.begin outside creator_server ($n)"
+#   n=$(grep -rn "WiFi\.begin(" "$SKETCH/src" | wc -l); [ "$n" -eq 0 ] || fail "WiFi.begin() in src ($n) - the product never associates to a station"
 # fi
 
 echo "GATE OK"

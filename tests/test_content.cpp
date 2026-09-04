@@ -428,9 +428,20 @@ TEST(every_item_class_and_every_encounter_outcome_has_a_row) {
 // Spec section 22 names four outcomes and all four have rows, but SPECIAL has
 // NO payload table anywhere: no event roster, no ids, no per-category weights,
 // while it is 4 to 10 % of every scan. ITEM has the same shape of problem and
-// was rescued by ITEM_DROPS; SPECIAL has no equivalent. This test states the
-// gap in a way that will FAIL when P5-C3 fills it, which is the point - the
-// person who adds the payload table has to come back here and say so.
+// was rescued by ITEM_DROPS; SPECIAL has no equivalent.
+//
+// THE TRIPWIRE, NARROWED IN THE P4-C6 FOLLOW-UP. This comment used to say the
+// case "will FAIL when P5-C3 fills it". It would not have: every assertion
+// below is about the ENCOUNTER rows, so a SPECIAL_EVENTS table could have
+// landed beside them and this case would have stayed green - a claim asserting
+// a hole that was already closed, which is the exact failure shape the phase-3
+// exit shipped. So the last line is now a real tripwire and its reach is
+// stated: CONTENT_VERSION is a hash of tools/content/*.json, and ADDING the
+// payload table means editing the pack, so it fires. What it catches is ANY
+// pack edit (that is its cost - re-derive the constant, then read this
+// comment), and what it misses is a SPECIAL table hand-written OUTSIDE the
+// pack (that is its gap; the banner in data/encounter_table.h and plan line
+// 541 are what stand behind it there).
 TEST(the_special_encounter_outcome_still_has_no_payload_table) {
   int special_rows = 0;
   for (uint8_t i = 0; i < ENCOUNTER_ROW_COUNT; ++i)
@@ -446,6 +457,10 @@ TEST(the_special_encounter_outcome_still_has_no_payload_table) {
   // ITEM has a drop table. SPECIAL has nothing of the kind, and there is no
   // structure in data/ for it to live in yet.
   CHECK(ITEM_DROP_ROW_COUNT > 0);
+  // AND THE LINE THAT ACTUALLY FIRES (see the banner above): the pack hash at
+  // the phase-4 exit. Change the pack - which is what filling this hole is -
+  // and this case fails until somebody comes back and says what they did.
+  CHECK_EQ((unsigned)CONTENT_VERSION, 0x5B4Au);
 }
 
 // A FOURTH HOLE OF THE SAME SHAPE, missed by the first completeness pass and
