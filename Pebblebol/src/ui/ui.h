@@ -341,8 +341,12 @@ bool     ui_input_locked(void);
 // web-busy cap if it wants to.
 uint8_t  ui_fps(void);
 
-// The living pet's display name: Config.pet_name when the user set one,
-// otherwise the deterministic dynasty name. Always NUL-terminates.
+// The living pet's display name, in order: Config.pet_name when the user set
+// one, then the SPECIES the active Pebble is (the roster's Spanish name), then
+// the deterministic dynasty name for a Pebble with no species row. Always
+// NUL-terminates. P4-C4a put the species in the middle: the dynasty name says
+// the same word before and after an evolution, so on its own it could never
+// tell the player their creature had become something else.
 void     ui_pet_name(char* out, size_t cap);
 
 // hash(lineage_id, generation) -> two Spanish syllables.

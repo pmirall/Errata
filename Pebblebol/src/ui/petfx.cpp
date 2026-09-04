@@ -460,7 +460,6 @@ static int16_t  s_ink_x0 = 44, s_ink_y0 = 12, s_ink_x1 = 83, s_ink_y1 = 51;
 // carry a PetView into a query. Written where set_id is derived, three lines
 // below, so the two cannot drift apart.
 static uint8_t  s_qry_ok      = 0;
-static uint8_t  s_qry_species = 0;
 static uint8_t  s_qry_stage   = 0;
 static uint8_t  s_qry_form    = 0;
 
@@ -515,11 +514,10 @@ static inline int16_t pf_stage_hi(uint8_t w) {
 // for as long as the stage is, which is what a clamp has to be.
 static uint8_t pf_width_of(const PetView& p) {
   static const uint8_t kPoses[] = { POSE_IDLE, POSE_SLEEP, POSE_SICK, POSE_EAT };
-  const uint8_t species = p.gene_species;
-  const uint8_t form    = p.form;
+  const uint8_t form = p.form;
   uint8_t w = 0;
   for (uint8_t i = 0; i < (uint8_t)(sizeof(kPoses) / sizeof(kPoses[0])); i++) {
-    const uint8_t id = sprite_set_id(species, p.stage, form, kPoses[i]);
+    const uint8_t id = sprite_set_id(p.stage, form, kPoses[i]);
     const uint8_t sw = sprite_set(id).w;
     if (sw > w) w = sw;
   }
@@ -1074,13 +1072,15 @@ void petfx_draw_body(const PetView& p, uint8_t pose, uint8_t frame, int16_t dy,
     // cracking a minute before it hatches.
     set_id = (uint8_t)(((uint32_t)p.age_s + 60u >= AGE_EGG_S) ? SPR_EGG_CRACK : SPR_EGG_IDLE);
   } else {
-    // sprite_form_of() is the ONLY correct source of `form`: the adult body
-    // comes from the species gene and child/teen variants live in minor_form.
-    s_qry_species = p.gene_species;
+    // PetView.form is the ONLY source of the body, and since P4-C4a it is the
+    // SPECIES' design: ui/pet_view.cpp folded the species row's sprite_id (or,
+    // for a Pebble with no row, the genome nibble) into the pool this life
+    // stage draws from. This module does not know what a species is and must
+    // not learn - see the banner in ui/pet_art.h.
     s_qry_stage   = p.stage;
     s_qry_form    = p.form;
     s_qry_ok      = 1;
-    set_id = sprite_set_id(s_qry_species, s_qry_stage, s_qry_form, pose);
+    set_id = sprite_set_id(s_qry_stage, s_qry_form, pose);
   }
   if (p.stage == STAGE_EGG) s_qry_ok = 0;   // an egg has no poses to ask about
 
@@ -1394,7 +1394,7 @@ uint8_t petfx_body_h(void) { return s_draw_h; }
 void petfx_pose_ink_x(uint8_t pose, int16_t* x0, int16_t* x1) {
   int16_t lo = s_ink_x0, hi = s_ink_x1;      // the honest fallback: what is drawn
   if (s_qry_ok) {
-    const uint8_t   id = sprite_set_id(s_qry_species, s_qry_stage, s_qry_form, pose);
+    const uint8_t   id = sprite_set_id(s_qry_stage, s_qry_form, pose);
     const SpriteSet s  = sprite_set(id);
     const uint8_t   st = pf_stride(s.w);
     const uint16_t  fb = (uint16_t)((uint16_t)st * s.h);

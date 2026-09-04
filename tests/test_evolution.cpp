@@ -376,16 +376,58 @@ TEST(a_chained_evolution_re_raises_pending_without_another_award) {
   CHECK_EQ(evolution_ready(p, full_ctx()), 0);
 }
 
-// Plan 1.5.2 lists `sprite_id < SPRITE_SET_COUNT` among the generator's
-// compile-time guards. species_table.h cannot assert it without including the
-// 86 KB sprite atlas into every translation unit that only wants a base_hp, so
-// it is asserted here instead - which still fails the build for a bad table,
-// just through the test binary rather than the firmware one.
-TEST(every_species_row_points_at_a_real_sprite_set) {
-  for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
-    const SpeciesDef& sp = SPECIES_TABLE[i];
-    CHECK(sp.sprite_id < (uint8_t)SPRITE_SET_COUNT);
-    CHECK((uint16_t)(SPR_BABY_BLOB + sp.sprite_id) < (uint16_t)SPRITE_SET_COUNT);
+// P4-C4a REPLACED A DUPLICATE WITH THE THING THIS FILE IS ACTUALLY FOR.
+//
+// What used to be here was a byte-identical copy of test_content.cpp's
+// `every_species_row_points_at_a_real_sprite_set`: two files asserting that
+// `SPR_BABY_BLOB + sprite_id` was arithmetically in range, and nothing in the
+// tree evaluating that sum to draw anything. Neither copy could fail in the way
+// that mattered. The roster-wide check lives once, in test_content.cpp; what
+// belongs HERE is the evolution module's own question -
+//
+//   DOES A RULE CHANGE THE CREATURE ON SCREEN?
+//
+// For three phases the answer was no. The atlas was keyed on the genome's
+// species nibble, which no evolution moves, so all 24 rules were invisible.
+// This walks every shipped rule at the three stages a species chooses its own
+// body at, through the SAME two functions the renderer calls.
+//
+// MEASURED, so that the claim is no wider than the tree: it fails at 24 checks
+// with SPRITE_BABY_BODIES 8 -> 1, at 48 with SPRITE_ADULT_BODIES 6 -> 1, and at
+// 40 when the naive SPR_BABY_BLOB + sprite_id resolution is restored. It does
+// NOT fail at a pool of 3 or 2, and that is a property of the roster rather
+// than a weakness worth papering over: every rule is a SINGLE step between
+// CONSECUTIVE art keys, so `k % P != (k+1) % P` for every P except 1. A pool of
+// 3 is caught instead by test_pet_view.cpp's
+// a_pebble_with_no_species_row_draws_what_it_always_did.
+TEST(every_evolution_rule_changes_the_body) {
+  const uint8_t n = (uint8_t)(sizeof EVOLUTION_RULES / sizeof EVOLUTION_RULES[0]);
+  CHECK(n > 0);
+  static const uint8_t kStages[] = { STAGE_BABY, STAGE_ADULT, STAGE_SENIOR };
+  for (uint8_t r = 0; r < n; ++r) {
+    const EvolutionRule& rule = EVOLUTION_RULES[r];
+    const SpeciesDef* from = species_get(rule.species);
+    const SpeciesDef* to   = species_get(rule.target);
+    CHECK(from != nullptr);
+    CHECK(to   != nullptr);
+    if (!from || !to) continue;
+    for (uint8_t s = 0; s < (uint8_t)(sizeof kStages / sizeof kStages[0]); ++s) {
+      const Stage st = (Stage)kStages[s];
+      const uint8_t a = sprite_set_id((uint8_t)st, sprite_form_of(from->sprite_id, 0u, st),
+                                      (uint8_t)POSE_IDLE);
+      const uint8_t b = sprite_set_id((uint8_t)st, sprite_form_of(to->sprite_id, 0u, st),
+                                      (uint8_t)POSE_IDLE);
+      CHECK(a != b);
+    }
+    // CHILD and TEEN deliberately do NOT move: the atlas authors two designs at
+    // each and they carry the care quality, not the species. Stated so that a
+    // later change cannot quietly spend them.
+    for (uint8_t st = STAGE_CHILD; st <= STAGE_TEEN; ++st) {
+      CHECK_EQ(sprite_set_id(st, sprite_form_of(from->sprite_id, 0u, (Stage)st),
+                             (uint8_t)POSE_IDLE),
+               sprite_set_id(st, sprite_form_of(to->sprite_id, 0u, (Stage)st),
+                             (uint8_t)POSE_IDLE));
+    }
   }
 }
 

@@ -61,6 +61,7 @@
 #include "../networking/net.h"
 #include "../networking/webui.h"      // web_pin() only - no network header comes with it
 #include "../dev/godmode.h"    // GodEvt, god_active/handle/draw/entry_progress/marker
+#include "pet_art.h"   // pet_species_name(): what the creature IS
 #include "pet_view.h"  // PetView: what petfx and actfx are allowed to know
 #include "petfx.h"      // the body's own presentation layer: floor, position, gaze
 #include "actfx.h"      // the choreography of every action the player can take
@@ -261,11 +262,28 @@ void ui_name_for(uint32_t lineage_id, uint8_t generation, char* out, size_t cap)
   snprintf(out, cap, "%s%s", S_SYL_A(h % 12u), S_SYL_B((h / 12u) % 12u));
 }
 
+// THE WORD BESIDE THE BODY, in the order the player earns it (P4-C4a).
+//
+//   1. the nickname the owner typed, if there is one - nothing outranks that;
+//   2. THE SPECIES the Pebble is, from the roster's own Spanish name
+//      (STR_SPC_NAME_1..36). This is the half that closes the P3-C3 obligation
+//      on the text side: HOME used to show the dynasty syllables, which are a
+//      pure function of (lineage_id, generation) and therefore say the SAME
+//      word before and after an evolution. Paketo becoming Fragmar has to
+//      change the name as well as the pixels;
+//   3. the dynasty syllables, unchanged, for a Pebble with no species row -
+//      an unfiled egg, a creator custom (200..209), or a save from a build with
+//      more families than this one. ui_name_for() keeps its job; it is the
+//      FALLBACK now rather than the answer.
 void ui_pet_name(char* out, size_t cap) {
   if (!out || cap == 0) return;
   if (s_cfg && s_cfg->pet_name[0] != '\0') { snprintf(out, cap, "%s", s_cfg->pet_name); return; }
   const SimView* p = pet();
   if (!p) { snprintf(out, cap, "%s", S(STR_EGG_TITLE)); return; }
+  const uint8_t slot = box_active();
+  const PebbleInstance* pb = (slot == BOX_ACTIVE_NONE) ? nullptr : box_peek(slot);
+  const char* species = pb ? pet_species_name(pb->species_id) : nullptr;
+  if (species) { snprintf(out, cap, "%s", species); return; }
   ui_name_for(p->genome.lineage_id, p->genome.generation, out, cap);
 }
 

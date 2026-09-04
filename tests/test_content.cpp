@@ -159,17 +159,65 @@ TEST(species_rows_are_well_formed_at_runtime) {
   }
 }
 
-// plan 1.5.2's `sprite_id < SPRITE_SET_COUNT`. game/species.cpp is the one
-// translation unit that asserts it at compile time (asserting it in a header
-// would pull the 86 KB atlas into every TU that wants a base_hp); the real
-// bound is the SUM, because the roster resolves art as SPR_BABY_BLOB + id.
-TEST(every_species_row_points_at_a_real_sprite_set) {
+// plan 1.5.2's `sprite_id < SPRITE_SET_COUNT`, and - since P4-C4a - the check
+// that actually means something: EVERY ROW DRAWS A CREATURE.
+//
+// THE CASE THIS REPLACES COULD NOT FAIL IN THE WAY THAT MATTERED, and it was
+// the eighth of this project's recurring defect. It asserted that
+// `SPR_BABY_BLOB + sprite_id` was arithmetically inside SPRITE_SETS - and
+// NOTHING EVALUATED THAT SUM TO DRAW ANYTHING. It passed happily while species
+// 25..36 would have resolved onto SPR_GHOST, SPR_TOMB and the sleep / sick /
+// eat pose sets; Murax would have been drawn as an adult eating. A
+// byte-identical copy of it also sat in tests/test_evolution.cpp, so the tree
+// carried the same un-failable statement twice.
+//
+// The sum is still checked, because it is still the forward bound that caps the
+// roster at 36 until P10's art pass lands (see game/species.cpp guard 1). What
+// is NEW is the second loop: the resolution the firmware runs, at every stage,
+// asserted to land on one of the 24 authored creature bodies.
+TEST(every_species_row_draws_a_creature_body) {
+  static const uint8_t kStages[] = { STAGE_BABY, STAGE_CHILD, STAGE_TEEN,
+                                     STAGE_ADULT, STAGE_SENIOR };
   for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
     const SpeciesDef& sp = SPECIES_TABLE[i];
     CHECK(sp.sprite_id < (uint8_t)SPRITE_SET_COUNT);
     CHECK((uint16_t)(SPR_BABY_BLOB + sp.sprite_id) < (uint16_t)SPRITE_SET_COUNT);
     CHECK_EQ(sp.sprite_id, (uint8_t)(sp.id - 1u));
+
+    for (uint8_t s = 0; s < (uint8_t)(sizeof kStages / sizeof kStages[0]); ++s) {
+      const Stage st = (Stage)kStages[s];
+      const uint8_t id = sprite_set_id((uint8_t)st, sprite_form_of(sp.sprite_id, 0u, st),
+                                       (uint8_t)POSE_IDLE);
+      CHECK(id >= SPRITE_BODY_FIRST);
+      CHECK(id <= SPRITE_BODY_LAST);
+      CHECK(id != (uint8_t)SPR_GHOST);
+      CHECK(id != (uint8_t)SPR_TOMB);
+    }
   }
+}
+
+// AND THE REASON THE GUARD ABOVE IS NOT THE SUM. This states, as a number, how
+// much of the roster the naive `SPR_BABY_BLOB + sprite_id` resolution would
+// mis-draw against TODAY's 38-set atlas: species 25..36, i.e. all of families
+// 9 to 12, land on GHOST, TOMB and the ten pose sets.
+//
+// It is written to FAIL when P10's art pass lands and the atlas becomes one
+// body per species - at which point the naive sum becomes correct, this number
+// goes to 0, and whoever is holding it should come here and delete both this
+// case and sprite_design_of()'s folding.
+TEST(the_naive_sprite_sum_would_mis_draw_a_third_of_the_roster) {
+  uint8_t not_a_body = 0;
+  uint8_t first_bad  = 0;
+  for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
+    const SpeciesDef& sp = SPECIES_TABLE[i];
+    const uint16_t naive = (uint16_t)(SPR_BABY_BLOB + sp.sprite_id);
+    if (naive < SPRITE_BODY_FIRST || naive > SPRITE_BODY_LAST) {
+      if (!not_a_body) first_bad = sp.id;
+      ++not_a_body;
+    }
+  }
+  CHECK_EQ((int)not_a_body, 12);
+  CHECK_EQ((int)first_bad, 25);
 }
 
 // plan 1.5.2's `sum(spawn_weight) > 0 per category`, and the reason the table

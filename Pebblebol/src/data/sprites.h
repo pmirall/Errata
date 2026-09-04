@@ -1172,50 +1172,84 @@ static_assert(SPRITE_DATA_BYTES <= 14336, "sprite art over the flash budget");
 
 // -----------------------------------------------------------------------------
 //  LOOKUP
+//
+//  EVERYTHING FROM HERE TO THE END OF THE FILE IS HAND-WRITTEN LOGIC, not art:
+//  the banner at the top of this file is about the XBM arrays above, which
+//  sprite_src.py emits. This block has never been generated and P4-C4a edits
+//  it deliberately.
 // -----------------------------------------------------------------------------
 
-// Authored ADULT / SENIOR body designs in the atlas. An art count, not a game
-// rule: the care-scored adult branch was removed, so the adult body is a pure
-// genome trait now.
+// Authored body designs in the atlas, per pool. ART COUNTS, NOT GAME RULES:
+// there are 8 authored BABY bodies (24x24) and 6 authored ADULT/SENIOR bodies
+// (40x40 / 32x32), and a Pebble's design is its art key folded into the pool
+// its life stage draws from.
+//
+// P10's art pass replaces both pools with one 24x24 body PER SPECIES, at which
+// point sprite_design_of() below becomes `return art_key;` and these two
+// numbers go away. Until then two species can share a body and the NAME beside
+// it is what tells them apart - see ui/pet_art.h.
 #define SPRITE_ADULT_BODIES 6
+#define SPRITE_BABY_BODIES  8
 
 // -----------------------------------------------------------------------------
-//  sprite_form_of(genome, minor_form, stage) - THE ONLY correct source of `form`.
+//  sprite_design_of(art_key, stage) - WHICH BODY, out of the pool the stage
+//  draws from. `art_key` is ui/pet_art.h's pet_art_key(): the SPECIES row's
+//  sprite_id when the Pebble has a row, and the genome's species nibble when it
+//  has none. Folding is what makes 36 species fit 8 + 6 authored designs; the
+//  fold is stable, so a Pebble's body never moves unless its species does.
+// -----------------------------------------------------------------------------
+constexpr uint8_t sprite_design_of(uint8_t art_key, Stage stage) {
+  if (stage >= STAGE_ADULT) return (uint8_t)(art_key % SPRITE_ADULT_BODIES);
+  return (uint8_t)(art_key % SPRITE_BABY_BODIES);
+}
+
+// -----------------------------------------------------------------------------
+//  sprite_form_of(art_key, minor_form, stage) - THE ONLY correct source of
+//  `form`.
 //
 //  `form` means two different things depending on the stage:
-//      ADULT / SENIOR : one of SPRITE_ADULT_BODIES, chosen by the species gene
-//                       and therefore fixed for the pet's whole life.
-//      TEEN           : minor_form bits 7:4
-//      CHILD          : minor_form bits 3:0
-//                       (0 = bueno, 1 = descuidado)
-//      EGG / BABY     : unused; the species gene picks the body.
+//      BABY / ADULT / SENIOR : one of the authored designs, chosen by the ART
+//                              KEY and therefore by the SPECIES the Pebble is.
+//                              An evolution moves it; nothing else does.
+//      TEEN                  : minor_form bits 7:4
+//      CHILD                 : minor_form bits 3:0
+//                              (0 = bueno, 1 = descuidado)
+//      EGG                   : unused; an egg is an egg.
+//
+//  CHILD and TEEN ARE DELIBERATELY LEFT ON minor_form. The atlas authors two
+//  designs at each of those stages and they already carry a different fact -
+//  the care quality frozen when the pet grew (game/sim.cpp) - so keying them on
+//  the species would trade one visible thing for another and show neither.
 //
 //  Always feed sprite_lookup_pose() from here: reading minor_form for an adult
 //  (or the other way round) picks the wrong body for the pet's whole life.
 // -----------------------------------------------------------------------------
 // data/ may not depend on game/, so this takes the two numbers it needs rather
-// than the live view they come from.
-inline uint8_t sprite_form_of(const Genome& genome, uint8_t minor_form,
-                              Stage stage) {
-  if (stage >= STAGE_ADULT) {
-    return (uint8_t)(GN_GET(genome.g0, GN_SPECIES_SH, GN_SPECIES_MK)
-                     % SPRITE_ADULT_BODIES);
-  }
+// than the live view they come from. It takes an already-decoded art key rather
+// than a Genome for the same reason it now has to: the key may be a species
+// row's sprite_id, which no genome carries.
+constexpr uint8_t sprite_form_of(uint8_t art_key, uint8_t minor_form,
+                                 Stage stage) {
+  if (stage == STAGE_EGG)   return 0;
   if (stage == STAGE_TEEN)  return (uint8_t)(minor_form >> 4);
   if (stage == STAGE_CHILD) return (uint8_t)(minor_form & 0x0Fu);
-  return 0;
+  return sprite_design_of(art_key, stage);
 }
 
 // Map a live pet onto an animation set id.
-//   species : Genome g0 species gene 0..15. Only the low 3 bits pick a BABY
-//             design (8 authored bodies); CHILD and TEEN take a care-scored
-//             variant, and from ADULT on the gene picks the body again.
 //   stage   : enum Stage.
-//   form    : sprite_form_of() output - a body index 0..SPRITE_ADULT_BODIES-1
-//             for ADULT/SENIOR, the child/teen variant (0 = bueno,
-//             1 = descuidado) for CHILD/TEEN; ignored otherwise.
+//   form    : sprite_form_of() output - a design index for BABY / ADULT /
+//             SENIOR, the child/teen variant (0 = bueno, 1 = descuidado) for
+//             CHILD/TEEN; ignored otherwise.
 //   pose    : enum SpritePose. Falls back to IDLE where there is no art.
-inline uint8_t sprite_set_id(uint8_t species, uint8_t stage, uint8_t form, uint8_t pose) {
+//
+// THERE IS NO `species` PARAMETER ANY MORE, and its absence is the P4-C4a fix.
+// This function used to take the genome's species nibble and pick the BABY body
+// with `species & 7`, which is why all 36 species wore their genome's body and
+// an evolution changed nothing on screen. The body now comes in through `form`,
+// i.e. through sprite_form_of(pet_art_key(...)), and there is no path left that
+// can reach the atlas from a genome without going past a species row first.
+constexpr uint8_t sprite_set_id(uint8_t stage, uint8_t form, uint8_t pose) {
   if (stage == STAGE_EGG)  return SPR_EGG_IDLE;
 
   if (pose == POSE_SLEEP) {
@@ -1246,7 +1280,8 @@ inline uint8_t sprite_set_id(uint8_t species, uint8_t stage, uint8_t form, uint8
   // SPRITE_SETS into the next set's art. Out of range always falls back to the
   // "good"/first variant, never to "descuidado".
   switch (stage) {
-    case STAGE_BABY:   return (uint8_t)(SPR_BABY_BLOB + (species & 0x07u));
+    case STAGE_BABY:   return (uint8_t)(SPR_BABY_BLOB
+                                       + (form < SPRITE_BABY_BODIES ? form : 0u));
     case STAGE_CHILD:  return (uint8_t)(SPR_CHILD_GOOD + (form <= 1u ? form : 0u));
     case STAGE_TEEN:   return (uint8_t)(SPR_TEEN_GOOD  + (form <= 1u ? form : 0u));
     case STAGE_ADULT:  return (uint8_t)(SPR_ADULT_BOLOTA
@@ -1255,6 +1290,14 @@ inline uint8_t sprite_set_id(uint8_t species, uint8_t stage, uint8_t form, uint8
                                        + (form < SPRITE_ADULT_BODIES ? form : 0u));
   }
 }
+
+// The half-open window of set ids that are CREATURE BODIES. Everything outside
+// it is an egg, a pose (sleeping / sick / eating) or the two retired sets, and
+// a species that resolves onto one of those is not being drawn - it is being
+// mistaken for furniture. game/species.cpp asserts the whole roster against it
+// at compile time and tests/test_content.cpp re-checks it at runtime.
+#define SPRITE_BODY_FIRST  ((uint8_t)SPR_BABY_BLOB)
+#define SPRITE_BODY_LAST   ((uint8_t)SPR_SENIOR_QUIMERA)
 
 inline SpriteSet sprite_set(uint8_t id) {
   if (id >= SPRITE_SET_COUNT) id = SPR_EGG_IDLE;
@@ -1270,9 +1313,9 @@ inline SpriteRef sprite_frame(uint8_t id, uint8_t frame) {
 }
 
 // Pose-aware body lookup.
-inline SpriteRef sprite_lookup_pose(uint8_t species, uint8_t stage, uint8_t form,
+inline SpriteRef sprite_lookup_pose(uint8_t stage, uint8_t form,
                                     uint8_t pose, uint8_t frame) {
-  return sprite_frame(sprite_set_id(species, stage, form, pose), frame);
+  return sprite_frame(sprite_set_id(stage, form, pose), frame);
 }
 
 // Egg: phase 0 = intact (wobble), phase 1 = cracking.

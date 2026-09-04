@@ -201,13 +201,13 @@ $(BIN)/test_statemachine: $(SCREEN_OBJS) $(OBJ)/state_machine.o \
                         $(OBJ)/input_router.o $(OBJ)/host_shims.o
 # pet_view.cpp is the model->view seam petfx and actfx read (P2-C11c). It is
 # pure, so it compiles here; sim.o comes with it because the live fill reads
-# sim_stat_pct() / sim_mood_score().
-# evolution.o + xp.o as well: the P3-C3 case evolves a Pebble and re-fills its
-# PetView. NOT the shipped body - that goes through pet_view_fill_sim(), which
-# never reads evo_state; the case drives pet_view_fill(), which no firmware file
-# calls. It proves the MODEL half. See the banner in test_pet_view.cpp and the
-# open P3-C3 bullet in the plan. (Corrected by the P3-C5 follow-up: this comment
-# said "the view is where the body changed is provable".)
+# sim_stat_pct() / sim_mood_score() - and since P4-C4a because the care case
+# drives a REAL bound simulation through sim_god_set_stat().
+# evolution.o + xp.o as well: the evolution cases evolve a Pebble and re-fill
+# its PetView through pet_view_fill_sim() + pet_view_attach(), which IS the pair
+# ui.cpp:201-203 calls. (Until P4-C4a they drove pet_view_fill(), a function no
+# firmware file called; that function is deleted and this comment no longer
+# has to explain why the case proved only the model half.)
 $(BIN)/test_pet_view:   $(OBJ)/pet_view.o $(OBJ)/sim.o $(OBJ)/daylight.o \
                         $(OBJ)/box.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o

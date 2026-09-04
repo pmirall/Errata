@@ -11,6 +11,7 @@
 #include "../game/box.h"
 #include "../game/genome.h"
 #include "gfx.h"
+#include "pet_art.h"     // pet_species_name(): the roster's own Spanish name
 #include "screen.h"
 #include "ui.h"
 
@@ -44,7 +45,20 @@ void box_leave(void) { s_mode = BOXM_LIST; }
 //  "1 CANTO" plus a right-aligned "Nv7", and a leading '*' on the Pebble that
 //  is out walking. A slot with no nickname shows its SPECIES: inventing a name
 //  here would disagree with the one HOME shows for the same Pebble.
+//
+//  AND IT SHOWS THE SPECIES IT ACTUALLY IS (P4-C4a). Both rows used to read
+//  S_SPECIES(gene_species(genome)) - the sixteen-word genome vocabulary
+//  (BLOB / ORUGA / PAJARO / GATO / SETA / ...) that predates the roster - so ten
+//  slots holding ten different creatures could all be called SETA, and an
+//  evolution never changed a word. The roster carries all 36 names; the genome
+//  word is the fallback for a Pebble with no species row, which is the same
+//  ladder ui_pet_name() walks.
 // -----------------------------------------------------------------------------
+static const char* slot_species_name(const PebbleInstance& p) {
+  const char* sp = pet_species_name(p.species_id);
+  return sp ? sp : S_SPECIES(gene_species(p.genome));
+}
+
 static void slot_row(uint8_t slot, char* out, size_t cap, char* val, size_t vcap) {
   const PebbleInstance* p = box_peek(slot);
   if (!p) {
@@ -53,7 +67,7 @@ static void slot_row(uint8_t slot, char* out, size_t cap, char* val, size_t vcap
     return;
   }
   const char* name = (p->nickname[0] != '\0') ? p->nickname
-                                              : S_SPECIES(gene_species(p->genome));
+                                              : slot_species_name(*p);
   snprintf(out, cap, "%u %s%s", (unsigned)(slot + 1u),
            (slot == box_active()) ? S(STR_BOX_ACTIVE) : "", name);
   snprintf(val, vcap, "%s%u", S(STR_ST_LEVEL), (unsigned)p->level);
@@ -127,7 +141,7 @@ static void draw_card(void) {
   char tag[10];
   snprintf(tag, sizeof tag, "%s%u", S(STR_ST_LEVEL), (unsigned)p->level);
   const char* name = (p->nickname[0] != '\0') ? p->nickname
-                                              : S_SPECIES(gene_species(p->genome));
+                                              : slot_species_name(*p);
   gfx_header(name, tag);
 
   char line[32];

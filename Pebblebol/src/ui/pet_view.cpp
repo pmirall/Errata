@@ -3,9 +3,9 @@
 //  The ONE place that reads the model and decides what the body looks like.
 //
 //  This file is the seam described in pet_view.h: it includes game/sim.h,
-//  game/genome.h, data/sprites.h and data/species_table.h so that petfx.cpp
-//  and actfx.cpp no longer have to. Everything above it in the render stack
-//  sees a flat PetView and nothing else.
+//  game/genome.h, data/sprites.h and (through ui/pet_art.h) the species roster
+//  so that petfx.cpp and actfx.cpp no longer have to. Everything above it in
+//  the render stack sees a flat PetView and nothing else.
 //
 //  PURE translation unit: no Arduino.h, no render.h, no NVS, no radio.
 //
@@ -16,11 +16,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../data/species_table.h"
-#include "../game/xp.h"           // xp_hp_max(): the ONE hp_max formula
 #include "../data/sprites.h"
 #include "../game/genome.h"
 #include "../game/sim.h"
+#include "pet_art.h"              // pet_art_key(): species row -> atlas key
 
 // -----------------------------------------------------------------------------
 //  POSE AND MOOD POLICY (ex webui.cpp web_pose_of / web_mood_index)
@@ -75,7 +74,11 @@ static uint32_t identity_of_genome(const Genome& g) {
 static void fill_genome(PetView& out, const Genome& g, uint8_t minor_form,
                         uint8_t stage) {
   out.gene_species = gene_species(g);
-  out.form         = sprite_form_of(g, minor_form, (Stage)stage);
+  // The genome nibble is the art key's FALLBACK, and this is the only place it
+  // is used as the key itself: pet_view_attach() overwrites `form` a moment
+  // later for any Pebble the Box has a species row for. A view that never gets
+  // an attach - an egg nothing has filed - keeps exactly the body it always had.
+  out.form         = sprite_form_of(out.gene_species, minor_form, (Stage)stage);
   out.temper       = gene_temper_class(g);
   if (out.temper >= (uint8_t)TEMPER_COUNT) out.temper = (uint8_t)TEMPER_TRANQUILO;
   out.body_size    = gene_body_size(g);
@@ -116,77 +119,33 @@ void pet_view_fill_sim(PetView& out, const SimView& p, uint8_t pose) {
   fill_genome(out, p.genome, p.minor_form, p.stage);
 }
 
+// -----------------------------------------------------------------------------
+//  THE SPECIES REACHES THE BODY (P4-C4a).
+//
+//  ORDER MATTERS AND IT IS WHY THIS IS NOT IN fill_genome(). ui.cpp fills a
+//  view in two calls - pet_view_fill_sim() then pet_view_attach() - and
+//  species_id only arrives in the second one. fill_genome() therefore derives
+//  `form` from the genome, and this re-derives it from the species row the
+//  instant there is one.
+//
+//  ONLY THE STAGES WHOSE DESIGN IS THE ART KEY ARE TOUCHED. CHILD and TEEN
+//  forms are the care-quality variant sim.cpp froze into minor_form when the
+//  pet grew; the view does not carry minor_form, and it does not need to,
+//  because an evolution does not move those two designs at all.
+// -----------------------------------------------------------------------------
+static void apply_species_design(PetView& out) {
+  const Stage st = (Stage)out.stage;
+  if (st == STAGE_EGG || st == STAGE_CHILD || st == STAGE_TEEN) return;
+  out.form = pet_art_design(out.species_id, out.gene_species, st);
+}
+
 void pet_view_attach(PetView& out, const PebbleInstance* inst) {
   if (!inst) return;
   out.identity   = pet_view_identity(*inst);
   out.species_id = inst->species_id;
+  apply_species_design(out);
   out.level      = inst->level ? inst->level : (uint8_t)1;
   out.corrupted  = (uint8_t)((inst->status & PBS_CORRUPTED) != 0u);
   if (inst->nickname[0] != '\0')
     snprintf(out.name, sizeof(out.name), "%s", inst->nickname);
-}
-
-// -----------------------------------------------------------------------------
-//  THE STORED PATH (plan 1.4 signature)
-//
-//  A Pebble that is NOT the active one has no simulation behind it: its truth
-//  is entirely in the record, so everything here is read straight off it. The
-//  name is the nickname or nothing - the deterministic dynasty name is built
-//  from strings_es.h syllables and belongs to the screen layer, which is why
-//  ui_pet_name() keeps it.
-// -----------------------------------------------------------------------------
-void pet_view_fill(PetView& out, const PebbleInstance& inst,
-                   const SpeciesDef& sp, uint8_t pose) {
-  memset(&out, 0, sizeof(out));
-  out.present    = (uint8_t)((inst.species_id != 0u) ? 1u : 0u);
-  out.identity   = pet_view_identity(inst);
-  out.age_s      = inst.age_s;
-  out.species_id = inst.species_id;
-  out.level      = inst.level ? inst.level : (uint8_t)1;
-  out.pose       = pose;
-  out.asleep     = (uint8_t)((inst.status & PBS_ASLEEP)    != 0u);
-  out.sick       = (uint8_t)((inst.status & PBS_SICK)      != 0u);
-  out.corrupted  = (uint8_t)((inst.status & PBS_CORRUPTED) != 0u);
-
-  // The PF_* word petfx reads is the RAM view's; a stored Pebble only carries
-  // the two bits that survive a power cycle, so rebuild exactly those.
-  out.flags = (uint16_t)((out.asleep ? PF_ASLEEP : 0u) | (out.sick ? PF_SICK : 0u));
-
-  // Stage is derived from the level, the same rule sim_bind() uses.
-  out.stage = (uint8_t)((inst.level >= 20u) ? STAGE_ADULT
-                      : (inst.level >= 10u) ? STAGE_TEEN
-                      : (inst.level >=  4u) ? STAGE_CHILD
-                                            : STAGE_BABY);
-
-  // Derived and never stored (plan 1.5.1). Through xp_hp_max() rather than
-  // open-coded: P3-C3 made that function the ONE owner of the formula so a
-  // level-up and an evolution rescale identically, and a third copy here would
-  // be the one that silently disagrees.
-  const uint16_t hp_max = xp_hp_max(sp.base_hp, out.level);
-  // CLAMP BEFORE THE CAST. A record claiming far more HP than its maximum -
-  // hp_cur 60000 against an hp_max of 23 - divides to 260,869 %, and narrowing
-  // THAT to a uint8 first wraps it to 5 %: a "> 100" test after the cast can
-  // never see it. P3-C3 found this the moment the starter's base_hp moved.
-  uint32_t hp_pct = (hp_max == 0u) ? 0u
-                                   : ((uint32_t)inst.hp_cur * 100u) / (uint32_t)hp_max;
-  if (hp_pct > 100u) hp_pct = 100u;
-  out.hp_pct = (uint8_t)hp_pct;
-
-  for (uint8_t i = 0; i < PB_CARE_COUNT; ++i) {
-    int32_t v = inst.care[i];
-    if (v < 0) v = 0;
-    if (v > PB_CARE_MILLI_MAX) v = PB_CARE_MILLI_MAX;
-    out.care_pct[i] = (uint8_t)(v / (PB_CARE_MILLI_MAX / 100L));
-  }
-  // The care average is the honest mood for a Pebble nothing is simulating.
-  {
-    uint16_t sum = 0;
-    for (uint8_t i = 0; i < PB_CARE_COUNT; ++i) sum = (uint16_t)(sum + out.care_pct[i]);
-    out.mood_pct = (uint8_t)(sum / PB_CARE_COUNT);
-    out.mood = pet_mood_index(out.mood_pct);
-  }
-
-  fill_genome(out, inst.genome, (uint8_t)(inst.evo_state & 0x03u), out.stage);
-  if (inst.nickname[0] != '\0')
-    snprintf(out.name, sizeof(out.name), "%s", inst.nickname);
 }

@@ -36,12 +36,22 @@ Three numbers were measured before choosing:
     14,037 B figure includes an 8,640 B sprite atlas that does not exist yet).
     Flash permits all 60 with three orders of magnitude to spare.
 
-  * THE SPRITE ATLAS. It binds, hard. SpeciesDef.sprite_id is resolved as
-    SPR_BABY_BLOB + sprite_id (data/sprites.h) and the pack's invariant is
-    sprite_id == id - 1. tests/test_evolution.cpp asserts
-    SPR_BABY_BLOB + sprite_id < SPRITE_SET_COUNT, i.e. 2 + (N-1) < 38, i.e.
-    N <= 36. Shipping 60 would mean deleting a live guard against real art.
-    36 is the largest roster today's atlas can address.
+  * THE SPRITE ATLAS. It binds, hard. The pack's invariant is
+    sprite_id == id - 1, and SPR_BABY_BLOB + sprite_id < SPRITE_SET_COUNT is
+    2 + (N-1) < 38, i.e. N <= 36. Shipping 60 would mean deleting a live guard
+    against real art. 36 is the largest roster today's atlas can address.
+
+    P4-C4a NARROWED THIS PARAGRAPH TWICE. (1) It used to say sprite_id "is
+    resolved as" that sum. It is not, and never was: nothing evaluated it to
+    draw anything, and against the 38-set atlas species 25..36 would have
+    landed on GHOST, TOMB and the ten pose sets. It is a FORWARD bound on the
+    P10 atlas (2 eggs + one 24x24 body per species) and it still caps the
+    roster at 36, which is all this paragraph needs it for. What the firmware
+    draws is ui/pet_art.h's key folded into the authored pools, and
+    game/species.cpp asserts THAT separately. (2) The guard is in
+    game/species.cpp as a static_assert and in tests/test_content.cpp at
+    runtime; tests/test_evolution.cpp carried a byte-identical copy of the
+    runtime one until P4-C4a replaced it with the question that file owns.
 
   * WHAT 12 WOULD COST. Families 1..5 of the pack are all SIGNAL, so a
     12-species roster carries exactly one type: no shipped creature could ever

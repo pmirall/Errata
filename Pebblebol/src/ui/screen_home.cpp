@@ -17,8 +17,9 @@
 
 #include "../core/strings_es.h"
 #include "../data/sprites.h"
-#include "../game/genome.h"          // gene_species(), for the sprite lookup
+#include "../game/genome.h"          // gene_species(): the art key's fallback
 #include "gfx.h"
+#include "pet_art.h"                 // pet_art_key(): species -> body
 #include "screen.h"
 #include "screen_view.h"
 #include "ui.h"
@@ -94,9 +95,15 @@ static void draw_meters(const PebbleView& v) {
 static void draw_static_body(const PebbleView& v, uint8_t frame) {
   gfx_dither_rect(0, HOME_FLOOR_Y, OLED_W, 1, GFX_D50);
 
-  const uint8_t form = sprite_form_of(v.genome, v.minor_form, (Stage)v.stage);
-  const SpriteRef r  = sprite_lookup_pose(gene_species(v.genome), v.stage, form,
-                                          v.pose, frame);
+  // THE SPECIES CHOOSES THE BODY (P4-C4a). This used to pass
+  // gene_species(v.genome) to the lookup, so every one of the 36 species wore
+  // one of eight genome bodies and an evolution moved nothing on this screen.
+  // The still body and the animated one fold the SAME key through the SAME
+  // function - pet_art_key() into sprite_form_of() - so the golden below is a
+  // statement about the body the device draws and not about a second rule.
+  const uint8_t key  = pet_art_key(v.species_id, gene_species(v.genome));
+  const uint8_t form = sprite_form_of(key, v.minor_form, (Stage)v.stage);
+  const SpriteRef r  = sprite_lookup_pose(v.stage, form, v.pose, frame);
   if (!r.bits || r.w == 0 || r.h == 0) return;
   const int16_t x = (int16_t)sprite_center_x(r.w);
   const int16_t y = (int16_t)(HOME_FLOOR_Y - r.h);

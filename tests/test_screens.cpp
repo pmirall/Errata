@@ -610,6 +610,55 @@ TEST(snapshot_home_maxed) {
   snapshot(SCR_HOME, "home_maxed");
 }
 
+// =============================================================================
+//  P4-C4a: THE SPECIES - NOT THE GENOME - CHOSE THE CREATURE.
+//
+//  This fixture is home_starter with ONE BYTE CHANGED: species_id, 1 -> 3.
+//  Same genome, same name, same level, same meters, same everything else. Until
+//  this step HOME resolved the body from gene_species(v.genome), so the two
+//  frames were PIXEL-IDENTICAL and a golden could not have told them apart.
+//
+//  The two goldens together are the artefact; the checks below are what stops
+//  them from being two files nobody diffs. They assert that the frames differ
+//  AT ALL and that every differing pixel is inside the 40x40 body box - i.e.
+//  that the species moved the creature and nothing else on the screen.
+// =============================================================================
+TEST(snapshot_home_species) {
+  seams2_reset();
+
+  const ScreenDef* home = screen_def(SCR_HOME);
+  CHECK(home != nullptr);
+  if (!home) return;
+
+  static uint8_t starter[FB_H][FB_W];
+  fb_reset();
+  home->render();                      // species 1, the starter
+  for (int y = 0; y < FB_H; ++y)
+    for (int x = 0; x < FB_W; ++x) starter[y][x] = (uint8_t)fb_get(x, y);
+
+  g_view.species_id = 3;               // Rafagon: sprite_id 2, a different body
+  fb_reset();
+  home->render();
+
+  // The adult body box: 40x40, centred by sprite_center_x() and standing on
+  // HOME_FLOOR_Y, which is where draw_static_body() puts it.
+  const int bx = (int)sprite_center_x(40);
+  const int by = (int)HOME_FLOOR_Y - 40;
+  int changed = 0, changed_outside_the_body = 0;
+  for (int y = 0; y < FB_H; ++y) {
+    for (int x = 0; x < FB_W; ++x) {
+      if ((uint8_t)fb_get(x, y) == starter[y][x]) continue;
+      ++changed;
+      if (x < bx || x >= bx + 40 || y < by || y >= by + 40)
+        ++changed_outside_the_body;
+    }
+  }
+  CHECK(changed > 0);                        // the species reached the pixels
+  CHECK_EQ(changed_outside_the_body, 0);     // and reached nothing else
+
+  snapshot(SCR_HOME, "home_species");
+}
+
 TEST(snapshot_home_empty) {
   seams2_reset();
   fixture_none();

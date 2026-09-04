@@ -13,10 +13,22 @@
 // THE SPRITE GUARD IS THE ONE plan 1.5.2 LISTS AND species_table.h CANNOT
 // CARRY. Asserting it there would pull the 86 KB sprite atlas into every
 // translation unit that only wants a base_hp. It belongs in exactly one TU,
-// and this is it: the roster is resolved as SPR_BABY_BLOB + sprite_id, so the
-// real bound is the SUM, not the field.
+// and this is it.
 #include "../data/sprites.h"
 
+// GUARD 1 - THE ROSTER'S OWN SHAPE, AND A FORWARD BOUND ON P10's ATLAS.
+//
+// `SPR_BABY_BLOB + sprite_id` IS NOT HOW ANYTHING DRAWS, and until P4-C4a this
+// file said it was. It is the resolution the plan's T13 / P10 art pass will use
+// once the atlas is 2 eggs plus one 24x24 body PER SPECIES; applied to TODAY's
+// atlas it would send species 25..36 onto GHOST, TOMB and the sleep / sick /
+// eat pose sets - a third of the roster drawn as gravestones. What the firmware
+// actually draws is guard 2 below.
+//
+// The sum is still asserted, because it is still load-bearing: it is the
+// arithmetic that caps the shipped roster at 36 (SPR_BABY_BLOB 2 + (N-1) < 38),
+// which is the measurement plan 1.5.2 chose ROSTER_FAMILIES = 12 from. Widening
+// the roster past it means the art pass has to land first.
 static constexpr bool species_sprites_resolve(void) {
   for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
     const SpeciesDef& sp = SPECIES_TABLE[i];
@@ -28,7 +40,34 @@ static constexpr bool species_sprites_resolve(void) {
 }
 static_assert(species_sprites_resolve(),
               "a species sprite_id is outside the atlas, or is not id - 1: the roster "
-              "has outgrown SPRITE_SETS and needs the P10 art pass");
+              "has outgrown the P10 art pass's one-set-per-species bound");
+
+// GUARD 2 - EVERY SPECIES DRAWS A CREATURE (P4-C4a). This is the one about the
+// resolution the firmware runs: art key -> sprite_form_of() -> sprite_set_id().
+// Every row, at every stage that has a body, must land inside the 24 authored
+// creature sets and never on an egg, a pose or one of the two retired sets.
+//
+// It is a static_assert rather than only a test because it is decidable at
+// compile time and because the failure it guards is silent: a species resolved
+// onto SPR_TOMB still draws 24x24 pixels, still clamps, still animates, and
+// nothing but a human eye would notice the pet had become a gravestone.
+static constexpr bool species_bodies_are_creatures(void) {
+  const Stage kStages[] = { STAGE_BABY, STAGE_CHILD, STAGE_TEEN,
+                            STAGE_ADULT, STAGE_SENIOR };
+  for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
+    const uint8_t key = SPECIES_TABLE[i].sprite_id;
+    for (uint8_t s = 0; s < (uint8_t)(sizeof(kStages) / sizeof(kStages[0])); ++s) {
+      const Stage st = kStages[s];
+      const uint8_t id = sprite_set_id((uint8_t)st, sprite_form_of(key, 0u, st),
+                                       (uint8_t)POSE_IDLE);
+      if (id < SPRITE_BODY_FIRST || id > SPRITE_BODY_LAST) return false;
+    }
+  }
+  return true;
+}
+static_assert(species_bodies_are_creatures(),
+              "a species resolves onto something that is not a creature body - an egg, "
+              "a pose set or one of the retired ones");
 
 uint8_t species_base_of_family(uint8_t family)
 {

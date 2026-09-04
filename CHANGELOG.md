@@ -124,8 +124,57 @@ Phase 4 begins. Nothing is tagged yet.
 - **Two new host tests**, 21 → 23 binaries: `test_content.cpp` (31 cases, every §1.5.2 guard
   re-asserted at runtime, the starter pinned field by field, and `evolution_apply()` driven
   through a FAILING condition for the first time) and `test_stats.cpp` (11 cases).
+- **A species you can see** (P4-C4a, closing the obligation carried since P3-C3). The sprite
+  atlas was keyed on `gene_species(genome)`, the four-bit nibble the v1 save carried, so all
+  36 species wore one of eight genome bodies, an evolution moved the FORM and never the
+  CREATURE, and `SpeciesDef.sprite_id` was asserted by two guards and drawn by nothing. New
+  `ui/pet_art.h` holds the one resolution — the species row's `sprite_id`, falling back to
+  the genome nibble only when there is no row; `sprite_form_of()` takes that KEY instead of a
+  `Genome` and `sprite_set_id()` has no `species` parameter left, so no path from a genome to
+  a body exists that does not pass a species row first. `pet_view_attach()` re-derives the
+  design where `species_id` actually arrives, one call after `pet_view_fill_sim()` which
+  cannot see it. The NAME follows: `ui_pet_name()` is nickname → `STR_SPC_NAME_*` → dynasty
+  syllables, and the BOX list stopped calling ten different creatures SETA. **Measured**: all
+  24 evolution rules change the drawn set id at BABY, ADULT and SENIOR and none at CHILD or
+  TEEN (those two designs carry the care quality, and there is no species art at either
+  stage); the no-row fallback — id 0, the creator's 200..209, anything past the roster — is
+  bit-identical to the old arithmetic; +164 B of flash, 0 B of globals, and no new art, since
+  36 more 24×24 sets would be 15,807 B against a 14,336 B budget assert. What it does not
+  claim: 36 species do not fit 8 + 6 authored designs, so two species can share a body until
+  P10's art pass and the name beside it is what tells them apart.
 
 ### Fixed
+
+#### P4-C4a — three more tests that could not fail, and one dead function
+
+- **`every_species_row_points_at_a_real_sprite_set` existed byte-identically in
+  `test_content.cpp` and `test_evolution.cpp`, and neither copy could fail in the way that
+  mattered.** Both asserted that `SPR_BABY_BLOB + sprite_id` was arithmetically inside
+  `SPRITE_SETS` — and nothing in the tree evaluated that sum to draw anything. Against the
+  38-set atlas it sends species 25..36 onto `SPR_GHOST`, `SPR_TOMB` and the ten pose sets;
+  Murax would have been drawn as an adult eating, and both tests passed. `test_content.cpp`
+  now resolves every row at every stage through `sprite_set_id()` and requires a creature
+  body, and states as a number (12 species, first at id 25) how much of the roster the naive
+  sum would mis-draw. `test_evolution.cpp` takes the question that file owns instead: every
+  one of the 24 rules changes the body. A `static_assert` in `game/species.cpp` checks the
+  same property at compile time, and it is what fires first when the naive resolution is
+  restored.
+- **`test_pet_view.cpp`'s care-percentage case was cited as proof of the CareId/StatId
+  mapping while driving the fill that has no mapping in it.** The hazard lives in
+  `pet_view_fill_sim()`'s `kStatOfCare[]`; the case drove `pet_view_fill()`, a straight copy
+  of `inst.care[]`. It drives the live fill now, through five DISTINCT `sim_god_set_stat()`
+  values with the distinctness asserted — with five equal stats any permutation passes.
+- **`pet_view_fill()` is deleted.** No caller in `Pebblebol/src` for three phases; a stage
+  ladder its own comment called "the same rule `sim_bind()` uses" that disagreed with
+  `sim.cpp` on three of four thresholds and could never return `STAGE_SENIOR`; and an
+  evolution case that "proved" a changed body by feeding `evo_state & 3` in as `minor_form`,
+  i.e. by drawing the pet as badly cared for. `PetView.hp_pct` went with it — that function
+  alone wrote it and nothing read it.
+- **One claim of this step's own was refuted before it shipped.** The first draft of both
+  evolution cases said they would fail if `SPRITE_BABY_BODIES` shrank 8 → 3. Measured, they
+  do not: every rule is a single step between CONSECUTIVE art keys, so `k % P != (k+1) % P`
+  for every pool size except 1. Both comments now name the mutation each case really fails on
+  (8 → 1, 6 → 1) and say which case catches a pool of 3 instead.
 
 #### The P4-C2/C3 follow-up — six blocking review findings
 
@@ -218,9 +267,6 @@ Phase 4 begins. Nothing is tagged yet.
 
 ### Known gaps
 
-- **An evolution is still invisible.** The renderer keys on the genome, not on `species_id`,
-  so 36 species all wear their genome's body and the species name reaches no screen. This is
-  a renderer change with its own step; the open bullet under P3-C3 stays open.
 - **The SPECIAL encounter outcome has no payload table** — 4 to 10 % of every scan resolves
   to an outcome nothing defines. P5-C3 owns it; `test_content.cpp` states the gap.
 - **CARE and BATTLE_MOD items name no target stat**, and item 9 *Llave Raíz* is a CARE item
