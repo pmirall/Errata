@@ -89,6 +89,74 @@ Phase 4 begins. Nothing is tagged yet.
   matches zero lines today and exists to fail the day the wire path learns to mend what a
   peer sent.
 
+### Added (P4-C5b)
+
+- **`networking/session.{h,cpp}` — THE §15 SESSION FSM.** Nine states
+  (`SS_IDLE`..`SS_CLOSED`), one terminal, and a fixed **40 B `SessionEnd`** written on the
+  way into it that makes every terminal answerable without a rerun: both hashes side by
+  side for a desync, the obligation and the round for a loss, a `VReject` and a member
+  index for a refusal, and six named counters (`rx_ok`, `rx_dup`, `rx_stale`, `rx_gap`,
+  `rx_wrong_state`, `rx_reject`). Four rules run before the table and are what keep it
+  small: a frame the codec refused never reaches the FSM **and never touches a timer**; a
+  frame for another session is dropped by `proto_decode()` itself; a legal message that is
+  unexpected here is dropped and counted; and **only progress touches the ladder**, so a
+  duplicate, a re-acknowledgement, a stale frame and a wrong-state frame all leave it
+  where it was. Roles come from the device id, never from who spoke first, and the shared
+  seed is mixed from **both** nonces and **both** team CRCs so neither side fixes it alone.
+- **`networking/battle_link.cpp` — THE LOCKSTEP.** Both sides submit an ACTION carrying the
+  round's `open_hash`, both resolve locally through the one engine, and both exchange
+  `ROUND_RESULT{hash_before, hash_after}`; a mismatch is `BATTLE_END(SE_DESYNC)` and
+  **pays nobody on either side**. It holds no `BattleState` and no `BattleSetup` of its
+  own — both are caller-owned and the peer's team is decoded straight into
+  `setup->member[peer_side][]` — and **the local team goes through the same
+  `pbw_decode()` the peer's does**, so the two endpoints' 780 B setups are byte-identical.
+  Three hashes answer three different questions (we entered the round disagreeing; we
+  disagree about the action pair; we disagree about the rules) and the banner says plainly
+  that none of them catches a liar: a forged `ROUND_RESULT` is exactly indistinguishable
+  from a genuine divergence, and the protocol's whole answer is that neither side is paid.
+- **`networking/transport.h` + `transport_loopback.cpp` — THE SEAM AND THE FAULT
+  INJECTOR.** A struct of function pointers from a factory, so the transport is a runtime
+  value and **there is no `#ifdef` anywhere in the session logic**; `mtu` is a field rather
+  than a `#define`, so a test moves it to 60 and drives the oversize path without
+  recompiling; and a refused send is indistinguishable from a dropped frame, which is what
+  makes an injected loopback drop and a real radio failure exercise the identical path.
+  The loopback is two in-process queues with configurable drop / duplicate / reorder-window
+  percentages and a scripted "kill the next N frames of this named type" fault, all drawn
+  from **one seeded `Rng`**, so a failing acceptance trial reproduces from its printed seed.
+- **`tests/test_session.cpp` (36 cases, 1,053 checks) and `docs/protocol.md`.** The
+  acceptance census runs 500 trials per arm over six fault models and asserts that **no
+  trial ever diverges in silence** — 0 in 3,000 — while requiring the clean arm to complete
+  every trial and the harsh arm to show **both** a completion and a clean abort, because a
+  run in which everything aborted immediately would satisfy the promise and prove nothing.
+  `docs/protocol.md` is the wire format, the state table, the three invariants and
+  nineteen honest LIMITS.
+
+### Fixed (P4-C5b — found by the fault runs, in the design and in the protocol)
+
+- **A retransmitted ACTION carried the CURRENT round's open hash** instead of the hash of
+  its own round: **263 `SD_OPEN_HASH` desyncs in 500 trials at 10 % drop, on a link that
+  never corrupted a byte.**
+- **A `ROUND_RESULT` that arrived before we had resolved that round was recorded and never
+  matched**, so the agreement barrier only ever looked forward: a link that dropped nothing
+  and **only reordered** ended **472 of 500** trials in `SE_LOST`.
+- **A message from an earlier PHASE was dropped as out-of-state**, so a `CAPABILITIES` that
+  overtook its `HELLO` stranded an honest pair. The design gave the answer-from-state rule
+  to battle rounds only; the handshake needs it too. All three are now zero.
+- **A peer that echoed one of our own Pebble ids reached `battle_init()`** and came back as
+  `BR_DUPLICATE_ID` — which this device reports as an INTERNAL fault, because the engine's
+  duplicate rule spans all six members and `validate_team()` is about one team by
+  construction. It was this device blaming itself for a lie the peer told; there is now a
+  cross-team id check that answers `VR_DUPLICATE_ID` and names the peer.
+- **One injected frame could deafen an endpoint permanently.** The sequence window slid
+  forward to whatever seq it was shown, so a forged frame carrying seq 0x7000 pushed it
+  past every number the honest peer would ever send and every real frame afterwards was
+  dropped as stale. `SESSION_SEQ_MAX_JUMP` refuses a jump no honest peer can make
+  **without moving the window**.
+- **Agreeing is not leaving.** Closing as soon as both final hashes matched paid one side
+  and not the other in **88 of 500** trials at 10 % drop and **18 of 500 on a link that
+  only reordered**. The endpoint now stays in `SS_ENDING` until the peer's GOODBYE, so the
+  two-generals asymmetry needs nine consecutive losses in one direction: **0 in 3,000**.
+
 ### Changed
 
 - **`save_load_all()` now ends in the shared validator, and `save_manager.h` stopped

@@ -165,6 +165,19 @@ $(BIN)/test_protocol:   $(OBJ)/protocol.o $(OBJ)/validate.o $(OBJ)/pebble.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
 
+# THE SESSION FSM, THE LOCKSTEP AND THE FAULT-INJECTING LOOPBACK (P4-C5, the
+# second half). Everything the codec test links, plus the three new pure
+# networking modules and the REAL battle engine and the REAL local AI: the two
+# endpoints each run their own game/battle_ai.cpp over their own side, so a
+# trial is a whole battle between two engines and not a script. box.o comes
+# along for nothing else than the shared fixture builder the validator test
+# already uses.
+$(BIN)/test_session:    $(OBJ)/session.o $(OBJ)/battle_link.o \
+                        $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
+                        $(OBJ)/validate.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
+                        $(OBJ)/pebble.o $(OBJ)/evolution.o $(OBJ)/xp.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 # The minigame contract and the PURE logic of every game. No draw objects and
 # no ui/: if this link line ever needs one, a game has leaked drawing into its

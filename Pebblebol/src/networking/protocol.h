@@ -344,9 +344,18 @@ struct ProtoGoodbye      { uint8_t reason; };
 //
 // `ack` IS DIAGNOSTIC ONLY. It is carried and logged and NEVER compared or
 // branched on, and tests/test_protocol.cpp fuzzes it to arbitrary values across
-// a whole round trip to prove nothing depends on it. `seq` is a per-sender
-// MESSAGE IDENTITY - allocated once and reused verbatim on every retransmission
-// - and it is NOT the replay defence either.
+// a whole round trip to prove nothing depends on it.
+//
+// `seq` IS A PER-SENDER DE-DUPLICATION NUMBER, ALLOCATED FRESH ON EVERY FRAME -
+// RETRANSMISSIONS INCLUDED - AND IT IS NOT THE REPLAY DEFENCE. This header said
+// the opposite until P4-C5b ("allocated once and reused verbatim on every
+// retransmission"), and the two rules cannot both hold: the plan asks for a
+// window that DROPS DUPLICATES, and a retransmission that reused its seq would
+// be indistinguishable from a transport duplicate, so dropping duplicates would
+// discard exactly the frames the retransmission ladder depends on. Message
+// identity is carried by CONTENT instead, which networking/session.cpp needs
+// anyway because a radio can duplicate a frame the sender never repeated.
+// PF_RETX marks a retransmission for the log and is still never branched on.
 struct ProtoMsg {
   uint8_t  version;      // PROTO_VERSION
   uint8_t  type;         // ProtoType
