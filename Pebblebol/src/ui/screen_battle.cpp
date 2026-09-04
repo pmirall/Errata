@@ -38,6 +38,21 @@
 #define BT_INTRO_MS     1600u    // the stare-down, skippable
 #define BT_FPS_HOLD_MS   400u    // renewed every update(); see battle_update()
 
+// A BEAT MUST OUTLAST THE WORST FRAME PERIOD, or the playback enters beats and
+// replaces them without ever drawing one. battle_update() advances at most ONE
+// beat per call (see the `if`, deliberately not a `while`, in battle_update()),
+// so the relationship is exact: with BT_EV_MS at or below the frame period,
+// every frame retires a beat and the ones in between are never shown.
+// ui/render.h's rd_fps() never answers below FPS_LOW, so the frame period tops
+// out at 1000/FPS_LOW ms and today's margin is 600/250 = 2.4x. MEASURED at the
+// boundary: 293/293 beats drawn at 20 fps, at 4 fps and at 2 fps; at 1 fps only
+// 176/293. Nothing else in the tree states this, so a retune of BT_EV_MS below
+// a quarter of a second would silently start dropping transcript with no test
+// failing - which is what this line is here to stop.
+static_assert(BT_EV_MS > (1000u / (unsigned)FPS_LOW),
+              "a transcript beat must last longer than the slowest frame, or "
+              "beats are entered and replaced without ever being drawn");
+
 #define BT_MENU_ROWS     ((uint8_t)(PB_MOVE_COUNT + 1u))       // 4 attacks + CAMBIAR
 #define BT_MENU_SWITCH   ((uint8_t)PB_MOVE_COUNT)              // that last row
 #define BT_SWITCH_ROWS   ((uint8_t)(BATTLE_TEAM_MAX + 1u))     // slots + "Volver"
@@ -109,6 +124,16 @@ uint8_t battle_screen_event(void) {
 //  from awards its XP once, and a fight abandoned at round 3 awards none. This
 //  is the defect the minigame manager shipped with: two exits, each with its
 //  own phase check, each able to report.
+//
+//  THE GUARD IS PER SCREEN VISIT, NOT PER BATTLE, and the difference is worth
+//  stating precisely because the tests are named after the battle. battle_enter()
+//  clears s_reported, so every visit to SCR_BATTLE reports exactly once - even a
+//  visit in which no battle ever started, such as entering the pick list on an
+//  empty Box and pressing B: that reports (PRACTICE, won = 0), which ui.cpp
+//  drops on its `if (!won) return;`. Harmless, and one battle still cannot be
+//  reported twice, because a battle cannot outlive the visit that started it -
+//  there is exactly one nav_push(SCR_BATTLE) in the tree and battle_arm()
+//  always precedes it.
 // -----------------------------------------------------------------------------
 static void report_once(uint8_t won) {
   if (s_reported) return;
@@ -332,12 +357,30 @@ static const char* stat_label(uint8_t stat) {
   }
 }
 
+// BO_ABORT IS NOT A DRAW, and it used to print as one. game/battle.h defines it
+// as "step 1 found the state moved under a submitted action" - a dropped or
+// stale action, which P4-C5 maps to BATTLE_END(DESYNC) - and it arrived here
+// through the `default` arm, so the one outcome that means something went WRONG
+// was the one the panel called Empate. It is unreachable from this screen today
+// (submit() is the only producer of side 0's action and battle_ai_choose() the
+// only producer of side 1's, and both validate against the same unchanged
+// state) but the whole point of naming it is that a failure should not arrive
+// wearing an ordinary result's clothes.
 static const char* outcome_word(uint8_t outcome) {
   switch (outcome) {
     case BO_WIN_A: return S(STR_BT_WIN);
     case BO_WIN_B: return S(STR_BT_LOSE);
+    case BO_ABORT: return S(STR_BT_ABORT);
     default:       return S(STR_BT_DRAW);
   }
+}
+
+// The engine's own verdict as the byte ui_battle_result() takes. ONE
+// expression, because the two places that report - the transition into
+// BTM_RESULT and battle_leave() - disagreeing about who won is exactly the
+// defect this file's report_once() exists to make impossible.
+static uint8_t won_now(void) {
+  return (uint8_t)(s_st.outcome == (uint8_t)BO_WIN_A ? 1u : 0u);
 }
 
 // One line for the beat at s_ev. Built once per beat, not once per frame.
@@ -391,6 +434,15 @@ static void end_playback(void);
 static void enter_beat(uint16_t i) {
   s_ev      = i;
   s_ev_live = 1;
+  // THIS LINE IS LOAD-BEARING AND READS LIKE AN ORDINARY TIMESTAMP. It is a
+  // RESET TO NOW, not an accumulation (`s_ev_ms += BT_EV_MS`), and that is what
+  // makes time-based catch-up structurally impossible: a frame that arrives
+  // late shows its beat for a full BT_EV_MS from the moment it was entered
+  // rather than immediately owing the playback the beats the gap swallowed. So
+  // the rendered SEQUENCE of beats is identical at 20 fps and at 4 fps and only
+  // the wall-clock length of the transcript changes. MEASURED: turning
+  // battle_update()'s `if` into a catch-up `while` is completely INERT while
+  // this line resets; the two together are what would diverge.
   s_ev_ms   = ui_now_ms();
   build_message();
   const uint8_t k = battle_screen_event();
@@ -441,8 +493,16 @@ static void step_round(void) {
   s_round_shown = s_st.round;
 
   battle_log_init(s_log, s_ring, (uint16_t)BT_LOG_CAP);
-  (void)battle_step_round(s_st, &s_log);
+  // BS_NEED_ACTIONS means the engine wrote NOTHING - game/battle.h calls the
+  // state bit-identical - so there is no transcript to play and RESOLVE would
+  // be a mode with an empty ring under it. Going straight back to the menu is
+  // the only honest answer: the round did not happen, and the player's next
+  // press starts it again. Unreachable today (submit() only calls this after
+  // both sides' actions came back BR_OK) and cheaper than a mode that draws a
+  // round that was never resolved.
+  const uint8_t step = (uint8_t)battle_step_round(s_st, &s_log);
   if (s_log.dropped > s_dropped) s_dropped = s_log.dropped;
+  if (step == (uint8_t)BS_NEED_ACTIONS) { end_playback(); return; }
 
   s_ev_live = 0;
   set_mode(BTM_RESOLVE);
@@ -453,6 +513,16 @@ static void step_round(void) {
 // though the cursor cannot rest on an illegal row: the two halves of the
 // promise are independent, and this one also covers a submission arriving from
 // somewhere the ring never walked.
+//
+// AND THE FIRST VALIDATE IS EXACTLY ONE WIGGLE WIDE - said here because the
+// obvious reading of the paragraph above is that deleting it would let an
+// illegal action through, and it would not. battle_submit_action() performs
+// the SAME full validation internally and the line below checks its return, so
+// a refusal still happens either way; what this call adds is the ui_wiggle()
+// beside the toast. MEASURED: with this line deleted the whole battle-screen
+// suite stays green and the only observable difference is that the wiggle stops
+// firing. It is kept because a refusal the player cannot feel is a refusal they
+// will press again, not because the engine needs it.
 static void submit(BattleAction act) {
   s_reject = (uint8_t)battle_validate_action(s_st, 0u, act);
   if (s_reject != (uint8_t)BR_OK) { ui_toast(STR_BT_ILLEGAL); ui_wiggle(); return; }
@@ -469,7 +539,18 @@ static void submit(BattleAction act) {
   // is not covered by a test because nothing can drive it.
   const BattleAction foe = battle_ai_choose(s_ai, s_st);
   if (foe.kind == (uint8_t)BACT_NONE) { end_playback(); return; }
-  (void)battle_submit_action(s_st, 1u, foe);
+
+  // THE FOE'S SUBMISSION IS NOT DISCARDED. It was `(void)`-ed, and the failure
+  // mode that hides is silent and misleading rather than loud: a refused
+  // submission leaves side 1 carrying BACT_NONE into battle_s1_validate_action()
+  // at the top of the round, which turns the whole battle into BO_ABORT - and
+  // BO_ABORT used to print through outcome_word()'s default arm as "Empate". A
+  // dropped action would have reached the player as a DRAW and as nothing else.
+  // Recording it in s_reject makes it visible to battle_screen_reject(), which
+  // every case in tests/test_battle_screen.cpp already asserts is BR_OK, so an
+  // AI that ever drifts away from the validator fails a NAMED test instead of
+  // quietly ending battles in a word that is not true.
+  s_reject = (uint8_t)battle_submit_action(s_st, 1u, foe);
 
   step_round();
 }
@@ -491,7 +572,7 @@ static void end_playback(void) {
   s_ev_live = 0;
   s_msg[0]  = '\0';
   if (s_st.outcome != (uint8_t)BO_UNDECIDED) {
-    report_once((uint8_t)(s_st.outcome == (uint8_t)BO_WIN_A ? 1u : 0u));
+    report_once(won_now());
     set_mode(BTM_RESULT);
     return;
   }
@@ -558,6 +639,15 @@ void battle_arm(uint8_t entry, uint32_t seed) {
   s_armed = 1;
 }
 
+// RE-ENTERING WITHOUT LEAVING WOULD DROP A REPORT, and the reason it cannot is
+// worth writing down rather than relying on: app/state_machine.cpp's sm_goto()
+// skips leave() when the target IS the current screen but always runs enter(),
+// so an sm_push(SCR_BATTLE) onto a battle that has already reported would clear
+// s_reported and s_reports below and the visit would end having reported once
+// in total instead of twice - the minigame manager's bug in mirror image. The
+// tree is safe because there is exactly ONE nav_push(SCR_BATTLE) (ui.cpp's
+// ui_start_battle) and battle_arm() always precedes it, so a second entry point
+// added later must either go through ui_start_battle() or re-open this.
 void battle_enter(void) {
   s_live     = 0;
   s_reported = 0;
@@ -605,6 +695,16 @@ void battle_update(uint32_t now_ms) {
   // BT_FPS_HOLD_MS of the last update() this screen runs.
   ui_hold_fps((uint8_t)FPS_NORMAL, (uint16_t)BT_FPS_HOLD_MS);
 
+  // THE GUARD render() AND input() ALREADY CARRY, and update() was the one hook
+  // without it. A DIAG entry whose battle_init() is refused sits at BTM_INTRO
+  // with s_live 0: the INTRO timeout below then ran to_menu() on a dead battle
+  // and left s_mode at BTM_MENU while render() was drawing the start-error page
+  // and battle_screen_mode() was answering BTM_MENU. Not exploitable - B still
+  // leaves - but a screen whose reported mode disagrees with its picture is a
+  // screen no test can be written against. The fps hold stays ABOVE this line:
+  // the pick list is a live screen with s_live still 0.
+  if (!s_live) return;
+
   if (s_mode == BTM_INTRO && (uint32_t)(now_ms - s_mode_ms) >= BT_INTRO_MS) {
     to_menu();
     return;
@@ -617,9 +717,25 @@ void battle_update(uint32_t now_ms) {
 
 void battle_leave(void) {
   // Leaving by ANY route - B, LONG_BOTH, a push, the auto-return that SF_STICKY
-  // keeps off this screen anyway - reports exactly once. A battle abandoned
-  // before it ended reports a loss, which pays nothing.
-  report_once(0u);
+  // keeps off this screen anyway - reports exactly once.
+  //
+  // AND IT REPORTS THE ENGINE'S OWN VERDICT, WHICH IS THE FIX FOR A REAL
+  // UNDER-AWARD. This said report_once(0u): a flat loss, on the argument that
+  // "a battle abandoned before it ended pays nothing". The argument is right
+  // and the code did not implement it, because a battle is DECIDED inside
+  // battle_step_round() while its victory transcript is still playing - the
+  // outcome is BO_WIN_A for the four beats it takes to show the last blow, the
+  // faint and the BATTLE_END line, roughly 2.4 s. LONG_BOTH (the global HOME
+  // invariant; SCR_BATTLE carries no SF_LOCK_INPUT) or a hatch ceremony
+  // arriving inside that window reported the WIN as a LOSS and paid nothing,
+  // while B in the identical state ran end_playback() and paid. Same battle,
+  // same state, different exit, different reward. MEASURED before the fix: 35
+  // of 64 seeded practice battles sit decided-but-unreported in that window.
+  //
+  // An abandoned battle is still BO_UNDECIDED, so won_now() is 0 for it and the
+  // original intent is unchanged: walking out of a fight in progress earns
+  // nothing.
+  report_once(won_now());
   s_live  = 0;
   s_armed = 0;
 }

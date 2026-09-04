@@ -24,8 +24,10 @@ static_assert(BR_FOE_BODY_Y >= UI_CONTENT_Y, "the foe stands above the content b
 // THE SHADOW COUNTS. The first draft asserted the BODY clear of the transcript
 // and put the two rows of contact shadow straight through the top of it: at
 // BR_YOU_BODY_Y 23 the shadow landed on rows 47-48 and the text starts at 48,
-// which the intro golden happened not to show only because "¡A COMBATIR!" is
-// short enough to stop before the shadow's leftmost column.
+// which the intro golden happened not to show only because the intro line
+// (STR_BT_VS) is short enough to stop before the shadow's leftmost column.
+// The string itself is quoted nowhere here: Spanish belongs in
+// core/strings_es.h, comments included.
 static_assert(BR_YOU_BODY_Y + BR_BODY_H + BR_SHADOW_H - 1 < BR_MSG_BASE - GFX_ASC_BODY,
               "the player's body or its shadow would sit on the transcript line");
 static_assert(BR_MSG_BASE <= UI_CONTENT_BOTTOM, "the transcript line is under the strip");

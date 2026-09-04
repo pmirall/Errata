@@ -25,23 +25,53 @@
 //  cooldown is a UI bug, and game/battle_ai.cpp already proves an action
 //  producer and the validator can agree.
 //
-//  NO PER-FRAME HEAP, and it is a design property rather than a measurement:
-//  the 212 B BattleState, the 8 B BattleAi, the BattleSetup, the event ring and
-//  every string buffer are file-scope statics in screen_battle.cpp. Nothing in
-//  this screen's update or render path allocates, because there is nothing left
-//  for it to allocate. dev/godmode.cpp measures the ESP.getFreeHeap() delta per
-//  drawn frame and the SYS/HEAP page shows it.
+//  NO PER-FRAME HEAP, and it is now MEASURED as well as designed for. The
+//  design half: the 212 B BattleState, the 8 B BattleAi, the BattleSetup, the
+//  event ring and every string buffer are file-scope statics in
+//  screen_battle.cpp, so there is nothing left in update() or render() to
+//  allocate. The measurement half: tests/test_battle_screen.cpp intercepts
+//  operator new / new[] / malloc / calloc / realloc and drives thousands of
+//  real update+render frames across all six modes, asserting the count stays at
+//  zero - and proves the counter can fire before it trusts the zero.
+//  dev/godmode.cpp carries the same question to the device: it samples
+//  ESP.getFreeHeap() per drawn frame and the SYS/HEAP page prints it, which is
+//  the only half of this that has never run on hardware.
 //
-//  THE BOX IS READ-ONLY TO THIS SCREEN. A practice team is a COPY taken through
-//  box_peek(); the fight is fought at full health on that copy and no damage,
-//  no faint and no status ever travels back. So "a battle interrupted by
-//  leaving the screen must not corrupt the Box" is structural: there is no
-//  write to corrupt it with.
+//  UPDATE RUNS AT LOOP RATE, NOT FRAME RATE. battle_update() is called from
+//  ui_service() - app.cpp's step 3, every loop iteration - and not from the
+//  render path, which is why the BT_FPS_HOLD_MS hold can never lapse: it is
+//  renewed far more often than the frames it is holding the rate for. It is
+//  also why the beat clock is compared against ui_now_ms() rather than counted
+//  in frames.
+//
+//  THE BOX IS READ-ONLY TO THIS SCREEN - to THIS SCREEN, which is narrower than
+//  "a battle never writes the Box" and is the true sentence. A practice team is
+//  a COPY taken through box_peek(); the fight is fought at full health on that
+//  copy and no damage, no faint and no status ever travels back, so "a battle
+//  interrupted by leaving the screen must not corrupt the Box" is structural:
+//  this file has no write to corrupt it with. A battle that is WON does reach
+//  the Box, one hop away and outside this screen: ui_battle_result() calls
+//  app_award_xp(), which writes the ACTIVE Pebble's level, xp and hp_cur and
+//  flushes. That is the ordinary XP path every other source takes.
 //
 //  ONE REPORT PATH, copied from minigames/manager.cpp's mgr_abort(). Leaving by
 //  ANY route - B, LONG_BOTH, a push, the result screen - runs report_once(),
-//  which is idempotent. That is the fix for the exact defect the minigame
-//  manager had: two exits, two chances to count one result twice.
+//  which is idempotent, and reports the ENGINE'S outcome rather than a flat
+//  loss: a battle is decided while its victory transcript is still playing, so
+//  a leave inside that window used to pay nothing for a fight the player had
+//  already won. That is the fix for the exact defect the minigame manager had -
+//  two exits, two chances to count one result - plus the one it did not have.
+//
+//  THERE IS NO CONFIRM ON QUIT, and that is the one place this lifecycle
+//  differs from the minigame's (handle_game() opens CFM_QUIT_GAME before
+//  discarding a run). It is deliberate rather than forgotten: a confirm would
+//  have to be an OVERLAY, because leaving the screen is what reports, so a
+//  dialog pushed as a screen would report the battle it was asking about. The
+//  overlay is reachable - dialog_open_confirm() does not navigate - but it puts
+//  ui/dialog.o on a link line kept deliberately minimal, and with the report
+//  above fixed a stray B can no longer throw away a fight that was already won:
+//  it abandons an UNDECIDED one, which is what the minigame's dialog protects
+//  against and what P5 can add here if play says it should.
 //
 //  PURE translation unit: gfx.h, the pure game modules, the content tables and
 //  the ui.h seams. No render.h, no Arduino.h, no U8G2 - which is what lets

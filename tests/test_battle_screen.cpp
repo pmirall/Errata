@@ -11,8 +11,21 @@
 //       would refuse, in any mode, in any state, for any seed;
 //    2. the log ring is sized against the WORST round, not the typical one;
 //    3. one battle reports its result exactly once whatever route is taken out
-//       of the screen, and an abandoned battle pays nothing;
-//    4. the Box is never written, so an interrupted battle cannot corrupt it.
+//       of the screen, with the ENGINE'S outcome, and an abandoned battle pays
+//       nothing;
+//    4. the battle SCREEN never writes the Box, so an interrupted battle cannot
+//       corrupt it.
+//
+//  PROMISE 4 IS NARROWER THAN "A BATTLE NEVER WRITES THE BOX", and the earlier
+//  wording of it was wider than the tree. ui/screen_battle.cpp holds only
+//  box_peek / box_occupied / box_count, so THAT file cannot corrupt anything -
+//  which is the structural claim, and it is the one these cases can hold. A
+//  battle that is WON does reach the Box one hop away: ui.cpp's
+//  ui_battle_result() calls app_award_xp(), which writes the ACTIVE Pebble's
+//  level, xp and hp_cur and flushes. That path is host-unreachable from here
+//  (ui_battle_result is stubbed below and app.cpp is on no test link line), so
+//  a_battle_leaves_the_box_byte_identical is a statement about the screen and
+//  is now labelled as one.
 //
 //  Plus the two things P4-C4 lifted out of ui/petfx.cpp: the horizontal flip
 //  (which nothing in this repository compiled, let alone executed, until it
@@ -20,6 +33,8 @@
 // =============================================================================
 #include "nt_test.h"
 
+#include <new>
+#include <stdlib.h>
 #include <string.h>
 
 #include "core/nt_types.h"
@@ -30,6 +45,7 @@
 #include "game/box.h"
 #include "game/genome.h"
 #include "ui/battle_renderer.h"
+#include "ui/pet_art.h"
 #include "ui/screen_battle.h"
 #include "ui/ui.h"
 #include "ui/xbm_mirror.h"
@@ -306,6 +322,12 @@ TEST(one_battle_reports_its_result_exactly_once) {
 
   // (c) never started at all: the pick list, abandoned. Still exactly one
   // report, and still a loss - there is nothing to pay for.
+  //
+  // THIS IS ALSO WHERE THE CASE'S NAME IS WIDER THAN ITS GUARD, said rather
+  // than left to be found: the guard is per screen VISIT (battle_enter() clears
+  // it), so this visit reports (PRACTICE, 0) even though no battle existed.
+  // ui.cpp drops it on `if (!won) return;`. One battle still cannot report
+  // twice, because a battle cannot outlive the visit that started it.
   seams_reset();
   box_fixture(3);
   battle_arm(BT_ENTRY_PRACTICE, 0x3002u);
@@ -358,7 +380,11 @@ TEST(the_diag_seed_replays_the_same_battle) {
 }
 
 // =============================================================================
-//  4. THE BOX IS NEVER WRITTEN
+//  4. THE BATTLE SCREEN NEVER WRITES THE BOX
+//
+//  See the header: the XP a win pays is app_award_xp()'s write, one hop outside
+//  this screen and stubbed out of this binary, so what these two memcmps prove
+//  is that ui/screen_battle.cpp itself touches nothing.
 // =============================================================================
 TEST(a_battle_leaves_the_box_byte_identical) {
   seams_reset();
@@ -621,7 +647,16 @@ TEST(the_flip_refuses_a_frame_wider_than_the_atlas) {
 // =============================================================================
 //  THE 24x24 COMBAT BODY
 // =============================================================================
-TEST(the_species_chooses_the_combat_body) {
+// THE NAME THIS CASE USED TO CARRY WAS WIDER THAN ITS BODY. It was called
+// `the_species_chooses_the_combat_body` and it called br_body_set_id() with
+// sp->sprite_id read straight out of the row - so it never touched
+// pet_art_key(), the expression that IS the species->body link, and mutating
+// that function to `return gene_species` left this case green while
+// tests/test_pet_view.cpp and three battle goldens failed. Two things changed:
+// the key now comes through pet_art_key() exactly as ui/screen_battle.cpp's
+// resolve_art() builds it, and the name says what the rest of the case checks -
+// the FOLD, and the distribution it produces.
+TEST(the_roster_folds_onto_the_authored_combat_bodies) {
   // Every roster row draws a CREATURE at battle size - never an egg, a pose set
   // or one of the two retired bodies.
   int per_set[SPRITE_SET_COUNT];
@@ -630,7 +665,12 @@ TEST(the_species_chooses_the_combat_body) {
     const SpeciesDef* sp = species_get(id);
     CHECK(sp != nullptr);
     if (!sp) continue;
-    const uint8_t set = br_body_set_id(sp->sprite_id);
+    // THE SCREEN'S OWN EXPRESSION, not the row's field: resolve_art() stores
+    // pet_art_key(species_id, 0) and hands that to br_body_set_id(). Reading
+    // sprite_id directly here is what let this case pass under a pet_art_key()
+    // that ignored the species.
+    CHECK_EQ(pet_art_key(id, 0u), sp->sprite_id);
+    const uint8_t set = br_body_set_id(pet_art_key(id, 0u));
     CHECK(set >= SPRITE_BODY_FIRST);
     CHECK(set <= SPRITE_BODY_LAST);
     // 24x24, which is what the field geometry is laid out against.
@@ -680,4 +720,304 @@ TEST(the_two_combatants_face_each_other) {
   // And the body is not symmetric, so "mirrored" is a claim with content.
   CHECK(same < BR_BODY_W * BR_BODY_H);
   CHECK_EQ(fb_oob(), 0u);
+}
+
+// =============================================================================
+//  P4-C4 FOLLOW-UP. Four properties the first pass either got wrong or left
+//  unstated. Each one was made to fail before it was written down and the
+//  mutation is named above it.
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+//  THE ONE REAL DEFECT THE SWEEP FOUND: A WON BATTLE PAID NOTHING ON THE WRONG
+//  EXIT.
+//
+//  The engine decides the outcome inside battle_step_round(), while the victory
+//  transcript is still playing - the last blow, the faint and the BATTLE_END
+//  line are four more beats, about 2.4 s. battle_leave() reported a flat
+//  report_once(0u) for that whole window, so LONG_BOTH (the global HOME
+//  invariant; SCR_BATTLE has no SF_LOCK_INPUT) or a hatch ceremony arriving
+//  there turned a win into a loss and paid nothing, while B in the identical
+//  state ran end_playback() and paid. Same battle, same state, different exit,
+//  different reward.
+//
+//  MUTATION THIS CATCHES: battle_leave() back to report_once(0u) - measured, 35
+//  of the 64 seeds below reach the window, so 35 checks fail. Also caught:
+//  won_now() answering BO_WIN_B, or end_playback() and battle_leave() being
+//  given two different expressions for "won".
+// -----------------------------------------------------------------------------
+TEST(a_decided_battle_left_before_its_transcript_ends_still_reports_the_win) {
+  int windows = 0, wins = 0, losses = 0;
+  for (uint32_t s = 0; s < 64u; ++s) {
+    seams_reset();
+    box_fixture(3);
+    battle_arm(BT_ENTRY_PRACTICE, 0x1000u + s * 0x9E3779B9u);
+    battle_enter();
+    pick_team((uint8_t)BATTLE_TEAM_MAX);
+    battle_input(GST_HOLD_R);                  // INTRO -> MENU
+
+    // Play until the engine has DECIDED but the playback has not finished:
+    // that is the window, and it is entered by the transcript, never by a press.
+    bool in_window = false;
+    for (int guard = 0; guard < 4000; ++guard) {
+      const uint8_t m = battle_screen_mode();
+      if (m == BTM_RESULT) break;              // the playback got there first
+      if (m == BTM_RESOLVE &&
+          battle_screen_outcome() != (uint8_t)BO_UNDECIDED) { in_window = true; break; }
+      if (m == BTM_RESOLVE) { battle_input(GST_TAP_L); continue; }
+      battle_input(GST_HOLD_R);
+    }
+    if (!in_window) { battle_leave(); continue; }
+    ++windows;
+
+    // Nothing has been reported yet - end_playback() has not run.
+    CHECK_EQ(g_results, 0);
+    const uint8_t outcome = battle_screen_outcome();
+
+    // LONG_BOTH, a push, the auto-return: every one of them is battle_leave()
+    // and nothing else. The player never sees the result screen.
+    battle_leave();
+    CHECK_EQ(g_results, 1);
+    CHECK_EQ(g_res_entry, (uint8_t)BT_ENTRY_PRACTICE);
+    CHECK_EQ(g_res_won, (uint8_t)(outcome == (uint8_t)BO_WIN_A ? 1u : 0u));
+    if (outcome == (uint8_t)BO_WIN_A) ++wins; else ++losses;
+  }
+  // The case has to have MET the window, or it proved nothing about it.
+  CHECK(windows > 0);
+  CHECK(wins > 0);
+  printf("  %d of 64 battles were decided mid-transcript; %d won, %d lost, "
+         "each reported once and correctly\n", windows, wins, losses);
+
+  // AND THE OTHER HALF OF THE SAME SENTENCE, which is the one the old flat
+  // report_once(0u) got right: a battle abandoned while it is still UNDECIDED
+  // pays nothing, whichever exit is taken.
+  seams_reset();
+  box_fixture(3);
+  battle_arm(BT_ENTRY_PRACTICE, 0x1000u);
+  battle_enter();
+  pick_team((uint8_t)BATTLE_TEAM_MAX);
+  battle_input(GST_HOLD_R);
+  battle_input(GST_HOLD_R);                    // one real round
+  CHECK_EQ(battle_screen_outcome(), (uint8_t)BO_UNDECIDED);
+  battle_leave();
+  CHECK_EQ(g_results, 1);
+  CHECK_EQ(g_res_won, 0u);
+}
+
+// -----------------------------------------------------------------------------
+//  A DEAD SCREEN DOES NOT ADVANCE ITS OWN MODE.
+//
+//  battle_render() and battle_input() both check s_live; battle_update() did
+//  not, so a battle whose battle_init() was refused still ran the INTRO timeout
+//  and left s_mode at BTM_MENU while the panel was drawing the start-error
+//  page. Nothing was corrupted by it - B still leaves - but a screen whose
+//  reported mode disagrees with its picture is a screen no other case can be
+//  written against.
+//
+//  IT IS DRIVEN THROUGH THE ONLY DOOR A PLAYER HAS, which for this state is the
+//  DIAG entry with an impossible team, because battle_enter() is the one place
+//  that can leave s_live 0 at BTM_INTRO.
+//
+//  MUTATION THIS CATCHES: delete `if (!s_live) return;` from battle_update().
+// -----------------------------------------------------------------------------
+TEST(a_dead_screen_does_not_advance_its_own_mode) {
+  seams_reset();
+  box_fixture(3);
+  battle_arm(BT_ENTRY_PRACTICE, 0x9100u);
+  battle_enter();
+  pick_team((uint8_t)BATTLE_TEAM_MAX);
+  CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_INTRO);
+
+  // battle_leave() is what a push or LONG_BOTH does: the battle is over as far
+  // as this screen is concerned, and s_live is 0 again.
+  battle_leave();
+  const uint8_t mode_before = battle_screen_mode();
+  CHECK_EQ(mode_before, (uint8_t)BTM_INTRO);
+
+  // Four whole INTRO timeouts. On a live screen the first one alone would run
+  // to_menu(); on a dead one nothing may move.
+  for (int i = 0; i < 4; ++i) { g_now += 5000u; battle_update(g_now); }
+  CHECK_EQ(battle_screen_mode(), mode_before);
+  // And the hold is still renewed, because the pick list and the error page are
+  // drawn frames too: the guard sits BELOW ui_hold_fps() on purpose.
+  CHECK_EQ(g_holds, 4);
+  CHECK_EQ(g_hold_fps, (uint8_t)FPS_NORMAL);
+  // Nothing was reported a second time by any of it.
+  CHECK_EQ(g_results, 1);
+}
+
+// -----------------------------------------------------------------------------
+//  A MENU ALWAYS HAS AT LEAST ONE LEGAL ROW.
+//
+//  This is the property the ring's promise stands on and it was never stated:
+//  ring_legal() falls back to `cur` when nothing is legal, and first_legal()
+//  falls back to row 0, so a mode with NO legal row would park the cursor on an
+//  illegal one - and every other case in this file would then fail for a reason
+//  that does not name the cause. It holds because of two things neither of
+//  which is in this file:
+//    * game/battle.h's static_assert battle_every_learnset_has_an_always_ready_
+//      move() - no shipped species can have all four moves on cooldown at once;
+//    * battle_s9_check_victory() deciding the battle at alive_count == 0, which
+//      is what stops a fainted active with an empty bench ever reaching a menu.
+//  Both are re-checked here, at runtime, over the real roster and the real
+//  screen, and the minimum legal-row count actually seen is printed so that a
+//  future roster with a tighter learnset shows up as a number moving towards 1.
+//
+//  MUTATIONS THIS CATCHES: a learnset in which every move carries a cooldown
+//  (the static_assert fails the BUILD first, which is the point of it); and
+//  switch_row_legal()/menu_row_legal() inverted, which drives the minimum to 0.
+// -----------------------------------------------------------------------------
+TEST(every_menu_the_ring_can_reach_has_a_legal_row) {
+  // The compile-time guard, asked again at runtime so this file names it.
+  CHECK(battle_every_learnset_has_an_always_ready_move());
+  int ready_moves = 0;
+  for (uint8_t i = 0; i < (uint8_t)SPECIES_TABLE_COUNT; ++i)
+    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) {
+      const uint8_t id = SPECIES_TABLE[i].moves[m];
+      CHECK(id >= 1u && id <= (uint8_t)ATTACK_COUNT);
+      if (id >= 1u && id <= (uint8_t)ATTACK_COUNT &&
+          ATTACKS_TABLE[id - 1u].cooldown == 0u) ++ready_moves;
+    }
+  CHECK(ready_moves >= (int)SPECIES_TABLE_COUNT);
+
+  int menus = 0, worst_legal = 99;
+  for (uint32_t s = 0; s < 64u; ++s) {
+    seams_reset();
+    box_fixture(3);
+    battle_arm(BT_ENTRY_PRACTICE, 0xA000u + s * 0x27D4EB2Fu);
+    battle_enter();
+    pick_team((uint8_t)BATTLE_TEAM_MAX);
+    battle_input(GST_HOLD_R);
+    for (int guard = 0; guard < 4000 && battle_screen_mode() != BTM_RESULT; ++guard) {
+      const uint8_t m = battle_screen_mode();
+      if (m == BTM_MENU || m == BTM_SWITCH) {
+        const int rows = (m == BTM_MENU) ? (int)PB_MOVE_COUNT + 1
+                                         : (int)BATTLE_TEAM_MAX + 1;
+        const int legal = rows - (int)battle_screen_blocked_rows();
+        CHECK(legal >= 1);
+        if (legal < worst_legal) worst_legal = legal;
+        ++menus;
+      }
+      battle_input(m == BTM_RESOLVE ? GST_TAP_L : GST_HOLD_R);
+    }
+    battle_leave();
+  }
+  CHECK(menus > 0);
+  CHECK(worst_legal >= 1);
+  CHECK(worst_legal < 6);          // the situation was MET, not merely survived
+  printf("  %d menus reached; the tightest offered %d legal row(s)\n",
+         menus, worst_legal);
+}
+
+// =============================================================================
+//  NO PER-FRAME HEAP - MEASURED, NOT ARGUED.
+//
+//  The plan's bullet is "ESP.getFreeHeap() delta 0 per frame in DIAG" and there
+//  is no device in this environment, so P4-C4 could only offer the DESIGN
+//  argument: every byte the screen owns is a file-scope static, so there is
+//  nothing left in update() or render() to allocate. That argument is right and
+//  it is not a measurement. This is the measurement the host CAN make, and it
+//  is strictly stronger than counting statics: it intercepts the allocator
+//  itself and drives real frames.
+//
+//  WHAT IS INTERCEPTED: operator new / new[] / delete / delete[], and
+//  malloc / calloc / realloc by symbol interposition (the definitions below
+//  bind ahead of libc's and forward to __libc_*). So an allocation from
+//  anywhere under battle_update() or battle_render() is counted - the screen's
+//  own code, the gfx widgets, or a libc call underneath snprintf.
+//
+//  AND THE COUNTER IS PROVED TO FIRE BEFORE THE ZERO IS TRUSTED. A test that
+//  counts nothing because its counter is broken is the exact defect this
+//  project keeps finding, so the case allocates on purpose first and requires
+//  the count to move.
+// =============================================================================
+extern "C" void* __libc_malloc(size_t);
+extern "C" void* __libc_calloc(size_t, size_t);
+extern "C" void* __libc_realloc(void*, size_t);
+extern "C" void  __libc_free(void*);
+
+static long g_allocs = 0;
+static int  g_watch  = 0;
+
+extern "C" void* malloc(size_t n)             { if (g_watch) ++g_allocs; return __libc_malloc(n); }
+extern "C" void* calloc(size_t n, size_t m)   { if (g_watch) ++g_allocs; return __libc_calloc(n, m); }
+extern "C" void* realloc(void* p, size_t n)   { if (g_watch) ++g_allocs; return __libc_realloc(p, n); }
+extern "C" void  free(void* p)                { __libc_free(p); }
+
+void* operator new(size_t n) {
+  if (g_watch) ++g_allocs;
+  void* p = __libc_malloc(n ? n : 1u);
+  if (!p) throw std::bad_alloc();
+  return p;
+}
+void* operator new[](size_t n) { return operator new(n); }
+void  operator delete(void* p) noexcept            { __libc_free(p); }
+void  operator delete[](void* p) noexcept          { __libc_free(p); }
+void  operator delete(void* p, size_t) noexcept    { __libc_free(p); }
+void  operator delete[](void* p, size_t) noexcept  { __libc_free(p); }
+
+// One drawn frame, exactly as app.cpp orders it: ui_service() runs update at
+// LOOP rate, then the render pass draws.
+static void one_frame(void) {
+  battle_update(g_now);
+  battle_render();
+  g_now += 50u;
+}
+
+TEST(no_frame_of_a_battle_allocates) {
+  // (0) THE COUNTER WORKS. Without this the zero below means nothing.
+  g_allocs = 0; g_watch = 1;
+  { volatile int* leak = new int(7); delete leak; }
+  { char* c = (char*)malloc(32); free(c); }
+  g_watch = 0;
+  CHECK(g_allocs >= 2);
+
+  int frames = 0;
+  int modes_seen[BTM_MODE_COUNT];
+  memset(modes_seen, 0, sizeof modes_seen);
+
+  g_allocs = 0;
+  for (uint32_t s = 0; s < 8u; ++s) {
+    seams_reset();
+    box_fixture(5);
+    battle_arm(BT_ENTRY_PRACTICE, 0xB000u + s * 0x9E3779B9u);
+
+    g_watch = 1;
+    battle_enter();
+    // (a) the PICK list, drawn.
+    for (int i = 0; i < 10; ++i) { one_frame(); ++frames; ++modes_seen[BTM_PICK]; }
+    g_watch = 0;
+    pick_team((uint8_t)BATTLE_TEAM_MAX);
+    g_watch = 1;
+
+    // (b) the INTRO, on its own clock, then every mode the fight walks through.
+    for (int guard = 0; guard < 6000; ++guard) {
+      const uint8_t m = battle_screen_mode();
+      ++modes_seen[m];
+      one_frame();
+      ++frames;
+      if (m == BTM_RESULT) { if (modes_seen[BTM_RESULT] > 6) break; continue; }
+      if (m == BTM_MENU) {
+        // Walk a row and choose one, so the list widget re-lays-out under the
+        // counter rather than redrawing a settled frame.
+        battle_input(GST_TAP_L);
+        one_frame(); ++frames;
+        battle_input(GST_HOLD_R);
+        continue;
+      }
+      if (m == BTM_SWITCH) { battle_input(GST_TAP_L); battle_input(GST_HOLD_R); continue; }
+      // INTRO ends on its clock; RESOLVE advances on its own beat, so the
+      // frames above are what move it - that is the point of counting them.
+    }
+    battle_leave();
+    g_watch = 0;
+  }
+
+  // Every mode was actually drawn, or "no frame allocates" is a statement about
+  // frames that were never rendered.
+  for (uint8_t m = 0; m < (uint8_t)BTM_MODE_COUNT; ++m) CHECK(modes_seen[m] > 0);
+  CHECK(frames > 1000);
+  CHECK_EQ(g_allocs, 0L);
+  printf("  %d real update+render frames across all six modes, %ld allocations\n",
+         frames, g_allocs);
 }

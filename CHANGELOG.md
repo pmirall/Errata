@@ -199,6 +199,59 @@ Phase 4 begins. Nothing is tagged yet.
 
 ### Fixed
 
+#### P4-C4 follow-up — a won battle that paid nothing, and an evolution the tick was wider than
+
+- **A BATTLE THAT WAS ALREADY WON PAID NOTHING ON THE WRONG EXIT.** The engine decides the
+  outcome inside `battle_step_round()`, while the victory transcript is still playing — the
+  last blow, the faint and the `BATTLE_END` line are four more beats, about 2.4 s.
+  `battle_leave()` reported a flat `report_once(0u)` for that whole window, so `LONG_BOTH`
+  (the global HOME invariant; `SCR_BATTLE` carries no `SF_LOCK_INPUT`) or a hatch ceremony
+  arriving there turned a WIN into a loss and paid no XP, while B in the identical state ran
+  `end_playback()` and paid. Same battle, same state, different exit, different reward.
+  **Measured: 35 of 64 seeded practice battles sit decided-but-unreported in that window**,
+  and all 35 were mis-reported. `battle_leave()` reports the engine's own outcome now; an
+  abandoned battle is still `BO_UNDECIDED` and still pays nothing, which was the intent all
+  along. `a_decided_battle_left_before_its_transcript_ends_still_reports_the_win` drives all
+  64 to that exact state through the real screen.
+- **THE EVOLUTION TICK WAS WIDER THAN THE TREE FOR HALF THE ROSTER, and the number is now
+  written down and checked.** P4-C4a closed §18's visual obligation and measured "24 of 24
+  rules change the drawn body at BABY, ADULT and SENIOR". That is true, and those are three
+  STAGES, not three moments: `sim.cpp`'s ladder is `>= 20` SENIOR / `>= 15` ADULT / `>= 10`
+  TEEN / `>= 5` CHILD, and **12 of the 24 shipped rules have a minimum level of 8, 10 or 12
+  — every family's FIRST evolution, the starter's Paketo → Fragmar among them — so they fire
+  at CHILD or TEEN, which are the two stages the species deliberately does not key**. At
+  those twelve confirmations the drawn body is bit-identical and only the NAME and `hp_max`
+  move; the body follows when the pet reaches ADULT. The policy is unchanged and is right
+  (the atlas authors two CHILD and two TEEN designs and both pairs already carry care
+  quality), so what was fixed is the CLAIM: `every_rule_measured_at_the_level_it_actually_
+  fires_at` binds a Pebble at each rule's own level, asks the SIMULATION which stage that
+  is rather than restating the ladder, and asserts 12 / 12 with the name moving for all 24
+  and the body moving for all 24 at ADULT. The plan, the §67 line and the obligation bullet
+  all carry the number now.
+- **AND ON A MIGRATED DEVICE THE NAME DID NOT MOVE EITHER**, which made the twelve above a
+  change of nothing at all. `migrate_v1_to_v2()` synthesized the v1 DYNASTY name into
+  `PebbleInstance.nickname` for a pet nobody had ever renamed; `game_state.cpp` copies
+  `pebbles[0].nickname` into `Config.pet_name`; `ui_pet_name()` answers `Config.pet_name`
+  before anything else; and no v2 path ever clears it. So a migrated player saw the dynasty
+  syllables for the life of the device and the species name never appeared once — the exact
+  P3-C3 complaint P4-C4a set out to close, on every device that had a v1 save. A fresh v2
+  device was fine (`box.cpp` writes no nickname, ever). **The write was display-neutral when
+  it was written** — `ui_name_for()` computes the same hash over the same syllable tables,
+  so an empty nickname drew the identical word — and stopped being neutral the moment the
+  ladder grew a middle rung. A migrated pet with no typed name now arrives unnamed;
+  `migrate_default_name()` is deleted with its only call site; a v1 owner who DID type a
+  name still keeps it.
+- **`BO_ABORT` reached the player as the word "Empate".** `game/battle.h` defines it as "step
+  1 found the state moved under a submitted action" (P4-C5's `BATTLE_END(DESYNC)`), and it
+  arrived at `outcome_word()`'s `default` arm — so the one outcome that means something went
+  wrong was the one outcome the panel called an ordinary result. It has its own string now.
+  Unreachable from this screen today, which is why the fix is a name rather than a recovery.
+- **`battle_update()` had no `s_live` guard**, unlike `battle_render()` and `battle_input()`.
+  A DIAG entry whose `battle_init()` was refused still ran the INTRO timeout and left the
+  reported mode at `BTM_MENU` while the panel drew the start-error page. Not exploitable —
+  B still leaves — but a screen whose reported mode disagrees with its picture is a screen
+  no other case can be written against.
+
 #### P4-C4a — three more tests that could not fail, and one dead function
 
 - **`every_species_row_points_at_a_real_sprite_set` existed byte-identically in
@@ -318,6 +371,29 @@ Phase 4 begins. Nothing is tagged yet.
   0 stayed 0 for ever and every HP meter showed 0 %). Both come from the species row now.
 - **Two open-coded copies of `hp_max`** in `ui/ui.cpp` and `game/box.cpp` now call
   `xp_hp_max()`, which became `inline constexpr` in `game/xp.h`.
+
+### Measured (P4-C4 follow-up)
+
+- **No frame of a battle allocates — measured, not argued.** P4-C4 could only offer the
+  design argument (every byte the screen owns is a file-scope static) because there is no
+  device here to read `ESP.getFreeHeap()` on. `no_frame_of_a_battle_allocates` interposes
+  `operator new` / `new[]` / `malloc` / `calloc` / `realloc` and drives **3,942 real
+  `update()`+`render()` frames across all six modes for 0 allocations** — after allocating
+  on purpose first, so the zero is not a broken counter. The device half of the claim
+  (`dev/godmode.cpp`'s SYS/HEAP page) has still never run on hardware and says so.
+- **A menu always has at least one legal row**, which is the property the cursor ring's whole
+  promise stands on and which nothing named. It holds because of `battle.h`'s
+  `static_assert battle_every_learnset_has_an_always_ready_move()` and because
+  `battle_s9_check_victory()` decides the battle at `alive_count == 0`. Both are re-checked
+  at runtime now, over 905 menus reached across 64 battles; **the tightest offered exactly 1
+  legal row**, so the case has met the situation it is about rather than merely survived it.
+- **`the_species_chooses_the_combat_body` had a name wider than its body** and is renamed
+  `the_roster_folds_onto_the_authored_combat_bodies`. It called `br_body_set_id(sp->
+  sprite_id)` straight from the row, so it never touched `pet_art_key()` — the expression
+  that IS the species → body link — and mutating that function to `return gene_species` left
+  it green while `test_pet_view` and three goldens failed. It resolves through
+  `pet_art_key()` now, exactly as `resolve_art()` does, and that mutation fails it at 37
+  checks.
 
 ### Known gaps
 

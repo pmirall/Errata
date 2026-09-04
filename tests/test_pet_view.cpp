@@ -222,8 +222,41 @@ static void live_view(PetView& out, uint16_t g0, uint8_t stage,
 
 // The set id petfx would draw for a view, through the same two functions
 // petfx_draw_body() uses.
+//
+// AND IT IS A RE-STATEMENT, NOT THE THING ITSELF - said here because every
+// case below leans on it. ui/petfx.cpp includes render.h, so it is a
+// DEVICE-ONLY translation unit that no host binary compiles; this line is a
+// copy of petfx.cpp's own two-line resolution (`sprite_set_id(p.stage, p.form,
+// pose)`), and a change made INSIDE petfx would be caught by no host test. The
+// exposure is small and bounded by things the gate does hold: tools/check.sh
+// forbids petfx.cpp from including sim.h or genome.h, so the only body source
+// it has is PetView.form, and the goldens in tests/test_screens.cpp cover the
+// still body that screen_home.cpp draws through the same expression. What is
+// NOT covered is petfx's animation path, and putting it under test needs a
+// host fake for render.h, which is a phase of its own.
 static uint8_t drawn_set(const PetView& v, uint8_t pose) {
   return sprite_set_id(v.stage, v.form, pose);
+}
+
+// WHICH LIFE STAGE A LEVEL IS - ASKED, NOT RESTATED. sim.cpp's stage_of_level()
+// is static and there is no accessor for it, and writing the four thresholds
+// out here would be a second copy of the ladder that could drift from the one
+// the firmware runs - which is exactly the defect that got pet_view_fill()
+// deleted. So this binds a Pebble at the level and reads the stage the
+// SIMULATION derived for it. The bound instance is file-static because sim_bind
+// keeps a pointer to it.
+static PebbleInstance g_ladder;
+static uint8_t stage_at_level(uint8_t level) {
+  memset(&g_ladder, 0, sizeof g_ladder);
+  g_ladder.magic      = (uint16_t)PEBBLE_MAGIC;
+  g_ladder.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  g_ladder.species_id = 1;
+  g_ladder.id         = 0x0A0B0C0Du;
+  g_ladder.level      = level;
+  for (uint8_t c = 0; c < PB_CARE_COUNT; ++c) g_ladder.care[c] = PB_CARE_MILLI_MAX;
+  sim_bind(g_ladder);
+  const SimView* sv = sim_view();
+  return sv ? sv->stage : (uint8_t)STAGE_EGG;
 }
 
 // -----------------------------------------------------------------------------
@@ -283,6 +316,18 @@ TEST(the_species_and_not_the_genome_chooses_the_body) {
 //
 //  It walks EVERY rule in EVOLUTION_RULES, not a sample, and it walks the LIVE
 //  path - so it also fails if pet_view_attach() stops re-deriving the form.
+//
+//  AND IT IS ABOUT THREE STAGES, NOT ABOUT THE MOMENT A RULE FIRES. The three
+//  it walks are the three the species keys, and 12 of these 24 rules fire at a
+//  LEVEL that is not any of them - every family's FIRST evolution is at level
+//  8, 10 or 12, which sim.cpp's ladder calls CHILD or TEEN. So this case says
+//  "wherever a species-keyed body is drawn, these two species draw different
+//  ones"; it deliberately does NOT say "the player sees the body change when
+//  they confirm the evolution". The case that walks each rule at the stage it
+//  really fires at - and states, as a number, which half sees a changed body
+//  there and which half sees only a changed NAME - is
+//  every_rule_measured_at_the_level_it_actually_fires_at, at the bottom of this
+//  file.
 // -----------------------------------------------------------------------------
 TEST(every_evolution_reaches_the_body) {
   const uint8_t n = (uint8_t)(sizeof EVOLUTION_RULES / sizeof EVOLUTION_RULES[0]);
@@ -430,14 +475,23 @@ TEST(an_evolution_changes_the_creature_the_live_view_draws) {
   p.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
   p.species_id = 1;
   p.id         = 0x11223344u;
-  p.level      = 8;                       // the level family 1's first rule asks for
+  // LEVEL 15, not 8, AND THE FIX IS THE POINT. This case used to set level 8 -
+  // "the level family 1's first rule asks for" - and then draw the pet at
+  // STAGE_ADULT, which sim.cpp's ladder says a level-8 pet cannot be: it is
+  // CHILD until 10 and TEEN until 15. So the case proved a body change at a
+  // stage its own Pebble could not have been standing at. Paketo -> Fragmar is
+  // still the rule under test (evolution_apply() only asks that the level is at
+  // or above the rule's minimum), and 15 is a level at which the drawn body and
+  // the life stage agree with each other.
+  p.level      = 15;
   const SpeciesDef* s1 = species_get(p.species_id);
   CHECK(s1 != nullptr);
   if (!s1) return;
   p.hp_cur = xp_hp_max(s1->base_hp, p.level);
 
   SimView sv;
-  sim_view_of(sv, 0x1234u, STAGE_ADULT, 0u);
+  sim_view_of(sv, 0x1234u, stage_at_level(p.level), 0u);
+  CHECK_EQ(sv.stage, (uint8_t)STAGE_ADULT);
 
   PetView before;
   pet_view_fill_sim(before, sv, POSE_IDLE);
@@ -466,4 +520,95 @@ TEST(an_evolution_changes_the_creature_the_live_view_draws) {
   // came out of the ceremony full rather than hurt.
   CHECK(xp_hp_max(s2->base_hp, p.level) != xp_hp_max(s1->base_hp, p.level));
   CHECK_EQ(p.hp_cur, xp_hp_max(s2->base_hp, p.level));
+}
+
+// =============================================================================
+//  P4-C4 FOLLOW-UP: EACH RULE MEASURED AT THE LEVEL IT ACTUALLY FIRES AT.
+//
+//  THE HOLE THIS CLOSES IS IN A SENTENCE, NOT IN THE CODE. P4-C4a's own tests
+//  drive all 24 rules at BABY, ADULT and SENIOR - the three stages the species
+//  keys - and the commit then said the obligation was closed. But sim.cpp's
+//  ladder is >=20 SENIOR / >=15 ADULT / >=10 TEEN / >=5 CHILD, and TWELVE of
+//  the 24 shipped rules have a minimum level of 8, 10 or 12: every family's
+//  FIRST evolution, the starter's Paketo -> Fragmar among them. Those twelve
+//  fire at CHILD or TEEN, which are the two stages apply_species_design()
+//  deliberately does NOT touch - so at the moment the player confirms one of
+//  them the drawn body is bit-identical and only the NAME and hp_max move. The
+//  three stages the other case walks are three stages those twelve rules can
+//  never occur at, so it cannot notice.
+//
+//  THE POLICY IS UNCHANGED AND IS THE RIGHT ONE: the atlas authors exactly two
+//  CHILD designs and two TEEN designs, and both pairs already carry the care
+//  quality sim.cpp froze into minor_form. Folding 36 species onto two designs
+//  would say almost nothing about the species and would destroy the one thing
+//  those designs do say. What was wrong was the CLAIM, not the code, so this
+//  case states the exclusion as a NUMBER, against the levels the table really
+//  carries, and bounds it in time: the creature does reach the body, at ADULT.
+//
+//  MUTATIONS THIS CATCHES: apply_species_design() spending CHILD/TEEN as well
+//  (the CHECK(!moved) arm fails); apply_species_design() also skipping ADULT or
+//  SENIOR (the CHECK(moved) arm, and the later-body arm); a content pack moving
+//  a rule's level across a stage threshold in either direction (the two counts,
+//  which are the numbers CHANGELOG.md and the plan quote).
+// =============================================================================
+TEST(every_rule_measured_at_the_level_it_actually_fires_at) {
+  // The ladder itself, at the five anchors, so a reader can check the mapping
+  // below without opening sim.cpp - and so a retuned ladder fails HERE, with a
+  // sentence, rather than only in the counts.
+  CHECK_EQ(stage_at_level(1),  (uint8_t)STAGE_BABY);
+  CHECK_EQ(stage_at_level(5),  (uint8_t)STAGE_CHILD);
+  CHECK_EQ(stage_at_level(10), (uint8_t)STAGE_TEEN);
+  CHECK_EQ(stage_at_level(15), (uint8_t)STAGE_ADULT);
+  CHECK_EQ(stage_at_level(20), (uint8_t)STAGE_SENIOR);
+
+  const uint8_t n = (uint8_t)EVOLUTION_RULES_COUNT;
+  int only_the_name = 0, body_too = 0, reaches_the_body_at_adult = 0;
+
+  for (uint8_t r = 0; r < n; ++r) {
+    const EvolutionRule& rule = EVOLUTION_RULES[r];
+    const uint8_t st = stage_at_level(rule.level);
+
+    PetView from, to;
+    live_view(from, 0x1234u, st, rule.species);
+    live_view(to,   0x1234u, st, rule.target);
+    const bool moved = drawn_set(from, POSE_IDLE) != drawn_set(to, POSE_IDLE);
+
+    // THE NAME MOVES FOR EVERY RULE, AT EVERY STAGE, and that is what makes the
+    // twelve below a narrower claim rather than an empty one: the player who
+    // evolves at level 8 does see the creature they now have, in words.
+    const char* a = pet_species_name(rule.species);
+    const char* b = pet_species_name(rule.target);
+    CHECK(a != nullptr);
+    CHECK(b != nullptr);
+    if (a && b) CHECK(strcmp(a, b) != 0);
+
+    if (st == (uint8_t)STAGE_CHILD || st == (uint8_t)STAGE_TEEN) {
+      ++only_the_name;
+      // Stated, not discovered: the body is IDENTICAL here, on purpose.
+      CHECK(!moved);
+      CHECK_EQ(from.form, to.form);
+      // And the exclusion is bounded in time rather than permanent - the same
+      // pair, at the first species-keyed stage above the level the rule fires
+      // at, draws two different creatures.
+      PetView fa, ta;
+      live_view(fa, 0x1234u, (uint8_t)STAGE_ADULT, rule.species);
+      live_view(ta, 0x1234u, (uint8_t)STAGE_ADULT, rule.target);
+      CHECK(drawn_set(fa, POSE_IDLE) != drawn_set(ta, POSE_IDLE));
+      ++reaches_the_body_at_adult;
+    } else {
+      ++body_too;
+      CHECK(moved);
+    }
+  }
+
+  // THE TWO NUMBERS CHANGELOG.md AND THE PLAN QUOTE. A content pack that moves
+  // a rule across a stage threshold fails here, which is what makes the
+  // sentence in those files a checked one instead of a remembered one.
+  CHECK_EQ(only_the_name + body_too, (int)n);
+  CHECK_EQ(only_the_name, 12);
+  CHECK_EQ(body_too, 12);
+  CHECK_EQ(reaches_the_body_at_adult, only_the_name);
+  printf("  %d of %d rules change the drawn body at the level they fire at; "
+         "%d change only the name until the pet reaches ADULT\n",
+         body_too, (int)n, only_the_name);
 }

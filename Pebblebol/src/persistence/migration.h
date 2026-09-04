@@ -46,7 +46,8 @@ bool migration_needed(uint8_t found);
 //   stat_rem[]     -> care_rem[]  same reorder; milli-points and remainders
 //                                 both carry over unchanged
 //   Genome         copied whole
-//   pet_name       -> nickname, or the deterministic dynasty name when empty
+//   pet_name       -> nickname; NO name at all when v1 had none, so the
+//                  species name reaches HOME (P4-C4 follow-up)
 //   birth_epoch    -> birth_epoch
 //   last_seen      -> last_updated_epoch
 //   age_s          -> age_s
@@ -68,13 +69,12 @@ MigrateResult migrate_run(uint8_t from, GameState& out);
 // - the CRC is checked by the migration itself).
 bool migrate_v1_present(void);
 
-// The deterministic dynasty name: a pure function of (lineage_id, generation),
-// so a pet is called the same thing on every device, forever. This is the same
-// hash and the same syllable tables the v1 UI used, kept here so a migrated
-// pet does not silently get renamed. 'out' receives at most cap-1 characters
-// plus a NUL.
-void migrate_default_name(uint32_t lineage_id, uint8_t generation,
-                          char* out, size_t cap);
+// migrate_default_name() was here and is deleted (P4-C4 follow-up). It wrote
+// the v1 dynasty name into a nickname the owner had never typed, which pinned
+// every migrated device to the first rung of ui_pet_name()'s ladder and stopped
+// the species name from ever appearing. ui.cpp's ui_name_for() still produces
+// exactly that word as the ladder's LAST rung, so nothing is lost. See the
+// nickname block in migration.cpp.
 
 // Legacy family (gene species & 7) -> v2 species id. Exposed so the test can
 // assert the map instead of re-deriving it.

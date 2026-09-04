@@ -80,20 +80,14 @@ uint8_t migrate_level_of(uint8_t legacy_stage) {
   }
 }
 
-void migrate_default_name(uint32_t lineage_id, uint8_t generation,
-                          char* out, size_t cap) {
-  if (!out || cap == 0) return;
-  // The v1 hash, unchanged (ui.cpp ui_name_for): same dynasty, same name.
-  uint32_t h = lineage_id ^ 0x9E3779B9u;
-  h ^= (uint32_t)generation * 0x85EBCA6Bu;
-  h ^= h >> 15; h *= 0x2545F491u; h ^= h >> 13;
-  const char* a = S_SYL_A(h % 12u);
-  const char* b = S_SYL_B((h / 12u) % 12u);
-  size_t o = 0;
-  for (const char* s = a; *s && o + 1 < cap; ++s) out[o++] = *s;
-  for (const char* s = b; *s && o + 1 < cap; ++s) out[o++] = *s;
-  out[o] = '\0';
-}
+// migrate_default_name() USED TO LIVE HERE and was deleted by P4-C4's
+// follow-up, together with the only call it had. It wrote the v1 dynasty name
+// into PebbleInstance.nickname for a pet whose owner had never typed one, so
+// that "nothing appears to have been renamed by the update". That was
+// DISPLAY-NEUTRAL when it was written - ui.cpp's ui_name_for() computes the
+// same hash over the same syllable tables, so an empty nickname rendered the
+// identical word - and it stopped being neutral the moment P4-C4a gave the
+// name ladder a middle rung. See the nickname block in migrate_v1_to_v2().
 
 bool migration_needed(uint8_t found) {
   return found >= SAVE_SCHEMA_VERSION_V1 && found < (uint8_t)SAVE_SCHEMA_VERSION;
@@ -201,16 +195,34 @@ MigrateResult migrate_v1_to_v2(const uint8_t* petsave128, const uint8_t* cfg256,
   // nothing implements into a fresh v2 save.
   if (old.flags & LV1_PF_GOD_TAINTED) p.flags |= PBF_GOD_TAINTED;
 
-  // The name: an explicit v1 pet_name wins, otherwise the dynasty name the v1
-  // UI would have shown, so nothing appears to have been renamed by the update.
+  // THE NAME. An explicit v1 pet_name is a name the OWNER TYPED and nothing
+  // outranks it, so it comes across as the nickname. Anything else leaves the
+  // nickname EMPTY, and that is a deliberate change of behaviour rather than an
+  // omission.
+  //
+  // WHY IT CHANGED. This used to synthesize the v1 dynasty name here when there
+  // was no typed one. At the time that was display-neutral: ui.cpp's
+  // ui_name_for() computes the same hash over the same syllable tables, so an
+  // empty nickname drew the identical word, and the write only mattered to the
+  // BOX list. P4-C4a then made the display ladder nickname -> SPECIES NAME ->
+  // dynasty, and this write pinned every migrated device to the first rung for
+  // ever: persistence/game_state.cpp copies pebbles[0].nickname into
+  // Config.pet_name when device_name is empty, ui_pet_name() answers
+  // Config.pet_name before anything else, and no v2 code path ever clears it.
+  // The result was that a migrated player's HOME showed the dynasty syllables
+  // for the life of the device and the species name never appeared once - the
+  // exact complaint P3-C3 raised and P4-C4a set out to close - while a fresh v2
+  // device (box.cpp writes no nickname, ever) showed Paketo and then Fragmar.
+  //
+  // NOTHING IS LOST BY LEAVING IT EMPTY. ui_name_for() is still the last rung
+  // of the ladder, so a Pebble with no species row - which a migrated one never
+  // is, migrate_species_of() always lands on a real roster id - still shows the
+  // same v1 dynasty name it always did.
   if (have_cfg && oldcfg.pet_name[0] != '\0') {
     size_t o = 0;
     while (o + 1 < sizeof p.nickname && o < sizeof oldcfg.pet_name &&
            oldcfg.pet_name[o] != '\0') { p.nickname[o] = oldcfg.pet_name[o]; ++o; }
     p.nickname[o] = '\0';
-  } else {
-    migrate_default_name(old.genome.lineage_id, old.genome.generation,
-                         p.nickname, sizeof p.nickname);
   }
   pebble_seal(p);
 

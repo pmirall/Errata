@@ -655,6 +655,12 @@ enum StrId : uint16_t {
   STR_BT_ATK,
   STR_BT_DEF,
   STR_BT_SPD,
+  // BO_ABORT, which game/battle.h defines as "step 1 found the state moved
+  // under a submitted action" and P4-C5 maps to BATTLE_END(DESYNC). It reached
+  // the panel through outcome_word()'s default arm as "Empate" until P4-C4's
+  // follow-up: the one outcome that means something went wrong was the one
+  // outcome the screen called an ordinary result.
+  STR_BT_ABORT,
 
   STR_COUNT
 };
@@ -1219,6 +1225,7 @@ inline constexpr const char* const ES[] = {
   , /* STR_BT_ATK */              "ATQ"
   , /* STR_BT_DEF */              "DEF"
   , /* STR_BT_SPD */              "VEL"
+  , /* STR_BT_ABORT */            "Combate anulado"
 };
 
 // -----------------------------------------------------------------------------

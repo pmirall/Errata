@@ -786,18 +786,64 @@ TEST(a_migrated_pet_arrives_with_a_learnset_and_at_full_health) {
   CHECK(p.hp_cur > 0);
 }
 
-TEST(v1_without_a_config_gets_the_deterministic_name) {
+// -----------------------------------------------------------------------------
+//  THE CASE THIS REPLACES, AND WHY IT HAD TO BE REPLACED RATHER THAN KEPT.
+//
+//  It was v1_without_a_config_gets_the_deterministic_name, and it asserted the
+//  property P4-C4's follow-up deliberately reverses: that a v1 pet whose owner
+//  never typed a name arrives carrying the DYNASTY NAME as its nickname. That
+//  write was display-neutral when it was written (ui.cpp's ui_name_for()
+//  produces the same word from the same hash, so an empty nickname drew exactly
+//  the same thing) and it stopped being neutral when P4-C4a put the SPECIES
+//  NAME in the middle of the display ladder: persistence/game_state.cpp copies
+//  pebbles[0].nickname into Config.pet_name, ui_pet_name() answers that first,
+//  and nothing ever clears it - so a migrated device showed the dynasty
+//  syllables for ever and the species name never appeared once.
+//
+//  NO GUARD IS WEAKENED. This case holds the OPPOSITE and STRONGER property:
+//  the nickname is empty, the fallback word is still bit-for-bit the one the v1
+//  UI drew (checked against the hash written out here, since the function that
+//  used to produce it is deleted), AND the migrated pet has a real roster row,
+//  which is what makes an empty nickname show a species rather than nothing.
+// -----------------------------------------------------------------------------
+TEST(v1_without_a_config_arrives_unnamed_so_its_species_can_speak) {
   begin();
   seed_v1(false);
   GameState gs;
   CHECK_EQ(save_load_all(gs), LOAD_MIGRATED);
 
-  char expect[PB_NICKNAME_CAP];
-  migrate_default_name(gs.pebbles[0].genome.lineage_id,
-                       gs.pebbles[0].genome.generation, expect, sizeof expect);
-  CHECK(expect[0] != '\0');
-  CHECK_STR_EQ(gs.pebbles[0].nickname, expect);
+  const PebbleInstance& p = gs.pebbles[0];
+  // (1) NO NICKNAME. Nobody typed one, so nothing pretends anybody did.
+  CHECK_EQ(p.nickname[0], '\0');
+
+  // (2) The word the ladder falls back to is still the v1 one. ui.cpp's
+  // ui_name_for() is not host-linkable from here, so the hash it uses is
+  // written out - the same hash migrate_default_name() carried before it was
+  // deleted - and required to produce a non-empty dynasty name for this pet.
+  uint32_t h = p.genome.lineage_id ^ 0x9E3779B9u;
+  h ^= (uint32_t)p.genome.generation * 0x85EBCA6Bu;
+  h ^= h >> 15; h *= 0x2545F491u; h ^= h >> 13;
+  CHECK(S_SYL_A(h % 12u)[0] != '\0');
+  CHECK(S_SYL_B((h / 12u) % 12u)[0] != '\0');
+
+  // (3) And the rung ABOVE that fallback is reachable, which is the whole point
+  // of arriving unnamed: the migrated pet has a real roster row, so HOME says
+  // what creature it is instead of a dynasty word that never changes.
+  const SpeciesDef* sp = species_get(p.species_id);
+  CHECK(sp != nullptr);
+  if (sp) CHECK(S(sp->name_idx)[0] != '\0');
+
   CHECK_STR_EQ(gs.cfg.tz, CFG_TZ_STRING);         // defaults, not garbage
+}
+
+// A v1 owner who DID type a name keeps it, which is the rung above the species
+// and the reason the nickname field exists at all.
+TEST(v1_with_a_typed_name_keeps_it) {
+  begin();
+  seed_v1(true);
+  GameState gs;
+  CHECK_EQ(save_load_all(gs), LOAD_MIGRATED);
+  CHECK_STR_EQ(gs.pebbles[0].nickname, "Pebble");
 }
 
 TEST(v1_egg_fixture_migrates_to_level_one) {

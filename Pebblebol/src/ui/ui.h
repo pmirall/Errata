@@ -320,12 +320,29 @@ void     ui_start_minigame(uint8_t idx);
 void     ui_start_battle(uint8_t entry);
 
 // THE ONE PATH A BATTLE RESULT CAN TAKE, and it is called exactly once per
-// battle however the player leaves the screen (ui/screen_battle.cpp's
-// report_once(), which is minigames/manager.cpp's mgr_abort() in miniature).
+// VISIT to SCR_BATTLE however the player leaves the screen (ui/
+// screen_battle.cpp's report_once(), which is minigames/manager.cpp's
+// mgr_abort() in miniature - and per visit rather than per battle, which is
+// only a difference for a visit in which no battle started: that one reports
+// won = 0 and is dropped on the line below).
+//
+// `won` IS THE ENGINE'S OUTCOME, not "did the player sit through the result
+// screen": a battle is decided while its victory transcript is still playing,
+// and a leave inside that window has to pay the same as a leave after it.
+//
 // A practice win awards XP_BATTLE_WIN through app_award_xp() - metered by
 // game/xp.h's ledger like every other source - and persists. A DIAG battle
 // awards nothing: entering god mode already taints the genome, and a
 // diagnostic that pays XP is a cheat.
+//
+// WHO IS PAID: THE ACTIVE PEBBLE, which is not necessarily one that fought.
+// app_award_xp() pays box_slot(box_active()), and the pick list only requires
+// box_occupied(), so a player who fields slots 2-4 while slot 1 is active earns
+// the XP and the level-up hp rescale on the Pebble that stayed home. That is
+// consistent with every other source in the game (all of them pay the active
+// pet) and it is stated here rather than left to be discovered, because "a
+// practice win awards XP_BATTLE_WIN" does not say to whom. Per-combatant XP
+// needs a per-Pebble ledger and belongs with P4-C5's real battles.
 void     ui_battle_result(uint8_t entry, uint8_t won);
 
 // -----------------------------------------------------------------------------
