@@ -1,0 +1,402 @@
+[
+  {
+    "species": 1,
+    "target": 2,
+    "level": 8,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Paketo",
+    "_to": "Fragmar",
+    "_family": "PACKET"
+  },
+  {
+    "species": 2,
+    "target": 3,
+    "level": 18,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Fragmar",
+    "_to": "Rafagón",
+    "_family": "PACKET"
+  },
+  {
+    "species": 4,
+    "target": 5,
+    "level": 10,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Bippo",
+    "_to": "Estátic",
+    "_family": "RADIO"
+  },
+  {
+    "species": 5,
+    "target": 6,
+    "level": 20,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Estátic",
+    "_to": "Jamrón",
+    "_family": "RADIO"
+  },
+  {
+    "species": 7,
+    "target": 8,
+    "level": 10,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Lagui",
+    "_to": "Jitera",
+    "_family": "LATENCY"
+  },
+  {
+    "species": 8,
+    "target": 9,
+    "level": 20,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Jitera",
+    "_to": "Timaut",
+    "_family": "LATENCY"
+  },
+  {
+    "species": 10,
+    "target": 11,
+    "level": 10,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Pixio",
+    "_to": "Artefax",
+    "_family": "PIXEL"
+  },
+  {
+    "species": 11,
+    "target": 12,
+    "level": 20,
+    "cond": "CORRUPTED",
+    "cond_value": 1,
+    "_from": "Artefax",
+    "_to": "Burnix",
+    "_family": "PIXEL"
+  },
+  {
+    "species": 13,
+    "target": 14,
+    "level": 8,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Spamito",
+    "_to": "Kadenax",
+    "_family": "SPAM"
+  },
+  {
+    "species": 14,
+    "target": 15,
+    "level": 18,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Kadenax",
+    "_to": "Blaklix",
+    "_family": "SPAM"
+  },
+  {
+    "species": 16,
+    "target": 17,
+    "level": 10,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Buggo",
+    "_to": "Exploid",
+    "_family": "BUG"
+  },
+  {
+    "species": 17,
+    "target": 18,
+    "level": 20,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Exploid",
+    "_to": "Rootkar",
+    "_family": "BUG"
+  },
+  {
+    "species": 19,
+    "target": 20,
+    "level": 10,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Wormi",
+    "_to": "Parasix",
+    "_family": "WORM"
+  },
+  {
+    "species": 20,
+    "target": 21,
+    "level": 20,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Parasix",
+    "_to": "Plagón",
+    "_family": "WORM"
+  },
+  {
+    "species": 22,
+    "target": 23,
+    "level": 10,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Karnada",
+    "_to": "Klonix",
+    "_family": "PHISH"
+  },
+  {
+    "species": 23,
+    "target": 24,
+    "level": 20,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Klonix",
+    "_to": "Estafex",
+    "_family": "PHISH"
+  },
+  {
+    "species": 25,
+    "target": 26,
+    "level": 10,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Nulix",
+    "_to": "Voidina",
+    "_family": "NULL"
+  },
+  {
+    "species": 26,
+    "target": 27,
+    "level": 20,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Voidina",
+    "_to": "Segfalt",
+    "_family": "NULL"
+  },
+  {
+    "species": 28,
+    "target": 29,
+    "level": 8,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Bitto",
+    "_to": "Flipix",
+    "_family": "BITROT"
+  },
+  {
+    "species": 29,
+    "target": 30,
+    "level": 18,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Flipix",
+    "_to": "Podrix",
+    "_family": "BITROT"
+  },
+  {
+    "species": 31,
+    "target": 32,
+    "level": 12,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Daemi",
+    "_to": "Servik",
+    "_family": "DAEMON"
+  },
+  {
+    "species": 32,
+    "target": 33,
+    "level": 24,
+    "cond": "HAPPINESS_GE",
+    "cond_value": 70,
+    "_from": "Servik",
+    "_to": "Kernon",
+    "_family": "DAEMON"
+  },
+  {
+    "species": 34,
+    "target": 35,
+    "level": 10,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Proxi",
+    "_to": "Gateón",
+    "_family": "FIREWALL"
+  },
+  {
+    "species": 35,
+    "target": 36,
+    "level": 20,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Gateón",
+    "_to": "Murax",
+    "_family": "FIREWALL"
+  },
+  {
+    "species": 37,
+    "target": 38,
+    "level": 10,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Kachi",
+    "_to": "Memoro",
+    "_family": "MEMORY"
+  },
+  {
+    "species": 38,
+    "target": 39,
+    "level": 20,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Memoro",
+    "_to": "Lekron",
+    "_family": "MEMORY"
+  },
+  {
+    "species": 40,
+    "target": 41,
+    "level": 12,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Filito",
+    "_to": "Arkivo",
+    "_family": "FILE"
+  },
+  {
+    "species": 41,
+    "target": 42,
+    "level": 24,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Arkivo",
+    "_to": "Zipbom",
+    "_family": "FILE"
+  },
+  {
+    "species": 43,
+    "target": 44,
+    "level": 10,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Pingo",
+    "_to": "Floodra",
+    "_family": "PING"
+  },
+  {
+    "species": 44,
+    "target": 45,
+    "level": 20,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Floodra",
+    "_to": "Denyra",
+    "_family": "PING"
+  },
+  {
+    "species": 46,
+    "target": 47,
+    "level": 10,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Glitchi",
+    "_to": "Errox",
+    "_family": "GLITCH"
+  },
+  {
+    "species": 47,
+    "target": 48,
+    "level": 20,
+    "cond": "CORRUPTED",
+    "cond_value": 1,
+    "_from": "Errox",
+    "_to": "Panika",
+    "_family": "GLITCH"
+  },
+  {
+    "species": 49,
+    "target": 50,
+    "level": 10,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Portu",
+    "_to": "Skanor",
+    "_family": "PORT"
+  },
+  {
+    "species": 50,
+    "target": 51,
+    "level": 20,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Skanor",
+    "_to": "Bakdora",
+    "_family": "PORT"
+  },
+  {
+    "species": 52,
+    "target": 53,
+    "level": 12,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Klavik",
+    "_to": "Cifrax",
+    "_family": "CRYPTO"
+  },
+  {
+    "species": 53,
+    "target": 54,
+    "level": 24,
+    "cond": "ITEM",
+    "cond_value": 9,
+    "_from": "Cifrax",
+    "_to": "Ransora",
+    "_family": "CRYPTO"
+  },
+  {
+    "species": 55,
+    "target": 56,
+    "level": 10,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Probix",
+    "_to": "Beakon",
+    "_family": "PROBE"
+  },
+  {
+    "species": 56,
+    "target": 57,
+    "level": 20,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Beakon",
+    "_to": "Twinix",
+    "_family": "PROBE"
+  },
+  {
+    "species": 58,
+    "target": 59,
+    "level": 10,
+    "cond": "NONE",
+    "cond_value": 0,
+    "_from": "Cookit",
+    "_to": "Trakkar",
+    "_family": "COOKIE"
+  },
+  {
+    "species": 59,
+    "target": 60,
+    "level": 20,
+    "cond": "ACTIVITY_GE",
+    "cond_value": 60,
+    "_from": "Trakkar",
+    "_to": "Panoptix",
+    "_family": "COOKIE"
+  }
+]

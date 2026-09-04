@@ -12,6 +12,7 @@
 #include "../core/config.h"                // SEC_PER_HOUR, ABSENCE_MAX_S
 #include "../data/balance.h"               // BOX_RECOVER_MPH
 #include "../data/species_table.h"         // SpeciesDef, species_get()
+#include "xp.h"                            // xp_hp_max(): the ONE hp_max rule
 
 static GameState* s_gs = nullptr;
 
@@ -190,9 +191,10 @@ uint8_t box_new_pebble(uint8_t species_id, uint8_t level, uint8_t origin,
     p.care_rem[i] = 0;
   }
   memcpy(p.moves, sp->moves, sizeof p.moves);
-  // hp_max = 10 + 2*base_hp + level (plan 1.5.1, "derived, never stored"); only
-  // the CURRENT hp is a Pebble's own, and a new one starts at full.
-  p.hp_cur = (uint16_t)(10u + 2u * (uint16_t)sp->base_hp + (uint16_t)level);
+  // hp_max is derived and never stored (plan 1.5.1); only the CURRENT hp is a
+  // Pebble's own, and a new one starts at full. P4-C1: this used to open-code
+  // `10 + 2*base_hp + level`, a third copy of a formula game/xp.cpp owns.
+  p.hp_cur = xp_hp_max(sp->base_hp, level);
   p.id     = box_mint_id();
 
   mask_sync();

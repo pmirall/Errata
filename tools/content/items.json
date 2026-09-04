@@ -1,0 +1,92 @@
+[
+  {
+    "id": 1,
+    "name": "Bit Dulce",
+    "klass": "XP_CANDY",
+    "value": 5,
+    "rarity": 0,
+    "_rarity_name": "COMMON",
+    "_flavor_es": "40 XP. Sabe a poco."
+  },
+  {
+    "id": 2,
+    "name": "Byte Dulce",
+    "klass": "XP_CANDY",
+    "value": 24,
+    "rarity": 1,
+    "_rarity_name": "UNCOMMON",
+    "_flavor_es": "192 XP. Ocho bits de azúcar."
+  },
+  {
+    "id": 3,
+    "name": "Megadulce",
+    "klass": "XP_CANDY",
+    "value": 100,
+    "rarity": 2,
+    "_rarity_name": "RARE",
+    "_flavor_es": "800 XP. Azúcar de servidor."
+  },
+  {
+    "id": 4,
+    "name": "Cebo",
+    "klass": "CAPTURE",
+    "value": 15,
+    "rarity": 0,
+    "_rarity_name": "COMMON",
+    "_flavor_es": "+15% al capturar. Huele bien."
+  },
+  {
+    "id": 5,
+    "name": "Jaula Hash",
+    "klass": "CAPTURE",
+    "value": 45,
+    "rarity": 2,
+    "_rarity_name": "RARE",
+    "_flavor_es": "+45%. Ni los raros escapan."
+  },
+  {
+    "id": 6,
+    "name": "Parche",
+    "klass": "CARE",
+    "value": 40,
+    "rarity": 0,
+    "_rarity_name": "COMMON",
+    "_flavor_es": "Cura y repara un poco de todo."
+  },
+  {
+    "id": 7,
+    "name": "Antivirus",
+    "klass": "CARE",
+    "value": 100,
+    "rarity": 1,
+    "_rarity_name": "UNCOMMON",
+    "_flavor_es": "Limpia enfermedad y corrupción."
+  },
+  {
+    "id": 8,
+    "name": "Turbo Chip",
+    "klass": "BATTLE_MOD",
+    "value": 1,
+    "rarity": 1,
+    "_rarity_name": "UNCOMMON",
+    "_flavor_es": "+1 ATAQUE al empezar el combate."
+  },
+  {
+    "id": 9,
+    "name": "Llave Raíz",
+    "klass": "CARE",
+    "value": 0,
+    "rarity": 2,
+    "_rarity_name": "RARE",
+    "_flavor_es": "Abre lo que Klavik cerró."
+  },
+  {
+    "id": 10,
+    "name": "Escudo RAM",
+    "klass": "BATTLE_MOD",
+    "value": 1,
+    "rarity": 1,
+    "_rarity_name": "UNCOMMON",
+    "_flavor_es": "+1 DEFENSA al empezar el combate."
+  }
+]

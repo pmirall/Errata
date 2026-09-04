@@ -484,19 +484,139 @@ enum StrId : uint16_t {
   STR_PHASE_7,
   STR_PHASE_10,
 
-  // --- 34. species roster, data/species_table.h --------------------------
+  // --- 34. CONTENT STRINGS, written by tools/gen_content.py ---------------
   //     Names <= 10 chars @ t0_11b; flavor lines <= 25 chars @ 5x8.
-  //     ONE PAIR PER SPECIES ID, in roster order: SpeciesDef.name_idx and
-  //     .flavor_idx hold these StrIds directly, so the block grows with the
-  //     roster and P4-C1's generator appends to it rather than renumbering.
+  //     EVERYTHING BETWEEN THE TWO MARKERS BELOW IS GENERATED from
+  //     tools/content/*.json. Edit the JSON and re-run the generator; a hand
+  //     edit here is reverted by the next run and caught by
+  //     `tools/gen_content.py --check`, which the gate runs.
+  // >>> GEN StrId BLOCK - tools/gen_content.py - DO NOT EDIT BY HAND >>>
+  //     ONE PAIR PER SPECIES ID, in roster order, then one name per attack
+  //     and one per item. SpeciesDef.name_idx / .flavor_idx, AttackDef.name_idx
+  //     and ItemDef.name_idx hold these StrIds directly.
   //     Appended at the END of the enum on purpose: every id above keeps the
-  //     value it already had.
-  STR_SPC_NAME_1,      // species 1, Paketo
+  //     value it already had, and ids 1..3 keep the values P3-C3 froze.
+  STR_SPC_NAME_1,       // species 1, Paketo
   STR_SPC_FLAV_1,
-  STR_SPC_NAME_2,      // species 2, Fragmar
+  STR_SPC_NAME_2,       // species 2, Fragmar
   STR_SPC_FLAV_2,
-  STR_SPC_NAME_3,      // species 3, Rafagon
+  STR_SPC_NAME_3,       // species 3, Rafagón
   STR_SPC_FLAV_3,
+  STR_SPC_NAME_4,       // species 4, Bippo
+  STR_SPC_FLAV_4,
+  STR_SPC_NAME_5,       // species 5, Estátic
+  STR_SPC_FLAV_5,
+  STR_SPC_NAME_6,       // species 6, Jamrón
+  STR_SPC_FLAV_6,
+  STR_SPC_NAME_7,       // species 7, Lagui
+  STR_SPC_FLAV_7,
+  STR_SPC_NAME_8,       // species 8, Jitera
+  STR_SPC_FLAV_8,
+  STR_SPC_NAME_9,       // species 9, Timaut
+  STR_SPC_FLAV_9,
+  STR_SPC_NAME_10,      // species 10, Pixio
+  STR_SPC_FLAV_10,
+  STR_SPC_NAME_11,      // species 11, Artefax
+  STR_SPC_FLAV_11,
+  STR_SPC_NAME_12,      // species 12, Burnix
+  STR_SPC_FLAV_12,
+  STR_SPC_NAME_13,      // species 13, Spamito
+  STR_SPC_FLAV_13,
+  STR_SPC_NAME_14,      // species 14, Kadenax
+  STR_SPC_FLAV_14,
+  STR_SPC_NAME_15,      // species 15, Blaklix
+  STR_SPC_FLAV_15,
+  STR_SPC_NAME_16,      // species 16, Buggo
+  STR_SPC_FLAV_16,
+  STR_SPC_NAME_17,      // species 17, Exploid
+  STR_SPC_FLAV_17,
+  STR_SPC_NAME_18,      // species 18, Rootkar
+  STR_SPC_FLAV_18,
+  STR_SPC_NAME_19,      // species 19, Wormi
+  STR_SPC_FLAV_19,
+  STR_SPC_NAME_20,      // species 20, Parasix
+  STR_SPC_FLAV_20,
+  STR_SPC_NAME_21,      // species 21, Plagón
+  STR_SPC_FLAV_21,
+  STR_SPC_NAME_22,      // species 22, Karnada
+  STR_SPC_FLAV_22,
+  STR_SPC_NAME_23,      // species 23, Klonix
+  STR_SPC_FLAV_23,
+  STR_SPC_NAME_24,      // species 24, Estafex
+  STR_SPC_FLAV_24,
+  STR_SPC_NAME_25,      // species 25, Nulix
+  STR_SPC_FLAV_25,
+  STR_SPC_NAME_26,      // species 26, Voidina
+  STR_SPC_FLAV_26,
+  STR_SPC_NAME_27,      // species 27, Segfalt
+  STR_SPC_FLAV_27,
+  STR_SPC_NAME_28,      // species 28, Bitto
+  STR_SPC_FLAV_28,
+  STR_SPC_NAME_29,      // species 29, Flipix
+  STR_SPC_FLAV_29,
+  STR_SPC_NAME_30,      // species 30, Podrix
+  STR_SPC_FLAV_30,
+  STR_SPC_NAME_31,      // species 31, Daemi
+  STR_SPC_FLAV_31,
+  STR_SPC_NAME_32,      // species 32, Servik
+  STR_SPC_FLAV_32,
+  STR_SPC_NAME_33,      // species 33, Kernon
+  STR_SPC_FLAV_33,
+  STR_SPC_NAME_34,      // species 34, Proxi
+  STR_SPC_FLAV_34,
+  STR_SPC_NAME_35,      // species 35, Gateón
+  STR_SPC_FLAV_35,
+  STR_SPC_NAME_36,      // species 36, Murax
+  STR_SPC_FLAV_36,
+
+  //     Attack names, data/attacks_table.h --- <= 10 chars @ t0_11b ----------
+  STR_ATK_NAME_1,      // attack 1, Ping
+  STR_ATK_NAME_2,      // attack 2, Pulso
+  STR_ATK_NAME_3,      // attack 3, Ráfaga
+  STR_ATK_NAME_4,      // attack 4, Adelanto
+  STR_ATK_NAME_5,      // attack 5, Interferir
+  STR_ATK_NAME_6,      // attack 6, Amplificar
+  STR_ATK_NAME_7,      // attack 7, Antena
+  STR_ATK_NAME_8,      // attack 8, Eco Doble
+  STR_ATK_NAME_9,      // attack 9, Bytazo
+  STR_ATK_NAME_10,     // attack 10, Mordisco
+  STR_ATK_NAME_11,     // attack 11, Plaga
+  STR_ATK_NAME_12,     // attack 12, Infectar
+  STR_ATK_NAME_13,     // attack 13, Infección
+  STR_ATK_NAME_14,     // attack 14, Devorar
+  STR_ATK_NAME_15,     // attack 15, Corromper
+  STR_ATK_NAME_16,     // attack 16, Frenesí
+  STR_ATK_NAME_17,     // attack 17, Gusano
+  STR_ATK_NAME_18,     // attack 18, Escaneo
+  STR_ATK_NAME_19,     // attack 19, Núcleo
+  STR_ATK_NAME_20,     // attack 20, Sobrecarga
+  STR_ATK_NAME_21,     // attack 21, Bloqueo
+  STR_ATK_NAME_22,     // attack 22, Firewall
+  STR_ATK_NAME_23,     // attack 23, Cifrado
+  STR_ATK_NAME_24,     // attack 24, Permisos
+  STR_ATK_NAME_25,     // attack 25, Reinicio
+  STR_ATK_NAME_26,     // attack 26, Pánico
+  STR_ATK_NAME_27,     // attack 27, Choque
+  STR_ATK_NAME_28,     // attack 28, Apuesta
+  STR_ATK_NAME_29,     // attack 29, Defrag
+  STR_ATK_NAME_30,     // attack 30, Caché
+  STR_ATK_NAME_31,     // attack 31, Sandbox
+  STR_ATK_NAME_32,     // attack 32, Overclock
+  STR_ATK_NAME_33,     // attack 33, Backup
+  STR_ATK_NAME_34,     // attack 34, Depurar
+
+  //     Item names, data/items_table.h --------------------------------------
+  STR_ITEM_NAME_1,     // item 1, Bit Dulce
+  STR_ITEM_NAME_2,     // item 2, Byte Dulce
+  STR_ITEM_NAME_3,     // item 3, Megadulce
+  STR_ITEM_NAME_4,     // item 4, Cebo
+  STR_ITEM_NAME_5,     // item 5, Jaula Hash
+  STR_ITEM_NAME_6,     // item 6, Parche
+  STR_ITEM_NAME_7,     // item 7, Antivirus
+  STR_ITEM_NAME_8,     // item 8, Turbo Chip
+  STR_ITEM_NAME_9,     // item 9, Llave Raíz
+  STR_ITEM_NAME_10,    // item 10, Escudo RAM
+  // <<< GEN StrId BLOCK - tools/gen_content.py - DO NOT EDIT BY HAND <<<
 
   STR_COUNT
 };
@@ -907,13 +1027,125 @@ inline constexpr const char* const ES[] = {
   /* STR_PHASE_7 */               "Fase 7",
   /* STR_PHASE_10 */              "Fase 10",
 
-  /* --- 34. species roster --- */
-  /* STR_SPC_NAME_1 */            "Paketo",
-  /* STR_SPC_FLAV_1 */            "Reparte cartas sin parar.",
-  /* STR_SPC_NAME_2 */            "Fragmar",
-  /* STR_SPC_FLAV_2 */            "Se parte para colarse.",
-  /* STR_SPC_NAME_3 */            "Rafagón",
-  /* STR_SPC_FLAV_3 */            "Mil trozos, una tormenta"
+  /* --- 34. content strings, written by tools/gen_content.py --- */
+  /* >>> GEN ES[] BLOCK - tools/gen_content.py - DO NOT EDIT BY HAND >>> */
+  /* STR_SPC_NAME_1   */          "Paketo",
+  /* STR_SPC_FLAV_1   */          "Reparte cartas sin parar.",
+  /* STR_SPC_NAME_2   */          "Fragmar",
+  /* STR_SPC_FLAV_2   */          "Se parte para colarse.",
+  /* STR_SPC_NAME_3   */          "Rafagón",
+  /* STR_SPC_FLAV_3   */          "Mil trozos, una tormenta",
+  /* STR_SPC_NAME_4   */          "Bippo",
+  /* STR_SPC_FLAV_4   */          "Pita bajito para saludar.",
+  /* STR_SPC_NAME_5   */          "Estátic",
+  /* STR_SPC_FLAV_5   */          "Zumba y no deja pensar.",
+  /* STR_SPC_NAME_6   */          "Jamrón",
+  /* STR_SPC_FLAV_6   */          "Apaga todas las voces.",
+  /* STR_SPC_NAME_7   */          "Lagui",
+  /* STR_SPC_FLAV_7   */          "Siempre llega tarde.",
+  /* STR_SPC_NAME_8   */          "Jitera",
+  /* STR_SPC_FLAV_8   */          "Tiembla y te descoloca.",
+  /* STR_SPC_NAME_9   */          "Timaut",
+  /* STR_SPC_FLAV_9   */          "Nadie responde. Nunca.",
+  /* STR_SPC_NAME_10  */          "Pixio",
+  /* STR_SPC_FLAV_10  */          "Solo quiere brillar.",
+  /* STR_SPC_NAME_11  */          "Artefax",
+  /* STR_SPC_FLAV_11  */          "Mancha todo lo que miras.",
+  /* STR_SPC_NAME_12  */          "Burnix",
+  /* STR_SPC_FLAV_12  */          "Se queda grabado. Siempre",
+  /* STR_SPC_NAME_13  */          "Spamito",
+  /* STR_SPC_FLAV_13  */          "Ofertas que no pediste.",
+  /* STR_SPC_NAME_14  */          "Kadenax",
+  /* STR_SPC_FLAV_14  */          "Reenvía o algo pasará.",
+  /* STR_SPC_NAME_15  */          "Blaklix",
+  /* STR_SPC_FLAV_15  */          "Te borra de la lista.",
+  /* STR_SPC_NAME_16  */          "Buggo",
+  /* STR_SPC_FLAV_16  */          "Un fallito muy cariñoso.",
+  /* STR_SPC_NAME_17  */          "Exploid",
+  /* STR_SPC_FLAV_17  */          "Encuentra tu punto débil.",
+  /* STR_SPC_NAME_18  */          "Rootkar",
+  /* STR_SPC_FLAV_18  */          "Ya vive dentro de ti.",
+  /* STR_SPC_NAME_19  */          "Wormi",
+  /* STR_SPC_FLAV_19  */          "Se cuela por un hueco.",
+  /* STR_SPC_NAME_20  */          "Parasix",
+  /* STR_SPC_FLAV_20  */          "Vive de lo que tú tienes.",
+  /* STR_SPC_NAME_21  */          "Plagón",
+  /* STR_SPC_FLAV_21  */          "Ya no queda nada limpio.",
+  /* STR_SPC_NAME_22  */          "Karnada",
+  /* STR_SPC_FLAV_22  */          "Brilla para que piques.",
+  /* STR_SPC_NAME_23  */          "Klonix",
+  /* STR_SPC_FLAV_23  */          "Igualito, pero no es.",
+  /* STR_SPC_NAME_24  */          "Estafex",
+  /* STR_SPC_FLAV_24  */          "Te vacía con una sonrisa.",
+  /* STR_SPC_NAME_25  */          "Nulix",
+  /* STR_SPC_FLAV_25  */          "No es nada, y ahí está.",
+  /* STR_SPC_NAME_26  */          "Voidina",
+  /* STR_SPC_FLAV_26  */          "Se traga lo que toca.",
+  /* STR_SPC_NAME_27  */          "Segfalt",
+  /* STR_SPC_FLAV_27  */          "Aquí termina el programa.",
+  /* STR_SPC_NAME_28  */          "Bitto",
+  /* STR_SPC_FLAV_28  */          "Un bit feliz: cero o uno.",
+  /* STR_SPC_NAME_29  */          "Flipix",
+  /* STR_SPC_FLAV_29  */          "Le gusta cambiar de idea.",
+  /* STR_SPC_NAME_30  */          "Podrix",
+  /* STR_SPC_FLAV_30  */          "Pudre datos sin prisa.",
+  /* STR_SPC_NAME_31  */          "Daemi",
+  /* STR_SPC_FLAV_31  */          "Trabaja mientras duermes",
+  /* STR_SPC_NAME_32  */          "Servik",
+  /* STR_SPC_FLAV_32  */          "Siempre en segundo plano.",
+  /* STR_SPC_NAME_33  */          "Kernon",
+  /* STR_SPC_FLAV_33  */          "Manda en toda la máquina.",
+  /* STR_SPC_NAME_34  */          "Proxi",
+  /* STR_SPC_FLAV_34  */          "Lleva recados de ida.",
+  /* STR_SPC_NAME_35  */          "Gateón",
+  /* STR_SPC_FLAV_35  */          "Decide quién pasa hoy.",
+  /* STR_SPC_NAME_36  */          "Murax",
+  /* STR_SPC_FLAV_36  */          "Nada entra sin permiso.",
+  /* STR_ATK_NAME_1   */          "Ping",
+  /* STR_ATK_NAME_2   */          "Pulso",
+  /* STR_ATK_NAME_3   */          "Ráfaga",
+  /* STR_ATK_NAME_4   */          "Adelanto",
+  /* STR_ATK_NAME_5   */          "Interferir",
+  /* STR_ATK_NAME_6   */          "Amplificar",
+  /* STR_ATK_NAME_7   */          "Antena",
+  /* STR_ATK_NAME_8   */          "Eco Doble",
+  /* STR_ATK_NAME_9   */          "Bytazo",
+  /* STR_ATK_NAME_10  */          "Mordisco",
+  /* STR_ATK_NAME_11  */          "Plaga",
+  /* STR_ATK_NAME_12  */          "Infectar",
+  /* STR_ATK_NAME_13  */          "Infección",
+  /* STR_ATK_NAME_14  */          "Devorar",
+  /* STR_ATK_NAME_15  */          "Corromper",
+  /* STR_ATK_NAME_16  */          "Frenesí",
+  /* STR_ATK_NAME_17  */          "Gusano",
+  /* STR_ATK_NAME_18  */          "Escaneo",
+  /* STR_ATK_NAME_19  */          "Núcleo",
+  /* STR_ATK_NAME_20  */          "Sobrecarga",
+  /* STR_ATK_NAME_21  */          "Bloqueo",
+  /* STR_ATK_NAME_22  */          "Firewall",
+  /* STR_ATK_NAME_23  */          "Cifrado",
+  /* STR_ATK_NAME_24  */          "Permisos",
+  /* STR_ATK_NAME_25  */          "Reinicio",
+  /* STR_ATK_NAME_26  */          "Pánico",
+  /* STR_ATK_NAME_27  */          "Choque",
+  /* STR_ATK_NAME_28  */          "Apuesta",
+  /* STR_ATK_NAME_29  */          "Defrag",
+  /* STR_ATK_NAME_30  */          "Caché",
+  /* STR_ATK_NAME_31  */          "Sandbox",
+  /* STR_ATK_NAME_32  */          "Overclock",
+  /* STR_ATK_NAME_33  */          "Backup",
+  /* STR_ATK_NAME_34  */          "Depurar",
+  /* STR_ITEM_NAME_1   */         "Bit Dulce",
+  /* STR_ITEM_NAME_2   */         "Byte Dulce",
+  /* STR_ITEM_NAME_3   */         "Megadulce",
+  /* STR_ITEM_NAME_4   */         "Cebo",
+  /* STR_ITEM_NAME_5   */         "Jaula Hash",
+  /* STR_ITEM_NAME_6   */         "Parche",
+  /* STR_ITEM_NAME_7   */         "Antivirus",
+  /* STR_ITEM_NAME_8   */         "Turbo Chip",
+  /* STR_ITEM_NAME_9   */         "Llave Raíz",
+  /* STR_ITEM_NAME_10  */         "Escudo RAM"
+  /* <<< GEN ES[] BLOCK - tools/gen_content.py - DO NOT EDIT BY HAND <<< */
 };
 
 // -----------------------------------------------------------------------------

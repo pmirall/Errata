@@ -11,26 +11,57 @@
 #include "legacy_v1.h"
 #include "../core/crc16.h"
 #include "../core/strings_es.h"   // the dynasty-name syllables, v1's own tables
+#include "../data/species_table.h"   // SPECIES_BASE_OF_FAMILY: where a v1 pet lands
+#include "../game/xp.h"              // xp_hp_max(): inline constexpr, no link edge
 
 // -----------------------------------------------------------------------------
-// The legacy family map. v1 had no species roster: appearance came out of the
-// genome's four-bit species gene. Grouping it modulo 8 gives the eight legacy
-// families, and each maps onto one of the eight starter Pebbles of the v2
-// roster. The roster itself lands in P4-C1 (src/data/species_table.h); until
-// then these are the reserved built-in ids 1..8, which is exactly what a
-// migrated pet should be: a starter of the right family, not a random monster.
+// THE LEGACY FAMILY MAP (fixed in P4-C1, obligation 5).
 //
-// P4-C1 MUST REVISIT THIS MAP. P3-C3 filled ids 1..3 with the three EVOLUTION
-// STAGES of family 1, not with three different families, so ids 2 and 3 no
-// longer mean what this table assumes; ids 4..8 still resolve to nothing at
-// all. Once the 12-species roster exists, every legacy family must land on the
-// BASE-stage species of its family.
+// v1 had no species roster: appearance came out of the genome's four-bit
+// species gene, and a gen-0 pet rolled 0..7 (GENESIS_SPECIES_MAX). Folding the
+// gene modulo LEGACY_FAMILY_COUNT gives the eight legacy families.
+//
+// WHAT WAS WRONG WITH THE OLD TABLE. It was a literal { 1, 2, 3, 4, 5, 6, 7, 8 },
+// written when ids 1..8 were expected to be eight different families' starters.
+// P3-C3 then filled ids 1..3 with the three EVOLUTION STAGES of family 1, so
+// legacy family 1 landed on a MID-stage creature (and, at the ADULT/SENIOR
+// level anchors, one already past its own level-18 evolution gate), legacy
+// family 2 landed on a final-stage RARE dead end, and legacy families 3..7
+// resolved to nothing at all - species_get() returned nullptr, which meant a
+// migrated pet showed a fabricated "full" HP meter, silently skipped the
+// level-up HP rescale and could never evolve.
+//
+// THE RULE NOW: every legacy family lands on the BASE STAGE of a v2 family, so
+// a migrated pet starts a family rather than arriving mid-way through one. The
+// destination is read from the generated SPECIES_BASE_OF_FAMILY[] rather than
+// typed out here, so growing the roster cannot leave a stale literal behind.
+//
+// WITH THE ROSTER AT 12 FAMILIES the eight legacy families land on eight
+// DISTINCT base species (1, 4, 7, 10, 13, 16, 19, 22), which preserves v1's
+// "different genomes looked different". A SMALLER ROSTER CANNOT DO THAT: the
+// modulo folds, and at 4 families the map would be 1/4/7/10/1/4/7/10. The
+// static_assert below states the requirement that actually matters (every
+// destination exists and is a base stage) and the distinctness is a property of
+// this roster size, not a promise the code can keep at any size.
 // -----------------------------------------------------------------------------
-static const uint8_t LEGACY_FAMILY_SPECIES[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+#define LEGACY_FAMILY_COUNT  8u
+
+static constexpr bool legacy_families_land_on_a_base_stage(void) {
+  for (uint8_t l = 0; l < LEGACY_FAMILY_COUNT; ++l) {
+    const uint8_t id = SPECIES_BASE_OF_FAMILY[l % SPECIES_FAMILY_COUNT];
+    if (id < SPECIES_ID_MIN || id > SPECIES_TABLE_COUNT) return false;
+    if (SPECIES_TABLE[id - 1u].stage != 0u) return false;
+  }
+  return true;
+}
+static_assert(legacy_families_land_on_a_base_stage(),
+              "a legacy v1 family migrates onto a species that does not exist or is "
+              "not a base stage");
 
 uint8_t migrate_species_of(const Genome& g) {
   const uint8_t legacy = GN_GET(g.g0, GN_SPECIES_SH, GN_SPECIES_MK);   // 0..15
-  return LEGACY_FAMILY_SPECIES[legacy & 7u];
+  return SPECIES_BASE_OF_FAMILY[(legacy & (LEGACY_FAMILY_COUNT - 1u))
+                                % SPECIES_FAMILY_COUNT];
 }
 
 // v1 had six life stages and no levels; v2 has thirty levels and no stages.
@@ -129,6 +160,24 @@ MigrateResult migrate_v1_to_v2(const uint8_t* petsave128, const uint8_t* cfg256,
   PebbleInstance& p = out.pebbles[0];
   p.species_id         = migrate_species_of(old.genome);
   p.level              = migrate_level_of(old.stage);
+  // TWO FIELDS THIS FUNCTION USED TO LEAVE AT ZERO (found by the P4-C1 survey,
+  // fixed here because the species row it needs only exists now).
+  //   * moves[] stayed {0,0,0,0}: a migrated pet knew no attacks at all, and
+  //     0 is the EMPTY move slot, so it would have walked into P4's battle with
+  //     nothing to do on any of its four buttons.
+  //   * hp_cur stayed 0: hp_max is derived but hp_cur is a Pebble's own, and
+  //     xp_hp_rescale() scales it, so 0 stays 0 for ever. Every screen that
+  //     draws the HP meter (screen_home, screen_status, screen_box) would have
+  //     shown a migrated pet at 0 % HP permanently.
+  // A migration is not a punishment: the pet arrives with its family's learnset
+  // and at full health, exactly like box_new_pebble() gives a fresh one.
+  {
+    const SpeciesDef* msp = species_get(p.species_id);
+    if (msp != nullptr) {
+      memcpy(p.moves, msp->moves, sizeof p.moves);
+      p.hp_cur = xp_hp_max(msp->base_hp, (p.level == 0u) ? 1u : p.level);
+    }
+  }
   p.genome             = old.genome;
   p.id                 = migrated_id(old.genome);
   p.creation_seed      = old.genome.lineage_id ^ ((uint32_t)old.genome.g2 << 16);

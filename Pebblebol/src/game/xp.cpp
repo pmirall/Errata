@@ -56,14 +56,6 @@ uint16_t xp_for_level(uint8_t level)
 
 uint16_t xp_care_action_amount(void) { return (uint16_t)XP_CARE_ACTION; }
 
-// hp_max = 10 + 2*base_hp + level (plan 1.5.1), derived and never stored. The
-// widest possible input is base_hp 255 with level 255, which is 775: no u16
-// overflow is reachable however badly a content pack is edited.
-uint16_t xp_hp_max(uint8_t base_hp, uint8_t level)
-{
-  return (uint16_t)(10u + 2u * (uint16_t)base_hp + (uint16_t)level);
-}
-
 void xp_hp_rescale(PebbleInstance& p, uint16_t hp_max_before, uint16_t hp_max_after)
 {
   if (hp_max_before == 0u) return;

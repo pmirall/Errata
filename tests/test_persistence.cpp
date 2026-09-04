@@ -18,6 +18,10 @@
 #include "persistence/migration.h"
 #include "persistence/legacy_v1.h"
 #include "core/crc16.h"
+#include "data/species_table.h"   // the legacy family map's destinations
+#include "game/genome.h"          // gene_set_species(), to drive the map
+#include "game/species.h"         // species_base_of_family()
+#include "game/xp.h"              // xp_hp_max()
 
 // --- a fake clock so the wear filter and the 1 s floor are deterministic -----
 static uint32_t s_ms    = 0;
@@ -649,9 +653,14 @@ TEST(v1_fixtures_migrate_with_the_documented_field_map) {
   CHECK_EQ(gs.box.active_slot, 0);
   CHECK_EQ(gs.box.schema_version, SAVE_SCHEMA_VERSION);
 
-  // species: gene_species == 4 in the fixture, so family 4 -> species id 5.
+  // SPECIES: gene_species == 4 in the fixture, so legacy family 4. P4-C1 moved
+  // the destination from a literal { 1..8 } table to the generated
+  // SPECIES_BASE_OF_FAMILY[], because ids 2 and 3 are STAGES of family 1 and
+  // ids 4..8 resolved to nothing at all. Family 4's base stage is id 13
+  // (Spamito). The number here IS the proof of that map - update it when the
+  // roster grows, do not delete the check.
   CHECK_EQ(p.species_id, migrate_species_of(p.genome));
-  CHECK_EQ(p.species_id, 5);
+  CHECK_EQ(p.species_id, 13);
   // stage ADULT -> level 15
   CHECK_EQ(p.level, 15);
   CHECK_EQ(migrate_level_of(LV1_STAGE_EGG),    1);
@@ -709,6 +718,72 @@ TEST(v1_fixtures_migrate_with_the_documented_field_map) {
   CHECK(!save_was_migrated());
   CHECK_EQ(again.pebbles[0].id, p.id);
   CHECK_STR_EQ(again.pebbles[0].nickname, "Pebble");
+}
+
+// =============================================================================
+//  THE LEGACY FAMILY MAP (P4-C1 obligation 5)
+//
+//  Before P4-C1 this was a literal { 1, 2, 3, 4, 5, 6, 7, 8 } written when ids
+//  1..8 were expected to be eight different families' starters. P3-C3 then put
+//  the three STAGES of family 1 into ids 1..3, so five of the eight legacy
+//  families landed on nothing (species_get() == nullptr: no hp_max, no
+//  evolution, a fabricated full HP meter) and two landed mid-family. This is
+//  the test that says where they land now.
+// =============================================================================
+TEST(every_legacy_family_migrates_onto_a_base_stage_species) {
+  uint8_t seen[8];
+  for (uint8_t legacy = 0; legacy < 8; ++legacy) {
+    Genome g;
+    memset(&g, 0, sizeof g);
+    gene_set_species(g, legacy);
+    const uint8_t id = migrate_species_of(g);
+    seen[legacy] = id;
+
+    const SpeciesDef* sp = species_get(id);
+    CHECK(sp != nullptr);                 // it RESOLVES - five of eight did not
+    if (!sp) continue;
+    CHECK_EQ(sp->stage, 0);               // and it is a BASE stage, not a middle
+    CHECK_EQ(sp->id, species_base_of_family(sp->family));
+    CHECK(sp->evo_rule != SPECIES_EVO_NONE);   // so it can still evolve
+  }
+  // The map is stable under the high bits of the four-bit gene: v1 rolled 0..15
+  // and the fold is modulo 8.
+  for (uint8_t legacy = 8; legacy < 16; ++legacy) {
+    Genome g;
+    memset(&g, 0, sizeof g);
+    gene_set_species(g, legacy);
+    CHECK_EQ(migrate_species_of(g), seen[legacy & 7u]);
+  }
+  // WITH TWELVE FAMILIES THE EIGHT DESTINATIONS ARE DISTINCT, which is what
+  // preserves v1's "different genomes looked different". This is a property of
+  // THIS roster size, not a promise the code can keep at any size: at four
+  // families the modulo would fold them onto 1/4/7/10 twice over.
+  if (SPECIES_FAMILY_COUNT >= 8) {
+    for (uint8_t a = 0; a < 8; ++a)
+      for (uint8_t b = (uint8_t)(a + 1u); b < 8; ++b)
+        CHECK(seen[a] != seen[b]);
+  }
+}
+
+TEST(a_migrated_pet_arrives_with_a_learnset_and_at_full_health) {
+  // Both fields used to be left at zero by migrate_v1_to_v2(): a pet that knew
+  // no attacks (0 is the EMPTY move slot) and showed 0 % HP on every screen for
+  // ever, because hp_cur is a Pebble's own and xp_hp_rescale() scales it.
+  begin();
+  seed_v1(true);
+  GameState gs;
+  CHECK_EQ(save_load_all(gs), LOAD_MIGRATED);
+  const PebbleInstance& p = gs.pebbles[0];
+
+  const SpeciesDef* sp = species_get(p.species_id);
+  CHECK(sp != nullptr);
+  if (!sp) return;
+  for (uint8_t i = 0; i < (uint8_t)PB_MOVE_COUNT; ++i) {
+    CHECK(p.moves[i] != 0);
+    CHECK_EQ(p.moves[i], sp->moves[i]);
+  }
+  CHECK_EQ(p.hp_cur, xp_hp_max(sp->base_hp, p.level));
+  CHECK(p.hp_cur > 0);
 }
 
 TEST(v1_without_a_config_gets_the_deterministic_name) {

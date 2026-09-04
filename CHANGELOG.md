@@ -8,6 +8,73 @@ Versions are tagged at phase boundaries of `PEBBLEBOL_IMPLEMENTATION_PLAN.md`; t
 tag for a phase is cut only when its gate (`tools/check.sh`) and its variant matrix
 (`tools/build_matrix.sh`) are both green.
 
+## [Unreleased]
+
+Phase 4 begins. Nothing is tagged yet.
+
+### Added
+
+- **The content pipeline** (`tools/gen_content.py`, `tools/content/*.json`): the species,
+  attack, item, evolution and encounter tables under `Pebblebol/src/data/` are now
+  GENERATED from JSON and committed. Running the generator twice on the same JSON produces
+  byte-identical headers, and `tools/check.sh` runs both `tools/gen_content.py --check`
+  (regenerate in memory, diff against the tree) and the content pack's own `verify.py`
+  (82 checks) — so a hand edit to a generated header and a JSON edit that was never
+  regenerated each fail the gate.
+- **The roster grew from 3 species to 36** (12 families x 3), with 34 attacks, 10 items,
+  24 evolution rules, 40 encounter rows and 33 item-drop rows. **Species 1 (Paketo) is
+  byte-identical to what Phase 3 froze** and `tests/golden/care_v2.txt` was not re-recorded.
+  The roster is a PREFIX of the 60-species pack because `id == index + 1` is a
+  `static_assert`; 36 is the largest prefix today's 38-slot sprite atlas can address
+  (`SPR_BABY_BLOB + sprite_id < SPRITE_SET_COUNT`). Flash does not bind: +3,022 B against
+  503,906 B of headroom. Globals is the budget that will: the tables are all `.rodata`, so
+  this step spent 0 B of it on all 7 variants and it stays at 70,348 of 90,000 — 19,652 B
+  free, against flash's 503,906.
+- **`CONTENT_VERSION` is a hash** (`data/content_version.h`, generated) rather than a
+  hand-bumped counter: FNV-1a over the six JSON files with design notes excluded, plus the
+  roster size. Moving a real value changes it; fixing a typo in a `_`-prefixed note does not,
+  so a comment edit cannot mark every save on every device as foreign content.
+- **Battle constants** (`data/balance.h` §5): the §1.5.1 damage formula's terms, the
+  MULTIPLICATIVE type modifier that supersedes the plan's `+ 2*type_mod`, protection,
+  buff stages, the evasion rule, and three constants the content pack does not carry and
+  which are named as decisions here — the round cap with an integer HP tiebreak and an
+  explicit draw, the team size, and what a win pays.
+- **Derived stats** (`game/pebble.{h,cpp}`): `pebble_derive_stats()` — integer only, nothing
+  stored, variation from the genome with the `creation_seed` reading recorded as rejected.
+- **Content accessors** (`game/species.{h,cpp}`): family bases, the type modifier, the
+  weighted encounter pick and the two-stage item drop. It is also the one translation unit
+  that includes every generated header, so their compile-time guards actually fire.
+- **Two new host tests**, 21 → 23 binaries: `test_content.cpp` (31 cases, every §1.5.2 guard
+  re-asserted at runtime, the starter pinned field by field, and `evolution_apply()` driven
+  through a FAILING condition for the first time) and `test_stats.cpp` (11 cases).
+
+### Fixed
+
+- **The legacy v1 family map** (`persistence/migration.cpp`): it mapped the eight v1 families
+  onto ids 1..8, written before ids 1..3 became the three STAGES of one family. Five of the
+  eight resolved to nothing at all — no `hp_max`, no evolution, a fabricated full HP meter —
+  and two landed mid-family. Every legacy family now lands on a distinct BASE-stage species,
+  read from the generated `SPECIES_BASE_OF_FAMILY[]`, under a `static_assert`.
+- **A migrated pet arrived with no attacks and 0 HP.** `migrate_v1_to_v2()` never wrote
+  `p.moves` (0 is the empty move slot) or `p.hp_cur` (which `xp_hp_rescale()` only scales, so
+  0 stayed 0 for ever and every HP meter showed 0 %). Both come from the species row now.
+- **Two open-coded copies of `hp_max`** in `ui/ui.cpp` and `game/box.cpp` now call
+  `xp_hp_max()`, which became `inline constexpr` in `game/xp.h`.
+
+### Known gaps
+
+- **An evolution is still invisible.** The renderer keys on the genome, not on `species_id`,
+  so 36 species all wear their genome's body and the species name reaches no screen. This is
+  a renderer change with its own step; the open bullet under P3-C3 stays open.
+- **The SPECIAL encounter outcome has no payload table** — 4 to 10 % of every scan resolves
+  to an outcome nothing defines. P5-C3 owns it; `test_content.cpp` states the gap.
+- **CARE and BATTLE_MOD items name no target stat**, and item 9 *Llave Raíz* is a CARE item
+  with value 0 — the pack's EVOC_ITEM key folded onto a class list with no slot for one.
+  `items_table.h` derives all three into its banner and `test_content.cpp` pins the third.
+- **Eight of spec §35's thirteen creator validation inputs have no row anywhere.**
+  `creator_schema.h` lists those eight, states the id range, and names type validity and move
+  legality as derivable from tables that already ship — 2 + 1 + 2 + 8, so the header adds up.
+
 ## [0.3.0-pet] — Unreleased
 
 Phase 3 turns the Pebblebol core engine into a virtual pet. Care moved onto the hours scale

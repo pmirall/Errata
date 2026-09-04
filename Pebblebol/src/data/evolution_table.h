@@ -1,18 +1,30 @@
 // =============================================================================
 //  PEBBLEBOL - data/evolution_table.h
-//  THE EVOLUTION RULES (spec section 18, plan 1.5.2, P3-C3).
+//
+//  GENERATED FILE. Do not edit: tools/gen_content.py rewrites it from
+//  tools/content/*.json. `tools/gen_content.py --check` fails the gate if
+//  this file and the JSON have drifted apart.
+//
+//  THE EVOLUTION RULES (spec section 18, plan 1.5.2).
 //
 //  One row per species that can leave its stage. A row is DATA: a minimum
-//  level, an optional condition and the species on the other side. game/
-//  evolution.cpp is the only code that reads it, and it refuses any rule whose
-//  condition it cannot evaluate - see the EvoContext contract in evolution.h.
+//  level, an optional condition and the species on the other side.
+//  game/evolution.cpp is the only code that reads it, and it refuses any
+//  rule whose condition it cannot evaluate - see EvoContext in
+//  game/evolution.h.
 //
-//  P4-C1's tools/gen_content.py emits this file. Until then the rows are
-//  written by hand in exactly the shape the generator will produce, so the
-//  content pipeline replaces the table without touching anything else.
+//  SpeciesDef.evo_rule is the INDEX into this array, so the ORDER here is
+//  contractual. The generator emits the pack's own ordering,
+//  evo_rule == (family - 1) * 2 + stage, and evo_roster_agrees() below
+//  fails the build if it ever drifts.
 //
-//  Pure header: stdint plus the species roster. No Arduino.
+//  EvoCond KEEPS THE FIRMWARE'S NUMBERING, not the content pack's. The two
+//  disagree on three of six values and this enum sits one hop from
+//  persisted content, so gen_content.py maps by NAME and errors on a name
+//  it does not know. BATTLES_WON_GE, which the pack lists and no rule uses,
+//  stays dropped.
 // =============================================================================
+
 #ifndef PB_EVOLUTION_TABLE_H
 #define PB_EVOLUTION_TABLE_H
 
@@ -21,23 +33,11 @@
 
 #include "species_table.h"
 
-// -----------------------------------------------------------------------------
-//  THE CONDITION KINDS (spec section 18: "level, plus an optional condition").
-//
-//  All five ship now even though family 1 uses only EVOC_NONE. The generator
-//  emits all five at P4-C1 and this enum sits one hop from persisted content
-//  (SpeciesDef.evo_rule indexes the table these tag), so renumbering it later
-//  is strictly worse than carrying two names nothing reads yet.
-//
-//  EVERY kind needs an input, and game/evolution.cpp REFUSES a rule whose
-//  input the caller did not supply. An unchecked requirement that evolves the
-//  creature anyway is the exact bug this design exists to prevent.
-// -----------------------------------------------------------------------------
 enum EvoCond : uint8_t {
   EVOC_NONE = 0,        // the level is the whole rule
   EVOC_HAPPINESS_GE,    // care[CARE_HAPPINESS] percentage >= cond_value
   EVOC_CORRUPTED,       // status carries PBS_CORRUPTED  (spec section 55)
-  EVOC_ITEM,            // an item is being applied, id == cond_value      (P6)
+  EVOC_ITEM,            // an item is being applied, id == cond_value      (P5)
   EVOC_ACTIVITY_GE,     // activity score 0..100 >= cond_value             (P6)
   EVOC_COUNT
 };
@@ -51,13 +51,32 @@ struct EvolutionRule {          // 6 B: four bytes and an aligned u16
 };
 static_assert(sizeof(EvolutionRule) == 6, "EvolutionRule layout drifted");
 
-// --- the rules ---------------------------------------------------------------
-// Family 1 only, matching the roster in species_table.h. SpeciesDef.evo_rule
-// is the INDEX into this array, so the order here is contractual.
 inline constexpr EvolutionRule EVOLUTION_RULES[] = {
-  //  from  to  lvl  cond        value
-  {     1,   2,   8, EVOC_NONE,      0 },   // Paketo  -> Fragmar
-  {     2,   3,  18, EVOC_NONE,      0 },   // Fragmar -> Rafagon
+  // from   to  lvl  cond                  value
+  {   1,   2,   8, EVOC_NONE,                0 },   // [ 0] Paketo -> Fragmar
+  {   2,   3,  18, EVOC_NONE,                0 },   // [ 1] Fragmar -> Rafagón
+  {   4,   5,  10, EVOC_NONE,                0 },   // [ 2] Bippo -> Estátic
+  {   5,   6,  20, EVOC_NONE,                0 },   // [ 3] Estátic -> Jamrón
+  {   7,   8,  10, EVOC_NONE,                0 },   // [ 4] Lagui -> Jitera
+  {   8,   9,  20, EVOC_NONE,                0 },   // [ 5] Jitera -> Timaut
+  {  10,  11,  10, EVOC_NONE,                0 },   // [ 6] Pixio -> Artefax
+  {  11,  12,  20, EVOC_CORRUPTED,           1 },   // [ 7] Artefax -> Burnix
+  {  13,  14,   8, EVOC_NONE,                0 },   // [ 8] Spamito -> Kadenax
+  {  14,  15,  18, EVOC_NONE,                0 },   // [ 9] Kadenax -> Blaklix
+  {  16,  17,  10, EVOC_NONE,                0 },   // [10] Buggo -> Exploid
+  {  17,  18,  20, EVOC_NONE,                0 },   // [11] Exploid -> Rootkar
+  {  19,  20,  10, EVOC_NONE,                0 },   // [12] Wormi -> Parasix
+  {  20,  21,  20, EVOC_NONE,                0 },   // [13] Parasix -> Plagón
+  {  22,  23,  10, EVOC_NONE,                0 },   // [14] Karnada -> Klonix
+  {  23,  24,  20, EVOC_NONE,                0 },   // [15] Klonix -> Estafex
+  {  25,  26,  10, EVOC_NONE,                0 },   // [16] Nulix -> Voidina
+  {  26,  27,  20, EVOC_NONE,                0 },   // [17] Voidina -> Segfalt
+  {  28,  29,   8, EVOC_NONE,                0 },   // [18] Bitto -> Flipix
+  {  29,  30,  18, EVOC_NONE,                0 },   // [19] Flipix -> Podrix
+  {  31,  32,  12, EVOC_NONE,                0 },   // [20] Daemi -> Servik
+  {  32,  33,  24, EVOC_HAPPINESS_GE,       70 },   // [21] Servik -> Kernon
+  {  34,  35,  10, EVOC_NONE,                0 },   // [22] Proxi -> Gateón
+  {  35,  36,  20, EVOC_NONE,                0 },   // [23] Gateón -> Murax
 };
 
 inline constexpr uint8_t EVOLUTION_RULES_COUNT =
@@ -74,7 +93,7 @@ inline const EvolutionRule* evolution_rule_at(uint8_t idx) {
 //  GENERATOR-EMITTED COMPILE-TIME GUARDS (plan 1.5.2)
 //
 //  constexpr so a bad table is a BUILD failure, not a runtime surprise on a
-//  device in someone's pocket. tests/test_evolution.cpp re-checks every one of
+//  device in someone's pocket. tests/test_content.cpp re-checks every one of
 //  them at runtime as well, so a future table that somehow slipped past a
 //  compiler still fails the gate.
 // -----------------------------------------------------------------------------
@@ -96,6 +115,10 @@ constexpr bool evo_rules_are_well_formed(void) {
     if ((int)t->stage != (int)s->stage + 1)      return false;
     if (r.level == 0u || r.level > (uint8_t)PB_LEVEL_MAX) return false;
     if (r.cond >= (uint8_t)EVOC_COUNT)           return false;
+    // A condition that compares against a value needs one; EVOC_NONE and
+    // EVOC_CORRUPTED are the two that answer without reading cond_value.
+    if ((r.cond == (uint8_t)EVOC_HAPPINESS_GE || r.cond == (uint8_t)EVOC_ACTIVITY_GE ||
+         r.cond == (uint8_t)EVOC_ITEM) && r.cond_value == 0u) return false;
   }
   return true;
 }
@@ -132,16 +155,32 @@ constexpr bool evo_final_stages_have_no_rule(void) {
   return true;
 }
 
+// Every non-final species has a way out of its stage. A stage-0 or stage-1 row
+// marked SPECIES_EVO_NONE would be a dead end in the middle of a family.
+constexpr bool evo_every_non_final_stage_has_a_rule(void) {
+  for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
+    const SpeciesDef& sp = SPECIES_TABLE[i];
+    if (sp.stage >= 2u) continue;
+    if (sp.evo_rule == SPECIES_EVO_NONE) return false;
+  }
+  return true;
+}
+
 static_assert(EVOLUTION_RULES_COUNT >= 1, "the table needs at least one rule");
 // SPECIES_EVO_NONE is the "no evolution" marker, so it must never also be a
 // legal index: keep the table strictly shorter than 0xFF rows.
 static_assert(EVOLUTION_RULES_COUNT < SPECIES_EVO_NONE,
               "0xFF must stay the 'no evolution' marker, not a valid index");
+static_assert(EVOLUTION_RULES_COUNT == (uint8_t)(SPECIES_FAMILY_COUNT * 2u),
+              "every family owes exactly two rules: stage 0 -> 1 and 1 -> 2");
 static_assert(evo_rules_are_well_formed(),
-              "an evolution rule does not resolve, crosses families, or skips a stage");
+              "an evolution rule does not resolve, crosses families, skips a stage "
+              "or asks a condition with no value");
 static_assert(evo_sources_are_unique(), "two rules share a source species");
 static_assert(evo_roster_agrees(), "SpeciesDef.evo_rule and EVOLUTION_RULES disagree");
 static_assert(evo_final_stages_have_no_rule(),
               "a species marked final is the source of a rule");
+static_assert(evo_every_non_final_stage_has_a_rule(),
+              "a stage-0 or stage-1 species has no way out of its stage");
 
 #endif  // PB_EVOLUTION_TABLE_H

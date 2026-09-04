@@ -15,6 +15,7 @@
 //                         (persistence/migration.h). Version 1 = the legacy
 //                         Nottamagochi blobs frozen in legacy_v1.h.
 //    CONTENT_VERSION      the content tables (species/attacks/items/encounters).
+//                         DEFINED IN data/content_version.h, generated.
 //                         Recorded in BoxHeader so a save made against newer
 //                         content can be spotted; it never blocks a load,
 //                         because unknown ids are validated per field.
@@ -31,7 +32,12 @@
 #define FW_VERSION              "0.2.0-dev"
 
 #define SAVE_SCHEMA_VERSION     2
-#define CONTENT_VERSION         1
+// CONTENT_VERSION LIVES IN data/content_version.h SINCE P4-C1. It is a HASH of
+// tools/content/*.json emitted by tools/gen_content.py, not a counter somebody
+// remembers to bump, because plan line 668 requires it to change when the JSON
+// changes and a hand-maintained number does not. This header stays include-free
+// (the pure layers pull it in), so the define is not forwarded from here -
+// persistence/save_schema.h includes both.
 #define PROTOCOL_VERSION        1
 #define CREATOR_API_VERSION     1
 

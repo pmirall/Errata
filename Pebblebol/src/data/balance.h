@@ -156,6 +156,17 @@ inline constexpr int32_t CARE_DECAY_MPH[PB_BALANCE_CARE_COUNT] = {
 //      * every entry fits u16 - PebbleInstance.xp is u16 (plan 1.5.1);
 //      * the WHOLE curve sums to 8,845, which also fits u16, so any code that
 //        wants a lifetime total can hold one without a wider type.
+//
+//    THIS CURVE IS NOT THE CONTENT PACK'S, AND THAT IS A P4-C1 DECISION.
+//    tools/content/balance.json ships a second 31-entry XP_TABLE
+//    (25 + 12*(L-1) + 4*(L-1)^2, total 36,453), and adopting it would multiply
+//    time-to-level-30 by 4.12x. gen_content.py deliberately does NOT emit
+//    XP_TABLE: it is not one of the content TABLES of plan 1.5.2, the shipped
+//    curve predates the pack (P3-C2), and swapping it moves a recorded pixel
+//    golden - screen_home.cpp draws the XP rule at 128*xp/xp_next, and
+//    tests/test_screens.cpp sets xp = 2 against XP_TABLE[1], which is 23 px on
+//    11 and 10 px on 25. A whole-game pacing change is its own commit with its
+//    own re-recorded golden, not a side effect of "regenerate the content".
 // =============================================================================
 #define XP_LEVEL_MAX            30
 
@@ -172,6 +183,19 @@ inline constexpr uint16_t XP_TABLE[XP_LEVEL_MAX + 1] = {
 
 // Compile-time shape checks (plan 1.5.2 "generator-emitted compile-time
 // guards"): strictly increasing over 1..29, and the whole curve inside u16.
+//
+// THE TWO ARE NOT EQUALLY STRONG, AND THE WEAK ONE IS LABELLED RATHER THAN
+// DRESSED UP. xp_table_monotonic() is the one that catches real edits - it has
+// been made to fire three ways (flat at L15, backward at L20, a non-zero
+// XP_TABLE[30]). xp_table_total() < 65535 is a FLOOR, not a live guard: the
+// shipped curve totals 8,845 and even balance.json's rejected 4.12x curve
+// totals 36,453, so no plausible table trips it. It is also not quite the
+// quantity the u16 is about - PebbleInstance.xp holds xp toward the NEXT level,
+// never the total, and each XP_TABLE entry already fits u16 by its own type, so
+// the bound that would matter is max(XP_TABLE[i]) and it is true by
+// construction. Kept because a curve whose sum overflows u16 is broken anyway;
+// stated because the P4-C1 exit called the pair "stronger" without saying that
+// only one half does any work.
 inline constexpr uint32_t xp_table_total(void) {
   uint32_t t = 0;
   for (uint8_t i = 0; i <= (uint8_t)XP_LEVEL_MAX; ++i) t += XP_TABLE[i];
@@ -229,7 +253,129 @@ static_assert(XP_CAP_CARE < 256 && XP_CAP_MINIGAME < 256 && XP_CAP_CARRY < 256,
               "a ledger bucket is persisted as one byte (Inventory.xp_ledger)");
 
 // =============================================================================
-// 5. DAYLIGHT AND SLEEP  -- when it is dark, and what wakes the creature
+// 5. BATTLE  -- spec sections 11-14, plan 1.5.1, P4-C1
+//
+//    EVERY NUMBER BELOW IS INTEGER AND EVERY DIVISION TRUNCATES TOWARDS ZERO on
+//    non-negative operands, which is what C gives us. There is no remainder
+//    accumulator anywhere in this section and there must not be one: the care
+//    model carries remainders (care_rem[], xp.cpp's rem_s[]) because it
+//    INTEGRATES a rate over time, and a battle does not. Every expression here
+//    is evaluated once per round on fresh inputs, so truncation is
+//    deterministic and idempotent. Adding an accumulator would make a round's
+//    result depend on the rounds before it.
+//
+//    PROVENANCE. The constants come from tools/content/balance.json, which is
+//    the tuned content pack; three of them do NOT and are named as decisions
+//    here rather than smuggled in as defaults - see BATTLE_MAX_ROUNDS,
+//    BATTLE_TEAM_MAX and XP_BATTLE_WIN.
+// =============================================================================
+
+// --- damage (plan 1.5.1) -----------------------------------------------------
+//    raw = max(DMG_MIN, power * atk_eff / (def_eff * BATTLE_K))
+//    dmg = max(DMG_MIN, raw * TYPE_MUL_NUM[m+1] / TYPE_MUL_DEN[m+1]) + rng(0..2)
+// Widest intermediate: power 100 * atk_eff 24 = 2,400, and raw * 5 = 1,710.
+// uint16_t suffices; use uint32_t for headroom. No 64-bit anywhere.
+#define BATTLE_K                7       // the damage divisor
+#define DMG_MIN                 1       // a hit always costs at least one point
+#define DMG_RNG_SPAN            3       // rng(0..2), a 3-wide uniform
+
+// THE TYPE MODIFIER IS MULTIPLICATIVE, WHICH SUPERSEDES plan 1.5.1's `+ 2*type_mod`.
+// Hits land for 4-8 points, so a flat +-2 is a 50-100 % swing and type decides
+// every battle - the exact failure spec section 12 forbids ("type advantage
+// matters without deciding every battle automatically"). The content pack
+// measured this and shipped x4/5, x1, x5/4 instead, indexed by (type_mod + 1),
+// with the additive term scaled to zero. TYPE_MOD_SCALE is kept as a real
+// constant rather than deleted so the superseded path is visibly dead and not
+// merely absent.
+#define TYPE_MOD_SCALE          0
+inline constexpr uint8_t TYPE_MUL_NUM[3] = { 4, 1, 5 };   // index (type_mod + 1)
+inline constexpr uint8_t TYPE_MUL_DEN[3] = { 5, 1, 4 };
+// ...and the edge applies at most this many times per attacker per battle. A
+// per-hit edge COMPOUNDS over the ~5 exchanges a fight lasts, so capping the
+// hits is the other half of the fix. It is per-battle STATE, not a table: P4-C2
+// owns one counter per side and this is its bound.
+#define TYPE_MOD_MAX_HITS       1
+
+// --- defence, buffs and accuracy ---------------------------------------------
+// Protection HALVES incoming damage with a floor of 1 (plan 1.5.1). The divisor
+// and the shift are the SAME rule: use the divisor, so a future value other
+// than 2 cannot silently disagree with a >>1 somewhere else.
+#define PROTECT_DIVISOR         2
+
+// Buff/debuff stages clamp to +-2. plan 1.5.1 says "buffs +-1 stage"; the
+// content pack ships a two-stage move (attack 16 Frenesi, effect_value 2), so
+// +-1 is the plan's assumption and +-2 is what the content actually needs.
+// stat_eff = max(1, (int)stat + stage), computed SIGNED: stat is uint8_t and
+// stage can be negative, and an unsigned subtraction there wraps to 65535 and
+// looks like an invincible Pebble.
+#define BUFF_STAGE_MIN          (-2)
+#define BUFF_STAGE_MAX          (+2)
+#define STAT_EFF_MIN            1
+
+// SPD buys evasion, not just a tiebreak. Without this SPD does nothing but
+// break turn order and a fast Pebble pays 6-7 of its 16/22/28 stat points for
+// it (the pack measured the FAST archetype at a 24 % win rate).
+//    pen     = EVASION_PER_SPD * min(EVASION_MAX_SPD_GAP, max(0, spd_def - spd_atk))
+//    acc_eff = max(ACCURACY_MIN, (int16_t)accuracy - pen)     // SIGNED
+//    hit     = rng(0..99) < acc_eff
+#define EVASION_PER_SPD         2
+#define EVASION_MAX_SPD_GAP     10
+#define ACCURACY_MIN            40
+#define ACCURACY_ROLL_SPAN      100
+
+// Risk/reward moves pay through RECOIL_PCT and SELF_STUN, not through a flat
+// self-damage percentage. The constant is 0 and is named so the absence is a
+// stated design choice rather than a missing line.
+#define RISK_SELF_HP_PCT        0
+
+// --- corruption in battle (spec section 55) ----------------------------------
+#define CORRUPT_BATTLE_ATK_STAGE      (+1)
+#define CORRUPT_BATTLE_DEF_STAGE      (-1)
+#define CORRUPT_BATTLE_INFECT_PERMILLE 120
+#define CORRUPT_DURATION_S            86400UL
+
+// --- THE THREE NUMBERS THE CONTENT PACK DOES NOT CARRY -----------------------
+// Each of these is a P4-C1 DECISION, written down because the next reader will
+// look for its source and not find one in balance.json.
+//
+// 1. THE ROUND CAP. Spec section 14 step 8 says "determine end of round" and
+//    nothing anywhere states when a battle that neither side can win ends. The
+//    pack's simulator used 60 rounds for 3v3 and 40 for 1v1 as Python defaults
+//    it never promoted. 60 is taken here for both, because a device battle MUST
+//    terminate and the smaller number would end fights the simulator counted as
+//    wins. The timeout is broken by remaining HP as a FRACTION of each side's
+//    maximum, cross-multiplied so no float and no ratio is needed:
+//        A wins if hp_a * hp_max_b > hp_b * hp_max_a
+//    and an exact tie is a DRAW. The simulator broke that tie with a coin flip;
+//    a coin flip is not a rule anybody stated and it makes a replay depend on
+//    the RNG stream position, which P4-C5's lockstep protocol cannot afford.
+#define BATTLE_MAX_ROUNDS       60
+
+// 2. THE TEAM SIZE. Spec section 14 says "up to 3 Pebbles" in prose and names
+//    no constant. One active per side; a switch costs the turn.
+#define BATTLE_TEAM_MAX         3
+
+// 3. WHAT A WIN PAYS. Plan line 487 says "+25" and no table carries it.
+//    game/xp.h already reserves XP_SRC_BATTLE with a {0,0} ledger row.
+#define XP_BATTLE_WIN           25
+
+static_assert(BATTLE_K > 0, "the damage divisor must not be zero");
+static_assert(DMG_RNG_SPAN > 0, "the damage roll needs a range");
+static_assert(PROTECT_DIVISOR >= 2, "protection that does not at least halve is not protection");
+static_assert(BUFF_STAGE_MIN < 0 && BUFF_STAGE_MAX > 0, "stages must go both ways");
+static_assert(ACCURACY_MIN > 0 && ACCURACY_MIN <= ACCURACY_ROLL_SPAN,
+              "a move nothing can ever land is not a move");
+static_assert(EVASION_PER_SPD * EVASION_MAX_SPD_GAP < ACCURACY_ROLL_SPAN,
+              "evasion could drive accuracy below zero before the ACCURACY_MIN floor");
+static_assert(TYPE_MUL_NUM[1] == 1 && TYPE_MUL_DEN[1] == 1,
+              "a neutral matchup must be exactly x1");
+static_assert(TYPE_MUL_NUM[0] < TYPE_MUL_DEN[0] && TYPE_MUL_NUM[2] > TYPE_MUL_DEN[2],
+              "the type multipliers are the wrong way round");
+static_assert(BATTLE_MAX_ROUNDS > 0, "a battle must terminate");
+static_assert(BATTLE_TEAM_MAX >= 1, "a team needs a Pebble");
+
+// =============================================================================
+// 6. DAYLIGHT AND SLEEP  -- when it is dark, and what wakes the creature
 //    (plan P3-C2b, decision D13)
 //
 //    THIS TABLE IS AN APPROXIMATION AND SAYS SO. A true sunrise needs a

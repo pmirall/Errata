@@ -1877,11 +1877,11 @@ static const PebbleView* ui_fill_view(void) {
     s_view.xp         = pb->xp;
     s_view.hp_cur     = pb->hp_cur;
     const SpeciesDef* sp = species_get(pb->species_id);
-    // hp_max = 10 + 2*base_hp + level (plan 1.5.1), recomputed and never
-    // stored. With no species row there is nothing honest to show, so the
-    // meter reports the current value as full rather than inventing a maximum.
-    s_view.hp_max = sp ? (uint16_t)(10u + 2u * (uint16_t)sp->base_hp + (uint16_t)pb->level)
-                       : pb->hp_cur;
+    // hp_max is recomputed and never stored (plan 1.5.1). With no species row
+    // there is nothing honest to show, so the meter reports the current value
+    // as full rather than inventing a maximum. P4-C1: this used to open-code
+    // `10 + 2*base_hp + level`, a second copy of a formula game/xp.cpp owns.
+    s_view.hp_max = sp ? xp_hp_max(sp->base_hp, pb->level) : pb->hp_cur;
   }
   if (s_view.level == 0) s_view.level = 1;
   // What THIS level costs to leave (game/xp.h). 0 at XP_LEVEL_MAX, which is how

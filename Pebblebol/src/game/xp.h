@@ -102,7 +102,19 @@ uint16_t xp_minigame_amount(uint16_t win_permille);   // permille * 8 / 1000
 //  must rescale hp_cur the SAME way, so there is exactly one rescale in the
 //  firmware and it is xp_hp_rescale().
 // -----------------------------------------------------------------------------
-uint16_t xp_hp_max(uint8_t base_hp, uint8_t level);
+//  IT IS `inline constexpr` IN THE HEADER, not a symbol in xp.o, since P4-C1.
+//  Two pure layers outside this module need it - persistence/migration.cpp
+//  gives a migrated pet its full HP, and game/pebble.cpp derives hp_max - and
+//  linking the whole XP module (which drags game/evolution.cpp with it, the two
+//  call each other) into the persistence tests to reach one addition would be a
+//  worse trade than an inline definition. It is still ONE definition.
+//
+//  The widest possible input is base_hp 255 at level 255, which is 775: no u16
+//  overflow is reachable however badly a content pack is edited.
+inline constexpr uint16_t xp_hp_max(uint8_t base_hp, uint8_t level)
+{
+  return (uint16_t)(10u + 2u * (uint16_t)base_hp + (uint16_t)level);
+}
 
 // A full Pebble stays full, a hurt one keeps its fraction, nothing over-heals
 // and nothing lands above the new maximum. Integer and truncating: the lost

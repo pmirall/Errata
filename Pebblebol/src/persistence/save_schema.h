@@ -29,7 +29,8 @@
 #include <stddef.h>
 
 #include "../core/nt_types.h"     // Genome (copied whole into a Pebble)
-#include "../core/version.h"      // SAVE_SCHEMA_VERSION, CONTENT_VERSION, ...
+#include "../core/version.h"      // SAVE_SCHEMA_VERSION, PROTOCOL_VERSION, ...
+#include "../data/content_version.h"   // CONTENT_VERSION (generated hash)
 
 // -----------------------------------------------------------------------------
 // 0. Shared constants

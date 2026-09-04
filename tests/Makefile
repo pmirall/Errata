@@ -106,6 +106,14 @@ $(BIN)/test_box:        $(OBJ)/box.o
 $(BIN)/test_xp:         $(OBJ)/xp.o $(OBJ)/evolution.o
 # The other half of that pair. Both objects, for the same reason.
 $(BIN)/test_evolution:  $(OBJ)/evolution.o $(OBJ)/xp.o
+# The generated content tables (P4-C1). species.o is the accessor layer AND the
+# one translation unit that includes every generated header, so linking it here
+# is what makes their compile-time guards fire in this build and not only in the
+# firmware one. evolution.o + xp.o come as a pair (they call each other) because
+# test_content drives evolution_apply() through a failing CONDITION.
+$(BIN)/test_content:    $(OBJ)/species.o $(OBJ)/evolution.o $(OBJ)/xp.o
+# Derived stats. genome.o drags crc16.o and rng.o, exactly as test_genome does.
+$(BIN)/test_stats:      $(OBJ)/pebble.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 # The Box <-> sim seam: the real box.cpp and the real sim.cpp together, which
 # is the only way to see a swap move sim's raw pointer off its creature.
 $(BIN)/test_box_sim:    $(OBJ)/box_sim.o $(OBJ)/box.o $(OBJ)/sim.o \
@@ -125,8 +133,13 @@ $(BIN)/test_overflow:   $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o \
                         $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_fixtures:   $(OBJ)/crc16.o
+# genome.o + species.o since P4-C1: the legacy family map case drives
+# gene_set_species() and reads back through species_base_of_family(), which is
+# the only way to prove that every v1 family lands on a BASE-stage creature
+# rather than on nothing. genome.o drags rng.o.
 $(BIN)/test_persistence: $(OBJ)/save_manager.o $(OBJ)/migration.o \
-                        $(OBJ)/kv_mem.o $(OBJ)/crc16.o
+                        $(OBJ)/kv_mem.o $(OBJ)/crc16.o \
+                        $(OBJ)/genome.o $(OBJ)/rng.o $(OBJ)/species.o
 $(BIN)/test_game_state: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o
 # The screen table's migrated rows are pure translation units, so they compile

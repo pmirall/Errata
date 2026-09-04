@@ -43,6 +43,43 @@ if [ $DO_TESTS -eq 1 ]; then
   make -C "$ROOT/tests" check || fail "host tests"
 fi
 
+# --- THE CONTENT GATE (P4-C1) ---------------------------------------------
+# Two checks, both cheap (about 0.1 s together), both about the same thing: the
+# committed headers under src/data/ are GENERATED, so nothing may hand-edit
+# them and nothing may edit the JSON without re-running the generator.
+#
+#   1. tools/content/verify.py is the content pack's OWN gate. It travels with
+#      the JSON and validates all 60 species against the design rules, importing
+#      nothing from the generator - so a green run proves the deliverable
+#      consistent even if gen_content.py is wrong.
+#   2. gen_content.py --check regenerates every header in memory and diffs it
+#      against the tree. It catches a hand edit to a generated header AND a JSON
+#      edit that was never regenerated, which is the drift that would otherwise
+#      only show up as a save recorded against a CONTENT_VERSION nothing built.
+#
+# Skipped with a WORD, not silently, if python3 is missing: a gate that decides
+# not to run must say so. THE OUTER TEST IS A HARD FAIL, not a skip, and the
+# difference matters: the other `if [ -f ... ]` guards in this file cover gates
+# whose subject does not exist YET, while tools/content is a COMMITTED
+# deliverable that src/data/*_table.h is generated from. Missing, it does not
+# mean "not this phase", it means the gate's input was deleted - and until this
+# `else` existed, `rm -rf tools/content` printed GATE OK and exited 0, which is
+# the exact shape of failure this file's own comment forbids.
+if [ -d "$ROOT/tools/content" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    ( cd "$ROOT/tools/content" && python3 verify.py --fast >/dev/null ) \
+      || fail "tools/content/verify.py (the content pack's own gate)"
+    python3 "$ROOT/tools/gen_content.py" --check >/dev/null \
+      || fail "src/data/*_table.h and tools/content/*.json have drifted apart "\
+"(run: python3 tools/gen_content.py)"
+  else
+    echo "check.sh: python3 not found, SKIPPING the content gate" >&2
+  fi
+else
+  fail "tools/content is missing - src/data/*_table.h is generated from it and "\
+"nothing can check them against it"
+fi
+
 # --- grep gates (each is enabled by the plan commit that makes it true) ---
 # The screen state machine owns navigation. TREE-WIDE since P2-C11d: the
 # exception this gate used to carry (dev/godmode.cpp had its own unrelated
