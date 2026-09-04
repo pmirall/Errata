@@ -292,8 +292,23 @@ inline constexpr uint8_t TYPE_MUL_NUM[3] = { 4, 1, 5 };   // index (type_mod + 1
 inline constexpr uint8_t TYPE_MUL_DEN[3] = { 5, 1, 4 };
 // ...and the edge applies at most this many times per attacker per battle. A
 // per-hit edge COMPOUNDS over the ~5 exchanges a fight lasts, so capping the
-// hits is the other half of the fix. It is per-battle STATE, not a table: P4-C2
-// owns one counter per side and this is its bound.
+// hits is the other half of the fix. It is per-battle STATE, not a table.
+//
+// CORRECTED BY P4-C2: this paragraph used to say "P4-C2 owns one counter per
+// side", which contradicts the sentence above it and is not what the roster was
+// measured with. tools/content/sim_engine.py keeps `tmod_used` on the ATTACKING
+// FIGHTER (Fighter.reset, take_turn), so the counter is PER COMBATANT and
+// game/battle.h's BattleCombatant.type_edge_left is where it lives. Three more
+// semantics come from the same code and are implemented, not guessed: the cap
+// is tested and spent AFTER the accuracy roll and only inside `if power > 0`,
+// so a MISS does not spend it and a POWER-0 move does not spend it; and
+// `if m != 0` means it zeroes a DISADVANTAGE as well as an advantage.
+//
+// THE READING THAT WAS REJECTED: cap the BONUS and always apply the PENALTY.
+// It is the better game-design argument - a type-disadvantaged attacker should
+// stay disadvantaged - but it is NOT what the win-rate matrix was measured
+// against, and changing it here without re-running the simulator would move the
+// roster silently.
 #define TYPE_MOD_MAX_HITS       1
 
 // --- defence, buffs and accuracy ---------------------------------------------

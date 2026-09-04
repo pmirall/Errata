@@ -136,6 +136,49 @@ if [ -d "$SKETCH/src" ]; then
   [ "$n" -eq 0 ] || fail "esp_random outside app/app.cpp ($n)"
 fi
 
+# --- P4-C2: THE THREE BATTLE GATES ---------------------------------------
+# 1. src/game IS PURE. Until P4-C2 this was enforced only by tests/Makefile
+#    compiling sketch sources with no Arduino include path, so an
+#    `#include <Arduino.h>` in a game module surfaced as a confusing compile
+#    error inside `make -C tests check` and not as a named gate. The plan's
+#    ground truth said this gate already existed; `grep -n Arduino tools/check.sh`
+#    returned nothing, so it did not. It matches #include LINES ONLY: five game
+#    headers discuss the rule in prose and must not trip it.
+if [ -d "$SKETCH/src/game" ]; then
+  n=$( { grep -rnE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*(Arduino\.h|u8g2|gfx\.h|render\.h)' \
+          "$SKETCH/src/game" --include='*.cpp' --include='*.h' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "src/game includes a hardware or renderer header ($n)"
+fi
+
+# 2. THE BATTLE DRAWS ONLY FROM ITS OWN Rng. game/battle.h's determinism
+#    contract is that every draw comes from BattleState.rng, seeded from one
+#    u32, so a replay is exact and two peers stay in lockstep. A named global
+#    stream is shared with the rest of the firmware, so a care roll on one
+#    device would move the other device's damage numbers. This is the exact
+#    failure mode "the AI reaches for RNG_BATTLE and the logs stop
+#    reproducing", and it is mechanically checkable. Comment lines are dropped:
+#    battle.h names these functions in prose on purpose.
+if ls "$SKETCH"/src/game/battle* >/dev/null 2>&1; then
+  n=$( { grep -rnE '\b(rng_u32|rng_below|rng_chance_permille|rng_seed|rng_seed_all|esp_random)[[:space:]]*\(' \
+          "$SKETCH"/src/game/battle* || true; } \
+        | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "game/battle* draws from a named RNG stream ($n) - it must use st.rng only"
+fi
+
+# 3. THE NINE STEPS ARE CALLED IN ORDER. NARROW BY DESIGN, and the narrowness
+#    is the point: this extracts the digits of the battle_s<N>_ calls inside
+#    battle_step_round() and requires 1..9 ascending, squeezing repeats (step 2
+#    is asked for both sides). It catches a REORDERING and it proves NOTHING
+#    about whether each function does what its name says - tests/test_battle.cpp
+#    is what does that. Do not widen this comment.
+if [ -f "$SKETCH/src/game/battle.cpp" ]; then
+  order=$(sed -n '/^BattleStepResult battle_step_round/,/^}/p' "$SKETCH/src/game/battle.cpp" \
+          | { grep -oE 'battle_s[1-9]_' || true; } | { grep -oE '[1-9]' || true; } \
+          | tr -d '\n' | tr -s '1-9')
+  [ "$order" = "123456789" ] || \
+    fail "battle_step_round() does not call the spec section 14 steps once each in order (got '$order')"
+fi
+
 # P5-C1: no station association anywhere (scan-only Wi-Fi, spec §68 r5)
 # if [ -d "$SKETCH/src" ]; then
 #   n=$(grep -rn "WiFi\.begin(" "$SKETCH/src" | grep -v creator_server | wc -l); [ "$n" -eq 0 ] || fail "WiFi.begin outside creator_server ($n)"

@@ -119,6 +119,18 @@ $(BIN)/test_stats:      $(OBJ)/pebble.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rn
 $(BIN)/test_box_sim:    $(OBJ)/box_sim.o $(OBJ)/box.o $(OBJ)/sim.o \
                         $(OBJ)/daylight.o $(OBJ)/genome.o $(OBJ)/crc16.o \
                         $(OBJ)/rng.o
+# THE BATTLE ENGINE (P4-C2). battle.cpp is PURE, so it compiles here exactly as
+# it does in the firmware; pebble.o is the one stat derivation it calls, and
+# genome.o drags crc16.o and rng.o just as test_stats does. NO ui/ object and no
+# species.o: type_mod_of() and species_get() are inline in the generated
+# headers, so a round never leaves the data tables.
+$(BIN)/test_battle:     $(OBJ)/battle.o $(OBJ)/pebble.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
+$(BIN)/test_battle_replay: $(OBJ)/battle.o $(OBJ)/pebble.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
+$(BIN)/test_battle_golden: $(OBJ)/battle.o $(OBJ)/pebble.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
+
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 # The minigame contract and the PURE logic of every game. No draw objects and
 # no ui/: if this link line ever needs one, a game has leaked drawing into its
@@ -199,8 +211,9 @@ $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
 
 # --- goldens ----------------------------------------------------------------
-golden: $(BIN)/test_care_golden
+golden: $(BIN)/test_care_golden $(BIN)/test_battle_golden
 	./$(BIN)/test_care_golden --record
+	./$(BIN)/test_battle_golden --record
 
 # Screen snapshots (golden/screens/*.pbm). Same rule as above: only from a
 # commit that means to change what a screen looks like, and read the diff.

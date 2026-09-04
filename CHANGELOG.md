@@ -14,6 +14,44 @@ Phase 4 begins. Nothing is tagged yet.
 
 ### Added
 
+- **The battle engine** (`game/battle.{h,cpp}`): spec §14's nine numbered steps as nine
+  functions carrying those numbers, called once each in order by a driver whose body is
+  exactly those calls. Teams of up to three with one active a side, switching that costs
+  the turn and outruns every attack, buffs and protection with real durations, a forced
+  replacement after a faint, a caller-owned `BattleLog` ring, and `battle_state_hash()` —
+  FNV-1a 32 over the whole 212-byte state, random cursor included, so a divergence in the
+  NUMBER of draws taken is caught on the round it happens rather than three rounds later.
+  PURE: no `Arduino.h`, no heap, no `std::` container, no floating point, no clock, and no
+  file-scope mutable variable, which is what will let P4-C5's loopback run two engines in
+  one process. Sizes are compiled, not estimated: `BattleCombatant` 32 B, `BattleSide`
+  100 B, `BattleState` 212 B, `BattleEvent` 12 B, each padding-free under a sum-of-members
+  `static_assert`. The module declares no instance, so it spends 0 B of globals, and it
+  spends 0 B of flash TODAY for a measured reason rather than a hopeful one: the firmware
+  compiles the file (its `static_assert`s fire, and it is clean under `--warnings all`) but
+  nothing calls it yet, so `nm` finds no `battle_*` symbol in the linked ELF and the image
+  is byte-identical to P4-C1's on all 7 variants. The object is 8,533 B of `.text`, which
+  is what P4-C4 should expect to start paying.
+- **A rejection contract with teeth.** A `BattleAction` is two untrusted bytes and all
+  65,536 patterns are swept in the tests; every one maps to a legal action or to a NAMED
+  `BR_*` refusal, and the engine NEVER CLAMPS a peer-supplied value. The validator takes a
+  `const BattleState&`, and because the per-battle `Rng` lives inside the state, `const`
+  also freezes the random cursor — so "stash the attempt", "decrement the cooldown you
+  just checked" and "roll for the tie you are about to need" do not compile.
+  `battle_submit_action()` has exactly one write site and it is unreachable on a reject,
+  which the tests prove with `memcmp` over the whole struct rather than by reading fields.
+- **Three new host tests**, 23 → 26 binaries: `test_battle.cpp` (60 cases — every §50
+  battle case, each invalid action asserting the exact reject code with a positive control
+  beside it), `test_battle_replay.cpp` (8 cases — twin engines run INTERLEAVED with equal
+  hashes every round, a seeded negative control, a pinned RNG cursor and exact draw count,
+  and replay from a recorded log) and `test_battle_golden.cpp` over
+  `tests/golden/battle_v1.txt` (a 22-round 3v3 recorded event by event: it is the only
+  thing that can catch a duration off-by-one two engines share, and the only thing that
+  watches the log at all, since the log lives outside the hashed state on purpose).
+- **Three grep gates** in `tools/check.sh`, each proven failable before it landed: `src/game`
+  may not include `Arduino.h`/`u8g2`/`gfx.h`/`render.h` (this gate did not previously
+  exist — purity was enforced only as a confusing compile error inside the host tests);
+  `src/game/battle*` may not touch a named RNG stream; and `battle_step_round()`'s nine step
+  calls must read 1..9 in order.
 - **The content pipeline** (`tools/gen_content.py`, `tools/content/*.json`): the species,
   attack, item, evolution and encounter tables under `Pebblebol/src/data/` are now
   GENERATED from JSON and committed. Running the generator twice on the same JSON produces
@@ -49,6 +87,15 @@ Phase 4 begins. Nothing is tagged yet.
   through a FAILING condition for the first time) and `test_stats.cpp` (11 cases).
 
 ### Fixed
+
+- **`balance.h` contradicted itself about who owns the type-advantage cap.** The
+  `TYPE_MOD_MAX_HITS` paragraph said "per attacker per battle" in one sentence and "P4-C2
+  owns one counter per side" in the next. `tools/content/sim_engine.py`, which is what the
+  roster was tuned against, keeps the counter on the attacking FIGHTER; the ownership
+  sentence was the wrong one and is corrected, together with three semantics read out of
+  the same code rather than guessed (a miss does not spend the edge, a power-0 move does
+  not spend it, and the cap zeroes a DISADVANTAGE as well as an advantage). The rejected
+  reading is recorded beside it.
 
 - **The legacy v1 family map** (`persistence/migration.cpp`): it mapped the eight v1 families
   onto ids 1..8, written before ids 1..3 became the three STAGES of one family. Five of the
