@@ -566,7 +566,7 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 - **DELIBERATELY DEFERRED, with the reason**: `battle_log_apply()` — reconstructing the state from log ENTRIES — is a second implementation of the state transition, and the one thing worse than no replay is a replay that agrees with itself. `battle_replay()` re-runs the recorded ACTIONS through the one engine instead, which is what the plan line asks for; entry-level desync localisation belongs to P4-C5 if it earns it.
 
 **P4-C3 Battle AI** — S
-- [ ] `game/battle_ai.cpp`: greedy expected damage with type mod; switch when HP < 25 % and a better type is benched; never invalid; own `Rng` stream. `test_battle_ai.cpp`.
+- [x] `game/battle_ai.cpp`: greedy expected damage with type mod; switch when HP < 25 % and a better type is benched; never invalid; own `Rng` stream. `test_battle_ai.cpp`.
 
 **P4-C4 Battle on device vs AI + DIAG `test_battle`** — M
 - [ ] `ui/battle_renderer.cpp` on `rd_bar/rd_flash/rd_shake/rd_dither_rect` + `gfx_xbm` (24x24 sprites, PIXEL CORE mirror petfx.cpp:64-289); `BATTLE` state; team pick from BOX (3 slots); 4-attack + SWITCH menu on the list widget; 20 fps via `rd_hold_fps`; no per-frame heap (`ESP.getFreeHeap()` delta 0 per frame in DIAG).

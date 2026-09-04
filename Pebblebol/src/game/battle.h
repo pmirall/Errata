@@ -475,6 +475,37 @@ bool     battle_side_must_switch(const BattleState& st, uint8_t side);
 uint8_t  battle_alive_count(const BattleState& st, uint8_t side);
 
 // -----------------------------------------------------------------------------
+//  THE TWO PURE HALVES OF A HIT (added by P4-C3)
+//
+//  Both are CONST, side-effect free and DRAWLESS. They were factored out of
+//  resolve_one()/compute_damage() for exactly one reason: game/battle_ai.cpp has
+//  to predict what a move would do, and a chooser carrying its own copy of the
+//  damage formula is a SECOND IMPLEMENTATION that drifts from this one the first
+//  time a constant in data/balance.h moves. The engine calls them with the type
+//  modifier it has DECIDED AND SPENT; the AI calls them with the modifier it
+//  PREDICTS. Neither function touches the type-edge budget, because only the
+//  engine may spend it.
+//
+//  Factoring them changed no behaviour: tests/golden/battle_v1.txt is a 22-round
+//  transcript recorded before this commit and is asserted event by event after
+//  it, so a refactor that moved a single number would fail it.
+// -----------------------------------------------------------------------------
+
+// The damage a hit deals BEFORE the roll and BEFORE protection, for an
+// already-decided type modifier m in -1..+1 (data/balance.h publishes the
+// formula). An m outside that range is treated as neutral rather than indexing
+// TYPE_MUL_NUM past its end - defence on a public function, not a clamp of any
+// wire value: type_mod_of() cannot produce one and no caller in this tree does.
+uint16_t battle_damage_pre_roll(const BattleCombatant& u, const BattleCombatant& f,
+                                const AttackDef& a, int8_t m);
+
+// Accuracy after evasion and the ACCURACY_MIN floor, in 0..ACCURACY_ROLL_SPAN.
+// A power-0 move rolls against RAW accuracy with no evasion term, which is the
+// engine's rule and not a simplification.
+uint8_t  battle_accuracy_eff(const BattleCombatant& u, const BattleCombatant& f,
+                             const AttackDef& a);
+
+// -----------------------------------------------------------------------------
 //  THE HASH
 //
 //  FNV-1a 32 over ALL sizeof(BattleState) raw bytes - the whole object

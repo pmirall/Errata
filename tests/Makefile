@@ -130,6 +130,11 @@ $(BIN)/test_battle_replay: $(OBJ)/battle.o $(OBJ)/pebble.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_battle_golden: $(OBJ)/battle.o $(OBJ)/pebble.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
+# THE LOCAL OPPONENT (P4-C3). battle_ai.o on top of the SAME objects the engine
+# tests link, and no others: the AI reads the battle through game/battle.h's
+# const queries and needs no privileged access to anything.
+$(BIN)/test_battle_ai:  $(OBJ)/battle_ai.o $(OBJ)/battle.o $(OBJ)/pebble.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 # The minigame contract and the PURE logic of every game. No draw objects and

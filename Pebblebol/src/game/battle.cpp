@@ -402,11 +402,33 @@ static void set_stage(BattleCombatant& c, uint8_t k, int16_t delta, uint8_t dur,
            (uint16_t)((int16_t)BATTLE_STAGE_BIAS + s), round, 0u);
 }
 
-// The damage rule, in the order the code reads it. uint32_t intermediates, no
-// float, no 64-bit. Widest reachable value: power 100 * atk_eff 25 = 2,500,
-// raw <= 357 and raw * 5 <= 1,785 (measured against the shipped tables).
-static uint16_t compute_damage(BattleState& st, BattleCombatant& u,
-                               const BattleCombatant& f, const AttackDef& a)
+// THE ACCURACY RULE, and the ONE copy of it in the tree (data/balance.h names
+// the constants). SPD buys evasion, capped at EVASION_MAX_SPD_GAP and floored
+// at ACCURACY_MIN; a power-0 utility move is not evaded at all.
+uint8_t battle_accuracy_eff(const BattleCombatant& u, const BattleCombatant& f,
+                            const AttackDef& a)
+{
+  int16_t acc = (int16_t)a.accuracy;
+  if (a.power > 0u) {
+    const int16_t gap_raw = (int16_t)((int16_t)battle_effective_speed(f) -
+                                      (int16_t)battle_effective_speed(u));
+    int16_t gap = (gap_raw > 0) ? gap_raw : (int16_t)0;
+    if (gap > (int16_t)EVASION_MAX_SPD_GAP) gap = (int16_t)EVASION_MAX_SPD_GAP;
+    acc = (int16_t)(acc - (int16_t)((int16_t)EVASION_PER_SPD * gap));
+    if (acc < (int16_t)ACCURACY_MIN) acc = (int16_t)ACCURACY_MIN;
+  }
+  // Both ends fit a byte without a clamp: attack_rows_are_well_formed() caps
+  // accuracy at 100 and ACCURACY_MIN is the floor, so no value here is lost.
+  return (uint8_t)acc;
+}
+
+// THE DAMAGE RULE, in the order the code reads it, and the ONE copy of it in
+// the tree: game/battle_ai.cpp predicts a hit by calling this same function.
+// uint32_t intermediates, no float, no 64-bit. Widest reachable value:
+// power 100 * atk_eff 25 = 2,500, raw <= 357 and raw * 5 <= 1,785 (measured
+// against the shipped tables).
+uint16_t battle_damage_pre_roll(const BattleCombatant& u, const BattleCombatant& f,
+                                const AttackDef& a, int8_t m)
 {
   const uint32_t atk_eff = battle_stat_eff(u, (uint8_t)BSTAT_ATK);
   const uint32_t def_eff = battle_stat_eff(f, (uint8_t)BSTAT_DEF);
@@ -421,17 +443,32 @@ static uint16_t compute_damage(BattleState& st, BattleCombatant& u,
   // multiplier could separate them; nothing here claims it is tested.
   if (raw < (uint32_t)DMG_MIN) raw = (uint32_t)DMG_MIN;
 
+  // Defence on a PUBLIC function that indexes a three-entry table. type_mod_of()
+  // answers -1..+1 and neither caller in this tree can produce anything else, so
+  // this is not a clamp of an untrusted value - it is the difference between a
+  // wrong number and an undefined read if a future caller gets it wrong.
+  if (m < -1 || m > 1) m = 0;
+
+  uint32_t dmg = (raw * (uint32_t)TYPE_MUL_NUM[m + 1]) / (uint32_t)TYPE_MUL_DEN[m + 1];
+  if (dmg < (uint32_t)DMG_MIN) dmg = (uint32_t)DMG_MIN;
+  return (uint16_t)dmg;
+}
+
+static uint16_t compute_damage(BattleState& st, BattleCombatant& u,
+                               const BattleCombatant& f, const AttackDef& a)
+{
   int8_t m = type_mod_of(a.type, f.type);
   if (m != 0) {
     // The cap zeroes a DISADVANTAGE as well as an advantage (sim_engine.py
     // take_turn: `if m != 0`), it is spent PER ATTACKING COMBATANT, and it is
     // spent only here - after the accuracy roll and only for power > 0 - so a
-    // miss does not spend it and a utility move does not spend it.
+    // miss does not spend it and a utility move does not spend it. THE SPEND IS
+    // THE ENGINE'S ALONE: battle_damage_pre_roll() only reads the modifier it is
+    // handed, which is what lets the AI predict a hit without paying for one.
     if (u.type_edge_left == 0u) m = 0;
     else                        u.type_edge_left = (uint8_t)(u.type_edge_left - 1u);
   }
-  uint32_t dmg = (raw * (uint32_t)TYPE_MUL_NUM[m + 1]) / (uint32_t)TYPE_MUL_DEN[m + 1];
-  if (dmg < (uint32_t)DMG_MIN) dmg = (uint32_t)DMG_MIN;
+  uint32_t dmg = (uint32_t)battle_damage_pre_roll(u, f, a, m);
 
   dmg += rng_next_below(st.rng, (uint32_t)DMG_RNG_SPAN);
 
@@ -578,17 +615,9 @@ static void resolve_one(BattleState& st, uint8_t side, BattleLog* log)
   // A power-0 utility move rolls against RAW accuracy with no evasion - and it
   // STILL ROLLS, which is why every non-stunned, non-switch action costs
   // exactly one accuracy draw.
-  int16_t acc = (int16_t)a->accuracy;
-  if (a->power > 0u) {
-    const int16_t gap_raw = (int16_t)((int16_t)battle_effective_speed(f) -
-                                      (int16_t)battle_effective_speed(u));
-    int16_t gap = (gap_raw > 0) ? gap_raw : (int16_t)0;
-    if (gap > (int16_t)EVASION_MAX_SPD_GAP) gap = (int16_t)EVASION_MAX_SPD_GAP;
-    acc = (int16_t)(acc - (int16_t)((int16_t)EVASION_PER_SPD * gap));
-    if (acc < (int16_t)ACCURACY_MIN) acc = (int16_t)ACCURACY_MIN;
-  }
+  const uint32_t acc  = (uint32_t)battle_accuracy_eff(u, f, *a);
   const uint32_t roll = rng_next_below(st.rng, (uint32_t)ACCURACY_ROLL_SPAN);
-  if (roll >= (uint32_t)acc) {
+  if (roll >= acc) {
     log_push(log, (uint8_t)RLE_MISS, side, me.active, me.pending_index, 0u, st.round, 0u);
     return;
   }

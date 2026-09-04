@@ -374,6 +374,24 @@ inline constexpr uint8_t TYPE_MUL_DEN[3] = { 5, 1, 4 };
 //    game/xp.h already reserves XP_SRC_BATTLE with a {0,0} ledger row.
 #define XP_BATTLE_WIN           25
 
+// --- the local opponent (plan P4-C3, game/battle_ai.h) -----------------------
+// A FOURTH number the content pack does not carry, and it is a DECISION of the
+// same kind as the three above. The plan states the AI's switch rule in words -
+// "switch when HP < 25 % and a better type is benched" - and 25 is that word as
+// a number, with no simulator run behind it: tools/content/sim_engine.py has no
+// AI at all, it scripts both sides. The comparison is STRICT, so a Pebble at
+// exactly a quarter of its health stands and fights; game/battle_ai.cpp
+// multiplies out rather than dividing, and tests/test_battle_ai.cpp pins both
+// sides of the boundary.
+//
+// It lives here and not in game/battle_ai.h for the reason this file exists: it
+// changes how the game FEELS and a designer will want to move it. Moving it
+// changes NO hashed state and NO wire format - the AI is a local action
+// PRODUCER, its choices reach a peer only as the two bytes every other action
+// travels as - so unlike the numbers above it may be retuned without a
+// BATTLE_ENGINE_VER bump.
+#define BATTLE_AI_SWITCH_HP_PCT 25
+
 static_assert(BATTLE_K > 0, "the damage divisor must not be zero");
 static_assert(DMG_RNG_SPAN > 0, "the damage roll needs a range");
 static_assert(PROTECT_DIVISOR >= 2, "protection that does not at least halve is not protection");
@@ -388,6 +406,9 @@ static_assert(TYPE_MUL_NUM[0] < TYPE_MUL_DEN[0] && TYPE_MUL_NUM[2] > TYPE_MUL_DE
               "the type multipliers are the wrong way round");
 static_assert(BATTLE_MAX_ROUNDS > 0, "a battle must terminate");
 static_assert(BATTLE_TEAM_MAX >= 1, "a team needs a Pebble");
+static_assert(BATTLE_AI_SWITCH_HP_PCT > 0 && BATTLE_AI_SWITCH_HP_PCT < 100,
+              "an AI that switches at 0 % never switches and one that switches at "
+              "100 % never fights");
 
 // =============================================================================
 // 6. DAYLIGHT AND SLEEP  -- when it is dark, and what wakes the creature

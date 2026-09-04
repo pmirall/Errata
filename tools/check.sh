@@ -179,6 +179,26 @@ if [ -f "$SKETCH/src/game/battle.cpp" ]; then
     fail "battle_step_round() does not call the spec section 14 steps once each in order (got '$order')"
 fi
 
+# --- P4-C3: THE AI NEVER TAKES A MUTABLE BATTLE STATE --------------------
+# game/battle_ai.h's two-stream argument rests on the AI being unable to write
+# ANY byte of BattleState - not merely unable to draw from BattleState.rng. The
+# const parameter on battle_ai_choose() is what enforces that today (rng_next()
+# will not bind to a const member, so a draw from the battle stream does not
+# compile), and this gate is what stops a helper added next year from quietly
+# taking a mutable one and reopening the hole.
+#
+# NARROW, and the narrowness is the point: it matches DECLARATIONS ONLY -
+# `BattleState&` or `BattleState &` not preceded by `const` - and it proves
+# NOTHING about what the AI does with the const reference it gets. Gate 2 above
+# already covers this file for named RNG streams, since it globs src/game/battle*.
+# Comment lines are dropped: battle_ai.h discusses the rule in prose.
+if ls "$SKETCH"/src/game/battle_ai.* >/dev/null 2>&1; then
+  n=$( { grep -rnE 'BattleState[[:space:]]*&' "$SKETCH"/src/game/battle_ai.* || true; } \
+        | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true; } \
+        | { grep -vE 'const[[:space:]]+BattleState[[:space:]]*&' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "game/battle_ai takes a MUTABLE BattleState ($n) - it must only ever see a const one"
+fi
+
 # P5-C1: no station association anywhere (scan-only Wi-Fi, spec §68 r5)
 # if [ -d "$SKETCH/src" ]; then
 #   n=$(grep -rn "WiFi\.begin(" "$SKETCH/src" | grep -v creator_server | wc -l); [ "$n" -eq 0 ] || fail "WiFi.begin outside creator_server ($n)"

@@ -31,6 +31,41 @@ Phase 4 begins. Nothing is tagged yet.
   nothing calls it yet, so `nm` finds no `battle_*` symbol in the linked ELF and the image
   is byte-identical to P4-C1's on all 7 variants. The object is 8,533 B of `.text`, which
   is what P4-C4 should expect to start paying.
+- **The local opponent** (`game/battle_ai.{h,cpp}`): a greedy chooser that ranks legal
+  moves by expected damage times effective accuracy — the type modifier included, and the
+  per-combatant type-edge budget respected so it stops paying for an advantage it has
+  already spent — and switches when HP is strictly below 25 % (`BATTLE_AI_SWITCH_HP_PCT`)
+  AND a benched Pebble is better typed against the foe. IT CANNOT PRODUCE AN INVALID
+  ACTION, and the reason is structural rather than careful: the AI does not decide legality
+  at all. It enumerates the seven actions that exist, hands each to
+  `battle_validate_action()`, and may return only one that came back `BR_OK` — so there is
+  no second copy of "is this on cooldown" or "has this side submitted" to drift from the
+  engine's, and a forced replacement is not a special case but the branch where the
+  validator has refused every attack. A side with nothing legal gets `BACT_NONE`, which the
+  validator itself refuses by name. It carries **its own `Rng`**, in its own object outside
+  `BattleState`: not hashed, not on P4-C5's wire, and — because `battle_ai_choose()` takes
+  a `const BattleState&` and no function in the module takes a mutable one — unable to draw
+  from the battle's stream or write any byte of the hashed state. That is measured and not
+  merely argued: an AI-driven battle replays byte-for-byte through `battle_replay()`, which
+  never constructs an AI, and the round-by-round cursor comparison would catch a single
+  stolen draw. Compiled cost is 1,148 B of `.text`, 0 `.data`, 0 `.bss`, and flash stays
+  byte-identical at 1,896,094 on all 7 variants because nothing calls it yet.
+- **`test_battle_ai.cpp`**, 26 → 27 binaries: 25 cases / 3,159 checks. Every `BACT_NONE`
+  answer is paired with a brute-force sweep of all 65,536 action patterns proving nothing
+  was legal either; 64 AI-vs-AI battles submit every action through the real validator with
+  a floor on the count so the headline claim cannot pass vacuously; the type modifier is
+  walked on all three arms of the chart with exact integer scores; the 25 % rule is pinned
+  at the threshold and one point below it, and as a FRACTION rather than a raw hit-point
+  count.
+- **A fourth grep gate**, proven failable in both the header and the source before it
+  landed: `game/battle_ai.*` may not name a mutable `BattleState&`. The existing purity and
+  named-RNG-stream gates already glob `src/game/battle*` and so cover the new file too —
+  which was confirmed by breaking each of them and watching it fail.
+- **One damage rule and one accuracy rule, not two.** `battle_damage_pre_roll()` and
+  `battle_accuracy_eff()` were factored out of `battle.cpp`'s round so the AI predicts a
+  hit by calling the engine's own arithmetic instead of carrying a copy that drifts the
+  first time a constant in `balance.h` moves. Behaviour-preserving: the 22-round golden
+  transcript recorded before the refactor still matches event by event after it.
 - **A rejection contract with teeth.** A `BattleAction` is two untrusted bytes and all
   65,536 patterns are swept in the tests; every one maps to a legal action or to a NAMED
   `BR_*` refusal, and the engine NEVER CLAMPS a peer-supplied value. The validator takes a
