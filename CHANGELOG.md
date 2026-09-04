@@ -8,9 +8,47 @@ Versions are tagged at phase boundaries of `PEBBLEBOL_IMPLEMENTATION_PLAN.md`; t
 tag for a phase is cut only when its gate (`tools/check.sh`) and its variant matrix
 (`tools/build_matrix.sh`) are both green.
 
-## [Unreleased]
+## [0.4.0-battle] — Unreleased
 
-Phase 4 begins. Nothing is tagged yet.
+Phase 4 gives the pet something to do with the stats phase 3 gave it. The content stopped
+being a placeholder and became a generated pack — 36 species in 12 families of three, 34
+attacks, a three-type chart, 24 evolution rules and 10 items, all authored as JSON and
+regenerated into `src/data/*_table.h` by a script with its own gate. The battle engine is
+spec §14's nine steps as nine functions over a 212-byte state with no heap, no float and no
+clock in it, so a battle is a pure function of its seed and its actions and can be replayed
+and hashed. The AI plays it, the device plays it, and the species finally chooses the body:
+before this phase all 36 species wore one of eight genome bodies and an evolution moved
+nothing on screen. And the whole §15 exchange — one validator, a 14-byte frame, twelve
+message types, a nine-state session and a lockstep battle — is proven end to end over a
+loopback that drops, duplicates and reorders frames. There is still no radio; that is P7.
+
+Measured at the exit, each figure re-derived by running the command rather than copied
+forward:
+
+- **Firmware:** baseline **1,915,654 B of flash and 72,676 B of static RAM**, up
+  **22,582 / 2,328** on `0.3.0-pet`. All seven `build_matrix.sh` variants at 0 project
+  warnings; the release build (`GOD_MODE_ENABLED=0 FEATURE_BLE=0`, decision D2) is
+  **1,191,426 / 49,004**, 37.9 % of the `app0` slot. Almost the whole bill is one chunk:
+  P4-C4, the battle screen, is +18,780 B of flash and +2,304 B of globals, and it is all
+  file-scope statics, which is the same fact as "no per-frame heap".
+- **Host suite:** 21 → **31 binaries, 328 → 603 tests, 350,214 → 728,778 checks.** Screen
+  goldens 48 → 55, plus `tests/golden/battle_v1.txt`, a 22-round transcript.
+- **The lossy-link acceptance run:** **3,000 trials over six fault arms, 2,971 completed and
+  agreed, 0 silent divergences, and no trial wrote a Box it should not have.** The five 10 %
+  arms complete 500 of 500; the harsh arm (30 % drop, 20 % reorder) completes 471, loses 28
+  by name and half-pays 1 — which is what makes "or aborts cleanly" a measured half of the
+  promise rather than a decoration.
+- **Sanitizers:** ALL PASS 31/31 under `-fsanitize=address,undefined
+  -fno-sanitize-recover=all`, zero reports, with exactly one line neutralised for a
+  pre-existing GCC 13.3 `constexpr` fold.
+
+**No win-rate percentage appears anywhere in this entry, on purpose.** The only ones that
+exist were measured on `tools/content/sim_engine.py`, a Python model that diverges from the
+shipped engine in five ways `game/battle.h` names and that has no AI at all. P9-C4 produces
+real ones.
+
+Every commit in this range passes the gate: firmware compile with `--warnings all` at 0
+project warnings, size caps, and `make -C tests check`.
 
 ### Added
 
@@ -648,6 +686,93 @@ Phase 4 begins. Nothing is tagged yet.
   `creator_schema.h` lists those eight, states the id range, and names type validity and move
   legality as derivable from tables that already ship — 2 + 1 + 2 + 8, so the header adds up.
 
+### Removed (P4-C6 — the dead code the P4-C4a sweep stopped one item short of)
+
+- **The mood badge, all four links of it.** P4-C4a deleted `PetView.hp_pct` because one
+  function wrote it and nothing read it, and stopped at the first instance. A symbol-level
+  sweep — every global present in a `.o` and absent from the linked ELF, cross-checked
+  against a comment-stripped grep — found the next three and the chain behind them:
+  `PetView.mood`, `PetView.asleep` and `PetView.sick` (each assigned once in
+  `pet_view_fill_sim()` and read by no line in `Pebblebol/src` or `tests`),
+  `PebbleView.mood_face` (written by `ui.cpp` every frame, drawn by no screen),
+  `sprite_mood_face()` (**zero references in the whole tree**, its last caller gone since
+  P2-C11b) and `spr_mood12`, 144 B of authored 12×12 art that `--gc-sections` had been
+  dropping from every build. `asleep` and `sick` were worse than unused: they were a second
+  copy of `PF_ASLEEP` and `PF_SICK`, which every real consumer reads from `flags` —
+  `petfx.cpp:873` and `actfx.cpp:595` do exactly that. Two places to be wrong about one
+  fact is the defect. **Measured: −42 B of flash on every variant and −16 B of globals on
+  `release`.** The Mood enum, the `pet_mood_index()` ladder and the Spanish mood words stay
+  and stay live; recover the pixels with `git show 250f73e:Pebblebol/src/data/sprites.h` if
+  P10 designs a screen that wants a badge.
+
+### Fixed (P4-C6 — documents that had stopped describing the tree)
+
+- **`session_state_name()` and `session_detail_name()` shipped with no caller and no test**,
+  while their three siblings (`proto_err_name`, `validate_reject_name`,
+  `session_reason_name`) all had both. They are wired into the acceptance census now — a
+  hung trial names the state each endpoint stopped in, and every arm prints its terminal
+  `SessionDetail` distribution by name instead of by number — and
+  `every_session_state_and_detail_has_a_distinct_english_name_and_the_lookup_is_total`
+  gives all three enums the totality case only two of them had.
+- **`docs/protocol.md` carried false test counts one commit after they changed.** Its header
+  said 24 and 36 cases / 1,053 checks; commit `250f73e` edited 161 lines of that file and
+  added the cases without touching the sentence. It says 25 / 234,356 and 41 / 2,493 now.
+- **`docs/save_schema.md` §8's v1→v2 field map had three wrong rows and two missing ones**,
+  and §9 documented a module and an NVS key that P2-C10 deleted two phases ago. The legacy
+  family map is `SPECIES_BASE_OF_FAMILY[]` — `{1, 4, 7, 10, 13, 16, 19, 22}` — not the
+  literal `1..8` table P4-C1 deleted as a defect; `moves[]` and `hp_cur` were added to the
+  migration by P4-C1 and were not in the table; and the "else the deterministic dynasty
+  name" arm is gone. The `lgpet` row is out of the key table and out of the entry
+  arithmetic, which drops from 231 to **226 of 504**.
+- **Two numbers inside decision D2 were written before the code they describe.** The frame
+  does not fit "with 38 B to spare" as a 12 B header and a 200 B payload — that was plan
+  §1.4's sketch; the shipped frame is 14 B + at most 148 B + a 2 B trailing CRC = **164 B,
+  86 B to spare**, which `protocol.h` asserts. And compiling BLE out recovers **712,466 B /
+  23,504 B**, re-measured here, not the phase-1 audit's 721,632 / 23,688.
+- **"Zero `link_` symbols in the ELF" was false as written.** The substance holds — none of
+  `battle_link.cpp`'s five functions is linked — but the ELF carries six `link_*` symbols:
+  two from `ui/screen_link.cpp` and four from the Bluetooth stack. `docs/protocol.md` names
+  the five functions now instead of a prefix that also catches an unrelated screen.
+- **An obligation answered in another file and left open where it was filed.**
+  `game/evolution.cpp` still said "there is no attack table until P4-C1 … P4-C1 adds the
+  table and decides what a learnset change owes an existing creature". P4-C1 landed the
+  table and did not decide; **P4-C2 did**, through `BR_UNLEARNABLE_MOVE`, which accepts the
+  verbatim learnset of any same-family species at a stage ≤ this one's — so an evolved
+  Pebble keeping the moves it was raised with is legal by construction. The decision, and
+  the price it carries (a later stage's own learnset is unreachable in V1), are written
+  where the reader is standing.
+- **Four sentences narrowed to what the tree does.** `migration.cpp` claimed "nothing is
+  lost" by leaving a migrated nickname empty and then described the loss in its own next
+  clause — the v1 dynasty word is gone from that device for good and V1 has no rename
+  screen; `pet_art.h` claimed two callers for `pet_art_design()` and has one, because
+  `screen_home.cpp` correctly needs a stage ladder that covers EGG/CHILD/TEEN and this one
+  does not; `tools/check.sh` claimed all thirteen of its balance constants "decide hashed
+  battle state" when `TYPE_MOD_SCALE` and `RISK_SELF_HP_PCT` are 0 and decide nothing; and
+  `data/balance.h` now names the chunk that owns each of its two consumerless corruption
+  constants (`CORRUPT_DURATION_S` had said nothing at all). `screen_status.cpp` keeps the
+  genome's species word on the genome page and now records that as a choice; and
+  `game_state.cpp`'s slot-0 (rather than active-slot) name source is recorded as the latent
+  P5-C4 bug it is, in the chunk that will be able to write a failing test for it.
+
+### Not verified
+
+**This firmware has still never run on a physical board.** No ESP32-C3, no panel, no cells.
+Every number above is a host measurement or a compile result.
+
+**There is no radio.** All 3,333 lines of `src/networking` are proven over an in-process
+loopback and are not linked into any build: `riscv32-esp-elf-nm` finds none of them in the
+ELF, so they cost 0 B today and the 468 B forecast for P7 is a `sizeof`, not a measurement.
+A real ESP-NOW link is bursty and correlated where the loopback's fault model is an
+independent Bernoulli draw, so the completion rates above describe the model, not the air.
+
+**The battle screen has never been timed on a panel**, and the on-device half of "no
+per-frame heap" (`dev/godmode.cpp`'s `ESP.getFreeHeap()` sampling) has never run on
+hardware. The host half is measured: 3,942 frames, 0 allocations.
+
+**The roster's balance has never been measured against `battle.cpp`.** The win-rate band it
+was tuned to came from a Python model with five named divergences from the shipped engine
+and no AI at all. P9-C4 owns the real matrix.
+
 ## [0.3.0-pet] — Unreleased
 
 Phase 3 turns the Pebblebol core engine into a virtual pet. Care moved onto the hours scale
@@ -1003,9 +1128,10 @@ The plan cuts tags from Phase 2 onward, so Phase 1 has no `v0.1.0` tag; it is co
 - Repository archaeology: audit of the inherited sketch, the ten-phase implementation
   plan, the decisions log, and a CI skeleton.
 
+[0.4.0-battle]: https://github.com/pmirall/Pebblebol/commit/250f73e
 [0.3.0-pet]: https://github.com/pmirall/Pebblebol/commit/e2004e7
 [0.2.0-core]: https://github.com/pmirall/Pebblebol/commit/db3feb3
-<!-- The annotated tags v0.2.0-core and v0.3.0-pet exist in the local
+<!-- The annotated tags v0.2.0-core, v0.3.0-pet and v0.4.0-battle exist in the local
      repository but this environment's git remote refuses tag pushes
      (send-pack disconnects), so each link points at a commit, which does
      resolve. Create the releases from those commits on GitHub to restore
@@ -1018,4 +1144,13 @@ The plan cuts tags from Phase 2 onward, so Phase 1 has no `v0.1.0` tag; it is co
      follow-up, as post-exit audits found and fixed things. A reader following
      the 0.3.0-pet link therefore lands on the exit as it was cut, before the
      corrections recorded above. That is the useful anchor for a changelog
-     entry, but it is the exit commit, not the tag. -->
+     entry, but it is the exit commit, not the tag.
+
+     THE 0.4.0-battle LINK IS NEITHER, AND SAYS SO. 250f73e is the LAST COMMIT
+     OF PHASE 4's SUBSTANCE - the P4-C5 follow-up - and NOT the P4-C6 exit
+     commit, because the exit commit is the one that adds this line and no
+     commit can carry its own SHA before it exists. The tag v0.4.0-battle points
+     at the exit commit; a reader following this link lands one commit earlier,
+     before the exit's own document corrections. Repoint it at the exit commit's
+     SHA in the first commit after the tag, which is how the 0.3.0-pet link came
+     to point where it does. -->

@@ -990,21 +990,22 @@ inline constexpr uint8_t spr_mini8[] = {
 static_assert(sizeof(spr_mini8) == (size_t)MIC_COUNT * spr_xbm_bytes(8, 8),
               "spr_mini8 size vs MIC_COUNT");
 
-// mood faces  6 x 12x12  (144 B)
-inline constexpr uint8_t spr_mood12[] = {
-  0xF8, 0x01, 0x06, 0x06, 0x02, 0x04, 0x05, 0x0A, 0x09, 0x09, 0x05, 0x0A, 0x01, 0x08, 0xF1, 0x08,
-  0x09, 0x09, 0x02, 0x04, 0x06, 0x06, 0xF8, 0x01, 0xF8, 0x01, 0x06, 0x06, 0x02, 0x04, 0x0D, 0x0B,
-  0x0D, 0x0B, 0x01, 0x08, 0x01, 0x08, 0xF1, 0x08, 0x09, 0x09, 0x02, 0x04, 0x06, 0x06, 0xF8, 0x01,
-  0xF8, 0x01, 0x06, 0x06, 0x02, 0x04, 0x0D, 0x0B, 0x0D, 0x0B, 0x01, 0x08, 0x01, 0x08, 0x01, 0x08,
-  0xF9, 0x09, 0x02, 0x04, 0x06, 0x06, 0xF8, 0x01, 0xF8, 0x01, 0x06, 0x06, 0x02, 0x04, 0x0D, 0x0B,
-  0x0D, 0x0B, 0x01, 0x08, 0x01, 0x08, 0x09, 0x09, 0xF1, 0x08, 0x02, 0x04, 0x06, 0x06, 0xF8, 0x01,
-  0xF8, 0x01, 0x06, 0x06, 0x02, 0x04, 0x0D, 0x0B, 0x0D, 0x0B, 0x01, 0x08, 0xFD, 0x0B, 0x05, 0x0A,
-  0xF9, 0x09, 0x02, 0x04, 0x06, 0x06, 0xF8, 0x01, 0xF8, 0x01, 0x06, 0x06, 0x0A, 0x05, 0x95, 0x0A,
-  0x95, 0x0A, 0x01, 0x08, 0xFD, 0x0B, 0xFD, 0x0B, 0xF9, 0x09, 0xF2, 0x04, 0x06, 0x06, 0xF8, 0x01,
-};
-// 144 B, indexed by sprite_mood_face() with any mood < MOOD_COUNT (nt_types.h).
-static_assert(sizeof(spr_mood12) == (size_t)MOOD_COUNT * spr_xbm_bytes(12, 12),
-              "spr_mood12 size vs MOOD_COUNT");
+// NO MOOD FACES (P4-C6). `spr_mood12` was 6 x 12x12 = 144 B of authored art
+// reached only by sprite_mood_face(), whose last caller went away at P2-C11b
+// (b450b11). At this commit the accessor had ZERO references in Pebblebol/src
+// and in tests/, its one remaining consumer PebbleView.mood_face was written
+// by ui.cpp every frame and read by no screen, and riscv32-elf-nm confirms the
+// array was dropped from every linked ELF by --gc-sections - so it cost 0 B and
+// proved nothing. The chain is deleted whole rather than left as a fourth
+// pet_view_fill(). RECOVER THE ART with
+// `git show 250f73e:Pebblebol/src/data/sprites.h` if the P10 art pass designs a
+// screen with a mood badge on it; the enum (Mood, core/nt_types.h), the ladder
+// (pet_mood_index) and the Spanish mood words (STR_MOOD_*) are all still here
+// and still live, so only the pixels would have to come back. THE SIZE GUARD
+// WENT WITH THE ARRAY, not ahead of it: `static_assert(sizeof(spr_mood12) ==
+// MOOD_COUNT * spr_xbm_bytes(12,12))` measured data that no longer exists. No
+// assertion about anything still in this file was weakened.
+
 
 // species badges  13 x 12x12  (312 B)
 // The count lives here, next to the art it measures; sprite_species_badge()
@@ -1332,13 +1333,6 @@ inline SpriteRef sprite_icon(uint8_t id) {
 inline SpriteRef sprite_mini(uint8_t id) {
   if (id >= MIC_COUNT) id = 0;
   SpriteRef r = { spr_mini8 + (uint16_t)id * 8u, 8, 8 };
-  return r;
-}
-
-// Indexed by enum Mood (MOOD_MISERIA .. MOOD_EUFORICO).
-inline SpriteRef sprite_mood_face(uint8_t mood) {
-  if (mood >= MOOD_COUNT) mood = MOOD_NEUTRO;
-  SpriteRef r = { spr_mood12 + (uint16_t)mood * 24u, 12, 12 };
   return r;
 }
 

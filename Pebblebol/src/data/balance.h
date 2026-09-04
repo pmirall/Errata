@@ -364,6 +364,18 @@ inline constexpr uint8_t TYPE_MUL_DEN[3] = { 5, 1, 4 };
 // --- corruption in battle (spec section 55) ----------------------------------
 #define CORRUPT_BATTLE_ATK_STAGE      (+1)
 #define CORRUPT_BATTLE_DEF_STAGE      (-1)
+// THE TWO WITH NO CONSUMER, EACH NAMING THE CHUNK THAT OWNS IT (P4-C6). The
+// first two above are read by game/battle.cpp's ATK_EFF_CORRUPT arm. These two
+// are not read anywhere in Pebblebol/src or tests/, and until this commit only
+// one of them said so:
+//   * CORRUPT_BATTLE_INFECT_PERMILLE - the chance a hit spreads corruption.
+//     battle.cpp never reads the STORED PBS_CORRUPTED either, so corruption
+//     reaches a fight only through attack 12 Infectar. game/battle.h names the
+//     absence; P9-C5 wires both halves.
+//   * CORRUPT_DURATION_S - the 24 h timer a SPECIAL encounter arms when it
+//     corrupts the active Pebble (spec section 22). There is no encounter roll
+//     yet: P5-C3 is the first code that can start this clock, and P9-C5 the
+//     first that reads it in battle.
 #define CORRUPT_BATTLE_INFECT_PERMILLE 120
 #define CORRUPT_DURATION_S            86400UL
 

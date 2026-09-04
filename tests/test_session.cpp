@@ -927,10 +927,11 @@ TEST(one_legal_frame_replayed_forever_cannot_hold_the_session_open)
     const uint32_t poured = replay_until_closed(T, 0u, ARMS[k].make, 200u);
     const SessionEnd& e = session_end(T.e[0].s);
     if (e.reason != (uint8_t)SE_LOST || e.tx_retx != (uint8_t)PROTO_RETX_MAX)
-      fprintf(stderr, "  replaying %s: %u injections, reason=%s detail=%u tx_retx=%u\n",
+      fprintf(stderr, "  replaying %s: %u injections, reason=%s detail=%s tx_retx=%u\n",
               ARMS[k].what, (unsigned)poured,
               session_reason_name((SessionEndReason)e.reason),
-              (unsigned)e.detail, (unsigned)e.tx_retx);
+              session_detail_name((SessionDetail)e.detail),
+              (unsigned)e.tx_retx);
     CHECK_EQ(e.reason, SE_LOST);
     CHECK_EQ(e.tx_retx, PROTO_RETX_MAX);
     // ON EXACTLY ITS OWN SCHEDULE. One rung per injection plus what was already
@@ -1486,6 +1487,7 @@ static void arm(const char* name, const LoopbackFault& f, uint32_t trials,
 {
   Trial& T = arena();
   uint32_t overflow = 0, sends = 0;
+  uint32_t detail_tally[(size_t)SD_DETAIL_COUNT] = { 0 };
   for (uint32_t i = 0; i < trials; ++i) {
     const uint32_t seed = 0x5E5510u + i;
     trial_begin(T, seed, f);
@@ -1494,7 +1496,14 @@ static void arm(const char* name, const LoopbackFault& f, uint32_t trials,
     session_start(T.e[1].s, T.now);
     trial_run(T);
     if (T.hung) {
-      fprintf(stderr, "  arm %s: seed 0x%X DID NOT TERMINATE\n", name, (unsigned)seed);
+      // NAMED, not numbered. A hung trial is the one failure whose whole
+      // content is WHERE the two endpoints stopped, and until P4-C6 this line
+      // printed neither - session_state_name() existed for exactly this and
+      // had no caller anywhere in the tree.
+      fprintf(stderr, "  arm %s: seed 0x%X DID NOT TERMINATE (%s / %s)\n",
+              name, (unsigned)seed,
+              session_state_name((SessionState)T.e[0].s.state),
+              session_state_name((SessionState)T.e[1].s.state));
       CHECK(false);
       return;
     }
@@ -1502,6 +1511,17 @@ static void arm(const char* name, const LoopbackFault& f, uint32_t trials,
     tally[c]++;
     if (c == LE_SILENT) {
       fprintf(stderr, "  arm %s: seed 0x%X SILENT DIVERGENCE\n", name, (unsigned)seed);
+    }
+    // WHY a trial did not complete, by NAME. The census counts terminals; this
+    // records which SessionDetail each non-completing pair carried, so an arm
+    // that starts losing trials says SD_OPEN_HASH or SD_RX_BUDGET instead of a
+    // number the reader has to look up. Both endpoints are consulted: only one
+    // of them is usually the one that declared.
+    if (c != LE_COMPLETED_AGREED) {
+      for (uint8_t q = 0; q < 2u; ++q) {
+        const uint8_t d = session_end(T.e[q].s).detail;
+        if (d < (uint8_t)SD_DETAIL_COUNT) detail_tally[d]++;
+      }
     }
     if (!boxes_untouched(T)) {
       fprintf(stderr, "  arm %s: seed 0x%X wrote a Box\n", name, (unsigned)seed);
@@ -1514,7 +1534,14 @@ static void arm(const char* name, const LoopbackFault& f, uint32_t trials,
   printf("  arm %-22s", name);
   for (uint8_t b = 0; b < (uint8_t)LE_BUCKETS; ++b)
     printf(" %s=%u", CENSUS_NAME[b], (unsigned)tally[b]);
-  printf(" overflow=%u/%u\n", (unsigned)overflow, (unsigned)sends);
+  printf(" overflow=%u/%u", (unsigned)overflow, (unsigned)sends);
+  // SD_NONE INCLUDED ON PURPOSE. The harsh arm's 28 losses and 1 half-pay carry
+  // no detail at all, and "SD_NONE=58" - 29 trials x 2 endpoints - is exactly the
+  // fact worth printing: they ran out of retransmissions, they did not disagree.
+  for (uint8_t d = 0; d < (uint8_t)SD_DETAIL_COUNT; ++d)
+    if (detail_tally[d]) printf(" %s=%u", session_detail_name((SessionDetail)d),
+                                (unsigned)detail_tally[d]);
+  printf("\n");
   CHECK_EQ(tally[LE_SILENT], 0);
   // THE INSTRUMENT'S OWN ERROR BAR, REPORTED RATHER THAN ASSUMED AWAY, and it
   // is NOT zero. A send onto a full LB_QUEUE_CAP queue is counted as a drop, so
@@ -1912,4 +1939,49 @@ TEST(the_abort_record_is_forty_bytes_and_the_session_fits_the_budget_it_claims)
   // target.
   CHECK(sizeof(Session) <= 512);
   CHECK_EQ(sizeof(Transport), sizeof(void*) * 3 + sizeof(void*));
+}
+
+// P4-C6. session_reason_name() had a caller and its two siblings did not: a
+// P4-C6 sweep for symbols present in an object file and absent from the linked
+// ELF found session_state_name() and session_detail_name() uncalled ANYWHERE -
+// not in Pebblebol/src, not in tests/ - and unlike proto_err_name() and
+// validate_reject_name() neither had the totality case its enum deserves. Both
+// are wired into the acceptance census above now, and this is the case they
+// were missing: a name that is not distinct is a name that cannot tell two
+// terminals apart in the one report anybody reads.
+TEST(every_session_state_and_detail_has_a_distinct_english_name_and_the_lookup_is_total)
+{
+  for (int i = 0; i < (int)SS_STATE_COUNT; ++i) {
+    const char* n = session_state_name((SessionState)i);
+    CHECK(n != nullptr);
+    CHECK(strncmp(n, "SS_", 3) == 0);
+    CHECK(strcmp(n, "SS_?") != 0);
+    for (int q = 0; q < i; ++q)
+      CHECK(strcmp(n, session_state_name((SessionState)q)) != 0);
+  }
+  CHECK(strcmp(session_state_name((SessionState)SS_STATE_COUNT), "SS_?") == 0);
+  CHECK(strcmp(session_state_name((SessionState)255), "SS_?") == 0);
+
+  for (int i = 0; i < (int)SD_DETAIL_COUNT; ++i) {
+    const char* n = session_detail_name((SessionDetail)i);
+    CHECK(n != nullptr);
+    CHECK(strncmp(n, "SD_", 3) == 0);
+    CHECK(strcmp(n, "SD_?") != 0);
+    for (int q = 0; q < i; ++q)
+      CHECK(strcmp(n, session_detail_name((SessionDetail)q)) != 0);
+  }
+  CHECK(strcmp(session_detail_name((SessionDetail)SD_DETAIL_COUNT), "SD_?") == 0);
+  CHECK(strcmp(session_detail_name((SessionDetail)255), "SD_?") == 0);
+
+  // The third lookup, which DID have a caller and did NOT have this case.
+  for (int i = 0; i < (int)SE_REASON_COUNT; ++i) {
+    const char* n = session_reason_name((SessionEndReason)i);
+    CHECK(n != nullptr);
+    CHECK(strncmp(n, "SE_", 3) == 0);
+    CHECK(strcmp(n, "SE_?") != 0);
+    for (int q = 0; q < i; ++q)
+      CHECK(strcmp(n, session_reason_name((SessionEndReason)q)) != 0);
+  }
+  CHECK(strcmp(session_reason_name((SessionEndReason)SE_REASON_COUNT), "SE_?") == 0);
+  CHECK(strcmp(session_reason_name((SessionEndReason)255), "SE_?") == 0);
 }

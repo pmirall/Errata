@@ -153,7 +153,6 @@ NUL). `save_schema.h` §9 is the only place they are spelled.
 | `t` | last-seen epoch, 8 B | `KV_MAIN` |
 | `ok` | canary, 4 B | both |
 | `gl` | the v1 anti-farm ledger, 20 B, carried forward unchanged | `KV_MAIN` |
-| `lgpet` | **temporary** (P2-C9 → P2-C10): the live v1 `PetSave` | `KV_MAIN` |
 | `ck_box`, `ck_cfg`, `ck_pb0`..`ck_pb9` | the checkpoint | `KV_CKPT` |
 | `save`, `cfg`, `egg`, `anc` | v1 keys, read once by the migration then erased | `KV_MAIN` |
 
@@ -178,13 +177,13 @@ present at once:
 | `t` | 8 | 1 | 2 | 2 |
 | `ok` | 4 | 1 | 2 | 2 |
 | `gl` | 20 | 1 | 2 | 2 |
-| `lgpet` | 128 | 1 | 5 | 5 |
 | namespace index | — | — | — | 1 |
-| | | | | **231 / 504** |
+| | | | | **226 / 504** |
 
 The plan's §1.5 quotes 262; that figure predates the seven-slot `Inventory` and
-the temporary `lgpet` blob, and rounded the pair keys differently. 231 is what
-the committed layouts actually cost. Either way the headroom is roughly a
+rounded the pair keys differently. 226 is what the committed layouts actually
+cost. **It was 231 here until P4-C6**, which included the five entries of the
+`lgpet` blob P2-C10 deleted (see §9). Either way the headroom is roughly a
 factor of two, which is what matters: NVS needs free entries to compact.
 
 `nvs2` is `0x10000` = 16 pages → **1,890 usable entries**. The checkpoint costs
@@ -239,26 +238,52 @@ branch. The only row today is v1 → v2, whose field map is:
 
 | v1 | v2 |
 |---|---|
-| `gene_species & 7` | legacy family map → starter species 1..8 |
+| `gene_species & 7` | legacy family map → `SPECIES_BASE_OF_FAMILY[]`, i.e. one of `{1, 4, 7, 10, 13, 16, 19, 22}` |
 | `stage` | `level`: EGG/BABY 1, CHILD 5, TEEN 10, ADULT 15, SENIOR 20 |
 | `stat[]`, `stat_rem[]` | `care[]`, `care_rem[]`, reordered `StatId` → `CareId`, values unchanged |
 | `Genome` | copied whole |
-| `pet_name`, else the deterministic dynasty name | `nickname` |
+| — | `moves[4]`: the destination species' learnset, verbatim (P4-C1) |
+| — | `hp_cur`: `xp_hp_max()` at the mapped level — a migrated pet arrives at FULL health (P4-C1) |
+| `Config.pet_name` when the player typed one, otherwise **nothing** | `nickname` |
 | `birth_epoch`, `last_seen`, `age_s` | `birth_epoch`, `last_updated_epoch`, `age_s` |
 | `flags` SICK/ASLEEP | `status`; GOD_TAINTED → `flags`; LIGHT_ON is dropped (P3-C2b deleted the light mechanic; `status` bit 0x10 is reserved) |
 | `Config.tz/brightness/mute/statusbar` | `ConfigV2` |
 | `gl` | untouched: same key, same 20 B layout |
+
+**Three rows of that table were wrong until P4-C6 and are corrected above**,
+because this is the document the next migration author reads to learn what the
+current one does:
+
+- **"starter species 1..8" was the literal `{1,2,…,8}` table P4-C1 deleted as a
+  defect.** It landed legacy family 1 on a mid-stage creature and families 3..7
+  on species ids with no row at all (`species_get()` → `nullptr`). The map is
+  `SPECIES_BASE_OF_FAMILY[(gene_species & 7) % SPECIES_FAMILY_COUNT]`, which is
+  a family BASE stage by construction.
+- **`moves[]` and `hp_cur` were missing from the table**, and they were added to
+  `migrate_v1_to_v2()` by P4-C1 precisely because their absence was silent: a
+  migrated pet had four move ids of 0 and an HP meter pinned at 0 % for ever.
+- **The "else the deterministic dynasty name" arm is gone.** The P4-C4 follow-up
+  deleted `migrate_default_name()`; a v1 pet whose owner never typed a name now
+  arrives with an EMPTY nickname, so `ui_pet_name()` falls to its species-name
+  rung and the creature can say what it is — and what it becomes when it
+  evolves, which was the whole point. The cost is stated at
+  `persistence/migration.cpp`: the v1 dynasty word is gone from that device for
+  good, and V1 has no rename screen to put it back.
 
 The migration writes nothing itself: committing the result and erasing the v1
 keys is `save_load_all()`'s job, so a power cut in the middle leaves the v1 save
 intact and the migration simply runs again. The v1 blobs reach `pbbl` through
 the one-shot import in `kv_begin()` (decision D3).
 
-## 9. The temporary bridge
+## 9. The temporary bridge — GONE
 
-`persistence/save_compat.cpp` maps the live v1 `PetSave`/`Config` onto
-`PebbleInstance` slot 0 and `ConfigV2`, because the simulation does not move to
-`PebbleInstance` until P2-C10. The `lgpet` companion blob carries the v1 fields
-SaveSchema v2 has no home for — care quality, the daily wish, poop, snacks, the
-event bits — so nothing is lost during the transition. **P2-C10 deletes the
-module, the key and this section.**
+`persistence/save_compat.cpp` and the `lgpet` key were the P2-C9 bridge that
+mapped a live v1 `PetSave`/`Config` onto `PebbleInstance` slot 0 while the
+simulation still ran on the v1 types. **P2-C10 deleted the module and the key**,
+as the section itself said it would; this section described both in the present
+tense for two more phases, which P4-C6 corrects. Neither exists in the tree —
+`tests/test_game_state.cpp` asserts that `lgpet` is absent — and the key table
+in §4 and the entry arithmetic in §5 no longer list it either.
+
+There is no bridge left. A v1 save reaches v2 through `migrate_v1_to_v2()` (§8)
+and nothing else.

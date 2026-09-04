@@ -1936,7 +1936,6 @@ static const PebbleView* ui_fill_view(void) {
 
   for (uint8_t i = 0; i < ST_COUNT; ++i) s_view.care_pct[i] = ui_stat_shown((StatId)i);
   s_view.mood_pct  = (uint8_t)sim_mood_score();
-  s_view.mood_face = mood_of();
 
   const uint8_t slot = box_active();
   const PebbleInstance* pb = (slot == BOX_ACTIVE_NONE) ? nullptr : box_peek(slot);

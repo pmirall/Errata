@@ -56,8 +56,12 @@ phase re-derives them:
   the `Transport` interface of spec §59. The game logic never learns which transport
   carried a packet.
 - **`FEATURE_BLE 0` in the release build.** The BLE plumbing kept in P2-C7b becomes a
-  removal candidate in P7-C1; deleting it recovers 721,632 B of flash and 23,688 B of
-  static RAM (measured, audit §14).
+  removal candidate in P7-C1; compiling it out recovers **712,466 B of flash and 23,504 B
+  of static RAM**, re-measured at the P4-C6 exit as baseline minus `no-ble`
+  (1,915,654 − 1,203,188 and 72,676 − 49,172). *(This line said 721,632 / 23,688 — the
+  phase-1 audit's figure for a tree three phases old. The number moves with every commit
+  that touches the BLE-guarded code, so it is dated here rather than left to look
+  permanent.)*
 - **No stack flip during a link session.** ESP-NOW runs on the same `WIFI_STA` residency the
   §40 scanner already needs, so the single-radio invariant holds without tearing a stack
   down and bringing another up mid-session — which was the weakest point of the BLE path.
@@ -77,7 +81,7 @@ builds with, so P7-C1 starts from facts rather than from the audit's summary:
 
 | Fact | Value | Why it matters |
 |---|---|---|
-| `ESP_NOW_MAX_DATA_LEN` | 250 B (`= ESP_NOW_MAX_IE_DATA_LEN`) | The §1.4 frame is a 12 B header + payload capped at 200 B, so it fits with 38 B to spare. |
+| `ESP_NOW_MAX_DATA_LEN` | 250 B (`= ESP_NOW_MAX_IE_DATA_LEN`) | **As shipped by P4-C5a: a 14 B header + a payload of at most 148 B + a 2 B trailing CRC = a 164 B worst-case frame, so it fits with 86 B to spare.** `protocol.h` asserts exactly that (`PROTO_HDR_BYTES + PROTO_PAYLOAD_MAX + 2 <= 250`), and `PROTO_PAYLOAD_MAX` is DERIVED as `max(PROTO_LEN_OF[])` rather than chosen. *(Corrected in P4-C6: this row was written on 2026-09-02, before the codec existed, and quoted plan §1.4's sketch — a 12 B header and a 200 B cap, "38 B to spare". Neither number was ever in the tree.)* |
 | `ESP_NOW_MAX_TOTAL_PEER_NUM` | 20 | Far above the 8-entry peer table the discovery layer keeps. |
 | Receive callback | `esp_now_recv_cb_t(const esp_now_recv_info_t*, const uint8_t*, int)` | `esp_now_recv_info_t.rx_ctrl` is a `wifi_pkt_rx_ctrl_t`, **which carries RSSI** — so the proximity gate the BLE courtship used (RSSI >= -70 dBm) survives unchanged. |
 | Send confirmation | `esp_now_register_send_cb` -> `ESP_NOW_SEND_SUCCESS/FAIL` | Gives the per-frame ACK the session FSM needs for its retry/timeout ladder. |
@@ -585,3 +589,131 @@ confirmation and **is now genuinely listed** with the other first-flash measurem
 the P3-C5 follow-up found that this sentence and the plan's had both been asserting a listing
 that did not exist, and added the bullet; the criterion it was meant to check now lives in the suite, where
 it runs on every gate instead of once, by hand, on a board nobody has.
+
+## Phase-4 exit (P4-C6, 2026-09-04)
+
+**Variant matrix.** `tools/build_matrix.sh` compiles all seven feature variants with
+`--warnings all` and fails on any warning pointing into the sketch. Result at the
+`v0.4.0-battle` tag, every variant at **0 project warnings**:
+
+| Variant | Overrides | Flash (B) | Static RAM (B) | Δ flash vs 0.3.0-pet | Δ RAM vs 0.3.0-pet |
+|---|---|---|---|---|---|
+| baseline | — | 1,915,654 | 72,676 | +22,582 | +2,328 |
+| no-ble | `FEATURE_BLE=0` | 1,203,188 | 49,172 | +22,504 | +2,304 |
+| no-web | `FEATURE_WEB=0` | 1,286,128 | 51,732 | +22,512 | +2,312 |
+| no-god | `GOD_MODE_ENABLED=0` | 1,903,770 | 72,508 | +22,716 | +2,304 |
+| sh1106 | `DISPLAY_IS_SH1106=1` | 1,915,654 | 72,676 | +22,582 | +2,328 |
+| all-off | every `FEATURE_*`=0 + `GOD_MODE_ENABLED=0` | 515,268 | 24,408 | +22,658 | +2,296 |
+| **release** | `GOD_MODE_ENABLED=0 FEATURE_BLE=0` (D2) | **1,191,426** | **49,004** | +22,654 | +2,296 |
+
+A whole phase — a generated content pack and a 36-species roster, the deterministic battle
+engine, the AI, the battle on the device with six pixel goldens, one Pebble validator, the
+§15 codec and a lockstep session proven over a faulty loopback — cost **22,582 B of flash
+and 2,328 B of static RAM** on the baseline. Caps are `GATE_FLASH_MAX` 2,400,000 and
+`GATE_GLOBALS_MAX` 90,000 (`config.h`), so the baseline sits at **79.8 % of the flash cap**
+(484,346 B free) and **80.8 % of the globals cap** (17,324 B free); the release build is
+1,191,426 B, **37.9 %** of the 3,145,728 B `app0` slot, where it has been since phase 2.
+
+**Where the phase-4 cost actually landed.** Per-commit, from each commit's own recorded size
+line: P4-C1 and P4-C2 moved the baseline not at all (1,896,094 / 70,348 — the content tables
+and the engine are compiled but nothing on the device called them yet); P4-C4a +164 B;
+**P4-C4 +18,780 B of flash and +2,304 B of globals**, which is the battle screen's file-scope
+statics (`s_setup` 780 B, `s_st` 212 B, `s_ring` 576 B, `s_ai` 8 B and the rest,
+`ui/screen_battle.cpp:72-101`); P4-C5a +658 B; P4-C5 and its follow-up 0 B. **P4-C6 itself is
+−42 B of flash** on every variant and −16 B of globals on `release`, from deleting four
+write-only view fields and the dead mood-badge chain (below).
+
+**Globals is the tight axis, and this is what the trend leaves for phases 5–10.** 17,324 B
+free with six phases to go is 2,887 B a phase; phase 4 spent 2,328 B, so six more at
+phase-4's rate lands at 86,644 of 90,000 — inside the cap with 3,356 B of margin, which is
+not comfortable, and P7 and P8 are each larger in scope than P4. Three things make it
+survivable and all three are measured rather than hoped:
+
+- **P7's session state is 468 B**, not a phase. `sizeof(Session)` compiled with
+  `riscv32-esp-elf-g++` is 340 B and `sizeof(LinkEvent)` is 8 B, so a 16-entry ring is
+  128 B — 2.7 % of the headroom, all caller-owned.
+- **Phases 5 and 7 cost 0 new globals for their persisted state.** `Inventory` (32 B),
+  `CooldownTable` (272 B) and `PendingTrade` (64 B) are already members of the one 1,936 B
+  `GameState` that `persistence/game_state.cpp` already declares.
+- **Phase 9's content growth is flash, not globals** (36 → 60 species is +576 B of
+  `SPECIES_TABLE`), and P10's sprite atlas is 8,640 B against 484,346 B free.
+
+**And the relief D2 already bought is large:** compiling BLE out recovers **712,466 B of
+flash and 23,504 B of static RAM**, measured here as baseline minus `no-ble`. The build that
+ships sits at 54.4 % of the globals cap with 40,996 B free.
+
+**THE CAVEAT, and it is load-bearing: none of P4-C5 is linked yet.** `riscv32-esp-elf-nm` on
+the baseline ELF finds zero `proto_`, `session_`, `pbw_`, `loopback_` or `transport_loopback`
+symbols and none of `battle_link.cpp`'s five function names, because nothing under `app/`,
+`ui/` or `persistence/` calls them and `--gc-sections` drops them. 3,333 lines of networking
+cost 0 B today. The 468 B above is a `sizeof`, not a measurement of a linked build.
+
+**Host suite.** 31 binaries, **603 tests, 728,778 checks** (phase 3 shipped 21 / 328 /
+350,214). Phase 4 added 10 binaries, 275 tests and 378,564 checks, and grew 6 existing
+binaries. Goldens went 48 → **55** screen frames plus `tests/golden/battle_v1.txt`, a
+22-round transcript — the only artifact in the tree that can catch a duration off-by-one
+that both the Python model and `battle.cpp` share.
+
+**Content gates.** `python3 tools/gen_content.py --check` → `8 files in sync,
+CONTENT_VERSION 0x5B4A`; `cd tools/content && python3 verify.py` → `RESULT: 99 checks,
+0 FAILED`. `tools/check.sh` additionally proves that **eleven of the thirteen** battle
+tuning constants that decide hashed battle state agree between `src/data/balance.h` (which
+the firmware compiles) and `tools/content/balance.json` (which the roster was tuned against);
+the other two, `TYPE_MOD_SCALE` and `RISK_SELF_HP_PCT`, are 0 and name superseded rules, and
+P4-C6 narrowed the gate's own justification to say so.
+
+**Sanitizers.** `make -C tests check` under `-fsanitize=address,undefined
+-fno-sanitize-recover=all` → **ALL PASS 31/31, zero ASan reports, zero UBSan runtime
+errors**. It needs **ONE line** neutralised, `data/evolution_table.h:112`, where GCC 13.3
+will not fold `&SPECIES_TABLE[0] == nullptr` inside a `constexpr` evaluation under ASan.
+Commit `250f73e` said "the same three PRE-EXISTING GCC-13.3 `constexpr` sub-checks"; at this
+commit one line — two sub-expressions — is the whole cost, re-derived by building and not
+carried forward. Run by hand; deliberately not in `tools/check.sh`, because the gate must
+build the firmware on a toolchain that does not have these sanitizers.
+
+### D2 was already closed, and P4-C6's own plan bullet asked for it again
+
+`PEBBLEBOL_IMPLEMENTATION_PLAN.md` carried "D2 decision formally requested from the owner
+with the §0.2 evidence (needed by P7-C1)" in the P4-C6 box. **That obligation was already
+discharged.** The owner-decision table at the top of this file records D2 as
+**CLOSED — ESP-NOW (2026-09-02, owner)** (line 15), the consequences are written out under
+"D2 — consequences of choosing ESP-NOW" (line 53), and the evidence P7-C1 starts from — the
+250 B datagram, the 20-peer table, RSSI on the receive callback, the send-callback ACK, the
+`esp_now_init()` ordering, the broadcast peer, `CONFIG_ESP_WIFI_ENABLED` — was verified
+against the installed core (esp32 3.1.1, ESP32-C3) before it was closed. Asking again would
+have been asking for a decision the owner had already made two days earlier. The plan bullet
+is corrected in place rather than acted on.
+
+Two numbers inside that D2 record were stale and are corrected at this exit rather than
+repeated: the frame no longer "fits with 38 B to spare" as a 12 B header plus a 200 B
+payload (that was plan §1.4's sketch, written before the codec existed) — the shipped frame
+is 14 B + at most 148 B + a 2 B trailing CRC = **164 B, 86 B to spare**; and BLE removal
+recovers **712,466 B / 23,504 B**, not the phase-1 audit's 721,632 / 23,688.
+
+### What phase 4 did NOT measure, stated as unmeasured
+
+- **The device frame budget.** `FRAME_BUDGET_US` is 50,000 µs (20 fps) and
+  `rd_frame_time_us()` exists to be compared against it on real hardware. The battle screen
+  is the heaviest thing this firmware draws — two mirrored 24×24 XBM bodies, bars, dither,
+  flash and shake — and **it has never been timed on a panel.** The ≈24 ms `sendBuffer()`
+  figure at 400 kHz is still an estimate.
+- **Per-frame heap, the device half.** The host half is measured: 3,942 real
+  `update()`+`render()` frames across all six battle modes for **0 allocations**, with the
+  counter proved to fire first. `dev/godmode.cpp`'s `ESP.getFreeHeap()` sampling has still
+  never run on a board.
+- **The radio.** Every networking figure in this repository comes from an in-process
+  loopback whose fault model is an independent per-direction Bernoulli draw from one seeded
+  `Rng`. A real ESP-NOW link is bursty and correlated, so **the arm completion rates are
+  claims about the model, not about the air.** Untested: the 250 B datagram in flight, the
+  send-callback ACK, RSSI gating, the same-channel constraint, peer discovery, and whether
+  1,000 ms is the right ladder rung — the whole ladder runs in virtual time, because
+  `now_ms` is a parameter.
+- **The roster's balance against the engine that ships.** The 40–63 % / 57–65 % win-rate
+  band the content pack was tuned to came from `tools/content/sim_engine.py`, which diverges
+  from `battle.cpp` in five ways `game/battle.h` names and **has no AI at all** — it scripts
+  both sides. So no percentage anywhere in this repository is a statement about what the
+  device plays, and none is quoted at this exit. **P9-C4** is the chunk that produces real
+  ones (`tests/tools/balance_matrix.cpp`, 60×60 AI-vs-AI at 1,000 seeded battles a pair).
+- **Battery life.** D11 is still OPEN and is the single biggest open factor.
+- **The 1 h heap soak (P2-C12) and the ×3600 neglect soak (P3-C5)** are still pending first
+  flash. **This firmware has still never run on a physical board.**

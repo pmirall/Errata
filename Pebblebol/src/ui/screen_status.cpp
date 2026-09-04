@@ -117,6 +117,15 @@ void status_b_render(void) {
   const Genome& g = v->genome;
   char line[48];
 
+  // THE GENOME'S WORD, ON PURPOSE, AND IT IS THE ONLY SCREEN THAT STILL USES IT
+  // (recorded in P4-C6). P4-C4a moved HOME and the BOX off S_SPECIES() onto the
+  // roster's Spanish names, because a species that evolves has to be able to
+  // say so. This page is the GENOME page: the badge and the word both describe
+  // the sixteen-value cosmetic nibble the creature was BORN with, which an
+  // evolution does not move. The consequence, stated rather than discovered: a
+  // Paketo and the Fragmar it becomes print the same word here, and that is the
+  // page working. pet_species_name() is what a screen showing the CREATURE
+  // wants; ui/screen_box.cpp uses it and falls back to this word.
   const SpriteRef badge = sprite_species_badge(gene_species(g));
   gfx_xbm(2, 13, badge.w, badge.h, badge.bits);
   gfx_text_fit(GF_NARR, 17, 20, 108, S_SPECIES(gene_species(g)));

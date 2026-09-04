@@ -43,7 +43,14 @@ struct PebbleView {
   // Care, as PERCENTAGES already smoothed for display, indexed by StatId.
   uint8_t  care_pct[ST_COUNT];
   uint8_t  mood_pct;                // 0..100, the care-quality score
-  uint8_t  mood_face;               // enum Mood, the 12x12 badge index
+  // NO mood_face (P4-C6). ui.cpp:1939 wrote it every frame and no screen ever
+  // drew it: its consumer, sprite_mood_face(), had had zero references in the
+  // whole tree since the last caller went away at P2-C11b, and the 144 B of
+  // 12x12 art behind it (spr_mood12) was gc-sectioned out of every build. The
+  // whole chain is deleted rather than carried; recover the art with
+  // `git show 250f73e:Pebblebol/src/data/sprites.h` if P10 designs a screen
+  // that wants a mood badge. The mood WORD ladder is untouched and live -
+  // ui.cpp's mood_of() still gates the HOME heart on MOOD_FELIZ.
 
   // Body
   uint8_t  stage;                   // enum Stage, for the sprite lookup

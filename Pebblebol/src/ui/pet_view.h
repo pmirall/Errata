@@ -69,7 +69,6 @@ struct PetView {
                               // the resolved design, species-chosen at BABY /
                               // ADULT / SENIOR, care-chosen at CHILD / TEEN
   uint8_t  pose;              // SpritePose the caller wants drawn
-  uint8_t  mood;              // Mood, the 12x12 badge index
 
   // ---- numbers a screen may show ------------------------------------------
   uint8_t  level;             // 1..30
@@ -77,10 +76,19 @@ struct PetView {
   // all, so when P4-C4a deleted that function the field became a number no
   // code produced and no code consumed. HOME's HP meter comes from
   // PebbleView.hp_cur / hp_max (ui/screen_view.h) through xp_hp_max().
+  //
+  // NO mood, asleep OR sick EITHER (P4-C6). P4-C4a's sweep deleted hp_pct for
+  // exactly one reason - one writer, no reader - and stopped at the first
+  // instance. These three were the next three: pet_view_fill_sim() assigned
+  // each of them once and nothing in Pebblebol/src or tests/ ever read one.
+  // `mood` was the head of a four-link chain that was dead all the way down
+  // (PebbleView.mood_face -> sprite_mood_face() -> spr_mood12, all removed in
+  // the same commit). `asleep` and `sick` were WORSE than unused: they were a
+  // second copy of PF_ASLEEP and PF_SICK, which every real consumer already
+  // reads out of `flags` - petfx.cpp:873 and actfx.cpp:595 do exactly that.
+  // Two places to be wrong about one fact is the defect; one is the fix.
   uint8_t  mood_pct;          // 0..100 care-quality score; petfx scales motion by it
   uint8_t  care_pct[PB_CARE_COUNT];   // INDEXED BY CareId (save_schema.h), not StatId
-  uint8_t  asleep;
-  uint8_t  sick;
   uint8_t  corrupted;         // PBS_CORRUPTED, the Phase 9 status
   uint8_t  poop_count;        // 0..POOP_MAX; actfx dissolves these on ACT_CLEAN
 

@@ -63,10 +63,20 @@ inline uint8_t pet_art_key(uint8_t species_id, uint8_t gene_species) {
   return sp ? sp->sprite_id : gene_species;
 }
 
-// The art key already folded into the design its life stage draws from. The two
-// call sites that hold a species id and a stage - ui/pet_view.cpp for the
+// The art key already folded into the design its life stage draws from.
+//
+// ONE CALLER, NOT TWO, AND THAT IS CORRECT (narrowed in P4-C6). This said "the
+// two call sites that hold a species id and a stage - ui/pet_view.cpp for the
 // animated body, ui/screen_home.cpp for the still one - go through this so they
-// cannot fold it two different ways.
+// cannot fold it two different ways". screen_home.cpp does not and must not:
+// sprite_design_of() only answers for the three stages whose design IS the art
+// key, and the still body has to draw EGG, CHILD and TEEN as well, so it folds
+// pet_art_key() through sprite_form_of() instead. pet_view.cpp's
+// apply_species_design() makes the same EGG/CHILD/TEEN discrimination by hand
+// and then calls this. So there ARE two stage ladders in the tree; they agree
+// today, and this function narrows the second one rather than preventing it.
+// A screen that wants a design for ONE known stage should use this; a screen
+// that has to cover all five should use sprite_form_of().
 inline uint8_t pet_art_design(uint8_t species_id, uint8_t gene_species,
                               Stage stage) {
   return sprite_design_of(pet_art_key(species_id, gene_species), stage);

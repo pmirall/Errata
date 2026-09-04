@@ -87,8 +87,8 @@ fi
 # Pebblebol/src/data/balance.h, which the firmware actually compiles. balance.h
 # is NOT generated, so gen_content.py --check does not see it.
 #
-# WHY IT MATTERS, and it is a P4-C5 problem rather than a tidiness one: these
-# constants decide hashed battle state. Retuning one in the HEADER alone moves
+# WHY IT MATTERS, and it is a P4-C5 problem rather than a tidiness one: ELEVEN
+# OF THE THIRTEEN decide hashed battle state. Retuning one in the HEADER alone moves
 # every damage number while CONTENT_VERSION and BATTLE_ENGINE_VER both stay
 # where they are - so two devices flashed from two commits agree on every
 # version word they exchange and then disagree on the first round hash, which is
@@ -99,6 +99,18 @@ fi
 # CONTENT_VERSION 0x5B4A" - unchanged. Every clamp assertion in the tree is
 # written in terms of the constant under test, so no literal pins it and nothing
 # else was ever going to catch this.
+#
+# THE OTHER TWO DECIDE NOTHING, AND THE GATE SHOULD SAY WHICH (P4-C6). This
+# paragraph used to claim the property for all thirteen. TYPE_MOD_SCALE is 0 and
+# names the SUPERSEDED additive damage path (balance.h keeps it so the dead
+# branch is visible rather than merely absent, and balance.json documents the
+# TYPE_MOD_MODE=ADDITIVE A/B run P9-C4 may want); RISK_SELF_HP_PCT is 0 and names
+# a self-damage rule the pack deliberately does not have. Neither is read by
+# game/battle.cpp, so editing either in one file moves no damage number and
+# desyncs nothing. They stay IN the gate on purpose - the day one of them stops
+# being 0 it becomes load-bearing in both files at once, and that is precisely
+# the moment a drift between them would be invisible - but the gate's own
+# justification is about the eleven, not about these two.
 #
 # It compares VALUES, not formatting: the header writes (-2) and (+2) where the
 # JSON writes -2 and 2, and the two files disagree on two names on purpose

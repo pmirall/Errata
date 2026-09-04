@@ -227,9 +227,15 @@ TEST(apply_leaves_the_moves_the_care_and_the_genome_alone) {
   p.trait_id = 9;
 
   CHECK(evolution_apply(p, full_ctx()));
-  // The new species' learnset is NOT applied in P3: there is no attack table
-  // until P4-C1, so overwriting these would write unresolvable ids over
-  // unresolvable ids.
+  // The new species' learnset is NOT applied, and since P4-C2 that is a
+  // DECISION rather than a wait: the engine accepts the verbatim learnset of
+  // any same-family species at a stage <= this one's (BR_UNLEARNABLE_MOVE), so
+  // an evolved Pebble keeping the moves the player raised it with is legal.
+  // This case used to say "there is no attack table until P4-C1"; there is one,
+  // and game/evolution.cpp now carries the decision it left open.
+  // The synthetic ids below (40+i) are why this case is insulated from a
+  // learnset EDIT; test_content.cpp's
+  // `species_two_and_three_keep_their_frozen_columns` is what pins those.
   for (uint8_t i = 0; i < PB_MOVE_COUNT; ++i) CHECK_EQ(p.moves[i], (uint8_t)(40 + i));
   for (uint8_t i = 0; i < PB_CARE_COUNT; ++i) CHECK_EQ(p.care[i], (int32_t)(1234 + i));
   CHECK_EQ(p.genome.lineage_id, 0xDEADBEEFu);

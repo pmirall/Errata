@@ -214,10 +214,20 @@ MigrateResult migrate_v1_to_v2(const uint8_t* petsave128, const uint8_t* cfg256,
   // exact complaint P3-C3 raised and P4-C4a set out to close - while a fresh v2
   // device (box.cpp writes no nickname, ever) showed Paketo and then Fragmar.
   //
-  // NOTHING IS LOST BY LEAVING IT EMPTY. ui_name_for() is still the last rung
-  // of the ladder, so a Pebble with no species row - which a migrated one never
-  // is, migrate_species_of() always lands on a real roster id - still shows the
-  // same v1 dynasty name it always did.
+  // WHAT LEAVING IT EMPTY COSTS, NARROWED IN P4-C6 - this used to say "NOTHING
+  // IS LOST", and that sentence contradicted its own next clause. The dynasty
+  // syllables are the LAST rung of ui_pet_name()'s ladder, reached only by a
+  // Pebble with NO species row; migrate_species_of() always lands on a real
+  // roster id, so a migrated pet never reaches that rung and the v1 dynasty word
+  // is gone from the device for good. There is no rename UI in V1 either -
+  // nothing outside persistence/game_state.cpp writes Config.pet_name - so an
+  // update renames a player's pet with no way back to the old word.
+  //
+  // IT IS STILL THE RIGHT TRADE, and it is a trade rather than a free win: a
+  // name that never changes on a creature that now evolves is worse than a name
+  // the roster owns, because the evolution is the thing V1 has to be able to
+  // show. Restoring the old word would mean a nickname field on the SETTINGS
+  // screen, which is P8's keyboard and not this function's business.
   if (have_cfg && oldcfg.pet_name[0] != '\0') {
     size_t o = 0;
     while (o + 1 < sizeof p.nickname && o < sizeof oldcfg.pet_name &&

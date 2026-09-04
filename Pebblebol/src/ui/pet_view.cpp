@@ -100,11 +100,12 @@ void pet_view_fill_sim(PetView& out, const SimView& p, uint8_t pose) {
   out.flags    = p.flags;
   out.stage    = p.stage;
   out.pose     = pose;
-  out.asleep   = (uint8_t)((p.flags & PF_ASLEEP) != 0u);
-  out.sick     = (uint8_t)((p.flags & PF_SICK)   != 0u);
   out.poop_count = p.poop_count;
+  // mood_pct is READ (petfx scales motion by it). The mood INDEX, `asleep` and
+  // `sick` were written here and read nowhere, and the last two duplicated
+  // PF_ASLEEP / PF_SICK, which every consumer takes from `flags`. P4-C6 deleted
+  // all three from the view - see the note in ui/pet_view.h.
   out.mood_pct = (uint8_t)sim_mood_score();
-  out.mood     = pet_mood_index(out.mood_pct);
   // StatId order and CareId order are NOT the same list (ST_ENERGY is 2,
   // CARE_ENERGY is 4). The view is indexed by CareId, so the mapping happens
   // exactly once, here, instead of being re-guessed at every read site.

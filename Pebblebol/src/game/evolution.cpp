@@ -115,9 +115,24 @@ bool evolution_apply(PebbleInstance& p, const EvoContext& ctx)
   if (evolution_level_ready(p)) p.evo_state |= (uint8_t)EVO_STATE_PENDING;
 
   // DELIBERATELY UNTOUCHED: moves, xp, level, care[], care_rem[], the genome
-  // and the nickname. In particular the new species' LEARNSET is not applied -
-  // there is no attack table until P4-C1, so overwriting moves[] here would
-  // write ids nothing can resolve over ids nothing can resolve. P4-C1 adds the
-  // table and decides what a learnset change owes an existing creature.
+  // and the nickname. In particular the new species' LEARNSET is not applied.
+  //
+  // ANSWERED, and the answer is that this stays as it is (P4-C6). This comment
+  // used to say "there is no attack table until P4-C1 ... P4-C1 adds the table
+  // and decides what a learnset change owes an existing creature". P4-C1 landed
+  // the table and did NOT decide; P4-C2 did, in another file, and the obligation
+  // was left open here where the reader is standing. The decision, from
+  // game/battle.h's BR_UNLEARNABLE_MOVE: a legal moveset is "the verbatim
+  // learnset of SOME species in the same family at a stage <= this one's", so a
+  // Paketo that becomes a Fragmar keeps {1,6,7,27} for life and the engine
+  // accepts it outright (tests/test_validate.cpp
+  // `the_learnset_walk_reaches_earlier_stages_and_not_later_ones`). An
+  // evolution that rewrote moves[] would take four attacks off a creature the
+  // player chose them for; teaching moves is spec section 13's own mechanic and
+  // it is not this function's.
+  //
+  // THE PRICE, STATED: a later stage's own learnset is unreachable by any
+  // player-facing path in V1. Fragmar's {5,27,31,33} exists in the table, is
+  // legal to hold, and nothing today can put it on a creature.
   return true;
 }

@@ -4,8 +4,13 @@ This is the wire format, the state table and the honest limits of the
 device-to-device battle protocol. It documents what is **in the tree at this
 commit**, not what is planned: everything below is implemented in
 `Pebblebol/src/networking/{protocol,session,battle_link,transport_loopback}.cpp`
-and exercised by `tests/test_protocol.cpp` (24 cases) and
-`tests/test_session.cpp` (36 cases, 1,053 checks).
+and exercised by `tests/test_protocol.cpp` (**25 cases, 234,356 checks**) and
+`tests/test_session.cpp` (**41 cases, 2,493 checks**), re-counted from the
+binaries' own output at every commit that touches them. *(This line said 24 and
+36 / 1,053 until P4-C6: the P4-C5 follow-up added the cases and edited 161 lines
+of this file without touching its own header sentence — a shipped document
+carrying false numbers one commit after they stopped being true, which is the
+exact failure the phase-3 exit shipped four of.)*
 
 **There is no radio yet.** Every claim here is proven on a host loopback that
 drops, duplicates and reorders frames. ESP-NOW arrives in P7 behind the same
@@ -489,10 +494,21 @@ includes `esp_now.h`; it is excluded from the host build **by file selection**.
 ## 6. Budget
 
 Nothing in `app/` or `ui/` references these modules yet, so the ESP32 link
-(`--gc-sections`) drops them entirely: flash and globals are **unchanged**
-against the previous commit at 1,915,696 / 72,676, confirmed by
-`riscv32-esp-elf-nm` finding zero `proto_`, `session_`, `link_` or `pbw_` symbols
-in the ELF. When P7 wires it: `Session` is **340 B on the device** (it already contains the
+(`--gc-sections`) drops them entirely: flash and globals are **unchanged** by
+them, measured at the P4-C6 exit at 1,915,654 / 72,676. `riscv32-esp-elf-nm` on
+the linked ELF finds **zero** `proto_`, `session_`, `pbw_`, `loopback_` or
+`transport_loopback` symbols, and **none of `battle_link.cpp`'s five functions**
+— `link_begin`, `link_on_msg`, `link_resend`, `link_wants_action`,
+`link_local_action`.
+
+*(That last clause is narrowed from "zero `link_` symbols", which P4-C6 measured
+and found false: the ELF carries six. `link_render()` and `link_input(Gesture)`
+belong to `ui/screen_link.cpp`, and `link_down` / `link_established` /
+`link_required` / `link_terminated` come from the Bluetooth stack. The claim the
+evidence supports is about the five names above, and it holds; a prefix that
+also catches an unrelated screen and a vendor library is not the claim.)*
+
+When P7 wires it: `Session` is **340 B on the device** (it already contains the
 40 B `SessionEnd` and the 144 B of frozen wire records it must be able to
 retransmit), plus a 16-entry `LinkEvent` ring at 128 B — **468 B**, all
 caller-owned, about 2.7 % of the 17,324 B of globals headroom. The 340 is

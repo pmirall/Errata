@@ -89,6 +89,16 @@ static void cfg_from_v2(const ConfigV2& v2, Config& out) {
   // Config, so the two are held in step until P2-C11 moves the UI over. The
   // config copy wins when it has one: it is the field SETTINGS writes, so a
   // rename must not be undone by the nickname the last save mapped.
+  //
+  // SLOT 0, NOT THE ACTIVE SLOT, AND P5 IS WHERE THAT STARTS TO MATTER (found
+  // by the P4-C6 sweep, left as it is on purpose). Today the only writer of any
+  // nickname in the whole tree is migration.cpp mapping a TYPED v1 pet_name,
+  // and that Pebble is in slot 0 AND is the active one, so the two readings
+  // cannot differ and changing the line now would change no behaviour and be
+  // untestable. Once P5-C4 capture puts other Pebbles in the Box and the player
+  // moves the active slot, HOME will call the new Pebble by slot 0's name -
+  // Config.pet_name wins over everything downstream. The fix belongs in the
+  // chunk that can write the failing test: read box_active() here.
   const char* name = (v2.device_name[0] != '\0') ? v2.device_name
                                                  : s_gs.pebbles[0].nickname;
   size_t i = 0;
