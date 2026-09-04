@@ -457,10 +457,23 @@ TEST(the_special_encounter_outcome_still_has_no_payload_table) {
   // ITEM has a drop table. SPECIAL has nothing of the kind, and there is no
   // structure in data/ for it to live in yet.
   CHECK(ITEM_DROP_ROW_COUNT > 0);
-  // AND THE LINE THAT ACTUALLY FIRES (see the banner above): the pack hash at
-  // the phase-4 exit. Change the pack - which is what filling this hole is -
-  // and this case fails until somebody comes back and says what they did.
-  CHECK_EQ((unsigned)CONTENT_VERSION, 0x5B4Au);
+  // AND THE LINE THAT ACTUALLY FIRES (see the banner above): the pack hash.
+  // Change the pack - which is what filling this hole is - and this case fails
+  // until somebody comes back and says what they did.
+  //
+  // IT FIRED AT P5-C1, AND THE ANSWER IS: NOT THIS. 0x5B4A was the phase-4
+  // exit; 0x54BD is P5-C1, which added tools/content/networks.json - the
+  // network classifier's RSSI bands and token lists - to the pack and
+  // therefore to the hash. SPECIAL STILL HAS NO PAYLOAD TABLE: there is no
+  // specials.json, no SPECIAL_EVENTS[] in data/, and no ids behind
+  // ENC_OUT_SPECIAL. Everything this case asserts is still true and it is
+  // still P5-C3's debt. The re-pin is the tripwire doing its job - it made
+  // somebody come back and write this paragraph - and NOT a weakening: the
+  // constant is re-derived, not deleted.
+  //
+  // The cost the comment above already named (any pack edit fires it) is
+  // exactly what happened. Re-derive with `python3 tools/gen_content.py`.
+  CHECK_EQ((unsigned)CONTENT_VERSION, 0x54BDu);
 }
 
 // A FOURTH HOLE OF THE SAME SHAPE, missed by the first completeness pass and

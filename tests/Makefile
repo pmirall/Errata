@@ -178,6 +178,26 @@ $(BIN)/test_session:    $(OBJ)/session.o $(OBJ)/battle_link.o \
                         $(OBJ)/pebble.o $(OBJ)/evolution.o $(OBJ)/xp.o \
                         $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
+# P5-C1: THE SCANNER, THE CLASSIFIER AND THE SALTED IDENTITY. Two objects and
+# NO OTHERS - net_classify.cpp and wifi_scanner.cpp are pure translation units,
+# and the scan job reaches the radio through a struct of function pointers, so
+# this binary drives every path a real scan can take with no radio and no
+# net.cpp (which is a device module tests/Makefile never compiles). If this link
+# line ever needs a third object, something has leaked into the pure half.
+$(BIN)/test_exploration_hash: $(OBJ)/net_classify.o $(OBJ)/wifi_scanner.o
+
+# P5-C2: THE COOLDOWN TABLE. cooldowns.cpp is pure and takes its clock as a
+# struct, so the uncalibrated path and a calibration landing mid-session are
+# driven directly. The persistence objects are here for ONE claim the module
+# cannot make on its own - that an armed cooldown survives a reboot - and they
+# are the same set tests/test_persistence.cpp links, for the same reason:
+# save_manager.cpp ends in the shared validator.
+$(BIN)/test_cooldowns:  $(OBJ)/cooldowns.o $(OBJ)/save_manager.o \
+                        $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/crc16.o \
+                        $(OBJ)/genome.o $(OBJ)/rng.o $(OBJ)/species.o \
+                        $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o
+
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 # The minigame contract and the PURE logic of every game. No draw objects and
 # no ui/: if this link line ever needs one, a game has leaked drawing into its

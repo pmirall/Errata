@@ -5,8 +5,10 @@
 //  left is the part Phase 8 builds the creator API on:
 //
 //   1. BIND POLICY. The listening socket only opens once net_phase() reports
-//      NPH_STA_UP or NPH_AP_PORTAL, and only while CF_WEB_ENABLED is set.
-//      Binding earlier aborts the firmware inside FreeRTOS (see web_begin()).
+//      NPH_AP_PORTAL, and only while CF_WEB_ENABLED is set. Binding earlier
+//      aborts the firmware inside FreeRTOS (see web_begin()). NPH_STA_UP was
+//      the other legal phase until P5-C1 deleted the station: the creator page
+//      is served over the device's OWN access point and nothing else.
 //   2. ROUTE REGISTRATION EXACTLY ONCE for the lifetime of the firmware.
 //   3. The token-bucket rate limiter in front of every handler.
 //   4. The captive-portal catch-all.
@@ -245,14 +247,13 @@ bool web_begin(uint16_t port)
   // -> tcpip_send_msg_wait_sem() -> sys_mutex_lock() takes a mutex that is
   // still NULL, and FreeRTOS aborts the whole firmware with
   //     assert failed: xQueueSemaphoreTake queue.c:1709 (( pxQueue ))
-  // Only NPH_STA_UP and NPH_AP_PORTAL guarantee a netif with an address.
+  // Only NPH_AP_PORTAL guarantees a netif with an address. NPH_SCANNING does
+  // NOT: a scan enables the station interface without associating, so there is
+  // no address to bind to and the creator page has nothing to be served over.
   // web_service() re-enters web_begin() on every pump while the port is
   // wanted but closed, so the socket opens by itself the moment the radio
   // comes up - no other module has to remember to call us back.
-  {
-    const NetPhase ph = net_phase();
-    if (ph != NPH_STA_UP && ph != NPH_AP_PORTAL) return true;
-  }
+  if (net_phase() != NPH_AP_PORTAL) return true;
 
   s_srv.begin(port);
   s_port    = port;

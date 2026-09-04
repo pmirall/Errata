@@ -107,7 +107,8 @@ static int      g_hatches  = 0;
 static int      g_radio    = -1;      // the last ui_creator_radio() argument
 static int      g_radio_calls = 0;
 static uint8_t  g_ap_up    = 0;
-static uint8_t  g_sta_up   = 0;
+// g_sta_up went with CreatorInfo.sta_up at P5-C1: the station path is deleted,
+// so "joined the user's network" is not a state this firmware can be in.
 static int      g_commits  = 0;
 static uint8_t  g_commit_id = CFM_NONE;
 static int      g_wiggles   = 0;
@@ -173,11 +174,10 @@ void ui_game_leave(void)          { }
 void ui_creator_info(CreatorInfo& out) {
   memset(&out, 0, sizeof out);
   out.ap_up  = g_ap_up;
-  out.sta_up = g_sta_up;
   out.pin    = 1234;
   snprintf(out.ssid, sizeof out.ssid, "PEBBLEBOL-1234");
   snprintf(out.ip,   sizeof out.ip,   "192.168.4.1");
-  if (g_ap_up || g_sta_up) snprintf(out.url, sizeof out.url, "http://192.168.4.1/?k=1234");
+  if (g_ap_up) snprintf(out.url, sizeof out.url, "http://192.168.4.1/?k=1234");
 }
 bool ui_btn_down(uint8_t)         { return false; }
 uint32_t ui_btn_hold_ms(uint8_t)  { return 0; }
@@ -286,7 +286,6 @@ static void seams2_reset(void) {
   g_radio = -1;
   g_radio_calls = 0;
   g_ap_up = 0;
-  g_sta_up = 0;
   g_commits = 0;
   g_commit_id = CFM_NONE;
   g_goto = 0xFF;
@@ -1165,13 +1164,11 @@ TEST(diag_leaves_when_the_console_is_gone) {
   CHECK_EQ(g_goto, (uint8_t)SCR_HOME);
 }
 
-TEST(snapshot_creator_station) {
-  seams2_reset();
-  g_sta_up = 1;
-  creator_enter();
-  CHECK_EQ(g_radio, 1);                        // it asked for the station
-  snapshot(SCR_CREATOR, "creator_station");
-}
+// snapshot_creator_station and tests/golden/screens/creator_station.pbm were
+// here. Both were the frozen image of the "joined the user's network" branch,
+// which P5-C1 deleted from ui/screen_creator.cpp - a golden of a branch that
+// cannot be reached is a test that cannot fail. The case below keeps the part
+// of it that survives: the screen takes and releases the radio.
 
 TEST(snapshot_creator_portal) {
   seams2_reset();
@@ -1193,7 +1190,7 @@ TEST(snapshot_creator_offline) {
 // board.
 TEST(creator_takes_and_releases_the_radio) {
   seams2_reset();
-  g_sta_up = 1;
+  g_ap_up = 1;                                 // was g_sta_up, see above
   creator_enter();
   CHECK_EQ(g_radio, 1);
   creator_leave();
@@ -1211,8 +1208,10 @@ TEST(creator_alternates_only_while_the_portal_is_up) {
   creator_input(GST_TAP_L);
   CHECK(creator_variant() != first);
 
+  // ...and with NO radio at all there is likewise one symbol and nothing to
+  // flip. This half used to drive g_sta_up, which no longer exists; the offline
+  // state is what is left of "the portal is not up".
   seams2_reset();
-  g_sta_up = 1;
   creator_enter();
   const uint8_t only = creator_variant();
   creator_input(GST_TAP_L);

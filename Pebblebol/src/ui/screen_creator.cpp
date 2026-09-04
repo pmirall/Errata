@@ -190,11 +190,10 @@ void creator_render(void) {
       snprintf(line, sizeof(line), "%s %s", S(STR_WEB_PIN), pin);
       gfx_text_fit(GF_BODY, rx, 55, rw, line);
     }
-  } else if (in.sta_up) {
-    gfx_text_fit(GF_TINY, rx, 23, rw, in.ip);
-    gfx_text(GF_TINY, rx, 30, S(STR_WEB_PIN));
-    gfx_text(GF_BIG, rx, 48, pin);          // 9x19 digits: readable at arm's length
   } else {
+    // The station branch was here: address, PIN label, big PIN. It is gone with
+    // the station itself (P5-C1). Two states remain - the access point is up,
+    // or it is not yet - and both are reachable.
     gfx_text_wrap(GF_BODY, rx, 26, rw, GFX_LINE_BODY, 3, S(STR_WEB_CONNECTING));
   }
 

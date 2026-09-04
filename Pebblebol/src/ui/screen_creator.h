@@ -35,8 +35,12 @@
 // one fill. ui.cpp answers it; on the host tests/test_screens.cpp does.
 #define CREATOR_TEXT_MAX  QR_TEXT_MAX
 struct CreatorInfo {
-  uint8_t  ap_up;                    // the provisioning access point is serving
-  uint8_t  sta_up;                   // joined the user's network
+  uint8_t  ap_up;                    // the device's own access point is serving
+  // `sta_up` was here. It meant "joined the user's network", which this
+  // firmware cannot do since P5-C1 - the station path is deleted, not disabled
+  // - so the field and the screen branch that read it are gone rather than
+  // permanently false.
+  uint8_t  reserved;                 // must be 0
   uint16_t pin;                      // web_pin(), printed % 10000
   char     ssid[24];                 // the AP's SSID, when ap_up
   char     ip[24];                   // whichever address is live

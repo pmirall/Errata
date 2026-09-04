@@ -105,6 +105,7 @@ class Content(object):
         self.items = load("items.json")
         self.evo_all = load("evolution.json")
         self.encounters = load("encounters.json")
+        self.networks = load("networks.json")
         self.balance = load("balance.json")
         self.families = families
 
@@ -168,6 +169,13 @@ class Content(object):
             ("encounters.json", self.encounters, "weight", [
                 ("weight", U8), ("rarity_min", RAR), ("rarity_max", RAR)]),
         ]
+        # networks.json is not a list of rows, so it gets its own shape check
+        # rather than a column walk. Every rule below is one the GENERATED
+        # header cannot state for itself: a threshold outside int8_t, a token
+        # that no scan can ever produce, or a token claimed by two classes -
+        # which would make NET_TOKEN_TABLE's class column depend on emit order.
+        self._check_networks()
+
         for fname, rows, idkey, fields in specs:
             for n, row in enumerate(rows):
                 for key, (lo, hi) in fields:
@@ -188,6 +196,69 @@ class Content(object):
                 if int(iid) < 0 or int(iid) > 255 or w < 0 or w > 255:
                     die("balance.json ITEM_DROPS[%s]: item %s weight %r is "
                         "outside the 0..255 ItemDropRow holds" % (cat, iid, w))
+
+    def _check_networks(self):
+        n = self.networks
+        near, mid = n["RSSI_NEAR"], n["RSSI_MID"]
+        for k in ("RSSI_NEAR", "RSSI_MID"):
+            v = n[k]
+            if not isinstance(v, int) or isinstance(v, bool) or v < -127 or v > 0:
+                die("networks.json: %s = %r is outside the -127..0 an int8_t "
+                    "RSSI holds" % (k, v))
+        if not (mid < near):
+            die("networks.json: RSSI_MID %d must be strictly weaker than "
+                "RSSI_NEAR %d, or the HOME band is empty" % (mid, near))
+        minlen = n["TOKEN_MIN_LEN"]
+        if not isinstance(minlen, int) or minlen < 2 or minlen > 16:
+            die("networks.json: TOKEN_MIN_LEN %r is outside 2..16" % (minlen,))
+        # The scanner buffers one token at a time on the stack, in a loop that
+        # runs once per access point. 32 is the ceiling this generator will
+        # emit for that buffer.
+        for cname in sorted(n["TOKENS"].keys()):
+            for t in n["TOKENS"][cname]:
+                if isinstance(t, str) and len(t) > 32:
+                    die("networks.json: token %r in %s is longer than the 32 "
+                        "characters net_classify.cpp will buffer" % (t, cname))
+        bits = n["NET_TOKEN_CLASS_BITS"]
+        seen_bit = {}
+        for cname, b in sorted(bits.items()):
+            if not isinstance(b, int) or b <= 0 or b > 255 or (b & (b - 1)) != 0:
+                die("networks.json: token class %s = %r is not a single bit in "
+                    "0..255" % (cname, b))
+            if b in seen_bit:
+                die("networks.json: token classes %s and %s share bit %d"
+                    % (seen_bit[b], cname, b))
+            seen_bit[b] = cname
+        owner = {}
+        for cname in sorted(n["TOKENS"].keys()):
+            if cname not in bits:
+                die("networks.json: TOKENS has a %s list but "
+                    "NET_TOKEN_CLASS_BITS has no %s bit" % (cname, cname))
+            if not n["TOKENS"][cname]:
+                die("networks.json: token class %s is empty - a class no name "
+                    "can carry is a rule the classifier can never reach" % cname)
+            for t in n["TOKENS"][cname]:
+                if not isinstance(t, str) or not t.isascii() or not t.isalpha() \
+                        or t != t.lower():
+                    die("networks.json: token %r in %s is not lowercase ASCII "
+                        "letters - the scanner splits a name into runs of "
+                        "letters, so nothing else can ever match" % (t, cname))
+                if len(t) < minlen:
+                    die("networks.json: token %r in %s is shorter than "
+                        "TOKEN_MIN_LEN %d, so the scanner never looks it up"
+                        % (t, cname, minlen))
+                if t in owner:
+                    die("networks.json: token %r is in both %s and %s"
+                        % (t, owner[t], cname))
+                owner[t] = cname
+        ords = n["NET_AUTH_ENUM"]
+        if sorted(ords.values()) != list(range(len(ords))):
+            die("networks.json: NET_AUTH_ENUM ordinals are not 0..%d"
+                % (len(ords) - 1))
+        if ords.get("OTHER") != len(ords) - 1:
+            die("networks.json: NET_AUTH_ENUM's OTHER must be the LAST ordinal "
+                "- it is the sink every IDF auth mode the core gains next "
+                "lands on")
 
     # -------------------------------------------------------------------------
     #  EVERY EMITTED STRING IS CHECKED BEFORE ANY FILE IS BUILT
@@ -265,7 +336,10 @@ def enum_from(balance, key, prefix):
 #  Plan line 668: "CONTENT_VERSION changes when JSON changes". The input set is
 #  stated here rather than left to whoever reads the number later:
 #
-#    * the six JSON files, in the fixed order below;
+#    * the seven JSON files, in the fixed order below (networks.json joined
+#      them at P5-C1: an RSSI threshold decides a network's category, and a
+#      category is what indexes the encounter table, so a threshold edit changes
+#      what the game hands the player exactly as an encounter weight does);
 #    * every key EXCEPT the `_`-prefixed ones. Those are design and art notes
 #      (_silhouette, _move_names, _doc, ...). Folding them in would mean that
 #      fixing a typo in a comment marks every save on every device as made
@@ -277,7 +351,8 @@ def enum_from(balance, key, prefix):
 #  and 0 is remapped to 1 so the value is never the "unset" one a zeroed blob
 #  would carry.
 # =============================================================================
-HASH_FILES = ["species", "attacks", "items", "evolution", "encounters", "balance"]
+HASH_FILES = ["species", "attacks", "items", "evolution", "encounters",
+              "networks", "balance"]
 
 
 def strip_notes(o):
@@ -293,7 +368,7 @@ def content_hash(c):
     for name in HASH_FILES:
         obj = {"species": c.species_all, "attacks": c.attacks, "items": c.items,
                "evolution": c.evo_all, "encounters": c.encounters,
-               "balance": c.balance}[name]
+               "networks": c.networks, "balance": c.balance}[name]
         parts.append(name + "=" + json.dumps(strip_notes(obj), sort_keys=True,
                                              separators=(",", ":"),
                                              ensure_ascii=False))
@@ -1029,6 +1104,190 @@ static_assert(evo_every_non_final_stage_has_a_rule(),
     return "\n".join(o) + "\n"
 
 
+def fnv1a32(text):
+    """FNV-1a 32 over the ASCII bytes of `text`. THE FIRMWARE COMPUTES THE SAME
+    FUNCTION over the same bytes in networking/net_classify.cpp; if these two
+    ever disagree every token lookup misses silently and every network reads
+    UNKNOWN, which is why tests/test_exploration_hash.cpp pins a literal from
+    this side against the C++ side."""
+    h = 0x811C9DC5
+    for b in text.encode("ascii"):
+        h ^= b
+        h = (h * 0x01000193) & 0xFFFFFFFF
+    return h
+
+
+def emit_networks(c):
+    n = c.networks
+    bal = c.balance
+    bits = bal["NET_CATEGORY_BITS"]
+    ords = bal["NET_CATEGORY_ORDINALS"]
+    cats = sorted(ords.keys(), key=lambda k: ords[k])
+
+    auth = n["NET_AUTH_ENUM"]
+    auth_names = sorted(auth.keys(), key=lambda k: auth[k])
+    tclass = n["NET_TOKEN_CLASS_BITS"]
+    minlen = n["TOKEN_MIN_LEN"]
+
+    rows = []
+    for cname in sorted(n["TOKENS"].keys()):
+        for t in n["TOKENS"][cname]:
+            rows.append((fnv1a32(t), tclass[cname], t, cname))
+    rows.sort(key=lambda r: r[0])
+    for i in range(1, len(rows)):
+        if rows[i][0] == rows[i - 1][0]:
+            die("networks.json: tokens %r and %r both hash to 0x%08X - rename "
+                "one; a 32-bit collision would give one of them the other's "
+                "class" % (rows[i - 1][2], rows[i][2], rows[i][0]))
+
+    all_bits = 0
+    for b in tclass.values():
+        all_bits |= b
+
+    o = [banner("data/network_table.h", [
+        "THE NETWORK CLASSIFIER'S TABLE (spec sections 20, 40, 44). P5-C1.",
+        "",
+        "Six abstract categories, the auth modes a passive scan can tell apart,",
+        "two RSSI bands and a sorted token table. networking/net_classify.cpp is",
+        "the one consumer; it is a PURE translation unit, so nothing here may",
+        "name a radio type - networking/net.cpp maps wifi_auth_mode_t onto",
+        "NetAuth and static_asserts that mapping against the real constants.",
+        "",
+        "NO NAME AND NO HARDWARE ADDRESS SURVIVES A LOOKUP. The scanner splits a",
+        "beacon's name into runs of ASCII letters inside its own loop, hashes",
+        "each run of at least NET_TOKEN_MIN_LEN letters, binary-searches this",
+        "table and ORs the classes. What leaves that loop is a %d-bit bitmask."
+        % (bin(all_bits).count("1")),
+        "",
+        "The category ENCODING lives here rather than in encounter_table.h",
+        "because it is the classifier's OUTPUT and the encounter table's INDEX,",
+        "and a value with two owners is a value that drifts. encounter_table.h",
+        "includes this header and keeps the count cross-check against the",
+        "species roster, which is the one thing this header cannot see.",
+    ])]
+    o.append("#ifndef PB_NETWORK_TABLE_H\n#define PB_NETWORK_TABLE_H\n")
+    o.append("#include <stdint.h>\n#include <stddef.h>\n")
+
+    o.append("// Network categories (spec section 20). ORDINALS index EncounterRow.category;")
+    o.append("// BITS are what SpeciesDef.category_mask holds. Two encodings, one set.")
+    o.append("enum NetCategory : uint8_t {")
+    for cn in cats:
+        o.append("  NET_CAT_%s = %d," % (cn, ords[cn]))
+    o.append("  NET_CAT_COUNT")
+    o.append("};\n")
+    o.append("inline constexpr uint8_t NET_CATEGORY_BIT[NET_CAT_COUNT] = {")
+    o.append("  " + ", ".join("%d" % bits[cn] for cn in cats) + "   // " + " ".join(cats))
+    o.append("};\n")
+
+    o.append("// What a beacon says about its own security, as the classifier sees it.")
+    o.append("// A PROJECT enum: net_classify.cpp may not include a radio header, so")
+    o.append("// net.cpp owns the one mapping from wifi_auth_mode_t and asserts it.")
+    o.append("// NAUTH_OTHER is LAST on purpose - it is the sink every constant the")
+    o.append("// core gains next lands on, so a new IDF value moves a category and")
+    o.append("// never produces an unhandled case.")
+    o.append("enum NetAuth : uint8_t {")
+    for an in auth_names:
+        o.append("  NAUTH_%s = %d," % (an, auth[an]))
+    o.append("  NAUTH_COUNT")
+    o.append("};\n")
+
+    o.append("// Token CLASSES - a bitmask, never text.")
+    for cn in sorted(tclass.keys(), key=lambda k: tclass[k]):
+        o.append("#define NTOK_%-10s %du" % (cn, tclass[cn]))
+    o.append("#define NTOK_ALL %s%du" % (" " * 8, all_bits))
+    o.append("#define NET_TOKEN_MIN_LEN %du" % minlen)
+    o.append("// The longest token in the table below. net_classify.cpp sizes its")
+    o.append("// stack buffer from this, so adding a longer token to networks.json")
+    o.append("// widens the buffer instead of silently becoming unmatchable.")
+    o.append("#define NET_TOKEN_MAX_LEN %du\n" % max(len(r[2]) for r in rows))
+
+    o.append("// The two signal bands. Stronger than NEAR is 'you are inside it';")
+    o.append("// between NEAR and MID is 'you are next to it'; weaker than MID is a")
+    o.append("// distant beacon nothing can be claimed about.")
+    o.append("#define NET_RSSI_NEAR  (%d)" % n["RSSI_NEAR"])
+    o.append("#define NET_RSSI_MID   (%d)\n" % n["RSSI_MID"])
+
+    o.append("""struct NetTokenRow {        // 8 B
+  uint32_t hash;            // FNV-1a 32 of the lowercase ASCII token
+  uint8_t  klass;           // exactly one NTOK_* bit
+  uint8_t  reserved[3];     // must be 0
+};
+static_assert(sizeof(NetTokenRow) == 8, "NetTokenRow layout drifted");
+""")
+    o.append("// SORTED BY HASH: net_classify.cpp binary-searches this, and the guard")
+    o.append("// below is what makes that search legal.")
+    o.append("inline constexpr NetTokenRow NET_TOKEN_TABLE[] = {")
+    for h, k, t, cname in rows:
+        o.append("  { 0x%08Xu, NTOK_%-8s { 0, 0, 0 } },   // %s" % (h, cname + ",", t))
+    o.append("};\n")
+    o.append("inline constexpr uint8_t NET_TOKEN_ROW_COUNT =")
+    o.append("    (uint8_t)(sizeof(NET_TOKEN_TABLE) / sizeof(NET_TOKEN_TABLE[0]));\n")
+
+    o.append("""// --- generator-emitted compile-time guards -----------------------------------
+constexpr bool net_category_bits_are_one_bit_each_and_distinct(void) {
+  uint32_t seen = 0;
+  for (uint8_t i = 0; i < (uint8_t)NET_CAT_COUNT; ++i) {
+    const uint32_t b = NET_CATEGORY_BIT[i];
+    if (b == 0u || (b & (b - 1u)) != 0u) return false;
+    if (seen & b)                        return false;
+    seen |= b;
+  }
+  return true;
+}
+
+// STRICTLY ascending, which proves sortedness AND uniqueness in one walk. The
+// binary search in net_classify.cpp is only correct on a sorted table, and a
+// duplicate hash would give one token the other's class depending on where the
+// search happened to land.
+constexpr bool net_token_table_is_sorted_and_unique(void) {
+  for (uint8_t i = 1; i < NET_TOKEN_ROW_COUNT; ++i)
+    if (NET_TOKEN_TABLE[i].hash <= NET_TOKEN_TABLE[i - 1].hash) return false;
+  return true;
+}
+
+constexpr bool net_token_rows_are_well_formed(void) {
+  for (uint8_t i = 0; i < NET_TOKEN_ROW_COUNT; ++i) {
+    const NetTokenRow& r = NET_TOKEN_TABLE[i];
+    if (r.klass == 0u)                          return false;
+    if ((r.klass & (uint8_t)(r.klass - 1u)) != 0u) return false;  // one bit
+    if ((r.klass & ~(uint8_t)NTOK_ALL) != 0u)   return false;
+    if (r.reserved[0] || r.reserved[1] || r.reserved[2]) return false;
+  }
+  return true;
+}
+
+// EVERY CLASS IS REACHABLE. A class no token carries is a branch of the ladder
+// no scan can ever take - the shape of dead rule this project keeps finding.
+constexpr bool net_every_token_class_is_populated(void) {
+  uint8_t seen = 0;
+  for (uint8_t i = 0; i < NET_TOKEN_ROW_COUNT; ++i) seen |= NET_TOKEN_TABLE[i].klass;
+  return seen == (uint8_t)NTOK_ALL;
+}
+
+// The HOME band is [NET_RSSI_NEAR, 0] and the BUSINESS band is
+// [NET_RSSI_MID, NET_RSSI_NEAR). Swap the two constants and BUSINESS is empty
+// while HOME swallows everything down to the noise floor.
+constexpr bool net_rssi_bands_are_ordered(void) {
+  return NET_RSSI_MID < NET_RSSI_NEAR &&
+         NET_RSSI_MID >= -127 && NET_RSSI_NEAR <= 0;
+}
+
+static_assert(NET_TOKEN_ROW_COUNT >= 1, "the network token table is empty");
+static_assert(net_category_bits_are_one_bit_each_and_distinct(),
+              "two network categories share a category_mask bit");
+static_assert(net_token_table_is_sorted_and_unique(),
+              "NET_TOKEN_TABLE is not strictly ascending by hash - the binary search is invalid");
+static_assert(net_token_rows_are_well_formed(),
+              "a network token row has no class, more than one class, or a dirty reserved byte");
+static_assert(net_every_token_class_is_populated(),
+              "a network token class has no tokens - the classifier branch that reads it is dead");
+static_assert(net_rssi_bands_are_ordered(),
+              "NET_RSSI_NEAR / NET_RSSI_MID are swapped or out of int8_t range");
+
+#endif // PB_NETWORK_TABLE_H""")
+    return "\n".join(o) + "\n"
+
+
 def emit_encounter(c):
     bal = c.balance
     out_ord, out_names = enum_from(bal, "ENCOUNTER_OUTCOME_ENUM", "ENC_OUT_")
@@ -1087,20 +1346,15 @@ def emit_encounter(c):
          if clamped else []))]
     o.append("#ifndef PB_ENCOUNTER_TABLE_H\n#define PB_ENCOUNTER_TABLE_H\n")
     o.append('#include <stdint.h>\n#include <stddef.h>\n')
-    o.append('#include "species_table.h"\n#include "items_table.h"\n')
+    o.append('#include "network_table.h"\n#include "species_table.h"\n'
+             '#include "items_table.h"\n')
 
-    o.append("// Network categories (spec section 20). ORDINALS index EncounterRow.category;")
-    o.append("// BITS are what SpeciesDef.category_mask holds. Two encodings, one set.")
-    o.append("enum NetCategory : uint8_t {")
-    for cn in cats:
-        o.append("  NET_CAT_%s = %d," % (cn, ords[cn]))
-    o.append("  NET_CAT_COUNT")
-    o.append("};")
+    o.append("// NetCategory and NET_CATEGORY_BIT moved to network_table.h at P5-C1: the")
+    o.append("// encoding is the classifier's OUTPUT and this table's INDEX, and it now")
+    o.append("// has one owner. What stays here is the cross-check against the roster,")
+    o.append("// which network_table.h cannot see.")
     o.append("static_assert((uint8_t)NET_CAT_COUNT == NET_CATEGORY_COUNT,")
     o.append('              "NetCategory and SPECIES_SPAWN_SUM disagree on the category count");\n')
-    o.append("inline constexpr uint8_t NET_CATEGORY_BIT[NET_CAT_COUNT] = {")
-    o.append("  " + ", ".join("%d" % bits[cn] for cn in cats) + "   // " + " ".join(cats))
-    o.append("};\n")
 
     o.append("enum EncounterOutcome : uint8_t {")
     for n in out_names:
@@ -1491,6 +1745,7 @@ def build_all(families):
         os.path.join(DATA, "attacks_table.h"): emit_attacks(c),
         os.path.join(DATA, "items_table.h"): emit_items(c),
         os.path.join(DATA, "evolution_table.h"): emit_evolution(c),
+        os.path.join(DATA, "network_table.h"): emit_networks(c),
         os.path.join(DATA, "encounter_table.h"): emit_encounter(c),
         os.path.join(DATA, "creator_schema.h"): emit_creator_schema(c),
     }
@@ -1536,10 +1791,11 @@ def main():
         return 0
 
     print("gen_content.py: %d species (%d families), %d attacks, %d items, "
-          "%d evolution rules, %d encounter rows, %d item drops"
+          "%d evolution rules, %d encounter rows, %d item drops, %d network tokens"
           % (len(c.species), c.families, len(c.attacks), len(c.items),
              len(c.evo), len(c.encounters),
-             sum(len(v) for v in c.balance["ITEM_DROPS"].values())))
+             sum(len(v) for v in c.balance["ITEM_DROPS"].values()),
+             sum(len(v) for v in c.networks["TOKENS"].values())))
     print("gen_content.py: CONTENT_VERSION 0x%04X" % h)
     if drift:
         for p in sorted(drift):

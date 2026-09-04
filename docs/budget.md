@@ -43,6 +43,25 @@ Measured history, baseline deltas:
 |---|---|---|---|
 | 3 (pet) | 5 | +11,696 | +72 |
 | 4 (battle) | 6 | +22,582 | +2,328 |
+| 5 (exploration), so far: C1+C2 | 2 of 4 | **-1,572** | **-112** |
+
+**Phase 5's first two chunks are NEGATIVE on both axes, and that is a rebate rather than a
+discount.** P5-C1 deleted the Wi-Fi station path - credentials, association, retry backoff,
+link-loss re-association, `net_rssi()`, `net_is_sta_up()`, the creator screen's station
+branch and its golden - and what it added (a passive scanner, a pure classifier, an 88-row
+token table and the cooldown module) is smaller than what went. Measured, baseline:
+1,915,654 / 72,676 -> **1,914,082 / 72,564**. All seven matrix variants moved the same way;
+`release` is 1,191,426 / 49,004 -> **1,190,000 / 48,916**.
+
+**THE BILL IS NOT PAID YET, AND THIS IS WHERE THAT IS WRITTEN DOWN.** Nothing in the
+firmware CALLS the scanner or the cooldown table - the NETWORK screen is P5-C3 - so
+`--gc-sections` drops both from the image the figures above measure. Measured with a probe
+that wires a `WifiScanJob`, `net_scan_driver()` and `cd_ready`/`cd_arm` over the existing
+`GameState.cds` and then removed: **1,917,922 / 72,972**, i.e. P5-C3 inherits
+**+3,840 flash and +408 globals** the moment it calls any of it. The 408 is
+264 (game/cooldowns.cpp's per-boot RAM table, 32 rows of 8 B plus a dirty flag)
++ 136 (one `WifiScanJob`, 8 + 8 x `WIFI_SCAN_MAX_RESULTS`, owned by whichever screen
+declares it) + 8 (net.cpp's scan salt and intent byte).
 
 Phase 4's globals went almost entirely to ONE chunk — P4-C4, the battle screen and its
 renderer, at +18,780 / +2,304. That is the shape: **code and data cost flash; screens and

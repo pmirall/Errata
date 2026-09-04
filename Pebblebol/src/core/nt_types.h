@@ -368,6 +368,11 @@ struct Config {
   uint8_t  version;                      //   2  NT_CFG_VERSION
   uint8_t  flags;                        //   3  CF_*
   uint32_t saved_epoch;                  //   4
+  // FROZEN PADDING SINCE P5-C1, and deliberately not renamed. Nothing reads
+  // these 98 bytes any more - the device never joins a network - but the
+  // offsets of pet_name, tz, brightness and crc16 are asserted below and pinned
+  // by tests/fixtures/config_v1.bin, so removing them would move five fields
+  // and stop a v1 save loading. Kept, empty, with the reason written down.
   char     wifi_ssid[SSID_MAX_LEN + 1];  //   8  33
   char     wifi_pass[PASS_MAX_LEN + 1];  //  41  65
   char     pet_name[NAME_MAX_LEN + 1];   // 106  13

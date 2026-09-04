@@ -314,8 +314,8 @@ fi
 # THE TWO LISTS BELOW ARE DEFINED ONCE AND USED BY ALL OF THEM. Gates 1, 2 and
 # 2b read the same names, because two lists that must agree is the disagreement
 # this project keeps finding.
-PURE_NET="protocol.h protocol.cpp session.h session.cpp battle_link.h battle_link.cpp transport.h transport_loopback.cpp"
-PURE_NET_CPP="protocol.cpp session.cpp battle_link.cpp transport_loopback.cpp"
+PURE_NET="protocol.h protocol.cpp session.h session.cpp battle_link.h battle_link.cpp transport.h transport_loopback.cpp net_classify.h net_classify.cpp wifi_scanner.h wifi_scanner.cpp"
+PURE_NET_CPP="protocol.cpp session.cpp battle_link.cpp transport_loopback.cpp net_classify.cpp wifi_scanner.cpp"
 IMPURE_NET="ble_social.h ble_social.cpp net.h net.cpp webui.h webui.cpp"
 
 # 1. THE PURE NETWORKING MODULES ARE PURE, AND THE SCOPING IS BY FILENAME
@@ -396,19 +396,59 @@ if [ -d "$SKETCH/src/networking" ]; then
   [ "$n" -eq 0 ] || fail "src/networking mentions repairing ($n) - the wire path refuses, it never mends"
 fi
 
-# P5-C1: no station association anywhere (scan-only Wi-Fi, spec section 68 r5).
-# Still dormant on purpose - it cannot pass until P5-C1 deletes the station path
-# (networking/net.cpp:280 is the one call site today, reached from net.cpp:440).
+# --- P5-C1: THE TWO SCANNER GATES -----------------------------------------
+# 1. NO STATION ASSOCIATION ANYWHERE (scan-only Wi-Fi, spec section 68 r5).
+#    ARMED AT P5-C1, after three years dormant. It was dormant for a good
+#    reason - it could not pass while networking/net.cpp had the call - and it
+#    had TWO defects that only showed up when somebody tried to arm it:
 #
-# THE CARVE-OUT IS GONE (P4-C6 follow-up). This read `| grep -v creator_server`,
-# an exception the plan does not authorise: plan line 72 specifies the gate as
-# `grep -c "WiFi.begin" src/` == 0 flat. It also excused a file that does not
-# exist - the creator server is `networking/webui.cpp` and P8-C3 renames it -
-# and it would have excused nothing anyway, because the AP portal uses
-# WiFi.softAP() (net.cpp:297) and never WiFi.begin(). An exception no rule
-# authorises, for a file nothing has, is how a gate quietly stops gating.
-# if [ -d "$SKETCH/src" ]; then
-#   n=$(grep -rn "WiFi\.begin(" "$SKETCH/src" | wc -l); [ "$n" -eq 0 ] || fail "WiFi.begin() in src ($n) - the product never associates to a station"
-# fi
+#    (a) IT ABORTED IN THE PASSING CASE. It read
+#          n=$(grep -rn "WiFi\.begin(" "$SKETCH/src" | wc -l)
+#        and this script runs under `set -euo pipefail`. With ZERO hits grep
+#        exits 1, pipefail propagates that through `| wc -l`, the assignment
+#        inherits it and `set -e` kills the run BEFORE `echo "GATE OK"` - the
+#        exact failure this file warns about twice in its own comments
+#        (a gate must not be able to abort the thing it guards). Measured: a
+#        src/ with no hits exited 1 with no message at all. The `|| true` below
+#        is the house form used by every other grep gate here.
+#
+#    (b) EVEN CORRECTED IT FAILED ON PROSE. networking/net.h used to name the
+#        association call twice in comments - once in its banner rule and once
+#        as a phase's trailing comment - so the corrected gate counted 2 and
+#        failed on a tree with no call sites. THE FIX IS TO REWORD THE PROSE,
+#        NOT TO FILTER COMMENTS OUT: the comment-dropping filter the other
+#        gates use catches a whole-line comment and not a trailing one, and
+#        adding a filter here would reintroduce, in a new shape, the kind of
+#        carve-out the P4-C6 follow-up removed from this very gate.
+#
+#    THE CARVE-OUT IS GONE (P4-C6 follow-up). This read `| grep -v
+#    creator_server`, an exception the plan does not authorise: plan line 72
+#    specifies the gate as `grep -c "WiFi.begin" src/` == 0 flat. It also
+#    excused a file that does not exist, and would have excused nothing anyway:
+#    the AP portal uses WiFi.softAP() and never the association call.
+if [ -d "$SKETCH/src" ]; then
+  n=$( { grep -rn "WiFi\.begin(" "$SKETCH/src" || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "WiFi.begin() in src ($n) - the product never associates to a station"
+fi
+
+# 2. THE SCAN RESULT CARRIES NO NETWORK IDENTITY (spec section 44).
+#    networking/wifi_scanner.h is where ScanResult is declared, and the claim is
+#    that the struct a scan hands the game holds a salted hash, a signal
+#    strength and an abstract category and NOTHING that identifies a network.
+#    tests/test_exploration_hash.cpp pins sizeof AND every member's offset,
+#    which a `sizeof == 8` alone could not: swapping the two reserved bytes for
+#    two bytes of a network name keeps sizeof at 8. This gate is the half that
+#    cannot be satisfied by accident - the words themselves may not appear in
+#    the file, in a field, in a parameter or in a comment.
+#
+#    THE PROSE COST IS DELIBERATE AND IS NOT A DODGE: the rule is spelled out in
+#    full in networking/net_classify.h, which is the file that legitimately
+#    handles both (it is where they are destroyed), and wifi_scanner.h's banner
+#    points at it. A gate that its own subject's comments cannot satisfy is a
+#    gate somebody eventually filters.
+if [ -f "$SKETCH/src/networking/wifi_scanner.h" ]; then
+  n=$( { grep -rin "ssid\|bssid" "$SKETCH/src/networking/wifi_scanner.h" || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "networking/wifi_scanner.h names a network identifier ($n) - ScanResult carries a salted hash and nothing that identifies a network (spec 44)"
+fi
 
 echo "GATE OK"

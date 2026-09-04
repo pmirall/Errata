@@ -1,6 +1,14 @@
 // =============================================================================
 //  net.cpp - Nottamagochi radio state machine (BRIEF 1.3).
 //
+//  SCAN-ONLY WI-FI (P5-C1). This module has no station path: no credentials,
+//  no association call, no retry backoff, no link-loss re-association. What
+//  Wi-Fi does here is listen (NPH_SCANNING, a PASSIVE scan that sends nothing)
+//  and serve the creator's own access point (NPH_AP_PORTAL). tools/check.sh
+//  counts association call sites under src/ and fails the build at anything but
+//  zero, so "the device never joins a network" is a fact about the tree rather
+//  than a promise - which it was until P5-C1, held up by an empty SSID string.
+//
 //  Strict time-multiplex: exactly one radio stack resident at a time.
 //  Both-resident was rejected on the measured heap arithmetic
 //  (179,836 - 70,000 Bluedroid - 50,000 WiFi leaves too little for the HTTP
@@ -12,6 +20,8 @@
 //  millis() directly and never calls gt_now().
 // =============================================================================
 #include "net.h"
+#include "wifi_scanner.h"      // ScanResult, WifiScanDriver
+#include "net_classify.h"      // NetFacts, the ladder, the salted hash
 
 // net.h only forward-declares StrId (it must not pull the string table into
 // every one of its consumers). This TU is one of the few that really indexes
@@ -43,6 +53,12 @@
 // -----------------------------------------------------------------------------
 #define NET_LOGF(...) do { Serial.printf(__VA_ARGS__); } while (0)
 
+// The NPH_SCANNING backstop (net_service()). STRICTLY LATER than the scan job's
+// own WIFI_SCAN_TIMEOUT_MS so the two clocks can never disagree about what
+// happened: the job always answers first, and this only catches a job nobody is
+// pumping. One settle window plus a second of slack is the margin.
+#define NET_SCAN_BACKSTOP_MS ((uint32_t)WIFI_SCAN_TIMEOUT_MS + RADIO_SETTLE_MS + 1000UL)
+
 // -----------------------------------------------------------------------------
 // Module state
 // -----------------------------------------------------------------------------
@@ -53,22 +69,18 @@ static NetErr       s_err            = NERR_NONE;
 
 static uint32_t     s_phase_ms       = 0;    // millis() when the phase was entered
 static RadioMode    s_pending        = RADIO_OFF;  // NPH_SETTLING target
-static uint8_t      s_fails          = 0;    // consecutive association failures
 static uint8_t      s_ble_sessions   = 0;    // BLEDevice::init() calls this boot
 static bool         s_ap_up          = false;
+static bool         s_want_scan      = false;  // the next WiFi bring-up is a scan
+static uint32_t     s_scan_salt      = 0;    // net_scan_salt_set(gs_device_id())
 
 #if NT_NET_WANT_WIFI
-static uint32_t     s_retry_at_ms    = 0;    // next association attempt
-static uint32_t     s_link_lost_ms   = 0;    // 0 = link healthy
-static uint32_t     s_ip_refresh_ms  = 0;
 static bool         s_dns_up         = false;
 #endif
 
 static char         s_ip[16]         = "0.0.0.0";
 static char         s_ap_ssid[SSID_MAX_LEN + 1];
 static char         s_ble_name[16];
-static char         s_ssid[SSID_MAX_LEN + 1];
-static char         s_pass[PASS_MAX_LEN + 1];
 
 static NetHeapStats s_heap;
 
@@ -251,9 +263,18 @@ static void ap_down(void) {
 
 static void wifi_down(void) {
   ap_down();
+  // FREE THE SCAN ARRAY HERE, not only where a scan is read. WiFiScan::
+  // _scanDone() heap-allocates one wifi_ap_record_t per access point and only
+  // scanDelete() or the NEXT scan releases it - so any route to RADIO_OFF out
+  // from under a running or finished scan (leaving the screen, god mode, a
+  // low-power state) leaked the array. This is the one place every teardown
+  // passes through, which is why it belongs here.
+  WiFi.scanDelete();
   wifi_mode_t m = WiFi.getMode();
   if (m & WIFI_MODE_STA) {
-    // (wifioff, eraseap, timeout_ms) - three parameters in 3.1.1.
+    // (wifioff, eraseap, timeout_ms) - three parameters in 3.1.1. The scan
+    // enables STA (a pure mode change) and never associates, so this is a
+    // driver-state tidy-up rather than a disconnection.
     WiFi.disconnect(false, false, 100);
   }
   if (m != WIFI_MODE_NULL) {
@@ -262,27 +283,38 @@ static void wifi_down(void) {
     WiFi.mode(WIFI_MODE_NULL);
   }
   clear_ip();
-  s_link_lost_ms = 0;
 }
 
-static void refresh_sta_ip(void) {
-  IPAddress ip = WiFi.localIP();
-  set_ip_str(ip[0], ip[1], ip[2], ip[3]);
-  s_ip_refresh_ms = millis();
-}
-
-static void sta_start(void) {
-  WiFi.persistent(false);                 // do not burn NVS on every begin()
-  WiFi.setHostname(FW_NAME);              // before the netif exists
-  WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(true);
+// =============================================================================
+//  THE PASSIVE SCAN (P5-C1, spec sections 20, 40, 44)
+//
+//  WiFiScan::scanNetworks() calls WiFi.enableSTA(true) and NOTHING else that
+//  touches association - verified against the installed core (esp32 3.1.1,
+//  WiFiScan.cpp:75): enableSTA is a mode change, esp_wifi_connect() is never
+//  reached. net_begin()'s WiFi.persistent(false) also puts the IDF in
+//  WIFI_STORAGE_RAM, so it holds no saved credentials to try on its own.
+// =============================================================================
+static bool scan_begin(void) {
+  WiFi.persistent(false);
   WiFi.setSleep(true);                    // modem sleep; we are battery bound
-  WiFi.begin(s_ssid, s_pass[0] ? s_pass : (const char *)NULL);
-  clear_ip();
-  s_link_lost_ms = 0;
-  set_phase(NPH_STA_CONNECTING);
-  NET_LOGF("[net] STA connecting to \"%s\" (try %u/%u)\r\n",
-           s_ssid, (unsigned)(s_fails + 1), (unsigned)WIFI_MAX_FAILS);
+  // async, show_hidden, PASSIVE, ms per channel. Passive is the privacy half of
+  // spec section 44: the device listens for beacons and never sends a probe
+  // request, so it broadcasts nothing about itself while it explores.
+  // show_hidden is on because a beacon with no name is a CATEGORY (HIDDEN),
+  // not noise.
+  const int16_t r = WiFi.scanNetworks(true, true, true,
+                                      (uint32_t)WIFI_SCAN_DWELL_MS);
+  if (r != WIFI_SCAN_RUNNING) {
+    s_err = NERR_SCAN_FAILED;
+    NET_LOGF("[net] scan start FAILED (%d)\r\n", (int)r);
+    WiFi.scanDelete();
+    WiFi.mode(WIFI_MODE_NULL);
+    clear_ip();
+    set_mode(RADIO_OFF, NPH_OFF, "SCAN FAIL");
+    return false;
+  }
+  set_mode(RADIO_WIFI, NPH_SCANNING, "-> SCAN");
+  return true;
 }
 
 #if NT_NET_HAVE_PORTAL
@@ -330,33 +362,6 @@ static bool ap_start(void) {
 }
 #endif  // NT_NET_HAVE_PORTAL
 
-// Association attempt failed: back off, or fall back to the portal.
-static void sta_failed(uint32_t now) {
-  ++s_fails;
-  WiFi.disconnect(false, false, 100);
-  clear_ip();
-  if (s_fails >= WIFI_MAX_FAILS) {
-    s_err = NERR_STA_TIMEOUT;
-    NET_LOGF("[net] STA gave up after %u attempts\r\n", (unsigned)s_fails);
-#if NT_NET_HAVE_PORTAL
-    ap_start();
-    return;
-#else
-    s_fails       = 0;
-    s_retry_at_ms = now + (WIFI_RETRY_PERIOD_S * 1000UL);
-    set_phase(NPH_STA_RETRY_WAIT);
-    return;
-#endif
-  }
-  uint32_t backoff = 2000UL << (s_fails - 1);   // 2 s, 4 s, 8 s ...
-  if (backoff > 30000UL) {
-    backoff = 30000UL;
-  }
-  s_retry_at_ms = now + backoff;
-  set_phase(NPH_STA_RETRY_WAIT);
-  NET_LOGF("[net] STA retry in %lu ms\r\n", (unsigned long)backoff);
-}
-
 #endif  // NT_NET_WANT_WIFI
 
 // =============================================================================
@@ -369,8 +374,6 @@ void net_begin(void) {
   s_begun = true;
   memset(&s_heap, 0, sizeof(s_heap));
   build_identity();
-  copy_bounded(s_ssid, sizeof(s_ssid), CFG_WIFI_SSID);
-  copy_bounded(s_pass, sizeof(s_pass), CFG_WIFI_PASS);
   clear_ip();
 #if NT_NET_WANT_WIFI
   WiFi.persistent(false);
@@ -425,21 +428,21 @@ static bool bring_up(RadioMode want) {
   set_mode(RADIO_OFF, NPH_OFF, "-> OFF (no wifi)");
   return false;
 #else
-  s_fails = 0;
-  if (s_ssid[0] == '\0') {
-    s_err = NERR_NO_CREDENTIALS;
-#if NT_NET_HAVE_PORTAL
-    NET_LOGF("[net] no credentials -> provisioning portal\r\n");
-    return ap_start();
-#else
-    NET_LOGF("[net] no credentials and no portal available\r\n");
-    set_mode(RADIO_OFF, NPH_OFF, "-> OFF (no creds)");
-    return false;
-#endif
+  // TWO INTENTS ON ONE STACK, and the caller does not get to confuse them: the
+  // scanner sets s_want_scan through net_scan_driver()'s start(), everything
+  // else lands on the creator's access point. There is no third branch, because
+  // there is no station.
+  if (s_want_scan) {
+    return scan_begin();
   }
-  set_mode(RADIO_WIFI, NPH_STA_CONNECTING, "-> WIFI");
-  sta_start();
-  return true;
+#if NT_NET_HAVE_PORTAL
+  return ap_start();
+#else
+  s_err = NERR_WIFI_DISABLED;
+  NET_LOGF("[net] no portal available in this build\r\n");
+  set_mode(RADIO_OFF, NPH_OFF, "-> OFF (no portal)");
+  return false;
+#endif
 #endif
 }
 
@@ -459,7 +462,7 @@ bool net_request(RadioMode want) {
 #if NT_NET_WANT_WIFI
     wifi_down();
 #endif
-    s_fails   = 0;
+    s_want_scan = false;            // a scan intent does not survive a power-down
     s_pending = RADIO_OFF;          // cancels a settle that was in flight
     if (s_mode != RADIO_OFF || s_phase != NPH_OFF) {
       set_mode(RADIO_OFF, NPH_OFF, "-> OFF");
@@ -532,7 +535,7 @@ bool net_request(RadioMode want) {
     }
   }
   if (s_mode == RADIO_WIFI && s_phase != NPH_OFF) {
-    return true;   // already on the WiFi track (connecting, up, or portal)
+    return true;   // already on the WiFi track (scanning or portal)
   }
   return bring_up(RADIO_WIFI);
 #endif  // NT_NET_WANT_WIFI
@@ -565,44 +568,20 @@ void net_service(void) {
 #if NT_NET_WANT_WIFI
   switch (s_phase) {
 
-    case NPH_STA_CONNECTING:
-      if (WiFi.status() == WL_CONNECTED) {
-        s_fails = 0;
-        s_err   = NERR_NONE;
-        refresh_sta_ip();
-        set_phase(NPH_STA_UP);
-        net_heap_log("STA UP");
-        NET_LOGF("[net] STA up: %s rssi=%d\r\n", s_ip, (int)WiFi.RSSI());
-      } else if ((uint32_t)(now - s_phase_ms) >= WIFI_CONNECT_TIMEOUT_MS) {
-        sta_failed(now);
-      }
-      break;
-
-    case NPH_STA_RETRY_WAIT:
-      if ((int32_t)(now - s_retry_at_ms) >= 0) {
-        sta_start();
-      }
-      break;
-
-    case NPH_STA_UP:
-      if (WiFi.status() != WL_CONNECTED) {
-        if (s_link_lost_ms == 0) {
-          s_link_lost_ms = now;
-          NET_LOGF("[net] STA link lost, waiting for auto-reconnect\r\n");
-        } else if ((uint32_t)(now - s_link_lost_ms) >= WIFI_CONNECT_TIMEOUT_MS) {
-          clear_ip();
-          s_link_lost_ms = 0;
-          s_fails        = 0;
-          sta_start();
-        }
-      } else {
-        if (s_link_lost_ms != 0) {
-          s_link_lost_ms = 0;
-          refresh_sta_ip();
-          NET_LOGF("[net] STA re-associated: %s\r\n", s_ip);
-        } else if ((uint32_t)(now - s_ip_refresh_ms) >= 5000UL) {
-          refresh_sta_ip();   // DHCP renew can move us
-        }
+    // A BACKSTOP, AND IT IS DELIBERATELY LATER THAN THE JOB'S OWN CLOCK.
+    // networking/wifi_scanner.h owns the section 47 timeout at
+    // WIFI_SCAN_TIMEOUT_MS and releases the radio through the driver's stop().
+    // This one only fires when NOBODY IS PUMPING THE JOB AT ALL - a screen torn
+    // down mid-scan, a caller that forgot to service it - and because its
+    // deadline is strictly later it can never pre-empt the job's answer or
+    // disagree with it about what happened.
+    case NPH_SCANNING:
+      if ((uint32_t)(now - s_phase_ms) >= NET_SCAN_BACKSTOP_MS) {
+        s_err = NERR_SCAN_FAILED;
+        NET_LOGF("[net] scan backstop fired - nobody serviced the job\r\n");
+        wifi_down();
+        s_want_scan = false;
+        set_mode(RADIO_OFF, NPH_OFF, "SCAN BACKSTOP");
       }
       break;
 
@@ -620,15 +599,6 @@ const char *net_ip(void) {
   return s_ip;
 }
 
-bool net_is_sta_up(void) {
-#if NT_NET_WANT_WIFI
-  return (s_mode == RADIO_WIFI) && (s_phase == NPH_STA_UP) &&
-         (WiFi.status() == WL_CONNECTED);
-#else
-  return false;
-#endif
-}
-
 bool net_is_ap_up(void) {
   return s_ap_up;
 }
@@ -639,8 +609,7 @@ StrId net_last_err_str(void) {
     case NERR_BUSY:            return STR_ERR_BUSY;
     case NERR_BLE_SESSION_CAP: return STR_SO_CAP;
     case NERR_BLE_INIT_FAILED: return STR_ERR_MEM;
-    case NERR_NO_CREDENTIALS:  return STR_ERR_NO_WIFI;
-    case NERR_STA_TIMEOUT:     return STR_ERR_NO_WIFI;
+    case NERR_SCAN_FAILED:     return STR_ERR_NO_WIFI;
     case NERR_WIFI_DISABLED:   return STR_ERR_NO_WIFI;
     case NERR_BLE_DISABLED:    return STR_ERR_NO_NET;
     case NERR_AP_FAILED:       return STR_ERR_NO_NET;
@@ -691,50 +660,157 @@ uint8_t net_ble_sessions_left(void) {
              : (uint8_t)(BLE_SESSION_CAP - s_ble_sessions);
 }
 
-void net_set_credentials(const char *ssid, const char *pass) {
+// =============================================================================
+//  THE SCANNER'S RADIO DRIVER (P5-C1)
+//
+//  The four calls networking/wifi_scanner.cpp makes, and the ONE loop in the
+//  firmware where a beacon's name and hardware address exist. Both die inside
+//  scan_read(): what comes out is a salted 32-bit hash and a category ordinal
+//  (spec section 44). Nothing here returns an Arduino String - WiFi.SSID(i)
+//  would heap-allocate one per access point AND would be a name escaping by
+//  accident - so the records are read straight out of the driver's array.
+// =============================================================================
+void net_scan_salt_set(uint32_t device_id) {
+  s_scan_salt = net_scan_salt(device_id);
+}
+
+#if NT_NET_WANT_WIFI
+// The one mapping from the IDF's auth modes onto the project enum the pure
+// classifier speaks. NAUTH_OTHER is the default arm, so WIFI_AUTH_DPP and every
+// constant the core gains next classify rather than fall off the end.
+static uint8_t auth_of(wifi_auth_mode_t m) {
+  switch (m) {
+    case WIFI_AUTH_OPEN:                    return (uint8_t)NAUTH_OPEN;
+    case WIFI_AUTH_WEP:                     return (uint8_t)NAUTH_WEP;
+    case WIFI_AUTH_WPA_PSK:
+    case WIFI_AUTH_WPA2_PSK:
+    case WIFI_AUTH_WPA_WPA2_PSK:
+    case WIFI_AUTH_WPA3_PSK:
+    case WIFI_AUTH_WPA2_WPA3_PSK:
+    case WIFI_AUTH_WAPI_PSK:
+    case WIFI_AUTH_WPA3_EXT_PSK:
+    case WIFI_AUTH_WPA3_EXT_PSK_MIXED_MODE: return (uint8_t)NAUTH_PSK;
+    // WIFI_AUTH_WPA2_ENTERPRISE is an ALIAS of WIFI_AUTH_ENTERPRISE in this
+    // core, so naming both here would be a duplicate case label.
+    case WIFI_AUTH_ENTERPRISE:
+    case WIFI_AUTH_WPA3_ENT_192:            return (uint8_t)NAUTH_ENTERPRISE;
+    case WIFI_AUTH_OWE:                     return (uint8_t)NAUTH_OWE;
+    default:                                return (uint8_t)NAUTH_OTHER;
+  }
+}
+// The classifier is a pure translation unit and cannot see wifi_auth_mode_t, so
+// this is the file that pins the two together.
+static_assert((int)WIFI_AUTH_OPEN == 0, "WIFI_AUTH_OPEN is no longer 0");
+static_assert((int)WIFI_AUTH_WPA2_ENTERPRISE == (int)WIFI_AUTH_ENTERPRISE,
+              "WIFI_AUTH_WPA2_ENTERPRISE stopped aliasing WIFI_AUTH_ENTERPRISE - "
+              "auth_of() needs a case for it");
+static_assert((int)WIFI_AUTH_MAX > (int)WIFI_AUTH_DPP,
+              "the auth enum shrank under auth_of()");
+static_assert((int)NAUTH_COUNT == 6, "NetAuth gained or lost a value");
+
+static bool scan_start(void) {
   if (!s_begun) {
     net_begin();
   }
-  char new_ssid[SSID_MAX_LEN + 1];
-  char new_pass[PASS_MAX_LEN + 1];
-  copy_bounded(new_ssid, sizeof(new_ssid), ssid);
-  copy_bounded(new_pass, sizeof(new_pass), pass);
-  bool changed = (strcmp(new_ssid, s_ssid) != 0) || (strcmp(new_pass, s_pass) != 0);
-  copy_bounded(s_ssid, sizeof(s_ssid), new_ssid);
-  copy_bounded(s_pass, sizeof(s_pass), new_pass);
-  if (!changed) {
-    return;
+  // ONE RADIO, ONE OWNER. The creator portal is the other WiFi intent; refuse
+  // rather than silently hand back a scan that will never run.
+  if (s_mode == RADIO_WIFI && s_phase == NPH_AP_PORTAL) {
+    s_err = NERR_BUSY;
+    return false;
   }
-  NET_LOGF("[net] credentials updated (ssid=\"%s\")\r\n", s_ssid);
-#if NT_NET_WANT_WIFI
-  // Re-associate immediately if we are already on the WiFi track.
-  if (s_mode == RADIO_WIFI && s_ssid[0] != '\0') {
-    ap_down();
-    s_fails = 0;
-    set_phase(NPH_STA_CONNECTING);
-    sta_start();
+  s_want_scan = true;
+  if (!net_request(RADIO_WIFI)) {
+    s_want_scan = false;
+    return false;
   }
-#endif
+  return true;
 }
 
-bool net_has_credentials(void) {
-  return s_ssid[0] != '\0';
+static int16_t scan_poll(void) {
+  if (s_phase == NPH_SETTLING) {
+    return (int16_t)WSCAN_POLL_RUNNING;      // the radio is still coming up
+  }
+  if (s_mode != RADIO_WIFI || s_phase != NPH_SCANNING) {
+    return (int16_t)WSCAN_POLL_FAILED;       // bring-up failed, or somebody
+  }                                          // else took the radio
+  const int16_t r = WiFi.scanComplete();
+  if (r == WIFI_SCAN_RUNNING) {
+    return (int16_t)WSCAN_POLL_RUNNING;
+  }
+  if (r < 0) {
+    // WIFI_SCAN_FAILED covers both "timed out" and "was never triggered" - the
+    // core cannot tell them apart, which is exactly why wifi_scanner.h keeps
+    // its own clock instead of trusting this value to arrive.
+    s_err = NERR_SCAN_FAILED;
+    return (int16_t)WSCAN_POLL_FAILED;
+  }
+  return r;
 }
 
-int8_t net_rssi(void) {
-#if NT_NET_WANT_WIFI
-  if (s_phase != NPH_STA_UP || WiFi.status() != WL_CONNECTED) {
+static uint8_t scan_read(ScanResult *out, uint8_t cap) {
+  if (!out || cap == 0) {
+    WiFi.scanDelete();
     return 0;
   }
-  int32_t r = WiFi.RSSI();
-  if (r > 0) {
-    r = 0;
+  const int16_t n = WiFi.scanComplete();
+  uint8_t w = 0;
+  for (int16_t i = 0; i < n && w < cap; ++i) {
+    const wifi_ap_record_t *rec =
+        (const wifi_ap_record_t *)WiFi.getScanInfoByIndex((int)i);
+    if (!rec) {
+      continue;
+    }
+    // --- the only place a name and an address exist -----------------------
+    size_t name_len = 0;
+    while (name_len < sizeof(rec->ssid) && rec->ssid[name_len] != 0) {
+      ++name_len;
+    }
+    NetFacts f;
+    f.auth   = auth_of(rec->authmode);
+    f.hidden = (name_len == 0) ? 1u : 0u;
+    f.rssi   = net_rssi_clamp((int32_t)rec->rssi);
+    f.tokens = f.hidden ? 0u
+                        : net_tokens_of((const char *)rec->ssid, name_len);
+    out[w].net_hash    = net_hash_from_bssid(rec->bssid, s_scan_salt);
+    // --- and here they are gone -------------------------------------------
+    out[w].rssi        = f.rssi;
+    out[w].category    = net_classify(f);
+    out[w].reserved[0] = 0;
+    out[w].reserved[1] = 0;
+    ++w;
   }
-  if (r < -127) {
-    r = -127;
-  }
-  return (int8_t)r;
-#else
-  return 0;
-#endif
+  WiFi.scanDelete();
+  NET_LOGF("[net] scan read %u of %d\r\n", (unsigned)w, (int)n);
+  return w;
+}
+
+static void scan_stop(void) {
+  s_want_scan = false;
+  // Always: this is the call that makes spec section 40's "Wi-Fi shuts down
+  // after use" true, and wifi_scanner.cpp guarantees it happens exactly once
+  // per run on every exit path - done, failed, timed out or cancelled.
+  (void)net_request(RADIO_OFF);
+}
+
+static const WifiScanDriver s_scan_driver = {
+  &scan_start, &scan_poll, &scan_read, &scan_stop
+};
+
+#else   // NT_NET_WANT_WIFI
+
+// No WiFi consumer in this variant: the job refuses at start() and reports
+// WSCAN_FAILED, which is a defined outcome rather than a screen that hangs.
+static bool    scan_start(void) { s_err = NERR_WIFI_DISABLED; return false; }
+static int16_t scan_poll(void)  { return (int16_t)WSCAN_POLL_FAILED; }
+static uint8_t scan_read(ScanResult *out, uint8_t cap) { (void)out; (void)cap; return 0; }
+static void    scan_stop(void)  { (void)net_request(RADIO_OFF); }
+
+static const WifiScanDriver s_scan_driver = {
+  &scan_start, &scan_poll, &scan_read, &scan_stop
+};
+
+#endif  // NT_NET_WANT_WIFI
+
+const WifiScanDriver &net_scan_driver(void) {
+  return s_scan_driver;
 }

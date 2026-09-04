@@ -1824,7 +1824,6 @@ uint8_t ui_god_progress(void) { return s_god_prog; }
 void ui_creator_info(CreatorInfo& out) {
   memset(&out, 0, sizeof(out));
   out.ap_up  = net_is_ap_up()  ? 1u : 0u;
-  out.sta_up = net_is_sta_up() ? 1u : 0u;
   out.pin    = web_pin();
   snprintf(out.ssid, sizeof(out.ssid), "%s", net_ap_ssid());
   snprintf(out.ip,   sizeof(out.ip),   "%s", net_ip());
@@ -1866,7 +1865,10 @@ void ui_request_hatch(void) {
 void ui_info_lines(char lines[UI_INFO_LINES][UI_INFO_CAP]) {
   for (uint8_t i = 0; i < UI_INFO_LINES; ++i) lines[i][0] = '\0';
   snprintf(lines[0], UI_INFO_CAP, "%s %s", FW_NAME, FW_VERSION);
-  snprintf(lines[1], UI_INFO_CAP, "IP %s  rssi %d", net_ip(), (int)net_rssi());
+  // Was "IP %s  rssi %d". net_rssi() was station-only and went with the
+  // station (P5-C1); the radio's phase is what this line can still report.
+  snprintf(lines[1], UI_INFO_CAP, "IP %s  net %u/%u", net_ip(),
+           (unsigned)net_mode(), (unsigned)net_phase());
   snprintf(lines[2], UI_INFO_CAP, "PIN %04u  spr rev %u",
            (unsigned)(web_pin() % 10000u), (unsigned)SPRITE_REV);
   snprintf(lines[3], UI_INFO_CAP, "heap %lu  nvs %02X",

@@ -1190,7 +1190,10 @@ static void draw_sys(void)
       rd_text(2, 27, RD_FONT_TINY, b);
       snprintf(b, sizeof(b), "ip %s", net_ip());
       rd_text(2, 35, RD_FONT_TINY, b);
-      snprintf(b, sizeof(b), "rssi %d  ble %u/%u", (int)net_rssi(),
+      // No rssi line: net_rssi() was station-only and went with the station
+      // (P5-C1). Per-access-point signal strength lives in ScanResult.rssi,
+      // which the NETWORK screen reads, not here.
+      snprintf(b, sizeof(b), "ble %u/%u",
                (unsigned)net_ble_sessions_used(), (unsigned)BLE_SESSION_CAP);
       rd_text(2, 43, RD_FONT_TINY, b);
       break;

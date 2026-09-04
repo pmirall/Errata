@@ -8,6 +8,64 @@ Versions are tagged at phase boundaries of `PEBBLEBOL_IMPLEMENTATION_PLAN.md`; t
 tag for a phase is cut only when its gate (`tools/check.sh`) and its variant matrix
 (`tools/build_matrix.sh`) are both green.
 
+## [Unreleased] — Phase 5 (exploration), in progress
+
+### P5-C1 scan-only Wi-Fi · P5-C2 cooldowns
+
+**The device stopped being able to join a Wi-Fi network, and that is the feature.** Wi-Fi is
+now a sensor: it listens passively for the networks around it, turns each one into a salted
+32-bit hash and one of six abstract categories, and switches off again. It never associates
+to anything — not because a setting says so, but because the code that could is gone.
+
+- **The station path is deleted, not disabled.** `sta_start()`, `sta_failed()`,
+  `refresh_sta_ip()`, the retry backoff, the link-loss re-association, `net_rssi()`,
+  `net_is_sta_up()`, `net_set_credentials()`, the three `NPH_STA_*` phases, the creator
+  screen's "joined your network" branch and its frozen golden. `CFG_WIFI_SSID` and
+  `CFG_WIFI_PASS` are out of the user configuration block — there is nothing to fill in.
+  Until now this was a promise held up by an empty string: the credentials were always `""`,
+  so the association line was already unreachable. `tools/check.sh`'s dormant `WiFi.begin(`
+  gate is now armed and counts them at zero.
+- **`Config.wifi_ssid` and `Config.wifi_pass` stay, empty, on purpose.** 98 bytes of frozen
+  padding: their offsets are `static_assert`ed and pinned by `tests/fixtures/config_v1.bin`,
+  so removing them would move five fields and stop a v1 save loading.
+- **`networking/wifi_scanner.{h,cpp}`** — one scan as a caller-owned state machine with a
+  12-second software timeout and a cancel. The Arduino core's own scan timeout is 60 s and
+  its `scanComplete()` cannot tell "timed out" from "never triggered", so that clock is
+  load-bearing. The radio is released exactly once per run on every exit path.
+- **`networking/net_classify.{h,cpp}` + `tools/content/networks.json`** — the classifier the
+  plan had promised and never specified. Auth mode, the hidden flag, a clamped RSSI and a
+  three-bit token-class mask go in; one of `UNKNOWN / HOME / PUBLIC / BUSINESS / OPEN /
+  HIDDEN` comes out. The thresholds and the 88 tokens are content, generated into
+  `src/data/network_table.h` and folded into `CONTENT_VERSION` (`0x5B4A` → `0x54BD`) —
+  because a threshold decides a category and a category indexes the encounter table.
+- **Privacy (spec §44) is structural.** `ScanResult` is 8 bytes: a salted hash, a signal
+  strength, a category and two zero bytes. A network's name and hardware address exist only
+  as locals inside one loop; the hash is `fnv1a32(address ‖ fnv1a32("pbl-scan" ‖ device_id))`,
+  with zero folded away because zero means "empty row" in the cooldown table. The test pins
+  `sizeof` **and** every member's offset, and a gate greps the header for both words —
+  because `sizeof == 8` alone cannot fail when two reserved bytes become two bytes of a name,
+  which was measured rather than assumed.
+- **`game/cooldowns.{h,cpp}`** — two hours per network, absolute deadlines, LRU over 32 rows,
+  persisted in the `cd` pair. A clock that rolls backwards can only lengthen a wait. While
+  the clock is untrustworthy a **separate per-boot table** is used in both directions, on the
+  monotonic millisecond clock, and a calibration landing mid-session promotes its live rows
+  instead of stepping past them: without that, one keystroke on the time screen freed all
+  thirty-two networks at once. What it does not close — a reboot clears the fallback — is
+  written into the header, not left to be discovered.
+
+Measured, and both figures are **rebates**: baseline **1,915,654 / 72,676 → 1,914,082 /
+72,564** (−1,572 flash, −112 globals); `release` **1,191,426 / 49,004 → 1,190,000 / 48,916**.
+All seven matrix variants moved the same way. Nothing calls the scanner yet — the NETWORK
+screen is P5-C3 — so `--gc-sections` drops it from the image those figures measure; a probe
+build that wires it says P5-C3 inherits **+3,840 flash and +408 globals**. Host suite
+**31 → 33 binaries, 603 → 643 tests, 728,779 → 798,806 checks** — `test_exploration_hash`
+(24 cases) and `test_cooldowns` (17), less `snapshot_creator_station`, whose subject was deleted.
+
+`tests/golden/battle_v1.txt` was re-recorded: `battle_hash_basis()` mixes `CONTENT_VERSION`,
+so a pack change moves every round hash by design. **Every event line in the transcript is
+byte-identical** — only the version-stamped hashes and the header's `content=` field moved,
+which was checked by diffing the file with the hash fields masked out.
+
 ## [0.4.0-battle] — Unreleased
 
 Phase 4 gives the pet something to do with the stats phase 3 gave it. The content stopped

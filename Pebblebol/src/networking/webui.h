@@ -50,8 +50,9 @@
 // a call with a different port rebinds. Returns false only when FEATURE_WEB is
 // compiled out.
 //
-// The socket only opens once net_phase() is NPH_STA_UP or NPH_AP_PORTAL:
-// binding before lwIP exists aborts the firmware inside FreeRTOS.
+// The socket only opens once net_phase() is NPH_AP_PORTAL: binding before lwIP
+// exists aborts the firmware inside FreeRTOS, and since P5-C1 the access point
+// is the only WiFi phase that has an address at all.
 //
 // GATED ON CF_WEB_ENABLED when a Config is bound: with the flag clear the
 // routes are still registered (once, for the lifetime of the firmware) but no

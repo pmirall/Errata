@@ -24,6 +24,7 @@ def check(name, cond, detail=""):
 J = lambda n: json.load(open(os.path.join(HERE, n), encoding="utf-8"))
 SPECIES, ATTACKS, ITEMS = J("species.json"), J("attacks.json"), J("items.json")
 EVO, ENC, BAL = J("evolution.json"), J("encounters.json"), J("balance.json")
+NET = J("networks.json")
 ATK = {a["id"]: a for a in ATTACKS}
 # A species id nothing defines used to reach through this dict and raise
 # `KeyError: 5` out of the section-6 cross-check - a traceback, with no RESULT
@@ -292,6 +293,41 @@ noitem = [(r["category"],) for r in ENC if r["outcome"] == "ITEM" and not
            if next(i for i in ITEMS if i["id"] == int(k))["rarity"] in
               range(r["rarity_min"], r["rarity_max"]+1)]]
 check("every ITEM row resolves to a non-empty drop pool", not noitem, str(noitem))
+
+# ======================================================= 9b. NETWORK CLASSIFIER
+P(); P("=" * 78); P("9b. NETWORK CLASSIFIER  (spec 20, 40, 44)"); P("=" * 78)
+_tok = NET["TOKENS"]
+_all = [t for v in _tok.values() for t in v]
+check("token classes match NET_TOKEN_CLASS_BITS",
+      set(_tok) == set(NET["NET_TOKEN_CLASS_BITS"]), str(sorted(_tok)))
+check("every token class is populated", all(len(v) > 0 for v in _tok.values()),
+      {k: len(v) for k, v in _tok.items()})
+check("no token is claimed by two classes", len(_all) == len(set(_all)),
+      "%d tokens, %d unique" % (len(_all), len(set(_all))))
+check("every token is lowercase ASCII letters at least TOKEN_MIN_LEN long",
+      all(t.isascii() and t.isalpha() and t == t.lower()
+          and len(t) >= NET["TOKEN_MIN_LEN"] for t in _all),
+      str([t for t in _all if not (t.isascii() and t.isalpha() and t == t.lower()
+                                   and len(t) >= NET["TOKEN_MIN_LEN"])]))
+def _fnv(t):
+    h = 0x811C9DC5
+    for b in t.encode("ascii"):
+        h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF
+    return h
+check("no two tokens collide under FNV-1a 32",
+      len({_fnv(t) for t in _all}) == len(set(_all)))
+check("RSSI_MID is strictly weaker than RSSI_NEAR, both inside int8_t",
+      -127 <= NET["RSSI_MID"] < NET["RSSI_NEAR"] <= 0,
+      "MID %d NEAR %d" % (NET["RSSI_MID"], NET["RSSI_NEAR"]))
+check("NET_AUTH_ENUM is 0..N-1 with OTHER last (the sink for a new IDF mode)",
+      sorted(NET["NET_AUTH_ENUM"].values()) == list(range(len(NET["NET_AUTH_ENUM"])))
+      and NET["NET_AUTH_ENUM"]["OTHER"] == len(NET["NET_AUTH_ENUM"]) - 1,
+      str(NET["NET_AUTH_ENUM"]))
+# EVERY CATEGORY THE CLASSIFIER CAN EMIT HAS CONTENT BEHIND IT. This is the
+# join between this section and section 9: a ladder rung that lands on a
+# category with no encounter rows is an outcome the game cannot answer.
+check("every classifier output category has encounter rows",
+      all(any(r["category"] == c for r in ENC) for c in CATS), str(CATS))
 
 # ============================================================== 10. BALANCE
 P(); P("=" * 78); P("10. BALANCE CONSTANTS  (plan 1.5.1/1.5.2, spec 11, 36)"); P("=" * 78)

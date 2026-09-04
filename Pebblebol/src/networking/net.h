@@ -2,16 +2,27 @@
 //  net.h - Nottamagochi radio state machine.
 //
 //  THE ONLY MODULE ALLOWED TO TOUCH RADIO LIFECYCLE.
-//  Nothing else in the firmware may call WiFi.mode(), WiFi.begin(),
-//  WiFi.softAP(), DNSServer::start(), BLEDevice::init() or
-//  BLEDevice::deinit(). Consumers ask for a RadioMode and poll the accessors.
+//  Nothing else in the firmware may call WiFi.mode(), the station association
+//  entry point, WiFi.softAP(), WiFi.scanNetworks(), DNSServer::start(),
+//  BLEDevice::init() or BLEDevice::deinit(). Consumers ask for a RadioMode and
+//  poll the accessors.
+//
+//  THIS FIRMWARE NEVER JOINS A NETWORK (P5-C1, spec section 68 r5). The station
+//  path - credentials, association, retry backoff, link-loss re-association -
+//  was DELETED, not disabled: there is no call site left anywhere under src/,
+//  and tools/check.sh counts them and fails the build at anything but zero.
+//  That gate is a literal grep for the association call's name, which is why
+//  the sentence above spells the rule out instead of naming the function: a
+//  comment naming it would fail the gate that enforces it. What Wi-Fi is FOR is
+//  the passive scan (networking/wifi_scanner.h) and the creator's own access
+//  point, and neither one associates to anything.
 //
 //  INVARIANT (binding): exactly one radio stack is resident.
 //    RADIO_OFF  -> no WiFi, no Bluedroid. Simulation + OLED only.
-//    RADIO_WIFI -> WiFi STA (or the AP provisioning portal). Bluedroid down.
+//    RADIO_WIFI -> WiFi up as a scanner or as the AP portal. Bluedroid down.
 //    RADIO_BLE  -> Bluedroid up. WiFi driver deinitialised (WIFI_MODE_NULL).
-//  Therefore net_is_sta_up() == true implies BLEDevice::getInitialized()
-//  == false: a consumer that has the station up needs no separate BLE check.
+//  Therefore net_is_ap_up() == true implies BLEDevice::getInitialized()
+//  == false: a consumer that has the portal up needs no separate BLE check.
 //
 //  This header deliberately pulls in NO network headers (no WiFi.h, no
 //  BLEDevice.h, no WebServer.h) so ui/render/qr may include it without
@@ -41,10 +52,8 @@ enum StrId : uint16_t;
 // -----------------------------------------------------------------------------
 enum NetPhase : uint8_t {
   NPH_OFF = 0,          // RADIO_OFF, nothing resident
-  NPH_STA_CONNECTING,   // WiFi.begin() issued, waiting for association
-  NPH_STA_UP,           // WL_CONNECTED, IP valid
-  NPH_STA_RETRY_WAIT,   // backoff between association attempts
-  NPH_AP_PORTAL,        // softAP + captive DNS up (provisioning fallback)
+  NPH_SCANNING,         // WIFI_STA enabled for a passive scan. NEVER associated.
+  NPH_AP_PORTAL,        // softAP + captive DNS up (the creator's own network)
   NPH_BLE_UP,           // Bluedroid initialised
   NPH_SETTLING,         // one stack torn down, waiting RADIO_SETTLE_MS for the other
   NPH_COUNT
@@ -61,8 +70,7 @@ enum NetErr : uint8_t {
   NERR_BLE_DISABLED,      // built with FEATURE_BLE == 0
   NERR_BLE_SESSION_CAP,   // BLE_SESSION_CAP init/deinit cycles used this boot
   NERR_BLE_INIT_FAILED,   // BLEDevice::init() did not take
-  NERR_NO_CREDENTIALS,    // no SSID -> went straight to the AP portal
-  NERR_STA_TIMEOUT,       // association timed out WIFI_MAX_FAILS times
+  NERR_SCAN_FAILED,       // the driver refused to start a scan
   NERR_AP_FAILED,         // softAP() returned false
   NERR_DNS_FAILED,        // captive DNSServer::start() returned false
   NERR_COUNT
@@ -105,20 +113,22 @@ RadioMode   net_mode(void);
 // becomes NPH_SETTLING, the request returns true, and net_service() finishes
 // the bring-up when the timer expires. A caller that needs the stack resident
 // (SOCIAL before ble_begin(), god mode's GBS_RADIO) must therefore POLL
-// net_mode() rather than assume the call was enough. RADIO_WIFI has always
-// only *started* associating - poll net_is_sta_up() / net_phase().
+// net_mode() rather than assume the call was enough.
 // RADIO_OFF is the exception: it is always immediate and always succeeds.
+//
+// RADIO_WIFI brings up the AP PORTAL. The scan is a different intent on the
+// same stack and has its own entry point below, so a screen cannot get one by
+// asking for the other.
 bool        net_request(RadioMode want);
 
 // Pump. Call once per loop(). Never blocks: drives the settle timer, the
 // association timeout, the retry backoff and the AP provisioning fallback.
 void        net_service(void);
 
-// Dotted-quad of the active interface, "0.0.0.0" when down. Never NULL.
+// Dotted-quad of the access point, "0.0.0.0" when down. Never NULL.
+// NOT station-only and therefore NOT part of the P5-C1 deletion: the creator
+// portal is what serves this address (net_ap_ssid(), webui.cpp).
 const char *net_ip(void);
-
-// True only in STA mode with WL_CONNECTED and a routable IP.
-bool        net_is_sta_up(void);
 
 // -----------------------------------------------------------------------------
 // Extended interface
@@ -144,19 +154,38 @@ void        net_heap_log(const char *tag);
 uint8_t     net_ble_sessions_used(void);
 uint8_t     net_ble_sessions_left(void);
 
-// Runtime credentials (from Config in NVS). Pass NULL/"" to clear. Applied on
-// the next STA bring-up; if called while WiFi is up with a different SSID the
-// station is restarted.
-void        net_set_credentials(const char *ssid, const char *pass);
-bool        net_has_credentials(void);
-
-// 0 when not associated.
-int8_t      net_rssi(void);
+// -----------------------------------------------------------------------------
+// THE SCANNER'S RADIO (P5-C1, spec sections 20, 40, 44).
+//
+// net_scan_driver() hands back the WifiScanDriver that networking/
+// wifi_scanner.h drives: start a passive asynchronous scan, poll it, read the
+// results as ScanResult rows, and put the radio back to OFF. It is the ONLY
+// route from the game to WiFi.scanNetworks(), and the only place a beacon's
+// name or hardware address is ever touched - both die inside the read loop,
+// which hands out a salted hash and an abstract category (spec 44).
+//
+// net_scan_salt_set(device_id) must be called once, from the entry point, with
+// gs_device_id(): the hash is salted per device so the same access point reads
+// differently on two units and identically across reboots on one. Without it
+// the salt is 0, which is a usable hash but not a private one.
+// -----------------------------------------------------------------------------
+struct WifiScanDriver;
+const WifiScanDriver &net_scan_driver(void);
+void        net_scan_salt_set(uint32_t device_id);
 
 // Compile-time sanity on the constants this module contracts against.
 static_assert(RADIO_COUNT == 3, "RadioMode must stay OFF/WIFI/BLE");
-static_assert(NPH_COUNT == 7, "NetPhase gained or lost a phase");
+// Was 7. Three of them - the two station phases and the retry backoff - are
+// gone with the station path (P5-C1); NPH_SCANNING is new. The assertion is
+// RESTATED rather than deleted: its job is to make a phase appearing or
+// vanishing a deliberate act, and that job survives its subject changing.
+static_assert(NPH_COUNT == 5, "NetPhase gained or lost a phase");
 static_assert(BLE_SESSION_CAP > 0 && BLE_SESSION_CAP <= 255, "BLE_SESSION_CAP must fit uint8_t");
-static_assert(SSID_MAX_LEN == 32 && PASS_MAX_LEN == 64, "WiFi credential caps drifted");
+// Was `SSID_MAX_LEN == 32 && PASS_MAX_LEN == 64, "WiFi credential caps"`. There
+// are no credentials any more, so that assertion lost its subject; what these
+// two constants still size is this module's ACCESS POINT name buffer and the
+// frozen Config padding (core/nt_types.h). Restated in those terms, not
+// dropped, so the file still pins what it depends on.
+static_assert(SSID_MAX_LEN >= 15, "s_ap_ssid must hold AP_SSID_PREFIX + 4 hex digits");
 
 #endif  // NT_NET_H

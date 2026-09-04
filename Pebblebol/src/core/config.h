@@ -24,13 +24,12 @@
 // #############################################################################
 
 // --- Wi-Fi ------------------------------------------------------------------
-// The name (SSID) of your Wi-Fi network. Only 2.4 GHz networks work.
-// If you leave it empty the device brings up its own network, NOTTAMAGOCHI-XXXX,
-// so you can connect with a phone and hand it the password from the browser.
-#define CFG_WIFI_SSID       ""
-
-// Your Wi-Fi password. Leave it empty for an open network.
-#define CFG_WIFI_PASS       ""
+// THERE IS NOTHING TO FILL IN HERE ANY MORE, and that is the point (P5-C1).
+// The device NEVER joins a Wi-Fi network. It listens for the networks around
+// it - that is the exploration sensor - and it brings up its OWN network,
+// NOTTAMAGOCHI-XXXX, when you want to open the creator page from a phone.
+// CFG_WIFI_SSID and CFG_WIFI_PASS used to live here; the code that would have
+// used them is gone and tools/check.sh fails the build if it comes back.
 
 // --- Your creature ----------------------------------------------------------
 // What it is called. 12 characters at most. Left empty, it invents a name from
@@ -344,9 +343,13 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 // =============================================================================
 // 11. RADIO / NETWORK
 // =============================================================================
-#define WIFI_CONNECT_TIMEOUT_MS 15000UL
-#define WIFI_RETRY_PERIOD_S     120UL
-#define WIFI_MAX_FAILS          3
+// THE STATION IS GONE (P5-C1). WIFI_CONNECT_TIMEOUT_MS, WIFI_RETRY_PERIOD_S
+// and WIFI_MAX_FAILS timed an association this firmware can no longer make:
+// networking/net.cpp has no association call site left and tools/check.sh
+// counts them and fails the build at anything but zero - which is why this
+// comment describes the call instead of naming it, exactly as net.h's banner
+// does. (Spec section 68 r5.) The scan has its own section 47 budget
+// below rather than borrowing the association's - they are different waits.
 #define AP_SSID_PREFIX          "NOTTAMAGOCHI-"
 #define AP_IP_A                 192
 #define AP_IP_B                 168
@@ -354,6 +357,25 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 #define AP_IP_D                 1
 
 #define RADIO_SETTLE_MS         250
+
+// --- SCAN-ONLY Wi-Fi (P5-C1, spec sections 20, 40, 44, 47) ------------------
+// PASSIVE: the device listens for beacons and never sends a probe request, so
+// nothing about it is broadcast while it explores.
+#define WIFI_SCAN_DWELL_MS      300          // per channel; 13 channels ~ 3.9 s
+// The software ceiling. The Arduino core's own scan timeout is 60,000 ms and
+// its scanComplete() cannot tell "timed out" from "never triggered", so this is
+// the clock that actually bounds the wait (networking/wifi_scanner.h).
+#define WIFI_SCAN_TIMEOUT_MS    12000UL
+// How many access points one job hands back. A WifiScanJob is 8 + 8*N bytes and
+// is owned by whoever declares one, so this is a RAM decision: 16 covers a
+// dense flat block and costs 136 B in the screen that holds the job.
+#define WIFI_SCAN_MAX_RESULTS   16
+
+// --- ENCOUNTER COOLDOWNS (P5-C2, spec section 21) ---------------------------
+// "approximately 2 hours or greater per relevant network/event". One period,
+// used by game/cooldowns.cpp for both the persisted table and the uncalibrated
+// RAM fallback, so the two cannot be tuned apart.
+#define ENCOUNTER_COOLDOWN_S    7200UL
 
 // BLE (connectionless, advertisement only)
 #define BLE_COMPANY_ID          0xFFFF
@@ -420,6 +442,11 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 #define GATE_RELEASE_FLASH_MAX    1600000UL
 #define GATE_RELEASE_GLOBALS_MAX    65000UL
 #define NAME_MAX_LEN            12           // + NUL = 13
+// These two size the FROZEN Config.wifi_ssid / Config.wifi_pass fields (98 B of
+// padding since P5-C1 deleted their only reader) and the access-point SSID
+// buffer. The offsets of every Config field after them are static_asserted and
+// pinned by tests/fixtures/config_v1.bin, so the bytes stay where they are; see
+// core/nt_types.h.
 #define SSID_MAX_LEN            32
 #define PASS_MAX_LEN            64
 #define TZ_MAX_LEN              39

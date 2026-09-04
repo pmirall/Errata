@@ -93,7 +93,10 @@ static void apply_config(void)
 {
   ui_note_brightness(g_cfg.brightness);
 
-  net_set_credentials(g_cfg.wifi_ssid, g_cfg.wifi_pass);
+  // net_set_credentials() was here. It went with the station path (P5-C1):
+  // this firmware never joins a network, so there is nothing to apply.
+  // Config.wifi_ssid / wifi_pass stay in the struct as frozen padding - their
+  // offsets are pinned by tests/fixtures/config_v1.bin - and nothing reads them.
 
   g_cfg_crc = g_cfg.crc16;
 }
@@ -536,6 +539,14 @@ void app_setup(void)
   // --- everything that reads Config or the pet ------------------------------
   input_begin();
   net_begin();
+  // The scan's per-device salt (spec section 44). gs_device_id() is drawn once
+  // from RNG_MISC, is never 0 and is persisted, so the same access point hashes
+  // differently on two units and identically across reboots on one. It must be
+  // set before any scan runs; a salt of 0 is a usable hash but not a private
+  // one. THE CONSEQUENCE, WRITTEN DOWN: a factory reset regenerates the device
+  // id, so every armed cooldown goes stale at once - correct, a wiped device is
+  // a new device, but it looks like a bug when nobody has said it.
+  net_scan_salt_set(gs_device_id());
   god_begin();
 
   ui_bind_recover(&app_recover_save);

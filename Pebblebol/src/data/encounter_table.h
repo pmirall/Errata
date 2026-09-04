@@ -37,26 +37,16 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "network_table.h"
 #include "species_table.h"
 #include "items_table.h"
 
-// Network categories (spec section 20). ORDINALS index EncounterRow.category;
-// BITS are what SpeciesDef.category_mask holds. Two encodings, one set.
-enum NetCategory : uint8_t {
-  NET_CAT_UNKNOWN = 0,
-  NET_CAT_HOME = 1,
-  NET_CAT_PUBLIC = 2,
-  NET_CAT_BUSINESS = 3,
-  NET_CAT_OPEN = 4,
-  NET_CAT_HIDDEN = 5,
-  NET_CAT_COUNT
-};
+// NetCategory and NET_CATEGORY_BIT moved to network_table.h at P5-C1: the
+// encoding is the classifier's OUTPUT and this table's INDEX, and it now
+// has one owner. What stays here is the cross-check against the roster,
+// which network_table.h cannot see.
 static_assert((uint8_t)NET_CAT_COUNT == NET_CATEGORY_COUNT,
               "NetCategory and SPECIES_SPAWN_SUM disagree on the category count");
-
-inline constexpr uint8_t NET_CATEGORY_BIT[NET_CAT_COUNT] = {
-  1, 2, 4, 8, 16, 32   // UNKNOWN HOME PUBLIC BUSINESS OPEN HIDDEN
-};
 
 enum EncounterOutcome : uint8_t {
   ENC_OUT_WILD,

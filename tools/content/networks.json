@@ -1,0 +1,114 @@
+{
+  "_doc": [
+    "NETWORK CLASSIFIER TUNING (spec 20, 40, 44). P5-C1.",
+    "",
+    "The classifier turns what a passive Wi-Fi scan can see - the authentication",
+    "mode in the beacon, whether the beacon carried a name at all, the signal",
+    "strength, and which CLASSES of word the name is built from - into one of the",
+    "six abstract NetCategory values the encounter table is indexed by. It never",
+    "connects, never stores a name or a hardware address, and never puts either",
+    "in a struct: the tokens below are matched inside the scan and only a 3-bit",
+    "class bitmask leaves that loop.",
+    "",
+    "WHY THIS IS IN THE CONTENT PACK AND NOT IN data/balance.h BY HAND. A",
+    "category decides which encounter row is rolled, so moving RSSI_NEAR by 5 dB",
+    "changes what the game hands the player exactly as an encounter weight does.",
+    "Everything that does that is generated from this directory and folded into",
+    "CONTENT_VERSION; a hand-written second home for it would be a source of",
+    "category truth that tools/check.sh's balance gate - which compares a named",
+    "list of ELEVEN BATTLE constants - does not cover.",
+    "",
+    "THE TOKEN LISTS ARE A LOCALE BET AND THIS IS WHERE THAT IS WRITTEN DOWN.",
+    "The product ships Spanish strings, so ISP_CPE is the Spanish residential",
+    "router-default families plus the CPE vendor names that reach that market.",
+    "A device carried through Lisbon or Lyon will classify more networks UNKNOWN",
+    "than one carried through Madrid. UNKNOWN is the right sink for that: it has",
+    "the largest species pool on the roster and six encounter rows of its own,",
+    "so a mis-token costs variety, never an unanswerable outcome.",
+    "",
+    "MATCHING IS WHOLE-TOKEN AND DELIBERATELY CONSERVATIVE. The scanner splits a",
+    "name into maximal runs of ASCII letters, lowercases them and looks up runs",
+    "of at least TOKEN_MIN_LEN letters. So MOVISTAR_1234 and vodafone9F4 both",
+    "match, and Telefonica does NOT match 'fon'. It under-matches rather than",
+    "over-matches, which is the safe direction: an unmatched name falls through",
+    "to the signal-strength rules instead of being asserted to be something."
+  ],
+
+  "NET_AUTH_ENUM": {
+    "OPEN": 0,
+    "WEP": 1,
+    "PSK": 2,
+    "ENTERPRISE": 3,
+    "OWE": 4,
+    "OTHER": 5
+  },
+  "_NET_AUTH_ENUM_doc": [
+    "The classifier's view of a beacon's authentication mode - a PROJECT enum,",
+    "not the IDF's. networking/net_classify.cpp is a pure translation unit and",
+    "may not name wifi_auth_mode_t; networking/net.cpp does the one mapping and",
+    "static_asserts it against the real constants. OTHER is what every value the",
+    "core gains next (WPA3_EXT_PSK, DPP, ...) lands on, so a new IDF constant",
+    "changes a category and never an unhandled case."
+  ],
+
+  "NET_TOKEN_CLASS_BITS": {
+    "VENUE": 1,
+    "ISP_CPE": 2,
+    "OPERATOR": 4
+  },
+  "_NET_TOKEN_CLASS_doc": [
+    "VENUE    - a place that MEANS to be found by strangers: a hotel, a station,",
+    "           a library, a campus. The strongest non-auth signal for PUBLIC.",
+    "ISP_CPE  - a residential router's factory default. Says 'somebody lives",
+    "           here', which is what separates HOME from BUSINESS at mid range.",
+    "OPERATOR - a carrier or federated hotspot family, open by design. Only",
+    "           consulted on the OPEN/OWE branch, where it separates a carrier's",
+    "           public hotspot from a router somebody left unlocked."
+  ],
+
+  "TOKEN_MIN_LEN": 3,
+
+  "RSSI_NEAR": -55,
+  "RSSI_MID": -75,
+  "_RSSI_doc": [
+    "RSSI_NEAR: 'you are standing inside it'. A locked network this loud is",
+    "  almost always the premises you are in; on a phone this is a full bar.",
+    "RSSI_MID:  the edge of usable. Between the two you are NEXT TO a place",
+    "  rather than in it, which reads as BUSINESS unless the name says home.",
+    "Below RSSI_MID a locked beacon is a distant fact you can say nothing about,",
+    "and that is UNKNOWN rather than a guess.",
+    "",
+    "THE HONEST WEAKNESS, NAMED: a strong neighbour's router classifies HOME.",
+    "Without connecting, or keeping a per-network observation history, there is",
+    "nothing better available. The upgrade - 'seen on N consecutive scans' -",
+    "needs a seen count, and CooldownRow is {u32 net_hash, u32 until_epoch}",
+    "inside a 272 B blob whose every offset is static_asserted. That is a schema",
+    "change, so it is a P6 option and not a free one."
+  ],
+
+  "TOKENS": {
+    "VENUE": [
+      "guest", "guests", "invitado", "invitados", "visitante", "visitantes",
+      "free", "gratis", "public", "publico", "publica",
+      "hotel", "hostal", "hostel", "camping", "apartamentos",
+      "cafe", "cafeteria", "restaurante", "terraza", "lobby", "recepcion",
+      "biblioteca", "museo", "teatro", "cine",
+      "aeropuerto", "airport", "estacion", "terminal", "renfe",
+      "eduroam", "campus", "universidad", "colegio", "escuela", "instituto",
+      "ayuntamiento", "hospital", "clinica", "centrosalud"
+    ],
+    "ISP_CPE": [
+      "movistar", "vodafone", "orange", "jazztel", "masmovil", "yoigo",
+      "pepephone", "digi", "lowi", "euskaltel", "telecable", "adamo",
+      "avatel", "finetwork", "parlem", "rcable",
+      "mifibra", "livebox", "wlan", "ono",
+      "fritzbox", "technicolor", "sagemcom", "comtrend", "mitrastar",
+      "askey", "zyxel", "tplink", "dlink", "netgear", "linksys", "arris"
+    ],
+    "OPERATOR": [
+      "fon", "fonera", "fonwifi", "hotspot", "wifispot", "freewifi",
+      "attwifi", "xfinitywifi", "optimumwifi", "spectrumwifi",
+      "boingo", "wayport", "telekom", "swisscom", "wifionice"
+    ]
+  }
+}
