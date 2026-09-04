@@ -73,6 +73,16 @@ $(OBJ)/%.o: $(SRC_ROOT)/minigames/games/%.cpp Makefile | $(OBJ)
 $(OBJ)/%.o: $(SRC_ROOT)/persistence/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
+# networking/ (P4-C5). NOTHING under src/networking could link on the host
+# before this rule existed - `grep -c networking Makefile` was 0 - so the
+# section 15 codec had no way to be tested at all. The rule is generic and the
+# LINK LINES are what select: ble_social.cpp, net.cpp and webui.cpp are device
+# modules that include Arduino.h and no test asks for them, so they are never
+# compiled here. tools/check.sh gates the purity of the pure ones BY FILENAME
+# for exactly that reason.
+$(OBJ)/%.o: $(SRC_ROOT)/networking/%.cpp Makefile | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
 # Host fakes for the device seams (kv_store, later gfx).
 $(OBJ)/%.o: fakes/%.cpp fakes/%.h Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
@@ -136,6 +146,25 @@ $(BIN)/test_battle_golden: $(OBJ)/battle.o $(OBJ)/pebble.o $(OBJ)/genome.o \
 $(BIN)/test_battle_ai:  $(OBJ)/battle_ai.o $(OBJ)/battle.o $(OBJ)/pebble.o \
                         $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
+# THE SHARED VALIDATOR (P4-C5, spec section 15). validate.cpp is PURE, so it
+# compiles here exactly as it does in the firmware. pebble.o is the one stat
+# derivation it calls (hp_max through the SAME function battle.cpp uses),
+# evolution.o + xp.o come as the pair they always do (they call each other), and
+# genome.o drags crc16.o and rng.o. battle.o is here for the CONTAINMENT case:
+# the claim "validate_team accepts => battle_init does not refuse for any reason
+# but BR_MEMBER_FAINTED" is only checkable with the real engine in the binary.
+$(BIN)/test_validate:   $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o \
+                        $(OBJ)/rng.o $(OBJ)/battle.o $(OBJ)/box.o
+
+# THE SECTION 15 CODEC (P4-C5). protocol.o on top of the validator's objects,
+# because pbw_decode() IS a decode in front of validate_pebble(). rng.o is also
+# the fuzzer's source: every fuzz frame is a pure function of one printable u32
+# drawn through core/rng.h, so a failure reproduces from the seed alone.
+$(BIN)/test_protocol:   $(OBJ)/protocol.o $(OBJ)/validate.o $(OBJ)/pebble.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
+
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 # The minigame contract and the PURE logic of every game. No draw objects and
 # no ui/: if this link line ever needs one, a game has leaked drawing into its
@@ -154,11 +183,18 @@ $(BIN)/test_fixtures:   $(OBJ)/crc16.o
 # gene_set_species() and reads back through species_base_of_family(), which is
 # the only way to prove that every v1 family lands on a BASE-stage creature
 # rather than on nothing. genome.o drags rng.o.
+# validate.o + its pair since P4-C5: save_load_all() ends in the shared
+# validator (the quarantine), so the load path drags the section 15 rules the
+# same way the wire path does.
 $(BIN)/test_persistence: $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/crc16.o \
-                        $(OBJ)/genome.o $(OBJ)/rng.o $(OBJ)/species.o
+                        $(OBJ)/genome.o $(OBJ)/rng.o $(OBJ)/species.o \
+                        $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o
 $(BIN)/test_game_state: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
-                        $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o
+                        $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o \
+                        $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/genome.o
 # The screen table's migrated rows are pure translation units, so they compile
 # here exactly as they do in the firmware; gfx_fb.o is the host end of gfx.h
 # and gfx_widgets.o is the SHARED half of it, linked into both.

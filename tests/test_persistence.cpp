@@ -22,6 +22,7 @@
 #include "game/genome.h"          // gene_set_species(), to drive the map
 #include "game/species.h"         // species_base_of_family()
 #include "game/xp.h"              // xp_hp_max()
+#include "game/validate.h"        // the load path is a spec 15 consumer (P4-C5)
 
 // --- a fake clock so the wear filter and the 1 s floor are deterministic -----
 static uint32_t s_ms    = 0;
@@ -492,6 +493,90 @@ TEST(unforced_writes_obey_the_wear_filter) {
 // =============================================================================
 //  5. Header/slot disagreement: the slot blobs are the truth
 // =============================================================================
+// =============================================================================
+//  THE LOAD PATH IS A SPEC SECTION 15 CONSUMER (P4-C5). save_manager.h used to
+//  advertise "runtime validation" over a pipeline whose only check was
+//  blob_ok() - magic, CRC and a version byte. It runs game/validate.h's
+//  validate_pebble() now, and the rule is QUARANTINE: flag the slot, keep the
+//  Pebble, repair nothing.
+// =============================================================================
+static PebbleInstance valid_pebble(uint8_t slot, uint8_t species, uint8_t level) {
+  PebbleInstance p;
+  pebble_clear(p);
+  p.species_id = species;
+  p.id         = 0xC0FFEE00u + slot;
+  p.level      = level;
+  p.origin     = (uint8_t)ORIGIN_WILD;
+  const SpeciesDef* sp = species_get(species);
+  memcpy(p.moves, sp->moves, sizeof p.moves);
+  p.hp_cur    = xp_hp_max(sp->base_hp, level);
+  p.evo_state = sp->stage;
+  for (uint8_t i = 0; i < PB_CARE_COUNT; ++i) p.care[i] = (int32_t)PB_CARE_MILLI_MAX;
+  p.genome.lineage_id = 0x0BADF00Du + slot;
+  p.genome.g0 = 0x1234; p.genome.g1 = 0x5678; p.genome.g2 = 0x09AB;
+  genome_seal(p.genome);
+  pebble_seal(p);
+  return p;
+}
+
+TEST(a_valid_box_is_quarantined_nowhere) {
+  begin();
+  GameState gs;
+  CHECK_EQ(save_load_all(gs), LOAD_FRESH);
+  gs.pebbles[1] = valid_pebble(1, 1, 5);
+  gs.pebbles[6] = valid_pebble(6, 9, 22);            // species 9 is stage 2
+  gs.box.slot_mask   = 0x0042u;
+  gs.box.active_slot = 1;
+  CHECK(save_pebble(1, gs.pebbles[1], true));
+  CHECK(save_pebble(6, gs.pebbles[6], true));
+  CHECK(save_box_header(gs.box));
+
+  GameState back;
+  CHECK_EQ(save_load_all(back), LOAD_OK);
+  CHECK_EQ((int)save_quarantine_mask(), 0);
+  for (uint8_t slot = 0; slot < BOX_SLOTS; ++slot)
+    CHECK_EQ((int)save_quarantine_reason(slot), (int)VR_OK);
+  CHECK_EQ((int)validate_pebble(back.pebbles[6]), (int)VR_OK);
+}
+
+TEST(a_load_quarantines_an_invalid_pebble_by_name_and_repairs_nothing) {
+  begin();
+  GameState gs;
+  CHECK_EQ(save_load_all(gs), LOAD_FRESH);
+  // sample_pebble() is the LAYOUT fixture: every field is set to something
+  // distinctive rather than to something legal, so it carries trait_id 9, a
+  // moveset no species teaches and an evo_state that disagrees with its row.
+  // That makes it exactly the shape of save this stage exists to notice.
+  gs.pebbles[3] = sample_pebble(3);
+  gs.pebbles[5] = valid_pebble(5, 1, 5);
+  gs.box.slot_mask   = 0x0028u;
+  gs.box.active_slot = 5;
+  CHECK(save_pebble(3, gs.pebbles[3], true));
+  CHECK(save_pebble(5, gs.pebbles[5], true));
+  CHECK(save_box_header(gs.box));
+
+  GameState back;
+  // THE BOX STILL LOADS. Refusing it would brick a device on a content-pack
+  // change, because VR_UNKNOWN_SPECIES is what an older save legitimately
+  // produces - so the failure is reported, not acted on.
+  CHECK_EQ(save_load_all(back), LOAD_OK);
+  CHECK_EQ((int)save_quarantine_mask(), (int)(1u << 3));
+  CHECK(save_quarantine_reason(3) != VR_OK);
+  CHECK_EQ((int)save_quarantine_reason(3),
+           (int)validate_pebble(gs.pebbles[3]));      // the named reason, not a bool
+  CHECK_EQ((int)save_quarantine_reason(5), (int)VR_OK);
+
+  // AND NOTHING WAS MENDED: every byte the GAME owns comes back unchanged. The
+  // comparison stops at offsetof(seq) because seq and the CRC over it are the
+  // PAIR bookkeeping - save_pebble() stamps a fresh sequence number on every
+  // write, so those four bytes differ for a reason that has nothing to do with
+  // validation.
+  CHECK_EQ(memcmp(&back.pebbles[3], &gs.pebbles[3],
+                  offsetof(PebbleInstance, seq)), 0);
+  CHECK_EQ((int)back.pebbles[3].trait_id, 9);
+  CHECK_EQ((int)back.pebbles[3].evo_state, 1);
+}
+
 TEST(header_slot_mismatch_self_heals) {
   begin();
   GameState gs;

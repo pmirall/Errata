@@ -583,7 +583,46 @@ bool save_restore_checkpoint(GameState& gs) {
   return commit_all(gs);
 }
 
-LoadResult save_load_all(GameState& gs) {
+// -----------------------------------------------------------------------------
+//  THE SAVE PATH IS THE SHARED VALIDATOR'S SECOND LIVE CALL SITE (spec 15).
+//
+//  IT QUARANTINES. It does not refuse the Box and it does not repair one byte.
+//  Refusing would brick a device on a content-pack change, because
+//  VR_UNKNOWN_SPECIES is exactly what an older save legitimately produces; and
+//  repairing is the failure spec 15's first sentence is written against, so
+//  game/validate.h takes its Pebble CONST and this file could not repair even
+//  if it wanted to. A quarantined Pebble is loaded, drawn and reported with its
+//  named VReject, and P7 must keep it out of a battle and out of a trade.
+//
+//  It runs on EVERY load outcome, after migration and after a checkpoint
+//  restore, because those two paths build Pebbles too. On LOAD_CORRUPT and
+//  LOAD_FOREIGN_NEWER the Box is still at its defaults and every slot is empty,
+//  so the scan is a no-op rather than a special case.
+// -----------------------------------------------------------------------------
+static uint16_t s_quarantine_mask = 0;
+static uint8_t  s_quarantine_why[BOX_SLOTS] = { 0 };
+
+static void quarantine_scan(const GameState& gs) {
+  s_quarantine_mask = 0;
+  for (uint8_t slot = 0; slot < BOX_SLOTS; ++slot) {
+    s_quarantine_why[slot] = (uint8_t)VR_OK;
+    if (pebble_is_empty(gs.pebbles[slot])) continue;
+    const VReject r = validate_pebble(gs.pebbles[slot]);
+    if (r != VR_OK) {
+      s_quarantine_mask     |= (uint16_t)(1u << slot);
+      s_quarantine_why[slot] = (uint8_t)r;
+    }
+  }
+}
+
+uint16_t save_quarantine_mask(void) { return s_quarantine_mask; }
+
+VReject save_quarantine_reason(uint8_t slot) {
+  if (slot >= (uint8_t)BOX_SLOTS) return VR_OK;
+  return (VReject)s_quarantine_why[slot];
+}
+
+static LoadResult load_all_inner(GameState& gs) {
   state_defaults(gs);
   save_bind(gs);
   s_migrated      = false;
@@ -700,6 +739,14 @@ LoadResult save_load_all(GameState& gs) {
     return LOAD_RECOVERED_PAIR;
   }
   return LOAD_OK;
+}
+
+// The whole pipeline of plan 1.5.4, with runtime validation as its last stage.
+// The scan runs on every outcome so no return path can forget it.
+LoadResult save_load_all(GameState& gs) {
+  const LoadResult r = load_all_inner(gs);
+  quarantine_scan(gs);
+  return r;
 }
 
 // =============================================================================

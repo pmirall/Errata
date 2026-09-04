@@ -48,7 +48,59 @@ Phase 4 begins. Nothing is tagged yet.
   the last thing every DRAWN frame does and a no-op while god mode is off — so it measures
   frames rather than loops and costs nothing in the shipped configuration.
 
+### Added (P4-C5a)
+
+- **`game/validate.{h,cpp}` — THE ONE PEBBLE VALIDATOR** (spec §15, P4-C5a). Spec §15's
+  second governing sentence is "the same validator used for custom Pebbles should be used
+  for exchanged Pebbles", and this is it: a `const PebbleInstance&` in, one of twenty-seven
+  named `VReject` codes out, no policy flag and no scope parameter. A validator that
+  cannot write cannot repair, and a repairing validator is the exact failure §15's first
+  sentence is written against — `ui/screen_battle.cpp:205 copy_from_box()` repairs, and
+  that is defensible for a Pebble the device made and not for one a peer sent. Every §15
+  reject reason has a live code: impossible stats (`VR_HP_OVER_MAX` against the DERIVED
+  maximum, through the same `pebble_derive_stats()` call `battle.cpp` makes), illegal moves
+  (`VR_UNKNOWN_MOVE` and `VR_UNLEARNABLE_MOVESET`), impossible levels (`VR_BAD_LEVEL`),
+  invalid species (`VR_UNKNOWN_SPECIES`), invalid evolution state (`VR_BAD_EVO_STAGE`,
+  `VR_BAD_EVO_PENDING`) and the rest.
+- **`networking/protocol.{h,cpp}` — THE §15 FRAME AND THE 48 B WIRE PEBBLE.** A 14-byte
+  header carrying all six things §15 requires of every packet (version, type, session id,
+  payload length, sequence number, and a trailing CRC-16/CCITT over the whole frame INCLUDING
+  the header), the twelve §15 message types at twelve FIXED payload lengths, and a decode
+  that is total in eleven pinned steps. `PROTO_PAYLOAD_MAX` is **derived** as
+  `max(PROTO_LEN_OF[])` = 148 rather than chosen, so the cap can never be looser than the
+  protocol needs, and `PROTO_HDR_BYTES + PROTO_PAYLOAD_MAX + 2 <= 250` is asserted against
+  ESP-NOW's datagram. Every multi-byte field is read and written **byte by byte with
+  explicit shifts** — never a struct memcpy — and one golden frame plus one golden 48 B
+  record are pinned byte for byte, because a grep cannot express that rule and a
+  memory-image codec would make the host test prove nothing about the device.
+- **`tests/test_validate.cpp` (24 cases) and `tests/test_protocol.cpp` (24 cases)**, plus
+  a `networking/` pattern rule in `tests/Makefile` — until now `grep -c networking
+  tests/Makefile` was **0** and nothing under `src/networking` could link on the host at
+  all. Totality is swept rather than sampled: every truncation length of every type, every
+  single-bit flip at every bit position of every type (3,680 flips), every truncation
+  again out of a heap block sized to EXACTLY the delivered byte count so ASan's redzone
+  sits on the first illegal read, and a 20,000-iteration structured fuzzer that applies
+  exactly one of eleven mutations to a frame built from one printable `u32`.
+- **Three networking gates in `tools/check.sh`**, all scoped BY FILENAME because
+  `src/networking/` is a mixed directory (`ble_social.cpp:45` legitimately includes
+  `Arduino.h`): the pure modules include no radio, hardware or renderer header; they hold
+  no file-scope mutable state, which is what will let one host process run two endpoints;
+  and the word `repair` may not appear under `src/networking` — a labelled tripwire that
+  matches zero lines today and exists to fail the day the wire path learns to mend what a
+  peer sent.
+
 ### Changed
+
+- **`save_load_all()` now ends in the shared validator, and `save_manager.h` stopped
+  advertising a stage it did not have.** The header promised "read, checksum, schema
+  validation, migration, runtime validation"; `grep -c valid` inside the old
+  `save_load_all()` was **0** and `blob_ok()` — magic, CRC and a version byte — was the
+  whole of it. Spec §15 names the load path as a consumer, so every occupied slot is now
+  run through `validate_pebble()`. The rule is **QUARANTINE**: the slot is flagged in an
+  in-RAM mask with its named `VReject` (`save_quarantine_mask()` /
+  `save_quarantine_reason()`), the Box still loads and not one byte is repaired. Refusing
+  the Box would brick a device on a content-pack change, because `VR_UNKNOWN_SPECIES` is
+  exactly what an older save legitimately produces.
 
 - **`XP_SRC_BATTLE` is metered.** `game/xp.cpp` carried its row as `{0, 0}` — "reserved but
   not yet metered, until P4-C4 exists to spend it", in its own words — and P4-C4 is that
@@ -198,6 +250,16 @@ Phase 4 begins. Nothing is tagged yet.
   P10's art pass and the name beside it is what tells them apart.
 
 ### Fixed
+
+- **`box_new_pebble()` never wrote `evo_state`, so every Pebble it minted at a stage-1 or
+  stage-2 species carried stage bits 0** — a fact about the creature that disagreed with
+  its own species row. `grep -c evo_state game/box.cpp` was 0, and
+  `tests/test_battle_screen.cpp:107` creates species 1, 5 and 9, of which 5 is stage 1 and
+  9 is stage 2. It was harmless only because nothing outside the evolve ceremony read the
+  bits; `game/validate.cpp` reads them now, so a legitimately captured mid-stage Pebble
+  would have been refused on the wire and quarantined on load. The fix is one line **at the
+  writer**, never a repair inside the validator, and reverting it turns
+  `a_constructed_pebble_validates` red.
 
 #### P4-C4 follow-up — a won battle that paid nothing, and an evolution the tick was wider than
 

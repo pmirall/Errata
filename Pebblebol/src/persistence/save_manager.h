@@ -30,6 +30,7 @@
 #include <stddef.h>
 
 #include "save_schema.h"
+#include "../game/validate.h"   // VReject: the load path is a section 15 consumer
 #include "../core/config.h"       // SAVE_FULL_PERIOD_S, SAVE_LASTSEEN_PERIOD_S
 
 // -----------------------------------------------------------------------------
@@ -76,7 +77,32 @@ void save_bind(GameState& gs);
 // LOAD_FOREIGN_NEWER nothing is written to flash and 'gs' is left in the
 // defaults, so the ERROR screen can offer recovery or a factory reset without
 // anything having been destroyed first.
+//
+// "RUNTIME VALIDATION" IS THE QUARANTINE BELOW, AND UNTIL P4-C5 THIS SENTENCE
+// WAS WIDER THAN THE TREE: `grep -c valid save_manager.cpp` inside the old
+// save_load_all() was 0, and blob_ok() - magic, CRC and a version byte - was the
+// whole of it. Spec section 15 names the load path as a consumer of the shared
+// validator, so the stage is real now rather than advertised.
 LoadResult save_load_all(GameState& gs);
+
+// -----------------------------------------------------------------------------
+// QUARANTINE (spec section 15, P4-C5). After every load, every occupied slot is
+// run through game/validate.h's validate_pebble(). A slot that fails is FLAGGED
+// AND KEPT, never repaired and never dropped:
+//
+//   * repairing is the failure spec section 15's first sentence is written
+//     against, and validate_pebble() takes a const Pebble so this module could
+//     not repair even if it wanted to;
+//   * refusing the Box would brick a device on a content-pack change, since
+//     VR_UNKNOWN_SPECIES is exactly what an older save legitimately produces.
+//
+// A quarantined Pebble may be shown to its owner. It may NOT enter a battle or
+// a trade - that is P7's obligation and this header is where it is written
+// down. The mask is in RAM only: nothing about the quarantine is persisted, so
+// a content pack that brings a species back clears it on the next boot by
+// itself.
+uint16_t save_quarantine_mask(void);          // bit s set = slot s failed
+VReject  save_quarantine_reason(uint8_t slot); // VR_OK for a slot that passed
 
 // -----------------------------------------------------------------------------
 // WRITING. Each of these seals the blob (magic, version, seq, CRC), writes the

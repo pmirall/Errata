@@ -298,6 +298,56 @@ if ls "$SKETCH"/src/game/battle_ai.* >/dev/null 2>&1; then
   [ "$n" -eq 0 ] || fail "game/battle_ai takes a MUTABLE BattleState ($n) - it must only ever see a const one"
 fi
 
+# --- P4-C5: THE THREE NETWORKING GATES ------------------------------------
+# 1. THE PURE NETWORKING MODULES ARE PURE, AND THE SCOPING IS BY FILENAME
+#    BECAUSE THE DIRECTORY IS MIXED. networking/ble_social.cpp:45-53
+#    legitimately includes Arduino.h, esp_bt_device.h and the BLE headers, and
+#    net.cpp and webui.cpp are device modules too - so a directory-wide gate
+#    here could only ever be a gate somebody disables. The list below is the
+#    files that are compiled by tests/Makefile and must stay host-compilable;
+#    each is checked only if it exists, so the entries for P4-C5's second half
+#    (session, battle_link, transport) arm themselves when those files land.
+#    It matches #include LINES ONLY: protocol.h discusses ESP-NOW in prose and
+#    must not trip it.
+if [ -d "$SKETCH/src/networking" ]; then
+  for f in protocol.h protocol.cpp session.h session.cpp \
+           battle_link.h battle_link.cpp transport.h transport_loopback.cpp; do
+    [ -f "$SKETCH/src/networking/$f" ] || continue
+    n=$( { grep -nE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*(Arduino\.h|esp_now|esp_wifi|WiFi|u8g2|gfx\.h|render\.h)' \
+            "$SKETCH/src/networking/$f" || true; } | wc -l )
+    [ "$n" -eq 0 ] || fail "networking/$f includes a radio, hardware or renderer header ($n)"
+  done
+fi
+
+# 2. NO FILE-SCOPE MUTABLE STATE IN THE PURE NETWORKING MODULES. This is what
+#    lets one host process run two endpoints against each other, exactly as
+#    game/battle.h says of battle.cpp - and P4-C5's loopback depends on it.
+#    NARROW, AND THE NARROWNESS IS THE POINT: it matches a line that begins
+#    `static` and contains NO `(` (so every static function is excluded) and no
+#    `const`/`constexpr` (so a lookup table in flash is excluded). It catches
+#    `static uint16_t s_seq;` and it proves NOTHING about a mutable that a
+#    function returns a reference to; the tests are what prove the modules are
+#    re-entrant across two endpoints.
+if [ -d "$SKETCH/src/networking" ]; then
+  for f in protocol.cpp session.cpp battle_link.cpp transport_loopback.cpp; do
+    [ -f "$SKETCH/src/networking/$f" ] || continue
+    n=$( { grep -nE '^[[:space:]]*static[[:space:]]' "$SKETCH/src/networking/$f" || true; } \
+          | { grep -v '(' || true; } \
+          | { grep -vE '\b(const|constexpr)\b' || true; } | wc -l )
+    [ "$n" -eq 0 ] || fail "networking/$f holds file-scope mutable state ($n) - two endpoints could not share a process"
+  done
+fi
+
+# 3. A TRIPWIRE, AND IT IS LABELLED AS ONE. spec section 15 says never trust a
+#    peer's object; game/validate.h says the wire path REFUSES where
+#    ui/screen_battle.cpp's copy_from_box() repairs. The word "repair" matches
+#    zero lines under src/networking today and this gate's whole job is to fail
+#    the day somebody teaches the wire path to mend what a peer sent.
+if [ -d "$SKETCH/src/networking" ]; then
+  n=$( { grep -rin "repair" "$SKETCH/src/networking" || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "src/networking mentions repairing ($n) - the wire path refuses, it never mends"
+fi
+
 # P5-C1: no station association anywhere (scan-only Wi-Fi, spec §68 r5)
 # if [ -d "$SKETCH/src" ]; then
 #   n=$(grep -rn "WiFi\.begin(" "$SKETCH/src" | grep -v creator_server | wc -l); [ "$n" -eq 0 ] || fail "WiFi.begin outside creator_server ($n)"

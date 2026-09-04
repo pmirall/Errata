@@ -12,6 +12,7 @@
 #include "../core/config.h"                // SEC_PER_HOUR, ABSENCE_MAX_S
 #include "../data/balance.h"               // BOX_RECOVER_MPH
 #include "../data/species_table.h"         // SpeciesDef, species_get()
+#include "evolution.h"                     // EVO_STATE_STAGE_MASK
 #include "xp.h"                            // xp_hp_max(): the ONE hp_max rule
 
 static GameState* s_gs = nullptr;
@@ -183,6 +184,18 @@ uint8_t box_new_pebble(uint8_t species_id, uint8_t level, uint8_t origin,
   p.birth_epoch   = now_epoch;
   p.last_updated_epoch = now_epoch;
   p.level         = level;
+  // THE STAGE BITS. box_new_pebble() never wrote evo_state before P4-C5, so
+  // every Pebble it minted at a stage-1 or stage-2 species carried stage 0 - a
+  // fact about the creature that disagreed with its own species row. It was
+  // harmless only because nothing outside the evolve ceremony read the bits;
+  // game/validate.cpp reads them now (VR_BAD_EVO_STAGE) and the peer path would
+  // have refused a legitimately captured mid-stage Pebble. THE FIX IS AT THE
+  // WRITER, never a repair inside the validator: reverting this line turns
+  // tests/test_validate.cpp's `a_constructed_pebble_validates` red.
+  // EVO_STATE_PENDING is deliberately NOT set here: game/xp.cpp raises it on a
+  // level-up and validate_pebble()'s rule is one-directional, so a wild capture
+  // above its evolution level is legal with the bit clear.
+  p.evo_state     = (uint8_t)(sp->stage & (uint8_t)EVO_STATE_STAGE_MASK);
   p.genome        = genome;
   p.origin        = (origin < (uint8_t)ORIGIN_COUNT) ? origin : (uint8_t)ORIGIN_WILD;
   p.custom_sprite = (uint8_t)PB_CUSTOM_SPRITE_NONE;
