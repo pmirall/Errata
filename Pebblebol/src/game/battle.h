@@ -138,15 +138,33 @@
 // -----------------------------------------------------------------------------
 //  VERSIONS
 //
-//  Both are folded into the FNV BASIS of battle_state_hash() rather than stored
-//  as state bytes, so a peer running different rules or a different content
-//  pack can never produce a matching hash - "we are playing different games"
-//  surfaces as a round-1 desync - at a cost of zero bytes of state.
-//  BATTLE_ENGINE_VER must be bumped by any commit that changes what a round
-//  does; CONTENT_VERSION is generated and moves on its own.
+//  ALL THREE - BATTLE_ENGINE_VER, BATTLE_HASH_VERSION and CONTENT_VERSION - are
+//  mixed into the FNV BASIS of battle_state_hash() rather than stored as state
+//  bytes, so a peer running different rules or a different content pack can
+//  never produce a matching hash - "we are playing different games" surfaces as
+//  a round-1 desync - at a cost of zero bytes of state.
+//
+//  BATTLE_ENGINE_VER MUST be bumped by any commit that changes what a round
+//  does, or what battle_init() will accept; CONTENT_VERSION is generated and
+//  moves on its own; BATTLE_HASH_VERSION belongs to the HASH FUNCTION and moves
+//  only when the mixing itself changes.
+//
+//  THE P4-C2/C3 FOLLOW-UP FIXED THIS BLOCK AND THE CODE UNDER IT. Until then the
+//  paragraph above promised the round-1 guarantee for BATTLE_ENGINE_VER and the
+//  basis carried BATTLE_HASH_VERSION instead, so bumping the engine version - the
+//  very thing the next sentence orders a maintainer to do - moved no hash at all.
+//  Not an argument: at commit 9997ed4, BATTLE_ENGINE_VER appeared in battle.cpp
+//  exactly three times, and all three were the setup-carried version check
+//  (battle_setup_clear, battle_init, battle_replay). It reached the hash
+//  nowhere, so EVERY state hashed the same at either version.
+//  battle_hash_basis() below is the parameterised form, and
+//  tests/test_battle.cpp requires a neighbouring value of EACH of the three to
+//  change it - a claim a host test can check without recompiling the engine
+//  three times.
 // -----------------------------------------------------------------------------
-#define BATTLE_ENGINE_VER   1u
-#define BATTLE_HASH_VERSION 1u
+#define BATTLE_ENGINE_VER   2u    // P4-C2/C3 follow-up: battle_init() now
+                                  // refuses a moveset no species can teach
+#define BATTLE_HASH_VERSION 2u    // the basis mixing changed with it
 
 // A switch outruns every attack in the pack. The constexpr guard below fails
 // the BUILD if a content pack ever ships a move at or above this priority,
@@ -170,6 +188,13 @@ enum BattleActKind : uint8_t {
 };
 
 // The whole wire payload of a P4-C5 ACTION message: two untrusted bytes.
+//
+// WHAT THE ENGINE CANNOT ANSWER ABOUT ONE, said here so P4-C5 does not assume
+// it is covered: battle_validate_action() refuses a side above 1 by name, but
+// nothing in this file can tell whether the PEER that sent an action is the one
+// entitled to play that side. There is no identity in a BattleAction and there
+// is deliberately none in BattleState either. Binding a connection to a side is
+// the transport's job.
 struct BattleAction {
   uint8_t kind;
   uint8_t index;
@@ -199,6 +224,9 @@ enum BattleReject : uint8_t {
   BR_UNKNOWN_SPECIES,      // species_get() answers nullptr
   BR_BAD_LEVEL,            // outside 1..PB_LEVEL_MAX
   BR_ILLEGAL_MOVESET,      // one of the four moves fails attack_get()
+  BR_UNLEARNABLE_MOVE,     // the four moves are real attacks, but no species in
+                           // this one's family at this stage or below teaches
+                           // exactly them - see battle.cpp's moveset_is_learnable
   BR_HP_OVER_MAX,          // hp_cur above the DERIVED hp_max
   BR_MEMBER_FAINTED,       // hp_cur == 0, or PBS_FAINTED
   BR_DUPLICATE_ID,         // the same PebbleInstance.id twice across the six
@@ -406,10 +434,23 @@ const BattleEvent* battle_log_at(const BattleLog& l, uint16_t i);
 // -----------------------------------------------------------------------------
 //  LIFECYCLE
 // -----------------------------------------------------------------------------
-// Builds a battle from two stored teams. Validates EVERYTHING - the engine must
-// be safe when called by anything and must not assume its caller checked. ON
-// ANY REJECTION the state is memset back to zero and phase stays BP_INIT, so a
-// failed init is bit-defined too.
+// Builds a battle from two stored teams. Validates the whole setup - the engine
+// must be safe when called by anything and must not assume its caller checked.
+// ON ANY REJECTION the state is memset back to zero and phase stays BP_INIT, so
+// a failed init is bit-defined too.
+//
+// WHAT IT CHECKS, named rather than summarised as "everything", because the
+// P4-C2/C3 review found the summary hiding a hole: the team size, each member's
+// species, level, hp against the DERIVED hp_max, faint status, the ids being
+// distinct across all six, the engine and content versions - and, since that
+// review, that each member's four moves are a moveset its species could
+// actually have (spec section 67: a peer must not be able to hand its Pebble a
+// move the content never gave it). Measured before the fix: injecting attack 11
+// Plaga onto a species-1 Paketo took a scripted 1v1 from 0 wins in 200 seeds to
+// 100, and the on-type attack 3 Rafaga to 103. What it does NOT check is
+// anything about the OWNERSHIP of a team: whether the peer that sent it may play
+// side 0 or side 1 is a transport question and P4-C5's to answer, and the
+// BattleAction comment above says the same thing about a single action.
 BattleReject battle_init(BattleState& st, const BattleSetup& setup);
 
 // Refuses or records one side's action for this round. The ONLY function that
@@ -509,8 +550,12 @@ uint8_t  battle_accuracy_eff(const BattleCombatant& u, const BattleCombatant& f,
 //  THE HASH
 //
 //  FNV-1a 32 over ALL sizeof(BattleState) raw bytes - the whole object
-//  representation - with the basis seeded by BATTLE_HASH_VERSION and
-//  CONTENT_VERSION.
+//  representation - starting from a basis into which BATTLE_ENGINE_VER,
+//  BATTLE_HASH_VERSION and CONTENT_VERSION have been mixed BYTE BY BYTE through
+//  the same FNV step, and not XORed in. The difference is not cosmetic: an XOR
+//  fold collides, and (BATTLE_HASH_VERSION 1, CONTENT_VERSION 0x5B4A) and
+//  (3, 0x5B48) both give 0x5B4B - two different builds satisfying one version
+//  guard. Mixing costs twelve FNV steps once per hash.
 //
 //  COVERED, without a judgement call: both teams' three slots INCLUDING the
 //  benched and the fainted ones, every duration, every cooldown, every stage,
@@ -526,6 +571,16 @@ uint8_t  battle_accuracy_eff(const BattleCombatant& u, const BattleCombatant& f,
 //  struct. Nothing derived, because nothing derived is stored. No pointers,
 //  because there are none.
 //
+//  WHAT IT CANNOT SEE, and this one is worth knowing before leaning on it as a
+//  desync detector: the ORDER of steps 6 and 7. Spec section 14 numbers fainting
+//  before status, and swapping the two calls in battle_step_round() leaves every
+//  round hash and the final hash BYTE-IDENTICAL across a whole battle - measured
+//  - because tick_status() does not consult BCF_FAINTED, so a corpse ticks the
+//  same whether it was flagged before or after. Two peers that shipped opposite
+//  orders would agree on every hash they exchanged. tests/golden/battle_v1.txt
+//  (which watches the LOG, where the order does show) and tools/check.sh's third
+//  battle gate are the only things holding that boundary, and both say so.
+//
 //  STATED LIMITS, because P4-C5 puts this value on the wire: it is a 32-bit
 //  NON-CRYPTOGRAPHIC hash and a MEMORY-IMAGE hash, valid between two
 //  little-endian builds of the same struct (ESP32-C3 to ESP32-C3, and
@@ -535,6 +590,15 @@ uint8_t  battle_accuracy_eff(const BattleCombatant& u, const BattleCombatant& f,
 //  a peer's state at all - only its two bytes of intent.
 // -----------------------------------------------------------------------------
 uint32_t battle_state_hash(const BattleState& st);
+
+// The basis battle_state_hash() starts from, PARAMETERISED. Public for exactly
+// one reason: a host test cannot recompile the engine with a different
+// BATTLE_ENGINE_VER, so the only way to prove that a version word actually
+// reaches the hash is to ask for the basis of a neighbouring version and require
+// a different answer. tests/test_battle.cpp does that for all three, and also
+// rebuilds battle_state_hash() longhand from this function so that dropping a
+// version word at the CALL SITE fails too.
+uint32_t battle_hash_basis(uint32_t engine_ver, uint32_t hash_ver, uint32_t content_ver);
 
 // -----------------------------------------------------------------------------
 //  REPLAY

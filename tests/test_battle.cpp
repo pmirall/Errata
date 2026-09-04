@@ -232,6 +232,50 @@ TEST(the_hash_moves_when_only_the_random_cursor_has) {
   CHECK(battle_state_hash(st) != h0);
 }
 
+// THE VERSION GUARANTEE battle.h SELLS, checked instead of asserted. The header
+// promises that a peer on different RULES, a different HASH MIXING or a
+// different CONTENT PACK can never produce a matching hash. Until the P4-C2/C3
+// follow-up that promise was false for the first of the three: the basis carried
+// BATTLE_HASH_VERSION and CONTENT_VERSION, BATTLE_ENGINE_VER reached nothing,
+// and bumping it - the one thing battle.h orders a maintainer to do for a rules
+// change - left every hash byte-identical.
+//
+// A host test cannot recompile the engine three times with three different
+// macros, which is exactly why battle_hash_basis() is parameterised. The two
+// halves below are what make this non-vacuous TOGETHER: the first says each
+// version word reaches the BASIS, the second says the basis reaches the HASH
+// with all three words in it - so deleting a word from the call site fails even
+// though battle_hash_basis() itself still mixes it.
+TEST(each_of_the_three_versions_reaches_the_hash_and_no_two_pairs_collide) {
+  const uint32_t E = (uint32_t)BATTLE_ENGINE_VER;
+  const uint32_t H = (uint32_t)BATTLE_HASH_VERSION;
+  const uint32_t C = (uint32_t)CONTENT_VERSION;
+  const uint32_t b = battle_hash_basis(E, H, C);
+
+  // Each word alone, moved by one: the engine version is the arm that was
+  // broken, and the other two are the controls beside it.
+  CHECK(battle_hash_basis(E + 1u, H, C) != b);
+  CHECK(battle_hash_basis(E, H + 1u, C) != b);
+  CHECK(battle_hash_basis(E, H, C ^ 1u) != b);
+  CHECK_EQ(battle_hash_basis(E, H, C), b);          // and it is a pure function
+
+  // THE COLLISION THE OLD XOR FOLD HAD. `basis ^ hash_ver ^ content_ver` maps
+  // (1, 0x5B4A) and (3, 0x5B48) to the same 0x5B4B, so two builds that disagree
+  // satisfied one guard. Mixing the bytes through the FNV step separates them.
+  CHECK(battle_hash_basis(E, 1u, 0x5B4Au) != battle_hash_basis(E, 3u, 0x5B48u));
+  CHECK(battle_hash_basis(1u, 2u, 3u) != battle_hash_basis(3u, 2u, 1u));   // order matters
+
+  // AND THE CALL SITE: battle_state_hash() is FNV-1a over the whole object
+  // representation starting from THAT basis, rebuilt here longhand. Drop a
+  // version from the basis call in battle.cpp and this is what fails.
+  BattleState st;
+  fixture(st);
+  uint32_t want = b;
+  const uint8_t* q = (const uint8_t*)&st;
+  for (size_t i = 0; i < sizeof st; ++i) { want ^= q[i]; want *= 16777619u; }
+  CHECK_EQ(battle_state_hash(st), want);
+}
+
 // =============================================================================
 //  1. INIT - the engine must be safe when called by anything
 // =============================================================================
@@ -330,6 +374,100 @@ TEST(init_refuses_every_illegal_team_by_name) {
   init_refuses(s, BR_VERSION_MISMATCH);
   mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u); s.content_ver = (uint16_t)(CONTENT_VERSION ^ 1u);
   init_refuses(s, BR_VERSION_MISMATCH);
+
+  // AND THE CONTROL AGAIN, after all of it.
+  mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u);
+  CHECK_EQ(battle_init(st, s), BR_OK);
+}
+
+// Copies one species' learnset verbatim onto a setup member, so a case can say
+// exactly whose four moves that member is carrying.
+static void give_learnset(PebbleInstance& p, uint8_t from_species)
+{
+  const SpeciesDef* sp = species_get(from_species);
+  CHECK(sp != nullptr);
+  if (sp == nullptr) return;
+  for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) p.moves[m] = sp->moves[m];
+}
+
+// SPEC SECTION 67, and the hole the P4-C2/C3 review found: until that follow-up
+// battle_init() checked only that the four move ids RESOLVED, so a peer could
+// hand its Pebble any of the 34 attacks. The engine measured the cost itself - a
+// species-1 Paketo that wins 0 of 200 scripted 1v1 seeds against species 17 wins
+// 100 with attack 11 Plaga written into slot 0, and 103 with the ON-TYPE attack
+// 3 Rafaga - so this is a cheat that decides fights, and a type-only rule would
+// have missed the bigger half of it.
+//
+// The rule under test: moves[] must be the VERBATIM learnset of some species in
+// the same family at a stage no higher than this one's. Every arm below moves
+// exactly one of those three words - the moves, the family, the stage - and the
+// order arm pins the "verbatim" that the other three lean on.
+TEST(init_refuses_a_moveset_no_species_in_this_family_could_teach) {
+  BattleSetup s;
+  BattleState st;
+
+  // POSITIVE CONTROL FIRST. member[0][0] is species 1: family 1, stage 0,
+  // learnset {1,6,7,27}, which is what mk_member() gives it.
+  mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u);
+  CHECK_EQ(battle_init(st, s), BR_OK);
+
+  // OFF-TYPE AND OFF-LEARNSET: attack 11 Plaga is CORRUPT power 75.
+  mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u); s.member[0][0].moves[0] = 11u;
+  init_refuses(s, BR_UNLEARNABLE_MOVE);
+
+  // ON-TYPE AND OFF-LEARNSET: attack 3 Rafaga is SIGNAL, exactly like species 1,
+  // and species 1 still cannot learn it. This is the arm a "the move must match
+  // the species type" rule would let through, and it is the STRONGER cheat.
+  mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u); s.member[0][0].moves[0] = 3u;
+  init_refuses(s, BR_UNLEARNABLE_MOVE);
+
+  // A REAL LEARNSET, BUT ANOTHER FAMILY'S. Species 3 is family 1 stage 2 and
+  // species 6 is family 2 stage 2, so the STAGE matches and only the family
+  // moves: a rule that forgot the family would accept this.
+  mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u);
+  s.member[0][0].species_id = 3u;
+  s.member[0][0].hp_cur     = xp_hp_max(species_get(3u)->base_hp, 10u);
+  give_learnset(s.member[0][0], 6u);
+  init_refuses(s, BR_UNLEARNABLE_MOVE);
+
+  // A REAL LEARNSET FROM THE RIGHT FAMILY, BUT FROM AHEAD OF IT. Species 1 is
+  // stage 0 and species 2 is stage 1 of the same family: moves travel FORWARD
+  // through an evolution and never backward, so a stage-0 Pebble holding its
+  // own evolution's kit is a lie. A rule that dropped `stage <=` accepts this.
+  mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u);
+  give_learnset(s.member[0][0], 2u);
+  init_refuses(s, BR_UNLEARNABLE_MOVE);
+
+  // ITS OWN FOUR MOVES IN ANOTHER ORDER. No writer in the tree can produce this
+  // - game/box.cpp and persistence/migration.cpp both memcpy a learnset whole -
+  // so "verbatim" is the closure and this is refused. Pinned because it is the
+  // one arm a future move-reordering feature would have to come back and relax.
+  mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u);
+  s.member[0][0].moves[0] = 6u; s.member[0][0].moves[1] = 1u;   // {1,6,..} -> {6,1,..}
+  init_refuses(s, BR_UNLEARNABLE_MOVE);
+
+  // THE OTHER SIDE IS CHECKED TOO, and a middle slot as well as slot 0.
+  mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u); s.member[1][2].moves[2] = 27u;
+  init_refuses(s, BR_UNLEARNABLE_MOVE);
+
+  // THE ARM THAT MAKES THE RULE MORE THAN "moves must equal MY learnset", and
+  // the reason a per-species membership test is wrong: an evolved Pebble keeps
+  // the kit it grew up with. game/evolution.cpp deliberately leaves moves[]
+  // alone, so a species-2 Fragmar legitimately carries species 1's {1,6,7,27},
+  // which is NOT species 2's own {5,27,31,33}. This MUST be accepted.
+  mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u);
+  s.member[0][0].species_id = 2u;
+  s.member[0][0].hp_cur     = xp_hp_max(species_get(2u)->base_hp, 10u);
+  give_learnset(s.member[0][0], 1u);
+  CHECK_EQ(battle_init(st, s), BR_OK);
+
+  // ...and so must the same Pebble one stage further on, still carrying the
+  // base stage's kit: species 3 is stage 2 of that same family.
+  mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u);
+  s.member[0][0].species_id = 3u;
+  s.member[0][0].hp_cur     = xp_hp_max(species_get(3u)->base_hp, 10u);
+  give_learnset(s.member[0][0], 1u);
+  CHECK_EQ(battle_init(st, s), BR_OK);
 
   // AND THE CONTROL AGAIN, after all of it.
   mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u);
@@ -606,6 +744,32 @@ TEST(damage_never_falls_below_one_and_never_wraps_past_zero) {
   battle_s4_resolve_first(st, 0u, nullptr);
   CHECK_EQ(st.side[1].team[0].hp_cur, 2);             // exactly DMG_MIN
 
+  // THE SECOND FLOOR, WHICH THIS CASE USED TO MISS. data/balance.h publishes two
+  // DMG_MIN floors - one on the raw term and one AFTER the type multiply - and
+  // the case above reaches only a NEUTRAL matchup, where TYPE_MUL is 1/1 and the
+  // two are indistinguishable. So each floor was masked by the other: deleting
+  // EITHER one alone left the whole suite green, and only deleting both was ever
+  // caught. A DISADVANTAGE is what separates them: raw 1 times 4/5 is 0 in
+  // integers, and without the post-multiply floor a disadvantaged minimum hit
+  // deals literally nothing. Asserted on the shared function directly...
+  duel(st, TYPE_SIGNAL, TYPE_SYSTEM, 1u, 200u, 400u);
+  const BattleCombatant& du = st.side[0].team[0];
+  const BattleCombatant& df = st.side[1].team[0];
+  const AttackDef* ping = attack_get(MV_PING);
+  CHECK(ping != nullptr);
+  if (ping != nullptr) {
+    CHECK_EQ(battle_damage_pre_roll(du, df, *ping, 0), 1);     // the neutral reading
+    CHECK_EQ(battle_damage_pre_roll(du, df, *ping, -1), 1);    // and the disadvantaged one
+  }
+  // ...and end to end, where MV_PING is SIGNAL into a SYSTEM defender, so the
+  // engine decides the -1 itself and spends the type edge on it.
+  const uint16_t hp_d = st.side[1].team[0].hp_cur;
+  rng_init(st.rng, SEED_HIT_ROLL0);
+  set_pending(st, 0u, (uint8_t)BACT_ATTACK, 0u);
+  battle_s4_resolve_first(st, 0u, nullptr);
+  CHECK_EQ(st.side[0].team[0].type_edge_left, 0);     // the -1 really was applied
+  CHECK_EQ(hp_d - st.side[1].team[0].hp_cur, 1);
+
   st.side[1].team[0].hp_cur = 1u;
   duel(st, TYPE_SIGNAL, TYPE_CORRUPT, 30u, 1u, 4u);   // a hit far bigger than hp
   rng_init(st.rng, SEED_HIT_ROLL2);
@@ -742,6 +906,20 @@ TEST(protection_halves_after_the_roll_and_never_below_one) {
   set_pending(st, 0u, (uint8_t)BACT_ATTACK, 1u);
   battle_s4_resolve_first(st, 0u, nullptr);
   CHECK_EQ(hp0 - st.side[1].team[0].hp_cur, 16);
+
+  // "NEVER BELOW ONE" - the half of this test's own NAME that had no case at
+  // all until the P4-C2/C3 review, so the DMG_MIN floor inside the protection
+  // branch could be deleted with the entire suite still green. atk 1 into def
+  // 200 gives raw 1, the NEUTRAL move keeps it at 1, roll 0 leaves 1 to halve,
+  // and 1 / PROTECT_DIVISOR is 0 in integers: the floor is the only thing
+  // between a protected Pebble and a hit that costs nothing.
+  duel(st, TYPE_SIGNAL, TYPE_SIGNAL, 1u, 200u, 400u);
+  st.side[1].team[0].protect_left = 1u;
+  const uint16_t hp_min = st.side[1].team[0].hp_cur;
+  rng_init(st.rng, SEED_HIT_ROLL0);
+  set_pending(st, 0u, (uint8_t)BACT_ATTACK, 1u);
+  battle_s4_resolve_first(st, 0u, nullptr);
+  CHECK_EQ(hp_min - st.side[1].team[0].hp_cur, 1);
 }
 
 TEST(protection_covers_the_round_it_was_raised_and_is_gone_the_next) {
@@ -821,12 +999,19 @@ TEST(a_buff_holds_on_its_last_active_round_and_is_gone_on_the_first_inactive_one
 
 TEST(a_buff_stage_clamps_at_two_and_a_debuff_can_never_wrap_the_stat) {
   BattleState st;
-  duel(st, TYPE_SIGNAL, TYPE_CORRUPT, 3u, 3u);
+  // BASE 10, NOT 3, AND THE DIFFERENCE IS THE WHOLE DEBUFF ARM. At base 3,
+  // 3 + BUFF_STAGE_MIN is 1, which is also STAT_EFF_MIN - so the assertion
+  // below was satisfied by the LATER floor and the clamp it names was never
+  // reached: deleting the BUFF_STAGE_MIN half of battle_stat_eff's clamp left
+  // ALL PASS 27/27, while deleting the BUFF_STAGE_MAX half on the next line was
+  // caught. At base 10 the clamp answers 8 and the floor would answer 1.
+  duel(st, TYPE_SIGNAL, TYPE_CORRUPT, 10u, 10u);
   BattleCombatant& c = st.side[0].team[0];
   c.stage[BSTAT_ATK] = 5;    c.stage_left[BSTAT_ATK] = 3u;   // past the clamp
-  CHECK_EQ(battle_stat_eff(c, (uint8_t)BSTAT_ATK), 3 + BUFF_STAGE_MAX);
+  CHECK_EQ(battle_stat_eff(c, (uint8_t)BSTAT_ATK), 10 + BUFF_STAGE_MAX);
   c.stage[BSTAT_ATK] = -9;
-  CHECK_EQ(battle_stat_eff(c, (uint8_t)BSTAT_ATK), 3 + BUFF_STAGE_MIN);
+  CHECK_EQ(battle_stat_eff(c, (uint8_t)BSTAT_ATK), 10 + BUFF_STAGE_MIN);
+  CHECK(10 + BUFF_STAGE_MIN > STAT_EFF_MIN);   // the two readings really do differ
   // The unsigned-wrap failure data/balance.h names: a stat of 1 with a -2 stage
   // must be STAT_EFF_MIN, never 65,535.
   c.atk = 1u;
@@ -1664,4 +1849,111 @@ TEST(a_third_buff_cannot_push_the_stored_stage_past_the_clamp) {
   }
   CHECK_EQ(f.stage[BSTAT_ATK], BUFF_STAGE_MIN);
   CHECK_EQ(battle_stat_eff(f, (uint8_t)BSTAT_ATK), 10 + BUFF_STAGE_MIN);
+}
+
+// =============================================================================
+//  8. THE THREE PUBLIC QUERIES THAT WERE ONLY EVER REACHED THROUGH A CALLER
+//
+//  The P4-C2/C3 review's single-line deletion sweep found guards that survive
+//  deletion NOT because they are unreachable, but because every test that
+//  exercised them went in through a caller carrying its own copy of the same
+//  check. game/battle.h publishes all three of these as callable on their own -
+//  P4-C5 calls battle_action_legal_now() directly, and battle_ai.cpp asks
+//  battle_move_ready() before it scores anything - so they are tested here as
+//  what they are, rather than labelled untested.
+// =============================================================================
+TEST(battle_action_legal_now_refuses_a_bad_side_without_help_from_its_callers) {
+  BattleState st;
+  fixture(st);
+  // battle_validate_action() checks the side too and shadowed this one on every
+  // path the suite used, so deleting it was green. Called directly, it is the
+  // only thing between `side` and st.side[side].
+  // Without the guard both of these index st.side[side] on a two-element array,
+  // which is undefined behaviour rather than a wrong answer: the observed
+  // symptom is a wrong reject code for 2 and a crash for 255. Both fail, which
+  // is all a guard against a peer-supplied byte can be asked to demonstrate.
+  CHECK_EQ(battle_action_legal_now(st, 2u, ACT(BACT_ATTACK, 0u)), BR_BAD_SIDE);
+  CHECK_EQ(battle_action_legal_now(st, 255u, ACT(BACT_SWITCH, 1u)), BR_BAD_SIDE);
+  // The positive controls, on both sides, so a function that refused everything
+  // could not satisfy the two above.
+  CHECK_EQ(battle_action_legal_now(st, 0u, ACT(BACT_ATTACK, 0u)), BR_OK);
+  CHECK_EQ(battle_action_legal_now(st, 1u, ACT(BACT_ATTACK, 0u)), BR_OK);
+  CHECK_EQ(battle_action_legal_now(st, 1u, ACT(BACT_SWITCH, 1u)), BR_OK);
+  // And the range order: a bad side is answered BEFORE a bad kind, so nothing
+  // is indexed on the way to the second complaint.
+  CHECK_EQ(battle_action_legal_now(st, 2u, ACT(BACT_NONE, 0u)), BR_BAD_SIDE);
+}
+
+TEST(battle_move_ready_answers_for_itself_and_each_of_its_guards_is_reachable) {
+  BattleState st;
+  duel(st, TYPE_SIGNAL, TYPE_CORRUPT);
+  BattleCombatant& c = st.side[0].team[0];
+
+  CHECK(battle_move_ready(c, 0u));                       // the positive control
+  CHECK(battle_move_ready(c, 3u));
+
+  // THE SLOT BOUND, and it needs arranging or it cannot fail. Slot 4 reads the
+  // byte just past moves[3], which is cooldown[0]; that byte is 0 in any normal
+  // fixture, so `moves[slot] == 0` on the next line answers for the missing
+  // bound and deleting it stays green. Park a REAL attack id there and slot 4
+  // resolves to a real move whose slot-4 "cooldown" (stage[0]) is 0 - so
+  // without the bound this call answers true.
+  // Said through offsetof rather than by indexing moves[4] here: the point is
+  // that the FUNCTION must not make that read, and a test that makes it itself
+  // is undefined behaviour of its own (UBSAN says so out loud).
+  CHECK_EQ(offsetof(BattleCombatant, cooldown), offsetof(BattleCombatant, moves) + PB_MOVE_COUNT);
+  CHECK_EQ(offsetof(BattleCombatant, stage), offsetof(BattleCombatant, cooldown) + PB_MOVE_COUNT);
+  c.cooldown[0] = MV_CHOQUE;      // == moves[4] to anything that ignores the bound
+  CHECK_EQ(c.stage[0], 0);        // == cooldown[4], so the move would read as READY
+  CHECK(!battle_move_ready(c, (uint8_t)PB_MOVE_COUNT));
+  c.cooldown[0] = 0u;
+  CHECK(battle_move_ready(c, 0u));                        // and slot 0 is free again
+
+  const uint8_t keep = c.moves[2];
+  c.moves[2] = 0u;                                       // the empty slot
+  CHECK(!battle_move_ready(c, 2u));
+  c.moves[2] = (uint8_t)(ATTACK_COUNT + 1u);             // an id past the table
+  CHECK(!battle_move_ready(c, 2u));
+  c.moves[2] = keep;
+  CHECK(battle_move_ready(c, 2u));
+
+  c.cooldown[2] = 1u;                                    // and the cooldown
+  CHECK(!battle_move_ready(c, 2u));
+  c.cooldown[2] = 0u;
+  CHECK(battle_move_ready(c, 2u));
+}
+
+TEST(the_drivers_two_early_outs_are_two_guards_and_not_one) {
+  // They mutually masked: phase and outcome are set together when a battle
+  // ends, so deleting EITHER alone left the suite green. Each arm below reaches
+  // a state where exactly one of them is the thing that answers.
+  //
+  // ARM 1 - a state that was never initialised. phase is BP_INIT and outcome is
+  // BO_UNDECIDED, so only the PHASE guard can refuse it. Without that guard the
+  // driver falls through to the pending check and answers BS_NEED_ACTIONS,
+  // which invites a caller to keep feeding a battle that does not exist.
+  BattleState st;
+  memset(&st, 0, sizeof st);
+  BattleState before;
+  memcpy(&before, &st, sizeof before);
+  CHECK_EQ(battle_step_round(st, nullptr), BS_BATTLE_OVER);
+  CHECK(memcmp(&before, &st, sizeof st) == 0);
+
+  // ARM 2 - a battle that ENDED. phase is still BP_RUNNING (the engine has no
+  // "over" phase on purpose: game/battle.h says outcome is the single fact), so
+  // only the OUTCOME guard can refuse it. The pending actions are written
+  // directly, because battle_submit_action would refuse them by name - which is
+  // exactly why the driver may not rely on the submitter having been asked.
+  fixture(st);
+  st.side[1].team[0].hp_cur = 0u;
+  st.side[1].team[1].hp_cur = 0u;
+  st.side[1].team[2].hp_cur = 0u;
+  round_with(st, ACT(BACT_ATTACK, 0u), ACT(BACT_ATTACK, 0u), nullptr);
+  CHECK_EQ(st.phase, BP_RUNNING);
+  CHECK_EQ(st.outcome, BO_WIN_A);
+  set_pending(st, 0u, (uint8_t)BACT_ATTACK, 0u);
+  set_pending(st, 1u, (uint8_t)BACT_ATTACK, 0u);
+  memcpy(&before, &st, sizeof before);
+  CHECK_EQ(battle_step_round(st, nullptr), BS_BATTLE_OVER);
+  CHECK(memcmp(&before, &st, sizeof st) == 0);
 }

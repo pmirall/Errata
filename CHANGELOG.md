@@ -29,8 +29,11 @@ Phase 4 begins. Nothing is tagged yet.
   spends 0 B of flash TODAY for a measured reason rather than a hopeful one: the firmware
   compiles the file (its `static_assert`s fire, and it is clean under `--warnings all`) but
   nothing calls it yet, so `nm` finds no `battle_*` symbol in the linked ELF and the image
-  is byte-identical to P4-C1's on all 7 variants. The object is 8,533 B of `.text`, which
-  is what P4-C4 should expect to start paying.
+  is byte-identical to P4-C1's on all 7 variants. The marginal code it adds is the
+  `size -A` `.text` sum, 6,030 B after the P4-C2/C3 follow-up, which is what P4-C4 should
+  expect to start paying. (This first read "8,533 B of `.text`" — the Berkeley `size` `text`
+  column, which also counts `.rodata` the linker shares with every other user of the
+  generated content tables.)
 - **The local opponent** (`game/battle_ai.{h,cpp}`): a greedy chooser that ranks legal
   moves by expected damage times effective accuracy — the type modifier included, and the
   per-combatant type-edge budget respected so it stops paying for an advantage it has
@@ -48,8 +51,9 @@ Phase 4 begins. Nothing is tagged yet.
   from the battle's stream or write any byte of the hashed state. That is measured and not
   merely argued: an AI-driven battle replays byte-for-byte through `battle_replay()`, which
   never constructs an AI, and the round-by-round cursor comparison would catch a single
-  stolen draw. Compiled cost is 1,148 B of `.text`, 0 `.data`, 0 `.bss`, and flash stays
-  byte-identical at 1,896,094 on all 7 variants because nothing calls it yet.
+  stolen draw. Compiled cost is 1,148 B by the `size -A` `.text` sum (Berkeley `size`
+  prints 2,013, the difference being shared `.rodata` and `.eh_frame`), 0 `.data`, 0 `.bss`,
+  and flash stays byte-identical at 1,896,094 on all 7 variants because nothing calls it yet.
 - **`test_battle_ai.cpp`**, 26 → 27 binaries: 25 cases / 3,159 checks. Every `BACT_NONE`
   answer is paired with a brute-force sweep of all 65,536 action patterns proving nothing
   was legal either; 64 AI-vs-AI battles submit every action through the real validator with
@@ -74,9 +78,9 @@ Phase 4 begins. Nothing is tagged yet.
   just checked" and "roll for the tie you are about to need" do not compile.
   `battle_submit_action()` has exactly one write site and it is unreachable on a reject,
   which the tests prove with `memcmp` over the whole struct rather than by reading fields.
-- **Three new host tests**, 23 → 26 binaries: `test_battle.cpp` (60 cases — every §50
-  battle case, each invalid action asserting the exact reject code with a positive control
-  beside it), `test_battle_replay.cpp` (8 cases — twin engines run INTERLEAVED with equal
+- **Three new host tests**, 23 → 26 binaries: `test_battle.cpp` (60 cases at P4-C2, 65 after the
+  follow-up — every §50 battle case, each invalid action asserting the exact reject code
+  with a positive control beside it), `test_battle_replay.cpp` (8 cases — twin engines run INTERLEAVED with equal
   hashes every round, a seeded negative control, a pinned RNG cursor and exact draw count,
   and replay from a recorded log) and `test_battle_golden.cpp` over
   `tests/golden/battle_v1.txt` (a 22-round 3v3 recorded event by event: it is the only
@@ -122,6 +126,75 @@ Phase 4 begins. Nothing is tagged yet.
   through a FAILING condition for the first time) and `test_stats.cpp` (11 cases).
 
 ### Fixed
+
+#### The P4-C2/C3 follow-up — six blocking review findings
+
+- **A hash that did not carry the version it said it carried.** `battle.h` promised that a
+  peer running different RULES could never produce a matching `battle_state_hash()`, because
+  `BATTLE_ENGINE_VER` rode in the FNV basis. It did not — the basis carried
+  `BATTLE_HASH_VERSION` — so bumping the engine version, which the very next sentence orders
+  a maintainer to do for a rules change, moved no hash at all. Not an argument: at commit
+  9997ed4 the macro appeared in `battle.cpp` exactly three times, all three of them the
+  setup-carried version check, so every state hashed the same at either version. All three
+  version words are now mixed through the FNV step byte by byte rather than XORed into the
+  basis, which also removes a genuine collision — `(hash 1, content 0x5B4A)` and
+  `(3, 0x5B48)` both folded to `0x5B4B`. `battle_hash_basis()` is parameterised so a host
+  test can require each word to change the answer without recompiling the engine three times.
+- **`battle_init()` accepted a move the species cannot learn** (spec §67). It checked only
+  that the four ids resolved through `attack_get()`, so a peer-supplied team could hand any
+  species any of the 34 attacks — including the off-type ones `attacks_table.h`'s own
+  `species_learnsets_are_legal()` declares impossible. Decisive and measured: a species-1
+  Paketo that wins **0 of 200** scripted 1v1 seeds against species 17 wins **100** with
+  attack 11 Plaga written into slot 0 — and **103** with the ON-TYPE attack 3 Rafaga, so a
+  rule that only checked the move's type would have stopped nothing. The rule is the closure
+  of the only two writers of `PebbleInstance.moves[]` in the tree: it must be the verbatim
+  learnset of some species in the same family at a stage no higher than this one's, which
+  accepts an evolved Pebble still carrying the kit it grew up with and refuses everything
+  else. New reject code `BR_UNLEARNABLE_MOVE`, and `BATTLE_ENGINE_VER` is bumped to 2
+  because `battle_init()` now refuses what it used to accept.
+- **Three more tests that could not fail** — the seventh, eighth and ninth instances of this
+  project's named recurring defect, each fixed and each verified by breaking the guard it
+  names and watching that test fail. (1) `protection_halves_after_the_roll_and_never_below_one`
+  never tested "never below one": deleting the `DMG_MIN` floor inside the protection branch
+  left the whole suite green. (2) The two `DMG_MIN` floors in `battle_damage_pre_roll()`
+  **mutually masked**, because every case reached only a NEUTRAL matchup where `TYPE_MUL` is
+  1/1 — deleting either alone was green, and without the post-multiply floor a disadvantaged
+  minimum hit deals literally nothing. (3) The debuff arm of
+  `a_buff_stage_clamps_at_two_and_a_debuff_can_never_wrap_the_stat` used base ATK 3, where
+  `3 + BUFF_STAGE_MIN` is also `STAT_EFF_MIN` — so the later floor answered and the clamp the
+  test names was never reached.
+- **Four of the nine steps indexed `team[active]` without range-checking it.** `battle.h`
+  advertises the steps as individually callable and P4-C5 hands in state this engine did not
+  build; with `side[1].active = 3`, `battle_s3_determine_order()` is a stack-buffer-overflow
+  read past the end of the 212 B `BattleState` under `-fsanitize=address`. It is not
+  reachable through `battle_step_round()` — step 1 refuses that state as `BR_EMPTY_ACTIVE`
+  and the driver aborts — so the new guards are labelled in the code as untested defence in
+  depth rather than left looking proven.
+- **A fifth grep gate: the firmware's tuning must match the content pack's.** Thirteen
+  numbers live in both `tools/content/balance.json` (which feeds `CONTENT_VERSION`, and
+  which the roster was tuned against) and `src/data/balance.h` (which the firmware compiles,
+  and which is not generated). Nothing compared them, so a header-only retune changed hashed
+  battle state with no `CONTENT_VERSION` and no `BATTLE_ENGINE_VER` moving to say so —
+  measured: editing `BUFF_STAGE_MAX` from `+2` to `+3` in the header alone left the entire
+  gate green. Proven failable three ways and restored.
+- **Four sentences wider than the tree, corrected against measurement.** `battle_ai.h`
+  claimed its protected-defender estimate "preserves the ranking"; it does not — 757 of
+  233,280 plain-roster protected move pairs (0.32 %) rank the wrong way round, worst case
+  5.9 % of the better move's expected damage — though the conservative half of the claim
+  held, at no more than 2/6 of a point from the engine's exact expectation. The comment
+  defending step 8's second fainting pass said a DOT-killed Pebble "never yields a victory";
+  `combatant_alive()` requires `hp_cur > 0`, so the victory is found either way and what
+  actually goes missing is the `BCF_FAINTED` flag and the transcript's FAINT event.
+  `battle_ai_move_score()`'s "widest reachable" 89,400 is an arithmetic ceiling; the widest
+  the shipped roster reaches is 34,170. And the two object-size figures were printed side by
+  side from two different measures.
+- **Also**: `BATTLE_AI_VER` is labelled as having no consumer; a provably dead `DMG_MIN`
+  floor in `battle_ai.cpp` is deleted rather than labelled; three public queries that were
+  only ever reached through a caller carrying its own copy of the same check
+  (`battle_action_legal_now`'s side bound, `battle_move_ready`'s three guards, and the
+  driver's two mutually-masking early-outs) now have tests that reach them directly; and
+  `battle.h` records that swapping steps 6 and 7 leaves every round hash byte-identical, so
+  the golden transcript and the third grep gate are the only things holding that boundary.
 
 - **`balance.h` contradicted itself about who owns the type-advantage cap.** The
   `TYPE_MOD_MAX_HITS` paragraph said "per attacker per battle" in one sentence and "P4-C2

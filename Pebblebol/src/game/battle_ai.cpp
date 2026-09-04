@@ -1,7 +1,7 @@
 // =============================================================================
 //  PEBBLEBOL - game/battle_ai.cpp
 //  The greedy local opponent. See game/battle_ai.h for the never-invalid
-//  contract, the two-stream argument and the four stated limits.
+//  contract, the two-stream argument and the five stated limits.
 //
 //  NO FILE-SCOPE MUTABLE VARIABLE, for the same reason game/battle.cpp has none:
 //  P4-C5's loopback runs two of these in one process and a single static would
@@ -78,11 +78,24 @@ static uint32_t expected_damage_half(const BattleCombatant& u, const BattleComba
              + (uint32_t)((uint32_t)DMG_RNG_SPAN - 1u);
 
   if (f.protect_left > 0u) {
-    // The engine halves AFTER the roll and floors at DMG_MIN; this halves the
-    // ESTIMATE, which differs by at most half a point and preserves the ranking
-    // - all a greedy chooser reads. It is an approximation and says so.
+    // The engine halves AFTER the roll and floors at DMG_MIN, so its expected
+    // damage is the mean of DMG_RNG_SPAN separately-halved values; this halves
+    // the mean once. The GAP is small and conservative - at most 2/6 of a point,
+    // measured over the whole roster - but it does NOT always preserve the
+    // ranking, and the first version of this comment claimed it did. When two
+    // candidates straddle the integer halving the order can flip: 757 of the
+    // 233,280 plain-roster protected move pairs, 0.32 %, worst case 5.9 % of the
+    // better move's expected damage. game/battle_ai.h's LIMITS list carries the
+    // measurement and the reason it is accepted rather than removed.
     h /= (uint32_t)PROTECT_DIVISOR;
-    if (h < 2u * (uint32_t)DMG_MIN) h = 2u * (uint32_t)DMG_MIN;
+    // NOT A FLOOR: h is 2 * pre_roll + (DMG_RNG_SPAN - 1) and pre_roll is itself
+    // floored at DMG_MIN, so h is at least 2 * DMG_MIN + DMG_RNG_SPAN - 1 and
+    // h / PROTECT_DIVISOR cannot fall below 2 * DMG_MIN under any value
+    // data/balance.h can hold. The line below was DEAD, not merely untested -
+    // deleting it changed nothing anywhere - and a floor that reads as though it
+    // does something is worse than no floor. It is gone; this comment is what
+    // replaces it, and a future PROTECT_DIVISOR larger than DMG_RNG_SPAN + 1
+    // would be the change that needs it back.
   }
   return h;
 }
@@ -114,8 +127,18 @@ uint32_t battle_ai_move_score(const BattleState& st, uint8_t side, uint8_t move_
   const AttackDef* a = attack_get(u->moves[move_slot]);
   if (a == nullptr) return 0u;
 
-  // Expected damage weighted by the chance of landing it. Widest reachable
-  // product with the shipped tables: 894 half-points * 100 = 89,400.
+  // Expected damage weighted by the chance of landing it, and the u32 has room
+  // for it several thousand times over. TWO DIFFERENT NUMBERS, and the first
+  // version of this comment printed the second while calling it the first:
+  //   * the widest the SHIPPED ROSTER actually reaches is 34,170 - species 12 at
+  //     level 6 against species 16 with attack 3, pre_roll 200 - measured by
+  //     sweeping 36 attackers x 36 defenders x levels 1..30 x every ATK and DEF
+  //     stage x corruption on either side x the type edge held and spent;
+  //   * the arithmetic CEILING is 894 half-points * 100 = 89,400, from
+  //     battle_damage_pre_roll()'s own bound of 446 (atk_eff 25, def_eff 1,
+  //     power 100, times 5/4).
+  // The ceiling is what makes the type safe; the measured figure is what the
+  // game does. Neither is close to 4,294,967,295.
   return expected_damage_half(*u, *f, *a) * (uint32_t)battle_accuracy_eff(*u, *f, *a);
 }
 

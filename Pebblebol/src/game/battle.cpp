@@ -61,16 +61,40 @@ const BattleEvent* battle_log_at(const BattleLog& l, uint16_t i)
 // =============================================================================
 //  THE HASH
 // =============================================================================
+// One FNV-1a step. Named so the basis and the state walk are provably the same
+// arithmetic and cannot drift into two mixings.
+static inline uint32_t fnv1a_byte(uint32_t h, uint8_t b)
+{
+  h ^= (uint32_t)b;
+  h *= 16777619u;
+  return h;
+}
+
+uint32_t battle_hash_basis(uint32_t engine_ver, uint32_t hash_ver, uint32_t content_ver)
+{
+  // THE THREE VERSIONS RIDE IN THE BASIS, not in the state: a peer on other
+  // rules, another hash mixing or another content pack can never match, at a
+  // cost of zero state bytes.
+  //
+  // MIXED, NOT XORED. `basis ^ hash_ver ^ content_ver` was the P4-C2 form and it
+  // collides: (1, 0x5B4A) and (3, 0x5B48) both fold to 0x5B4B, so two builds
+  // that disagree satisfy one guard. Four bytes of each word through the FNV
+  // step has no such pair, and the order is fixed here so two peers agree.
+  uint32_t h = 2166136261u;
+  const uint32_t w[3] = { engine_ver, hash_ver, content_ver };
+  for (uint8_t i = 0; i < 3u; ++i)
+    for (uint8_t k = 0; k < 4u; ++k)
+      h = fnv1a_byte(h, (uint8_t)((w[i] >> (8u * k)) & 0xFFu));
+  return h;
+}
+
 uint32_t battle_state_hash(const BattleState& st)
 {
-  // The two versions ride in the BASIS, not in the state: a peer on other rules
-  // or another content pack can never match, at a cost of zero state bytes.
-  uint32_t h = 2166136261u ^ (uint32_t)BATTLE_HASH_VERSION ^ (uint32_t)CONTENT_VERSION;
+  uint32_t h = battle_hash_basis((uint32_t)BATTLE_ENGINE_VER,
+                                 (uint32_t)BATTLE_HASH_VERSION,
+                                 (uint32_t)CONTENT_VERSION);
   const uint8_t* p = (const uint8_t*)&st;
-  for (size_t i = 0; i < sizeof(BattleState); ++i) {
-    h ^= p[i];
-    h *= 16777619u;
-  }
+  for (size_t i = 0; i < sizeof(BattleState); ++i) h = fnv1a_byte(h, p[i]);
   return h;
 }
 
@@ -232,6 +256,46 @@ void battle_setup_clear(BattleSetup& s)
   s.content_ver = (uint16_t)CONTENT_VERSION;
 }
 
+// COULD THIS SPECIES ACTUALLY HAVE THIS MOVESET? (spec section 67, added by the
+// P4-C2/C3 follow-up.) Until then battle_init() checked only that each of the
+// four ids resolved through attack_get(), so a peer-supplied team could hand any
+// species any of the 34 attacks - including the off-type ones
+// data/attacks_table.h's species_learnsets_are_legal() declares impossible.
+//
+// IT IS DECISIVE AND NOT COSMETIC, measured here rather than assumed: a species-1
+// Paketo scripted against a species-17 Exploid, both level 10, 1v1, walking their
+// move slots, wins 0 of 200 seeds honestly. Write attack 11 Plaga (CORRUPT,
+// power 75) over its slot 0 and it wins 100 of 200. Write the ON-TYPE attack 3
+// Rafaga (SIGNAL, power 75) there instead and it wins 103 of 200 - so a rule that
+// only checked the move's TYPE would have stopped nothing at all.
+//
+// THE RULE, and it is the closure of the only writers in the tree rather than a
+// guess at intent: game/box.cpp memcpy's sp->moves at creation and
+// persistence/migration.cpp memcpy's msp->moves at migration - those two are the
+// ONLY places a PebbleInstance.moves[] is ever written - and game/evolution.cpp
+// deliberately leaves moves[] alone while moving species_id one stage forward
+// inside the same family (data/evolution_table.h static_asserts that a rule
+// never crosses a family and never skips a stage). So a legitimate moves[] is
+// the VERBATIM learnset, in order, of some species in this one's family at a
+// stage no higher than this one's.
+//
+// NOT strict per-species membership, which was the tempting wrong answer: a
+// Paketo (species 1, learnset {1,6,7,27}) that has become a Fragmar still
+// carries Paketo's four moves, and species 2's own learnset is {5,27,31,33} - so
+// a per-species rule would refuse every evolved Pebble in the box.
+static bool moveset_is_learnable(const SpeciesDef& sp, const uint8_t* moves)
+{
+  for (uint8_t i = 0; i < (uint8_t)SPECIES_TABLE_COUNT; ++i) {
+    const SpeciesDef& cand = SPECIES_TABLE[i];
+    if (cand.family != sp.family || cand.stage > sp.stage) continue;
+    bool same = true;
+    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m)
+      if (moves[m] != cand.moves[m]) { same = false; break; }
+    if (same) return true;
+  }
+  return false;
+}
+
 // Validates one setup slot and hands back BOTH the species row and the derived
 // stats, so battle_init() derives once. game/pebble.cpp owns the derivation and
 // game/xp.h owns hp_max: this file holds no stat formula at all.
@@ -246,6 +310,8 @@ static BattleReject setup_member_ok(const PebbleInstance& p,
   if (p.level < 1u || p.level > (uint8_t)PB_LEVEL_MAX) return BR_BAD_LEVEL;
   for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m)
     if (attack_get(p.moves[m]) == nullptr) return BR_ILLEGAL_MOVESET;
+  // Four real attacks is not four attacks THIS Pebble could know.
+  if (!moveset_is_learnable(*sp, p.moves)) return BR_UNLEARNABLE_MOVE;
 
   PebbleStats stats;
   pebble_derive_stats(*sp, p.level, p.genome, stats);
@@ -354,6 +420,32 @@ int8_t battle_s2_priority(const BattleState& st, uint8_t side)
   return (a != nullptr) ? a->priority : (int8_t)0;
 }
 
+// RANGE FIRST, THEN INDEX - APPLIED TO THE ACTIVE SLOT TOO, which four of the
+// nine steps did not do until the P4-C2/C3 review. BattleState.side[s].active is
+// a byte like any other; battle.h advertises the nine steps as individually
+// callable so a host test can hash before and after; and P4-C5 hands in state
+// this engine did not build. A state carrying active == 3 therefore reached
+// st.side[s].team[3].
+//
+// MEASURED, NOT ARGUED: with side[1].active = 3, battle_s3_determine_order()
+// under -fsanitize=address is a stack-buffer-overflow READ past the end of a
+// 212-byte BattleState, reported inside battle_stat_eff(); battle_s7's status
+// tick reaches the same slot.
+//
+// NOT REACHABLE THROUGH battle_step_round(), and this comment does not pretend
+// otherwise: step 1 re-validates both pending actions against the state as it
+// stands, battle_action_legal_now() refuses an out-of-range active by name with
+// BR_EMPTY_ACTIVE, and the driver turns that into BO_ABORT before step 3 runs.
+//
+// NO TEST CLAIMS THESE GUARDS, and they are labelled rather than left looking
+// proven - the treatment this file gives its DMG_MIN floor. A normal build
+// cannot tell the difference, because what they prevent is undefined behaviour
+// and not a wrong answer; the sanitizer run above is the whole evidence.
+static inline bool active_in_range(const BattleSide& s)
+{
+  return s.active < (uint8_t)BATTLE_TEAM_MAX;
+}
+
 // =============================================================================
 //  STEP 3 - determine effective speed, and therefore the order.
 //  THE ONLY DRAW OUTSIDE steps 4 and 5, and it happens only on a double tie.
@@ -362,6 +454,11 @@ uint8_t battle_s3_determine_order(BattleState& st, int8_t pri_a, int8_t pri_b)
 {
   if (pri_a > pri_b) return 0u;
   if (pri_b > pri_a) return 1u;
+
+  // Side 0 first is an arbitrary but DEFINED answer, and no draw is taken: a
+  // state with no active fighter has no speeds to compare and must not spend a
+  // number from the shared stream deciding nothing.
+  if (!active_in_range(st.side[0]) || !active_in_range(st.side[1])) return 0u;
 
   const BattleCombatant& a = st.side[0].team[st.side[0].active];
   const BattleCombatant& b = st.side[1].team[st.side[1].active];
@@ -441,6 +538,15 @@ uint16_t battle_damage_pre_roll(const BattleCombatant& u, const BattleCombatant&
   // sweep confirmed it - deleting this line changes no result and no test can
   // tell. It stays because it is the published formula and because a future
   // multiplier could separate them; nothing here claims it is tested.
+  //
+  // THE SECOND FLOOR IS A DIFFERENT MATTER, and the P4-C2/C3 review found this
+  // comment being read as though it covered both. It is OBSERVABLE and it is
+  // tested: raw 1 times the 4/5 disadvantage multiplier is 0 in integers, so
+  // without it a disadvantaged minimum hit deals literally nothing.
+  // damage_never_falls_below_one_and_never_wraps_past_zero asserts exactly that,
+  // because until then every case reached only a NEUTRAL matchup where TYPE_MUL
+  // is 1/1 and the two floors were indistinguishable - so each was masked by the
+  // other and deleting either alone was green.
   if (raw < (uint32_t)DMG_MIN) raw = (uint32_t)DMG_MIN;
 
   // Defence on a PUBLIC function that indexes a three-entry table. type_mod_of()
@@ -587,8 +693,12 @@ static void resolve_one(BattleState& st, uint8_t side, BattleLog* log)
 {
   BattleSide& me  = st.side[side];
   BattleSide& you = st.side[side ^ 1u];
+  // See active_in_range() above: unreachable through the driver, untested, and
+  // here because this function indexes three caller-supplied slots.
+  if (!active_in_range(me) || !active_in_range(you)) return;
 
   if (me.pending_kind == (uint8_t)BACT_SWITCH) {
+    if (me.pending_index >= (uint8_t)BATTLE_TEAM_MAX) return;
     resolve_switch(st, side, me.pending_index, log);
     return;                                        // 0 draws
   }
@@ -660,6 +770,7 @@ void battle_s5_resolve_second(BattleState& st, uint8_t side, BattleLog* log)
   if (side > 1u) return;
   const BattleSide& me  = st.side[side];
   const BattleSide& you = st.side[side ^ 1u];
+  if (!active_in_range(me) || !active_in_range(you)) return;   // active_in_range()
 
   // sim_engine.py's `if not (u.alive and f.alive): break`, expressed as a rule
   // and LOGGED rather than silently dropped. It covers both "the first mover
@@ -706,6 +817,7 @@ void battle_s6_process_fainting(BattleState& st, BattleLog* log)
 static void tick_status(BattleState& st, uint8_t side, BattleLog* log)
 {
   BattleSide& me = st.side[side];
+  if (!active_in_range(me)) return;                             // active_in_range()
   BattleCombatant& c = me.team[me.active];
 
   if (c.dot_left > 0u) {
@@ -746,10 +858,21 @@ void battle_s7_process_status(BattleState& st, BattleLog* log)
 //  STEP 8 - determine end of round.
 //
 //  THE SECOND CALL TO STEP 6 IS LOAD-BEARING AND IS NOT REDUNDANT. Spec section
-//  14 numbers fainting (6) BEFORE status (7), and step 7's DOT is the only
-//  thing in the status tick that deals damage - so without this line a Pebble
-//  killed by poison sits at 0 HP, is never marked fainted, and never yields a
-//  victory. Do not delete it as duplicated work.
+//  14 numbers fainting (6) BEFORE status (7), and step 7's DOT is the only thing
+//  in the status tick that deals damage - so without this line a Pebble killed
+//  by poison sits at 0 HP and is NEVER MARKED FAINTED: the BCF_FAINTED flag that
+//  P4-C5 compares between peers goes missing from the hashed state, and the
+//  transcript loses its FAINT event.
+//
+//  IT DOES NOT COST THE VICTORY, and the first version of this comment said it
+//  did - a sentence wider than the tree, corrected by the P4-C2/C3 review.
+//  combatant_alive() requires hp_cur > 0 as well as the flag, so
+//  battle_alive_count() and step 9 already count a 0-HP unflagged Pebble as
+//  dead. Deleting this line fails exactly two checks of
+//  a_dot_kills_on_the_status_tick_and_the_second_faint_pass_is_what_sees_it -
+//  the flag and the single FAINT event - and the outcome check beside them still
+//  passes. Do not delete it as duplicated work; do not defend it with the wrong
+//  reason either.
 // =============================================================================
 void battle_s8_end_of_round(BattleState& st, BattleLog* log)
 {

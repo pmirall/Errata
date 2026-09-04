@@ -80,6 +80,105 @@ else
 "nothing can check them against it"
 fi
 
+# --- P4-C2/C3 FOLLOW-UP: THE FIRMWARE'S TUNING MATCHES THE CONTENT PACK'S ---
+# THIRTEEN NUMBERS LIVE IN TWO PLACES AND NOTHING COMPARED THEM. Every one of
+# them is in tools/content/balance.json - which feeds CONTENT_VERSION, and which
+# tools/content/sim_engine.py tuned the 36-species roster against - AND in
+# Pebblebol/src/data/balance.h, which the firmware actually compiles. balance.h
+# is NOT generated, so gen_content.py --check does not see it.
+#
+# WHY IT MATTERS, and it is a P4-C5 problem rather than a tidiness one: these
+# constants decide hashed battle state. Retuning one in the HEADER alone moves
+# every damage number while CONTENT_VERSION and BATTLE_ENGINE_VER both stay
+# where they are - so two devices flashed from two commits agree on every
+# version word they exchange and then disagree on the first round hash, which is
+# exactly the silent desync game/battle.h's version block exists to prevent.
+# MEASURED, on the tree this gate landed on: with BUFF_STAGE_MAX edited from +2
+# to +3 in balance.h and nowhere else, `make -C tests check` printed
+# ALL PASS 27/27 and `gen_content.py --check` printed "8 files in sync,
+# CONTENT_VERSION 0x5B4A" - unchanged. Every clamp assertion in the tree is
+# written in terms of the constant under test, so no literal pins it and nothing
+# else was ever going to catch this.
+#
+# It compares VALUES, not formatting: the header writes (-2) and (+2) where the
+# JSON writes -2 and 2, and the two files disagree on two names on purpose
+# (JSON K is BATTLE_K, JSON LEVEL_MAX is XP_LEVEL_MAX), so the map is explicit.
+# TYPE_MUL_NUM/DEN are arrays and are compared element by element.
+#
+# Skipped with a WORD if python3 is missing, like the content gate above.
+if [ -f "$ROOT/tools/content/balance.json" ] && [ -f "$SKETCH/src/data/balance.h" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$ROOT/tools/content/balance.json" "$SKETCH/src/data/balance.h" <<'PYGATE' \
+      || fail "src/data/balance.h and tools/content/balance.json disagree on a tuning "\
+"constant - the firmware would play a different game from the one the roster was tuned for, "\
+"with no CONTENT_VERSION or BATTLE_ENGINE_VER change to say so"
+import json, re, sys
+
+pack = json.load(open(sys.argv[1], encoding="utf-8"))
+hdr  = open(sys.argv[2], encoding="utf-8").read()
+
+# JSON name -> balance.h macro name. Only the ones that really are the same
+# number: everything else in balance.json belongs to a GENERATED header and
+# gen_content.py --check already owns it.
+SCALARS = {
+    "K":                  "BATTLE_K",
+    "LEVEL_MAX":          "XP_LEVEL_MAX",
+    "TYPE_MOD_SCALE":     "TYPE_MOD_SCALE",
+    "TYPE_MOD_MAX_HITS":  "TYPE_MOD_MAX_HITS",
+    "PROTECT_DIVISOR":    "PROTECT_DIVISOR",
+    "BUFF_STAGE_MIN":     "BUFF_STAGE_MIN",
+    "BUFF_STAGE_MAX":     "BUFF_STAGE_MAX",
+    "EVASION_PER_SPD":    "EVASION_PER_SPD",
+    "EVASION_MAX_SPD_GAP":"EVASION_MAX_SPD_GAP",
+    "ACCURACY_MIN":       "ACCURACY_MIN",
+    "RISK_SELF_HP_PCT":   "RISK_SELF_HP_PCT",
+}
+ARRAYS = ["TYPE_MUL_NUM", "TYPE_MUL_DEN"]
+
+def macro(name):
+    m = re.search(r"^#define\s+%s\s+(\S+)" % re.escape(name), hdr, re.M)
+    if not m:
+        return None
+    t = m.group(1).strip().strip("()")          # (-2) -> -2
+    t = re.sub(r"[uUlL]+$", "", t)              # 86400UL -> 86400
+    t = t.lstrip("+")
+    try:
+        return int(t, 0)
+    except ValueError:
+        return None
+
+def array(name):
+    m = re.search(r"^inline constexpr \w+ %s\[\d*\]\s*=\s*\{([^}]*)\}" % re.escape(name),
+                  hdr, re.M)
+    if not m:
+        return None
+    return [int(x.strip(), 0) for x in m.group(1).split(",") if x.strip()]
+
+bad = 0
+for jname, hname in sorted(SCALARS.items()):
+    want = pack.get(jname)
+    got  = macro(hname)
+    if got is None:
+        print("balance gate: %s is not a plain #define in balance.h" % hname); bad += 1
+    elif got != want:
+        print("balance gate: %s is %r in balance.h but %s is %r in balance.json"
+              % (hname, got, jname, want)); bad += 1
+for name in ARRAYS:
+    want = pack.get(name)
+    got  = array(name)
+    if got != want:
+        print("balance gate: %s is %r in balance.h but %r in balance.json" % (name, got, want))
+        bad += 1
+if bad:
+    sys.exit(1)
+print("check.sh: %d battle tuning constants agree between balance.h and balance.json"
+      % (len(SCALARS) + len(ARRAYS)))
+PYGATE
+  else
+    echo "check.sh: python3 not found, SKIPPING the balance-constant gate" >&2
+  fi
+fi
+
 # --- grep gates (each is enabled by the plan commit that makes it true) ---
 # The screen state machine owns navigation. TREE-WIDE since P2-C11d: the
 # exception this gate used to carry (dev/godmode.cpp had its own unrelated

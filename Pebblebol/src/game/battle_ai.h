@@ -78,6 +78,16 @@
 //    4. Otherwise attack with the highest battle_ai_move_score().
 //    5. Ties at any of those are broken by ONE draw from the AI's own stream.
 //
+//  RULE 3 CANNOT FIRE FOR A SINGLE-FAMILY TEAM, and that is worth knowing before
+//  anyone reads a census of it. "Strictly better typed" needs a bench member
+//  whose type DIFFERS from the active's, and every shipped family is mono-type
+//  (data/species_table.h), so the natural "three of one family" team can never
+//  reach rule 3 at all. It is not dead code, and the census says so: over 896
+//  roster AI-vs-AI battles (four teams - three mono-type and one mixed - each
+//  against each, 56 seeds, level 14) it fired 1,012 times in 25,914 side-rounds,
+//  3.9 %. But every one of those 1,012 involved the MIXED team: all nine
+//  mono-type-vs-mono-type cells of that grid are exactly ZERO.
+//
 //  A BETTER TYPE IS ONE NUMBER, NOT TWO. type_mod_of(mine, theirs) is enough,
 //  and the defensive reading type_mod_of(theirs, mine) adds nothing: TYPE_CHART
 //  is antisymmetric and data/attacks_table.h static_asserts that it is, so the
@@ -86,8 +96,8 @@
 // -----------------------------------------------------------------------------
 //  WHAT IT IS NOT, MEASURED RATHER THAN APOLOGISED FOR
 // -----------------------------------------------------------------------------
-//  This is a practice opponent for P4-C4, not a solver, and four limits are real
-//  and tested rather than merely admitted:
+//  This is a practice opponent for P4-C4, not a solver, and five limits are real
+//  and measured rather than merely admitted:
 //
 //    * IT NEVER USES A STATUS MOVE while a damaging one is legal. A power-0 move
 //      scores 0 by construction, so buffs, protection, cleanse and the DOT are
@@ -101,6 +111,26 @@
 //      own battle_damage_pre_roll() plus the mean of the damage roll, halved if
 //      the defender is protected. It cannot know the accuracy or damage roll,
 //      because those draws have not happened.
+//    * AGAINST A PROTECTED DEFENDER THE ESTIMATE CAN RANK TWO MOVES THE WRONG
+//      WAY ROUND. The first version of this header claimed it "preserves the
+//      ranking, which is all a greedy chooser reads", and that sentence was
+//      wider than the tree. The engine halves AFTER the roll, so its expected
+//      damage is the mean of three separately-halved values; the AI halves the
+//      mean once. When two candidates straddle the integer halving, the order
+//      flips. MEASURED over 36 attackers x 36 defenders x levels 1..30 with a
+//      protected defender, no stage, no corruption and a full type edge -
+//      233,280 move pairs: 757 of them (0.32 %) invert, and the worst costs
+//      5.9 % of the expected damage of the move the engine would have preferred
+//      (the first one the sweep meets is species 3 at level 9 against species 32:
+//      the AI takes attack 27 at score 800 over attack 3 at 765, where the
+//      engine's exact expectations are 1,100 and 1,105). With protection OFF
+//      there is not ONE inversion in the 46,656,000 unprotected pairs of the
+//      widest sweep - it is a protection-only effect. The ESTIMATE itself is
+//      conservative, and that half of the old claim held: the worst gap to the
+//      engine's exact expectation is 2/6 of a point, over the same sweep. This
+//      is an accepted cost of a greedy chooser, not a defect to work around;
+//      removing it means scoring in sixth-points and re-pinning every literal in
+//      tests/test_battle_ai.cpp, for a third of a percent of the pairs.
 //    * IT VALUES A TYPE EDGE ONLY WHILE THE ATTACKER STILL HAS BUDGET FOR ONE
 //      (data/balance.h TYPE_MOD_MAX_HITS). That is not sophistication, it is the
 //      minimum needed to stop it paying for an advantage it has already spent.
@@ -117,14 +147,27 @@
 //  container, no floating point, no clock, no I/O and no file-scope mutable
 //  variable - so P4-C5's loopback can run two of these in one process.
 //
-//  WHAT IT COSTS, MEASURED RATHER THAN ESTIMATED. arduino-cli compiles this file
-//  under --warnings all (so its static_asserts fire in the firmware build), and
-//  riscv32-esp-elf-size puts battle_ai.cpp.o at 1,148 B of .text, 0 .data,
-//  0 .bss. riscv32-esp-elf-nm then finds ZERO battle_ai_* symbols in the linked
-//  ELF, because nothing calls it yet and --gc-sections drops it: flash is
-//  byte-identical to P4-C2's 1,896,094 on all seven variants. 1,148 B is what
-//  P4-C4 starts paying, on top of game/battle.cpp's 8,533 B, against 503,906 B
-//  of headroom. BattleAi is 8 B of caller-owned RAM per side.
+//  WHAT IT COSTS, MEASURED RATHER THAN ESTIMATED - AND THE MEASURE IS NAMED,
+//  because the two numbers below came from two different ones and were printed
+//  side by side as though they were comparable. Both are `riscv32-esp-elf-size
+//  -A`, summing the per-function .text.* sections, which is the MARGINAL code
+//  each file adds:
+//
+//      game/battle_ai.cpp.o    1,148 B   (Berkeley `size` prints 2,013)
+//      game/battle.cpp.o       6,030 B   (Berkeley `size` prints 8,909)
+//
+//  The gap in each row is .rodata plus .eh_frame. The .rodata is the generated
+//  content tables (TYPE_CHART, ATTACKS_TABLE, and SPECIES_TABLE in battle.cpp),
+//  emitted into COMDAT groups - riscv32-esp-elf-readelf -g shows them - so the
+//  linker keeps ONE copy across both objects and the whole firmware, which is
+//  why adding them up would over-count. Neither file has any .data or .bss.
+//
+//  Both figures are what P4-C4 STARTS paying, not what it pays today: flash is
+//  1,896,094 on all seven variants with these files compiled, byte-identical to
+//  P4-C1's, because riscv32-esp-elf-nm finds ZERO battle_* and battle_ai_*
+//  symbols in the linked ELF - nothing calls them and --gc-sections drops the
+//  lot. Against 503,906 B of headroom. BattleAi is 8 B of caller-owned RAM per
+//  side and there is no static instance anywhere.
 // =============================================================================
 #ifndef PB_GAME_BATTLE_AI_H
 #define PB_GAME_BATTLE_AI_H
@@ -138,6 +181,14 @@
 // NOT part of battle_state_hash()'s basis and must never become part of it: two
 // peers running different AI versions, or one running none at all, still play
 // the same battle, because only the resulting two bytes ever cross the wire.
+//
+// IT HAS NO CONSUMER, and is named as such rather than left looking enforced -
+// the treatment game/battle.h gives CORRUPT_BATTLE_INFECT_PERMILLE.
+// `grep -rn BATTLE_AI_VER` over the whole tree returns this line and nothing
+// else, so the sentence above is a rule for a human and no code checks it. It
+// is kept because a version a P4-C4 debug screen or a replay header can quote
+// costs nothing until it is quoted, and inventing it later would mean a value
+// whose 1 means "some AI before anyone was counting".
 #define BATTLE_AI_VER 1u
 
 // The weight of the type term in a switch score. It must exceed the widest
