@@ -1169,7 +1169,32 @@ NT_SPR_REF_FITS(spr_emo_spark,     SPRITE_EMOTES, EMO_SPARK);
 
 
 #define SPRITE_DATA_BYTES 10623
-static_assert(SPRITE_DATA_BYTES <= 14336, "sprite art over the flash budget");
+// THE BUDGET IS A TRANSITION ALLOWANCE, NOT AN END-STATE REQUIREMENT, and the
+// difference is worth writing down because the first version of this comment got
+// it wrong. One species costs 144 B of art: a 24x24 XBM is ((24+7)/8)*24 = 72 B and
+// every set carries two frames.
+//
+// Of the 10,623 B here today, 9,448 B is the 38 legacy Nottamagochi BODY sets and
+// only 1,175 B is everything else (icons, the emote set, the egg). P9-C3 DELETES
+// those 38 and lands 60 species at 8,640 B, so the END STATE is
+//
+//     1,175 + 8,640 = 9,815 B
+//
+// which fits the original 14,336 with room to spare. The roster does not need a
+// bigger budget; it needs the swap to happen.
+//
+// What needs the headroom is the WINDOW. If species art arrives before the legacy
+// sets go - the natural order, since the new art has to be checked against the real
+// screens before the old art can be safely deleted - the peak is
+//
+//     10,623 + 8,640 = 19,263 B      (both alive at once)
+//
+// and the old 14,336 would have failed that build with no explanation attached.
+// 24,576 covers the peak with margin and is 1.0 % of the 2,400,000 flash cap.
+// P9-C3 SHOULD BRING IT BACK DOWN once the legacy sets are gone: an allowance left
+// standing after the thing it allowed for is a budget that stopped meaning anything.
+// docs/budget.md section 4.3 carries the same arithmetic.
+static_assert(SPRITE_DATA_BYTES <= 24576, "sprite art over the flash budget");
 
 // -----------------------------------------------------------------------------
 //  LOOKUP

@@ -406,8 +406,19 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 // =============================================================================
 // 14. SIZE CAPS / BUILD GATES
 // =============================================================================
+// The BASELINE caps: every feature on, including BLE and the legacy web UI, neither
+// of which V1 ships. This is a dev-build guard, not the number that matters.
 #define GATE_FLASH_MAX          2400000UL
 #define GATE_GLOBALS_MAX        90000UL
+
+// The RELEASE caps, enforced by tools/build_matrix.sh on the `release` variant
+// (GOD_MODE_ENABLED=0 FEATURE_BLE=0) - the artefact that actually gets flashed.
+// docs/budget.md measured release at 1,191,426 / 49,004 against a baseline of
+// 1,915,654 / 72,676, so for four phases the gate was policing a build nobody
+// would run. These are set at the projected phase-10 ending state plus margin:
+// budget.md projects ~1,333,000 / ~57,200 once BLE goes.
+#define GATE_RELEASE_FLASH_MAX    1600000UL
+#define GATE_RELEASE_GLOBALS_MAX    65000UL
 #define NAME_MAX_LEN            12           // + NUL = 13
 #define SSID_MAX_LEN            32
 #define PASS_MAX_LEN            64
