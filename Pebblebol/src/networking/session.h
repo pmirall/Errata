@@ -28,7 +28,15 @@
 //   R4  ONLY PROGRESS TOUCHES THE TIMER. A duplicate, a re-acknowledgement, a
 //       stale frame and a wrong-state frame all leave the ladder exactly where
 //       it was, so the ladder is the only liveness bound in the design and no
-//       separate "wrong state tolerance" constant is needed.
+//       separate "wrong state tolerance" constant is needed. EVERY HANDLER HAS
+//       TO GUARD ITS OWN REPEAT FOR THIS TO BE TRUE, and one did not:
+//       on_action_result() called session_progress() for every ACTION_RESULT
+//       matching our outstanding ACTION, so a peer replaying ONE legal frame
+//       held the session open for as long as it kept typing (measured: 1,019
+//       injections, seventeen hours of virtual time, tx_retx stuck at 0). It is
+//       now leashed by s.ar_ack_round and pinned by
+//       `one_legal_frame_replayed_forever_cannot_hold_the_session_open`, which
+//       replays a BATTLE_STATE in the same shape as its control.
 //
 //  FIVE anti-exhaustion caps remain and every one is NAMED AS A HEURISTIC
 //  rather than derived: SESSION_MAX_RX, SESSION_MAX_TX,
@@ -48,7 +56,12 @@
 //      arm                          3 x 3000        9 x 1000
 //      10 % drop                    483 / 500       500 / 500
 //      10 % drop + dup + reorder    482 / 500       500 / 500
-//      30 % drop, 20 % reorder      108 / 500       474 / 500
+//      30 % drop, 20 % reorder      108 / 500       471 / 500
+//
+//  (The harsh arm was 474 before the P4-C5 follow-up closed the ACTION_RESULT
+//  hole in R4 below. Three trials of five hundred were completing on a ladder
+//  that a re-acknowledgement had wrongly reset, and they are not a loss worth
+//  keeping: the same reset is what let a peer hold a session open forever.)
 //
 //  THE ESTIMATE THAT CHOSE NINE WAS PESSIMISTIC AND THE MEASUREMENT SAYS SO.
 //  The design reasoned that an obligation needs its frame out AND the clearing
@@ -132,6 +145,14 @@
 // device can forge, since the session id travels in clear. An honest jump is
 // the count of consecutive frames we missed: nine ladder rungs at up to three
 // frames each, plus what is in flight, is under forty.
+//
+// IT BOUNDS THE BASELINE TOO, and that half was missing until the P4-C5
+// follow-up. The rule above is about a jump from an ESTABLISHED last; the FIRST
+// frame an endpoint accepted set that last to whatever it claimed, so the same
+// one-packet deafness was still available BEFORE the peer had spoken - through
+// a HELLO, which carries session 0 by definition and so needs no session id at
+// all. An honest peer's first frame is seq 1, and the furthest it can get
+// before it hears from us is its own ladder, which is under ten.
 
 #define SESSION_SEQ_MAX_JUMP 64u
 
@@ -336,6 +357,11 @@ struct Session {
                                // the peer will compare it against
   uint8_t  ar_round, ar_reject, ar_kind, ar_index;    // our last ACTION_RESULT
   uint32_t ar_hash;
+  uint8_t  ar_ack_round;       // the last round whose ACTION_RESULT we accepted
+                               // AS PROGRESS. Without it R4 was false for this
+                               // one type: a peer replaying a single legal
+                               // ACTION_RESULT reset the ladder every time and
+                               // held the session open indefinitely.
   uint8_t  rr_round, rr_outcome;                      // our last ROUND_RESULT
   uint32_t rr_before, rr_after;
   uint8_t  peer_rr_round;                             // the peer's last, so a
@@ -385,10 +411,22 @@ inline SessionState      session_state(const Session& s) { return (SessionState)
 inline bool              session_closed(const Session& s) { return s.state == (uint8_t)SS_CLOSED; }
 inline const SessionEnd& session_end(const Session& s) { return s.end; }
 
-// TRUE ONLY AFTER SE_DONE. The caller pays XP and writes the Box on this and on
-// nothing else; every other terminal pays nobody. The asymmetry of the two
-// generals falls on the side of NOT awarding - see the LIMITS section of
-// docs/protocol.md.
+// TRUE ONLY WHERE SessionEnd.reason IS SE_DONE, and that is STRUCTURAL rather
+// than a habit of the callers: session_close() is the one place that decides a
+// terminal, and a session that has authorised rewards closes SE_DONE there. It
+// was NOT structural until the P4-C5 follow-up - on_battle_end() took the
+// peer's own reason byte, so a peer that had already made us pay could then
+// choose our label, and an exhausted rx budget could do it with no peer at all.
+// The asymmetry of the two generals still falls on the side of NOT awarding -
+// see the LIMITS section of docs/protocol.md.
+//
+// THE FLAG IS SET BY OUR OWN COMPARISON AND NEVER BY THE PEER'S WORD: our
+// engine finished the battle, and the peer's BATTLE_END carried the same
+// outcome AND the same final hash as ours.
+//
+// NO PRODUCT CODE READS THIS YET. Paying XP and writing the Box is P7's, the
+// same way the radio is; nothing under app/, ui/ or persistence/ calls into
+// this module at this commit.
 inline bool session_rewards_authorised(const Session& s) { return s.paid != 0u; }
 
 const char* session_state_name(SessionState st);

@@ -236,6 +236,19 @@ ProtoErr proto_encode(const ProtoMsg& m, uint8_t* buf, size_t cap, size_t& n_out
   const size_t   n   = (size_t)PROTO_HDR_BYTES + len + PROTO_CRC_BYTES;
   if (n > cap) return PE_OVERSIZE;
 
+  // THE ONE HEADER RULE header_rules_ok() CANNOT HOLD, because it is about a
+  // field the decoder only reaches at step 10 and only against a session the
+  // encoder is not told. HELLO carries session 0 BY DEFINITION - it predates
+  // the session - so proto_decode() refuses any other value whatever
+  // `expect_session` it is given, and a HELLO the encoder let through with a
+  // nonzero session would be undeliverable to every endpoint alive. It was let
+  // through until the P4-C5 follow-up: a review's encoder fuzzer found 198 such
+  // frames in 2,000,000 random messages, and the header cited a case for the
+  // claim that did not exist. The case exists now
+  // (`every_frame_the_encoder_emits_its_own_decoder_accepts`); deleting this
+  // line again makes it report 35 undeliverable frames and fail by name.
+  if (m.type == (uint8_t)PT_HELLO && m.session != 0u) return PE_SESSION;
+
   // The two payload rules the encoder must also hold, or it could produce a
   // frame its own decoder names PE_COUNT_RANGE / PE_RESERVED.
   if (m.type == (uint8_t)PT_TEAM_SUBMIT &&

@@ -77,6 +77,22 @@ what makes `len` a **check** rather than a trusted input. **The decode is total*
 and never partially writes its output: `out` is memset on every reject, which
 the tests prove by poisoning it with `0xA5` first.
 
+**The encoder holds the same rules, and that is asserted rather than assumed.**
+`proto_encode()` applies the type, flag, round, count, reserved and
+HELLO-session rules, so a frame it emits is one `proto_decode()` accepts when
+given the session the frame names —
+`every_frame_the_encoder_emits_its_own_decoder_accepts` sweeps the twelve types
+and then fuzzes the header. **That case did not exist until the P4-C5 follow-up,
+and when it was written the claim it checks was false:** the encoder applied no
+session rule at all, so a HELLO with a non-zero session encoded happily and step
+10 then refused it for *every* `expect_session` — a frame deliverable to nobody.
+A review's encoder fuzzer found 198 of them in 2,000,000 random messages, all
+the same class; with the rule removed again, the case written here reproduces it
+**35 times** across its sweep and its 40,000 fuzz iterations. Nothing was live
+(`session.cpp` forces the HELLO session to 0); the defect was a sentence wider
+than the tree, with a citation to a named test that did not exist anywhere in the
+repository.
+
 ### The twelve messages, at twelve fixed lengths
 
 | # | type | len | payload |
@@ -153,8 +169,12 @@ epochs, all five lifetime counters, `creation_seed`, `custom_sprite` and the sav
 bookkeeping. The nickname is the one deliberate *feature* loss and the reason is
 memory safety: `ui/screen_battle.cpp:156` hands it out as a bare `const char*`
 and `ui/pet_view.cpp:150` snprintf's `"%s"` from it — both cap the **output** at
-13 and read the **source** to NUL — and nothing in `src/` writes a nickname
-today, so a peer would be the first producer of an unterminated one. Not
+13 and read the **source** to NUL — and the only nickname *writer* in `src/` is
+`persistence/migration.cpp:221-226`, whose loop is bounded by
+`o + 1 < sizeof p.nickname` and always stores the NUL, so a peer would be the
+first producer of an **unterminated** one. (This read "nothing in `src/` writes a
+nickname today" until the P4-C5 follow-up, which was wider than the tree; the
+load-bearing half survives the correction.) Not
 transmitting it deletes the class instead of guarding it, and after this **every
 wire field is a bounded integer and there is no string parsing on the ingest
 path at all**.
@@ -200,7 +220,18 @@ session. Whoever *speaks* first is irrelevant.
 * **R3** A legal message that is not expected in this state is **dropped and
   counted**, never aborted on.
 * **R4** **Only progress touches the ladder.** A duplicate, a re-acknowledgement,
-  a stale frame and a wrong-state frame all leave it where it was.
+  a stale frame and a wrong-state frame all leave it where it was. **Every
+  handler has to guard its own repeat for this to be true, and one did not:**
+  `on_action_result()` treated *every* ACTION_RESULT matching our outstanding
+  ACTION as progress — including the second and every one after, which is
+  precisely what an honest peer regenerates from state. Measured before the
+  guard: one legal frame replayed into a cut link, at a spacing the **attacker**
+  chose, kept the session alive for 1,019 injections and seventeen hours of
+  virtual time and then ended `SE_PROTOCOL(SD_RX_BUDGET)` with `tx_retx == 0` —
+  neither the `SE_LOST` LIMIT 2 promises nor the `tx_retx == 9` the abort
+  record's own signature relies on. It is leashed now, and
+  `one_legal_frame_replayed_forever_cannot_hold_the_session_open` replays a
+  BATTLE_STATE in the same shape as a control that always obeyed the rule.
 
 **The ladder.** `PROTO_RETX_MS 1000` × `PROTO_RETX_MAX 9`. The plan asked for
 3 s × 3; this is the same nine-second deadline spent as nine attempts. **Measured
@@ -210,7 +241,7 @@ on the same 500 seeds per arm, changing only the two constants:**
 |---|---|---|
 | 10 % drop | 483 completed, 17 `SE_LOST` | **500 completed, 0 lost** |
 | 10 % drop + dup + reorder | 482 completed, 18 lost | **500 completed, 0 lost** |
-| 30 % drop, 20 % reorder | 108 completed, 391 lost, 1 half-paid | **474 completed, 25 lost, 1 half-paid** |
+| 30 % drop, 20 % reorder | 108 completed, 391 lost, 1 half-paid | **471 completed, 28 lost, 1 half-paid** |
 
 The design predicted worse than that for three rungs — it reasoned that an
 obligation needs its frame out and the clearing reply back (≈0.81 per attempt),
@@ -223,6 +254,9 @@ cooperate on every gap, and the independent-obligation arithmetic is pessimistic
 Nine rungs is still the right number — it is the difference between 17 aborts and
 0 at the stated fault level, and between 108 and 474 completions at the harsh one
 — but the number that justified it is a measurement and not the estimate.
+(The harsh arm read 474 before the P4-C5 follow-up closed the R4 hole above.
+Three trials of five hundred had been completing on a ladder that a
+re-acknowledgement wrongly reset, and they are not a loss worth keeping.)
 
 **Retransmission is by regeneration.** Nothing stores a transmitted frame; the
 session re-encodes what its own state says it owes — **exactly one frame per
@@ -271,14 +305,33 @@ dropped and counted — both-initiator glare is forbidden by the device-id rule,
 it is a modified or reflected peer, not a race.
 
 **SS_TEAM** — *rx TEAM_SUBMIT, first*: `pbw_decode` × count → `validate_team` →
-`validate_level_band` → **the cross-team id check** → TEAM_VALIDATION carrying
-the verdict. A non-`VR_OK` verdict also sends GOODBYE and closes
-`SE_REJECTED(VReject)` with the member index. *rx TEAM_SUBMIT again, same
-`team_crc`*: re-send the same TEAM_VALIDATION. *different `team_crc`*:
+`validate_level_band` → `validate_battle_ready` → **the cross-team id check** →
+TEAM_VALIDATION carrying the verdict. The three per-team rules run before the one
+that spans both teams, so a team with two defects is named by its own. A non-`VR_OK` verdict also sends GOODBYE
+and closes `SE_REJECTED(VReject)` with the member index. *rx TEAM_SUBMIT again,
+same `team_crc`*: re-send the same TEAM_VALIDATION. *different `team_crc`*:
 `SE_PROTOCOL(SD_TEAM_CHANGED)`. *rx TEAM_VALIDATION(OK) echoing our crc*: when
 both verdicts are in, seed the battle and → SS_VERIFY. *`battle_init()` refuses a
-team `validate_team` accepted*: `SE_PROTOCOL(SD_INTERNAL)` — **a bug in
-`game/validate.cpp`, never a peer capability, and the peer is not blamed**.
+team that whole chain accepted*: `SE_PROTOCOL(SD_INTERNAL)` — **a bug in this
+tree, never a peer capability, and the peer is not blamed**.
+
+**`validate_battle_ready` is the last link in that chain and it was missing.**
+`hp_cur == 0` is a legal thing to have **stored** and an illegal thing to bring
+to a battle, so `validate_pebble()`, `validate_team()` and `pbw_decode()` all
+answered `VR_OK` for it and `battle_init()` answered `BR_MEMBER_FAINTED` — and
+the driver above turned that into `SE_PROTOCOL(SD_INTERNAL)` with
+`bad_index == 0xFF`. That is **this device recording a bug in its own validator
+for a lie the peer told**, byte for byte the class the cross-team id check had
+already fixed once, and it fired with no adversary at all: an honest player whose
+own team held a fainted Pebble got `VR_OK` from `session_set_team()` and then
+watched **both** endpoints close `SD_INTERNAL`. `PBS_FAINTED` cannot make the
+trip (`VR_WIRE_STATUS_BITS` refuses it), so `hp_cur` was the single field that
+got through. The rule is now named `VR_MEMBER_FAINTED`, it runs on the **local**
+team in `session_set_team()` before a frame is sent and on the **peer's** in
+`on_team_submit()`, and `game/validate.h`'s containment claim is now the strong
+one: after the whole chain, `battle_init()` returns `BR_OK` — asserted over
+36 species × 5 levels × 8 hostile variants by
+`a_battle_ready_team_is_one_the_engine_accepts_outright`.
 
 **SS_VERIFY** — the round-1 agreement barrier. *rx BATTLE_STATE(1), open hash
 equal* → SS_BATTLE. *differs*: BATTLE_END, `SE_DESYNC(SD_SETUP)`, no rewards.
@@ -296,6 +349,25 @@ SS_ENDING until the peer's GOODBYE. *either disagrees*:
 agreed, otherwise counted and ignored — a GOODBYE that overtook the BATTLE_END
 it follows proves nothing about the battle. *ladder expires*: `SE_DONE` if we
 agreed, `SE_LOST` otherwise.
+
+**Once the rewards are committed, the terminal is `SE_DONE` — whatever reaches us
+next.** The rule lives in `session_close()`, which is the one place a terminal is
+decided, so "`session_rewards_authorised()` is true only where `reason` is
+`SE_DONE`" is structural rather than a habit of the callers. It was not, until
+the P4-C5 follow-up: `on_battle_end()` took the peer's own reason byte without
+consulting `paid`, so a peer that had **already made us pay** could then choose
+our label — a forged `BATTLE_END(SE_DESYNC)` carrying a final hash we never
+computed closed us `SE_DESYNC` **while paid**, and a `BATTLE_END` with any other
+reason closed us `SE_LOST` while paid. A flood that exhausted `SESSION_MAX_RX`
+after the agreement did the same with no `BATTLE_END` at all, which is why the
+fix could not live in `on_battle_end()`. A caller following LIMIT 1
+(`if reason == SE_DONE`) and one following the header
+(`if rewards_authorised()`) disagreed about the same session, and the **peer**
+picked which. The label is what is corrected and not the payment: `paid` is set
+only by **our own** comparison of the peer's outcome and final hash against ours,
+after our own engine finished the battle, and nothing that happens afterwards can
+un-decide that. Refusing to pay instead would hand an attacker a free denial for
+the price of one frame.
 
 **SS_CLOSED** — terminal; every type is dropped.
 
@@ -420,10 +492,17 @@ Nothing in `app/` or `ui/` references these modules yet, so the ESP32 link
 (`--gc-sections`) drops them entirely: flash and globals are **unchanged**
 against the previous commit at 1,915,696 / 72,676, confirmed by
 `riscv32-esp-elf-nm` finding zero `proto_`, `session_`, `link_` or `pbw_` symbols
-in the ELF. When P7 wires it: `Session` is **360 B** measured (it already contains the 40 B
-`SessionEnd` and the 144 B of frozen wire records it must be able to
-retransmit), plus a 16-entry `LinkEvent` ring at 128 B — **488 B**, all
-caller-owned, about 2.8 % of the 17,324 B of globals headroom. The lockstep holds **no**
+in the ELF. When P7 wires it: `Session` is **340 B on the device** (it already contains the
+40 B `SessionEnd` and the 144 B of frozen wire records it must be able to
+retransmit), plus a 16-entry `LinkEvent` ring at 128 B — **468 B**, all
+caller-owned, about 2.7 % of the 17,324 B of globals headroom. The 340 is
+measured by compiling this header with `riscv32-esp-elf-g++`; the **host** figure
+is 360, and this line said 360 until the P4-C5 follow-up — a host number wearing
+a device number's clothes, conservative but wrong. `sizeof(SessionEnd) == 40`,
+`sizeof(LinkEvent) == 8` and `sizeof(LoopbackLink) == 8020` are identical on both,
+and `tests/test_session.cpp` asserts only the *bound* on `sizeof(Session)`
+because an equality there would pin the host's alignment and claim nothing about
+the target. The lockstep holds **no**
 `BattleState` and **no** `BattleSetup` of its own — it takes both by reference
 and decodes the peer's team straight into `setup->member[peer_side][]`, so the
 linked path borrows the one `ui/screen_battle.cpp` already owns at file scope.
@@ -442,14 +521,21 @@ sees.
    no third party, no signature, no shared secret. **What happens:** `SE_DESYNC`
    on the round the mismatch is seen; no XP, no `battles_won` increment, no hp
    write-back, no checkpoint, both Boxes untouched, on **both** sides. **What the
-   player sees:** a neutral "the battle could not be agreed" with the round
-   number — never "the other player cheated", because the protocol cannot make
-   that claim. A lying peer's guaranteed power is **denial**: it can burn any
+   player will see, in P7:** a neutral "the battle could not be agreed" with the
+   round number — never "the other player cheated", because the protocol cannot
+   make that claim. Written in the future tense on purpose: nothing under `app/`,
+   `ui/` or `persistence/` calls into this module at this commit, so the screen
+   is P7's the same way the radio is, and the same applies to "the caller pays XP
+   and writes the Box". A lying peer's guaranteed power is **denial**: it can burn any
    battle at will. It cannot move our state, because it never supplies state —
    only two bytes of intent and a digest we compare against our own.
 2. **A peer that stalls forever** gets nine attempts at one second per
    obligation, then `SE_LOST` naming the obligation and the round, with no
-   rewards. A peer that answers at the last millisecond of every ladder is
+   rewards. **This was false for one message type until the P4-C5 follow-up** —
+   see R4 in §3: a peer that said nothing else and replayed one legal
+   ACTION_RESULT reset the ladder every time, so it held the session open for as
+   long as it kept typing and ended `SE_PROTOCOL(SD_RX_BUDGET)` with
+   `tx_retx == 0`. A peer that answers at the last millisecond of every ladder is
    **inside every rule**: the ladder bounds silence, not slowness, and there is
    no per-round time budget and **no total-session deadline** — a slow but alive
    link can drag a 60-round battle out for minutes. The cheapest fix is a
@@ -468,6 +554,15 @@ sees.
    `genome_valid()` checks only the signature, the proto version, `lineage_id != 0`
    and the CRC — a forgery resealed with a correct CRC passes all four. The
    genome is validated for lineage and trade integrity and for nothing else.
+   **"0..2" is a bound on the range and not a reassurance about the stakes**, and
+   the difference is measured: a mirror match at level 10, same species, same
+   moves, same level, AI on both sides, 200 seeds per configuration, with one
+   side carrying the maximum genome (+2/+2/+2) and the other the minimum
+   (+0/+0/+0), gives **594 wins of 600 to the forged side** (species 1 and 2:
+   200/200 each; species 3: 194/200) — and it is symmetric across sides, so side
+   bias does not explain it. Two points of atk, def and spd is not a rounding
+   error at the levels this game is played at. This is LIMIT 3's class, not a
+   separate hole: it is a peer winning by sending data that is legal.
 5. **The protocol cannot stop a peer cheating itself.** There is no shared ledger
    and no server; a modified peer awards itself the win locally whatever it
    reports. The claim this design supports is §67's actual one — *invalid peers
@@ -527,22 +622,40 @@ sees.
 13. **Completion is not promised at arbitrary loss — only "completes or aborts
     named".** Measured over 500 trials per arm: clean 500/500, 10 % duplicate
     500/500, 10 % reorder (window 4) 500/500, 10 % drop 500/500, 10 % of all
-    three together 500/500, and **30 % drop with 20 % reorder 474 completed, 25
+    three together 500/500, and **30 % drop with 20 % reorder 471 completed, 28
     clean `SE_LOST` and 1 half-paid**. Silent divergences: **0 in all 3,000
-    trials**. Above roughly half sustained loss per direction the ladder expires
-    more often than it succeeds and the battle aborts as `SE_LOST` — a clean
-    abort, not a divergence.
+    trials**, and not one trial wrote a Box byte. **Two things about the
+    instrument, said here rather than left to be re-derived.** (a) The loopback's
+    queue is `LB_QUEUE_CAP 24` deep and a send onto a full queue is counted as a
+    drop, so an arm's *effective* loss is its declared loss **plus** that:
+    measured 0 of 70,298 sends on the clean arm, 283 of 109,656 at 10 % drop, 192
+    of 88,042 on the reorder arm, 540 of 120,856 with all three and 43 of 157,896
+    on the harsh arm — under half a percent everywhere, and the census now
+    asserts both that an unfaulted link overflows nothing and that no arm lets
+    overflow become its dominant fault. (b) The harness advances its virtual
+    clock only on a poll round in which **no frame moved anywhere in the
+    system**, so an endpoint never climbs its ladder while its peer is
+    transmitting something unrelated — which no real device does. The census is
+    therefore a measurement of the session **logic** under loss, not of a duty
+    cycle.
 14. **The anti-exhaustion constants are heuristics.** `SESSION_MAX_RX 1024`,
     `SESSION_MAX_TX 4096`, `SESSION_MAX_REACK_PER_ROUND 8`,
     `SESSION_MAX_HANDSHAKE_REACK 16` and `SESSION_SEQ_MAX_JUMP 64` come from the
     worst honest case plus slack, not from an adversary, because there is no
-    radio in this step. They bound how long one hostile session holds the link;
+    radio in this step. `SESSION_SEQ_MAX_JUMP` bounds the **baseline** as well as
+    the jumps after it, and that half was missing until the P4-C5 follow-up: the
+    rule covered a jump from an *established* last, while the first frame an
+    endpoint accepted set that last to whatever it claimed — so the same
+    one-packet deafness was still available before the peer had spoken, through a
+    HELLO, which needs no session id at all. They bound how long one hostile session holds the link;
     they do nothing to stop the peer opening another immediately. Discovery-level
     rate limiting does not exist and belongs to P7.
 15. **The validator's own bugs are the trust boundary, and half of it has no
     second line.** Keeping `battle_init()` as an independent checker means a
     single-guard bug is usually caught — **but only for the rules the engine also
-    has**. The rules that exist only in `validate.cpp` (the genome seal, the xp
+    has**, and only where the two agree about *which layer* owns the answer: the
+    faint rule was in the engine and nowhere above it, so the engine caught it
+    and the layer above misattributed it (§3, SS_TEAM). The rules that exist only in `validate.cpp` (the genome seal, the xp
     curve, the status masks, the evolution state, the reserved bytes, the wire
     seal) are guarded by nothing but their own tests.
 16. **A Pebble's history cannot be checked.** `battles_won`, `age_s`, `trades`

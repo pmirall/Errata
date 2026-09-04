@@ -23,6 +23,17 @@
 //   (d) EVERY ProtoErr and every VR_WIRE_* is reached by a vector whose OWN
 //       field is the only defect, with a positive control in the same function.
 //
+//  TWO CASES ALLOCATE, AND IT IS DELIBERATE RATHER THAN AN OVERSIGHT. This step
+//  forbids the heap in the FIRMWARE; the_decoder_reads_nothing_past_the_byte_
+//  count_the_transport_gave_it and the fuzzer at the bottom both decode out of a
+//  `new uint8_t[k]` block sized to EXACTLY the byte count under test, because
+//  that is the only way to put an AddressSanitizer redzone on the first illegal
+//  byte - a full-size stack array turns an out-of-bounds read into a read that
+//  lands inside the array and no sanitizer ever sees it. Both are host-test-only,
+//  both are correctly paired with `delete[]`, and the measurement each one buys
+//  is recorded at the case. Said here because "no heap in this step" is the rule
+//  and a reader running the obvious grep will find these two lines.
+//
 //  THE GOLDEN BYTE ARRAYS ARE NOT DECORATION. networking/protocol.h forbids a
 //  struct memcpy onto the wire, and a grep cannot express that; a frozen frame
 //  and a frozen 48 B record, compared byte for byte and cross-checked against
@@ -465,6 +476,20 @@ TEST(the_decoder_reads_nothing_past_the_byte_count_the_transport_gave_it) {
   CHECK(swept > 12 * (int)PROTO_FRAME_MIN);
 }
 
+// THIS SWEEP DECODES OUT OF A STACK BUFFER AND THAT IS CORRECT, which is worth a
+// sentence because it looks like the omission the case above exists to fix. A
+// single bit flipped anywhere in the frame either invalidates the trailing CRC
+// (step 4) or breaks the length equality (step 3), so NO frame this sweep builds
+// ever reaches step 5, let alone the payload read at step 11 - which the
+// assertions below state independently, since only PE_CRC, PE_LEN and
+// PE_OVERSIZE are permitted answers. A sweep that cannot reach a payload read
+// cannot read past the buffer, so an exact-sized arena here would buy nothing.
+// MEASURED, because a review suggested otherwise: with step 8
+// (len == PROTO_LEN_OF[type]) deleted and every one of these 3,680 flips decoded
+// out of a heap block of exactly `n` bytes, AddressSanitizer reports NOTHING.
+// The sweep that CAN reach step 11 with a forged type is the fuzzer at the
+// bottom of this file, because six of its eleven mutations reseal the CRC - and
+// that is where the exact-sized arena lives and where it is measured.
 TEST(a_single_bit_flipped_at_every_position_of_every_type_is_refused_by_name) {
   int crc_seen = 0, len_seen = 0, other = 0;
   for (int t = 1; t <= (int)PROTO_TYPE_MAX; ++t) {
@@ -1115,7 +1140,23 @@ TEST(a_structured_fuzzer_finds_no_frame_that_is_accepted_and_malformed) {
       }
     }
 
-    const ProtoErr e = guarded_decode(buf, n_use, sess);
+    // DECODED OUT OF A HEAP BLOCK OF EXACTLY n_use BYTES, and this is the one
+    // sweep in the file where that is load-bearing. Kinds 5 to 10 RESEAL the
+    // CRC, so a frame with a FORGED TYPE reaches step 11 and the decoder reads
+    // the payload of the type the byte now claims - a TEAM_SUBMIT's 148 bytes
+    // out of a 20-byte GOODBYE frame, if step 8 were not there to stop it. Over
+    // a full-size stack array that read lands inside the array and no sanitizer
+    // sees it; over an exact block ASan's redzone sits on the first illegal
+    // byte. MEASURED with step 8 (len == PROTO_LEN_OF[type]) deleted: the
+    // ordinary build catches the mutation by name through
+    // a_length_that_is_not_this_types_length_is_refused_by_name and reports NO
+    // memory error at all, and this case under -fsanitize=address reports
+    // "heap-buffer-overflow ... READ of size 1 ... in proto_decode
+    // protocol.cpp:433" from inside this loop.
+    uint8_t* exact = new uint8_t[n_use ? n_use : 1u];
+    memcpy(exact, buf, n_use);
+    const ProtoErr e = guarded_decode(exact, n_use, sess);
+    delete[] exact;
     by_code[(int)e]++;
     if (e == PE_OK) {
       accepted++;
@@ -1150,5 +1191,114 @@ TEST(a_structured_fuzzer_finds_no_frame_that_is_accepted_and_malformed) {
     if (by_code[MUST[i]] == 0)
       fprintf(stderr, "    fuzzer never produced %s\n", proto_err_name((ProtoErr)MUST[i]));
     CHECK(by_code[MUST[i]] > 0);
+  }
+}
+
+// =============================================================================
+//  8. THE ENCODER'S OWN CLAIM
+//
+//  networking/protocol.h says of proto_encode(): "The encoder applies the SAME
+//  type, round and count rules as the decoder, so a message this function
+//  accepts is one the decoder accepts", and cites this case by name. THE CASE
+//  DID NOT EXIST until the P4-C5 follow-up, and when it was written it FAILED:
+//  a HELLO carrying a nonzero session encoded PE_OK and was then refused by
+//  proto_decode() step 10 for EVERY expect_session, because HELLO predates the
+//  session and must carry 0. That is the class this project keeps finding - a
+//  sentence wider than the tree, here with a citation for cover - and the fix
+//  was to add the missing ENCODER rule rather than to narrow the sentence.
+//
+//  IT IS SWEPT AND THEN FUZZED, and the fuzz half is load-bearing: the sweep
+//  uses mk_msg()'s own session and would never have produced the one message
+//  the rule is about.
+// =============================================================================
+static void encoder_agrees(const ProtoMsg& m, int* accepted, int* refused)
+{
+  uint8_t buf[PROTO_FRAME_MAX];
+  size_t  n = 0;
+  const ProtoErr e = proto_encode(m, buf, sizeof buf, n);
+  if (e != PE_OK) {
+    CHECK((int)e < (int)PE_CODEC_COUNT);        // a NAMED refusal, always
+    CHECK_EQ((int)n, 0);                        // n_out is 0 on every reject
+    (*refused)++;
+    return;
+  }
+  (*accepted)++;
+  // THE CLAIM. `expect_session` is the session the message names, which is what
+  // an endpoint holding that session passes; a HELLO names 0 and so does the
+  // endpoint that has no session yet.
+  const ProtoErr d = guarded_decode(buf, n, m.session);
+  if (d != PE_OK)
+    fprintf(stderr, "    encoder emitted type %d session %08lX that its decoder "
+                    "refused with %s\n",
+            (int)m.type, (unsigned long)m.session, proto_err_name(d));
+  CHECK_EQ((int)d, (int)PE_OK);
+  if (d != PE_OK) return;
+  uint8_t again[PROTO_FRAME_MAX];
+  size_t  n2 = 0;
+  CHECK_EQ((int)proto_encode(g_arena.m, again, sizeof again, n2), (int)PE_OK);
+  CHECK_EQ((int)n2, (int)n);
+  CHECK_EQ(memcmp(again, buf, n), 0);
+}
+
+TEST(every_frame_the_encoder_emits_its_own_decoder_accepts) {
+  int accepted = 0, refused = 0;
+
+  // (a) THE SWEEP: every type, over the header fields a caller can choose.
+  static const uint32_t SESSIONS[] = { 0u, 1u, TEST_SESSION, 0xFFFFFFFFu };
+  for (int t = 1; t <= (int)PROTO_TYPE_MAX; ++t) {
+    for (size_t si = 0; si < sizeof SESSIONS / sizeof SESSIONS[0]; ++si) {
+      for (int fl = 0; fl < 2; ++fl) {
+        for (int rd = 0; rd <= (int)BATTLE_MAX_ROUNDS; ++rd) {
+          ProtoMsg m; mk_msg(m, (ProtoType)t);
+          m.session = SESSIONS[si];
+          m.flags   = (uint8_t)(fl ? PF_RETX : 0u);
+          m.round   = (uint8_t)rd;
+          encoder_agrees(m, &accepted, &refused);
+        }
+      }
+    }
+  }
+
+  // (b) THE FUZZ: the header is drawn, so the combinations the sweep's own
+  //     fixtures never build are reached. One printable seed, as everywhere.
+  Rng rng; rng_init(rng, nt_state().seed ^ 0x454E4344u);
+  for (int it = 0; it < 40000; ++it) {
+    const uint32_t d0 = rng_next(rng);
+    const ProtoType t = (ProtoType)(1u + (d0 % (uint32_t)PROTO_TYPE_MAX));
+    ProtoMsg m; mk_msg(m, t);
+    m.session = rng_next(rng);
+    m.seq     = (uint16_t)rng_next(rng);
+    m.ack     = (uint16_t)rng_next(rng);
+    // DRAWN THROUGH rng_next_below RATHER THAN AS A LOW BYTE. Measured while
+    // writing this: `(uint8_t)rng_next(rng)` for `round` produced ZERO zeroes in
+    // 40,000 draws on this xorshift32, so the fuzz arm never built the one
+    // message the case exists for - a HELLO, whose round MUST be 0 to get past
+    // the round rule at all. A low byte is not a uniform small integer.
+    m.flags   = (uint8_t)rng_next_below(rng, 8u);
+    m.round   = (uint8_t)rng_next_below(rng, 40u);
+    if (t == PT_TEAM_SUBMIT) m.p.team.count = (uint8_t)rng_next_below(rng, 6u);
+    if (t == PT_SESSION_REQUEST) m.p.sreq.rules = (uint8_t)rng_next_below(rng, 3u);
+    encoder_agrees(m, &accepted, &refused);
+  }
+
+  // NOT VACUOUS IN EITHER DIRECTION: an encoder that refused everything would
+  // satisfy the claim above and prove nothing, and one that accepted everything
+  // would mean the sweep never exercised a rule.
+  CHECK(accepted > 1000);
+  CHECK(refused  > 1000);
+
+  // (c) THE RULE THE CASE WAS WRITTEN FOR, with its positive control. HELLO
+  //     carries session 0 BY DEFINITION - proto_decode() step 10 refuses any
+  //     other value whatever session the endpoint is in - so the encoder must
+  //     refuse it too, by the same name.
+  {
+    ProtoMsg m; mk_msg(m, PT_HELLO);
+    uint8_t buf[PROTO_FRAME_MAX]; size_t n = 0;
+    CHECK_EQ((int)m.session, 0);
+    CHECK_EQ((int)proto_encode(m, buf, sizeof buf, n), (int)PE_OK);   // control
+    m.session = 0x11223344u;
+    n = 12345u;
+    CHECK_EQ((int)proto_encode(m, buf, sizeof buf, n), (int)PE_SESSION);
+    CHECK_EQ((int)n, 0);
   }
 }

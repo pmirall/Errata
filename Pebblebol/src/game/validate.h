@@ -76,23 +76,37 @@
 //  game/battle.cpp keeps its own setup_member_ok(). Two independent checkers
 //  with the SAME bounds is defence in depth; two with DIFFERENT bounds is the
 //  disagreement this project keeps finding - so the relationship is asserted by
-//  a test that can fail rather than by this sentence:
+//  two tests that can fail rather than by this sentence:
 //
-//      validate_team(...) == VR_OK  =>  battle_init(...) != <anything but
-//                                       BR_OK or BR_MEMBER_FAINTED>
+//      validate_team(...) == VR_OK  =>  battle_init(...) is BR_OK or
+//                                       BR_MEMBER_FAINTED and nothing else
+//                                       (`a_team_the_validator_accepts_the_engine_
+//                                         refuses_only_for_fainting`)
 //
-//  BR_MEMBER_FAINTED is the ONE engine code this validator deliberately does
-//  not own, and the reason is that hp_cur == 0 / PBS_FAINTED is a legitimate
-//  STORED state and an illegal BATTLE state. It is battle eligibility, not
-//  Pebble validity, and putting it here would need exactly the scope flag this
-//  design removed. BR_VERSION_MISMATCH is structurally unreachable on the wire
-//  path: battle_setup_clear() stamps the LOCAL engine and content versions and
-//  a peer sends records, never a BattleSetup - which is why the CAPABILITIES
-//  message carries those words and refuses before a team is ever sent.
+//      validate_team(...) == VR_OK AND validate_battle_ready(...) == VR_OK
+//                                   =>  battle_init(...) == BR_OK
+//                                       (`a_battle_ready_team_is_one_the_engine_
+//                                         accepts_outright`)
 //
-//  The consequence has teeth: a BattleReject on a team this validator accepted
-//  is a BUG IN validate.cpp, never a peer capability, and the linked battle
-//  driver must report it as an internal fault rather than blaming the peer.
+//  hp_cur == 0 / PBS_FAINTED is the one engine code the SHARED BODY does not
+//  own, because it is a legitimate STORED state and an illegal BATTLE state -
+//  battle eligibility, not Pebble validity. It is owned by
+//  validate_battle_ready() one function down instead, which is what keeps the
+//  shared body free of a scope flag AND stops the engine being the first thing
+//  in the tree to notice. BR_VERSION_MISMATCH is structurally unreachable on
+//  the wire path: battle_setup_clear() stamps the LOCAL engine and content
+//  versions and a peer sends records, never a BattleSetup - which is why the
+//  CAPABILITIES message carries those words and refuses before a team is ever
+//  sent. BR_DUPLICATE_ID spans BOTH teams, which no single-team function can
+//  see, so networking/session.cpp owns the cross-team half and answers
+//  VR_DUPLICATE_ID.
+//
+//  The consequence has teeth: once a caller has run validate_team(), the
+//  cross-team id check and validate_battle_ready(), a BattleReject is a BUG IN
+//  THIS TREE and never a peer capability, and the linked battle driver reports
+//  it as an internal fault rather than blaming the peer. Before
+//  validate_battle_ready() existed that sentence was FALSE for exactly one
+//  code, and the driver's comment asserted it anyway.
 //
 // -----------------------------------------------------------------------------
 //  FOUR RULES DELIBERATELY NOT WRITTEN, EACH WITH ITS REASON
@@ -105,7 +119,9 @@
 //   (b) NO genome GENE-RANGE check. GN_TEMPER_MK, GN_HARDY_MK and GN_METAB_MK
 //       are all 0x0F, so a gene is <= 15 BY CONSTRUCTION and genome variance is
 //       0..2 whatever a peer sends. A guard there is a test that cannot fail.
-//   (c) NO faint rule - see the battle_init() paragraph above.
+//   (c) NO faint rule IN THE SHARED BODY - it is a battle rule and it lives in
+//       validate_battle_ready(). Putting it here would quarantine a fainted
+//       Pebble on the save path, where being fainted is ordinary.
 //   (d) NO "level >= the evolution rule's level" rule. It is FALSE for wild
 //       captures: every one of the 36 roster rows carries a nonzero spawn
 //       weight and a wild level is clamped around the active Pebble's, so a
@@ -125,7 +141,12 @@
 //     genome_valid() checks the signature, the proto version, lineage_id != 0
 //     and the CRC - and a forgery resealed with a correct CRC passes all four.
 //     The genome is validated for lineage and trade integrity and for nothing
-//     else. It is NOT a stat-forging defence.
+//     else. It is NOT a stat-forging defence. AND THE STAKES ARE NOT SMALL:
+//     rule (b) below says variance is 0..2 by construction, which is a bound on
+//     the RANGE and not a reassurance about the outcome. Measured - level 10
+//     mirror match, same species and moves, AI on both sides, 200 seeds per
+//     configuration - the maximum genome beats the minimum one 594 times in
+//     600, symmetric across sides.
 //   * A PEBBLE'S HISTORY CANNOT BE CHECKED. battles_won, battles_lost,
 //     minigames_won, evolutions, trades, age_s, lifetime_active_s and every
 //     epoch are checked against NOTHING here, because no rule exists to check
@@ -220,14 +241,24 @@ enum VReject : uint8_t {
   VR_TEAM_SIZE,              // count outside 1..BATTLE_TEAM_MAX
   VR_DUPLICATE_ID,           // the same PebbleInstance.id twice
 
-  // --- SESSION-SCOPED. Produced ONLY by validate_level_band().
+  // --- SESSION-SCOPED. Produced ONLY by validate_level_band() and
+  //     validate_battle_ready(). Both are about a SET in a CONTEXT, never about
+  //     whether a Pebble is a legal object: the same team is in band in one
+  //     session and out of it in the next, and a fainted Pebble is a perfectly
+  //     legal thing to have STORED.
   VR_LEVEL_OUT_OF_BAND,      // outside the band the two peers agreed
+  VR_MEMBER_FAINTED,         // hp_cur == 0 or PBS_FAINTED: legal to store,
+                             // illegal to bring to a battle. It is the engine's
+                             // BR_MEMBER_FAINTED, named ONE LAYER EARLIER so a
+                             // peer that sends one is answered as a peer.
 
   VR_REJECT_COUNT
 };
 
 // -----------------------------------------------------------------------------
-//  THE API. Five functions, and no policy parameter anywhere.
+//  THE API. FIVE functions, and no policy parameter anywhere. (This line said
+//  "five" when there were four declared below and says five now that there are
+//  five; the count is the one below, not the one it inherited.)
 // -----------------------------------------------------------------------------
 
 // THE shared body. Every content rule in the tree is here exactly once.
@@ -246,6 +277,23 @@ VReject validate_team(const PebbleInstance* m, uint8_t count, uint8_t& bad_index
 // and out of band in the next. lo > hi refuses everything, by construction.
 VReject validate_level_band(const PebbleInstance* m, uint8_t count,
                             uint8_t lo, uint8_t hi, uint8_t& bad_index);
+
+// BATTLE ELIGIBILITY, which is not Pebble validity. A stored Pebble may be
+// fainted; a battling one may not, and game/battle.cpp's battle_init() has
+// always said so with BR_MEMBER_FAINTED. Same shape as validate_level_band():
+// a rule about a SET in a CONTEXT, outside the shared body, with no policy flag
+// anywhere.
+//
+// IT EXISTS BECAUSE OF A MEASURED MISATTRIBUTION. Before it, hp_cur == 0 was
+// the one thing three checkers accepted and the engine refused, so a peer that
+// sent a fainted member made the honest device close SE_PROTOCOL / SD_INTERNAL -
+// "a bug in game/validate.cpp" - for a lie the peer told, with bad_index 0xFF so
+// neither the log nor the peer was told which Pebble did it. It is the same
+// class as the cross-team duplicate id the session layer already owned, and the
+// last instance of it. An honest player whose own team held a fainted Pebble
+// reached the identical dead end with nobody lying at all.
+VReject validate_battle_ready(const PebbleInstance* m, uint8_t count,
+                              uint8_t& bad_index);
 
 // The English name of a code, for the event log and the host tests. NOT a UI
 // string: Spanish lives in core/strings_es.h. Total - an out-of-range value

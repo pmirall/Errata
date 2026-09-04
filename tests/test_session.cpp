@@ -605,6 +605,49 @@ TEST(a_sequence_number_no_honest_peer_could_reach_does_not_move_the_window)
   CHECK_EQ(session_end(T.e[1].s).reason, SE_DONE);
 }
 
+TEST(the_very_first_sequence_number_is_bounded_too_and_not_only_the_jumps_after_it)
+{
+  // THE HALF THE RULE ABOVE DID NOT COVER. SESSION_SEQ_MAX_JUMP bounded a jump
+  // from an ESTABLISHED last, but the FIRST frame an endpoint accepted set that
+  // last to whatever it said, with no bound at all - so the same one-packet
+  // deafness was still available BEFORE the peer had spoken. HELLO is the frame
+  // to do it with: it carries session 0 by definition, so an off-path device
+  // needs no session id at all, and the id travels in clear anyway.
+  //
+  // MEASURED before the bound: e0 took rx_seq_last = 28672 from the injected
+  // HELLO and BOTH endpoints ended SE_LOST on a link that dropped nothing.
+  Trial& T = arena();
+  trial_begin(T, 0x5A30u, CLEAN);
+  CHECK_EQ(trial_set_teams(T), VR_OK);
+
+  ProtoMsg m;
+  proto_msg_init(m, PT_HELLO, 0u, 0x7000u);
+  m.p.hello.device_id   = 0x0BADBADu;          // a device that is not the peer
+  m.p.hello.hello_nonce = 0x12345678u;
+  uint8_t buf[PROTO_FRAME_MAX]; size_t n = 0;
+  CHECK_EQ(proto_encode(m, buf, sizeof buf, n), PE_OK);
+  inject(T.lk, 0u, buf, (uint16_t)n);          // BEFORE either endpoint speaks
+  session_poll(T.e[0].s, T.now);               // the ONLY frame it has ever seen
+
+  // It was DELIVERED and REFUSED - not absent, which would make the rest
+  // vacuous - and the window is still where session_init() left it.
+  CHECK_EQ(session_end(T.e[0].s).rx_stale, 1);
+  CHECK_EQ(session_end(T.e[0].s).rx_ok, 0);    // it never reached the FSM
+  CHECK_EQ(T.e[0].s.rx_seq_last, 0);
+  CHECK_EQ(T.e[0].s.rx_seq_seen, 0);
+  CHECK_EQ(T.e[0].s.peer_device_id, 0);        // no phantom peer was bound
+
+  session_start(T.e[0].s, T.now);
+  session_start(T.e[1].s, T.now);
+  trial_run(T);
+  CHECK(!T.hung);
+  CHECK_EQ(T.e[0].s.peer_device_id, DEV_ID[1]);
+  // And the honest battle happens exactly as it would have without it.
+  CHECK_EQ(session_end(T.e[0].s).reason, SE_DONE);
+  CHECK_EQ(session_end(T.e[1].s).reason, SE_DONE);
+  CHECK_EQ(memcmp(&T.e[0].st, &T.e[1].st, sizeof(BattleState)), 0);
+}
+
 TEST(a_frame_from_far_below_the_window_is_stale_and_not_a_duplicate)
 {
   // Reordering is what produces one, and the window has to tell it from a
@@ -805,6 +848,99 @@ TEST(a_retransmitted_action_for_a_resolved_round_is_answered_and_not_submitted)
   CHECK(session_end(T.e[0].s).rx_stale > 0);
 }
 
+// Replays ONE legal, in-state frame into a cut link, one per ladder rung, and
+// answers the only question that matters about R4: does the ladder still climb?
+// `make` fills the message; the seq is always one past what the endpoint has
+// accepted, so the window calls every replay new and the FSM really sees it.
+static uint32_t replay_until_closed(Trial& T, uint8_t who,
+                                    void (*make)(Trial&, uint8_t, ProtoMsg&),
+                                    uint32_t cap)
+{
+  uint8_t buf[PROTO_FRAME_MAX]; size_t n = 0;
+  uint32_t poured = 0;
+  while (!session_closed(T.e[who].s) && poured < cap) {
+    ProtoMsg m;
+    make(T, who, m);
+    m.seq = (uint16_t)(T.e[who].s.rx_seq_last + 1u);
+    if (proto_encode(m, buf, sizeof buf, n) != PE_OK) break;
+    inject(T.lk, who, buf, (uint16_t)n);
+    poured++;
+    session_poll(T.e[who].s, T.now);
+    T.now += PROTO_RETX_MS;                  // the attacker chooses the spacing
+  }
+  return poured;
+}
+
+static void mk_replayed_action_result(Trial& T, uint8_t who, ProtoMsg& m)
+{
+  proto_msg_init(m, PT_ACTION_RESULT, T.e[who].s.id, 0u);
+  m.round             = T.e[who].s.my_act_round;
+  m.p.ares.reject     = (uint8_t)BR_OK;
+  m.p.ares.kind_echo  = T.e[who].s.my_act_kind;
+  m.p.ares.index_echo = T.e[who].s.my_act_index;
+  m.p.ares.open_hash  = T.e[who].s.my_act_hash;
+}
+
+static void mk_replayed_battle_state(Trial& T, uint8_t who, ProtoMsg& m)
+{
+  proto_msg_init(m, PT_BATTLE_STATE, T.e[who].s.id, 0u);
+  m.round              = (uint8_t)T.e[who].st.round;
+  m.p.bstate.open_hash = T.e[who].s.open_hash;
+  m.p.bstate.phase     = T.e[who].st.phase;
+  m.p.bstate.outcome   = T.e[who].st.outcome;
+}
+
+TEST(one_legal_frame_replayed_forever_cannot_hold_the_session_open)
+{
+  // R4 SAYS ONLY PROGRESS TOUCHES THE LADDER, and docs/protocol.md promises a
+  // peer that stalls gets nine attempts and then SE_LOST. BOTH WERE FALSE FOR
+  // ONE TYPE: on_action_result() called session_progress() for EVERY
+  // ACTION_RESULT whose round matched our outstanding ACTION, including the
+  // second and every one after - and a re-acknowledged ACTION_RESULT is exactly
+  // what an honest peer regenerates from state. MEASURED before the guard: one
+  // frame replayed at a spacing the ATTACKER chooses held the session open for
+  // over a thousand injections and seventeen hours of virtual time, ending
+  // SE_PROTOCOL / SD_RX_BUDGET with tx_retx 0 - not the SE_LOST with
+  // tx_retx == 9 that SessionEnd's own documented signature relies on.
+  //
+  // WHY THE EXISTING FLOOD CASE COULD NOT SEE IT: junk_never_reaches_... injects
+  // PT_ACTION_RESULT from SS_TEAM, where it is a wrong-state frame that never
+  // reaches this handler. Right type, wrong state, branch never entered.
+  struct Arm { void (*make)(Trial&, uint8_t, ProtoMsg&); const char* what; };
+  const Arm ARMS[] = {
+    { &mk_replayed_action_result, "ACTION_RESULT" },
+    { &mk_replayed_battle_state,  "BATTLE_STATE"  },   // the control: always obeyed R4
+  };
+  for (uint8_t k = 0; k < sizeof ARMS / sizeof ARMS[0]; ++k) {
+    Trial& T = arena();
+    trial_begin(T, 0x5300u + k, CLEAN);
+    CHECK_EQ(trial_set_teams(T), VR_OK);
+    session_start(T.e[0].s, T.now);
+    session_start(T.e[1].s, T.now);
+    CHECK(trial_run_until_state(T, 0u, SS_BATTLE));
+    // Run on until endpoint 0 has an ACTION outstanding, so the replayed frame
+    // is IN STATE and reaches the handler under test.
+    while (T.e[0].s.my_act_round == 0u && !session_closed(T.e[0].s)) (void)trial_step(T);
+    CHECK(T.e[0].s.my_act_round != 0u);
+    link_cut(T);
+
+    const uint32_t poured = replay_until_closed(T, 0u, ARMS[k].make, 200u);
+    const SessionEnd& e = session_end(T.e[0].s);
+    if (e.reason != (uint8_t)SE_LOST || e.tx_retx != (uint8_t)PROTO_RETX_MAX)
+      fprintf(stderr, "  replaying %s: %u injections, reason=%s detail=%u tx_retx=%u\n",
+              ARMS[k].what, (unsigned)poured,
+              session_reason_name((SessionEndReason)e.reason),
+              (unsigned)e.detail, (unsigned)e.tx_retx);
+    CHECK_EQ(e.reason, SE_LOST);
+    CHECK_EQ(e.tx_retx, PROTO_RETX_MAX);
+    // ON EXACTLY ITS OWN SCHEDULE. One rung per injection plus what was already
+    // on the clock; anything more means the replay bought the peer time.
+    CHECK(poured <= (uint32_t)PROTO_RETX_MAX + 2u);
+    CHECK(!session_rewards_authorised(T.e[0].s));
+    CHECK(boxes_untouched(T));
+  }
+}
+
 TEST(losing_one_frame_of_every_type_in_turn_still_finishes_the_battle)
 {
   // The re-ack rules are not one rule: each message type has its own way back,
@@ -869,6 +1005,14 @@ static void ed_genome_crc(PebbleInstance& p){ p.genome.crc16 = (uint16_t)(p.geno
 // so this is the vector that makes deleting validate_team() fail a named case
 // rather than passing on the strength of the decoder underneath it.
 static void ed_same_id(PebbleInstance& p)   { p.id = 0x200u; }
+// THE LAST THING THREE CHECKERS ACCEPTED AND THE ENGINE REFUSED. hp_cur == 0 is
+// a legal STORED state, so validate_pebble(), validate_team() and pbw_decode()
+// all answer VR_OK for it; battle_init() answers BR_MEMBER_FAINTED. Before
+// validate_battle_ready() this vector closed the honest endpoint SE_PROTOCOL /
+// SD_INTERNAL with bad_index 0xFF - measured - which is this device recording a
+// bug in its own validator for a lie the peer told. PBS_FAINTED cannot make the
+// trip (VR_WIRE_STATUS_BITS refuses it), so hp_cur is the only way through.
+static void ed_fainted(PebbleInstance& p)   { p.hp_cur = 0u; }
 
 struct PoisonCase { void (*edit)(PebbleInstance&); VReject want; const char* what; };
 
@@ -882,6 +1026,7 @@ TEST(a_team_the_peer_could_not_have_raised_is_refused_by_the_right_code)
     { &ed_hp_over,     VR_HP_OVER_MAX,          "hp above the derived max" },
     { &ed_genome_crc,  VR_BAD_GENOME,           "a broken genome seal" },
     { &ed_same_id,     VR_DUPLICATE_ID,         "one Pebble sent twice" },
+    { &ed_fainted,     VR_MEMBER_FAINTED,       "a member that has fainted" },
   };
   for (uint8_t k = 0; k < sizeof CASES / sizeof CASES[0]; ++k) {
     Trial& T = arena();
@@ -928,6 +1073,56 @@ TEST(a_peer_that_echoes_our_own_pebble_ids_is_refused_as_a_duplicate)
   CHECK_EQ(session_end(T.e[0].s).detail, VR_DUPLICATE_ID);
   CHECK(session_end(T.e[0].s).detail != SD_INTERNAL);
   CHECK_EQ(T.e[0].st.phase, BP_INIT);
+}
+
+TEST(a_fainted_member_is_the_peer_s_lie_and_our_own_teams_refusal_never_an_internal_bug)
+{
+  // THE ARM ABOVE proves the peer is answered by name. This case proves the two
+  // things that arm cannot: that the honest device NEVER records SD_INTERNAL for
+  // it, and that OUR OWN team is refused before a single frame goes out - which
+  // is the half with no adversary in it at all. Both endpoints used to close
+  // SE_PROTOCOL / SD_INTERNAL on a team nobody had tampered with.
+  Trial& T = arena();
+
+  // (a) THE PEER'S LIE. Same vector as the table above, asserted against the
+  //     code it used to produce rather than only against the one it should.
+  trial_begin(T, 0x3200u, CLEAN);
+  CHECK_EQ(trial_set_teams(T), VR_OK);
+  session_start(T.e[0].s, T.now);
+  session_start(T.e[1].s, T.now);
+  CHECK(poison_in_flight(T, 0u, 1u, &ed_fainted));
+  trial_run(T);
+  CHECK(!T.hung);
+  CHECK_EQ(session_end(T.e[0].s).reason, SE_REJECTED);
+  CHECK_EQ(session_end(T.e[0].s).detail, VR_MEMBER_FAINTED);
+  CHECK_EQ(session_end(T.e[0].s).bad_index, 1);          // WHICH member, not 0xFF
+  CHECK(session_end(T.e[0].s).reason != SE_PROTOCOL);
+  CHECK(session_end(T.e[0].s).detail != SD_INTERNAL);
+  CHECK_EQ(T.e[0].st.phase, BP_INIT);                    // the engine never ran
+  CHECK(boxes_untouched(T));
+
+  // (b) OUR OWN TEAM, WITH NOBODY LYING. The refusal is at session_set_team(),
+  //     so the session is never even started - and the code names the member.
+  trial_begin(T, 0x3201u, CLEAN);
+  T.e[0].box[2].hp_cur = 0u;
+  memcpy(T.e[0].box_before, T.e[0].box, sizeof T.e[0].box_before);
+  uint8_t bad = 0xFFu;
+  CHECK_EQ(session_set_team(T.e[0].s, T.e[0].box, T.e[0].count, bad), VR_MEMBER_FAINTED);
+  CHECK_EQ(bad, 2);
+  CHECK_EQ(T.e[0].s.my_count, 0);          // nothing was frozen for the wire
+  CHECK_EQ(session_state(T.e[0].s), SS_IDLE);
+
+  // (c) THE POSITIVE CONTROL, IN THE SAME FUNCTION: PBS_FAINTED on a full-hp
+  //     Pebble is the other half of the engine's own rule, and healing the hp
+  //     alone must not make the team eligible.
+  T.e[0].box[2].hp_cur = T.e[0].box[0].hp_cur;
+  T.e[0].box[2].status = (uint8_t)PBS_FAINTED;
+  CHECK_EQ(session_set_team(T.e[0].s, T.e[0].box, T.e[0].count, bad), VR_MEMBER_FAINTED);
+  CHECK_EQ(bad, 2);
+  T.e[0].box[2].status = 0u;
+  CHECK_EQ(session_set_team(T.e[0].s, T.e[0].box, T.e[0].count, bad), VR_OK);
+  CHECK_EQ(bad, 0xFF);
+  CHECK_EQ(T.e[0].s.my_count, 3);
 }
 
 TEST(the_agreed_level_band_is_refused_before_a_team_is_ever_sent)
@@ -1265,7 +1460,13 @@ static LinkCensus classify(const Trial& T)
                     (battle_state_hash(T.e[0].st) == battle_state_hash(T.e[1].st)) &&
                     (memcmp(&T.e[0].st, &T.e[1].st, sizeof(BattleState)) == 0);
   if (pa && pb) return same ? LE_COMPLETED_AGREED : LE_SILENT;
-  if (pa != pb) return LE_HALF_PAID;
+  // A HALF-PAID TRIAL IS STILL CHECKED FOR AGREEMENT. This line used to return
+  // LE_HALF_PAID before `same` was consulted at all, so a trial that paid
+  // exactly one side ON A DIVERGENT STATE would have landed in an ACCEPTED
+  // bucket - the census's own blind spot. It has never fired (0 in every arm),
+  // which is what makes it a latent hole rather than a defect, and it costs one
+  // condition to close.
+  if (pa != pb) return same ? LE_HALF_PAID : LE_SILENT;
   if (session_end(T.e[0].s).reason == SE_DESYNC ||
       session_end(T.e[1].s).reason == SE_DESYNC) return LE_DESYNC_DECLARED;
   if (session_end(T.e[0].s).reason == SE_LOST ||
@@ -1284,6 +1485,7 @@ static void arm(const char* name, const LoopbackFault& f, uint32_t trials,
                 uint32_t* tally, ArmExpect expect)
 {
   Trial& T = arena();
+  uint32_t overflow = 0, sends = 0;
   for (uint32_t i = 0; i < trials; ++i) {
     const uint32_t seed = 0x5E5510u + i;
     trial_begin(T, seed, f);
@@ -1306,12 +1508,29 @@ static void arm(const char* name, const LoopbackFault& f, uint32_t trials,
       CHECK(false);
       return;
     }
+    overflow += T.lk.stats.overflow;
+    sends    += T.lk.stats.sent;
   }
   printf("  arm %-22s", name);
   for (uint8_t b = 0; b < (uint8_t)LE_BUCKETS; ++b)
     printf(" %s=%u", CENSUS_NAME[b], (unsigned)tally[b]);
-  printf("\n");
+  printf(" overflow=%u/%u\n", (unsigned)overflow, (unsigned)sends);
   CHECK_EQ(tally[LE_SILENT], 0);
+  // THE INSTRUMENT'S OWN ERROR BAR, REPORTED RATHER THAN ASSUMED AWAY, and it
+  // is NOT zero. A send onto a full LB_QUEUE_CAP queue is counted as a drop, so
+  // an arm's EFFECTIVE loss rate is its declared one plus this. MEASURED at this
+  // commit: 0 of 70,298 sends on the clean arm, 283 of 109,656 at 10 % drop, 192
+  // of 88,042 on the reorder arm, 540 of 120,856 with all three, 43 of 157,896
+  // on the harsh arm - i.e. under half a percent everywhere, which is why the
+  // arms still measure roughly what they say. Both halves are asserted: an
+  // UNFAULTED link must overflow exactly nothing (or the harness itself is
+  // losing frames), and no arm may let queue overflow grow into the dominant
+  // fault and quietly become a different experiment.
+  const bool unfaulted = (f.drop_permille == 0u && f.dup_permille == 0u &&
+                          f.reorder_permille == 0u && f.dead == 0u &&
+                          f.block_type[0] == 0u && f.block_type[1] == 0u);
+  if (unfaulted) CHECK_EQ(overflow, 0);
+  CHECK(overflow * 100u < sends);
   if (expect == ARM_ALL_COMPLETE) {
     CHECK_EQ(tally[LE_COMPLETED_AGREED], trials);
   } else if (expect == ARM_MOSTLY_COMPLETE) {
@@ -1462,6 +1681,104 @@ TEST(rewards_are_authorised_on_agreement_and_on_nothing_else)
   CHECK(seen[SE_DONE].paid);
 }
 
+// Runs a clean pair with the PEER'S GOODBYE blocked, so endpoint 0 agrees the
+// battle, commits its rewards and then SITS in SS_ENDING with the session still
+// open - the one window in which "we have already paid" and "the session has not
+// ended" are both true. Leaves the link drained so the next poll sees only what
+// the case injects.
+static bool run_to_paid_and_still_open(Trial& T, uint32_t seed)
+{
+  LoopbackFault f = {};
+  f.block_type[1] = (uint8_t)PT_GOODBYE;
+  f.block_left[1] = 0xFFu;
+  trial_begin(T, seed, f);
+  if (trial_set_teams(T) != VR_OK) return false;
+  session_start(T.e[0].s, T.now);
+  session_start(T.e[1].s, T.now);
+  while (!session_closed(T.e[0].s) && !session_rewards_authorised(T.e[0].s)) {
+    if (T.iters++ >= 400000u) { T.hung = true; return false; }
+    (void)trial_step(T);
+  }
+  T.lk.inbox[0].count = 0u;
+  T.lk.inbox[1].count = 0u;
+  return session_rewards_authorised(T.e[0].s) && !session_closed(T.e[0].s) &&
+         session_state(T.e[0].s) == (uint8_t)SS_ENDING;
+}
+
+static void inject_msg(Trial& T, uint8_t who, ProtoMsg& m)
+{
+  uint8_t buf[PROTO_FRAME_MAX]; size_t n = 0;
+  m.seq = (uint16_t)(T.e[who].s.rx_seq_last + 1u);
+  CHECK_EQ((int)proto_encode(m, buf, sizeof buf, n), (int)PE_OK);
+  inject(T.lk, who, buf, (uint16_t)n);
+}
+
+TEST(a_peer_cannot_relabel_a_terminal_after_the_rewards_are_committed)
+{
+  // session.h says session_rewards_authorised() is true ONLY after SE_DONE and
+  // docs/protocol.md's LIMIT 1 says SE_DESYNC pays nobody on BOTH sides. BOTH
+  // WERE FALSE ONCE WE HAD PAID: on_battle_end() closed SE_DESYNC or SE_LOST
+  // from the peer's own reason byte without ever consulting s.paid, and nothing
+  // cleared s.paid - so a peer that had already made us pay could then CHOOSE
+  // our terminal label, and a caller following LIMIT 1 (`if reason == SE_DONE`)
+  // and one following the header (`if rewards_authorised()`) disagreed about
+  // the same session, with the PEER picking which.
+  //
+  // The rule now lives in session_close(): a session that has authorised
+  // rewards has agreed everything a battle decides - our own comparison of the
+  // peer's outcome AND final hash against ours - and a later terminal cannot
+  // un-agree it. THREE VECTORS, and the third is not a BATTLE_END at all,
+  // which is why the fix could not live in on_battle_end() alone.
+  Trial& T = arena();
+
+  // (a) A FORGED DESYNC, carrying a final hash this endpoint never computed.
+  CHECK(run_to_paid_and_still_open(T, 0x9200u));
+  {
+    ProtoMsg m; proto_msg_init(m, PT_BATTLE_END, T.e[0].s.id, 0u);
+    m.p.bend.reason     = (uint8_t)SE_DESYNC;
+    m.p.bend.detail     = (uint8_t)SD_RULES;
+    m.p.bend.final_hash = 0xDEADBEEFu;
+    inject_msg(T, 0u, m);
+    session_poll(T.e[0].s, T.now);
+  }
+  CHECK_EQ(session_rewards_authorised(T.e[0].s),
+           session_end(T.e[0].s).reason == (uint8_t)SE_DONE);
+  CHECK_EQ(session_end(T.e[0].s).reason, SE_DONE);
+  CHECK(session_rewards_authorised(T.e[0].s));
+
+  // (b) A PEER THAT SAYS IT GAVE UP. Pre-fix this closed SE_LOST while paid.
+  CHECK(run_to_paid_and_still_open(T, 0x9201u));
+  {
+    ProtoMsg m; proto_msg_init(m, PT_BATTLE_END, T.e[0].s.id, 0u);
+    m.p.bend.reason = (uint8_t)SE_LOCAL_CANCEL;
+    inject_msg(T, 0u, m);
+    session_poll(T.e[0].s, T.now);
+  }
+  CHECK_EQ(session_rewards_authorised(T.e[0].s),
+           session_end(T.e[0].s).reason == (uint8_t)SE_DONE);
+  CHECK_EQ(session_end(T.e[0].s).reason, SE_DONE);
+
+  // (c) NOT A BATTLE_END AT ALL: a flood that exhausts SESSION_MAX_RX after the
+  //     rewards are committed. The clock is deliberately NOT advanced, so the
+  //     ladder cannot get there first and the budget is what closes the session.
+  CHECK(run_to_paid_and_still_open(T, 0x9202u));
+  {
+    uint32_t poured = 0;
+    while (!session_closed(T.e[0].s) && poured < (uint32_t)SESSION_MAX_RX + 64u) {
+      ProtoMsg m; mk_replayed_battle_state(T, 0u, m);
+      inject_msg(T, 0u, m);
+      session_poll(T.e[0].s, T.now);
+      poured++;
+    }
+    CHECK(session_closed(T.e[0].s));
+    CHECK(poured > (uint32_t)SESSION_MAX_RX / 2u);   // the budget, not the ladder
+  }
+  CHECK_EQ(session_rewards_authorised(T.e[0].s),
+           session_end(T.e[0].s).reason == (uint8_t)SE_DONE);
+  CHECK_EQ(session_end(T.e[0].s).reason, SE_DONE);
+  CHECK(boxes_untouched(T));
+}
+
 TEST(a_cancelled_session_says_goodbye_and_the_peer_is_not_left_hanging)
 {
   Trial& T = arena();
@@ -1588,6 +1905,11 @@ TEST(the_abort_record_is_forty_bytes_and_the_session_fits_the_budget_it_claims)
   // The two numbers docs/protocol.md quotes, checked rather than remembered.
   CHECK_EQ(sizeof(SessionEnd), 40);
   CHECK_EQ(sizeof(LinkEvent), 8);
+  // sizeof(Session) IS A HOST NUMBER HERE AND THE DOC SAYS SO. This binary is
+  // x86-64, where it is 360; the DEVICE figure, measured by compiling the same
+  // header with riscv32-esp-elf-g++, is 340. Only the bound is asserted, because
+  // an equality here would pin the host's alignment and claim nothing about the
+  // target.
   CHECK(sizeof(Session) <= 512);
   CHECK_EQ(sizeof(Transport), sizeof(void*) * 3 + sizeof(void*));
 }

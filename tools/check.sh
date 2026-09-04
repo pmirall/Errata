@@ -298,7 +298,14 @@ if ls "$SKETCH"/src/game/battle_ai.* >/dev/null 2>&1; then
   [ "$n" -eq 0 ] || fail "game/battle_ai takes a MUTABLE BattleState ($n) - it must only ever see a const one"
 fi
 
-# --- P4-C5: THE THREE NETWORKING GATES ------------------------------------
+# --- P4-C5: THE FOUR NETWORKING GATES -------------------------------------
+# THE TWO LISTS BELOW ARE DEFINED ONCE AND USED BY ALL OF THEM. Gates 1, 2 and
+# 2b read the same names, because two lists that must agree is the disagreement
+# this project keeps finding.
+PURE_NET="protocol.h protocol.cpp session.h session.cpp battle_link.h battle_link.cpp transport.h transport_loopback.cpp"
+PURE_NET_CPP="protocol.cpp session.cpp battle_link.cpp transport_loopback.cpp"
+IMPURE_NET="ble_social.h ble_social.cpp net.h net.cpp webui.h webui.cpp"
+
 # 1. THE PURE NETWORKING MODULES ARE PURE, AND THE SCOPING IS BY FILENAME
 #    BECAUSE THE DIRECTORY IS MIXED. networking/ble_social.cpp:45-53
 #    legitimately includes Arduino.h, esp_bt_device.h and the BLE headers, and
@@ -310,8 +317,7 @@ fi
 #    It matches #include LINES ONLY: protocol.h discusses ESP-NOW in prose and
 #    must not trip it.
 if [ -d "$SKETCH/src/networking" ]; then
-  for f in protocol.h protocol.cpp session.h session.cpp \
-           battle_link.h battle_link.cpp transport.h transport_loopback.cpp; do
+  for f in $PURE_NET; do
     [ -f "$SKETCH/src/networking/$f" ] || continue
     n=$( { grep -nE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*(Arduino\.h|esp_now|esp_wifi|WiFi|u8g2|gfx\.h|render\.h)' \
             "$SKETCH/src/networking/$f" || true; } | wc -l )
@@ -329,12 +335,42 @@ fi
 #    function returns a reference to; the tests are what prove the modules are
 #    re-entrant across two endpoints.
 if [ -d "$SKETCH/src/networking" ]; then
-  for f in protocol.cpp session.cpp battle_link.cpp transport_loopback.cpp; do
+  for f in $PURE_NET_CPP; do
     [ -f "$SKETCH/src/networking/$f" ] || continue
     n=$( { grep -nE '^[[:space:]]*static[[:space:]]' "$SKETCH/src/networking/$f" || true; } \
           | { grep -v '(' || true; } \
           | { grep -vE '\b(const|constexpr)\b' || true; } | wc -l )
     [ "$n" -eq 0 ] || fail "networking/$f holds file-scope mutable state ($n) - two endpoints could not share a process"
+  done
+fi
+
+# 2b. EVERY FILE UNDER src/networking IS CLASSIFIED, so gate 1's filename
+#    scoping cannot silently under-cover. Gate 1 lists the PURE files by name
+#    for the reason above, and its failure mode was SILENCE: a ninth file - say
+#    P7's esp_now_transport.cpp - would get no purity gate at all and nothing
+#    would say so. This gate turns that into a red line. A new file must be
+#    added to PURE_NET (or PURE_NET_CPP for a .cpp) or to IMPURE_NET, which is the
+#    declared list of device modules that legitimately include Arduino.h and
+#    the radio headers. Adding a name to IMPURE_NET is a deliberate act with a
+#    reviewer looking at it; forgetting is now impossible.
+if [ -d "$SKETCH/src/networking" ]; then
+  # And the two lists must not drift from each other either: every .cpp named
+  # pure must also be in the list gate 2 walks, or a pure module would be
+  # checked for Arduino.h and not for file-scope mutable state.
+  for f in $PURE_NET; do
+    case "$f" in
+      *.cpp) case " $PURE_NET_CPP " in *" $f "*) ;;
+               *) fail "check.sh: networking/$f is in PURE_NET but not PURE_NET_CPP - gate 2 would skip it" ;;
+             esac ;;
+    esac
+  done
+  for path in "$SKETCH"/src/networking/*; do
+    [ -f "$path" ] || continue
+    b="$(basename "$path")"
+    case " $PURE_NET $IMPURE_NET " in
+      *" $b "*) ;;
+      *) fail "networking/$b is in neither check.sh's PURE_NET nor its IMPURE_NET list - classify it (a pure module is gated for Arduino.h and file-scope mutable state; an impure one is a declared device module)" ;;
+    esac
   done
 fi
 

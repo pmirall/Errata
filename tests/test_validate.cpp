@@ -466,6 +466,14 @@ TEST(every_content_and_team_reject_is_reachable_and_no_wire_code_is) {
     OBSERVE(validate_team(m, 3u, bad));
     m[1].id = 0x61u;
     OBSERVE(validate_level_band(m, 3u, 20u, 30u, bad));
+    // BATTLE ELIGIBILITY, the other session-scoped rule. Its POSITIVE control
+    // is one line below, because a function that always refused would satisfy
+    // the reachability sweep on its own.
+    OBSERVE(validate_battle_ready(m, 3u, bad));       // VR_OK: nobody has fainted
+    CHECK_EQ(validate_battle_ready(m, 3u, bad), VR_OK);
+    m[2].hp_cur = 0u;
+    OBSERVE(validate_battle_ready(m, 3u, bad));
+    CHECK_EQ(bad, 2);
   }
   #undef OBSERVE
 
@@ -511,10 +519,17 @@ static void mk_setup_from(BattleSetup& s, const PebbleInstance* team, uint8_t co
   mk_valid(s.member[1][0], 16, 10, 0xB00Bu);        // a fixed legal opponent
 }
 
-TEST(a_team_the_validator_accepts_the_engine_refuses_only_for_fainting) {
-  int accepted = 0, br_ok = 0, br_fainted = 0;
-  bool other_seen = false;
+// ONE SWEEP, TWO CLAIMS. 36 species x 5 levels x 8 hostile variants, run once
+// against validate_team() alone and once against the whole chain a linked
+// battle actually puts a team through. `with_battle_ready` is the ONLY
+// difference, so the two cases below are the same measurement asking two
+// different questions - and the pair is what shows the exception is exactly one
+// code wide and exactly where validate.h says it is.
+struct ContainCount { int accepted, br_ok, br_fainted, refused_ready; bool other_seen; };
 
+static void sweep_containment(bool with_battle_ready, ContainCount& c)
+{
+  memset(&c, 0, sizeof c);
   for (uint8_t s = 1; s <= (uint8_t)SPECIES_TABLE_COUNT; ++s) {
     for (uint8_t lv = 1; lv <= (uint8_t)PB_LEVEL_MAX; lv = (uint8_t)(lv + 7u)) {
       for (uint8_t variant = 0; variant < 8u; ++variant) {
@@ -526,7 +541,7 @@ TEST(a_team_the_validator_accepts_the_engine_refuses_only_for_fainting) {
         // Eight hostile variants, so the sweep is not a parade of legal teams.
         switch (variant) {
           case 0: break;                                    // legal
-          case 1: m[1].hp_cur = 0u; break;                  // the faint exception
+          case 1: m[1].hp_cur = 0u; break;                  // the faint arm
           case 2: m[2].status |= (uint8_t)PBS_FAINTED; break;
           case 3: m[0].moves[1] = MV_PLAGA; break;
           case 4: m[0].level = 31u; break;
@@ -538,28 +553,59 @@ TEST(a_team_the_validator_accepts_the_engine_refuses_only_for_fainting) {
         uint8_t bad = 0;
         const VReject v = validate_team(m, 3u, bad);
         if (v != VR_OK) continue;
-        accepted++;
+        if (with_battle_ready) {
+          uint8_t bad2 = 0;
+          if (validate_battle_ready(m, 3u, bad2) != VR_OK) { c.refused_ready++; continue; }
+        }
+        c.accepted++;
 
         BattleSetup su; mk_setup_from(su, m, 3u);
         BattleState st;
         const BattleReject b = battle_init(st, su);
-        if      (b == BR_OK)             br_ok++;
-        else if (b == BR_MEMBER_FAINTED) br_fainted++;
+        if      (b == BR_OK)             c.br_ok++;
+        else if (b == BR_MEMBER_FAINTED) c.br_fainted++;
         else {
-          other_seen = true;
+          c.other_seen = true;
           fprintf(stderr, "    validator accepted, engine said %d\n", (int)b);
         }
       }
     }
   }
-  // THE CLAIM: nothing but BR_OK or BR_MEMBER_FAINTED, ever.
-  CHECK(!other_seen);
+}
+
+TEST(a_team_the_validator_accepts_the_engine_refuses_only_for_fainting) {
+  ContainCount c;
+  sweep_containment(false, c);
+  // THE CLAIM about the SHARED BODY: nothing but BR_OK or BR_MEMBER_FAINTED.
+  CHECK(!c.other_seen);
   // AND THE SWEEP IS NOT VACUOUS: both outcomes actually happen, so the test
   // cannot pass by accepting nothing and cannot pass by never fainting.
-  CHECK(accepted > 100);
-  CHECK(br_ok > 0);
-  CHECK(br_fainted > 0);
-  CHECK_EQ(br_ok + br_fainted, accepted);
+  CHECK(c.accepted > 100);
+  CHECK(c.br_ok > 0);
+  CHECK(c.br_fainted > 0);
+  CHECK_EQ(c.br_ok + c.br_fainted, c.accepted);
+}
+
+TEST(a_battle_ready_team_is_one_the_engine_accepts_outright) {
+  // THE TIGHTENED CLAIM, which is what networking/battle_link.cpp's link_begin()
+  // rests on when it records a BattleReject as SD_INTERNAL. Add
+  // validate_battle_ready() to the chain and the ONE exception above disappears:
+  // every team that survives is BR_OK, so a BattleReject on the linked path
+  // really is a bug in this tree and never a peer capability.
+  ContainCount c;
+  sweep_containment(true, c);
+  CHECK(!c.other_seen);
+  CHECK_EQ(c.br_fainted, 0);                 // the exception is gone
+  CHECK_EQ(c.br_ok, c.accepted);
+  // NOT VACUOUS IN EITHER DIRECTION: the new check must have refused something
+  // (or it is a no-op that would pass anyway) and must have let most teams
+  // through (or it is a filter that empties the sweep).
+  CHECK(c.accepted > 100);
+  CHECK(c.refused_ready > 0);
+  ContainCount base;
+  sweep_containment(false, base);
+  CHECK_EQ(c.refused_ready, base.br_fainted);
+  CHECK_EQ(c.accepted, base.br_ok);
 }
 
 // The one rule this tree implements TWICE, pinned to its twin rather than

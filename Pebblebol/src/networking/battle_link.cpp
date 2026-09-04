@@ -311,9 +311,17 @@ void link_begin(Session& s)
 
   const BattleReject br = battle_init(*s.st, *s.setup);
   if (br != BR_OK) {
-    // game/validate.h's containment claim has teeth: a BattleReject on a team
-    // validate_team() accepted is a BUG IN validate.cpp and never a peer
-    // capability, so it is reported as INTERNAL and the peer is not blamed.
+    // game/validate.h's containment claim has teeth, and the claim is about the
+    // WHOLE CHAIN both teams have already been through: validate_team() (every
+    // content rule and the within-team ids), the cross-team id check in
+    // session.cpp's on_team_submit(), validate_level_band() and
+    // validate_battle_ready(). After those there is no BattleReject a peer can
+    // still cause, so this is a BUG IN THIS TREE and the peer is not blamed.
+    //
+    // THIS COMMENT USED TO CLAIM THAT OF validate_team() ALONE, AND IT WAS
+    // FALSE FOR ONE CODE: BR_MEMBER_FAINTED, which game/validate.h declared an
+    // exception in the same commit. A peer sending hp_cur == 0 landed here and
+    // was recorded as SD_INTERNAL. That is why validate_battle_ready() exists.
     s.final_outcome = 0u;
     s.final_hash    = 0u;
     send_battle_end(s, (uint8_t)SE_PROTOCOL, (uint8_t)SD_INTERNAL, false);
@@ -430,6 +438,15 @@ static void on_action_result(Session& s, const ProtoMsg& m)
     return;
   }
   if (m.round != s.my_act_round) { count_stale(s, m); return; }
+  // ONLY THE FIRST ONE IS PROGRESS (R4). The second ACTION_RESULT for a round is
+  // a re-acknowledgement - which is precisely what reanswer_round() regenerates
+  // for an honest peer - and a re-acknowledgement leaves the ladder where it
+  // was. Every other handler in this file already guards its repeat; this one
+  // did not, so a peer that said nothing else and replayed one legal frame at a
+  // spacing IT chose held the session open forever with tx_retx stuck at 0.
+  // A round number is used once per battle, so equality is the whole test.
+  if (s.ar_ack_round == m.round) { count_stale(s, m); return; }
+  s.ar_ack_round = m.round;
   s.waiting_for = (uint8_t)PT_ACTION;
   session_progress(s);
 }

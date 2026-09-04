@@ -157,6 +157,118 @@ Phase 4 begins. Nothing is tagged yet.
   only reordered**. The endpoint now stays in `SS_ENDING` until the peer's GOODBYE, so the
   two-generals asymmetry needs nine consecutive losses in one direction: **0 in 3,000**.
 
+### Fixed (P4-C5 follow-up — six hostile verifiers, and what they found)
+
+- **`hp_cur == 0` WAS THE LAST THING THREE CHECKERS ACCEPTED AND THE ENGINE REFUSED, AND
+  THE HONEST DEVICE BLAMED ITSELF FOR IT.** A fainted Pebble is a legal thing to have
+  *stored* and an illegal thing to bring to a battle, so `validate_pebble()`,
+  `validate_team()` and `pbw_decode()` all answered `VR_OK` for one and `battle_init()`
+  answered `BR_MEMBER_FAINTED` — which `battle_link.cpp` turned into
+  `SE_PROTOCOL(SD_INTERNAL)`, *"a bug in `game/validate.cpp`"*, with `bad_index == 0xFF`
+  so neither the log nor the peer was told which member did it. Measured: a peer sending
+  `member[1].hp_cur = 0` closed the honest endpoint that way, and so did an honest player
+  whose own team held a fainted Pebble, **with nobody lying at all** — both endpoints
+  recorded an internal fault over a legal team. It is byte for byte the class P4-C5b had
+  already fixed once for cross-team duplicate ids and left one instance of. There is now a
+  `validate_battle_ready()` beside `validate_level_band()` — a set rule in a context, no
+  policy flag in the shared body — answering a named **`VR_MEMBER_FAINTED`**; it runs on
+  the LOCAL team in `session_set_team()` before a frame is sent and on the PEER's in
+  `on_team_submit()`, so the player is told before a session starts and the peer is told
+  by the same code with the member index. `game/validate.h`'s containment claim is now the
+  strong one — after the whole chain `battle_init()` returns `BR_OK` — and
+  `a_battle_ready_team_is_one_the_engine_accepts_outright` asserts it over 36 species x 5
+  levels x 8 hostile variants.
+- **A PEER COULD CHOOSE OUR TERMINAL LABEL AFTER IT HAD ALREADY MADE US PAY.**
+  `session.h` said `session_rewards_authorised()` is true only after `SE_DONE` and
+  `docs/protocol.md` said a desync pays nobody on both sides; `on_battle_end()` closed
+  `SE_DESYNC` or `SE_LOST` straight from the peer's own reason byte without ever
+  consulting `s.paid`, and nothing cleared `s.paid`. Measured: with the endpoint parked in
+  `SS_ENDING` with rewards committed, one forged `BATTLE_END(SE_DESYNC)` carrying a final
+  hash we never computed closed us `SE_DESYNC` **while paid**, and a flood that exhausted
+  `SESSION_MAX_RX` did the same with no `BATTLE_END` at all. A caller following the doc
+  and one following the header then disagreed about the same session and the **peer**
+  picked which. The rule now lives in `session_close()`, the one place a terminal is
+  decided: **a session that has authorised rewards closes `SE_DONE`.** The label is
+  corrected and not the payment — `paid` is set only by our own comparison of the peer's
+  outcome *and* final hash against ours — because refusing to pay would hand an attacker a
+  free denial for the price of one frame.
+- **ONE LEGAL FRAME, REPLAYED, HELD A SESSION OPEN FOREVER.** R4 says only progress touches
+  the ladder, and every handler guards its own repeat — except `on_action_result()`, which
+  treated *every* ACTION_RESULT matching our outstanding ACTION as progress, including the
+  second and every one after. A re-acknowledged ACTION_RESULT is exactly what an honest
+  peer regenerates from state, so a peer that said nothing else and replayed one frame at a
+  spacing **it** chose kept the session alive for 1,019 injections and seventeen hours of
+  virtual time, ending `SE_PROTOCOL(SD_RX_BUDGET)` with `tx_retx == 0` — neither the
+  `SE_LOST` the LIMITS promise nor the `tx_retx == 9` the abort record's own signature
+  relies on. The existing flood case could not see it: it injects `PT_ACTION_RESULT` from
+  `SS_TEAM`, where it is a wrong-state frame that never reaches the handler.
+- **THE FIRST SEQUENCE NUMBER WAS UNBOUNDED.** `SESSION_SEQ_MAX_JUMP` bounded a jump from
+  an *established* last; the first frame an endpoint accepted set that last to whatever it
+  claimed, so the one-packet deafness P4-C5b closed was still available **before the peer
+  had spoken** — through a HELLO, which carries session 0 and needs no session id at all.
+  Measured: an injected HELLO with seq 0x7000 took `rx_seq_last` to 28,672 and both
+  endpoints ended `SE_LOST` on a link that dropped nothing. The bound now applies from an
+  implicit last of 0.
+- **`proto_encode()` COULD EMIT A FRAME NO DECODER WOULD EVER ACCEPT.** `protocol.h`
+  claimed the encoder applies the same rules as the decoder and cited a named test for it;
+  `grep` found that name in exactly one place in the repository — the citation itself. The
+  claim was also false: the encoder applied no session rule, so a HELLO with a non-zero
+  session encoded happily and step 10 refused it for *every* `expect_session`. A review's
+  encoder fuzzer found 198 of them in 2,000,000 random messages; the case written here
+  reproduces it 35 times when the rule is removed again. The missing rule is added and
+  `every_frame_the_encoder_emits_its_own_decoder_accepts` now exists, sweeping the twelve
+  types and then fuzzing the header — **and writing it found a second thing**: drawing the
+  header's `round` as `(uint8_t)rng_next(rng)` produced **zero zeroes in 40,000 draws** on
+  this xorshift32, so the fuzz arm would never have built the one message the case exists
+  for. A low byte is not a uniform small integer; it draws through `rng_next_below()` now.
+
+### Changed (P4-C5 follow-up — sentences narrowed to what is true)
+
+- `game/validate.cpp` and `docs/protocol.md` said **"nothing in `src/` writes a nickname
+  today"**. `persistence/migration.cpp:221-226` does, on the v1 -> v2 migration. The
+  load-bearing half survives — that loop is bounded and always stores the NUL, so a peer
+  would still be the first producer of an *unterminated* nickname — and both sentences now
+  say so.
+- `docs/protocol.md` quoted **`Session` at 360 B inside the device RAM budget**. That is
+  the x86-64 host figure; compiled with `riscv32-esp-elf-g++` it is **340 B**, so the
+  total is 468 B and not 488. Conservative, but a host number wearing a device number's
+  clothes.
+- LIMIT 1's *"what the player sees"* and `session.h`'s *"the caller pays XP and writes the
+  Box"* were present tense about code that does not exist: nothing under `app/`, `ui/` or
+  `persistence/` calls into this module at this commit. Both are marked P7's, the way the
+  radio already was.
+- LIMIT 4's **"genome variance is 0..2 by construction"** reads as a reassurance about the
+  stakes and is only a statement about the range. Measured: a mirror match at level 10,
+  same species and moves, AI both sides, 200 seeds per configuration, maximum genome
+  against minimum, is **594 wins of 600 to the forged side**, symmetric across sides. Two
+  points of atk/def/spd is not a rounding error, and the clause says so now.
+- The acceptance census records the **instrument's own error bar**: the loopback's 24-deep
+  queue counts a send onto a full queue as a drop, so an arm's effective loss is its
+  declared loss plus 0 / 283 / 192 / 540 / 43 overflows of 70,298 / 109,656 / 88,042 /
+  120,856 / 157,896 sends. It now asserts that an unfaulted link overflows nothing and
+  that no arm lets overflow become its dominant fault. It also states that the harness
+  advances its virtual clock only on a poll round in which no frame moved anywhere, so the
+  census measures session logic under loss and not a duty cycle.
+- The harsh acceptance arm reads **471/500** (was 474): three trials had been completing on
+  a ladder a re-acknowledgement wrongly reset.
+- `tests/test_session.cpp`'s census classifier returned `LE_HALF_PAID` before it consulted
+  state agreement, so a trial paying exactly one side **on a divergent state** would have
+  landed in an accepted bucket. It has never fired — a latent hole, closed for one
+  condition.
+- P4-C5b's *"every variant byte-identical to `66993bb`"* is not a checkable sentence about
+  this build system, and the substance behind it is now measured more strongly than that
+  wording could be: building the parent and this commit into two fixed build paths,
+  `.flash.text` (sha256 `d1616c8e...`), `.iram0.text` and `.dram0.data` are byte-identical
+  and `.flash.rodata` differs in **exactly one byte** — the minute digit of the `__TIME__`
+  literal. The 66 bytes that differ in the whole `.bin` are that one, the 32 B
+  `app_elf_sha256`, and the 32 B trailing image hash both propagate into.
+- `tools/check.sh` gained a gate that requires **every** file under `src/networking` to be
+  classified as pure or as a declared device module. The purity gates are filename-scoped
+  on purpose (the directory is mixed), and their failure mode was silence: P7's transport
+  would have arrived with no gate on it and nothing would have said so. The three
+  networking gates now read **one** pair of lists rather than three copies, and a fourth
+  check keeps those two lists from drifting apart.
+
 ### Changed
 
 - **`save_load_all()` now ends in the shared validator, and `save_manager.h` stopped

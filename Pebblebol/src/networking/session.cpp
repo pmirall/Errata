@@ -184,6 +184,27 @@ void session_progress(Session& s)
 void session_close(Session& s, SessionEndReason r, uint8_t detail)
 {
   if (s.state == (uint8_t)SS_CLOSED) return;      // the first terminal wins
+
+  // AGREEING IS FINAL. The ONE place that makes session_rewards_authorised()
+  // and SessionEnd.reason agree, so the header's "true only after SE_DONE" is a
+  // structural property of this function rather than a habit of its callers.
+  //
+  // s.paid is set in battle_link.cpp's compare_end() and NOWHERE ELSE: OUR
+  // comparison of the peer's outcome AND final hash against our own, after our
+  // own engine has finished the battle. Nothing that happens afterwards can
+  // un-decide that - the peer has already agreed, and a later BATTLE_END saying
+  // SE_DESYNC contradicts what it said itself. What was reachable before this
+  // line: a peer that had made us pay could then CHOOSE our terminal label
+  // (SE_DESYNC or SE_LOST from its own reason byte), and a flood after the
+  // agreement could close us SE_PROTOCOL / SD_RX_BUDGET while paid. In every
+  // case the battle was over, agreed and correctly paid, and only the label was
+  // wrong - so the label is what is corrected. Refusing to pay instead would
+  // hand an attacker a free denial for the price of one frame.
+  //
+  // The superseded reason is not recorded: SessionEnd has one reason field, and
+  // what happened afterwards is in the counters (rx_reject, rx_stale, rx_ok).
+  if (s.paid != 0u) { r = SE_DONE; detail = (uint8_t)SD_NONE; }
+
   s.end.reason  = (uint8_t)r;
   s.end.state   = s.state;
   s.end.role    = s.role;
@@ -208,6 +229,14 @@ enum SeqVerdict : uint8_t { SQ_NEW = 0, SQ_DUP, SQ_STALE };
 static SeqVerdict seq_check(Session& s, uint16_t seq)
 {
   if (s.rx_seq_seen == 0u) {
+    // THE BASELINE IS BOUNDED BY THE SAME RULE, from an implicit last of 0.
+    // Without this line the bound below covered only jumps from an ESTABLISHED
+    // last, and the very first frame set that last to whatever it claimed - so
+    // the one-packet deafness was still available BEFORE the peer had spoken,
+    // through a HELLO, which needs no session id at all. An honest peer's first
+    // frame is seq 1 and the furthest it can get before it hears from us is its
+    // own ladder, which is under ten.
+    if (seq > (uint16_t)SESSION_SEQ_MAX_JUMP) return SQ_STALE;
     s.rx_seq_seen = 1u; s.rx_seq_last = seq; s.rx_seq_bits = 0u;
     return SQ_NEW;
   }
@@ -299,6 +328,14 @@ VReject session_set_team(Session& s, const PebbleInstance* m, uint8_t count,
   s.my_count = 0u;
   const VReject r = validate_team(m, count, bad_index);
   if (r != VR_OK) return r;
+  // BATTLE ELIGIBILITY, CHECKED ON OUR OWN TEAM BEFORE A FRAME IS SENT. It is
+  // not Pebble validity (game/validate.h), so it cannot live in the shared body
+  // - and without it a player whose own team held a fainted Pebble got VR_OK
+  // here and then watched BOTH endpoints close SE_PROTOCOL / SD_INTERNAL with
+  // nobody lying at all. The wire path refuses where ui/screen_battle.cpp's
+  // copy_from_box() mends, so the answer is a named refusal and not a heal.
+  const VReject b = validate_battle_ready(m, count, bad_index);
+  if (b != VR_OK) return b;
   for (uint8_t i = 0; i < count; ++i) pbw_encode(m[i], s.my_rec[i]);
   s.my_count = count;
   s.team_crc_local = session_team_crc(s.my_rec);
@@ -434,6 +471,13 @@ static void on_team_submit(Session& s, const ProtoMsg& m)
   }
   if (v == VR_OK) v = validate_team(them, m.p.team.count, bad);
   if (v == VR_OK) v = validate_level_band(them, m.p.team.count, s.lvl_lo, s.lvl_hi, bad);
+  // BATTLE ELIGIBILITY. hp_cur == 0 was the last thing validate_pebble(),
+  // validate_team() and pbw_decode() all accepted and battle_init() refused, so
+  // a peer that sent a fainted member reached the engine and came back as
+  // SD_INTERNAL - this device recording a bug in game/validate.cpp, with
+  // bad_index 0xFF, for a lie the peer told. It is a peer capability, so it is
+  // named as one and the peer is told which member.
+  if (v == VR_OK) v = validate_battle_ready(them, m.p.team.count, bad);
   // THE ONE RULE THAT SPANS BOTH TEAMS, and it has to live here because
   // validate_team() is about ONE team by construction. game/battle.cpp's
   // battle_init() refuses BR_DUPLICATE_ID across ALL SIX members, so a peer
@@ -779,9 +823,11 @@ static void ladder(Session& s)
   if (s.tries >= (uint8_t)PROTO_RETX_MAX) {
     // A session that already AGREED - both endpoints' outcome and final hash
     // matched - has nothing left to lose: the peer's GOODBYE is a courtesy and
-    // its absence is not a disagreement.
-    if (s.paid != 0u) session_close(s, SE_DONE, (uint8_t)SD_NONE);
-    else              session_close(s, SE_LOST, (uint8_t)SD_NONE);
+    // its absence is not a disagreement. That rule USED TO BE WRITTEN HERE, as
+    // a `paid ? SE_DONE : SE_LOST` fork; it now lives in session_close(),
+    // which is the only place that can hold it for the terminals this function
+    // is not the one to reach (a relabelling BATTLE_END, an exhausted budget).
+    session_close(s, SE_LOST, (uint8_t)SD_NONE);
     return;
   }
   s.tries++;

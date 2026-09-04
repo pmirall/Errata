@@ -308,6 +308,14 @@ void pbw_encode(const PebbleInstance& p, uint8_t rec[PBW_BYTES]);
 // persistence layer; whoever stores a received Pebble seals it there. The wire
 // record's own CRC is this layer's integrity check and it has already been
 // applied by the time out is written.
+//
+// THE validate_pebble() CALL IS REDUNDANT ON THE BATTLE PATH AND MUST STAY.
+// Measured: removing it leaves tests/test_session.cpp entirely green, because
+// networking/session.cpp re-runs validate_team() over the decoded members and
+// catches the same vectors one layer up (test_protocol goes red, which is the
+// point of having both). It is not redundant for a caller that decodes ONE
+// record without a team around it - P7's trade path is exactly that - so the
+// duplication is defence in depth on one path and the only check on another.
 VReject pbw_decode(const uint8_t rec[PBW_BYTES], PebbleInstance& out);
 
 // -----------------------------------------------------------------------------
@@ -334,6 +342,14 @@ struct ProtoTeamValid    { uint16_t team_crc_echo; uint8_t verdict, bad_index; }
 struct ProtoBattleState  { uint32_t open_hash; uint8_t phase, outcome; };
 struct ProtoAction       { uint32_t open_hash; uint8_t kind, index; };
 struct ProtoActionResult { uint32_t open_hash; uint8_t reject, kind_echo, index_echo; };
+// ProtoRoundResult.outcome IS CARRIED AND DELIBERATELY NEVER COMPARED, the same
+// way `ack` is. It is the sender's BattleOutcome for the round, and
+// battle_state_hash() covers the whole 212 B state INCLUDING st.outcome - so
+// hash_after already decides the same fact, and a comparison of this byte could
+// never fail while the hashes matched. It is a diagnostic in a wire trace, and
+// adding a guard for it would be a guard nobody can make fail. Flipping it in
+// flight is measurably inert: both sides still reach SE_DONE with equal outcome,
+// equal 212 B state and both paid.
 struct ProtoRoundResult  { uint32_t hash_before, hash_after; uint8_t outcome; };
 struct ProtoBattleEnd    { uint32_t final_hash; uint16_t rounds;
                            uint8_t  reason, outcome, detail; };
@@ -390,9 +406,13 @@ void proto_msg_init(ProtoMsg& m, ProtoType t, uint32_t session, uint16_t seq);
 // -----------------------------------------------------------------------------
 // Encodes `m` into `buf`. `cap` is the caller's buffer size; `n_out` receives
 // the frame length on PE_OK and 0 on every reject. The encoder applies the SAME
-// type, round and count rules as the decoder, so a message this function
-// accepts is one the decoder accepts - which is asserted rather than assumed
-// (`every_frame_the_encoder_emits_its_own_decoder_accepts`).
+// type, flag, round, count, reserved and HELLO-session rules as the decoder, so
+// a frame this function emits is one proto_decode() accepts when it is given
+// the session the frame names. That is ASSERTED and not assumed, by a sweep
+// over the twelve types and a header fuzz
+// (`every_frame_the_encoder_emits_its_own_decoder_accepts`) - and the case is
+// there because the claim was FALSE when it was first written: a HELLO with a
+// nonzero session encoded and could then be decoded by nobody.
 ProtoErr proto_encode(const ProtoMsg& m, uint8_t* buf, size_t cap, size_t& n_out);
 
 // Decodes `n` bytes. `n` IS THE TRANSPORT'S BYTE COUNT AND NEVER A FRAME FIELD:

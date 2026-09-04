@@ -110,6 +110,12 @@ static uint16_t lb_recv(void* ctx, uint8_t* buf, uint16_t cap)
     // Cannot happen with a PROTO_FRAME_MAX buffer, which is what every caller
     // in this tree passes. Counted as a drop rather than truncated, because a
     // truncated frame is a malformed frame wearing a valid header.
+    //
+    // IT IS ALSO THE ONE PATH WHERE THIS FUNCTION'S 0 IS A LIE. The seam's 0
+    // means "nothing waiting", and here the queue still holds frames - a caller
+    // that stops polling on 0 would stall behind an oversized one. Nothing in
+    // this tree can reach it, but P7's driver will not have that guarantee, so
+    // it is written down rather than left to be rediscovered.
     lk.stats.dropped++;
   } else {
     memcpy(buf, q.frame[take], n);

@@ -160,8 +160,12 @@ VReject validate_pebble(const PebbleInstance& p)
   // memory safety rather than game rules: ui/screen_battle.cpp:156 hands the
   // nickname out as a bare `const char*` and ui/pet_view.cpp:150 snprintf's
   // "%s" from it. Both cap the OUTPUT at 13 and read the SOURCE to NUL, so an
-  // unterminated nickname reads forward into the next field. Nothing in src/
-  // writes a nickname today; a peer would be the first producer of one.
+  // unterminated nickname reads forward into the next field. The ONE nickname
+  // writer in src/ is persistence/migration.cpp:221-226, whose loop is bounded
+  // by `o + 1 < sizeof p.nickname` and always stores the NUL, so a peer would be
+  // the first producer of an UNTERMINATED one. (This said "nothing in src/
+  // writes a nickname today" until the P4-C5 follow-up, which was wider than the
+  // tree; the load-bearing half survives the correction.)
   {
     bool terminated = false;
     for (uint8_t i = 0; i < (uint8_t)PB_NICKNAME_CAP; ++i)
@@ -212,6 +216,34 @@ VReject validate_level_band(const PebbleInstance* m, uint8_t count,
 }
 
 // -----------------------------------------------------------------------------
+//  validate_battle_ready - battle eligibility, which is not Pebble validity.
+//  See validate.h: this is game/battle.cpp's BR_MEMBER_FAINTED, named one layer
+//  earlier so a peer that sends a fainted member is answered as a peer instead
+//  of the engine refusing a team three checkers had already accepted.
+// -----------------------------------------------------------------------------
+VReject validate_battle_ready(const PebbleInstance* m, uint8_t count,
+                              uint8_t& bad_index)
+{
+  bad_index = 0xFFu;
+  if (m == nullptr) return VR_TEAM_SIZE;
+  if (count < 1u || count > (uint8_t)BATTLE_TEAM_MAX) return VR_TEAM_SIZE;
+
+  for (uint8_t i = 0; i < count; ++i) {
+    // BOTH halves, and the same two game/battle.cpp's setup_member_ok() reads.
+    // A PEER cannot send PBS_FAINTED - networking/protocol.cpp masks it off and
+    // VR_WIRE_STATUS_BITS refuses a forged one - but the LOCAL team comes
+    // straight out of the Box, where the bit is legitimate and ordinary, so
+    // checking only hp_cur would be a rule narrower than the engine's on
+    // exactly the caller that has no adversary in it.
+    if (m[i].hp_cur == 0u || (m[i].status & (uint8_t)PBS_FAINTED) != 0u) {
+      bad_index = i;
+      return VR_MEMBER_FAINTED;
+    }
+  }
+  return VR_OK;
+}
+
+// -----------------------------------------------------------------------------
 //  validate_reject_name - English, for the event log. TOTAL.
 // -----------------------------------------------------------------------------
 static const char* const VR_NAMES[] = {
@@ -224,7 +256,7 @@ static const char* const VR_NAMES[] = {
   "VR_BAD_FLAGS_BITS", "VR_BAD_ORIGIN", "VR_BAD_TRAIT", "VR_BAD_CUSTOM_SPRITE",
   "VR_BAD_CARE", "VR_BAD_NICKNAME",
   "VR_TEAM_SIZE", "VR_DUPLICATE_ID",
-  "VR_LEVEL_OUT_OF_BAND"
+  "VR_LEVEL_OUT_OF_BAND", "VR_MEMBER_FAINTED"
 };
 static_assert(sizeof(VR_NAMES) / sizeof(VR_NAMES[0]) == (size_t)VR_REJECT_COUNT,
               "a VReject was added without its name: the event log would print "
