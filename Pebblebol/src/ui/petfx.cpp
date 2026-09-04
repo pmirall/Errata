@@ -2,12 +2,20 @@
 //  PEBBLEBOL - ui/petfx.cpp
 //  The creature layer. Three things live here and they only barely touch:
 //
-//   1. A pixel core (mirroring, ink bounds, eyelids). Pure bit twiddling on
-//      XBM rows, no U8G2, no globals from the sim. It is fenced between the
-//      PIXEL CORE markers below because scratchpad/petfx/mkharness.py slices
-//      exactly those lines out and compiles them on the host: that is how the
-//      28 px mirror case and the blink masks are actually verified, since the
-//      whole sketch cannot be built without hardware headers.
+//   1. A pixel core (ink bounds, eyelids). Pure bit twiddling on XBM rows, no
+//      U8G2, no globals from the sim. It is fenced between the PIXEL CORE
+//      markers below because scratchpad/petfx/mkharness.py slices exactly
+//      those lines out and compiles them on the host, since the whole sketch
+//      cannot be built without hardware headers.
+//
+//      P4-C4 CORRECTED THIS PARAGRAPH AND MOVED THE MIRROR OUT. It used to say
+//      the harness is "how the 28 px mirror case and the blink masks are
+//      actually verified"; scratchpad/ IS NOT IN THIS REPOSITORY, so nothing
+//      in the tree has ever executed either. The MIRROR is now ui/xbm_mirror.h,
+//      a pure module ui/battle_renderer.cpp shares and tests/ compiles and
+//      drives - including the 28 px case. The eyelid masks below are still
+//      verified by nothing that ships here, and that is now said rather than
+//      implied.
 //
 //   2. A behaviour automaton. Deterministic integer hash PRNG seeded from
 //      PetView.identity, so the same pet always moves the same way and its
@@ -23,6 +31,7 @@
 #include <string.h>
 
 #include "render.h"
+#include "xbm_mirror.h"
 #include "../data/sprites.h"
 
 // The eyelid table below is indexed by SpriteSetId and holds hand-verified row
@@ -63,29 +72,11 @@ static_assert(SPRITE_REV == 1, "petfx eyelid table was measured against SPRITE_R
 // and stdint only. Do not reach for U8G2, millis() or the sim in here.
 // =============================================================================
 
-// Bit-reversal LUT. XBM rows are LSB-first (LSB = leftmost pixel), so
-// mirroring a row is "reverse the byte order AND reverse the bits in each
-// byte". 256 B in flash beats a per-pixel loop by ~8x.
-static const uint8_t PF_REV8[256] = {
-  0x00, 0x80, 0x40, 0xC0, 0x20, 0xA0, 0x60, 0xE0, 0x10, 0x90, 0x50, 0xD0, 0x30, 0xB0, 0x70, 0xF0,
-  0x08, 0x88, 0x48, 0xC8, 0x28, 0xA8, 0x68, 0xE8, 0x18, 0x98, 0x58, 0xD8, 0x38, 0xB8, 0x78, 0xF8,
-  0x04, 0x84, 0x44, 0xC4, 0x24, 0xA4, 0x64, 0xE4, 0x14, 0x94, 0x54, 0xD4, 0x34, 0xB4, 0x74, 0xF4,
-  0x0C, 0x8C, 0x4C, 0xCC, 0x2C, 0xAC, 0x6C, 0xEC, 0x1C, 0x9C, 0x5C, 0xDC, 0x3C, 0xBC, 0x7C, 0xFC,
-  0x02, 0x82, 0x42, 0xC2, 0x22, 0xA2, 0x62, 0xE2, 0x12, 0x92, 0x52, 0xD2, 0x32, 0xB2, 0x72, 0xF2,
-  0x0A, 0x8A, 0x4A, 0xCA, 0x2A, 0xAA, 0x6A, 0xEA, 0x1A, 0x9A, 0x5A, 0xDA, 0x3A, 0xBA, 0x7A, 0xFA,
-  0x06, 0x86, 0x46, 0xC6, 0x26, 0xA6, 0x66, 0xE6, 0x16, 0x96, 0x56, 0xD6, 0x36, 0xB6, 0x76, 0xF6,
-  0x0E, 0x8E, 0x4E, 0xCE, 0x2E, 0xAE, 0x6E, 0xEE, 0x1E, 0x9E, 0x5E, 0xDE, 0x3E, 0xBE, 0x7E, 0xFE,
-  0x01, 0x81, 0x41, 0xC1, 0x21, 0xA1, 0x61, 0xE1, 0x11, 0x91, 0x51, 0xD1, 0x31, 0xB1, 0x71, 0xF1,
-  0x09, 0x89, 0x49, 0xC9, 0x29, 0xA9, 0x69, 0xE9, 0x19, 0x99, 0x59, 0xD9, 0x39, 0xB9, 0x79, 0xF9,
-  0x05, 0x85, 0x45, 0xC5, 0x25, 0xA5, 0x65, 0xE5, 0x15, 0x95, 0x55, 0xD5, 0x35, 0xB5, 0x75, 0xF5,
-  0x0D, 0x8D, 0x4D, 0xCD, 0x2D, 0xAD, 0x6D, 0xED, 0x1D, 0x9D, 0x5D, 0xDD, 0x3D, 0xBD, 0x7D, 0xFD,
-  0x03, 0x83, 0x43, 0xC3, 0x23, 0xA3, 0x63, 0xE3, 0x13, 0x93, 0x53, 0xD3, 0x33, 0xB3, 0x73, 0xF3,
-  0x0B, 0x8B, 0x4B, 0xCB, 0x2B, 0xAB, 0x6B, 0xEB, 0x1B, 0x9B, 0x5B, 0xDB, 0x3B, 0xBB, 0x7B, 0xFB,
-  0x07, 0x87, 0x47, 0xC7, 0x27, 0xA7, 0x67, 0xE7, 0x17, 0x97, 0x57, 0xD7, 0x37, 0xB7, 0x77, 0xF7,
-  0x0F, 0x8F, 0x4F, 0xCF, 0x2F, 0xAF, 0x6F, 0xEF, 0x1F, 0x9F, 0x5F, 0xDF, 0x3F, 0xBF, 0x7F, 0xFF,
-};
-
-static inline uint8_t pf_stride(uint8_t w) { return (uint8_t)((w + 7u) >> 3); }
+// The row stride and the horizontal flip moved to ui/xbm_mirror.h with P4-C4:
+// ui/battle_renderer.cpp needs the same flip to face two combatants at each
+// other, and a second copy of a routine whose whole difficulty is one
+// off-by-four on a 28 px sprite is exactly the kind that gets fixed once.
+static inline uint8_t pf_stride(uint8_t w) { return xbm_stride(w); }
 
 static inline uint8_t pf_get(const uint8_t* row, uint8_t x) {
   return (uint8_t)((row[x >> 3] >> (x & 7u)) & 1u);
@@ -93,43 +84,6 @@ static inline uint8_t pf_get(const uint8_t* row, uint8_t x) {
 
 static inline void pf_set(uint8_t* row, uint8_t x) {
   row[x >> 3] = (uint8_t)(row[x >> 3] | (uint8_t)(1u << (x & 7u)));
-}
-
-// -----------------------------------------------------------------------------
-//  pf_mirror_frame - horizontal flip of a whole XBM frame.
-//
-//  THE TRAP, and it is a real one: w = 24, 32 and 40 are multiples of 8 and
-//  fall out clean, but CHILD is 28 px wide. Its stride is 4 bytes = 32 bit
-//  slots, so every row carries 4 slots of padding ABOVE the sprite. Reversing
-//  the 32 slots puts the sprite at slots 4..31 instead of 0..27 - the body
-//  comes out shifted 4 px to the right and the last 4 px of the silhouette
-//  fall off the row. After reversing you MUST shift the row down by
-//  pad = stride*8 - w bit slots.
-//
-//  In this layout "shift down by k" means new_bit[i] = old_bit[i + k], which
-//  in byte terms is dst[j] = (tmp[j] >> k) | (tmp[j+1] << (8-k)) - it looks
-//  like a right shift and reads like a left shift; that inversion is exactly
-//  what makes this easy to get wrong. The padding bits themselves land in the
-//  low nibble of tmp[0] and are shifted out, so the source padding never has
-//  to be masked.
-// -----------------------------------------------------------------------------
-static void pf_mirror_frame(const uint8_t* src, uint8_t* dst, uint8_t w, uint8_t h) {
-  const uint8_t stride = pf_stride(w);
-  const uint8_t pad    = (uint8_t)((uint8_t)(stride * 8u) - w);
-  uint8_t tmp[PF_MAX_STRIDE + 1];
-
-  for (uint8_t y = 0; y < h; y++) {
-    const uint8_t* s = src + (uint16_t)y * stride;
-    uint8_t*       d = dst + (uint16_t)y * stride;
-    for (uint8_t i = 0; i < stride; i++) tmp[i] = PF_REV8[s[stride - 1u - i]];
-    tmp[stride] = 0;
-    if (pad == 0) {
-      for (uint8_t i = 0; i < stride; i++) d[i] = tmp[i];
-    } else {
-      for (uint8_t i = 0; i < stride; i++)
-        d[i] = (uint8_t)((uint8_t)(tmp[i] >> pad) | (uint8_t)(tmp[i + 1u] << (8u - pad)));
-    }
-  }
 }
 
 // -----------------------------------------------------------------------------
@@ -611,7 +565,7 @@ static void pf_cache_sync(uint8_t set_id, uint8_t mirrored) {
     const uint8_t* src   = s.bits + (uint32_t)fbytes * src_f;
     uint8_t*       dst   = s_cache_bits[f];
 
-    if (mirrored) pf_mirror_frame(src, dst, s.w, s.h);
+    if (mirrored) xbm_mirror_frame(src, dst, s.w, s.h);
     else          memcpy(dst, src, fbytes);
 
     if (!pf_scan_ink(dst, s.w, s.h, &s_ink_t[f], &s_ink_b[f], &s_ink_l[f], &s_ink_r[f])) {

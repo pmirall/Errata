@@ -43,6 +43,9 @@
 #include "ui/screen_home.h"
 #include "ui/screen_link.h"
 #include "ui/screen_menu.h"
+#include "game/battle.h"      // BattleReject / BattleLogEvent, for the battle snapshots
+#include "ui/screen_battle.h"
+#include "ui/battle_renderer.h"
 #include "ui/screen_box.h"
 #include "ui/screen_settings.h"
 #include "ui/screen_soon.h"
@@ -108,6 +111,15 @@ static uint8_t  g_sta_up   = 0;
 static int      g_commits  = 0;
 static uint8_t  g_commit_id = CFM_NONE;
 static int      g_wiggles   = 0;
+static uint8_t  g_battle_entry = 0xFF;
+static int      g_battle_starts = 0;
+static uint8_t  g_result_entry = 0xFF;
+static uint8_t  g_result_won   = 0xFF;
+static int      g_results      = 0;
+static uint8_t  g_hold_fps     = 0;
+static int      g_hold_calls   = 0;
+static int      g_flashes      = 0;
+static int      g_shakes       = 0;
 static uint8_t  g_box_active   = 0xFF;
 static uint8_t  g_box_released = 0xFF;
 static uint8_t  g_box_swap_a   = 0xFF;
@@ -126,6 +138,16 @@ bool ui_act_and_show(uint8_t a)   { g_shown  = a; return g_action_ok; }
 void ui_help(uint16_t id)         { g_help = id; }
 void ui_confirm_medicine(void)    { g_medicine++; }
 void ui_start_minigame(uint8_t i) { g_minigame = i; }
+// The P4-C4 battle seams. The screen is pure and runs the REAL engine here, so
+// these are the only three things it cannot do for itself: draw a seed, award
+// XP, and reach render.h's frame-level effects.
+void ui_start_battle(uint8_t e)          { g_battle_entry = e; g_battle_starts++; }
+void ui_battle_result(uint8_t e, uint8_t won) {
+  g_result_entry = e; g_result_won = won; g_results++;
+}
+void ui_hold_fps(uint8_t f, uint16_t)    { g_hold_fps = f; g_hold_calls++; }
+void ui_flash(uint16_t)                  { g_flashes++; }
+void ui_shake(uint8_t, uint16_t)         { g_shakes++; }
 uint8_t ui_god_progress(void)     { return g_god; }
 void ui_input_flush(void)         { g_flushes++; }
 void ui_home(void)                { g_goto = (uint8_t)SCR_HOME; }
@@ -273,6 +295,15 @@ static void seams2_reset(void) {
   g_box_released = 0xFF;
   g_box_swap_a = 0xFF;
   g_box_swap_b = 0xFF;
+  g_battle_entry = 0xFF;
+  g_battle_starts = 0;
+  g_result_entry = 0xFF;
+  g_result_won = 0xFF;
+  g_results = 0;
+  g_hold_fps = 0;
+  g_hold_calls = 0;
+  g_flashes = 0;
+  g_shakes = 0;
   dialog_reset();
   dialog_bind_commit(&fake_commit);
   diag_bind(nullptr, nullptr, nullptr);
@@ -363,7 +394,7 @@ TEST(table_rows_are_consistent) {
   // global navigation grammar runs before its own handler.
   static const uint8_t kOrdinary[] = {
     SCR_MENU, SCR_CARE, SCR_PLAY, SCR_STATUS, SCR_STATUS_B,
-    SCR_LINK, SCR_CREATOR, SCR_NETWORK, SCR_BATTLE, SCR_SLEEP
+    SCR_LINK, SCR_CREATOR, SCR_NETWORK, SCR_SLEEP
   };
   for (size_t i = 0; i < sizeof kOrdinary / sizeof kOrdinary[0]; i++)
     CHECK(SCREENS[kOrdinary[i]].flags == 0);
@@ -381,9 +412,21 @@ TEST(table_rows_are_consistent) {
 
   // SETTINGS, BOX, EVOLUTION and GAME answer B themselves; nothing that has
   // SF_LOCK_INPUT needs to say so twice.
-  static const uint8_t kOwnsBack[] = { SCR_SETTINGS, SCR_BOX, SCR_EVOLUTION, SCR_GAME };
+  static const uint8_t kOwnsBack[] = { SCR_SETTINGS, SCR_BOX, SCR_EVOLUTION, SCR_GAME,
+                                      SCR_BATTLE };
   for (size_t i = 0; i < sizeof kOwnsBack / sizeof kOwnsBack[0]; i++)
     CHECK((SCREENS[kOwnsBack[i]].flags & SF_OWNS_BACK) != 0);
+
+  // BATTLE left kOrdinary with P4-C4 and its exact flags are ASSERTED rather
+  // than merely permitted: SF_STICKY, because invariant 3 dropping the player
+  // on HOME twenty seconds into a fight would abandon it; SF_OWNS_BACK, because
+  // B walks SWITCH -> MENU and skips a round's transcript before it ever leaves
+  // the screen; and NOT SF_OWNS_FRAME, because "ahora no puedes" and the
+  // victory XP notice are both toasts, and ui_service() hands an owns-frame
+  // screen no toast and no modal at all.
+  CHECK_EQ(SCREENS[SCR_BATTLE].flags, (uint8_t)(SF_STICKY | SF_OWNS_BACK));
+  CHECK(SCREENS[SCR_BATTLE].update != nullptr);   // the 20 fps hold and the beat clock
+  CHECK(SCREENS[SCR_BATTLE].leave  != nullptr);   // THE one report path
 
   // CREATOR is the one screen that owns the Wi-Fi station, so it is the one
   // screen whose enter AND leave hooks must both exist: taking the radio
@@ -1666,4 +1709,180 @@ TEST(snapshot_sequence_show) {
 // exactly what a pair of goldens pins.
 TEST(snapshot_sequence_answer) {
   mg_snapshot(MG_SEQUENCE, sequence_draw, 1u, 60u, nullptr, "mg_sequence_answer");
+}
+
+// =============================================================================
+//  THE BATTLE SCREEN (P4-C4)
+//
+//  ui/screen_battle.cpp is a PURE translation unit that runs the REAL engine
+//  and the REAL AI, so these five frames are a battle actually being fought at
+//  128x64 - not a mock of one, and not a static sprite standing in for the
+//  thing under test. That is what the pure-renderer decision bought: had the
+//  field gone through render.h, none of it could have been snapshotted and the
+//  goldens would have been of the chrome around a hole.
+//
+//  DETERMINISM: one fixed seed, a Box built by box_new_pebble(), a clock the
+//  seams hold still, and every gesture below is one a player could make.
+// =============================================================================
+static void battle_choose(uint8_t n) {
+  for (uint8_t i = 0; i < n; ++i) {
+    battle_input(GST_HOLD_R);            // choose the slot under the cursor
+    battle_input(GST_TAP_L);             // step to the next occupied one
+  }
+  while (battle_screen_cursor() < (uint8_t)BOX_SLOTS) battle_input(GST_TAP_L);
+}
+
+static void battle_pick_team(uint8_t n) {
+  battle_choose(n);
+  battle_input(GST_HOLD_R);              // LISTO
+}
+
+// Play until the transcript is showing a beat of `kind`, choosing whatever the
+// ring's first legal row is each round. False when the battle ended first.
+static bool battle_to_beat(uint8_t kind) {
+  for (int guard = 0; guard < 4000; ++guard) {
+    const uint8_t m = battle_screen_mode();
+    if (m == BTM_RESULT) return false;
+    if (m == BTM_RESOLVE) {
+      if (battle_screen_event() == kind) return true;
+      battle_input(GST_TAP_L);
+      continue;
+    }
+    battle_input(GST_HOLD_R);
+  }
+  return false;
+}
+
+static void battle_to_result(void) {
+  for (int guard = 0; guard < 4000 && battle_screen_mode() != BTM_RESULT; ++guard)
+    battle_input(GST_HOLD_R);
+}
+
+// The team pick: the Box on the shared list widget, three slots chosen, the
+// LISTO row carrying 3/3. The only mode the practice entry has that the DIAG
+// entry does not.
+TEST(snapshot_battle_pick) {
+  seams2_reset();
+  box_fixture(3);
+  battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E01u);
+  battle_enter();
+  CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_PICK);
+  battle_choose(2);                      // two chosen, the cursor left on LISTO
+  CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_PICK);
+  CHECK_EQ(battle_screen_picked(), 2u);
+  snapshot(SCR_BATTLE, "battle_pick");
+  battle_leave();
+}
+
+// INTRO: both 24x24 bodies on the field, facing each other, both name panels
+// and both bench pip tracks. The foe's body is the MIRRORED frame - the flip
+// ui/petfx.cpp has always had and nothing in this repository ever drew twice.
+TEST(snapshot_battle_intro) {
+  seams2_reset();
+  box_fixture(3);
+  battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E02u);
+  battle_enter();
+  battle_pick_team((uint8_t)BATTLE_TEAM_MAX);
+  CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_INTRO);
+  snapshot(SCR_BATTLE, "battle_intro");
+  battle_leave();
+}
+
+// MENU: four attacks and CAMBIAR on the shared list widget, the round in the
+// title and both sides' HP percentages in the header tag - which is where they
+// have to be, because the content band belongs to the list.
+TEST(snapshot_battle_menu) {
+  seams2_reset();
+  box_fixture(3);
+  battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E02u);
+  battle_enter();
+  battle_pick_team((uint8_t)BATTLE_TEAM_MAX);
+  battle_input(GST_HOLD_R);              // skip the stare-down
+  CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_MENU);
+  CHECK_EQ(battle_screen_cursor_reject(), (uint8_t)BR_OK);
+  snapshot(SCR_BATTLE, "battle_menu");
+  battle_leave();
+}
+
+// A HIT landing: the move's own name and the damage on the transcript line, the
+// struck body inverted, and - the part a golden is really for - the HP bar
+// drawn as it stood AT THIS BEAT rather than where the already-resolved round
+// left it.
+TEST(snapshot_battle_hit) {
+  seams2_reset();
+  box_fixture(3);
+  battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E03u);
+  battle_enter();
+  battle_pick_team((uint8_t)BATTLE_TEAM_MAX);
+  battle_input(GST_HOLD_R);
+  CHECK(battle_to_beat((uint8_t)RLE_HIT));
+  CHECK_EQ(battle_screen_event(), (uint8_t)RLE_HIT);
+  CHECK_EQ(g_shakes, 1);                 // one shake per landed blow, not per frame
+  snapshot(SCR_BATTLE, "battle_hit");
+  battle_leave();
+}
+
+// A FAINT: the fallen body dissolved at 3/4 rather than deleted, so the
+// silhouette is still readable while the line says who it was.
+TEST(snapshot_battle_faint) {
+  seams2_reset();
+  box_fixture(3);
+  battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E03u);
+  battle_enter();
+  battle_pick_team((uint8_t)BATTLE_TEAM_MAX);
+  battle_input(GST_HOLD_R);
+  CHECK(battle_to_beat((uint8_t)RLE_FAINT));
+  CHECK_EQ(battle_screen_event(), (uint8_t)RLE_FAINT);
+  CHECK_EQ(g_flashes, 1);
+  snapshot(SCR_BATTLE, "battle_faint");
+  battle_leave();
+}
+
+// RESULT. The report has already gone through the ONE path by the time this is
+// drawn, which is why g_results is 1 here and stays 1 through battle_leave().
+TEST(snapshot_battle_result) {
+  seams2_reset();
+  box_fixture(3);
+  battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E03u);
+  battle_enter();
+  battle_pick_team((uint8_t)BATTLE_TEAM_MAX);
+  battle_input(GST_HOLD_R);
+  battle_to_result();
+  CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_RESULT);
+  CHECK(battle_screen_outcome() != (uint8_t)BO_UNDECIDED);
+  CHECK_EQ(g_results, 1);
+  snapshot(SCR_BATTLE, "battle_result");
+  battle_leave();
+  CHECK_EQ(g_results, 1);
+}
+
+// The PLAY list grew a row and the fold that keeps it in MgId order grew with
+// it. The row order is a static_assert in ui/screen_care.cpp; what a test has
+// to hold is that the two NEW branches of play_input() do what the row says -
+// the battle row starts a battle and does not launch minigame number 6, and
+// "Volver" still leaves.
+TEST(play_launches_the_battle_from_its_own_row) {
+  seams2_reset();
+  play_enter();
+  for (uint8_t i = 0; i < PLAY_BATTLE; ++i) play_input(GST_TAP_L);
+  CHECK_EQ(play_cursor(), PLAY_BATTLE);
+  play_input(GST_HOLD_R);
+  CHECK_EQ(g_battle_starts, 1);
+  CHECK_EQ(g_battle_entry, (uint8_t)BT_ENTRY_PRACTICE);
+  CHECK_EQ(g_minigame, 0xFF);            // and NOT a minigame
+  CHECK_EQ(g_backs, 0);
+
+  // The row before it is still the last minigame, which is the mistake the
+  // widened fold exists to prevent.
+  play_enter();
+  for (uint8_t i = 0; i + 1u < PLAY_BATTLE; ++i) play_input(GST_TAP_L);
+  play_input(GST_HOLD_R);
+  CHECK_EQ(g_minigame, (uint8_t)(PLAY_BATTLE - 1u));
+  CHECK_EQ(g_battle_starts, 1);
+
+  // And the row after it still means "leave".
+  play_enter();
+  for (uint8_t i = 0; i < PLAY_BACK; ++i) play_input(GST_TAP_L);
+  play_input(GST_HOLD_R);
+  CHECK_EQ(g_backs, 1);
 }

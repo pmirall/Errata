@@ -245,11 +245,29 @@ static_assert(xp_table_total() < 65535u,
 #define XP_WIN_MINIGAME_S       3600UL
 #define XP_CAP_CARRY            48          // per day   (8 h of carrying)
 #define XP_WIN_CARRY_S          86400UL
+// P4-C4 SIZED THE BATTLE BUCKET, which game/xp.cpp's meter table had been
+// carrying as {0, 0} - "reserved but not yet metered, until P4-C4 exists to
+// spend it", in its own words. Two wins an hour at XP_BATTLE_WIN = 25, which is
+// the same shape as the minigame row (two perfect runs an hour): a practice
+// battle is a minute of button presses and is repeatable at will, so without a
+// cap it would have been the only unmetered repeatable XP source in the game.
+//
+// THE SAVE-COMPAT CONSEQUENCE, stated rather than discovered: the byte was
+// persisted as 0 while the slot was unmetered, and 0 now means "empty bucket",
+// so a device upgrading across this commit earns no battle XP until the bucket
+// refills. xp_ledger_restore() credits the elapsed real time first, so a device
+// that was off for an hour comes back full and one that was saved a moment ago
+// waits 72 s for its first point. No save is invalidated and no byte changes
+// meaning for any other slot.
+#define XP_CAP_BATTLE           50          // per hour  (2 wins)
+#define XP_WIN_BATTLE_S         3600UL
 
 static_assert(XP_WIN_CARE_S     % XP_CAP_CARE     == 0, "care refill step is not exact");
 static_assert(XP_WIN_MINIGAME_S % XP_CAP_MINIGAME == 0, "minigame refill step is not exact");
 static_assert(XP_WIN_CARRY_S    % XP_CAP_CARRY    == 0, "carry refill step is not exact");
-static_assert(XP_CAP_CARE < 256 && XP_CAP_MINIGAME < 256 && XP_CAP_CARRY < 256,
+static_assert(XP_WIN_BATTLE_S   % XP_CAP_BATTLE   == 0, "battle refill step is not exact");
+static_assert(XP_CAP_CARE < 256 && XP_CAP_MINIGAME < 256 && XP_CAP_CARRY < 256 &&
+              XP_CAP_BATTLE < 256,
               "a ledger bucket is persisted as one byte (Inventory.xp_ledger)");
 
 // =============================================================================
@@ -371,8 +389,13 @@ inline constexpr uint8_t TYPE_MUL_DEN[3] = { 5, 1, 4 };
 #define BATTLE_TEAM_MAX         3
 
 // 3. WHAT A WIN PAYS. Plan line 487 says "+25" and no table carries it.
-//    game/xp.h already reserves XP_SRC_BATTLE with a {0,0} ledger row.
+//    P4-C1 wrote here that "game/xp.h already reserves XP_SRC_BATTLE with a
+//    {0,0} ledger row"; P4-C4 SPENT that row and sized it (XP_CAP_BATTLE above),
+//    so the sentence would now be false and is replaced rather than left.
 #define XP_BATTLE_WIN           25
+static_assert(XP_CAP_BATTLE >= XP_BATTLE_WIN,
+              "a battle bucket smaller than one win would pay a fraction of every "
+              "victory and there would be no honest number to show the player");
 
 // --- the local opponent (plan P4-C3, game/battle_ai.h) -----------------------
 // A FOURTH number the content pack does not carry, and it is a DECISION of the

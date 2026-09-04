@@ -21,6 +21,7 @@
 // =============================================================================
 #include "screen.h"
 
+#include "screen_battle.h"
 #include "screen_boot.h"
 #include "screen_box.h"
 #include "screen_care.h"
@@ -121,8 +122,15 @@ const ScreenDef SCREENS[SCR_COUNT] = {
                                                                   // SCR_ENCOUNTER
   { nop_enter, nop_update, soon_capture,     soon_input, nop_leave, 0, 0 },
                                                                   // SCR_CAPTURE
-  { nop_enter, nop_update, soon_battle,      soon_input, nop_leave, 0, 0 },
-                                                                  // SCR_BATTLE
+  // BATTLE (P4-C4). SF_OWNS_BACK: B walks its ladder one level at a time -
+  // SWITCH back to MENU, RESOLVE to the end of the round - and only the top
+  // mode leaves the screen, exactly as the BOX does. SF_STICKY because
+  // invariant 3 dropping the player on HOME twenty seconds into a fight would
+  // abandon it. NOT SF_OWNS_FRAME: the toast layer is how this screen says
+  // "ahora no puedes" and how ui.cpp says a win paid XP, and an owns-frame
+  // screen is handed neither.
+  { battle_enter, battle_update, battle_render, battle_input, battle_leave, 0,
+    SF_STICKY | SF_OWNS_BACK },                                   // SCR_BATTLE
   { nop_enter, nop_update, soon_trade,       soon_input, nop_leave, 0, 0 },
                                                                   // SCR_TRADE
   { nop_enter, nop_update, soon_breed,       soon_input, nop_leave, 0, 0 },

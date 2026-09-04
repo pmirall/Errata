@@ -174,7 +174,18 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/screen_evolution.o $(OBJ)/screen_creator.o \
                $(OBJ)/dialog.o $(OBJ)/qr.o $(OBJ)/box.o \
                $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o \
-               $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+               $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
+               $(OBJ)/screen_battle.o $(OBJ)/battle_renderer.o \
+               $(OBJ)/xbm_mirror.o \
+               $(OBJ)/battle.o $(OBJ)/battle_ai.o $(OBJ)/pebble.o
+
+# P4-C4 added the last six. ui/screen_battle.cpp is a PURE translation unit that
+# runs the real engine and the real AI, so the host renders a real battle at
+# 128x64 rather than a mock of one: battle.o and battle_ai.o are the same
+# objects tests/test_battle.cpp links, pebble.o is the stat derivation they
+# call, and xbm_mirror.o is ui/petfx.cpp's own horizontal flip - which nothing
+# in this repository compiled or executed until it moved out of that device-only
+# translation unit.
 
 # The minigame run frames, snapshotted by test_screens.cpp. Each game needs BOTH
 # halves: the draw half calls accessors the logic half owns, which is the whole
@@ -195,6 +206,17 @@ MG_FRAME_OBJS := $(OBJ)/minigame.o \
                  $(OBJ)/delete_logic.o       $(OBJ)/delete_draw.o
 
 $(BIN)/test_screens:    $(SCREEN_OBJS) $(MG_FRAME_OBJS)
+
+# THE BATTLE SCREEN'S BEHAVIOUR (P4-C4). Deliberately NOT $(SCREEN_OBJS): this
+# binary links the battle screen and the things it actually calls, and nothing
+# else, so it cannot start passing because some other screen happens to define
+# a seam it needs. gfx_widgets.o + gfx_fb.o come along because the screen draws
+# and because the mirror case reads pixels back.
+$(BIN)/test_battle_screen: $(OBJ)/screen_battle.o $(OBJ)/battle_renderer.o \
+                        $(OBJ)/xbm_mirror.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
+                        $(OBJ)/pebble.o $(OBJ)/box.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o \
+                        $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o
 
 # The navigation machine and the section 7 router, over the REAL table.
 $(BIN)/test_statemachine: $(SCREEN_OBJS) $(OBJ)/state_machine.o \

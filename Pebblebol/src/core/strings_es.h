@@ -473,7 +473,7 @@ enum StrId : uint16_t {
   STR_SOON_NETWORK,
   STR_SOON_ENCOUNTER,
   STR_SOON_CAPTURE,
-  STR_SOON_BATTLE,
+  STR_BT_TITLE,          // was STR_SOON_BATTLE: P4-C4 built the screen
   STR_SOON_TRADE,
   STR_SOON_BREED,
   STR_SOON_ITEM,
@@ -617,6 +617,44 @@ enum StrId : uint16_t {
   STR_ITEM_NAME_9,     // item 9, Llave Raíz
   STR_ITEM_NAME_10,    // item 10, Escudo RAM
   // <<< GEN StrId BLOCK - tools/gen_content.py - DO NOT EDIT BY HAND <<<
+
+  // --- 35. THE BATTLE SCREEN (P4-C4) --------------- <= 25 chars @ 5x8 ------
+  //     APPENDED AFTER THE GENERATED BLOCK, and that is not a style choice:
+  //     every id inside the block above is written into data/species_table.h,
+  //     data/attacks_table.h and data/items_table.h by tools/gen_content.py, so
+  //     inserting anything before them renumbers content the generator has
+  //     already emitted and `gen_content.py --check` fails on a tree that
+  //     compiles. New hand-written ids go here, at the end, for ever.
+  //     The transcript words are lower case on purpose: they are read as part
+  //     of a sentence ("Paketo cae"), not as labels.
+  STR_BT_PRACTICE,      // the PLAY row
+  STR_BT_TEST,          // the god console's row (spec section 49)
+  STR_BT_ROUND,
+  STR_BT_PICK,
+  STR_BT_READY,
+  STR_BT_SWITCH,
+  STR_BT_VS,
+  STR_BT_WIN,
+  STR_BT_LOSE,
+  STR_BT_DRAW,
+  STR_BT_NO_TEAM,
+  STR_BT_FULL_TEAM,
+  STR_BT_ILLEGAL,
+  STR_BT_START_ERR,
+  STR_BT_XP,
+  STR_BT_HELP,
+  STR_BT_ENTER,
+  STR_BT_MISS,
+  STR_BT_FAINT,
+  STR_BT_PROTECT,
+  STR_BT_DOT,
+  STR_BT_CORRUPT,
+  STR_BT_STUN,
+  STR_BT_CLEANSE,
+  STR_BT_SKIP,
+  STR_BT_ATK,
+  STR_BT_DEF,
+  STR_BT_SPD,
 
   STR_COUNT
 };
@@ -1016,7 +1054,7 @@ inline constexpr const char* const ES[] = {
   /* STR_SOON_NETWORK */          "RED",
   /* STR_SOON_ENCOUNTER */        "ENCUENTRO",
   /* STR_SOON_CAPTURE */          "CAPTURA",
-  /* STR_SOON_BATTLE */           "COMBATE",
+  /* STR_BT_TITLE */              "COMBATE",
   /* STR_SOON_TRADE */            "INTERCAMBIO",
   /* STR_SOON_BREED */            "CRÍA",
   /* STR_SOON_ITEM */             "PREMIO",
@@ -1146,6 +1184,41 @@ inline constexpr const char* const ES[] = {
   /* STR_ITEM_NAME_9   */         "Llave Raíz",
   /* STR_ITEM_NAME_10  */         "Escudo RAM"
   /* <<< GEN ES[] BLOCK - tools/gen_content.py - DO NOT EDIT BY HAND <<< */
+
+  /* --- 35. the battle screen (P4-C4) --- */
+  //  THE LEADING COMMA IS LOAD-BEARING. tools/gen_content.py emits the block
+  //  above with NO trailing comma after its last entry, and splices only the
+  //  lines BETWEEN the two markers - so the comma that joins the generated half
+  //  to this one has to live on this side of the marker or the next regeneration
+  //  would delete it.
+  , /* STR_BT_PRACTICE */         "COMBATE DE PRÁCTICA"
+  , /* STR_BT_TEST */             "COMBATE PRUEBA"
+  , /* STR_BT_ROUND */            "RONDA"
+  , /* STR_BT_PICK */             "ELIGE EQUIPO"
+  , /* STR_BT_READY */            "LISTO"
+  , /* STR_BT_SWITCH */           "CAMBIAR"
+  , /* STR_BT_VS */               "¡A COMBATIR!"
+  , /* STR_BT_WIN */              "¡HAS GANADO!"
+  , /* STR_BT_LOSE */             "Has perdido"
+  , /* STR_BT_DRAW */             "Empate"
+  , /* STR_BT_NO_TEAM */          "Elige al menos un Pebble"
+  , /* STR_BT_FULL_TEAM */        "El equipo ya está lleno"
+  , /* STR_BT_ILLEGAL */          "Ahora no puedes"
+  , /* STR_BT_START_ERR */        "No se puede combatir"
+  , /* STR_BT_XP */               "¡Victoria! Ganas XP"
+  , /* STR_BT_HELP */             "A elige, B vuelve. Cambiar cuesta el turno."
+  , /* STR_BT_ENTER */            "entra"
+  , /* STR_BT_MISS */             "falla"
+  , /* STR_BT_FAINT */            "cae"
+  , /* STR_BT_PROTECT */          "se protege"
+  , /* STR_BT_DOT */              "daño"
+  , /* STR_BT_CORRUPT */          "corrupto"
+  , /* STR_BT_STUN */             "aturdido"
+  , /* STR_BT_CLEANSE */          "limpio"
+  , /* STR_BT_SKIP */             "pierde el turno"
+  , /* STR_BT_ATK */              "ATQ"
+  , /* STR_BT_DEF */              "DEF"
+  , /* STR_BT_SPD */              "VEL"
 };
 
 // -----------------------------------------------------------------------------

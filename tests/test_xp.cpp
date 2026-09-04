@@ -325,18 +325,53 @@ TEST(a_reboot_cannot_refill_a_spent_budget) {
   CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_CARE), 0);
 }
 
-TEST(the_reserved_battle_slot_is_unmetered_and_persists_as_zero) {
+// REPLACED, NOT DELETED, and the old name said why it had to be:
+// the_reserved_battle_slot_is_unmetered_and_persists_as_zero asserted that
+// game/xp.cpp's battle row was {0, 0} - which was true, and which P4-C4 changed
+// on purpose, because the practice battle it built is a minute of button
+// presses repeatable at will and was the only unmetered repeatable XP source in
+// the game. The case now holds the OPPOSITE property, which is a stronger one:
+// the bucket is real, it is spent, it bounds an afternoon of fighting, and it
+// survives a power cut.
+TEST(the_battle_bucket_bounds_an_afternoon_of_fighting) {
   xp_ledger_reset(1);
   PebbleInstance p;
   make_pebble(p, 1);
 
-  // P4 has not sized a battle cap yet, so the slot exists but meters nothing:
-  // the award goes through untouched and the byte written is 0.
-  CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_BATTLE), 0xFFFF);
+  // A full bucket is exactly XP_CAP_BATTLE, not 0xFFFF: 0xFFFF is what
+  // xp_daily_left() answers for a source with NO meter at all.
+  CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_BATTLE), (uint16_t)XP_CAP_BATTLE);
+
+  // Two wins fit; the third pays nothing at all.
   uint8_t ups = 0;
-  CHECK(xp_add(p, 25, XP_SRC_BATTLE, &ups));
+  CHECK(xp_add(p, (uint16_t)XP_BATTLE_WIN, XP_SRC_BATTLE, &ups));
   CHECK_EQ(ups, 2);                                   // 25 XP is levels 1 and 2
+  CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_BATTLE),
+           (uint16_t)(XP_CAP_BATTLE - XP_BATTLE_WIN));
+  const uint16_t xp_after_one = p.xp;
+  const uint8_t  lv_after_one = p.level;
+  (void)xp_add(p, (uint16_t)XP_BATTLE_WIN, XP_SRC_BATTLE, &ups);
+  CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_BATTLE), 0);
+  CHECK(p.level > lv_after_one || p.xp != xp_after_one);   // the second one paid
+
+  const uint16_t xp_after_two = p.xp;
+  const uint8_t  lv_after_two = p.level;
+  CHECK(!xp_add(p, (uint16_t)XP_BATTLE_WIN, XP_SRC_BATTLE, &ups));
+  CHECK_EQ(p.xp, xp_after_two);                        // and the third did not
+  CHECK_EQ(p.level, lv_after_two);
+
+  // The empty bucket reaches flash as a zero byte, and an hour of real time
+  // brings it all the way back - the same continuous refill every other metered
+  // source gets, so a reboot cannot shortcut it.
   uint8_t snap[XP_LEDGER_SLOTS];
   xp_ledger_snapshot(snap);
   CHECK_EQ(snap[XP_SRC_BATTLE], 0);
+  CHECK_EQ(xp_ledger_restore(snap, (uint8_t)XP_LEDGER_SLOTS,
+                             SANE_EPOCH, SANE_EPOCH + (uint32_t)XP_WIN_BATTLE_S), 1);
+  CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_BATTLE), (uint16_t)XP_CAP_BATTLE);
+
+  // Half a window buys half a bucket and not one point more.
+  CHECK_EQ(xp_ledger_restore(snap, (uint8_t)XP_LEDGER_SLOTS,
+                             SANE_EPOCH, SANE_EPOCH + (uint32_t)(XP_WIN_BATTLE_S / 2u)), 1);
+  CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_BATTLE), (uint16_t)(XP_CAP_BATTLE / 2u));
 }

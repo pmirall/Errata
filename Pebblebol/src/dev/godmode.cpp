@@ -133,7 +133,8 @@ static const uint8_t GD_STATVALS[GOD_STATVAL_COUNT] = { 0, 25, 50, 100 };
 static constexpr uint16_t GD_MENU_STR[GOD_MENU_ROWS] = {
   (uint16_t)STR_GOD_SPEED,    (uint16_t)STR_GOD_ABSENCE, (uint16_t)STR_GOD_SETSTAT,
   (uint16_t)STR_GOD_STAGE,    (uint16_t)STR_GOD_GENOME,
-  (uint16_t)STR_GOD_CLOCK,    (uint16_t)STR_GOD_WIPE,    (uint16_t)STR_AF_QUIT
+  (uint16_t)STR_GOD_CLOCK,    (uint16_t)STR_GOD_WIPE,
+  (uint16_t)STR_BT_TEST,      (uint16_t)STR_AF_QUIT
 };
 
 // The two root rows draw_menu() prints a live value next to.
@@ -142,6 +143,15 @@ static_assert(GD_MENU_STR[GD_ROW_SPEED] == (uint16_t)STR_GOD_SPEED,
               "GD_ROW_SPEED no longer names the speed row");
 static_assert(GD_MENU_STR[GD_ROW_CLOCK] == (uint16_t)STR_GOD_CLOCK,
               "GD_ROW_CLOCK no longer names the clock row");
+// P4-C4's test_battle (spec section 49). open_command() switches on the ROW
+// NUMBER with no lookup table, exactly as ui/screen_care.cpp's PLAY list does,
+// so a row inserted in the wrong place would open somebody else's sub-screen.
+enum : uint8_t { GD_ROW_BATTLE = 7, GD_ROW_QUIT = 8 };
+static_assert(GD_MENU_STR[GD_ROW_BATTLE] == (uint16_t)STR_BT_TEST,
+              "GD_ROW_BATTLE no longer names the test_battle row");
+static_assert(GD_MENU_STR[GD_ROW_QUIT] == (uint16_t)STR_AF_QUIT,
+              "the exit row must stay last");
+static_assert(GD_ROW_QUIT + 1 == GOD_MENU_ROWS, "the root list grew without its rows");
 
 // The gene editor. Index-parallel to strings_es.h block 34c.
 struct GodGene {
@@ -198,6 +208,30 @@ static uint8_t  s_hex_mode    = GHX_DUMP;
 static uint8_t  s_confirm_act = GCF_NONE;
 static bool     s_confirm_yes = false;    // GAME_DESIGN 8.2: defaults to NO
 static uint16_t s_confirm_str = (uint16_t)STR_EMPTY;
+
+// The per-frame heap probe (godmode.h). Sampled from god_draw_marker(), which
+// is the LAST thing every rendered frame does and which returns immediately
+// while god mode is off - so it measures frames, costs nothing when the console
+// is not in use, and needs no hook in ui.cpp or app.cpp to exist.
+static uint16_t s_fh_moves = 0;
+static int32_t  s_fh_worst = 0;
+static uint32_t s_fh_last  = 0;
+static bool     s_fh_armed = false;
+
+static void frame_heap_sample(void)
+{
+  const uint32_t now = (uint32_t)ESP.getFreeHeap();
+  if (!s_fh_armed) { s_fh_armed = true; s_fh_last = now; return; }
+  const int32_t d = (int32_t)(now - s_fh_last);
+  s_fh_last = now;
+  if (d == 0) return;
+  if (s_fh_moves < 0xFFFFu) ++s_fh_moves;
+  if (d > s_fh_worst || -d > s_fh_worst) s_fh_worst = (d < 0) ? -d : d;
+}
+
+uint16_t god_frame_heap_moves(void) { return s_fh_moves; }
+int32_t  god_frame_heap_worst(void) { return s_fh_worst; }
+
 
 static uint16_t s_toast_str   = (uint16_t)STR_EMPTY;
 static uint32_t s_toast_until = 0;
@@ -548,6 +582,10 @@ void god_begin(void)
   s_hex[0]      = '\0';
   s_hex_show[0] = '\0';
 
+  s_fh_moves    = 0;
+  s_fh_worst    = 0;
+  s_fh_armed    = false;
+
   sim_set_time_scale(1u);
   heap_trend_begin();
 
@@ -702,6 +740,10 @@ static GodEvt open_command(uint8_t row)
     case  4: s_console_page = GSC_GENOME;   break;
     case  5: s_console_page = GSC_SYS;      s_sys_page = GD_SYS_CLOCK; break;
     case  6: open_confirm((uint16_t)STR_CF_WIPE, GCF_WIPE1); break;
+    // test_battle. The console cannot navigate - ui.cpp owns that - so this is
+    // the whole of what it does: say so and let the caller push SCR_BATTLE on
+    // top. god mode stays ON and stays visible underneath.
+    case GD_ROW_BATTLE: return GOD_EVT_BATTLE;
     default:
       god_exit();
       return GOD_EVT_LEAVE;
@@ -920,6 +962,7 @@ static void draw_toast(void)
 void god_draw_marker(void)
 {
   if (!s_active) return;
+  frame_heap_sample();
 
   U8G2& u = rd_u8g2();
   u.setDrawColor(1);
@@ -1132,6 +1175,12 @@ static void draw_sys(void)
       snprintf(b, sizeof(b), "%u>%u f%lu m%lu", (unsigned)h.from_mode, (unsigned)h.to_mode,
                (unsigned long)h.free_b, (unsigned long)h.max_alloc_b);
       rd_text(2, 51, RD_FONT_TINY, b);
+      // THE PER-FRAME DELTA (plan P4-C4). "dF 0/0" is what a screen that
+      // allocates nothing per frame reads - open test_battle, play a few rounds
+      // and come back to this page to check it.
+      snprintf(b, sizeof(b), "dF %u/%ld", (unsigned)god_frame_heap_moves(),
+               (long)god_frame_heap_worst());
+      rd_text_right(OLED_W - 2, 43, RD_FONT_TINY, b);
       break;
     }
     case GD_SYS_RADIO: {
@@ -1220,5 +1269,7 @@ void     god_exit(void)                         { }
 void     god_draw_marker(void)                  { }
 bool     god_freeze_clock(uint8_t& h, uint8_t& m) { (void)h; (void)m; return false; }
 bool     god_dump_enabled(void)                 { return false; }
+uint16_t god_frame_heap_moves(void)             { return 0; }
+int32_t  god_frame_heap_worst(void)             { return 0; }
 
 #endif // GOD_MODE_ENABLED

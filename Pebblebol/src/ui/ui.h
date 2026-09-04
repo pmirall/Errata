@@ -302,6 +302,47 @@ void     ui_request_hatch(void);
 // ui.cpp's until P3-C4.
 void     ui_start_minigame(uint8_t idx);
 
+// -----------------------------------------------------------------------------
+//  THE BATTLE SCREEN'S SEAMS (P4-C4)
+//
+//  ui/screen_battle.cpp is a pure translation unit and owns the whole fight -
+//  the 212 B BattleState, the AI, the log ring and every decision in it. What
+//  it cannot do for itself is exactly three things, and each gets one line
+//  here rather than a hole in the layering.
+// -----------------------------------------------------------------------------
+
+// Arm and open a battle. `entry` is BT_ENTRY_PRACTICE (the PLAY row) or
+// BT_ENTRY_DIAG (the console's test_battle). ui.cpp draws the seed - practice
+// from rng_u32(RNG_BATTLE), the diagnostic from the fixed BT_DIAG_SEED spec
+// section 49's "deterministic RNG seed" asks for - and then pushes SCR_BATTLE,
+// because a named RNG stream and the navigation machine are both outside a pure
+// screen's reach.
+void     ui_start_battle(uint8_t entry);
+
+// THE ONE PATH A BATTLE RESULT CAN TAKE, and it is called exactly once per
+// battle however the player leaves the screen (ui/screen_battle.cpp's
+// report_once(), which is minigames/manager.cpp's mgr_abort() in miniature).
+// A practice win awards XP_BATTLE_WIN through app_award_xp() - metered by
+// game/xp.h's ledger like every other source - and persists. A DIAG battle
+// awards nothing: entering god mode already taints the genome, and a
+// diagnostic that pays XP is a cheat.
+void     ui_battle_result(uint8_t entry, uint8_t won);
+
+// -----------------------------------------------------------------------------
+//  THE THREE render.h EFFECTS A PURE SCREEN CANNOT REACH (P4-C4)
+//
+//  ui_hold_fps() is the one that is load-bearing rather than decorative:
+//  rd_set_fps() only moves the REQUEST and rd_fps() caps that request at
+//  FPS_LOW for RENDER_WEB_BUSY_MS after every web hit, so a screen animating a
+//  transcript has to hold the rate the way actfx does. The hold is
+//  SELF-EXTINGUISHING (capped at RD_FPS_HOLD_MAX_MS) and must be renewed from
+//  the screen's update hook, which is what makes it impossible to leave the
+//  panel pinned at 20 fps by forgetting to release it.
+// -----------------------------------------------------------------------------
+void     ui_hold_fps(uint8_t fps, uint16_t ms);
+void     ui_flash(uint16_t ms);
+void     ui_shake(uint8_t amp_px, uint16_t ms);
+
 // The undocumented god-mode entry hold, 0..100, painted by the PEBBLE screen's
 // genome page. 0 whenever no hold is in progress, which is almost always.
 uint8_t  ui_god_progress(void);

@@ -423,7 +423,7 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 #define GOD_SCALE_4             3600
 #define GOD_SCALE_COUNT         5
 #define GOD_ABSENCE_COUNT       6            // 1 h, 6 h, 24 h, 72 h, 168 h, 720 h
-#define GOD_CMD_COUNT           7
+#define GOD_CMD_COUNT           8            // P4-C4 added test_battle (spec 49)
 #define GOD_BAR_H               9
 
 // =============================================================================

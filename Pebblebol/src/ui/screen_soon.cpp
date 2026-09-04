@@ -30,7 +30,12 @@ static void frame(uint16_t title, uint16_t phase) {
 void soon_network(void)     { frame(STR_SOON_NETWORK,   STR_PHASE_5);  }
 void soon_encounter(void)   { frame(STR_SOON_ENCOUNTER, STR_PHASE_5);  }
 void soon_capture(void)     { frame(STR_SOON_CAPTURE,   STR_PHASE_5);  }
-void soon_battle(void)      { frame(STR_SOON_BATTLE,    STR_PHASE_4);  }
+// soon_battle() IS GONE. P4-C4 gave SCR_BATTLE a real screen, so this line
+// stopped being reachable the moment the table row moved - and an
+// unreferenced non-static function raises no warning, so nothing would ever
+// have failed on account of it. STR_PHASE_4 is now the one string in
+// core/strings_es.h with no consumer; it stays because deleting an id
+// renumbers the generated block behind it.
 void soon_trade(void)       { frame(STR_SOON_TRADE,     STR_PHASE_7);  }
 void soon_breed(void)       { frame(STR_SOON_BREED,     STR_PHASE_7);  }
 void soon_item_reward(void) { frame(STR_SOON_ITEM,      STR_PHASE_6);  }

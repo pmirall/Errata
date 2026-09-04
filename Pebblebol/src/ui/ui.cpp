@@ -78,6 +78,7 @@
 // out. What is left here is the DEVICE half each of them needs - the animated
 // body layer, the diagnostics page, the minigame start - which this file binds
 // and hands over. It draws none of them.
+#include "screen_battle.h"   // BT_ENTRY_*, BT_DIAG_SEED
 #include "screen_box.h"      // box_screen_to_list(), for the release commit
 #include "screen_home.h"
 #include "screen_settings.h"
@@ -1188,6 +1189,14 @@ static bool diag_gesture(Gesture g) {
   switch (god_handle(g)) {
     case GOD_EVT_LEAVE:
       return true;
+    // test_battle (spec section 49). The battle screen is PUSHED on top of the
+    // console rather than replacing it, so B walks back into the god menu the
+    // operator started from and god mode stays on - which is the point: the
+    // heap panel is where the per-frame delta this entry exists to measure is
+    // read back.
+    case GOD_EVT_BATTLE:
+      ui_start_battle(BT_ENTRY_DIAG);
+      return false;
     case GOD_EVT_WIPED: {
       if (s_cfg) gs_cfg_defaults(*s_cfg);
       const SimView* np = pet();
@@ -1764,6 +1773,48 @@ void ui_start_minigame(uint8_t idx) {
   (void)input_pressed_edge(INPUT_BTN_R);
   nav_push(SCR_GAME);
 }
+
+// -----------------------------------------------------------------------------
+//  THE BATTLE SEAMS (P4-C4). See ui.h.
+// -----------------------------------------------------------------------------
+void ui_start_battle(uint8_t entry) {
+  // ONE seed per battle, drawn once. rng_u32(RNG_BATTLE) is legal here and
+  // illegal inside src/game/battle* - tools/check.sh's second battle gate greps
+  // for exactly that - because the ENGINE must draw only from BattleState.rng
+  // or two peers stop reproducing each other's rounds. Handing it in from the
+  // outside is what keeps both true at once.
+  const uint32_t seed = (entry == BT_ENTRY_DIAG) ? (uint32_t)BT_DIAG_SEED
+                                                 : rng_u32(RNG_BATTLE);
+  battle_arm(entry, seed);
+  // The console cannot navigate (ui.cpp owns that), so a DIAG battle is pushed
+  // ON TOP of SCR_DIAG and B walks back into the console it was started from.
+  nav_push(SCR_BATTLE);
+}
+
+void ui_battle_result(uint8_t entry, uint8_t won) {
+  // A diagnostic pays nothing. Entering god mode already sets
+  // genome.god_tainted for ever, and a test entry that also handed out XP would
+  // be a cheat wearing a developer tool's clothes.
+  if (entry != BT_ENTRY_PRACTICE) return;
+  if (!won) return;
+  // METERED LIKE EVERY OTHER SOURCE, and P4-C4 had to SIZE that meter to be able
+  // to say so: game/xp.cpp carried XP_SRC_BATTLE as {0, 0} - "reserved but not
+  // yet metered, until P4-C4 exists to spend it" - which would have made the
+  // practice battle the one repeatable XP source in the game with no ceiling at
+  // all. XP_CAP_BATTLE is two wins an hour (data/balance.h), refilling
+  // continuously, belonging to the device rather than to the Pebble.
+  //
+  // The return value is whether a LEVEL was gained, NOT whether anything was
+  // paid: a win against an empty bucket returns false and is not an error.
+  // ui_note_events() is what turns SIM_EV_LEVEL_UP into the flash and the toast.
+  (void)app_award_xp((uint16_t)XP_BATTLE_WIN, XP_SRC_BATTLE);
+  if (pet()) gs_save_active(true);
+  ui_toast(STR_BT_XP);
+}
+
+void ui_hold_fps(uint8_t fps, uint16_t ms) { rd_hold_fps(fps, ms); }
+void ui_flash(uint16_t ms)                 { rd_flash(ms); }
+void ui_shake(uint8_t amp_px, uint16_t ms) { rd_shake(amp_px, ms); }
 
 uint8_t ui_god_progress(void) { return s_god_prog; }
 

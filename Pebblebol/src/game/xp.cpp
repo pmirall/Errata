@@ -14,8 +14,9 @@
 
 // -----------------------------------------------------------------------------
 //  THE METER TABLE. One row per metered source, in XpSource order; a window of
-//  0 marks a slot that is reserved but not yet metered (XP_SRC_BATTLE, until
-//  P4-C4 exists to spend it).
+//  0 marks a slot that is reserved but not yet metered. There is no such row
+//  left: P4-C4 built the thing that spends XP_SRC_BATTLE and sized its bucket
+//  with it (data/balance.h says what the number is and what it costs a save).
 // -----------------------------------------------------------------------------
 struct XpMeter {
   uint16_t cap;        // whole XP the bucket holds
@@ -26,7 +27,7 @@ static const XpMeter METER[XP_LEDGER_SLOTS] = {
   { (uint16_t)XP_CAP_CARE,     (uint32_t)XP_WIN_CARE_S     },   // XP_SRC_CARE
   { (uint16_t)XP_CAP_MINIGAME, (uint32_t)XP_WIN_MINIGAME_S },   // XP_SRC_MINIGAME
   { (uint16_t)XP_CAP_CARRY,    (uint32_t)XP_WIN_CARRY_S    },   // XP_SRC_CARRY
-  { 0,                         0                           }    // XP_SRC_BATTLE
+  { (uint16_t)XP_CAP_BATTLE,   (uint32_t)XP_WIN_BATTLE_S   }    // XP_SRC_BATTLE
 };
 
 static XpLedger g_led;

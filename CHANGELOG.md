@@ -14,6 +14,60 @@ Phase 4 begins. Nothing is tagged yet.
 
 ### Added
 
+- **The BATTLE screen** (`ui/screen_battle.{h,cpp}`, `ui/battle_renderer.{h,cpp}`): the only
+  place on the device where the engine and the AI actually run. Six modes on one screen —
+  the Box team pick, the stare-down, a four-attack + `CAMBIAR` menu on the shared list
+  widget, the bench list, the round's transcript played back one event at a time, and the
+  result — with `SF_STICKY | SF_OWNS_BACK`, so B walks that ladder one level at a time and
+  invariant 3 cannot drop a player out of a fight. Two 24x24 creatures face each other,
+  each drawn from the SAME `ui/pet_art.h` resolution HOME and the BOX use, so the creature
+  in a battle is the creature that has been cared for. **THE RENDERER IS A PURE
+  TRANSLATION UNIT**, against the plan's own wording: three of the five calls the plan
+  named have a `gfx.h` face that forwards to exactly them on the device, and the two that
+  do not (`rd_flash`, `rd_shake`) draw no pixel and reach `render.h` through one-line
+  seams — which is what lets `tests/test_screens.cpp` render a REAL battle at the real
+  128x64 and diff six goldens, where a `render.h` module could not have been snapshotted
+  at all. **NO PER-FRAME HEAP IS STRUCTURAL**: the `BattleSetup`, the `BattleState`, the
+  `BattleAi`, the 48-entry event ring and every string buffer are file-scope statics, so
+  there is nothing left to allocate.
+- **`ui/xbm_mirror.{h,cpp}`**: `ui/petfx.cpp`'s horizontal XBM flip and its 256-byte
+  bit-reversal table, lifted out of that device-only file so the battle renderer can face
+  a combatant the other way without a second copy of a routine whose whole difficulty is
+  one off-by-four on a 28 px sprite. **It is executed for the first time**: `petfx.cpp`
+  said the flip was verified by `scratchpad/petfx/mkharness.py`, and that harness is not
+  in this repository, so nothing in the tree had ever run it. The banner now says which
+  half of that sentence was true.
+- **MENU → PLAY → "COMBATE DE PRÁCTICA"** and the god console's **`test_battle`** row
+  (spec §49) — the only two single-device battle entries in V1, because there are no wild
+  battles (§68 r18). They differ in the three things that matter: the practice entry draws
+  a fresh `RNG_BATTLE` seed, uses the player's Box and pays `XP_BATTLE_WIN`; the
+  diagnostic pins `BT_DIAG_SEED`, builds a synthetic team so it runs on a device that has
+  never filled its Box, and pays nothing.
+- **A per-frame heap probe in DIAG** (`god_frame_heap_moves()` / `god_frame_heap_worst()`,
+  drawn on the SYS/HEAP page as `dF n/worst`). Sampled inside `god_draw_marker()`, which is
+  the last thing every DRAWN frame does and a no-op while god mode is off — so it measures
+  frames rather than loops and costs nothing in the shipped configuration.
+
+### Changed
+
+- **`XP_SRC_BATTLE` is metered.** `game/xp.cpp` carried its row as `{0, 0}` — "reserved but
+  not yet metered, until P4-C4 exists to spend it", in its own words — and P4-C4 is that
+  commit. `XP_CAP_BATTLE` is 50 XP an hour (two wins at `XP_BATTLE_WIN` 25), the same shape
+  as the minigame row, because a practice battle is a minute of button presses repeatable
+  at will and would otherwise have been the only uncapped XP source in the game. **The
+  save-compat consequence is stated in `data/balance.h` rather than left to be found**: the
+  byte was persisted as 0 while the slot was unmetered and 0 now means "empty bucket", so a
+  device upgrading across this commit waits for the bucket to refill — `xp_ledger_restore()`
+  credits elapsed real time first, so a device that was off for an hour comes back full.
+- **The PLAY list's row fold was widened, not appended to.** `play_input()` launches game
+  number `s_play` with no lookup table, so a row inserted among the games would silently
+  start the wrong one. `PLAY_ROWS` is `MG_ID_COUNT + 2` and `play_rows_are_in_mgid_order()`
+  now pins the battle row and the way out by name AND by position.
+- `ui/screen_soon.cpp`'s `soon_battle()` was **deleted** with the row that pointed at it.
+  An unreferenced non-static function raises no warning, so nothing would ever have failed
+  on account of it; `STR_PHASE_4` is now the one string in `core/strings_es.h` with no
+  consumer and stays only because deleting an id renumbers the generated block behind it.
+
 - **The battle engine** (`game/battle.{h,cpp}`): spec §14's nine numbered steps as nine
   functions carrying those numbers, called once each in order by a driver whose body is
   exactly those calls. Teams of up to three with one active a side, switching that costs

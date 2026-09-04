@@ -3,11 +3,16 @@
 //  THE PLACEHOLDER SCREEN, one row per spec section 6 state that has no
 //  implementation yet (plan P2-C11d).
 //
+//  BATTLE LEFT THIS FILE WITH P4-C4. ui/screen_battle.cpp is the real screen
+//  now, and soon_battle() was deleted with the row that pointed at it rather
+//  than left behind - an unreferenced non-static function raises no warning, so
+//  a dead placeholder is a puzzle no gate would ever have failed on.
+//
 //  WHY THIS EXISTS. Spec section 6 lists the states this device has, and the
 //  screen table is the enumeration of them: "every state must define enter,
 //  update, render, handleInput, exit". A table with holes in it is not an
 //  enumeration - it is a switch with a default branch, which is exactly the
-//  shape section 6 forbids. So NETWORK, ENCOUNTER, CAPTURE, BATTLE, TRADE,
+//  shape section 6 forbids. So NETWORK, ENCOUNTER, CAPTURE, TRADE,
 //  BREED, ITEM_REWARD and SLEEP all have real rows from today: they can be
 //  navigated to, they draw, they take BACK and HELP, and each one says what it
 //  is and which phase brings it to life. Nothing here is a stub that silently
@@ -29,7 +34,6 @@
 void soon_network(void);      // phase 5
 void soon_encounter(void);    // phase 5
 void soon_capture(void);      // phase 5
-void soon_battle(void);       // phase 4
 void soon_trade(void);        // phase 7
 void soon_breed(void);        // phase 7
 void soon_item_reward(void);  // phase 6

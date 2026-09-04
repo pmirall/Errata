@@ -14,6 +14,7 @@
 #include "../core/strings_es.h"
 #include "gfx.h"
 #include "screen.h"
+#include "screen_battle.h"   // BT_ENTRY_PRACTICE
 #include "ui.h"
 
 static const uint16_t kCareItem[CARE_ROWS] = {
@@ -31,11 +32,11 @@ static const uint16_t kCareHelp[CARE_ROWS] = {
 // error rather than a game that launches its neighbour.
 static constexpr uint16_t kPlayItem[PLAY_ROWS] = {
   STR_MG_PING, STR_MG_SEQ, STR_MG_FLOOD, STR_MG_FIREWALL, STR_MG_BUFFER,
-  STR_MG_DELETE, STR_ITEM_BACK
+  STR_MG_DELETE, STR_BT_PRACTICE, STR_ITEM_BACK
 };
 static constexpr uint16_t kPlayHelp[PLAY_ROWS] = {
   STR_MG_PING_HINT, STR_MG_SEQ_HINT, STR_MG_FLOOD_HINT, STR_MG_FIREWALL_HINT,
-  STR_MG_BUFFER_HINT, STR_MG_DELETE_HINT, STR_HLP_BACK
+  STR_MG_BUFFER_HINT, STR_MG_DELETE_HINT, STR_BT_HELP, STR_HLP_BACK
 };
 
 // THE ORDER, not merely the count. screen_care.h asserts PLAY_ROWS against
@@ -51,11 +52,16 @@ static constexpr bool play_rows_are_in_mgid_order()
     if (kPlayItem[i] != (uint16_t)(STR_MG_PING + i))      return false;
     if (kPlayHelp[i] != (uint16_t)(STR_MG_PING_HINT + i)) return false;
   }
-  return kPlayItem[PLAY_ROWS - 1] == STR_ITEM_BACK &&
-         kPlayHelp[PLAY_ROWS - 1] == STR_HLP_BACK;
+  // P4-C4: the battle row is pinned by NAME and by POSITION. Swapping it with
+  // "Volver" would leave every count in the tree matching and start a battle
+  // from the row that means "leave".
+  return kPlayItem[PLAY_BATTLE] == STR_BT_PRACTICE &&
+         kPlayHelp[PLAY_BATTLE] == STR_BT_HELP &&
+         kPlayItem[PLAY_BACK]   == STR_ITEM_BACK &&
+         kPlayHelp[PLAY_BACK]   == STR_HLP_BACK;
 }
 static_assert(play_rows_are_in_mgid_order(),
-              "the PLAY rows must be in MgId order, plus the way out");
+              "the PLAY rows must be in MgId order, then the battle, then the way out");
 
 static uint8_t s_care = 0;
 static uint8_t s_play = 0;
@@ -121,7 +127,11 @@ void play_render(void) { draw_str_list(STR_MENU_PLAY, kPlayItem, PLAY_ROWS, s_pl
 
 void play_input(Gesture g) {
   if (g != GST_HOLD_R) { list_common(g, s_play, PLAY_ROWS, kPlayHelp); return; }
-  if (s_play >= (uint8_t)(PLAY_ROWS - 1)) { ui_back(); return; }
+  if (s_play == PLAY_BACK)   { ui_back(); return; }
+  // The seed comes from RNG_BATTLE and the Box has to be read, neither of which
+  // a pure translation unit may do: the screen says WHICH battle, ui.cpp draws
+  // the seed and pushes SCR_BATTLE.
+  if (s_play == PLAY_BATTLE) { ui_start_battle(BT_ENTRY_PRACTICE); return; }
   // The cooldown, the energy floor and the game itself are all still ui.cpp's
   // until P3-C4 lifts the minigames out; this screen only says which one.
   ui_start_minigame(s_play);

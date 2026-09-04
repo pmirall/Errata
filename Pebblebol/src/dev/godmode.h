@@ -97,6 +97,11 @@ enum GodEvt : uint8_t {
   GOD_EVT_LEAVE,      // leave SCR_DIAG for SCR_HOME. god_active() may still be 1.
   GOD_EVT_WIPED,      // NVS erased and a fresh gen-0 egg installed: reload cfg
                       // and go to SCR_EVOLUTION
+  GOD_EVT_BATTLE,     // test_battle (spec section 49): PUSH SCR_BATTLE on top of
+                      // the console, which the caller must arm with the fixed
+                      // BT_DIAG_SEED. The console stays underneath, so B walks
+                      // back into it - this is the third and last thing this
+                      // module cannot do for itself.
   GOD_EVT_COUNT
 };
 
@@ -184,11 +189,30 @@ bool     god_freeze_clock(uint8_t& hour, uint8_t& minute);
 // Whether the periodic soak log is armed (GST_BOTH on the root list toggles it).
 bool     god_dump_enabled(void);
 
+// -----------------------------------------------------------------------------
+//  THE PER-FRAME HEAP PROBE (plan P4-C4: "ESP.getFreeHeap() delta 0 per frame
+//  in DIAG").
+//
+//  Sampled inside god_draw_marker(), which every RENDERED frame calls last and
+//  which does nothing while god mode is off - so the measurement is per FRAME
+//  rather than per loop(), and it costs nothing in the shipped configuration.
+//  Two numbers, because one would not be enough to believe: how many frames
+//  since god_enter() moved the free heap at all, and the widest single move.
+//  A screen that allocates once per frame shows a rising count; a screen that
+//  allocates once, at entry, shows 1 - which is why the count is not a bool.
+//  The SYS / HEAP page prints both.
+// -----------------------------------------------------------------------------
+uint16_t god_frame_heap_moves(void);   // frames whose free heap differed from the last
+int32_t  god_frame_heap_worst(void);   // the widest delta seen, in bytes
+
 // Compile-time sanity on the constants this module contracts against.
 static_assert(GOD_SCALE_COUNT == 5, "godmode.h: the speed ring is five wide");
 static_assert(GOD_SCALE_0 == 1, "godmode.h: index 0 must be real time");
 static_assert(GOD_ABSENCE_COUNT == 6, "godmode.h: six forced-absence durations");
-static_assert(GOD_CMD_COUNT == 7, "godmode.h: 7 commands after the BLE mating surgery");
+static_assert(GOD_CMD_COUNT == 8,
+              "godmode.h: 8 commands - the 7 that survived the BLE mating surgery "
+              "plus P4-C4's test_battle. NOT a weakened guard: it still pins the "
+              "root list length that GOD_MENU_ROWS and open_command() are written against");
 static_assert(GOD_BAR_H <= STATUS_BAR_H, "god marker must fit the status bar rows");
 
 #endif // NT_GODMODE_H

@@ -38,6 +38,7 @@
 #include "ui/screen.h"
 #include "ui/gfx.h"
 #include "ui/screen_boot.h"
+#include "ui/screen_battle.h"
 #include "ui/screen_box.h"
 #include "ui/screen_care.h"
 #include "ui/screen_creator.h"
@@ -65,6 +66,10 @@ static int      g_wiggles = 0;
 static int      g_game_enters = 0, g_game_leaves = 0, g_game_updates = 0;
 static int      g_game_renders = 0, g_game_inputs = 0;
 static uint8_t  g_box_activated = 0xFF;
+static uint8_t  g_battle_entry  = 0xFF;
+static uint8_t  g_battle_won    = 0xFF;
+static int      g_battle_reports = 0;
+static uint8_t  g_hold_fps      = 0;
 static Config   g_cfg;
 
 void ui_toast(uint16_t id)        { g_toast = id; }
@@ -88,6 +93,13 @@ bool ui_act_and_show(uint8_t)     { return true; }
 void ui_repeat_last_action(void)  { }
 void ui_confirm_medicine(void)    { }
 void ui_start_minigame(uint8_t)   { }
+// The P4-C4 battle seams. This binary drives the REAL table, so SCR_BATTLE's
+// row runs the real screen and these three have to exist for it to link.
+void ui_start_battle(uint8_t e)   { g_battle_entry = e; }
+void ui_battle_result(uint8_t, uint8_t won) { g_battle_won = won; ++g_battle_reports; }
+void ui_hold_fps(uint8_t f, uint16_t) { g_hold_fps = f; }
+void ui_flash(uint16_t)           { }
+void ui_shake(uint8_t, uint16_t)  { }
 uint8_t ui_god_progress(void)     { return 0; }
 void ui_input_flush(void)         { }
 void ui_request_hatch(void)       { }
@@ -125,6 +137,10 @@ static void reset_all(void) {
   g_game_enters = g_game_leaves = g_game_updates = 0;
   g_game_renders = g_game_inputs = 0;
   g_box_activated = 0xFF;
+  g_battle_entry = 0xFF;
+  g_battle_won = 0xFF;
+  g_battle_reports = 0;
+  g_hold_fps = 0;
   memset(&g_cfg, 0, sizeof g_cfg);
   dialog_reset();
   dialog_bind_commit(nullptr);
@@ -182,7 +198,7 @@ TEST(every_row_is_the_screen_its_position_claims) {
     boot_render, load_save_render, home_render, menu_render, care_render,
     play_render, ui_game_render, box_render, status_a_render, status_b_render,
     soon_network, link_render, creator_render, settings_render, time_render,
-    soon_generic, soon_generic, soon_encounter, soon_capture, soon_battle,
+    soon_generic, soon_generic, soon_encounter, soon_capture, battle_render,
     soon_trade, soon_breed, evo_render, soon_item_reward, err_render,
     soon_sleep, diag_render
   };
@@ -269,6 +285,28 @@ TEST(autoreturn_follows_sticky) {
                                  kName[i], (int)sticky, (int)timed);
     CHECK(sticky != timed);
   }
+}
+
+// P4-C4. SF_STICKY on the BATTLE row is not a preference: leaving the screen
+// runs its ONE report path, so invariant 3 firing twenty seconds into a fight
+// would not merely move the player - it would end the battle and report it.
+// The flag itself is asserted in tests/test_screens.cpp; this is the
+// consequence, over the real table and the real machine.
+TEST(a_battle_is_never_timed_out_from_under_the_player) {
+  reset_all();
+  sm_push(SCR_BATTLE);
+  CHECK(sm_current() == SCR_BATTLE);
+  host_advance_ms(UI_AUTORETURN_MS * 4u);
+  CHECK(!sm_service(host_ms()));
+  CHECK(sm_current() == SCR_BATTLE);
+  CHECK_EQ(g_battle_reports, 0);        // nothing left the screen, so nothing reported
+
+  // And leaving it deliberately DOES report, exactly once - which is what makes
+  // the check above a statement about the auto-return and not about a hook that
+  // never fires.
+  sm_back();
+  CHECK(sm_current() != SCR_BATTLE);
+  CHECK_EQ(g_battle_reports, 1);
 }
 
 TEST(autoreturn_waits_and_blocks) {

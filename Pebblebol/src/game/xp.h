@@ -47,7 +47,7 @@ enum XpSource : uint8_t {
   XP_SRC_CARE = 0,      // a care action landed              (metered, hourly)
   XP_SRC_MINIGAME,      // a minigame finished               (metered, hourly)
   XP_SRC_CARRY,         // time carried awake                (metered, daily)
-  XP_SRC_BATTLE,        // P4-C4 win                         (metered, reserved)
+  XP_SRC_BATTLE,        // a practice-battle win             (metered, hourly)
   XP_SRC_CAPTURE,       // P5 capture                        (unmetered)
   XP_SRC_ITEM,          // P6 XP candy                       (unmetered)
   XP_SRC_COUNT
