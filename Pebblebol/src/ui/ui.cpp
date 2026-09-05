@@ -63,6 +63,7 @@
 #include "screen_diag.h"
 #include "screen_evolution.h"
 #include "screen_network.h"  // network_screen_busy(): the power ladder's `held` input
+#include "screen_link.h"     // link_screen_busy() and the P7-C3 session seams
 #include "../networking/net.h"
 #include "../networking/webui.h"      // web_pin() only - no network header comes with it
 #include "../dev/godmode.h"    // GodEvt, god_active/handle/draw/entry_progress/marker
@@ -1428,7 +1429,13 @@ void ui_note_power_dim(bool on) {
   bright_service();
 }
 
-bool ui_radio_job_busy(void) { return network_screen_busy(); }
+// BOTH radio screens since P7-C2. A single-screen answer here would have been
+// a gate that stopped biting the moment a second screen took the radio, which
+// is the shape of defect this project keeps finding: the NETWORK screen's scan
+// and the LINK screen's discovery job and session both hold it.
+bool ui_radio_job_busy(void) {
+  return network_screen_busy() || link_screen_busy();
+}
 
 // Defined with the rest of the seams in section 20; ui_begin() binds it.
 static const PebbleView* ui_fill_view(void);
@@ -1838,7 +1845,17 @@ void ui_battle_result(uint8_t entry, uint8_t won) {
   // A diagnostic pays nothing. Entering god mode already sets
   // genome.god_tainted for ever, and a test entry that also handed out XP would
   // be a cheat wearing a developer tool's clothes.
-  if (entry != BT_ENTRY_PRACTICE) return;
+  //
+  // A LINKED WIN PAYS THE SAME AS A PRACTICE ONE, THROUGH THE SAME METER
+  // (P7-C3). It is deliberately not worth more: XP_CAP_BATTLE is two wins an
+  // hour for the device, and a source that a second device can supply on demand
+  // is the last one that should have its own larger bucket. What makes the
+  // linked win honest is not the amount, it is WHERE `won` came from -
+  // ui/screen_battle.cpp's won_now() reads ui_link_battle_status(), which is
+  // true only where networking/session.h's session_rewards_authorised() is, so
+  // a desync or a lost link arrives here as won == 0 and falls out on the line
+  // below with no Box written and no ledger touched.
+  if (entry != BT_ENTRY_PRACTICE && entry != BT_ENTRY_LINK) return;
   if (!won) return;
   // METERED LIKE EVERY OTHER SOURCE, and P4-C4 had to SIZE that meter to be able
   // to say so: game/xp.cpp carried XP_SRC_BATTLE as {0, 0} - "reserved but not
@@ -1859,6 +1876,36 @@ void ui_battle_result(uint8_t entry, uint8_t won) {
 //  THE EXPLORATION SEAMS (P5-C3/C4). See ui.h.
 // -----------------------------------------------------------------------------
 const WifiScanDriver& ui_scan_driver(void) { return net_scan_driver(); }
+
+// -----------------------------------------------------------------------------
+//  THE PEER LINK'S SEAMS (P7-C2/C3). See ui.h.
+//
+//  networking/net.cpp is the ONE radio owner on the far side of every one of
+//  them, exactly as it is for the scan. ui/screen_link.cpp is pure and reaches
+//  none of this itself.
+// -----------------------------------------------------------------------------
+const LinkRadioDriver& ui_link_driver(void)   { return net_link_driver(); }
+const Transport&       ui_link_transport(void){ return net_link_transport(); }
+bool     ui_link_bind(uint8_t slot)           { return net_link_bind(slot); }
+void     ui_link_unbind(void)                 { net_link_unbind(); }
+// RNG_MISC is core/rng.h's "tokens, nonces, PINs, canaries" stream - the same
+// one the creator PIN, the device id, the RTC nonce and the flash canary are
+// drawn from - and a session nonce is exactly that kind of value. A pure screen
+// may not reach a named global stream, which is the whole reason this line is
+// here and not in ui/screen_link.cpp.
+uint32_t ui_link_nonce(void)                  { return rng_u32(RNG_MISC); }
+
+uint8_t  ui_link_battle_status(void)          { return link_battle_status(); }
+uint8_t  ui_link_battle_side(void)            { return link_battle_side(); }
+void     ui_link_battle_pump(uint32_t now_ms) { link_battle_pump(now_ms); }
+bool     ui_link_battle_wants_action(void)    { return link_battle_wants_action(); }
+void     ui_link_battle_submit(uint8_t kind, uint8_t index) {
+  link_battle_submit(kind, index);
+}
+uint32_t ui_link_battle_move_ms_left(uint32_t now_ms) {
+  return link_battle_move_ms_left(now_ms);
+}
+void     ui_link_battle_done(void)            { link_battle_done(); }
 
 void ui_explore_clock(uint32_t* now_epoch, uint32_t* now_ms, uint8_t* cal)
 {

@@ -95,10 +95,16 @@ const ScreenDef SCREENS[SCR_COUNT] = {
   // route off this screen that leaves Wi-Fi up (spec sections 40 and 47).
   { network_enter, network_update, network_render, network_input, network_leave,
     0, SF_OWNS_BACK },                                            // SCR_NETWORK
-  // LINK is a placeholder with a screen of its own (P2-C11c). The BLE peer
-  // browser that used to live here owned RADIO_BLE on entry; nothing does now.
-  { nop_enter, nop_update, link_render, link_input, nop_leave, 0, 0 },
-                                                                  // SCR_LINK
+  // LINK (P7-C2). No longer a placeholder: it owns the discovery job, the
+  // consent and the Session. SF_OWNS_BACK for the NETWORK screen's reason and
+  // then some - B means CANCEL THE LINK here, and a link holds the radio, so
+  // turning B into a plain BACK would leave the screen and the radio behind it.
+  // Its leave hook cancels anyway, so there is no route off this screen that
+  // leaves the radio up (spec sections 40 and 47) - the one exception being the
+  // push to SCR_BATTLE, which ui/screen_link.h explains and which
+  // ui/screen_battle.cpp's own leave hook closes.
+  { link_enter, link_update, link_render, link_input, link_leave, 0,
+    SF_OWNS_BACK },                                               // SCR_LINK
   // CREATOR: its enter/leave hooks are the radio - request on the way in,
   // release on the way out, which is the whole "radio OFF by default" policy
   // for the Wi-Fi station (plan section 2 row G4).

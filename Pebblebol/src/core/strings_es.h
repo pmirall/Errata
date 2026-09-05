@@ -212,7 +212,6 @@ enum StrId : uint16_t {
   STR_SO_SEARCHING,
   STR_SO_NOBODY,
   STR_SO_CAP,
-  STR_SO_LINK_SOON,
 
   // --- 26. web / QR ------------------------------- <= 25 chars @ 5x8 --------
   STR_WEB_TITLE,
@@ -431,15 +430,14 @@ enum StrId : uint16_t {
   //          bus, so nobody will ever read these: they are written for the
   //          retry that succeeds, when the screen comes back and the device
   //          has to explain what it has been blinking about.
-  // --- 33j. the Phase 2 placeholders (P2-C11c). CREATOR and LINK exist as
-  //          screens now - CREATOR already owns the radio and prints the PIN -
-  //          but what they are FOR arrives in Phases 8 and 7. The screen says
-  //          so instead of pretending.
+  // --- 33j. the Phase 2 placeholders (P2-C11c). CREATOR still is one: it owns
+  //          the radio and prints the PIN, and what it is FOR arrives in
+  //          Phase 8, so its screen says so instead of pretending. LINK IS NOT
+  //          ONE ANY MORE (P7-C2) - STR_LINK_PHASE and STR_LINK_BODY are gone
+  //          with the frame that drew them, and only the title is left.
   STR_CREATOR_TITLE,
   STR_CREATOR_PHASE,
   STR_LINK_TITLE,
-  STR_LINK_PHASE,
-  STR_LINK_BODY,
   STR_DIAG_TITLE,
   STR_DIAG_OFF,
 
@@ -707,6 +705,43 @@ enum StrId : uint16_t {
   STR_ITEM_NO_PET,
   STR_HLP_BAG,
 
+  // --- 33n. P7-C2/C3. THE PEER LINK (spec sections 42, 47).
+  //          Two things went from this table rather than into it:
+  //          STR_SO_LINK_SOON ("LINK - Fase 7") and STR_LINK_PHASE
+  //          ("Enlace - Fase 7"). Both printed an INTERNAL PLAN PHASE NUMBER on
+  //          a player's screen, which is a sentence about this repository and
+  //          not about the game. The rest of section 33j's placeholders keep
+  //          theirs because the screens they belong to really are placeholders;
+  //          LINK is not one any more.
+  //          Width: the card and the list are GF_BODY (25 chars), the two
+  //          headers are GF_HEAD (21).
+  STR_LK_SEARCH,
+  STR_LK_NOBODY,
+  STR_LK_FOUND,
+  STR_LK_OP_BATTLE,
+  STR_LK_OP_TRADE,
+  STR_LK_OP_BREED,
+  STR_LK_OP_CANCEL,
+  STR_LK_WAIT,
+  STR_LK_BOTH_A,
+  STR_LK_LOST,
+  STR_LK_RETRY,
+  STR_LK_EXIT,
+  STR_LK_ST_HELLO,
+  STR_LK_ST_CAPS,
+  STR_LK_ST_AGREE,
+  STR_LK_ST_TEAM,
+  STR_LK_ST_READY,
+  STR_LK_BROKEN,
+  STR_LK_ENDED,
+  STR_LK_CANCELLED,
+  STR_LK_NO_TEAM,
+  STR_LK_TEAM_BAD,
+  STR_LK_NO_CAP,
+  STR_LK_RADIO_ERR,
+  STR_LK_HELP,
+  STR_BT_WAIT_PEER,
+
   STR_COUNT
 };
 
@@ -895,7 +930,6 @@ inline constexpr const char* const ES[] = {
   /* STR_SO_SEARCHING */          "Buscando...",
   /* STR_SO_NOBODY */             "Nadie cerca. Como siempre.",
   /* STR_SO_CAP */                "Reinicia para seguir buscando.",
-  /* STR_SO_LINK_SOON */          "LINK - Fase 7",
 
   /* --- 26. web / QR --- */
   /* STR_WEB_TITLE */             "MÓVIL",
@@ -1073,8 +1107,6 @@ inline constexpr const char* const ES[] = {
   /* STR_CREATOR_TITLE */         "CREADOR",
   /* STR_CREATOR_PHASE */         "Creador - Fase 8",
   /* STR_LINK_TITLE */            "ENLACE",
-  /* STR_LINK_PHASE */            "Enlace - Fase 7",
-  /* STR_LINK_BODY */             "Intercambio, combate y cría entre Pebbles.",
 
   /* STR_DIAG_TITLE */            "DIAG",
   /* STR_DIAG_OFF */              "Consola apagada.",
@@ -1310,6 +1342,34 @@ inline constexpr const char* const ES[] = {
   , /* STR_ITEM_NOT_HERE */       "Esto se usa al capturar"
   , /* STR_ITEM_NO_PET */         "No hay Pebble activo"
   , /* STR_HLP_BAG */             "Lo que has encontrado explorando."
+
+  /* --- 33n. the peer link (P7-C2/C3) --- */
+  , /* STR_LK_SEARCH */            "Buscando Pebbles..."
+  , /* STR_LK_NOBODY */            "Nadie cerca todavía"
+  , /* STR_LK_FOUND */             "¡PEBBLEBOL ENCONTRADO!"
+  , /* STR_LK_OP_BATTLE */         "COMBATE"
+  , /* STR_LK_OP_TRADE */          "INTERCAMBIO"
+  , /* STR_LK_OP_BREED */          "CRIAR"
+  , /* STR_LK_OP_CANCEL */         "CANCELAR"
+  , /* STR_LK_WAIT */              "Esperando al otro"
+  , /* STR_LK_BOTH_A */            "Pulsad A los dos"
+  , /* STR_LK_LOST */              "CONEXIÓN PERDIDA"
+  , /* STR_LK_RETRY */             "A: Reintentar"
+  , /* STR_LK_EXIT */              "B: Salir"
+  , /* STR_LK_ST_HELLO */          "Saludo"
+  , /* STR_LK_ST_CAPS */           "Versiones"
+  , /* STR_LK_ST_AGREE */          "Acordando"
+  , /* STR_LK_ST_TEAM */           "Equipos"
+  , /* STR_LK_ST_READY */          "Listo"
+  , /* STR_LK_BROKEN */            "Enlace interrumpido"
+  , /* STR_LK_ENDED */             "Enlace terminado"
+  , /* STR_LK_CANCELLED */         "Enlace cancelado"
+  , /* STR_LK_NO_TEAM */           "No tienes ningún Pebble"
+  , /* STR_LK_TEAM_BAD */          "Tu equipo no es válido"
+  , /* STR_LK_NO_CAP */            "El otro no puede eso"
+  , /* STR_LK_RADIO_ERR */         "Radio no disponible"
+  , /* STR_LK_HELP */              "Acerca otro Pebblebol y pulsad A en los dos."
+  , /* STR_BT_WAIT_PEER */         "Esperando al rival"
 };
 
 // -----------------------------------------------------------------------------

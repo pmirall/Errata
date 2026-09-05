@@ -43,6 +43,8 @@
 #include "ui/screen_home.h"
 #include "ui/screen_encounter.h"
 #include "ui/screen_link.h"
+#include "networking/discovery.h"
+#include "fakes/link_fake.h"
 #include "ui/screen_menu.h"
 #include "ui/screen_network.h"
 #include "networking/wifi_scanner.h"
@@ -495,9 +497,12 @@ TEST(table_rows_are_consistent) {
   // scan holds the radio, so the row owns B (asserted by name in
   // b_cancels_the_scan_releases_the_radio_and_goes_back). SCR_ENCOUNTER joins
   // it as an ordinary row and SCR_CAPTURE owns B for the BOX screen's reason.
+  // SCR_LINK LEFT THIS LIST AT P7-C2 for the reason SCR_NETWORK left it at
+  // P5-C3 and then some: B means CANCEL THE LINK there, and a link holds the
+  // radio AND a session.
   static const uint8_t kOrdinary[] = {
     SCR_MENU, SCR_PLAY, SCR_STATUS, SCR_STATUS_B,
-    SCR_LINK, SCR_CREATOR, SCR_ENCOUNTER, SCR_SLEEP
+    SCR_CREATOR, SCR_ENCOUNTER, SCR_SLEEP
   };
   for (size_t i = 0; i < sizeof kOrdinary / sizeof kOrdinary[0]; i++)
     CHECK(SCREENS[kOrdinary[i]].flags == 0);
@@ -516,7 +521,7 @@ TEST(table_rows_are_consistent) {
   // SETTINGS, BOX, EVOLUTION and GAME answer B themselves; nothing that has
   // SF_LOCK_INPUT needs to say so twice.
   static const uint8_t kOwnsBack[] = { SCR_SETTINGS, SCR_BOX, SCR_EVOLUTION, SCR_GAME,
-                                      SCR_BATTLE };
+                                      SCR_BATTLE, SCR_LINK };
   for (size_t i = 0; i < sizeof kOwnsBack / sizeof kOwnsBack[0]; i++)
     CHECK((SCREENS[kOwnsBack[i]].flags & SF_OWNS_BACK) != 0);
 
@@ -1200,9 +1205,64 @@ TEST(the_countdown_bar_drains) {
 // =============================================================================
 //  P2-C11c: LINK, EVOLUTION, DIAG, CREATOR and the overlays
 // =============================================================================
-TEST(snapshot_link) {
+// =============================================================================
+//  P7-C2: THE LINK SCREEN'S FOUR FRAMES
+//
+//  All four are the REAL screen over the REAL discovery job and the REAL codec,
+//  with only the radio faked (tests/fakes/link_fake.h). link_phase7.pbm is gone
+//  with the placeholder that drew it - it printed "Enlace - Fase 7", an
+//  internal plan phase number, at a player.
+// =============================================================================
+static void link_reset_screen(void) {
   seams2_reset();
-  snapshot(SCR_LINK, "link_phase7");
+  lf_reset();
+  lf_set_pet_name("BOLOTA");
+  g_now = 1000;
+  link_enter();
+}
+
+// Three beacons at LINK_BEACON_MS apart is what crosses LINK_PEER_HITS_MIN, so
+// this is the shortest honest way to make a peer real (networking/discovery.h).
+static void link_make_peer(uint32_t id, const char* name, uint16_t caps,
+                           int8_t rssi, uint8_t slot) {
+  for (uint8_t i = 0; i < (uint8_t)LINK_PEER_HITS_MIN; ++i) {
+    lf_push_beacon(id, name, caps, rssi, slot);
+    g_now += 600;
+    link_update(g_now);
+  }
+}
+
+TEST(snapshot_link_searching) {
+  link_reset_screen();
+  link_update(g_now);
+  CHECK_EQ(link_screen_peers(), (uint8_t)0);
+  snapshot(SCR_LINK, "link_searching");
+}
+
+TEST(snapshot_link_peers) {
+  link_reset_screen();
+  link_make_peer(0x2001u, "PIEDRIN", (uint16_t)DISC_CAP_BATTLE, -42, 0);
+  link_make_peer(0x2002u, "CANTO", (uint16_t)DISC_CAP_BATTLE, -66, 1);
+  CHECK_EQ(link_screen_peers(), (uint8_t)2);
+  snapshot(SCR_LINK, "link_peers");
+}
+
+TEST(snapshot_link_card) {
+  link_reset_screen();
+  link_make_peer(0x2001u, "PIEDRIN", (uint16_t)DISC_CAP_BATTLE, -42, 0);
+  link_input(GST_HOLD_R);                 // open the card on the first peer
+  CHECK_EQ(link_screen_mode(), (uint8_t)LKM_CARD);
+  snapshot(SCR_LINK, "link_card");
+}
+
+TEST(snapshot_link_lost) {
+  link_reset_screen();
+  // The browse's own section 47 ceiling, which is the failure a player can
+  // reach without a second device in the room at all.
+  g_now += (uint32_t)LINK_JOB_TIMEOUT_MS + 1u;
+  link_update(g_now);
+  CHECK_EQ(link_screen_mode(), (uint8_t)LKM_LOST);
+  snapshot(SCR_LINK, "link_lost");
 }
 
 TEST(snapshot_evolution_incubator) {
@@ -1519,16 +1579,31 @@ TEST(box_does_what_section_9_says) {
   box_input(GST_HOLD_R);
   CHECK_EQ(g_box_released, (uint8_t)1);
 
-  // TRADE and BREED exist, are reachable, and say which phase brings them.
+  // TRADE AND BREED ARE ENTRY POINTS NOW (P7-C2), not a toast. Each one
+  // PRE-SELECTS this slot, arms the LINK screen with the operation and pushes
+  // it - and consents to nothing on the way: the radio is untouched and the
+  // session still needs A on the card and A on the other device.
   box_enter();
   box_input(GST_TAP_L);
   box_input(GST_HOLD_R);
   for (uint8_t i = 0; i < BOXA_TRADE; ++i) box_input(GST_TAP_L);
+  g_push = 0xFF;
   box_input(GST_HOLD_R);
-  CHECK_EQ(g_toast, STR_UI_SOON);
-  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
+  CHECK_EQ(g_push, (uint8_t)SCR_LINK);
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);   // still here underneath
+
+  box_enter();
+  box_input(GST_TAP_L);
+  box_input(GST_HOLD_R);
+  for (uint8_t i = 0; i < BOXA_BREED; ++i) box_input(GST_TAP_L);
+  g_push = 0xFF;
+  box_input(GST_HOLD_R);
+  CHECK_EQ(g_push, (uint8_t)SCR_LINK);
 
   // B walks back through the modes and only then leaves the screen.
+  box_enter();
+  box_input(GST_TAP_L);
+  box_input(GST_HOLD_R);
   g_backs = 0;
   box_input(GST_TAP_R);
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_LIST);

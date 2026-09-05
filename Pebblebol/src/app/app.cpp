@@ -1000,9 +1000,11 @@ void app_loop(void)
   // --- 6. radio ------------------------------------------------------------
   // NO POLICY HERE. The radio is OFF at boot and stays off:
   // the screen that needs it asks for it and releases it on the way out -
-  // QR owns RADIO_WIFI, SOCIAL owns RADIO_BLE. net_service() only pumps
-  // the state machine the screen put it in, including the settle timer that
-  // replaced the blocking delay between the two stacks.
+  // CREATOR owns the access point, NETWORK owns the scan and LINK owns the
+  // peer link (P7-C2), and each one releases through its own leave() hook.
+  // net_service() only pumps the state machine the screen put it in, including
+  // the settle timer that replaced the blocking delay between the two stacks
+  // and the NPH_LINK backstop that catches a link job nobody is servicing.
   net_service();
   web_service();
   ble_scan_service();

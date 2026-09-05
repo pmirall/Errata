@@ -79,6 +79,19 @@ void ui_battle_result(uint8_t entry, uint8_t won) {
   ++g_results; g_res_entry = entry; g_res_won = won;
 }
 void ui_hold_fps(uint8_t f, uint16_t) { g_hold_fps = f; ++g_holds; }
+
+// P7-C3's six. THIS BINARY LINKS NO SESSION AND NO LINK SCREEN, deliberately -
+// its whole argument is that it links what the battle screen drives and nothing
+// else - so the linked entry is refused here by UI_LKB_NONE and every case
+// below is a single-device battle. tests/test_link_screen.cpp is where the
+// linked half lives, with the REAL session on the other end of a loopback.
+uint8_t  ui_link_battle_status(void)       { return (uint8_t)UI_LKB_NONE; }
+uint8_t  ui_link_battle_side(void)         { return 0u; }
+void     ui_link_battle_pump(uint32_t)     { }
+bool     ui_link_battle_wants_action(void) { return false; }
+void     ui_link_battle_submit(uint8_t, uint8_t) { }
+uint32_t ui_link_battle_move_ms_left(uint32_t)   { return 0u; }
+void     ui_link_battle_done(void)         { }
 void ui_flash(uint16_t)               { ++g_flashes; }
 void ui_shake(uint8_t, uint16_t)      { ++g_shakes; }
 
@@ -1103,7 +1116,19 @@ TEST(no_frame_of_a_battle_allocates) {
 
   // Every mode was actually drawn, or "no frame allocates" is a statement about
   // frames that were never rendered.
-  for (uint8_t m = 0; m < (uint8_t)BTM_MODE_COUNT; ++m) CHECK(modes_seen[m] > 0);
+  //
+  // BTM_WAIT IS THE ONE EXCEPTION AND IT IS ASSERTED RATHER THAN SKIPPED. It is
+  // the linked battle's "the peer is choosing" mode, and this binary links no
+  // session at all (ui_link_battle_status() answers UI_LKB_NONE above), so a
+  // single-device battle must NEVER enter it - which is a property worth
+  // holding in its own right, and is the honest half of the sweep. The frames
+  // and the allocation count for that mode live in
+  // tests/test_link_screen.cpp's own allocation case, where a real linked
+  // battle can reach it.
+  for (uint8_t m = 0; m < (uint8_t)BTM_MODE_COUNT; ++m) {
+    if (m == (uint8_t)BTM_WAIT) { CHECK_EQ(modes_seen[m], 0); continue; }
+    CHECK(modes_seen[m] > 0);
+  }
   CHECK(frames > 1000);
   CHECK_EQ(g_allocs, 0L);
   printf("  %d real update+render frames across all six modes, %ld allocations\n",

@@ -260,6 +260,14 @@ void link_reset(LinkJob& j)
 
 bool link_is_busy(const LinkJob& j) { return j.state == (uint8_t)LS_RUNNING; }
 
+void link_hold(LinkJob& j)
+{
+  if (j.state != (uint8_t)LS_RUNNING) return;
+  j.held = 1u;
+}
+
+bool link_is_held(const LinkJob& j) { return j.held != 0u; }
+
 uint32_t link_elapsed_ms(const LinkJob& j, uint32_t now_ms)
 {
   if (j.state == (uint8_t)LS_IDLE && j.started_ms == 0u) return 0u;
@@ -308,6 +316,11 @@ void link_service(LinkJob& j, const LinkRadioDriver& d, const DiscBeacon& self,
                   uint32_t now_ms, CooldownTable& cds, const ActClock& aclk)
 {
   if (j.state != (uint8_t)LS_RUNNING) return;
+  // HELD: the radio is still ours and the browse is not. Every line below is a
+  // browse - a beacon, a drain, a TTL sweep, the section 47 ceiling - and a
+  // session that has just been agreed over this same stack owns all four of
+  // those decisions now (see link_hold()).
+  if (j.held != 0u) return;
 
   // --- our own beacon ------------------------------------------------------
   if ((uint32_t)(now_ms - j.beacon_ms) >= (uint32_t)LINK_BEACON_MS) {

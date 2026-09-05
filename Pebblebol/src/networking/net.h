@@ -206,6 +206,25 @@ void        net_scan_salt_set(uint32_t device_id);
 struct LinkRadioDriver;
 const LinkRadioDriver &net_link_driver(void);
 
+// -----------------------------------------------------------------------------
+// THE SESSION'S SIDE OF THE SAME LINK (P7-C2/C3).
+//
+// net_link_transport() is the networking/transport.h seam the section 15
+// session runs over, unicast to whichever peer net_link_bind() opened. A
+// REFERENCE and not a value because a device has one radio; the port object
+// behind it is this module's, exactly as the scan driver's state is.
+//
+// THE SLOT IS AN OPAQUE INDEX AND NOT AN ADDRESS. It is a DiscPeer::slot handed
+// out by the discovery job, and the six bytes it stands for never leave
+// networking/transport_espnow.cpp (spec sections 43/44). A caller that has not
+// bound gets a transport that refuses to send and never receives, which is
+// exactly what "consent is not implied by proximity" needs from the radio.
+// -----------------------------------------------------------------------------
+struct Transport;
+const Transport &net_link_transport(void);
+bool        net_link_bind(uint8_t slot);
+void        net_link_unbind(void);
+
 // Compile-time sanity on the constants this module contracts against.
 static_assert(RADIO_COUNT == 3, "RadioMode must stay OFF/WIFI/BLE");
 // Was 7. Three of them - the two station phases and the retry backoff - are

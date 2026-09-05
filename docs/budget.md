@@ -285,3 +285,69 @@ clean battle and sixteen would still have overflowed). If phase 8's creator serv
 globals back, that buffer is where they are — and the price of taking them is a link that is
 quietly slower with no error anywhere, which is why the number is in
 `tests/test_link_transport.cpp` as an assertion and not only in a comment.
+
+## 5. Phase 7, chunks 2 and 3 — the LINK screen and the battle over the link (measured 2026-09-05)
+
+All seven matrix variants, P7-C1 -> P7-C3:
+
+| Variant | flash before | flash after | Δ flash | globals before | globals after | Δ globals |
+|---|---|---|---|---|---|---|
+| baseline | 1,958,560 | 1,985,080 | +26,520 | 79,412 | 80,340 | +928 |
+| no-ble | 1,246,000 | 1,272,472 | +26,472 | 55,916 | 56,844 | +928 |
+| no-web | 1,900,532 | 1,927,092 | +26,560 | 77,364 | 78,292 | +928 |
+| no-god | 1,946,186 | 1,972,716 | +26,530 | 79,236 | 80,180 | +944 |
+| sh1106 | 1,958,560 | 1,985,080 | +26,520 | 79,412 | 80,340 | +928 |
+| all-off | 547,274 | 569,632 | +22,358 | 25,324 | 26,236 | +912 |
+| **release** | **1,233,762** | **1,260,236** | **+26,474** | **55,740** | **56,668** | **+928** |
+
+`all-off` moves this time and it is not a contradiction of P7-C1's zero: the LINK SCREEN is
+in the screen table, so it is linked whatever `FEATURE_ESPNOW` says, and it drags the session,
+the codec and the peer table with it. What `FEATURE_ESPNOW 0` still removes is the RADIO — the
+driver compiles to refusal stubs, `link_start()` answers false, and the screen shows "Radio no
+disponible" rather than hanging. That is the right shape: the feature switch turns the radio
+off, not the screen into a hole in the table.
+
+### Where the 928 B of globals went, symbol by symbol
+
+`riscv32-esp-elf-nm -S` over `sketch/src/ui/screen_link.cpp.o`:
+
+| symbol | bytes | what it is |
+|---|---|---|
+| `s_sess` | 340 | the caller-owned `Session` — 144 B of it is `my_rec[3][48]`, the frozen wire team |
+| `s_job` | 276 | the caller-owned `LinkJob` — **the 280 B §4 predicted, now that something declares one** |
+| `draw_browse`'s `rows` | 180 | nine 20-char list rows (`LINK_PEER_CAP` + "Volver") |
+| `draw_browse`'s `vals` | 72 | their nine right-hand signal readings |
+| `s_peer_name` | 13 | the agreed peer's name, copied out of the table so §47's retry can name it |
+| scalars | 15 | the mode, the cursor, the operation, the two arming bytes, the clock |
+| **screen_link.o** | **896** | |
+| `ui/screen_battle.cpp`'s `s_me` + padding | 32 | the local side, and link alignment |
+| **measured image delta** | **928** | |
+
+The peer's SLOT, DEVICE ID and CAPABILITY WORD are deliberately not in that
+table: they live in the `LinkJob`'s own row and in the `Session`, and a second
+copy on the screen would be a second thing to keep true. The NAME is copied
+because §47's "CONEXIÓN PERDIDA" has to be able to say who the player was
+talking to after the table that held them has been reset.
+
+**There is NO second `BattleSetup` and NO second `BattleState`,** which is the whole reason
+`networking/session.h` takes both by pointer: the linked path borrows
+`ui/screen_battle.cpp`'s 780 B setup and 212 B state, so this chunk's globals are the session's
+own bookkeeping and a peer list, and not a second copy of a battle. A `LinkLog` was
+deliberately NOT declared either — it is optional, it is 8 B per entry of transport telemetry
+no player sees, and `SessionEnd`'s 40 B record already answers "why did it end" without a
+rerun.
+
+### What it leaves
+
+`release` is **1,260,236 / 56,668** = **78.8 % of `GATE_RELEASE_FLASH_MAX`** and **87.2 % of
+`GATE_RELEASE_GLOBALS_MAX`** — **8,332 B of globals free** for P7-C4 (trade), P7-C5 (breeding)
+and phases 8-10, with `ble_social.cpp`'s 23,504 B still available to reclaim the day two boards
+have linked.
+
+**Flash moved twenty-six thousand bytes for a screen, and that is worth naming rather than
+shrugging at.** It is not the screen's drawing: it is `networking/session.cpp`,
+`battle_link.cpp`, `protocol.cpp`, `discovery.cpp` and `validate.cpp`'s wire path entering the
+IMAGE for the first time. Every one of them existed at P7-C1 and none of them was reachable
+from `setup()`, so `--gc-sections` dropped the lot; P7-C2 is the commit that gives them a
+caller. The same will NOT happen again for P7-C4 and P7-C5 — `trade_link.cpp` and
+`breed_link.cpp` add their own frames to a codec that is now already linked.

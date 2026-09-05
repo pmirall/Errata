@@ -1686,3 +1686,177 @@ stale binary, and the TTL mutation was re-planted as a TTL that never expires.
   now has a call site — `link_service()`, once per peer that crosses the hit threshold, tested
   with `activity.o` in the same binary — but nothing in the firmware drives `link_service()`
   until P7-C2's LINK screen, and §42's consent belongs there with it.
+
+---
+
+## P7-C2/C3 — the LINK screen, consent, and the battle over the link (recorded 2026-09-05)
+
+### 1. Consent is enforced twice, and only one of the two gates is host-observable
+
+Spec §42 asks that `SESSION_REQUEST` / `SESSION_ACCEPT` need A on **both** devices. That is
+not a dialog in front of an automatic handshake here; it is the only thing that starts one.
+Until the local player has opened a peer's card and pressed A:
+
+* **no `Session` exists on this device.** `session_init()` has not been called, so nothing
+  drains the transport and a peer's HELLO is not looked at. This is the half a host binary
+  can see, and `a_peer_in_the_room_does_not_start_a_session_on_its_own` is the case: the far
+  device consents, shouts HELLO for its whole nine-rung ladder, and this screen ends the run
+  still browsing with `link_screen_consents() == 0` and `lf_binds() == 0`.
+* **no unicast peer is bound.** `networking/transport_espnow.cpp`'s receive callback compares
+  every unicast frame against `s_bound_addr` and counts a mismatch as `rx_wrong_peer` before
+  anything else in the firmware sees it. **This half is a bench fact and is stated as one:**
+  the loopback the host tests run over delivers regardless of binding, so nothing here is
+  evidence about it. Bench item 2.
+
+The handshake is SYMMETRIC by construction (`session.h`: the roles come from the two device
+ids, not from who spoke first), so each device speaks when ITS player presses A, and the one
+that pressed alone reaches §47's "CONEXIÓN PERDIDA / A: Reintentar / B: Salir" —
+**measured at 9,950 ms through the real screen**, against a `PROTO_RETX_MS * PROTO_RETX_MAX`
+ladder of 9,000 ms.
+
+`tools/check.sh` now fails the build if `session_init()` or `session_start()` is called
+anywhere but `ui/screen_link.cpp`.
+
+### 2. The operation is NOT announced, and §43's field list is not widened
+
+The beacon still carries a device id, a name, a protocol version and a capability word, and
+nothing else. Two devices that pick different operations discover it in the session. The
+capability word is what the card uses to grey a row the peer cannot do — and this build
+claims `DISC_CAP_BATTLE` only, because P7-C3 ships the linked battle and P7-C4/C5 have not
+shipped trade or breeding. A peer that claims TRADE still gets the honest answer.
+
+### 3. `link_hold()` — a call that was not in the plan, and the reason it had to exist
+
+`link_cancel()` reaches `net_request(RADIO_OFF)`, which passes `wifi_down()`, which calls
+`espnow_end()`. So ending the browse the obvious way when the two players consent would have
+taken the stack down **one frame after they agreed to use it**. `link_hold()` stops the browse
+— no beacon, no drain, no TTL sweep, no §47 ceiling on the BROWSE — and leaves the job
+`LS_RUNNING`, so `link_is_busy()` and the power ladder still know the radio is out and
+`link_cancel()` is still the ONE release path and still exactly-once.
+
+**The ceiling is not lost; it changes owner.** From `link_hold()` the bound is the session's
+own ladder, which is an order of magnitude tighter than `LINK_JOB_TIMEOUT_MS`. A job HELD with
+no session behind it is the one shape that would hold the radio for ever, and the caller is
+what must not create it: the hold is called only on the success path of the function that
+opens a session.
+
+### 4. A linked round gives each player nine seconds, MEASURED, and nothing papers over it
+
+`session.h`'s rule R4 says only PROGRESS resets the ladder, and `battle_link.cpp`'s
+`on_battle_state()` counts a waiting peer's probe as STALE. So a round that neither device
+advances is closed `SE_LOST` after `PROTO_RETX_MAX * PROTO_RETX_MS` = 9,000 ms. **Measured
+through the real screen against a real peer: 9,950 ms from the round opening to the link
+dying**, with the screen's own countdown reading 8,950 ms at the start of it —
+`a_player_who_thinks_longer_than_the_ladder_loses_the_link_and_is_paid_nothing`.
+
+The clock resets on every frame that makes progress, so the FIRST mover has nine seconds from
+the round opening and the SECOND has nine from the first mover's action. Nine seconds is still
+nine seconds.
+
+**What was done and why not more.** The linked battle's header shows the clock (`RONDA 3 7s`),
+so the deadline arrives as a number rather than as a broken link. Substituting a move on a
+timeout is forbidden in principle — `battle_link.cpp` says the two engines would disagree
+about the substitute's legality — and stretching the ladder changes `session.h`'s own measured
+3×3000-vs-9×1000 tuning, which a UI chunk has no business doing on the side. **The remedy, if
+play says nine seconds is too short, is `PROTO_RETX_MAX` / `PROTO_RETX_MS`, and the cost is
+that every other wait in the protocol gets longer with it.**
+
+### 5. The reward gate is one expression, in one place, with one reader
+
+`ui/screen_link.cpp`'s `link_battle_status()` answers `UI_LKB_WON` only where
+`session_rewards_authorised()` is true — which `battle_link.cpp`'s `compare_end()` sets only
+when the peer's `BATTLE_END` carried the same outcome AND the same final hash as ours. Every
+other consumer asks that function; `tools/check.sh` fails the build if the flag is read
+anywhere else.
+
+`UI_LKB_BROKEN` is deliberately a FOURTH answer rather than `UI_LKB_LOST`. A desync is not a
+defeat, and printing one as the other is the same class of mistake as `BO_ABORT` printing as
+"Empate", which `game/battle.h` already records.
+
+**The sharpest case is `a_win_the_peer_never_confirmed_pays_nothing`:** the local team is built
+twenty levels stronger so the engine really does win, the peer's `BATTLE_END` is killed by
+name on the loopback, and the ladder gives up nine seconds later. The engine holds a win, the
+session authorised nothing, and the screen reports `won == 0` with the Box byte-identical.
+
+### 6. `sm_home()` leaves a pushed screen unasked — found here, and closed here
+
+`app/state_machine.cpp`'s `sm_home()` (LONG_BOTH) discards the whole back stack and runs ONLY
+the current screen's `leave()` hook. A linked battle is `SCR_BATTLE` pushed on top of
+`SCR_LINK`, and `ui/screen_link.cpp` deliberately does not release when it is pushed aside —
+so LONG_BOTH out of a linked battle would have left the radio up, the session unpumped and the
+power ladder clamped at DIM **for ever**, with nothing to end it: `session_poll()` is what runs
+the ladder, and nothing was pumping.
+
+`battle_leave()` runs on every route off `SCR_BATTLE` — the same property its one-report path
+already depends on — so that is the hook that closes the session and gives the radio back.
+`going_home_from_a_linked_battle_pays_nothing_and_gives_the_radio_back` is the case; deleting
+the one line fails it.
+
+### 7. Thirty-three hard-coded sides in the battle screen
+
+`session.cpp` fixes the two sides from the two device ids, so on one board of every pair the
+player is side 1. Every `0u` that meant "us" and every `1u` that meant "the foe" in
+`ui/screen_battle.cpp` is now `s_me` / `s_foe()` - thirty-three lines: the legality
+predicates, the submit, both `fill_art()` calls, the chrome's HP pair, the switch list, the
+outcome word, the armed battle modifier and the four test queries. Left as literals they would have drawn the PEER's team as the player's on one of the
+two devices and paid the wrong half of the fight.
+
+### What P7-C2/C3 did NOT measure, stated as unmeasured
+
+- **No radio ran, again.** Nothing here is evidence about ESP-NOW, the Wi-Fi task, a real
+  channel, a real duplicate or callback threading. §67's "Local multiplayer works" is
+  **UNTICKED**, and so is P7-C1's "two boards see each other's beacon in LINK".
+- **The radio half of the consent gate is unobserved.** The loopback delivers regardless of
+  binding; that an un-bound device's callback really drops the initiator's unicast is bench
+  item 2 and nothing else.
+- **One screen, one process.** A screen is a file-scope singleton, so
+  `tests/test_link_screen.cpp` drives ONE LINK screen against a real caller-owned `Session` on
+  the other end of a loopback. Both devices being real screens is a bench fact.
+- **BLE is still not deleted and `FEATURE_BLE` is still untouched**, for the reason P7-C1
+  gives: the deletion is gated on two boards having linked, and nothing here can link two
+  boards.
+
+### 8. Mutation testing — twenty source mutations and three gate mutations
+
+Every one was planted in the shipping tree, built, and required to make a NAMED
+test or a NAMED gate fail. A build that did not compile is reported as BUILD FAILED
+and never as a pass, and every test binary runs under a 90-second leash so a
+mutation that HANGS is a reported outcome rather than a stalled run.
+
+| # | mutation | what failed |
+|---|---|---|
+| 1 | the browse opens a session as soon as a peer qualifies | HANGS — `test_link_screen` does not finish in 90 s. Consent moved into the frame loop makes the screen re-enter the whole handshake from the browse; the leash is what turns it into a result |
+| 2 | hand off to the battle at `SS_HELLO` instead of `SS_VERIFY` | `a_session_that_was_never_accepted_never_reaches_a_battle`, `the_wait_for_a_peer_ends_at_the_ladder_and_not_a_second_later`, `a_lost_connection_offers_retry_and_exit_and_both_do_what_they_say`, and four more |
+| 3 | `link_battle_status()` reports the ENGINE's outcome, not the session's | `a_win_the_peer_never_confirmed_pays_nothing` (2 checks) |
+| 4 | `won_now()` reads the local engine for a linked battle | `a_win_the_peer_never_confirmed_pays_nothing` |
+| 5 | a linked result is reported the moment the ENGINE finishes | `a_win_confirmed_a_rung_late_is_still_paid` — **and it was NOT CAUGHT until that case existed**: the session normally agrees while the transcript is still playing, so the guard is only reachable when the peer's `BATTLE_END` is delayed. Blocking exactly one of them by name is what opens the window |
+| 6 | a linked entry wipes the `BattleState` the session built | six cases, including `no_frame_of_a_linked_battle_allocates_and_the_waiting_mode_is_drawn` |
+| 7 | the local side is hard-coded to 0 again | `the_higher_device_id_plays_side_one_and_still_sees_its_own_team` — **NOT CAUGHT until `battle_screen_side()` existed.** Every other assertion in the file passed with the peer's team drawn as the player's, because the session still routed the action to the right side; the wrong half was only on the PANEL |
+| 8 | `battle_leave()` no longer hands the link back | `going_home_from_a_linked_battle_pays_nothing_and_gives_the_radio_back`, `the_radio_is_released_exactly_once_on_every_way_off_this_screen`, `two_devices_...` |
+| 9 | the linked submit also writes the engine directly | four cases: the double write is `BR_ALREADY_SUBMITTED` and the session dies |
+| 10 | the round transcript is never re-opened | `two_devices_that_both_consent_fight_one_battle_reported_exactly_once` — **NOT CAUGHT until the case watched the transcript's own ROUND LABEL.** The 48-entry ring only overflows in a long fight; the label is wrong from round 2 |
+| 11 | consenting cancels the browse instead of holding it | `consenting_stops_the_browse_and_keeps_the_radio` |
+| 12 | `link_leave()` tears the link down on the way to the battle | eight cases |
+| 13 | an operation the peer cannot do is offered anyway | `an_operation_the_peer_cannot_do_is_refused_by_name_and_opens_nothing` |
+| 14 | the peer list offers an UNQUALIFIED peer | `only_a_peer_heard_often_enough_and_loudly_enough_can_be_picked` — **NOT CAUGHT until the case consented to row 0 and asserted the BOUND SLOT.** Counting qualified peers is not the same as mapping a row to one, and the count came from a different function than the row |
+| 15 | `link_service()` ignores `link_hold()` and goes on browsing | `a_held_job_stops_browsing_and_keeps_the_radio` (4 checks) |
+| 16 | GATE: a second module opens a peer session | `GATE FAIL: a peer session is opened outside ui/screen_link.cpp (1)` |
+| 17 | GATE: the battle screen reads the reward flag itself | `GATE FAIL: session_rewards_authorised() is read outside ui/screen_link.cpp (1)` |
+| 18 | GATE: the battle screen includes the LINK screen | `GATE FAIL: ui/screen_battle.cpp includes the LINK screen or a networking header (1)` |
+
+**FOUR OF THEM WERE NOT CAUGHT ON THE FIRST RUN, and that is the useful half of
+this table.** Numbers 5, 7, 10 and 14 all passed a green suite, and each one was
+green for the same kind of reason: the assertion that would have caught it was
+about a NEIGHBOURING fact. The tests were widened - a case that delays the
+peer's confirmation, a query for the side the screen is actually drawing, a
+watch on the transcript's own round label, and an assertion on which peer a
+consent binds - and only then did the mutations fail.
+
+**AND ONE MUTATION FAILED NOTHING BECAUSE THE CODE WAS WRONG, NOT THE TEST.**
+`link_screen_busy()` read `link_is_busy(job) || (session live)`, and deleting
+the second half broke nothing - because a session only ever exists over a job
+`link_hold()` left `LS_RUNNING`, so the right-hand side could not answer true
+where the left answered false. That is a sentence wider than the tree, so the
+sentence was narrowed to `link_is_busy(s_job)` with the dependency on
+`link_hold()` written beside it, rather than the test being stretched to cover
+an unreachable branch.

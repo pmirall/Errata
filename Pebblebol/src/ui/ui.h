@@ -130,7 +130,9 @@ void     ui_note_power_dim(bool on);
 // Is a screen holding a radio job right now? The power ladder's `held` input:
 // while this is true the ladder is clamped at DIM and will not drop the radio.
 // It is a query, not a handle - the release itself is a navigation, so it runs
-// the owning screen's leave() hook and cancels through wifi_scan_cancel().
+// the owning screen's leave() hook and cancels through wifi_scan_cancel() or
+// link_cancel(). BOTH radio screens are folded in here since P7-C2: the NETWORK
+// screen's scan and the LINK screen's discovery job and session.
 bool     ui_radio_job_busy(void);
 
 // Drain one sim_take_events() bitmask into the UI: evolution freeze, hatch,
@@ -360,6 +362,86 @@ void     ui_start_battle(uint8_t entry);
 // practice win awards XP_BATTLE_WIN" does not say to whom. Per-combatant XP
 // needs a per-Pebble ledger and belongs with P4-C5's real battles.
 void     ui_battle_result(uint8_t entry, uint8_t won);
+
+// -----------------------------------------------------------------------------
+//  THE PEER LINK'S SEAMS (P7-C2/C3)
+//
+//  ui/screen_link.cpp is a PURE translation unit that owns the discovery job
+//  and the Session; what it cannot do for itself is reach the radio and draw a
+//  nonce. Four calls for the first and one for the second, and it makes no
+//  others. networking/net.cpp is the ONE radio owner on the other side of all
+//  of them, exactly as it is for ui_scan_driver().
+// -----------------------------------------------------------------------------
+struct LinkRadioDriver;
+struct Transport;
+
+// The four-function seam networking/discovery.h drives: bring the link up,
+// beacon, drain, put the radio back. A host test hands the same screen a fake.
+const LinkRadioDriver& ui_link_driver(void);
+
+// The Transport networking/session.h runs over, unicast to the peer bound
+// below. It is a REFERENCE to one object because a device has one radio; a host
+// test binds a loopback endpoint to it instead.
+const Transport& ui_link_transport(void);
+
+// Open / close the unicast peer the transport talks to. The slot is a
+// DiscPeer::slot - the transport's own opaque handle - and NOT anything that
+// identifies a piece of hardware (networking/discovery.h, spec 43/44).
+// THE BIND IS HALF OF THE CONSENT GATE: until it happens the radio delivers
+// nothing from that device to this firmware at all.
+bool ui_link_bind(uint8_t slot);
+void ui_link_unbind(void);
+
+// One draw from RNG_MISC ("tokens, nonces, PINs, canaries"), which is what
+// SessionCfg.nonce is and which a pure screen may not reach for itself.
+uint32_t ui_link_nonce(void);
+
+// -----------------------------------------------------------------------------
+//  THE LINKED BATTLE'S SEAMS (P7-C3)
+//
+//  ui/screen_battle.cpp runs the ENGINE; the SESSION that keeps two engines
+//  identical lives on ui/screen_link.cpp - the screen the two players agreed on
+//  it from, and the screen that owns the radio. The battle screen reaches it
+//  through the calls below rather than by including screen_link.h, so
+//  tests/test_battle_screen.cpp still links the battle screen and the things it
+//  drives and nothing else.
+// -----------------------------------------------------------------------------
+// What the SESSION says happened. UI_LKB_WON is answered where and only where
+// session_rewards_authorised() is true - both endpoints agreed the outcome AND
+// the final hash - so a local engine that won a fight the peer never confirmed
+// is UI_LKB_BROKEN and pays nothing. UI_LKB_BROKEN is deliberately NOT
+// UI_LKB_LOST: a desync is not a defeat, and printing one as the other is the
+// same mistake as calling BO_ABORT a draw.
+#define UI_LKB_NONE     0u
+#define UI_LKB_RUNNING  1u
+#define UI_LKB_WON      2u
+#define UI_LKB_LOST     3u
+#define UI_LKB_DRAW     4u
+#define UI_LKB_BROKEN   5u
+
+uint8_t  ui_link_battle_status(void);
+// Which side of the shared BattleSetup is ours. It is the SESSION's answer
+// (networking/session.cpp fixes it from the two device ids) and not a constant:
+// the linked battle is the first fight in this firmware the player is not
+// always side 0 of.
+uint8_t  ui_link_battle_side(void);
+void     ui_link_battle_pump(uint32_t now_ms);
+bool     ui_link_battle_wants_action(void);
+void     ui_link_battle_submit(uint8_t kind, uint8_t index);
+// Milliseconds before the session's retransmission ladder gives up on a round
+// nobody has advanced - the player's real move clock. See the note at
+// link_battle_move_ms_left() in ui/screen_link.cpp for why it is nine seconds
+// and why neither screen papers over it.
+uint32_t ui_link_battle_move_ms_left(uint32_t now_ms);
+// SCR_BATTLE IS GONE, WHEREVER IT WENT. ui/screen_battle.cpp's leave() hook is
+// the only thing that runs on EVERY route off that screen - B, the result page,
+// and LONG_BOTH, which goes straight HOME and never runs the LINK screen's own
+// leave() at all - so this is where the session is closed and the radio given
+// back. Without it a linked battle abandoned with the HOME gesture would leave
+// the radio up, the session unpumped and the power ladder clamped at DIM for
+// ever, because ui/screen_link.cpp deliberately does not release when it is
+// pushed aside. Idempotent.
+void     ui_link_battle_done(void);
 
 // -----------------------------------------------------------------------------
 //  THE EXPLORATION SEAMS (P5-C3/C4)

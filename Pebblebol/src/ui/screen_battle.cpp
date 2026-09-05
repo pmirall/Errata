@@ -82,6 +82,14 @@ static BattleLog   s_log;
 
 static uint8_t  s_mode    = BTM_PICK;
 static uint8_t  s_entry   = BT_ENTRY_PRACTICE;
+// WHICH HALF OF THE SETUP IS THE PLAYER'S. 0 for every single-device entry, and
+// the SESSION's answer for a linked one (networking/session.cpp fixes it from
+// the two device ids). Every `0u` that used to mean "us" and every `1u` that
+// used to mean "the foe" in this file is now s_me / s_foe(): a linked battle is
+// the first fight in this firmware the player is not always side 0 of, and a
+// hard-coded 0 would have shown the peer's team as the player's on one of the
+// two devices and paid the wrong side.
+static uint8_t  s_me      = 0;
 static uint32_t s_seed    = 0;
 static uint8_t  s_armed   = 0;
 static uint8_t  s_live    = 0;              // battle_init() succeeded
@@ -102,18 +110,25 @@ static uint32_t s_mode_ms = 0;
 static uint16_t s_dropped = 0;
 static char     s_msg[BT_MSG_CAP];
 
+static uint8_t s_foe(void) { return (uint8_t)(s_me ^ 1u); }
+
+// A linked battle's opposing actions come off the wire, so nothing in this file
+// may call the AI, build a foe or step a round for one.
+static bool linked(void) { return s_entry == (uint8_t)BT_ENTRY_LINK; }
+
 uint8_t  battle_screen_mode(void)    { return s_mode; }
+uint8_t  battle_screen_side(void)    { return s_me; }
 uint8_t  battle_screen_cursor(void)  { return s_cur; }
 uint8_t  battle_screen_reject(void)  { return s_reject; }
 uint8_t  battle_screen_outcome(void) { return s_st.outcome; }
 
 int8_t battle_screen_lead_stage(uint8_t stat) {
   if (!s_live || stat >= (uint8_t)BSTAT_COUNT) return 0;
-  return s_st.side[0].team[s_st.side[0].active].stage[stat];
+  return s_st.side[s_me].team[s_st.side[s_me].active].stage[stat];
 }
 uint8_t battle_screen_lead_stage_left(uint8_t stat) {
   if (!s_live || stat >= (uint8_t)BSTAT_COUNT) return 0u;
-  return s_st.side[0].team[s_st.side[0].active].stage_left[stat];
+  return s_st.side[s_me].team[s_st.side[s_me].active].stage_left[stat];
 }
 uint16_t battle_screen_round(void)   { return s_round_shown; }
 uint16_t battle_screen_dropped(void) { return s_dropped; }
@@ -210,10 +225,18 @@ static void make_member(PebbleInstance& p, uint8_t species_id, uint8_t level,
   p.hp_cur = st.hp_max;
 }
 
+// THE THREE OBJECTS THE SESSION BORROWS (P7-C3). See screen_battle.h: a
+// Session holds no BattleSetup and no BattleState of its own, so the linked
+// path uses THESE - the same 780 B setup, the same 212 B state and the same
+// 576 B transcript ring the practice path uses, and never a second copy.
+BattleSetup* battle_link_setup(void) { return &s_setup; }
+BattleState* battle_link_state(void) { return &s_st; }
+BattleLog*   battle_link_log(void)   { return &s_log; }
+
 // One of the player's Pebbles, COPIED out of the Box. Nothing here writes back,
 // which is the whole of the "an interrupted battle cannot corrupt the Box"
 // argument.
-static bool copy_from_box(PebbleInstance& out, uint8_t slot) {
+bool battle_copy_from_box(PebbleInstance& out, uint8_t slot) {
   const PebbleInstance* src = box_peek(slot);
   if (src == nullptr) return false;
   out = *src;
@@ -293,12 +316,12 @@ static void set_mode(uint8_t m) {
 // -----------------------------------------------------------------------------
 static bool attack_legal(uint8_t slot) {
   const BattleAction a = { (uint8_t)BACT_ATTACK, slot };
-  return battle_validate_action(s_st, 0u, a) == BR_OK;
+  return battle_validate_action(s_st, s_me, a) == BR_OK;
 }
 
 static bool switch_legal(uint8_t slot) {
   const BattleAction a = { (uint8_t)BACT_SWITCH, slot };
-  return battle_validate_action(s_st, 0u, a) == BR_OK;
+  return battle_validate_action(s_st, s_me, a) == BR_OK;
 }
 
 static bool any_switch_legal(void) {
@@ -317,7 +340,7 @@ static bool switch_row_legal(uint8_t r) {
   // The way out of the switch list is closed exactly while the engine says a
   // replacement is owed, so the ladder can never park the player on a screen
   // whose only legal answer is one they just declined.
-  return !battle_side_must_switch(s_st, 0u);
+  return !battle_side_must_switch(s_st, s_me);
 }
 
 static bool pick_row_legal(uint8_t r) {
@@ -377,13 +400,23 @@ static const char* stat_label(uint8_t stat) {
 // only producer of side 1's, and both validate against the same unchanged
 // state) but the whole point of naming it is that a failure should not arrive
 // wearing an ordinary result's clothes.
+//
+// AND IT IS RELATIVE TO s_me SINCE P7-C3. BO_WIN_A is "side 0 won", which is
+// the PLAYER only on a device the session made side 0; on the other device the
+// same byte means the peer won, and printing "¡GANASTE!" there would be the
+// same battle reported two different ways on two panels.
 static const char* outcome_word(uint8_t outcome) {
-  switch (outcome) {
-    case BO_WIN_A: return S(STR_BT_WIN);
-    case BO_WIN_B: return S(STR_BT_LOSE);
-    case BO_ABORT: return S(STR_BT_ABORT);
-    default:       return S(STR_BT_DRAW);
-  }
+  // A LINKED BATTLE THE SESSION DID NOT AUTHORISE IS NEITHER A WIN NOR A LOSS.
+  // A desync, a lost radio or a peer that disagreed about the final hash all
+  // leave this engine holding an outcome nobody agreed, and blaming the player
+  // for a radio is the same class of mistake as calling BO_ABORT a draw.
+  if (linked() && ui_link_battle_status() == UI_LKB_BROKEN) return S(STR_LK_BROKEN);
+  const uint8_t win_me  = (s_me == 0u) ? (uint8_t)BO_WIN_A : (uint8_t)BO_WIN_B;
+  const uint8_t win_foe = (s_me == 0u) ? (uint8_t)BO_WIN_B : (uint8_t)BO_WIN_A;
+  if (outcome == win_me)  return S(STR_BT_WIN);
+  if (outcome == win_foe) return S(STR_BT_LOSE);
+  if (outcome == (uint8_t)BO_ABORT) return S(STR_BT_ABORT);
+  return S(STR_BT_DRAW);
 }
 
 // The engine's own verdict as the byte ui_battle_result() takes. ONE
@@ -391,7 +424,16 @@ static const char* outcome_word(uint8_t outcome) {
 // BTM_RESULT and battle_leave() - disagreeing about who won is exactly the
 // defect this file's report_once() exists to make impossible.
 static uint8_t won_now(void) {
-  return (uint8_t)(s_st.outcome == (uint8_t)BO_WIN_A ? 1u : 0u);
+  // THE REWARD GATE FOR A LINKED BATTLE IS THE SESSION'S AND NOT THIS ENGINE'S.
+  // ui_link_battle_status() answers UI_LKB_WON only where
+  // session_rewards_authorised() is true - both endpoints agreed the outcome
+  // AND the final hash - so SE_DESYNC and SE_LOST pay nothing however the local
+  // engine happened to end. Reading s_st.outcome here instead would pay a win
+  // the peer never confirmed, which is exactly the hole networking/session.h's
+  // `paid` flag exists to close.
+  if (linked()) return (uint8_t)(ui_link_battle_status() == UI_LKB_WON ? 1u : 0u);
+  const uint8_t mine = (s_me == 0u) ? (uint8_t)BO_WIN_A : (uint8_t)BO_WIN_B;
+  return (uint8_t)(s_st.outcome == mine ? 1u : 0u);
 }
 
 // One line for the beat at s_ev. Built once per beat, not once per frame.
@@ -495,17 +537,23 @@ static uint16_t hp_at_beat(uint8_t side, uint8_t slot) {
 // -----------------------------------------------------------------------------
 //  THE ROUND
 // -----------------------------------------------------------------------------
-static void step_round(void) {
+// EVERYTHING A ROUND'S TRANSCRIPT NEEDS BEFORE THE ROUND RESOLVES, in one
+// place because both paths need all three and a linked round is resolved
+// somewhere this file cannot see. The HP snapshot is what hp_at_beat() replays
+// forward from; s_round_shown is the round being resolved and NOT st.round
+// afterwards (battle_s8_end_of_round() increments it, which game/battle.h warns
+// about in as many words); and the ring holds ONE round, which is why it is
+// re-opened rather than appended to.
+static void open_round_log(void) {
   for (uint8_t side = 0; side < 2u; ++side)
     for (uint8_t i = 0; i < (uint8_t)BATTLE_TEAM_MAX; ++i)
       s_hp0[side][i] = s_st.side[side].team[i].hp_cur;
-
-  // The round being resolved NOW. battle_s8_end_of_round() increments
-  // st.round, so reading it AFTER the step prints n+1 - which game/battle.h
-  // warns about in as many words.
   s_round_shown = s_st.round;
-
   battle_log_init(s_log, s_ring, (uint16_t)BT_LOG_CAP);
+}
+
+static void step_round(void) {
+  open_round_log();
   // BS_NEED_ACTIONS means the engine wrote NOTHING - game/battle.h calls the
   // state bit-identical - so there is no transcript to play and RESOLVE would
   // be a mode with an empty ring under it. Going straight back to the menu is
@@ -537,10 +585,29 @@ static void step_round(void) {
 // firing. It is kept because a refusal the player cannot feel is a refusal they
 // will press again, not because the engine needs it.
 static void submit(BattleAction act) {
-  s_reject = (uint8_t)battle_validate_action(s_st, 0u, act);
+  s_reject = (uint8_t)battle_validate_action(s_st, s_me, act);
   if (s_reject != (uint8_t)BR_OK) { ui_toast(STR_BT_ILLEGAL); ui_wiggle(); return; }
 
-  s_reject = (uint8_t)battle_submit_action(s_st, 0u, act);
+  // THE LINKED PATH SUBMITS THROUGH THE LOCKSTEP AND NEVER DIRECTLY. The engine
+  // is written by networking/battle_link.cpp's link_local_action(), which also
+  // puts the action on the wire and re-tries the resolution; calling
+  // battle_submit_action() here as well would write the pending twice and the
+  // second write is what the engine calls BR_ALREADY_SUBMITTED.
+  if (linked()) {
+    // THE LOCKSTEP DECIDES WHEN A MOVE IS WANTED, not the menu. It answers
+    // false while the agreement barrier is up and while this side already has a
+    // pending action, and a submission into either of those would be silently
+    // dropped by networking/battle_link.cpp - a button that does nothing, which
+    // is indistinguishable from a broken one.
+    if (!ui_link_battle_wants_action()) { ui_toast(STR_BT_ILLEGAL); ui_wiggle(); return; }
+    open_round_log();
+    ++s_submits;
+    ui_link_battle_submit(act.kind, act.index);
+    set_mode(BTM_WAIT);
+    return;
+  }
+
+  s_reject = (uint8_t)battle_submit_action(s_st, s_me, act);
   if (s_reject != (uint8_t)BR_OK) { ui_toast(STR_BT_ILLEGAL); return; }
   ++s_submits;
 
@@ -563,7 +630,7 @@ static void submit(BattleAction act) {
   // every case in tests/test_battle_screen.cpp already asserts is BR_OK, so an
   // AI that ever drifts away from the validator fails a NAMED test instead of
   // quietly ending battles in a word that is not true.
-  s_reject = (uint8_t)battle_submit_action(s_st, 1u, foe);
+  s_reject = (uint8_t)battle_submit_action(s_st, s_foe(), foe);
 
   step_round();
 }
@@ -572,7 +639,7 @@ static void to_menu(void) {
   // A side that owes a replacement has no legal attack at all, so the menu
   // would be a list of five things none of which can be chosen. The engine is
   // asked, not guessed at.
-  if (battle_side_must_switch(s_st, 0u)) {
+  if (battle_side_must_switch(s_st, s_me)) {
     s_cur = first_legal(BT_SWITCH_ROWS, switch_row_legal);
     set_mode(BTM_SWITCH);
     return;
@@ -584,6 +651,25 @@ static void to_menu(void) {
 static void end_playback(void) {
   s_ev_live = 0;
   s_msg[0]  = '\0';
+  if (linked()) {
+    // THE ROUND HAS BEEN SHOWN. The ring holds one round and the lockstep will
+    // not write another until we submit again, so emptying it here is what
+    // stops the next frame replaying the transcript it just finished.
+    battle_log_init(s_log, s_ring, (uint16_t)BT_LOG_CAP);
+    const uint8_t stt = ui_link_battle_status();
+    if (stt != (uint8_t)UI_LKB_RUNNING) { report_once(won_now()); set_mode(BTM_RESULT); return; }
+    // THE ENGINE MAY HAVE FINISHED BEFORE THE SESSION AGREED, and this is the
+    // half-second in which reporting would be wrong: the local outcome is
+    // settled and the BATTLE_END exchange that authorises a reward has not
+    // happened yet. So the screen lands on the result page and battle_update()
+    // reports when ui_link_battle_status() stops answering RUNNING - which it
+    // will, in one direction or the other, because the ladder ends every
+    // session.
+    if (s_st.outcome != (uint8_t)BO_UNDECIDED) { set_mode(BTM_RESULT); return; }
+    if (ui_link_battle_wants_action()) { to_menu(); return; }
+    set_mode(BTM_WAIT);
+    return;
+  }
   if (s_st.outcome != (uint8_t)BO_UNDECIDED) {
     report_once(won_now());
     set_mode(BTM_RESULT);
@@ -613,7 +699,7 @@ static uint8_t start_battle(void) {
     if (s_pick_n == 0u) return (uint8_t)BR_TEAM_SIZE;
     uint8_t n = 0;
     for (uint8_t i = 0; i < s_pick_n; ++i)
-      if (copy_from_box(s_setup.member[0][n], s_pick[i])) ++n;
+      if (battle_copy_from_box(s_setup.member[0][n], s_pick[i])) ++n;
     if (n == 0u) return (uint8_t)BR_TEAM_SIZE;
     s_setup.count[0] = n;
     lead = s_setup.member[0][0].level;
@@ -642,7 +728,7 @@ static uint8_t start_battle(void) {
   // a golden run either.
   InvBattleMod mod;
   if (s_entry == BT_ENTRY_PRACTICE && inv_mod_take(mod)) {
-    BattleCombatant& lead_c = s_st.side[0].team[s_st.side[0].active];
+    BattleCombatant& lead_c = s_st.side[s_me].team[s_st.side[s_me].active];
     if (mod.stat < (uint8_t)BSTAT_COUNT) {
       int16_t st_v = (int16_t)((int16_t)lead_c.stage[mod.stat] + (int16_t)mod.stages);
       if (st_v > (int16_t)BUFF_STAGE_MAX) st_v = (int16_t)BUFF_STAGE_MAX;
@@ -680,6 +766,18 @@ void battle_arm(uint8_t entry, uint32_t seed) {
   s_armed = 1;
 }
 
+// NO SEED, BECAUSE THERE IS NO LOCAL SEED. networking/battle_link.cpp's
+// link_begin() derived it from the session id, both nonces and both team CRCs
+// and has ALREADY run battle_init() on the state this screen lent it - so a
+// linked entry adopts a battle rather than starting one, and drawing a seed
+// here would be a number nothing reads.
+void battle_arm_link(uint8_t my_side) {
+  s_entry = (uint8_t)BT_ENTRY_LINK;
+  s_me    = (uint8_t)(my_side & 1u);
+  s_seed  = 0;
+  s_armed = 1;
+}
+
 // RE-ENTERING WITHOUT LEAVING WOULD DROP A REPORT, and the reason it cannot is
 // worth writing down rather than relying on: app/state_machine.cpp's sm_goto()
 // skips leave() when the target IS the current screen but always runs enter(),
@@ -690,6 +788,7 @@ void battle_arm(uint8_t entry, uint32_t seed) {
 // ui_start_battle) and battle_arm() always precedes it, so a second entry point
 // added later must either go through ui_start_battle() or re-open this.
 void battle_enter(void) {
+  const uint8_t was_link = (uint8_t)(s_armed && s_entry == (uint8_t)BT_ENTRY_LINK ? 1u : 0u);
   s_live     = 0;
   s_reported = 0;
   s_reports  = 0;
@@ -700,7 +799,13 @@ void battle_enter(void) {
   s_ev_live  = 0;
   s_msg[0]   = '\0';
   memset(s_pick, 0, sizeof s_pick);
-  memset(&s_st, 0, sizeof s_st);
+  // A LINKED ENTRY MAY NOT WIPE THE STATE, and this is the one line where the
+  // difference is fatal rather than cosmetic: networking/battle_link.cpp ran
+  // battle_init() on this exact object before the push, both endpoints hashed
+  // it, and zeroing it here would put this device into round 1 of a battle the
+  // peer is already holding - a desync manufactured by the screen. The log is
+  // re-opened either way: it holds one round and the first one has not run.
+  if (!was_link) memset(&s_st, 0, sizeof s_st);
   battle_log_init(s_log, s_ring, (uint16_t)BT_LOG_CAP);
   // A mode that is NOT the pick list, before either branch below decides. A
   // stale BTM_PICK left over from a previous entry would draw the Box list for
@@ -716,6 +821,17 @@ void battle_enter(void) {
     s_seed  = (uint32_t)BT_DIAG_SEED;
   }
   s_armed = 0;
+  if (!was_link) s_me = 0u;      // every single-device entry is side 0
+
+  if (was_link) {
+    // ADOPT, do not start. The battle already exists on both devices; all this
+    // screen owes it is a picture, a menu and one action per round.
+    s_live        = 1;
+    s_round_shown = s_st.round;
+    resolve_art();
+    set_mode(BTM_INTRO);
+    return;
+  }
 
   if (s_entry == BT_ENTRY_DIAG) {
     const uint8_t r = start_battle();
@@ -726,6 +842,51 @@ void battle_enter(void) {
   s_cur = first_legal(BT_PICK_ROWS, pick_row_legal);
   set_mode(BTM_PICK);
   if (box_count() == 0u) ui_toast(STR_BT_NO_TEAM);
+}
+
+// -----------------------------------------------------------------------------
+//  ONE FRAME OF A LINKED BATTLE
+//
+//  The order of the four questions below is the whole of it, and it is chosen
+//  so that nothing the player is owed is skipped by something that happened
+//  later on the wire:
+//    1. pump the session, always, in every mode - including BTM_RESULT, where
+//       the BATTLE_END exchange that authorises the reward is still running;
+//    2. show a round that has resolved, even if the session has since ended -
+//       a transcript the player paid for is not thrown away by a desync that
+//       arrived after it;
+//    3. let a playback in progress finish before anything else is decided;
+//    4. and only then report, because report_once() is one shot and won_now()
+//       is only true once the session has authorised it.
+// -----------------------------------------------------------------------------
+static void link_frame(uint32_t now_ms) {
+  ui_link_battle_pump(now_ms);
+  if (s_log.dropped > s_dropped) s_dropped = s_log.dropped;
+
+  if (s_mode == BTM_INTRO) {
+    if ((uint32_t)(now_ms - s_mode_ms) < BT_INTRO_MS) return;
+    set_mode(BTM_WAIT);
+  }
+
+  if (s_mode == BTM_WAIT && s_log.count > 0u) {
+    s_ev_live = 0;
+    set_mode(BTM_RESOLVE);
+    advance_playback();
+    return;
+  }
+
+  if (s_mode == BTM_RESOLVE) {
+    if (s_ev_live && (uint32_t)(now_ms - s_ev_ms) >= BT_EV_MS) advance_playback();
+    return;
+  }
+
+  const uint8_t stt = ui_link_battle_status();
+  if (stt != (uint8_t)UI_LKB_RUNNING) {
+    report_once(won_now());
+    if (s_mode != BTM_RESULT) set_mode(BTM_RESULT);
+    return;
+  }
+  if (s_mode == BTM_WAIT && ui_link_battle_wants_action()) to_menu();
 }
 
 void battle_update(uint32_t now_ms) {
@@ -745,6 +906,8 @@ void battle_update(uint32_t now_ms) {
   // screen no test can be written against. The fps hold stays ABOVE this line:
   // the pick list is a live screen with s_live still 0.
   if (!s_live) return;
+
+  if (linked()) { link_frame(now_ms); return; }
 
   if (s_mode == BTM_INTRO && (uint32_t)(now_ms - s_mode_ms) >= BT_INTRO_MS) {
     to_menu();
@@ -777,6 +940,15 @@ void battle_leave(void) {
   // original intent is unchanged: walking out of a fight in progress earns
   // nothing.
   report_once(won_now());
+  // AND THE LINK GOES BACK, ON EVERY ROUTE OUT OF THIS SCREEN. ui/screen_link.cpp
+  // deliberately does NOT release the radio when it is pushed aside (that push
+  // is not a departure), so this is the ONLY hook that runs on every exit -
+  // including LONG_BOTH, which goes straight HOME and never runs the LINK
+  // screen's leave() at all. Without this line a linked battle abandoned with
+  // the HOME gesture would leave the radio up, the session unpumped and the
+  // power ladder clamped at DIM for ever. It is called AFTER report_once(),
+  // because the reward gate reads the session it is about to close.
+  if (linked()) ui_link_battle_done();
   s_live  = 0;
   s_armed = 0;
 }
@@ -820,8 +992,8 @@ static uint8_t body_frame(void) {
 
 static void draw_field(bool at_beat, const char* message) {
   BattleCombatantArt foe, you;
-  fill_art(foe, 1u, at_beat);
-  fill_art(you, 0u, at_beat);
+  fill_art(foe, s_foe(), at_beat);
+  fill_art(you, s_me, at_beat);
   br_draw_field(foe, you, body_frame(), message);
 }
 
@@ -843,15 +1015,31 @@ static void draw_chrome(void) {
   char tag[10];
   const uint16_t round = (s_mode == BTM_MENU || s_mode == BTM_SWITCH)
                            ? s_st.round : s_round_shown;
-  snprintf(title, sizeof title, "%s %u", S(STR_BT_ROUND),
-           (unsigned)(round ? round : 1u));
-  const BattleCombatant* a = battle_active(s_st, 0u);
-  const BattleCombatant* b = battle_active(s_st, 1u);
+  // THE MOVE CLOCK, ON A LINKED BATTLE ONLY, AND IT IS THE SESSION'S. A round
+  // neither device advances is closed by the retransmission ladder after
+  // PROTO_RETX_MAX rungs, so the player really does have a deadline; showing it
+  // is the honest alternative to letting it arrive as a broken link. See
+  // link_battle_move_ms_left() in ui/screen_link.cpp for why neither screen
+  // papers over it.
+  const uint32_t left = (linked() && (s_mode == BTM_MENU || s_mode == BTM_SWITCH))
+                          ? ui_link_battle_move_ms_left(ui_now_ms()) : 0u;
+  // Both fields are clamped where they are FORMATTED and not where they are
+  // read: a round is a byte and the ladder is nine seconds, so neither can
+  // really reach these bounds - but a title buffer that depends on that is a
+  // buffer nobody can check by looking at this line.
+  const unsigned r_txt = (unsigned)((round ? round : 1u) % 1000u);
+  const unsigned s_txt = (unsigned)(((left + 999u) / 1000u) % 100u);
+  if (left != 0u)
+    snprintf(title, sizeof title, "%s %u %us", S(STR_BT_ROUND), r_txt, s_txt);
+  else
+    snprintf(title, sizeof title, "%s %u", S(STR_BT_ROUND), r_txt);
+  const BattleCombatant* a = battle_active(s_st, s_me);
+  const BattleCombatant* b = battle_active(s_st, s_foe());
   const bool beat = (s_mode == BTM_RESOLVE);
   snprintf(tag, sizeof tag, "%u|%u",
-           (unsigned)(a ? hp_pct(beat ? hp_at_beat(0u, s_st.side[0].active) : a->hp_cur,
+           (unsigned)(a ? hp_pct(beat ? hp_at_beat(s_me, s_st.side[s_me].active) : a->hp_cur,
                                  a->hp_max) : 0u),
-           (unsigned)(b ? hp_pct(beat ? hp_at_beat(1u, s_st.side[1].active) : b->hp_cur,
+           (unsigned)(b ? hp_pct(beat ? hp_at_beat(s_foe(), s_st.side[s_foe()].active) : b->hp_cur,
                                  b->hp_max) : 0u));
   gfx_header(title, tag);
 }
@@ -897,7 +1085,7 @@ static void draw_menu(void) {
   const char* items[BT_MENU_ROWS];
   const char* values[BT_MENU_ROWS];
 
-  const BattleCombatant* me = battle_active(s_st, 0u);
+  const BattleCombatant* me = battle_active(s_st, s_me);
   for (uint8_t i = 0; i < (uint8_t)PB_MOVE_COUNT; ++i) {
     const AttackDef* a = me ? attack_get(me->moves[i]) : nullptr;
     snprintf(rows[i], BT_ROW_CAP, "%s", a ? S(a->name_idx) : "-");
@@ -913,7 +1101,7 @@ static void draw_menu(void) {
     values[i] = vals[i];
   }
   snprintf(rows[BT_MENU_SWITCH], BT_ROW_CAP, "%s", S(STR_BT_SWITCH));
-  snprintf(vals[BT_MENU_SWITCH], BT_VAL_CAP, "%u", (unsigned)battle_alive_count(s_st, 0u));
+  snprintf(vals[BT_MENU_SWITCH], BT_VAL_CAP, "%u", (unsigned)battle_alive_count(s_st, s_me));
   items[BT_MENU_SWITCH]  = rows[BT_MENU_SWITCH];
   values[BT_MENU_SWITCH] = vals[BT_MENU_SWITCH];
 
@@ -929,14 +1117,14 @@ static void draw_switch(void) {
   const char* values[BT_SWITCH_ROWS];
 
   for (uint8_t i = 0; i < (uint8_t)BATTLE_TEAM_MAX; ++i) {
-    const BattleCombatant* c = battle_combatant(s_st, 0u, i);
+    const BattleCombatant* c = battle_combatant(s_st, s_me, i);
     if (c == nullptr || (c->flags & BCF_PRESENT) == 0u) {
       snprintf(rows[i], BT_ROW_CAP, "%s", S(STR_BOX_EMPTY));
       vals[i][0] = '\0';
     } else {
       snprintf(rows[i], BT_ROW_CAP, "%s%s",
-               (i == s_st.side[0].active) ? S(STR_BOX_ACTIVE) : "",
-               combatant_name(0u, i));
+               (i == s_st.side[s_me].active) ? S(STR_BOX_ACTIVE) : "",
+               combatant_name(s_me, i));
       snprintf(vals[i], BT_VAL_CAP, "%u%%", (unsigned)hp_pct(c->hp_cur, c->hp_max));
     }
     items[i]  = rows[i];
@@ -972,6 +1160,13 @@ void battle_render(void) {
     case BTM_INTRO:
       draw_field(false, S(STR_BT_VS));
       gfx_affordance(nullptr, S(STR_AF_OK));
+      break;
+    case BTM_WAIT:
+      // The peer is choosing. The field is drawn settled (not at a beat): there
+      // is no transcript in flight and the bars must show where the round
+      // actually stands.
+      draw_field(false, S(STR_BT_WAIT_PEER));
+      gfx_affordance(nullptr, S(STR_AF_CANCEL));
       break;
     case BTM_RESULT:
       draw_field(false, outcome_word(s_st.outcome));
@@ -1024,8 +1219,19 @@ void battle_input(Gesture g) {
 
   switch (s_mode) {
     case BTM_INTRO:
-      if (g == GST_TAP_R)      ui_back();
-      else if (g != GST_NONE)  to_menu();
+      if (g == GST_TAP_R)          ui_back();
+      else if (g == GST_NONE)      break;
+      // Skipping the stare-down on a linked battle does not open the menu: the
+      // lockstep says when a move is wanted, and until it does the honest
+      // picture is "waiting".
+      else if (linked())           set_mode(BTM_WAIT);
+      else                         to_menu();
+      break;
+
+    case BTM_WAIT:
+      // One thing to say here and it is "stop". battle_leave() reports whatever
+      // the session has authorised, which mid-battle is nothing.
+      if (g == GST_TAP_R) ui_back();
       break;
 
     case BTM_MENU:
@@ -1062,7 +1268,7 @@ void battle_input(Gesture g) {
         case GST_TAP_R:
           // One level up the ladder - unless the engine says a replacement is
           // owed, in which case there is nothing above this list to go to.
-          if (battle_side_must_switch(s_st, 0u)) ui_wiggle();
+          if (battle_side_must_switch(s_st, s_me)) ui_wiggle();
           else                                   to_menu();
           break;
         default: break;
@@ -1093,16 +1299,16 @@ uint8_t battle_screen_cursor_reject(void) {
   if (s_mode == BTM_MENU) {
     if (s_cur < (uint8_t)PB_MOVE_COUNT) {
       const BattleAction a = { (uint8_t)BACT_ATTACK, s_cur };
-      return (uint8_t)battle_validate_action(s_st, 0u, a);
+      return (uint8_t)battle_validate_action(s_st, s_me, a);
     }
     return (uint8_t)(any_switch_legal() ? BR_OK : BR_BAD_INDEX);
   }
   if (s_mode == BTM_SWITCH) {
     if (s_cur < (uint8_t)BATTLE_TEAM_MAX) {
       const BattleAction a = { (uint8_t)BACT_SWITCH, s_cur };
-      return (uint8_t)battle_validate_action(s_st, 0u, a);
+      return (uint8_t)battle_validate_action(s_st, s_me, a);
     }
-    return (uint8_t)(battle_side_must_switch(s_st, 0u) ? BR_MUST_SWITCH : BR_OK);
+    return (uint8_t)(battle_side_must_switch(s_st, s_me) ? BR_MUST_SWITCH : BR_OK);
   }
   return (uint8_t)BR_OK;
 }

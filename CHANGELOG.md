@@ -78,6 +78,80 @@ ESP-NOW is a Wi-Fi consumer that needs no web server, and `all-off` is byte-iden
 547,274 / 25,324 while having become a build that switches the peer link off rather than one
 that never had a switch.
 
+### P7-C2/C3 — the LINK screen, the consent that gates it, and the battle over the link
+
+Two Pebblebols can now fight each other, and neither can be made to by the other one.
+
+**Consent is not implied by proximity, and it is enforced twice.** The LINK screen browses,
+lists the peers it has heard three times above the signal floor, and opens §42's card —
+"¡PEBBLEBOL ENCONTRADO!" over COMBATE / INTERCAMBIO / CRIAR / CANCELAR — on the one the player
+picks. Pressing A there is the ONLY thing in the firmware that calls `session_init()`: until
+it happens this device has no session at all, drains no transport and has no unicast peer
+bound, so the far device's HELLO is neither answered nor, on real hardware, even delivered —
+the receive callback drops an unbound peer's frame as `rx_wrong_peer`. The handshake is
+symmetric by construction, so the device whose player pressed A alone climbs its own ladder
+into §47's "CONEXIÓN PERDIDA / A: Reintentar / B: Salir", **measured at 9,950 ms**. Both
+devices show the peer's name, the operation and the session's own state throughout. A new gate
+fails the build if a session is opened anywhere but that one screen.
+
+**Rewards only where both devices agreed.** `session_rewards_authorised()` — true only when
+the peer's `BATTLE_END` carried the same outcome AND the same final hash as ours — is read in
+exactly one place, and the battle screen asks that function rather than its own engine. So a
+desync, a dead link and a walk-out all report `won == 0`, write no Box and touch no ledger,
+and a divergence prints a NEUTRAL "Enlace interrumpido" rather than "has perdido", because a
+lost radio is not a defeat. The sharpest case builds the local team twenty levels stronger so
+the engine really does win, kills the peer's `BATTLE_END` by name on the link, and asserts
+that the win is worth nothing.
+
+**Every "side 0 is the player" in the battle screen became a byte.** The session fixes the two
+sides from the two device ids, so on one board of every pair the player is side 1; thirty-three
+lines — the legality predicates, the submit, both art fills, the header's HP pair, the switch
+list, the outcome word, the armed battle modifier — would otherwise have drawn the PEER's team
+as the player's and paid the wrong half of the fight.
+
+**Two holes were found rather than designed around.** `link_cancel()` reaches
+`net_request(RADIO_OFF)`, so ending the browse the obvious way when two players consent would
+have put the radio down one frame later; `link_hold()` now stops the browse and keeps the
+stack, and the §47 ceiling changes owner to the session's own ladder. And `sm_home()` discards
+the back stack and runs only the CURRENT screen's leave hook, so LONG_BOTH out of a linked
+battle would have left the radio up and the power ladder clamped for ever — `battle_leave()`,
+which runs on every route off that screen, now hands the link back.
+
+**A linked round gives each player nine seconds, measured, and the screen says so.** Only
+progress resets the retransmission ladder, so a round neither device advances is closed
+`SE_LOST` after `PROTO_RETX_MAX * PROTO_RETX_MS`. The linked battle's header carries the
+remaining seconds; substituting a move on a timeout is forbidden in principle and widening the
+ladder is a change to the session's own measured tuning, so the constraint is written into the
+plan with its one-line remedy and its cost rather than papered over.
+
+`STR_SO_LINK_SOON` ("LINK - Fase 7") is deleted, and `STR_LINK_PHASE` ("Enlace - Fase 7"),
+which was the string the screen actually drew, went with it. The BOX's inspect menu's
+INTERCAMBIAR and CRIAR rows are entry points now instead of a toast: each pre-selects that
+Pebble and opens LINK with the intent, consenting to nothing. `act_note_peer()` has its first
+driver in the product. One new host binary — 43 -> **44**, 827 -> **854 tests**, 3,672,108 ->
+**3,672,806 checks**: `tests/test_link_screen.cpp` drives the real screen against a real
+caller-owned `Session` with a real AI over a real loopback, because a screen is a singleton and
+two of them cannot share a process.
+
+Twenty source mutations and three gate mutations were planted; **four of them were not caught
+on the first run**, and the table in `docs/decisions.md` says which and why the assertion that
+should have caught each one was about a neighbouring fact — a linked result reported the moment
+the ENGINE finishes, the local side hard-coded back to 0, a transcript never re-opened, and a
+peer list offering a device heard once. A fifth failed nothing because the CODE was wrong
+rather than the test: `link_screen_busy()`'s second clause could not answer true where the
+first answered false, so the sentence was narrowed instead of the test being stretched around
+a branch that cannot happen.
+
+**Not measured, not claimed:** no radio ran, again. §67's "Local multiplayer works" is
+UNTICKED, and so is the radio half of the consent gate — the loopback delivers regardless of
+binding. The plan carries a five-item bench list for this chunk on top of P7-C1's.
+
+Sizes, all seven matrix variants green with zero project warnings: baseline
+1,958,560 / 79,412 → **1,985,080 / 80,340**; release **1,260,236 / 56,668**, 78.8 % and 87.2 %
+of the caps. The 26 KB of flash is not the screen's drawing: it is the session, the codec, the
+peer table and the wire half of the validator entering the image for the first time, because
+until this commit nothing reachable from `setup()` called any of them.
+
 ## [0.6.0-activity] — Unreleased
 
 Phase 6 is about the three things the device does when nobody is pressing a button: it

@@ -332,6 +332,8 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/screen_status.o $(OBJ)/screen_settings.o \
                $(OBJ)/screen_time.o $(OBJ)/screen_view.o \
                $(OBJ)/screen_link.o $(OBJ)/screen_diag.o \
+               $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/battle_link.o \
+               $(OBJ)/protocol.o $(OBJ)/link_fake.o \
                $(OBJ)/screen_evolution.o $(OBJ)/screen_creator.o \
                $(OBJ)/screen_network.o $(OBJ)/screen_encounter.o \
                $(OBJ)/wifi_scanner.o $(OBJ)/net_classify.o \
@@ -347,6 +349,13 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/xbm_mirror.o \
                $(OBJ)/battle.o $(OBJ)/battle_ai.o $(OBJ)/pebble.o
 
+# P7-C2 added the peer link's four: ui/screen_link.cpp owns a REAL LinkJob and a
+# REAL Session over a REAL codec, and the screen binaries link all of it because
+# a screen test against a fake session would prove nothing about the thing that
+# ships. The RADIO is still a fake - net.cpp is never compiled here - and so is
+# the transport: the screen reaches both through ui.h seams that
+# tests/test_screens.cpp and tests/test_link_screen.cpp fill in themselves.
+#
 # P6-C2 added activity.o: ui/screen_network.cpp hands the WHOLE scan array to
 # the daily score before it walks the cooldowns, and reads the rare-encounter
 # permille back out of it for EncounterInput. activity.cpp is pure and takes its
@@ -395,6 +404,32 @@ MG_FRAME_OBJS := $(OBJ)/minigame.o \
                  $(OBJ)/delete_logic.o       $(OBJ)/delete_draw.o
 
 $(BIN)/test_screens:    $(SCREEN_OBJS) $(MG_FRAME_OBJS)
+
+# P7-C2/C3: THE LINK SCREEN, ITS CONSENT GATE AND THE BATTLE OVER THE LINK.
+#
+# ONE SCREEN AND ONE REAL PEER, IN ONE PROCESS, and that shape is the whole
+# design of this binary. A screen is a file-scope singleton, so two LINK screens
+# cannot coexist here - but a Session is CALLER-OWNED (networking/session.h says
+# why), so the far end is a real Session with a real BattleState and a real
+# game/battle_ai.cpp driving it over the other end of a real
+# transport_loopback.cpp. Nothing in this binary is a mock of the protocol: what
+# is faked is the RADIO (a LinkRadioDriver of function pointers, exactly as
+# tests/test_discovery.cpp fakes it) and the ui.h seams.
+#
+# screen_battle.o is here because P7-C3's battle IS that screen, and box.o
+# because the team the screen offers comes out of the tree's one Box.
+$(BIN)/test_link_screen: $(OBJ)/screen_link.o $(OBJ)/screen_battle.o \
+                        $(OBJ)/battle_renderer.o $(OBJ)/xbm_mirror.o \
+                        $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/battle_link.o \
+                        $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
+                        $(OBJ)/validate.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
+                        $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/cooldowns.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/activity.o \
+                        $(OBJ)/inventory.o $(OBJ)/corruption.o \
+                        $(OBJ)/audio.o $(OBJ)/genome.o $(OBJ)/crc16.o \
+                        $(OBJ)/rng.o $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o \
+                        $(OBJ)/link_fake.o
 
 # THE BATTLE SCREEN'S BEHAVIOUR (P4-C4). Deliberately NOT $(SCREEN_OBJS): this
 # binary links the battle screen and the things it actually calls, and nothing

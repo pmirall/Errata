@@ -701,4 +701,65 @@ for f in session.cpp battle_link.cpp; do
   fi
 done
 
+# --- P7-C2: A SESSION IS OPENED IN EXACTLY ONE PLACE ----------------------
+# THE CONSENT GATE, AS A RED LINE. ui/screen_link.h's claim is that until the
+# local player has chosen a peer, chosen an operation and pressed A there is no
+# Session on this device at all - not an idle one, NONE. That is only true while
+# ONE function in the whole firmware calls session_init(), and it is
+# ui/screen_link.cpp's open_session(). A second caller - a screen that
+# "prepares" a session while browsing, a diagnostic that opens one to measure
+# the link - would make the sentence false without changing a line of
+# ui/screen_link.cpp, and nothing else would notice.
+#
+# NARROW, exactly like the PIN_ and act_take_gain() gates: it counts CALL SITES
+# of session_init() and session_start() under src/ and says nothing about who
+# calls session_poll(), which the battle screen legitimately drives through a
+# ui.h seam. networking/ is exempt because that is the module the functions
+# belong to; ui/screen_link.cpp is the one consumer. Comment lines are dropped:
+# three headers discuss the rule in prose.
+if [ -d "$SKETCH/src" ]; then
+  n=$( { grep -rnE '\b(session_init|session_start)[[:space:]]*\(' "$SKETCH/src" \
+          --include='*.cpp' --include='*.h' || true; } \
+        | { grep -v 'networking/' || true; } \
+        | { grep -v 'ui/screen_link\.cpp' || true; } \
+        | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "a peer session is opened outside ui/screen_link.cpp ($n) - consent is what opens a session, and the A press on the LINK card is the only thing that may (ui/screen_link.h)"
+fi
+
+# --- P7-C3: THE REWARD GATE HAS EXACTLY ONE READER ------------------------
+# networking/session.h's session_rewards_authorised() is true only where BOTH
+# endpoints agreed the outcome AND the final hash, and P7-C3's whole reward rule
+# is that a linked battle pays where that is true and nowhere else. The flag is
+# read ONCE, in ui/screen_link.cpp's link_battle_status(), and every other
+# consumer asks that function. A second reader is how "rewards only on
+# BATTLE_END(OK)" becomes two rules that can disagree.
+#
+# AND ITS LIMIT, STATED: it cannot see a screen that decides a reward from
+# BattleState.outcome directly and never mentions this function at all. What it
+# buys is that there is exactly ONE DOOR, so adding that second rule has to be a
+# visible edit to link_battle_status() or to ui/screen_battle.cpp's won_now();
+# tests/test_link_screen.cpp's desync and dead-link cases are the other half.
+if [ -f "$SKETCH/src/networking/session.h" ]; then
+  n=$( { grep -rnE '\bsession_rewards_authorised[[:space:]]*\(' "$SKETCH/src" \
+          --include='*.cpp' --include='*.h' || true; } \
+        | { grep -v 'networking/session\.h' || true; } \
+        | { grep -v 'ui/screen_link\.cpp' || true; } \
+        | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "session_rewards_authorised() is read outside ui/screen_link.cpp ($n) - the linked battle's reward gate is one expression in one place (ui/screen_link.cpp link_battle_status())"
+fi
+
+# --- P7-C3: THE BATTLE SCREEN REACHES THE SESSION THROUGH ui.h ------------
+# ui/screen_battle.cpp runs the engine and ui/screen_link.cpp owns the session,
+# and the six calls between them go through ui.h. That is not tidiness: it is
+# what keeps tests/test_battle_screen.cpp linking the battle screen and the
+# things it drives and NOTHING else - the link line would otherwise have to drag
+# session.o, battle_link.o, discovery.o and protocol.o into a binary whose whole
+# argument is that it cannot start passing because some other module happened to
+# be there.
+if [ -f "$SKETCH/src/ui/screen_battle.cpp" ]; then
+  n=$( { grep -nE '^[[:space:]]*#[[:space:]]*include[[:space:]]*"[^"]*(screen_link|networking/)' \
+          "$SKETCH/src/ui/screen_battle.cpp" || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "ui/screen_battle.cpp includes the LINK screen or a networking header ($n) - the linked battle's session is reached through the ui.h seams (ui.h, THE LINKED BATTLE'S SEAMS)"
+fi
+
 echo "GATE OK"

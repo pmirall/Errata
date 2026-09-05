@@ -695,3 +695,48 @@ sees.
 19. **Nothing is confidential.** Teams cross in clear. A passive listener in P7
     learns the whole roster, both device ids and the session id. Not addressed
     here and not addressable at this layer.
+
+---
+
+## 8. What P7-C2/C3 added ABOVE this protocol, and what it did not change
+
+**The wire is untouched.** No frame changed shape, no type was added, `PROTO_PAYLOAD_MAX` did
+not move, and `networking/session.cpp` and `networking/battle_link.cpp` are unchanged by this
+chunk. What was built is a consumer: `ui/screen_link.cpp` owns a `Session` and pumps it, and
+`ui/screen_battle.cpp` runs the engine at one end of it.
+
+### 20. Consent is above the protocol, not in it
+
+The state table has no "the player has agreed" state and does not need one, because the
+DECISION TO EXIST is the consent. `session_init()` is called from exactly one function in the
+firmware — the A press on the LINK card — and until then this device has no session, drains no
+transport and has no unicast peer bound. `SESSION_REQUEST` / `SESSION_ACCEPT` still do what §3
+says; what changed is that both endpoints only ever reach them because two people pressed a
+button. `tools/check.sh` fails the build if `session_init()` or `session_start()` is called
+anywhere else.
+
+### 21. The ladder is the player's move clock, and the number is nine seconds
+
+Rule R4 (only progress resets the ladder) and `on_battle_state()` counting a waiting peer's
+probe as STALE together mean that a round NEITHER device advances is closed `SE_LOST` after
+`PROTO_RETX_MAX * PROTO_RETX_MS` = 9,000 ms. That was always true of this protocol; P7-C3 is
+where it became something a player can feel. **Measured through the real screen against a real
+peer: 9,950 ms.** The linked battle's header shows the remaining seconds so the deadline
+arrives as a number rather than as a broken link.
+
+**It is a real constraint on this design and it is recorded rather than worked around.** No
+substitute action may be sent (§4 says why: the two engines would disagree about the
+substitute's legality), and widening the ladder changes the measured 3×3000-vs-9×1000 tuning
+in `session.h` for every other wait in the protocol as well. If play says nine seconds is too
+short, the two constants are the remedy and the cost is stated.
+
+### 22. The reward gate has one reader, and `SE_DESYNC` is not a defeat
+
+`session_rewards_authorised()` is read in exactly one place —
+`ui/screen_link.cpp`'s `link_battle_status()` — and `ui/screen_battle.cpp` asks that function
+rather than its own `BattleState.outcome`. So the asymmetry §7 (LIMITS) describes falls where
+it always did, on the side of NOT awarding: a local engine that won a battle the peer never
+confirmed reports `won == 0`, writes no Box and touches no ledger. The screen prints a NEUTRAL
+line for it (`UI_LKB_BROKEN`, "Enlace interrumpido") rather than "has perdido", because a
+divergence and a lost radio are not defeats and printing them as one is the same mistake as
+`BO_ABORT` printing as "Empate".

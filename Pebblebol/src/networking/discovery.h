@@ -236,7 +236,7 @@ struct LinkJob {
   uint8_t  state;          // LinkState
   uint8_t  stopped;        // the driver's stop() has been called for this run
   uint8_t  count;          // entries in peer[]
-  uint8_t  reserved;       // must be 0
+  uint8_t  held;           // link_hold(): browsing is over, the radio is not
   uint32_t started_ms;
   uint32_t beacon_ms;      // when the last beacon went out
   uint16_t beacons_tx;
@@ -287,6 +287,36 @@ bool link_start(LinkJob& j, const LinkRadioDriver& d, uint32_t now_ms);
 // funnel; nothing here awards anything.
 void link_service(LinkJob& j, const LinkRadioDriver& d, const DiscBeacon& self,
                   uint32_t now_ms, CooldownTable& cds, const ActClock& aclk);
+
+// -----------------------------------------------------------------------------
+//  THE BROWSE IS OVER AND THE RADIO IS STILL OURS (P7-C2)
+//
+//  A screen that has AGREED a session with one of these peers has stopped
+//  browsing: no beacon goes out, no beacon is drained, no peer ages out and the
+//  section 47 ceiling on the BROWSE stops running. What it must NOT do is put
+//  the radio down, because the session it just agreed rides on the same stack -
+//  link_cancel() reaches net_request(RADIO_OFF), which passes wifi_down(),
+//  which calls espnow_end(), and would take the link with it one frame after
+//  the two players consented.
+//
+//  THE JOB STAYS LS_RUNNING, so link_is_busy() and therefore the power ladder's
+//  `held` still know the radio is out, and link_cancel() is still the ONE
+//  release path and still exactly-once.
+//
+//  THE CEILING IS NOT LOST, IT CHANGES OWNER, and that is the whole argument
+//  for this call existing. From here the bound is the SESSION's own
+//  retransmission ladder - nine rungs of PROTO_RETX_MS, and networking/
+//  session.h's rule R4 says nothing a silent peer sends resets it - which is an
+//  order of magnitude tighter than LINK_JOB_TIMEOUT_MS. A job HELD with no
+//  session behind it is the one shape that would hold the radio for ever, and
+//  the caller is what must not create it: ui/screen_link.cpp calls this only on
+//  the success path of the function that opens a session, and its own leave
+//  hook cancels.
+//
+//  Refuses (no-op) on a job that is not LS_RUNNING: holding a job that is not
+//  holding the radio would make link_is_held() a lie.
+void link_hold(LinkJob& j);
+bool link_is_held(const LinkJob& j);
 
 // Spec 47's cancellation, wired to B by the screen and reached by the power
 // ladder THROUGH NAVIGATION (hardware/power.h: the ladder never names the

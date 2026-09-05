@@ -1023,3 +1023,30 @@ static const LinkRadioDriver s_link_driver = {
 const LinkRadioDriver &net_link_driver(void) {
   return s_link_driver;
 }
+
+// -----------------------------------------------------------------------------
+// THE SESSION'S TRANSPORT. Built once, over this module's own port object, for
+// the reason networking/transport.h gives: `ctx` is what removes the need to
+// widen the seam, and a factory returning a pointer to its own static would be
+// a second, quieter singleton. The BINDING is the consent gate's radio half -
+// until it happens the receive callback drops the peer's frames as
+// rx_wrong_peer and nothing this firmware runs ever sees them.
+// -----------------------------------------------------------------------------
+static EspNowPort s_link_port = { 0u };
+static Transport  s_link_tp;
+static bool       s_link_tp_ready = false;
+
+const Transport &net_link_transport(void) {
+  // Built on first use rather than as a dynamic initialiser: this file already
+  // refuses to do work before net_begin(), and a namespace-scope object whose
+  // constructor calls into another translation unit is an initialisation-order
+  // question nobody should have to answer.
+  if (!s_link_tp_ready) {
+    s_link_tp       = transport_espnow(s_link_port);
+    s_link_tp_ready = true;
+  }
+  return s_link_tp;
+}
+
+bool net_link_bind(uint8_t slot) { return espnow_bind(slot); }
+void net_link_unbind(void)       { espnow_unbind(); }

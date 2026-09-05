@@ -95,8 +95,21 @@
 //              seed so a bug reproduces from a log, a SYNTHETIC team so it runs
 //              on a device with one starter, and NO reward - a diagnostic that
 //              pays XP is a cheat.
+//   LINK     - P7-C3. TWO DEVICES, ONE BATTLE. The seed is not drawn here at
+//              all: networking/battle_link.cpp derives it from the session id,
+//              both nonces and both team CRCs, so the two engines start from
+//              one number neither device chose alone. The teams are the two
+//              Boxes, each side's own half validated by game/validate.cpp on
+//              BOTH devices. THE REWARD IS THE SESSION'S TO AUTHORISE AND NOT
+//              THIS SCREEN'S TO INFER: ui_link_battle_status() answers
+//              UI_LKB_WON only where session_rewards_authorised() is true, so a
+//              desync and a lost link pay nothing and print a neutral line.
+//              There is no AI on this entry - the opposing actions come off the
+//              wire - and no pick list: the team was frozen when the two
+//              players consented, one screen earlier.
 #define BT_ENTRY_PRACTICE   0u
 #define BT_ENTRY_DIAG       1u
+#define BT_ENTRY_LINK       2u
 
 // The seed spec section 49's "deterministic RNG seed" pins. Stated here rather
 // than hidden in a .cpp because reproducing a report means quoting it.
@@ -110,6 +123,10 @@ enum BattleScreenMode : uint8_t {
   BTM_SWITCH,
   BTM_RESOLVE,
   BTM_RESULT,
+  // P7-C3 only: the lockstep has our move and is waiting for the peer's. It is
+  // a MODE and not a spinner over BTM_MENU because the menu must not accept a
+  // second action for a round the engine has already been given one for.
+  BTM_WAIT,
   BTM_MODE_COUNT
 };
 
@@ -117,6 +134,53 @@ enum BattleScreenMode : uint8_t {
 // screen, because the seed comes from a named RNG stream and a pure screen may
 // not draw from one. Calling it does not start anything: battle_enter() does.
 void battle_arm(uint8_t entry, uint32_t seed);
+
+// -----------------------------------------------------------------------------
+//  THE LINKED ENTRY (P7-C3)
+//
+//  ui/screen_link.cpp calls battle_arm_link() and then pushes the screen. There
+//  is no seed argument because there is no local seed, and there is a SIDE
+//  argument because the session decides which half of the shared BattleSetup is
+//  ours (networking/session.cpp fixes it from the two device ids, lower id
+//  first). Every "side 0 is the player" in this file became that byte.
+// -----------------------------------------------------------------------------
+void battle_arm_link(uint8_t my_side);
+
+// -----------------------------------------------------------------------------
+//  THE THREE OBJECTS THE SESSION BORROWS, AND WHY THEY LIVE HERE
+//
+//  networking/session.h says it in as many words: a Session "holds NO
+//  BattleState and NO BattleSetup of its own ... the linked path borrows the
+//  one ui/screen_battle.cpp already owns at file scope". These three accessors
+//  are that sentence made callable. They exist so there is never a SECOND 780 B
+//  BattleSetup and never a second source of truth for a hashed team - which is
+//  the whole reason the session takes them by pointer.
+//
+//  THE LOG IS THE SESSION'S TOO. networking/battle_link.cpp's try_resolve()
+//  passes s.blog straight to battle_step_round(), so the transcript this screen
+//  plays back IS the one the lockstep produced. Keeping it to ONE ROUND's worth
+//  is this file's own job and is not exported: submit() re-opens the ring
+//  immediately before handing the action to the lockstep, which is the last
+//  moment before a resolution can happen (a round needs BOTH pendings, and ours
+//  is the one being submitted).
+//
+//  A caller that is not the LINK screen has no business with any of these.
+// -----------------------------------------------------------------------------
+struct BattleSetup;
+struct BattleState;
+struct BattleLog;
+BattleSetup* battle_link_setup(void);
+BattleState* battle_link_state(void);
+BattleLog*   battle_link_log(void);
+
+// The ONE copy-out-of-the-Box this firmware has, shared with ui/screen_link.cpp
+// so the team that goes on the wire is built by the same rule the practice team
+// is: full health on a copy, a v1 save's empty moveset falling back to the
+// species learnset, a stale FAINTED bit cleared, and the Box itself untouched.
+// It repairs THIS DEVICE'S OWN Pebble before it is offered; it is not, and must
+// never become, a repair of anything a peer sent (networking/battle_link.cpp).
+struct PebbleInstance;
+bool battle_copy_from_box(PebbleInstance& out, uint8_t slot);
 
 // The screen-table hooks.
 void battle_enter(void);
@@ -130,6 +194,13 @@ void battle_leave(void);
 //  hooks above already keep; none of them exists only for a test.
 // -----------------------------------------------------------------------------
 uint8_t  battle_screen_mode(void);      // BattleScreenMode
+// WHICH HALF OF THE SETUP THIS SCREEN IS DRAWING AND SUBMITTING FOR. 0 for
+// every single-device entry; for a linked one it is the SESSION's answer, and
+// it is a plain query over the byte the hooks already keep. It exists because
+// the two answers are indistinguishable in a rendered frame until you know
+// which team is whose, and a mutation that hard-codes it back to 0 failed
+// nothing without it.
+uint8_t  battle_screen_side(void);
 uint8_t  battle_screen_cursor(void);    // the row inside the current mode
 uint8_t  battle_screen_event(void);     // the BattleLogEvent being played back
 uint8_t  battle_screen_reject(void);    // the last BattleReject this screen saw

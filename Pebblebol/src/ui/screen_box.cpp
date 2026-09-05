@@ -13,6 +13,7 @@
 #include "gfx.h"
 #include "pet_art.h"     // pet_species_name(): the roster's own Spanish name
 #include "screen.h"
+#include "screen_link.h"   // link_arm_intent(): the section 9 entry points
 #include "ui.h"
 
 #define BOX_LIST_ROWS   ((uint8_t)(BOX_SLOTS + 1u))   // ten slots plus "Volver"
@@ -230,8 +231,20 @@ static void choose_action(void) {
       break;
     case BOXA_TRADE:
     case BOXA_BREED:
-      // Spec section 9 lists both; the peer protocol they need is P7-C2.
-      ui_toast(STR_UI_SOON);
+      // Spec section 9's "initiate breeding; initiate trade" (P7-C2). The BOX
+      // is where the player is already looking at the Pebble they mean, so this
+      // row PRE-SELECTS it and opens LINK with that intent rather than making
+      // them find the same creature again from the other side.
+      //
+      // IT CONSENTS TO NOTHING. link_arm_intent() sets a pre-selection and
+      // touches no radio; the session still needs A on the LINK card and A on
+      // the other device (ui/screen_link.h). And the OPERATIONS themselves are
+      // P7-C4 and P7-C5: the card will say so. That is deliberately better than
+      // the toast this used to be - the entry point is what P7-C2 owes, and a
+      // player who takes it now sees the peer list and the real menu.
+      link_arm_intent((uint8_t)((s_cur == (uint8_t)BOXA_TRADE) ? LOP_TRADE : LOP_BREED),
+                      s_slot);
+      ui_push(SCR_LINK);
       break;
     default: to_list(); break;
   }

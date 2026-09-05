@@ -690,6 +690,83 @@ TEST(a_broadcast_the_driver_refuses_does_not_spin_the_cadence)
   CHECK(link_is_busy(f.job));
 }
 
+// =============================================================================
+//  THE HOLD (P7-C2): THE BROWSE IS OVER AND THE RADIO IS STILL OURS
+//
+//  ui/screen_link.cpp calls link_hold() the moment the two players consent,
+//  because link_cancel() would reach net_request(RADIO_OFF) - which passes
+//  wifi_down(), which calls espnow_end() - and take the session's own link down
+//  one frame after it was agreed. Everything a browse does must stop; the radio
+//  must not.
+// =============================================================================
+
+// MUTATION: delete the `if (j.held != 0u) return;` line at the top of
+// link_service() and this case fails on the beacon count - a held job starts
+// beaconing again underneath a bound unicast session.
+TEST(a_held_job_stops_browsing_and_keeps_the_radio)
+{
+  Fixture& f = fx();
+  CHECK(link_start(f.job, FAKE, 0u));
+  air(0x11111111u, -40, 1);
+  serve(f, 0u);
+  air(0x11111111u, -40, 1);
+  serve(f, 600u);
+  air(0x11111111u, -40, 1);
+  serve(f, 1200u);
+  CHECK_EQ((int)link_qualified_count(f.job), 1);
+  const int beacons = g_beacon_calls;
+  CHECK(beacons > 0);
+
+  CHECK(!link_is_held(f.job));
+  link_hold(f.job);
+  CHECK(link_is_held(f.job));
+
+  // The radio is STILL OURS: the job is running, nothing was stopped, and the
+  // power ladder's `held` input still says so.
+  CHECK(link_is_busy(f.job));
+  CHECK_EQ((int)f.job.state, (int)LS_RUNNING);
+  CHECK_EQ((int)g_stop_calls, 0);
+
+  // And the browse has stopped: no beacon, no drain, no ageing, and the
+  // section 47 ceiling on the BROWSE no longer fires - the bound from here is
+  // the session's own ladder, which lives in networking/session.cpp.
+  air(0x22222222u, -40, 2);
+  air(0x22222222u, -40, 2);
+  air(0x22222222u, -40, 2);
+  for (uint32_t t = 1800u; t <= (uint32_t)LINK_JOB_TIMEOUT_MS + 5000u; t += 600u)
+    serve(f, t);
+  CHECK_EQ(g_beacon_calls, beacons);                 // not one more beacon
+  CHECK_EQ((int)link_qualified_count(f.job), 1);     // and no new peer
+  CHECK_EQ((int)f.job.state, (int)LS_RUNNING);       // the ceiling did not fire
+  CHECK_EQ((int)g_stop_calls, 0);
+}
+
+// AND THE ONE RELEASE PATH IS STILL THE ONE RELEASE PATH. A held job gives the
+// radio back through link_cancel() and through nothing else, exactly once.
+TEST(cancelling_a_held_job_still_releases_the_radio_exactly_once)
+{
+  Fixture& f = fx();
+  CHECK(link_start(f.job, FAKE, 0u));
+  serve(f, 0u);
+  link_hold(f.job);
+  CHECK_EQ((int)g_stop_calls, 0);
+
+  link_cancel(f.job, FAKE);
+  CHECK_EQ((int)g_stop_calls, 1);
+  CHECK_EQ((int)f.job.state, (int)LS_CANCELLED);
+  CHECK(!link_is_busy(f.job));
+  link_cancel(f.job, FAKE);
+  CHECK_EQ((int)g_stop_calls, 1);
+
+  // A job that never held the radio cannot be held: link_is_held() would be a
+  // lie about a job that is not LS_RUNNING.
+  Fixture& g = fx();
+  link_hold(g.job);
+  CHECK(!link_is_held(g.job));
+  CHECK_EQ((int)g_start_calls, 0);
+  CHECK_EQ((int)g_stop_calls, 0);
+}
+
 // THE RADIO IS RELEASED EXACTLY ONCE PER RUN, WHATEVER ENDS THE RUN. This is
 // the property hardware/power.h's release() hook depends on: the ladder
 // navigates, the leaving screen's leave() hook cancels, and the radio goes back
