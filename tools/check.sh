@@ -348,8 +348,8 @@ fi
 # THE TWO LISTS BELOW ARE DEFINED ONCE AND USED BY ALL OF THEM. Gates 1, 2 and
 # 2b read the same names, because two lists that must agree is the disagreement
 # this project keeps finding.
-PURE_NET="protocol.h protocol.cpp session.h session.cpp battle_link.h battle_link.cpp trade_link.h trade_link.cpp transport.h transport_loopback.cpp net_classify.h net_classify.cpp wifi_scanner.h wifi_scanner.cpp rxring.h rxring.cpp discovery.h discovery.cpp"
-PURE_NET_CPP="protocol.cpp session.cpp battle_link.cpp trade_link.cpp transport_loopback.cpp net_classify.cpp wifi_scanner.cpp rxring.cpp discovery.cpp"
+PURE_NET="protocol.h protocol.cpp session.h session.cpp battle_link.h battle_link.cpp trade_link.h trade_link.cpp transport.h transport_loopback.cpp net_classify.h net_classify.cpp wifi_scanner.h wifi_scanner.cpp rxring.h rxring.cpp discovery.h discovery.cpp creator_gate.h creator_gate.cpp"
+PURE_NET_CPP="protocol.cpp session.cpp battle_link.cpp trade_link.cpp transport_loopback.cpp net_classify.cpp wifi_scanner.cpp rxring.cpp discovery.cpp creator_gate.cpp"
 # transport_espnow.* is IMPURE and that is HONEST rather than a dodge: esp_now.h's
 # two callback typedefs have no user-context argument at all, so the sink a
 # callback posts into is forced to be file-scope. A device has one radio and a
@@ -469,6 +469,29 @@ fi
 if [ -d "$SKETCH/src" ]; then
   n=$( { grep -rn "WiFi\.begin(" "$SKETCH/src" || true; } | wc -l )
   [ "$n" -eq 0 ] || fail "WiFi.begin() in src ($n) - the product never associates to a station"
+fi
+
+# 1b. THE CREATOR URL CARRIES NO SECRET (spec section 39, P8-C1).
+#    net_url() emitted "http://<ip>/?k=NNNN" until this chunk, and the NNNN was
+#    the PIN - so the authorisation secret was in a symbol anyone can photograph
+#    from across a room, in the phone's URL bar, in its history and in any
+#    Referer the page later sends. Spec section 39 is explicit that the PIN is
+#    the user-facing authorisation layer and that the QR carries no more than it
+#    must.
+#
+#    THIS IS A GREP BECAUSE NOTHING ELSE CAN SEE IT. net.cpp is on the IMPURE
+#    list, tests/Makefile never compiles it, and the host fixtures that fill a
+#    CreatorInfo write the URL themselves - so a test asserting "no k= in the
+#    payload" would only be asserting what the fixture typed. The one place the
+#    format string actually lives is greppable, and this counts it.
+#
+#    NARROW ON PURPOSE, exactly like the WiFi.begin gate above: it matches a
+#    query parameter being FORMATTED into a URL under src/networking, not the
+#    letter k anywhere. A future route that legitimately needs a query argument
+#    will have to argue with this line, which is the point.
+if [ -d "$SKETCH/src/networking" ]; then
+  n=$( { grep -rnE '"[^"]*\?[A-Za-z_]+=%' "$SKETCH/src/networking" || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "a URL with a formatted query parameter is built under src/networking ($n) - the creator URL is \"http://<ip>/\" and the PIN travels in an X-Pin header, never in the QR (spec 39)"
 fi
 
 # 2. THE SCAN RESULT CARRIES NO NETWORK IDENTITY (spec section 44).

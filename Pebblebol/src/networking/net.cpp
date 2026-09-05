@@ -488,6 +488,38 @@ bool net_request(RadioMode want) {
 #endif  // NT_NET_WANT_WIFI
 }
 
+// THE AP-ONLY REQUEST (P8-C2). net.h states the contract; what follows is why
+// each arm is there.
+bool net_request_portal(void) {
+  if (!s_begun) {
+    net_begin();
+  }
+#if !NT_NET_WANT_WIFI
+  s_err = NERR_WIFI_DISABLED;
+  return false;
+#else
+  // A job that owns the radio is not something to take it from: both the
+  // scanner and the peer link release it through their own stop().
+  if (s_want_scan || s_want_link) {
+    s_err = NERR_BUSY;
+    return false;
+  }
+  if (s_mode == RADIO_WIFI && s_phase == NPH_AP_PORTAL) {
+    s_err = NERR_NONE;
+    return true;                     // the portal is already the phase we want
+  }
+  // Any OTHER live Wi-Fi phase has to come down first. net_request(RADIO_WIFI)
+  // would have answered `true` here and left the caller without an access
+  // point - see net.h.
+  if (s_mode == RADIO_WIFI) {
+    wifi_down();
+    set_mode(RADIO_OFF, NPH_OFF, "-> OFF (portal wanted)");
+  }
+  s_err = NERR_NONE;
+  return bring_up(RADIO_WIFI);
+#endif  // NT_NET_WANT_WIFI
+}
+
 void net_service(void) {
   if (!s_begun) {
     return;
@@ -569,7 +601,7 @@ const char *net_ap_ssid(void) {
   return s_ap_ssid;
 }
 
-size_t net_url(char *out, size_t cap, uint16_t pin) {
+size_t net_url(char *out, size_t cap) {
   if (!out || cap == 0) {
     return 0;
   }
@@ -578,10 +610,14 @@ size_t net_url(char *out, size_t cap, uint16_t pin) {
     return 0;
   }
   // BRIEF 1.4: IP only. A hostname form would be 33 B and would force QR
-  // version 3. Worst case here is
-  // "http://255.255.255.255/?k=9999" = 30 B, inside the 32 B v2-L budget.
-  int n = snprintf(out, cap, "http://%s/?k=%04u",
-                   s_ip, (unsigned)(pin % (unsigned)WEB_PIN_MAX));
+  // version 3. Worst case here is "http://255.255.255.255/" = 23 B, and the
+  // real one is "http://192.168.4.1/" = 19 B - both inside the 32 B v2-L
+  // budget, so the symbol stays at 25 modules and the 62 px box still fits.
+  //
+  // THE "?k=NNNN" SUFFIX WAS HERE UNTIL P8-C1 AND IT WAS THE PIN. net.h says
+  // why it is gone (spec section 39); tools/check.sh has a gate that fails the
+  // build if it comes back.
+  int n = snprintf(out, cap, "http://%s/", s_ip);
   if (n <= 0 || (size_t)n >= cap) {
     out[0] = '\0';
     return 0;

@@ -300,11 +300,19 @@ void     ui_confirm_medicine(void);
 // -----------------------------------------------------------------------------
 //  THE CREATOR SCREEN'S RADIO SEAM (P2-C11c)
 //
-//  CREATOR is the one screen that owns the Wi-Fi station. It is a pure
-//  translation unit, so it cannot call net_request() itself: it asks through
-//  these two instead. ui_creator_radio(true) is a REQUEST, not a promise - the
-//  station may still be settling when it returns, which is why the screen
-//  re-reads ui_creator_info() every second rather than caching one answer.
+//  CREATOR is the one screen that owns the Wi-Fi access point. It is a pure
+//  translation unit, so it cannot call net_request_portal() itself: it asks
+//  through these two instead. ui_creator_radio(true) is a REQUEST, not a
+//  promise - the access point may still be coming up when it returns, which is
+//  why the screen re-reads ui_creator_info() every second rather than caching
+//  one answer, and why CREATOR_AP_WAIT_MS exists at all.
+//
+//  ui_creator_radio(false) IS THE ONE TEARDOWN (P8-C2): the socket, then the
+//  radio. Leaving the screen, the D7 idle timeout and the "the access point
+//  never came up" exit all reach it, so no path can leave half the portal up.
+//  CreatorInfo.idle_expired is how the timeout reaches a pure screen; the
+//  decision itself is networking/creator_gate.cpp's, where a host binary drives
+//  it.
 // -----------------------------------------------------------------------------
 struct CreatorInfo;
 void     ui_creator_info(CreatorInfo& out);
@@ -593,8 +601,12 @@ void     ui_name_for(uint32_t lineage_id, uint8_t generation, char* out, size_t 
 // =============================================================================
 //  MODULE SEAMS ui.cpp CONSUMES (declared by their owners, not here)
 //
-//  webui.h   uint16_t web_pin(void)          - the QR payload and the
-//                                              4-digit PIN printed beside it.
+//  webui.h   uint16_t web_pin(void)          - the 4-digit PIN printed beside
+//                                              the symbol. IT IS NOT IN THE QR
+//                                              PAYLOAD ANY MORE (spec 39).
+//            void     web_portal_open/close  - the CREATOR session
+//            bool     web_portal_idle_expired
+//                                            - the D7 grace period
 //  godmode.h bool     god_active(void)
 //            GodEvt   god_handle(Gesture)    - returns what ui must do next
 //            void     god_draw(void)         - owns the whole GOD frame

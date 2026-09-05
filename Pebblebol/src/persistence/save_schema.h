@@ -250,15 +250,32 @@ struct ConfigV2 {
   uint32_t device_id;                    //   4  spec section 43, generated once
   uint32_t time_cal_epoch;               //   8  when the clock was last set
   uint32_t last_known_epoch;             //  12  mirrors the 60 s "t" cadence
-  uint32_t pin_lock_until;               //  16  creator lockout deadline
+  uint32_t pin_lock_until;               //  16  creator lockout MIRROR, wall
+                                         //      clock, DIAG only - never read
+                                         //      back as a deadline. See
+                                         //      networking/creator_gate.h.
   uint32_t seq;                          //  20  pair sequence number
   uint16_t creator_pin;                  //  24  0 = no PIN issued yet
-  uint16_t creator_idle_s;               //  26  D7 idle timeout for the server
+  uint16_t creator_idle_s;               //  26  D7 idle timeout, seconds.
+                                         //      0 = never set -> the compiled
+                                         //      default, NOT an instant
+                                         //      shutdown (cg_idle_seconds).
   uint16_t flags;                        //  28  CFGV2_F_*
   uint8_t  brightness;                   //  30  OLED contrast
-  uint8_t  pin_fail_count;               //  31
+  uint8_t  pin_fail_count;               //  31  0 or CREATOR_PIN_FAIL_MAX only:
+                                         //      the ARMED EDGE, not a running
+                                         //      count (cg_persist_fails)
   char     device_name[CFGV2_NAME_CAP];  //  32
-  char     ap_pass[CFGV2_AP_PASS_CAP];   //  45
+  char     ap_pass[CFGV2_AP_PASS_CAP];   //  45  STILL HAS NO PRODUCER, and
+                                         //      P8-C2 decided that on purpose
+                                         //      rather than by omission: the
+                                         //      soft AP stays OPEN because a
+                                         //      WPA passphrase cannot be
+                                         //      carried by the join QR at ANY
+                                         //      length. The arithmetic is in
+                                         //      ui/screen_creator.cpp next to
+                                         //      the payload that would have to
+                                         //      hold it.
   char     tz[CFGV2_TZ_CAP];             //  62  POSIX TZ, no network needed
   uint8_t  reserved[152];                // 102  must be 0
   uint16_t crc16;                        // 254  over bytes 0..253

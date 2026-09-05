@@ -2096,27 +2096,52 @@ void ui_creator_info(CreatorInfo& out) {
   memset(&out, 0, sizeof(out));
   out.ap_up  = net_is_ap_up()  ? 1u : 0u;
   out.pin    = web_pin();
+  // The D7 grace period. The screen owns the radio, so the screen is what acts
+  // on this - webui only answers the question (spec sections 34 and 40).
+  out.idle_expired = web_portal_idle_expired() ? 1u : 0u;
   snprintf(out.ssid, sizeof(out.ssid), "%s", net_ap_ssid());
   snprintf(out.ip,   sizeof(out.ip),   "%s", net_ip());
-  if (net_url(out.url, sizeof(out.url), out.pin) == 0) out.url[0] = '\0';
+  // NO PIN IN THE URL SINCE P8-C1 (spec section 39): net_url() lost the
+  // argument, not just the substitution, so there is nothing left to pass.
+  if (net_url(out.url, sizeof(out.url)) == 0) out.url[0] = '\0';
 }
 
+// THE ONE TEARDOWN (P8-C2). Leaving the screen, the D7 idle timeout and the
+// section 47 "the access point never came up" exit all arrive here with
+// on == false, so there is exactly one order of operations and no path that
+// leaves half of the portal standing.
 void ui_creator_radio(bool on) {
 #if FEATURE_WEB
   if (on) {
-    // The screen that wants the station is the screen that asks for it; there
-    // is no radio policy in the entry point any more (plan section 2 row G4).
+    // The screen that wants the radio is the screen that asks for it; there is
+    // no radio policy in the entry point any more (plan section 2 row G4).
     // Was cfg_flag(CF_WEB_ENABLED): the helper had exactly this one caller left
     // once SETTINGS and the HOME status bar moved out, and that caller is
     // inside #if FEATURE_WEB - so in the no-web variant the function was
     // defined and never used, which this build treats as an error.
-    if (net_mode() != RADIO_WIFI && s_cfg && (s_cfg->flags & CF_WEB_ENABLED) != 0)
-      net_request(RADIO_WIFI);
-  } else if (net_mode() == RADIO_WIFI) {
-    // Radio OFF by default: CREATOR is the only owner of RADIO_WIFI, so leaving
-    // it gives back the ~50 KB of heap and the largest current draw on the
-    // board instead of holding the station powered until the next reboot.
-    (void)net_request(RADIO_OFF);
+    if (s_cfg && (s_cfg->flags & CF_WEB_ENABLED) != 0) {
+      // The PIN first: it is loaded or minted and persisted BEFORE the access
+      // point exists, so there is no window in which the portal is reachable
+      // and the device does not yet know what it will ask for.
+      web_portal_open();
+      // net_request_portal(), NOT net_request(RADIO_WIFI): the latter answers
+      // "already on the WiFi track" for a scan or a peer link and would leave
+      // this screen waiting for an access point that is never coming (net.h).
+      (void)net_request_portal();
+    }
+  } else {
+    // Socket first, then the radio under it. web_service() re-opens the socket
+    // whenever the phase is still NPH_AP_PORTAL, so dropping the radio first
+    // would leave one pump in which the server is listening on a netif that is
+    // going away.
+    web_portal_close();
+    if (net_mode() == RADIO_WIFI) {
+      // Radio OFF by default: CREATOR is the only owner of RADIO_WIFI, so
+      // leaving it gives back the ~50 KB of heap and the largest current draw
+      // on the board instead of holding the radio powered until the next
+      // reboot.
+      (void)net_request(RADIO_OFF);
+    }
   }
 #else
   (void)on;
@@ -2140,8 +2165,18 @@ void ui_info_lines(char lines[UI_INFO_LINES][UI_INFO_CAP]) {
   // station (P5-C1); the radio's phase is what this line can still report.
   snprintf(lines[1], UI_INFO_CAP, "IP %s  net %u/%u", net_ip(),
            (unsigned)net_mode(), (unsigned)net_phase());
-  snprintf(lines[2], UI_INFO_CAP, "PIN %04u  spr rev %u",
-           (unsigned)(web_pin() % 10000u), (unsigned)SPRITE_REV);
+  // "----" AND NOT "0000" WHEN NOTHING HAS BEEN ISSUED. 0 is the sentinel and
+  // is a value the PIN can never take (networking/creator_gate.h), so printing
+  // it as four zeros would be a diagnostic screen stating a PIN that does not
+  // exist. It is minted on the first CREATOR entry, not at boot.
+  {
+    const uint16_t pin = web_pin();
+    char pin_txt[8];
+    if (pin == 0u) snprintf(pin_txt, sizeof pin_txt, "----");
+    else           snprintf(pin_txt, sizeof pin_txt, "%04u", (unsigned)pin);
+    snprintf(lines[2], UI_INFO_CAP, "PIN %s  spr rev %u",
+             pin_txt, (unsigned)SPRITE_REV);
+  }
   snprintf(lines[3], UI_INFO_CAP, "heap %lu  nvs %02X",
            (unsigned long)ESP.getFreeHeap(), (unsigned)kv_error());
   if (gt_is_valid()) {

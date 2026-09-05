@@ -3,11 +3,26 @@
 //  CREATOR (spec section 6 SCR_CREATOR), migrated by P2-C11c over the old QR
 //  screen.
 //
-//  WHAT IT IS NOW: the one screen that owns the Wi-Fi station. It asks for the
-//  radio on the way in and gives it back on the way out (plan section 2 row
+//  WHAT IT IS NOW: the one screen that owns the Wi-Fi access point. It asks for
+//  the radio on the way in and gives it back on the way out (plan section 2 row
 //  G4, "radio OFF by default"), and while it is up it prints the two things a
 //  phone needs to reach the device - the URL as a QR symbol and the 4-digit
 //  PIN in numbers big enough to read at arm's length.
+//
+//  IT IS SF_STICKY SINCE P8-C2, AND THAT IS A BUG FIX RATHER THAN A PREFERENCE.
+//  The screen had the default flags, so invariant 3's 20 s navigation
+//  auto-return applied to it: entering CREATOR and walking to your phone sent
+//  the device back to HOME after twenty seconds and tore the access point down
+//  with it, which is less time than joining a network takes. The 20 s clock
+//  counts device GESTURES, and the whole point of this screen is that the user
+//  is looking at a phone instead. What replaces it is TWO exits the screen owns
+//  itself, both in creator_update():
+//    * the access point never came up within CREATOR_AP_WAIT_MS (spec 47:
+//      every radio wait has an exit), and
+//    * the portal went ConfigV2.creator_idle_s without an authorised request
+//      (spec 34 and 40, decision D7).
+//  Both go through ui_back(), so leaving on a timeout runs exactly the leave
+//  hook a B press runs.
 //
 //  WHAT IT IS NOT YET: the creator itself. Sprite import, the custom-species
 //  editor and everything else the page will serve is Phase 8, so the screen
@@ -40,11 +55,15 @@ struct CreatorInfo {
   // firmware cannot do since P5-C1 - the station path is deleted, not disabled
   // - so the field and the screen branch that read it are gone rather than
   // permanently false.
-  uint8_t  reserved;                 // must be 0
-  uint16_t pin;                      // web_pin(), printed % 10000
+  // Was `reserved`. The D7 grace period (spec section 34): the portal has gone
+  // ConfigV2.creator_idle_s without an AUTHORISED request and the screen should
+  // give the radio back. The DECISION is networking/creator_gate.cpp's, which a
+  // host binary drives; this is only how it reaches a pure screen.
+  uint8_t  idle_expired;
+  uint16_t pin;                      // web_pin(): 1..9999, 0 = none issued yet
   char     ssid[24];                 // the AP's SSID, when ap_up
   char     ip[24];                   // whichever address is live
-  char     url[CREATOR_TEXT_MAX];    // net_url() with the PIN already in it
+  char     url[CREATOR_TEXT_MAX];    // net_url(); NO PIN IN IT since P8-C1
 };
 
 // The screen-table hooks.

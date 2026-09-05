@@ -10,6 +10,55 @@ tag for a phase is cut only when its gate (`tools/check.sh`) and its variant mat
 
 ## [0.8.0-creator] — Unreleased
 
+### Added
+
+- **The creator PIN, persisted and gated (P8-C1).** `ConfigV2.creator_pin` is minted at the
+  first CREATOR entry from `RNG_MISC` in the range **1..9999** — never the `0` that means "none
+  issued" — persisted before it is shown, and the same number across reboots so a scanned QR and
+  a written-down PIN stay valid. `pin_ok()` reads an `X-Pin` **header**, not a `?k=` query
+  argument: the old form put the secret in the URL bar, the browser history and any `Referer`.
+  Five consecutive failures arm a 60 s lockout, an expired lockout grants exactly one guess, and
+  a malformed PIN and a wrong PIN are one answer.
+- **`networking/creator_gate.{h,cpp}`** — the rules as a pure, caller-owned 16 B struct, so a
+  host binary can drive a lockout, a reboot and a 300 s idle expiry in microseconds.
+  `networking/webui.cpp` keeps transport only and decides nothing.
+- **`POST /api/ping`**, the first of spec §38's seven routes: the PIN-gated keep-alive, and the
+  only thing that extends the portal's life. Registered with the 4-arg `on()` overload so a
+  hostile `Content-Length` goes down the core's fixed raw buffer instead of
+  `readBytesWithTimeout()`'s `malloc` growth loop.
+- **`net_request_portal()`** — the AP-only bring-up. `net_request(RADIO_WIFI)` answers "already
+  on the WiFi track" for any non-OFF phase, so asking for the portal while a scan or peer link
+  held the radio returned success and produced no access point.
+- **The D7 inactivity shutdown (P8-C2).** `ConfigV2.creator_idle_s` (default 300 s), measured on
+  the monotonic clock and reset **only by a request that passed the PIN gate** — otherwise
+  anyone in radio range holds the access point up forever by fetching one URL every 299 s.
+
+### Fixed
+
+- **The CREATOR screen was timed out from under the user after 20 seconds.** `SCR_CREATOR` had
+  the default screen flags, so invariant 3's navigation auto-return applied to the one screen
+  whose whole purpose is that the user is looking at a phone instead of pressing buttons:
+  entering CREATOR and walking away sent the device HOME and tore the access point down in less
+  time than joining a network takes. The row is `SF_STICKY` now, with two screen-owned exits in
+  its place — `CREATOR_AP_WAIT_MS` (§47) and the D7 grace period — both leaving through the same
+  teardown a B press runs.
+- **A PIN could not survive a reboot.** `gs_load()` zeroed `creator_pin`, `pin_fail_count` and
+  `pin_lock_until` on every load — a correct P2-era guard for a feature that did not exist yet,
+  and the reason the first round-trip test failed. Removed; the concern it named is answered by
+  never restoring the lockout *deadline*, only the armed state.
+
+### Changed
+
+- **The PIN left the QR payload (spec §39).** `net_url()` emits `http://<ip>/` and lost the
+  `pin` argument entirely; `tools/check.sh` gained a gate that fails the build if a formatted
+  query parameter reappears under `src/networking`.
+- **`AP_SSID_PREFIX` is `PEBBLEBOL-`**, closing decision D3's last open piece. The soft AP stays
+  **open**: no WPA passphrase of any length fits the join QR (32 B of fixed text against a 32 B
+  version-2 budget), and `docs/decisions.md` carries the arithmetic and the owner's remaining
+  choice.
+- `ConfigV2.pin_fail_count` holds **0 or 5 and nothing between** — only the armed edge reaches
+  flash, so an attack episode costs two writes rather than one per guess.
+
 ### Removed
 
 - **Bluetooth Low Energy, entirely.** `networking/ble_social.{h,cpp}`, `FEATURE_BLE`, the

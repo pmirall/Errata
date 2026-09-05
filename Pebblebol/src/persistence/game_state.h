@@ -116,6 +116,34 @@ bool gs_save_xp_ledger(const uint8_t pts[XP_LEDGER_SLOTS], uint32_t epoch);
 // when nothing has been persisted yet; the caller keeps its compiled default.
 void gs_boot_tz(char* out, size_t cap);
 
+// -----------------------------------------------------------------------------
+// THE CREATOR PIN STATE (P8-C1). ConfigV2 has carried creator_pin (offset 24),
+// creator_idle_s (26), pin_lock_until (16) and pin_fail_count (31) since the v2
+// schema was written and NOTHING had ever read or written them; these two
+// functions are their producer and consumer. They are here rather than in
+// networking/webui.cpp for one reason: webui.cpp is a device module no host
+// binary compiles, and "the PIN survives a reboot" is a claim about the SAVE
+// path, so it belongs where tests/test_game_state.cpp can drive it against the
+// real save_manager and the kv_mem fake.
+//
+// cfg_to_v2() does not touch any of these four, so a SETTINGS write cannot
+// clobber a PIN and a PIN write cannot clobber a setting.
+//
+// gs_creator_store() is a NO-OP WHEN NOTHING CHANGED, and that is a wear
+// property rather than an optimisation: the only client that can drive this
+// path is an unauthenticated HTTP request, and one flash write per wrong PIN
+// would be write amplification a rate limiter cannot stop. See
+// networking/creator_gate.h (cg_persist_fails) for the full argument - the
+// persisted fail count is only ever 0 or CREATOR_PIN_FAIL_MAX.
+//
+// `lock_until` is a MIRROR FOR THE DIAG SCREEN, in wall-clock seconds, and no
+// code may read it back as a deadline: the authority is a monotonic value in
+// RAM, because the lockout must not be movable by a phone that pushes the clock
+// (creator_gate.h, "THE CLOCK QUESTION").
+// -----------------------------------------------------------------------------
+void gs_creator_load(uint16_t& pin, uint8_t& fail_count, uint16_t& idle_s);
+bool gs_creator_store(uint16_t pin, uint8_t fail_count, uint32_t lock_until);
+
 // The persisted clock calibration (plan 1.7): what the clock last knew and
 // when. A boot whose state is not CAL_UNSET and whose last_known_epoch is sane
 // may call itself CAL_ESTIMATED instead of blind, which is the difference

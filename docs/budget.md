@@ -29,11 +29,22 @@ Against the 515,268 / 24,408 no-radio floor:
 | subsystem | flash | globals | status |
 |---|---|---|---|
 | BLE (`ble_social.cpp`, 1,211 lines) | **712,618** | **23,496** | decided dead, **still here** — re-measured at the P7-C6 exit; blocked on a two-board bench test |
-| Wi-Fi stack + HTTP server (`FEATURE_WEB`) | 676,158 | 24,596 | **needed**: P8's creator server is built on it |
+| Wi-Fi stack + HTTP server (`FEATURE_WEB`) | ~~676,158~~ **61,174** | ~~24,596~~ **2,072** | **STALE SINCE P7-C1, RE-MEASURED AT P8-C2 — see the note below** |
 | god mode | 11,884 | 168 | dev only, already off in release |
 
 The two radio stacks do not add: turning both off lands exactly on the 515,268 / 24,408 floor,
 and ESP-NOW currently costs nothing because P7-C1 has not built it yet.
+
+**THE `FEATURE_WEB` ROW WAS OFF BY A FACTOR OF TWELVE AND P8-C2 RE-MEASURED IT.** `baseline`
+minus `no-web` at the P8-C1/C2 commit is **61,174 flash / 2,072 globals**, not 676,158 / 24,596.
+The row was correct when it was written and stopped being correct at P7-C1, which made
+`net.cpp`'s `NT_NET_WANT_WIFI` read `(FEATURE_WEB || FEATURE_ESPNOW)`: since then `FEATURE_WEB=0`
+removes the HTTP half and leaves the whole Wi-Fi driver linked for ESP-NOW. Anyone budgeting
+phase 8 off the old row would have believed the server costs 24 KB of globals and either
+panicked or traded something away for nothing. **The number to quote is 61,174 / 2,072, and the
+variants it is a difference of are `baseline` and `no-web`.** The old figure is struck rather
+than deleted so the next reader can see that a variant changed meaning underneath a table — the
+same failure §8 records.
 
 **P7-C1 HAS NOW BUILT IT, AND THE LAST CLAUSE IS OBSOLETE — see §4 below.** ESP-NOW costs
 **+9,758 flash and +5,832 globals** on the baseline, five sixths of the globals being one
@@ -555,3 +566,47 @@ words to be a symbol filter, and the useful pattern is
 flash and 176 B of globals of the artefact**, where it was 725 KB and 23.7 KB away before. That
 is the number this chunk is actually worth: **`tools/check.sh` now polices a build shaped like
 the one that ships**, which is the standing lesson of phases 6 and 7 applied to the gate itself.
+
+
+## 9. Phase 8, chunks 1 and 2 — the PIN and the AP-only lifecycle (measured 2026-09-05)
+
+**+2,574 flash / +16 globals on `release`. The same on `baseline`.** Every figure below names
+its variant, and both builds were made with `tools/build.sh` at this commit.
+
+| build | after P8-C0 | after P8-C1/C2 | delta | against its cap |
+|---|---|---|---|---|
+| `baseline` | 1,281,500 / 56,980 | 1,284,074 / 56,996 | +2,574 / **+16** | 53.5 % / 63.3 % |
+| `release`  | 1,269,126 / 56,804 | **1,271,700 / 56,820** | +2,574 / **+16** | **79.5 % / 87.4 %** |
+| `no-web`   | 1,222,722 / 54,924 | 1,222,900 / 54,924 | +178 / **0** | — |
+| `all-off`  | 578,510 / 26,364 | 578,598 / 26,364 | +88 / **0** | — |
+
+### The 16 bytes, by name
+
+`riscv32-esp-elf-nm -S -td` over the **release** `.elf`:
+
+```
+1070162696 00000016 b _ZL6s_gate       <- the whole cost of this chunk
+1070162712 00000364 b _ZL5s_srv        <- unchanged
+1070162376 00000320 b _ZL6s_json       <- unchanged
+```
+
+`_ZL5s_pin`, the `uint16_t` boot PIN, is **gone**: the PIN lives in `ConfigV2` now and its
+runtime state is inside `s_gate`. Section-level cross-check on the same `.elf`: `.dram0.data`
+0x3a24 = 14,884 (unchanged) and `.dram0.bss` 0xa3d0 = 41,936 (was 0xa3c0 = 41,920), summing to
+exactly the 56,820 the compiler printed.
+
+The `+178` on `no-web` and `+88` on `all-off` with **zero** globals is the shape to expect:
+`webui.cpp` compiles to its stubs in those variants and `networking/creator_gate.cpp` is a pure
+translation unit whose whole state is the caller's struct, so what is left is `net.cpp`'s
+`net_request_portal()` and the shorter `net_url()`.
+
+### What it leaves
+
+`release` globals are at **56,820 of 65,000 — 8,180 B free**, where §8 left 8,196. **This chunk
+spent 16 B, 0.20 % of the remaining headroom**, against §3's 1.5–3.0 KB forecast for the whole
+of phase 8. Flash is at 79.5 % with **328,300 B free**.
+
+The row still to watch is unchanged and is P8-C3's: **`CS_BODY_MAX`, the 2 KB raw-body buffer,
+is 25.0 % of what is left on its own** — 128 times this chunk. Nothing here pre-spends it.
+`P8-C2` also leaves the page blob untouched: it is `.rodata` and lands on the flash line, which
+can absorb it four times over.

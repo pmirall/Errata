@@ -175,13 +175,25 @@ LoadResult gs_load(Config& cfg) {
     return r;
   }
 
-  // --- the identity and the fields no screen owns yet -----------------------
-  // Creator PIN state is zeroed until P8 brings the creator server back: a
-  // stale lockout deadline or fail count from a firmware that no longer has a
-  // PIN screen could lock a user out of a feature they cannot reach.
-  s_gs.cfg.creator_pin    = 0;
-  s_gs.cfg.pin_fail_count = 0;
-  s_gs.cfg.pin_lock_until = 0;
+  // --- the identity ---------------------------------------------------------
+  // THE THREE LINES THAT ZEROED THE CREATOR PIN STATE HERE ARE GONE (P8-C1).
+  // They read:
+  //     s_gs.cfg.creator_pin = 0; pin_fail_count = 0; pin_lock_until = 0;
+  // and their comment said "until P8 brings the creator server back: a stale
+  // lockout deadline or fail count from a firmware that no longer has a PIN
+  // screen could lock a user out of a feature they cannot reach". That was the
+  // right guard while nothing produced the fields and is the wrong one now: a
+  // PIN that does not survive gs_load() is a PIN that changes on every boot,
+  // and the user's phone and the QR they scanned would both be stale by the
+  // time they typed it.
+  //
+  // The concern it named is answered rather than ignored. A restored
+  // pin_fail_count leaves the gate ARMED but NOT LOCKED - cg_open() never
+  // restores a deadline, because no clock survives the power cut that lost it
+  // (networking/creator_gate.h) - so a stale count costs exactly one wrong
+  // guess before the 60 s throttle, and the correct PIN, which this device
+  // prints on its own screen, is accepted immediately either way. Nobody can
+  // be locked out of a feature they are standing in front of.
 
   // Spec section 43: one identity per device, drawn once from the rng service
   // app_setup() seeded with esp_random(), then persisted forever. Never on a
@@ -410,6 +422,28 @@ bool gs_save_cfg(Config& c) {
   cfg_seal(c);
   if (s_readonly) return false;
   cfg_to_v2(c, s_gs.cfg);
+  return save_config(s_gs.cfg);
+}
+
+void gs_creator_load(uint16_t& pin, uint8_t& fail_count, uint16_t& idle_s) {
+  pin        = s_gs.cfg.creator_pin;
+  fail_count = s_gs.cfg.pin_fail_count;
+  idle_s     = s_gs.cfg.creator_idle_s;   // 0 = never set; the gate resolves it
+}
+
+bool gs_creator_store(uint16_t pin, uint8_t fail_count, uint32_t lock_until) {
+  if (s_readonly) return false;
+  // Nothing changed -> no write. See the header: the caller is reachable from
+  // an unauthenticated HTTP request, so an unconditional write here would be a
+  // flash-wear lever a remote client controls.
+  if (s_gs.cfg.creator_pin    == pin &&
+      s_gs.cfg.pin_fail_count == fail_count &&
+      s_gs.cfg.pin_lock_until == lock_until) {
+    return true;
+  }
+  s_gs.cfg.creator_pin    = pin;
+  s_gs.cfg.pin_fail_count = fail_count;
+  s_gs.cfg.pin_lock_until = lock_until;
   return save_config(s_gs.cfg);
 }
 

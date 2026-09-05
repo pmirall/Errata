@@ -413,7 +413,12 @@ static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
 // comment describes the call instead of naming it, exactly as net.h's banner
 // does. (Spec section 68 r5.) The scan has its own section 47 budget
 // below rather than borrowing the association's - they are different waits.
-#define AP_SSID_PREFIX          "NOTTAMAGOCHI-"
+// D3's LAST OPEN PIECE, closed here in P8-C2. The persisted namespace became
+// "pbbl" in P2-C9b and mDNS was deleted in P2-C5; the access-point name was
+// scheduled for the chunk that builds the access point, which is this one.
+// "PEBBLEBOL-" + 4 hex digits of the STA MAC = 14 chars, and net.h asserts
+// SSID_MAX_LEN >= 15 for exactly that.
+#define AP_SSID_PREFIX          "PEBBLEBOL-"
 #define AP_IP_A                 192
 #define AP_IP_B                 168
 #define AP_IP_C                 4
@@ -517,6 +522,30 @@ static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
 #define WEB_RATE_REFILL_PER_S   4
 #define WEB_COST_READ           1
 #define WEB_COST_MUTATE         2
+
+// --- THE CREATOR PIN (spec section 34, P8-C1) -------------------------------
+// The PIN is an AUTHORISATION gate against the person standing next to the
+// device, not a cryptographic one, and networking/creator_gate.h says so at
+// length. These three constants are what bound an online guess: without the
+// lockout the rate limiter alone allows ~2 guesses/s and the whole 0..9999
+// space falls in ~83 minutes.
+#define CREATOR_PIN_DIGITS      4            // exactly four ASCII digits, always
+#define CREATOR_PIN_FAIL_MAX    5            // consecutive failures before the lockout
+#define CREATOR_PIN_LOCK_MS     60000UL      // how long one lockout holds
+
+// --- THE PORTAL IDLE TIMEOUT (spec sections 34 and 40, decision D7) ---------
+// ConfigV2.creator_idle_s carries the live value; 0 there means "never set",
+// which resolves to the default rather than to an instant shutdown. The cap is
+// a bound on a persisted number that survived a CRC, not on user input.
+#define CREATOR_IDLE_S_DEFAULT  300          // D7
+#define CREATOR_IDLE_S_MAX      3600
+
+// How long the CREATOR screen waits for the access point before giving up and
+// going back (spec section 47: every radio wait has an exit). The screen is
+// SF_STICKY - the 20 s navigation auto-return would otherwise tear the portal
+// down while the user is still looking at their phone - so this is the timeout
+// that replaces it on the failure path.
+#define CREATOR_AP_WAIT_MS      20000UL
 
 // The DEVICE action cooldowns (ACT_CD_*, named WEB_CD_* until P2-C5), the
 // minigame cooldown and the hourly gain caps live in data/balance.h.

@@ -343,6 +343,14 @@ $(BIN)/test_trade:      $(OBJ)/trade.o $(OBJ)/box.o $(OBJ)/save_manager.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
 
+# P8-C1/C2: THE CREATOR PIN AND THE PORTAL IDLE TIMER. creator_gate.cpp is pure
+# and caller-owned - the clock, the persisted failure count and the candidate
+# PIN all arrive as arguments - so ONE OBJECT AND NO OTHERS is the whole binary.
+# That is the same argument test_activity's line makes, and it has the same
+# tripwire: if this line ever needs a second object, something device-shaped has
+# leaked into the rules and webui.cpp has started deciding things again.
+$(BIN)/test_creator_gate: $(OBJ)/creator_gate.o
+
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 # The minigame contract and the PURE logic of every game. No draw objects and
 # no ui/: if this link line ever needs one, a game has leaked drawing into its

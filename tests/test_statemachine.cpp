@@ -137,7 +137,15 @@ void ui_shake(uint8_t, uint16_t)  { }
 uint8_t ui_god_progress(void)     { return 0; }
 void ui_input_flush(void)         { }
 void ui_request_hatch(void)       { }
-void ui_creator_radio(bool)       { }
+// The CREATOR screen's radio seam, RECORDED here rather than ignored: P8-C2
+// gave the screen two timeouts of its own, and the property worth checking over
+// the real machine is that both of them still run the leave hook.
+static int      g_creator_radio_calls = 0;
+static int      g_creator_radio_last  = -1;
+static uint8_t  g_creator_ap   = 0;
+static uint8_t  g_creator_idle = 0;
+void ui_creator_radio(bool on)    { g_creator_radio_last = on ? 1 : 0;
+                                    g_creator_radio_calls++; }
 bool ui_btn_down(uint8_t)         { return false; }
 uint32_t ui_btn_hold_ms(uint8_t)  { return 0; }
 void ui_box_activate(uint8_t s)   { g_box_activated = s; }
@@ -150,7 +158,11 @@ void ui_game_render(void)         { g_game_renders++; }
 void ui_game_input(Gesture)       { g_game_inputs++; }
 void ui_game_leave(void)          { g_game_leaves++; }
 
-void ui_creator_info(CreatorInfo& out) { memset(&out, 0, sizeof out); }
+void ui_creator_info(CreatorInfo& out) {
+  memset(&out, 0, sizeof out);
+  out.ap_up        = g_creator_ap;
+  out.idle_expired = g_creator_idle;
+}
 void ui_info_lines(char lines[UI_INFO_LINES][UI_INFO_CAP]) {
   for (uint8_t i = 0; i < UI_INFO_LINES; ++i) lines[i][0] = '\0';
 }
@@ -175,6 +187,10 @@ static void reset_all(void) {
   g_battle_won = 0xFF;
   g_battle_reports = 0;
   g_hold_fps = 0;
+  g_creator_radio_calls = 0;
+  g_creator_radio_last  = -1;
+  g_creator_ap   = 0;
+  g_creator_idle = 0;
   memset(&g_cfg, 0, sizeof g_cfg);
   dialog_reset();
   dialog_bind_commit(nullptr);
@@ -319,6 +335,57 @@ TEST(autoreturn_follows_sticky) {
                                  kName[i], (int)sticky, (int)timed);
     CHECK(sticky != timed);
   }
+}
+
+// P8-C2. SF_STICKY on the CREATOR row is likewise not a preference, and the
+// case it fixes is the ordinary one: the user enters CREATOR, picks up a phone
+// and joins the access point. That takes longer than twenty seconds, and until
+// this flag the navigation timeout fired first and tore the portal down. The
+// flag itself is asserted in tests/test_screens.cpp; this is the consequence,
+// over the real table and the real machine.
+TEST(the_creator_portal_is_never_timed_out_from_under_the_user) {
+  reset_all();
+  g_creator_ap = 1;                     // the access point is serving
+  g_creator_idle = 0;                   // and a client is still talking to it
+  sm_push(SCR_CREATOR);
+  CHECK(sm_current() == SCR_CREATOR);
+  CHECK_EQ(g_creator_radio_last, 1);    // enter() asked for the radio
+
+  for (int i = 0; i < 4; ++i) {
+    host_advance_ms(UI_AUTORETURN_MS + 1u);
+    CHECK(!sm_service(host_ms()));
+  }
+  CHECK(sm_current() == SCR_CREATOR);
+  CHECK_EQ(g_creator_radio_last, 1);    // and still holds it
+
+  // The D7 grace period is what ends it, and it leaves through the SAME hook a
+  // B press would: the radio is released exactly once, by creator_leave().
+  g_creator_idle = 1;
+  host_advance_ms(2000u);
+  (void)sm_service(host_ms());
+  CHECK(sm_current() == SCR_HOME);
+  CHECK_EQ(g_creator_radio_last, 0);
+  g_creator_ap = 0;
+  g_creator_idle = 0;
+}
+
+// The other exit, spec section 47: the access point never came up. Without it
+// SF_STICKY would leave a user on "Conectando" with the radio powered and no
+// route out but a button.
+TEST(the_creator_screen_gives_up_when_the_radio_never_arrives) {
+  reset_all();
+  g_creator_ap = 0;
+  sm_push(SCR_CREATOR);
+  CHECK(sm_current() == SCR_CREATOR);
+
+  host_advance_ms(CREATOR_AP_WAIT_MS - 1000u);
+  (void)sm_service(host_ms());
+  CHECK(sm_current() == SCR_CREATOR);
+
+  host_advance_ms(1000u);
+  (void)sm_service(host_ms());
+  CHECK(sm_current() == SCR_HOME);
+  CHECK_EQ(g_creator_radio_last, 0);    // the leave hook ran on the way out
 }
 
 // P4-C4. SF_STICKY on the BATTLE row is not a preference: leaving the screen

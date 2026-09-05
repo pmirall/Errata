@@ -370,3 +370,126 @@ TEST(game_state_mirrors_the_last_seen_epoch_into_rtc) {
   CHECK_EQ(boot_host_mirror(), 1700400000u);
   CHECK_EQ(save_last_seen(), 1700400000u);
 }
+
+// =============================================================================
+//  THE CREATOR PIN STATE (P8-C1)
+//
+//  ConfigV2 has carried creator_pin, pin_fail_count, pin_lock_until and
+//  creator_idle_s since the v2 schema was written and NOTHING had ever read or
+//  written them. These cases are the other half of tests/test_creator_gate.cpp:
+//  that binary owns the RULES with no store at all, this one owns the ROUND TRIP
+//  through the real save_manager and the kv_mem fake. Neither could see the
+//  other's half, which is why both exist.
+// =============================================================================
+
+TEST(game_state_creator_pin_survives_a_reboot) {
+  begin();
+  if (!seed_v1()) { CHECK(false); return; }
+  Config cfg;
+  CHECK_EQ((int)gs_load(cfg), (int)LOAD_MIGRATED);
+
+  // A fresh device has issued nothing. 0 is the sentinel, and it is what makes
+  // networking/webui.cpp's "mint on first CREATOR entry" decidable at all.
+  uint16_t pin = 0xFFFFu, idle = 0xFFFFu;
+  uint8_t  fails = 0xFFu;
+  gs_creator_load(pin, fails, idle);
+  CHECK_EQ((int)pin, 0);
+  CHECK_EQ((int)fails, 0);
+  // cfgv2_defaults() already ships D7's 300, so a device made by THIS firmware
+  // never sees the zero. A save written before the field existed would, which
+  // is what cg_idle_seconds(0) is for - and that half is proved in
+  // tests/test_creator_gate.cpp, where a zero can actually be constructed.
+  CHECK_EQ((int)idle, (int)CREATOR_IDLE_S_DEFAULT);
+
+  CHECK(gs_creator_store(4242u, 0u, 0u));
+
+  // THE REBOOT. Nothing in RAM survives; the store does.
+  Config back;
+  CHECK_EQ((int)gs_load(back), (int)LOAD_OK);
+  pin = 0; fails = 0xFFu; idle = 0xFFFFu;
+  gs_creator_load(pin, fails, idle);
+  CHECK_EQ((int)pin, 4242);
+  CHECK_EQ((int)fails, 0);
+}
+
+// The armed edge is the half that MUST survive: a power cycle that reset the
+// failure counter would make the lockout worthless, because an attacker in
+// range of a device on a desk can wait for it to be unplugged, and an attacker
+// who can unplug it can also read the PIN off the screen. The point is that the
+// counter is not free to reset ITSELF.
+TEST(game_state_creator_lockout_edge_survives_a_reboot) {
+  begin();
+  if (!seed_v1()) { CHECK(false); return; }
+  Config cfg;
+  CHECK_EQ((int)gs_load(cfg), (int)LOAD_MIGRATED);
+
+  CHECK(gs_creator_store(4242u, (uint8_t)CREATOR_PIN_FAIL_MAX, 1700300060u));
+
+  Config back;
+  CHECK_EQ((int)gs_load(back), (int)LOAD_OK);
+  uint16_t pin = 0, idle = 0;
+  uint8_t  fails = 0;
+  gs_creator_load(pin, fails, idle);
+  CHECK_EQ((int)pin, 4242);
+  CHECK_EQ((int)fails, (int)CREATOR_PIN_FAIL_MAX);
+  // And the mirror is there for DIAG. It is NOT a deadline: nothing reads it
+  // back, because a wall-clock deadline on this device is settable by the phone
+  // on the far side of the very gate it guards (networking/creator_gate.h).
+  CHECK_EQ((unsigned long)gs_state().cfg.pin_lock_until, 1700300060ul);
+}
+
+// THE WEAR PROPERTY, AND IT IS A SECURITY PROPERTY. The only client that can
+// drive this path is an unauthenticated HTTP request, so one flash write per
+// wrong PIN would be write amplification the rate limiter cannot stop. A store
+// that changes nothing must touch nothing.
+TEST(game_state_creator_store_writes_nothing_when_nothing_changed) {
+  begin();
+  if (!seed_v1()) { CHECK(false); return; }
+  Config cfg;
+  CHECK_EQ((int)gs_load(cfg), (int)LOAD_MIGRATED);
+
+  CHECK(gs_creator_store(4242u, 0u, 0u));
+  const uint32_t after_first = kv_mem_puts();
+
+  for (int i = 0; i < 20; ++i) CHECK(gs_creator_store(4242u, 0u, 0u));
+  CHECK_EQ((unsigned long)kv_mem_puts(), (unsigned long)after_first);
+
+  // A real edge still writes.
+  CHECK(gs_creator_store(4242u, (uint8_t)CREATOR_PIN_FAIL_MAX, 99u));
+  CHECK(kv_mem_puts() > after_first);
+}
+
+// A refused load leaves the session read-only, and a read-only session writes
+// nothing - the rule the whole P2-C9 pipeline exists to enforce. A PIN is not
+// an exception to it: minting one over a save the device has been told not to
+// touch would be the first write of a session that promised none.
+TEST(game_state_creator_store_refuses_a_read_only_session) {
+  begin();
+  gs_set_readonly(true);
+  const uint32_t before = kv_mem_puts();
+  CHECK(!gs_creator_store(4242u, 0u, 0u));
+  CHECK_EQ((unsigned long)kv_mem_puts(), (unsigned long)before);
+}
+
+// SETTINGS and the PIN share one 256 B blob and must not clobber each other:
+// cfg_to_v2() writes brightness, tz, the flag bits and the name, and touches
+// none of the four creator fields.
+TEST(game_state_a_settings_write_does_not_clobber_the_pin) {
+  begin();
+  if (!seed_v1()) { CHECK(false); return; }
+  Config cfg;
+  CHECK_EQ((int)gs_load(cfg), (int)LOAD_MIGRATED);
+  CHECK(gs_creator_store(4242u, (uint8_t)CREATOR_PIN_FAIL_MAX, 777u));
+
+  cfg.brightness = 44;
+  snprintf(cfg.pet_name, sizeof cfg.pet_name, "Roca");
+  CHECK(gs_save_cfg(cfg));
+
+  uint16_t pin = 0, idle = 0;
+  uint8_t  fails = 0;
+  gs_creator_load(pin, fails, idle);
+  CHECK_EQ((int)pin, 4242);
+  CHECK_EQ((int)fails, (int)CREATOR_PIN_FAIL_MAX);
+  CHECK_EQ((unsigned long)gs_state().cfg.pin_lock_until, 777ul);
+  CHECK_EQ((int)gs_state().cfg.brightness, 44);
+}

@@ -116,6 +116,12 @@ static int      g_hatches  = 0;
 static int      g_radio    = -1;      // the last ui_creator_radio() argument
 static int      g_radio_calls = 0;
 static uint8_t  g_ap_up    = 0;
+// The D7 grace period, as the CREATOR screen sees it. On the device
+// networking/creator_gate.cpp decides this from a monotonic clock and
+// webui.cpp answers it; here the test sets it, because the SCREEN's half of
+// the property is "what does it do when told", and the decision itself has its
+// own binary (tests/test_creator_gate.cpp).
+static uint8_t  g_idle_exp = 0;
 // g_sta_up went with CreatorInfo.sta_up at P5-C1: the station path is deleted,
 // so "joined the user's network" is not a state this firmware can be in.
 static int      g_commits  = 0;
@@ -183,10 +189,15 @@ void ui_game_leave(void)          { }
 void ui_creator_info(CreatorInfo& out) {
   memset(&out, 0, sizeof out);
   out.ap_up  = g_ap_up;
+  out.idle_expired = g_idle_exp;
   out.pin    = 1234;
   snprintf(out.ssid, sizeof out.ssid, "PEBBLEBOL-1234");
   snprintf(out.ip,   sizeof out.ip,   "192.168.4.1");
-  if (g_ap_up) snprintf(out.url, sizeof out.url, "http://192.168.4.1/?k=1234");
+  // NO "?k=NNNN" SINCE P8-C1. net_url() lost the PIN and the argument that
+  // carried it (spec section 39); this fixture matches what net.cpp now emits,
+  // and tools/check.sh has the gate that stops the query parameter coming back
+  // - a fixture could only ever assert what the fixture typed.
+  if (g_ap_up) snprintf(out.url, sizeof out.url, "http://192.168.4.1/");
 }
 bool ui_btn_down(uint8_t)         { return false; }
 uint32_t ui_btn_hold_ms(uint8_t)  { return 0; }
@@ -382,6 +393,7 @@ static void seams2_reset(void) {
   g_radio = -1;
   g_radio_calls = 0;
   g_ap_up = 0;
+  g_idle_exp = 0;
   g_commits = 0;
   g_commit_id = CFM_NONE;
   g_goto = 0xFF;
@@ -500,9 +512,15 @@ TEST(table_rows_are_consistent) {
   // SCR_LINK LEFT THIS LIST AT P7-C2 for the reason SCR_NETWORK left it at
   // P5-C3 and then some: B means CANCEL THE LINK there, and a link holds the
   // radio AND a session.
+  // SCR_CREATOR LEFT IT AT P8-C2, and it is the row this list was WRONG about
+  // rather than one whose rules changed. It held the radio all along, and the
+  // 20 s auto-return measures device GESTURES - so the one screen whose whole
+  // purpose is that the user is holding a phone instead was also the one screen
+  // the timeout was guaranteed to fire on. It is SF_STICKY now and owns two
+  // timeouts of its own; both are asserted by name below.
   static const uint8_t kOrdinary[] = {
     SCR_MENU, SCR_PLAY, SCR_STATUS, SCR_STATUS_B,
-    SCR_CREATOR, SCR_ENCOUNTER, SCR_SLEEP
+    SCR_ENCOUNTER, SCR_SLEEP
   };
   for (size_t i = 0; i < sizeof kOrdinary / sizeof kOrdinary[0]; i++)
     CHECK(SCREENS[kOrdinary[i]].flags == 0);
@@ -540,6 +558,9 @@ TEST(table_rows_are_consistent) {
   // screen whose enter AND leave hooks must both exist: taking the radio
   // without a hook to give it back is exactly the always-on policy the plan
   // removed (section 2 row G4).
+  // CREATOR: sticky and nothing else - it does NOT own B (B is BACK, and its
+  // leave hook is the teardown either way) and it does not lock input.
+  CHECK_EQ(SCREENS[SCR_CREATOR].flags, (uint8_t)SF_STICKY);
   CHECK(SCREENS[SCR_CREATOR].enter  != nullptr);
   CHECK(SCREENS[SCR_CREATOR].leave  != nullptr);
   CHECK(SCREENS[SCR_CREATOR].update != nullptr);   // the payload follows the IP
@@ -1387,6 +1408,113 @@ TEST(creator_alternates_only_while_the_portal_is_up) {
   const uint8_t only = creator_variant();
   creator_input(GST_TAP_L);
   CHECK_EQ(creator_variant(), only);
+}
+
+// -----------------------------------------------------------------------------
+//  THE TWO EXITS AND THE STICKY FLAG (P8-C2)
+// -----------------------------------------------------------------------------
+
+// CREATOR MUST BE STICKY, AND THIS IS THE BUG THAT MADE IT SO. With the default
+// flags, invariant 3's 20 s auto-return applied here: enter CREATOR, put the
+// device down, pick up a phone - and twenty seconds later the firmware went
+// HOME and tore the access point down, which is less time than joining a
+// network takes. The 20 s clock counts DEVICE gestures and this is the one
+// screen whose whole purpose is that the user is not making any.
+TEST(creator_is_sticky_so_the_portal_outlives_the_navigation_timeout) {
+  CHECK((SCREENS[SCR_CREATOR].flags & SF_STICKY) != 0);
+}
+
+// Exit 1, spec section 47: every radio wait has an exit. The access point can
+// fail to start outright (NERR_AP_FAILED) or be refused because a scan holds
+// the radio, and with the auto-return gone there would otherwise be no route
+// off this screen but a button - with the radio drawing current the whole time.
+TEST(creator_gives_up_when_the_access_point_never_comes_up) {
+  seams2_reset();
+  g_ap_up = 0;
+  g_now = 100000u;
+  creator_enter();
+  CHECK_EQ(g_backs, 0);
+
+  // One second short of the budget: still waiting.
+  g_now = 100000u + CREATOR_AP_WAIT_MS - 1000u;
+  creator_update(g_now);
+  CHECK_EQ(g_backs, 0);
+
+  g_now = 100000u + CREATOR_AP_WAIT_MS;
+  creator_update(g_now);
+  CHECK_EQ(g_backs, 1);
+}
+
+// ...and it does NOT give up while the access point is up, however long the
+// user leaves it there, because that is the case the idle timer owns.
+TEST(creator_waits_indefinitely_once_the_access_point_is_up) {
+  seams2_reset();
+  g_ap_up = 1;
+  g_now = 100000u;
+  creator_enter();
+  for (uint32_t t = 1000u; t <= 10u * CREATOR_AP_WAIT_MS; t += 1000u) {
+    g_now = 100000u + t;
+    creator_update(g_now);
+  }
+  CHECK_EQ(g_backs, 0);
+}
+
+// Exit 2, spec sections 34 and 40 and decision D7: the portal went its whole
+// grace period without an authorised request. The screen leaves through
+// ui_back() rather than dropping the radio where it stands, so the leave hook -
+// the ONE teardown - is what actually runs.
+TEST(creator_leaves_when_the_portal_idles_out) {
+  seams2_reset();
+  g_ap_up = 1;
+  g_now = 100000u;
+  creator_enter();
+  g_now += 5000u;
+  creator_update(g_now);
+  CHECK_EQ(g_backs, 0);
+
+  g_idle_exp = 1;
+  g_now += 5000u;
+  creator_update(g_now);
+  CHECK_EQ(g_backs, 1);
+}
+
+// And the teardown that follows is the same one a B press runs: ui_back() ->
+// sm_back() -> sm_goto() -> creator_leave() -> ui_creator_radio(false). This
+// binary stubs ui_back(), so what it can prove is that the leave hook releases
+// the radio however it is reached; tests/test_statemachine.cpp drives the real
+// ui_back() through the real table.
+TEST(creator_leave_releases_the_radio_however_it_is_reached) {
+  seams2_reset();
+  g_ap_up = 1;
+  creator_enter();
+  CHECK_EQ(g_radio, 1);
+  g_idle_exp = 1;
+  g_now += 2000u;
+  creator_update(g_now);
+  CHECK_EQ(g_backs, 1);
+  creator_leave();                    // what sm_goto() calls next
+  CHECK_EQ(g_radio, 0);
+}
+
+// The PIN is printed on the device and is NOT in the QR payload (spec 39).
+// What this binary can see is the payload the screen chooses; the format string
+// itself lives in net.cpp, which no host binary compiles, and tools/check.sh
+// gates that half.
+TEST(creator_payload_carries_no_pin) {
+  seams2_reset();
+  g_ap_up = 1;
+  creator_enter();
+  CreatorInfo in;
+  ui_creator_info(in);
+  CHECK(strstr(in.url, "k=") == nullptr);
+  CHECK(strstr(in.url, "1234") == nullptr);
+  CHECK_STR_EQ(in.url, "http://192.168.4.1/");
+  // The join symbol is the open-network form and stays inside QR version 2's
+  // 32 B budget. ui/screen_creator.cpp argues at length why no WPA passphrase
+  // can ever be added to it.
+  char join[64];
+  snprintf(join, sizeof join, "WIFI:S:%s;;", in.ssid);
+  CHECK(strlen(join) <= 32u);
 }
 
 // =============================================================================

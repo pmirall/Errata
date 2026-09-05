@@ -149,12 +149,39 @@ bool        net_is_ap_up(void);          // provisioning portal is serving
 NetErr      net_last_err(void);
 StrId       net_last_err_str(void);      // Spanish line for the UI
 
-// "NOTTAMAGOCHI-XXXX", derived from the STA MAC. Never NULL.
+// "PEBBLEBOL-XXXX", derived from the STA MAC. Never NULL. (The prefix was
+// "NOTTAMAGOCHI-" until P8-C2 closed decision D3's last open piece.)
 const char *net_ap_ssid(void);
 
-// Builds "http://<ip>/?k=NNNN" for the QR screen.
+// Builds "http://<ip>/" for the QR screen.
 // Returns the number of characters written, 0 if it did not fit or no IP.
-size_t      net_url(char *out, size_t cap, uint16_t pin);
+//
+// THE PIN CAME OUT OF THIS STRING IN P8-C1 AND THE ARGUMENT WENT WITH IT. The
+// old form was "http://<ip>/?k=NNNN", which put the authorisation secret into a
+// symbol anyone can photograph from across a room, into the phone's URL bar,
+// into its history and into any Referer the page later sends. Spec section 39
+// is explicit: "Do not put secrets into the QR beyond what is necessary. The
+// PIN remains the user-facing authorization layer" - a PIN that travels in the
+// QR is not a layer. It is typed by the user from the device screen into an
+// X-Pin header instead (networking/creator_gate.h).
+size_t      net_url(char *out, size_t cap);
+
+// -----------------------------------------------------------------------------
+// net_request_portal() - THE CREATOR SCREEN'S OWN BRING-UP (P8-C2).
+//
+// net_request(RADIO_WIFI) is not enough and the reason is worth writing down:
+// its body answers `already on the WiFi track` for ANY non-OFF phase, so a
+// caller that asks for the portal while a scan or a peer link still holds the
+// radio is told `true` and never gets an access point. This entry point names
+// the intent instead - AP ONLY, no scan, no link, and there has never been a
+// station to ask for - and it takes the radio back from a Wi-Fi phase that is
+// not the portal rather than reporting success it did not deliver.
+//
+// Refuses (NERR_BUSY) while a scan or link INTENT is set, because those jobs
+// own their own teardown and stealing the radio from underneath one would
+// leave a driver waiting for a result that can no longer arrive.
+// -----------------------------------------------------------------------------
+bool        net_request_portal(void);
 
 // Last heap census, and a way to force one (ble calls this around its
 // allocations so the debug screen shows the real peak).

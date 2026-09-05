@@ -107,9 +107,18 @@ const ScreenDef SCREENS[SCR_COUNT] = {
     SF_OWNS_BACK },                                               // SCR_LINK
   // CREATOR: its enter/leave hooks are the radio - request on the way in,
   // release on the way out, which is the whole "radio OFF by default" policy
-  // for the Wi-Fi station (plan section 2 row G4).
+  // for the Wi-Fi access point (plan section 2 row G4).
+  // SF_STICKY SINCE P8-C2, AND IT IS A BUG FIX. With the default flags the
+  // 20 s auto-return of invariant 3 applied here, so a user who entered CREATOR
+  // and picked up their phone was sent back to HOME - and the access point torn
+  // down - after twenty seconds, which is less than joining a network takes.
+  // The 20 s clock measures DEVICE gestures and this is the one screen whose
+  // whole purpose is that the user is not making any. ui/screen_creator.cpp
+  // owns the two timeouts that replace it (the access point never came up, and
+  // the D7 idle grace period), and both leave through ui_back() so the leave
+  // hook still runs.
   { creator_enter, creator_update, creator_render, creator_input, creator_leave,
-    0, 0 },                                                       // SCR_CREATOR
+    0, SF_STICKY },                                               // SCR_CREATOR
   // SETTINGS owns B because its "Acerca de" page is one level below the
   // navigation stack: B closes the page, and only then the screen.
   { settings_enter, nop_update, settings_render, settings_input, nop_leave, 0,

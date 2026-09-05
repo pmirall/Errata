@@ -43,9 +43,39 @@ static void build(const CreatorInfo& in) {
   text[0] = '\0';
 
   if (s_variant == 1 && in.ap_up) {
-    // Open network. "WIFI:S:<ssid>;;" is 26 B and fits QR version 2 (25
-    // modules -> 62 px at 2 px/module). Adding "T:nopass" makes it 35 B, which
-    // forces version 3 -> 29 modules -> 70 px, and 70 does not fit in 64 rows.
+    // OPEN NETWORK, AND P8-C2 DECIDED THAT RATHER THAN INHERITING IT.
+    //
+    // "WIFI:S:PEBBLEBOL-A1B2;;" is 23 B and fits QR version 2 (25 modules ->
+    // 25*2 + 2*3*2 = 62 px at 2 px/module, exactly QR_BOX_SIZE). Every addition
+    // breaks it: "T:nopass" alone makes it 35 B, which forces version 3 -> 29
+    // modules -> 70 px, and 70 does not fit in 64 rows.
+    //
+    // THE PLAN ASKED FOR A GENERATED ConfigV2.ap_pass AND A WPA ACCESS POINT.
+    // The arithmetic refuses it, for every passphrase length and every SSID
+    // this product may use:
+    //     "WIFI:T:WPA;S:" 13 + SSID 14 + ";P:" 3 + pass + ";;" 2
+    //   = 32 B of fixed text before a single passphrase character, against a
+    //     32 B version-2-L byte budget (ui/qr.cpp: data_cw - 2).
+    //   WPA2-PSK's own minimum passphrase is 8 characters, so the shortest
+    //   legal payload is 40 B -> version 3 -> 29 modules -> 70 px on a 64-row
+    //   panel. Dropping the "-XXXX" suffix does not save it (35 B), and
+    //   dropping the "PEBBLEBOL-" prefix would break decision D3.
+    // Turning WPA on anyway would have produced TWO silent failures no host
+    // test can see: draw_symbol() clamps px to 1 and paints a 35 px symbol at
+    // one pixel per module on a 0.96" panel, and snprintf() here truncates the
+    // payload to CREATOR_TEXT_MAX-1 = 39 characters without reporting it, so
+    // the symbol would encode a valid-looking WIFI: string with a mangled
+    // passphrase.
+    // So the access point stays OPEN and the PIN stays the authorisation
+    // layer, which is what spec section 39 asks for in as many words ("Do not
+    // put secrets into the QR beyond what is necessary. The PIN remains the
+    // user-facing authorization layer"). What makes that safe is not the
+    // network: it is that the portal exists only while this screen is open,
+    // that it dies after ConfigV2.creator_idle_s, and that the PIN gate locks
+    // for 60 s after five failures - which bounds an in-range attacker to
+    // about nine guesses per portal session out of 10,000.
+    // Reopening this needs a bench call (a redesigned CREATOR layout, or the
+    // join symbol dropped for on-screen text), not a code change.
     snprintf(text, sizeof(text), "WIFI:S:%s;;", in.ssid);
   } else {
     snprintf(text, sizeof(text), "%s", in.url);
@@ -99,6 +129,28 @@ void creator_update(uint32_t now_ms) {
 
   CreatorInfo in;
   ui_creator_info(in);
+
+  // ---- THE TWO EXITS (P8-C2) ------------------------------------------------
+  // This screen is SF_STICKY, so invariant 3's 20 s auto-return does not apply
+  // and these are the only ways out other than a B press. Both call ui_back(),
+  // which runs creator_leave() - the ONE teardown - so a timeout and a button
+  // leave the device in the same state.
+  //
+  // 1. The access point never came up. spec section 47: every radio wait has an
+  //    exit. net_request_portal() can fail outright (NERR_AP_FAILED, or a scan
+  //    holding the radio), and without this the user would sit on "Conectando"
+  //    with the radio drawing current until they pressed a button.
+  // 2. The portal has been idle for ConfigV2.creator_idle_s (decision D7,
+  //    default 300 s). "Idle" means no request that PASSED THE PIN GATE:
+  //    networking/creator_gate.cpp is deliberate about that, because otherwise
+  //    anyone in radio range could hold the access point up forever by fetching
+  //    one unauthenticated URL every 299 s.
+  if (!in.ap_up) {
+    if ((uint32_t)(now_ms - s_open_ms) >= CREATOR_AP_WAIT_MS) { ui_back(); return; }
+  } else if (in.idle_expired) {
+    ui_back();
+    return;
+  }
 
   // In AP-provisioning mode the two symbols alternate: join the network first,
   // then open the page. A manual tap pins the choice for CR_MANUAL_MS.

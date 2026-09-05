@@ -13,6 +13,22 @@
 //   3. The token-bucket rate limiter in front of every handler.
 //   4. The captive-portal catch-all.
 //
+//  P8-C1/C2 ADD THE PIN AND THE PORTAL SESSION, and split them the way this
+//  tree splits everything a host binary must be able to drive:
+//    - THE RULES are networking/creator_gate.{h,cpp}: pure, caller-owned, no
+//      Arduino, driven case by case in tests/test_creator_gate.cpp. Which
+//      clock each deadline uses, and why, is argued in that header.
+//    - THE PERSISTED HALF is persistence/game_state.h's gs_creator_load /
+//      gs_creator_store, driven in tests/test_game_state.cpp against the real
+//      save_manager.
+//    - WHAT IS LEFT HERE is transport: read a header, answer a status code,
+//      ask flash to remember an edge. Nothing in this file decides a rule.
+//
+//  EVERYTHING ARRIVING OVER HTTP IS HOSTILE UNTIL IT IS VALIDATED ON THIS
+//  DEVICE. The page's own checks are a courtesy to the user and never a
+//  control: nothing here can tell a request from our page apart from a request
+//  from curl, so it assumes curl.
+//
 //  BANNED HERE, ON PURPOSE:
 //    - the 3-arg send_P  (WebServer.cpp:619 strlen_P()s the blob)
 //    - the 1-arg sendContent_P (WebServer.cpp:663, same bug)
@@ -35,7 +51,10 @@
 #include "../data/sprites.h"
 #include "../ui/render.h"
 #include "net.h"
+#include "creator_gate.h"                 // the PIN and idle RULES, pure
 #include "../core/rng.h"
+#include "../hardware/gametime.h"         // gt_mono32() - see creator_gate.h
+#include "../persistence/game_state.h"    // gs_creator_load / gs_creator_store
 #include "../data/index_html.h"   // EXACTLY ONE TU. See the file header.
 
 #if FEATURE_WEB
@@ -54,7 +73,19 @@ static uint16_t s_port           = WEB_PORT;
 // web_service() needs to know what to re-open on the rising edge.
 static uint16_t s_want_port      = WEB_PORT;
 
-static uint16_t s_pin            = 0xFFFFu;   // 0xFFFF == not rolled yet
+// The live gate: the issued PIN, the failure counter, the lockout deadline and
+// the idle clock. 16 B; every rule that reads or writes it is in
+// networking/creator_gate.cpp, which a host binary compiles.
+static CreatorGate s_gate = { 0, 0, 0, 0, 0, 0, 0, 0 };
+
+// The header keys WebServer is asked to keep. IT DROPS EVERY OTHER HEADER:
+// collectAllHeaders() pre-registers only Authorization and If-None-Match, and
+// Parsing.cpp discards anything not registered - so header("X-Pin") is the
+// empty string on every request until this array is handed to collectHeaders(),
+// and the gate would refuse the correct PIN forever. collectAllHeaders() is the
+// wrong fix: it allocates a String pair per unknown header, which is unbounded
+// heap growth from a hostile header list.
+static const char* const HDR_KEYS[] = { "X-Pin" };
 
 // Token bucket, held in MILLI-tokens so the refill never needs a float and
 // never truncates to zero on a fast poll. Capacity WEB_RATE_TOKENS * 1000
@@ -194,13 +225,159 @@ static void h_notfound(void)
 }
 
 // =============================================================================
-//  7. LIFECYCLE
+//  7. THE PIN GATE
+//    The rules are creator_gate.cpp's; this is the transport around them.
+// =============================================================================
+
+// Persist the ARMED EDGE of the failure counter, and nothing else.
+//
+// gs_creator_store() is a no-op when all three fields already match, so a
+// steady stream of wrong PINs writes flash exactly ONCE (the fifth failure) and
+// a success writes it once more (back to 0). Persisting every attempt would
+// hand an unauthenticated client one flash write per guess; creator_gate.h
+// (cg_persist_fails) argues the trade in full.
+//
+// pin_lock_until is written on the SAME edge, in wall-clock seconds, purely so
+// the DIAG screen has something to show. NOTHING READS IT BACK: gt_now() is an
+// estimate on an uncalibrated device and is settable by the phone from P8-C3,
+// and a deadline the far end can move is not a deadline.
+static void pin_persist_edge(void)
+{
+  uint16_t pin = 0, idle = 0;
+  uint8_t  had = 0;
+  gs_creator_load(pin, had, idle);
+  const uint8_t want = cg_persist_fails(s_gate);
+  if (had == want) return;                       // no edge, no write
+  const uint32_t mirror =
+      want ? (uint32_t)(gt_now() + (uint32_t)(CREATOR_PIN_LOCK_MS / 1000u)) : 0u;
+  (void)gs_creator_store(s_gate.pin, want, mirror);
+}
+
+// The gate every mutating route stands behind. Answers the client itself on
+// refusal, so a caller is one `if`.
+//
+// THE PIN ARRIVES IN AN X-Pin HEADER. It used to be a query argument `?k=`
+// (git show aa2b7ee:Pebblebol/webui.cpp), which put the secret in the URL and
+// therefore in the browser's history and in any Referer the page sends. The
+// same cg_verify() takes a plain string, so P8-C3's JSON tokenizer can hand it
+// a `"pin"` field from a request body without a second gate existing.
+static bool pin_ok(void)
+{
+  const String supplied = s_srv.header(F("X-Pin"));
+  const uint32_t now = gt_mono32();
+
+  switch (cg_verify(s_gate, supplied.c_str(), now)) {
+    case CG_OK:
+      pin_persist_edge();
+      return true;
+
+    case CG_LOCKED: {
+      // Say HOW LONG, not how close the guess was. The seconds left are not a
+      // secret - the client can measure them - and telling the owner who
+      // mistyped is worth more than withholding them from an attacker who
+      // already knows.
+      const uint32_t left_s = (cg_lock_left_ms(s_gate, now) + 999u) / 1000u;
+      snprintf(s_json, sizeof(s_json), "{\"err\":\"locked\",\"s\":%lu}",
+               (unsigned long)left_s);
+      send_json(403, s_json);
+      return false;
+    }
+
+    case CG_NO_PIN:
+      // No PIN issued, or the portal is not open. Distinguished from a wrong
+      // PIN because it is not a guess: there is nothing to guess yet.
+      send_err(403, "nopin");
+      return false;
+
+    default:
+      pin_persist_edge();
+      // A malformed PIN and a wrong PIN are ONE answer, for the reason a login
+      // form does not say which half was wrong.
+      send_err(403, "pin");
+      return false;
+  }
+}
+
+// ---- POST /api/ping ---------------------------------------------------------
+//
+//  The keep-alive, and spec section 38 names it. It is here in P8-C2 rather
+//  than with the other six routes because it is the LIFECYCLE's own endpoint:
+//  it is what an authorised page uses to say "I am still here", and cg_verify()
+//  moving last_seen_ms on success is the whole idle timer. It is also what
+//  gives the PIN gate a caller in the shipping firmware in this chunk instead
+//  of leaving pin_ok() as a dead export nobody executes.
+static void h_ping(void)
+{
+  note_request();
+  if (!rate_take(WEB_COST_READ)) { send_throttled(); return; }
+  // HOSTILE UNTIL PROVEN: a ping carries no body, so a declared one is a
+  // malformed request and not something to parse. Refused BEFORE the PIN gate
+  // because it costs nothing to answer and the body has already been drained
+  // by the raw hook below.
+  if (s_srv.clientContentLength() != 0) { send_err(400, "body"); return; }
+  if (!pin_ok()) return;                      // pin_ok() has already answered
+  send_json(200, "{\"ok\":1}");
+}
+
+// The raw/upload hook for the one POST route this chunk registers.
+//
+// ITS ONLY JOB IS TO EXIST. WebServer::canRaw() (detail/RequestHandlersImpl.h)
+// is satisfied by a non-null fourth argument on a non-GET route, and that is
+// what routes a request body through the core's fixed HTTP_RAW_BUFLEN buffer
+// instead of Parsing.cpp's readBytesWithTimeout(), whose only bound on a
+// malloc/realloc growth loop is the attacker's own Content-Length header. Every
+// POST route this server ever registers must pass one of these; P8-C3's version
+// also counts bytes and answers 413.
+//
+// IT MUST NEVER TOUCH server.raw(). The SAME function is invoked as the UPLOAD
+// hook when the body is multipart (Parsing.cpp's _parseForm path), and there
+// _currentRaw is null while WebServer::raw() dereferences it with no check - so
+// a POST with a multipart Content-Type would be a null dereference, i.e. a
+// crash any client can ask for.
+static void h_body_discard(void)
+{
+}
+
+// =============================================================================
+//  8. LIFECYCLE
 // =============================================================================
 
 uint16_t web_pin(void)
 {
-  if (s_pin == 0xFFFFu) s_pin = (uint16_t)rng_below(RNG_MISC, (uint32_t)WEB_PIN_MAX);
-  return s_pin;
+  return s_gate.pin;                 // 0 = none issued. A pure read; see webui.h.
+}
+
+void web_portal_open(void)
+{
+  uint16_t pin = 0, idle_s = 0;
+  uint8_t  fails = 0;
+  gs_creator_load(pin, fails, idle_s);
+
+  if (pin == 0u || pin >= (uint16_t)WEB_PIN_MAX) {
+    // FIRST CREATOR ENTRY. rng_below() draws from RNG_MISC, the stream
+    // core/rng.h documents for "tokens, nonces, PINs, canaries"; the one
+    // esp_random() of the firmware seeded it in app.cpp. The range handed in is
+    // WEB_PIN_MAX-1 so cg_mint_pin()'s +1 is exact rather than biased, and the
+    // result is 1..9999 - never the "no PIN issued" sentinel.
+    pin   = cg_mint_pin(rng_below(RNG_MISC, (uint32_t)WEB_PIN_MAX - 1u));
+    fails = 0u;
+    // Persisted BEFORE it is shown. A PIN on the user's phone that the device
+    // has forgotten is worse than no PIN at all.
+    (void)gs_creator_store(pin, 0u, 0u);
+  }
+
+  cg_open(s_gate, pin, fails, idle_s, gt_mono32());
+}
+
+void web_portal_close(void)
+{
+  cg_close(s_gate);
+  web_stop();                        // the socket; the radio is ui.cpp's half
+}
+
+bool web_portal_idle_expired(void)
+{
+  return cg_idle_expired(s_gate, gt_mono32());
 }
 
 bool     web_running(void)           { return s_running; }
@@ -210,7 +387,10 @@ bool web_begin(uint16_t port)
 {
   s_want_port = port;
 
-  (void)web_pin();                   // roll it once, keep it across restarts
+  // NO PIN IS ROLLED HERE ANY MORE. web_begin() runs once from app_setup(),
+  // long before the user has asked for the creator, and a PIN minted at boot is
+  // a PIN written to flash on every fresh device whether or not it is ever
+  // wanted. web_portal_open() mints on FIRST CREATOR ENTRY instead (spec 34).
 
   if (!s_routes_done) {
     s_routes_done = true;
@@ -224,7 +404,16 @@ bool web_begin(uint16_t port)
     // a std::function per cycle for no behavioural change (the first match
     // wins).
     s_srv.on("/", HTTP_GET, h_root);
+    // THE FOUR-ARG on(). The fourth argument is what makes canRaw() true and
+    // keeps a hostile Content-Length off the heap - see h_body_discard().
+    s_srv.on("/api/ping", HTTP_POST, h_ping, h_body_discard);
     s_srv.onNotFound(h_notfound);
+
+    // Without this the PIN header is invisible: WebServer keeps only the keys
+    // it was asked for. Order does not matter - begin() re-initialises the list
+    // only while the count is still zero.
+    s_srv.collectHeaders((const char**)HDR_KEYS,
+                         sizeof(HDR_KEYS) / sizeof(HDR_KEYS[0]));
 
     // WebServer.h:288 defaults _nullDelay = true, which burns 1 ms inside
     // every idle handleClient() - 20 % of a 20 fps frame budget, for nothing.
@@ -295,5 +484,12 @@ bool     web_running(void)            { return false; }
 uint16_t web_port(void)               { return 0; }
 uint16_t web_pin(void)                { return 0; }
 void     web_bind_config(Config*)     {}
+void     web_portal_open(void)        {}
+void     web_portal_close(void)       {}
+// FALSE, NOT TRUE, and the difference is a screen the user cannot leave. With
+// no server there is no portal to time out, so this timer never fires; what
+// gets the user back out of CREATOR in this build is the screen's own
+// CREATOR_AP_WAIT_MS, because no access point ever appears either.
+bool     web_portal_idle_expired(void) { return false; }
 
 #endif // FEATURE_WEB
