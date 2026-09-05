@@ -107,6 +107,15 @@ uint16_t xp_for_level(uint8_t level);
 // return false, and the last of those also pins xp at 0: past the top of the
 // curve there is nothing for it to mean.
 //
+// THE METER IS SPENT EVEN AT XP_LEVEL_MAX (P7-C6). The ledger counts XP HANDED
+// OUT, not XP that found a home. That is what it has to count, because
+// app/app.cpp reads the meter either side of an award to learn what a day's
+// activity score was worth in happiness - and while the top of the curve
+// returned before meter_take(), a level-30 Pebble earned no activity happiness
+// at all (measured: 5,500 milli owed, 0 paid). The price of the fix is that a
+// maxed Pebble now drains the device-wide daily budget it used to leave for a
+// Box-mate, which is pinned by a named case in tests/test_xp.cpp.
+//
 // It also raises EVO_STATE_PENDING (game/evolution.h) whenever the award
 // leaves the Pebble at or past the level its evolution rule asks for. THE
 // LEVEL GATE IS ALL THIS MODULE CAN SEE - it is pure, with no happiness, no

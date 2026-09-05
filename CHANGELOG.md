@@ -8,7 +8,25 @@ Versions are tagged at phase boundaries of `PEBBLEBOL_IMPLEMENTATION_PLAN.md`; t
 tag for a phase is cut only when its gate (`tools/check.sh`) and its variant matrix
 (`tools/build_matrix.sh`) are both green.
 
-## [Unreleased] — phase 7 (social), in progress
+## [0.7.0-social] — Unreleased
+
+Phase 7 is the phase where a Pebblebol stops being alone. Two devices find each other over
+ESP-NOW, agree to talk only when **both** players press A, fight a lockstep battle whose reward
+neither device can award by itself, and swap a Pebble through a flash journal that survives the
+power being cut at any single write. `game/breeding.{h,cpp}` computes a balanced offspring from
+two parents and a shared seed. And the phase exit found that a successful trade **destroyed a
+Pebble on the shipping build**, fixed it, and then discharged the seven debts phase 6 carried
+forward.
+
+**Two acceptance items are deliberately UNTICKED and neither was run.** §67's "Local
+multiplayer works" and P7-C1's "two boards see each other's beacon in LINK" are BENCH tests,
+there is no hardware in this environment, and a bench item is not something a host binary can
+tick. **BLE is therefore still in the tree**: D2 authorises its deletion, and P7-C1's own
+bullet gates that deletion on ESP-NOW having linked two real boards. Deleting the only fallback
+before the chosen transport has ever run would be exactly backwards, and the 712,618 B of flash
+and 23,496 B of static RAM it holds are the largest lever left in the budget — waiting on one
+bench test that takes two boards and ten seconds.
+
 
 ### P7-C1 — the device transport, per decision D2 (ESP-NOW)
 
@@ -253,6 +271,129 @@ journal writers, the wire codec and `s_tl` are all in the image.
 
 Sizes, all seven matrix variants green with zero project warnings: baseline
 1,985,080 / 80,340 → **1,993,954 / 80,484**; release **1,269,108 / 56,812**, 79.3 % and 87.4 % of the caps.
+
+### P7-C6 — the exit: one destroyed Pebble, seven debts, and a grep that could not see a unit slip
+
+**The exit opened on a blocking defect: a successful trade destroyed a Pebble on the shipping
+build, and the boot resolver carried the identical defect through the identical shim.**
+`game/trade.cpp` clears the outgoing slot (B1) and then files the incoming Pebble (B2), and
+`box_add()` fills the lowest free slot — which is the slot B1 just released. So the sequence
+writes **the same flash key microseconds apart**. `save_pebble()` DEFERS a second write of one
+key inside `SAVE_MIN_GAP_MS` (1,000 ms) — `force` does not bypass that branch — **and returns
+true**. The two shims returned that `true` as `TradeStore.write_slot`, whose contract is
+literally "every function returns whether the bytes LANDED". B2 never reached flash, the Box
+header was written over it and the journal was cleared to IDLE, so nothing was left to repair
+it. The peer had already applied. The Pebble was gone.
+
+**Reproduced before it was fixed, and it is worse than a race.** Binding `app/app.cpp`'s own
+clock wiring in `tests/test_trade.cpp` — one line — makes the CLEAN trade case fail with **no
+fault injection at all**: the Box holds 2 Pebbles instead of 3 and the trade costs **9 flash
+writes instead of 10**.
+
+**The fixture is why 27,819 checks could not see it, and that is this project's named pattern
+with the polarity inverted.** `save_set_clock(nullptr, ...)` switches off `save_manager.cpp`'s
+entire wear-filter branch. A 15-point kill sweep, a 9-point resolver sweep and an 800-trial
+lossy table all ran against a save manager **the release artefact does not execute**. Phase 6
+found a default living inside a dev-only path; here the DEFAULT was the safe one and the
+SHIPPING wiring was the dangerous one. The fix is `save_pebble_now()` — no filter, no deferral,
+no third answer — and two gates: `save_pebble()` may not be called from `app/` or `ui/`, and no
+host test may bind a null millisecond clock.
+
+**The seven debts phase 6 carried forward are all discharged, three as defects and two as
+documentation.**
+
+- **The hourly care-gain ledger could be refilled by typing a date.** `sim_gain_restore()`
+  aged its snapshot forward by `elapsed * cap / 3600` from two wall clocks a player sets on the
+  time screen: 100 rounds of (clock +1 h, reboot) from a spent ledger manufactured **4,000
+  happiness gain points** against a cap of 40 an hour. The term is deleted, the same way
+  `xp_ledger_restore()` lost its at P6-C4. **The honest cost is written into `game/sim.h`**:
+  off-time no longer refills the budget, so a player back after an hour away may wait up to 29
+  minutes for a full meal. An unkind hour is recoverable; a stat budget a power cycle refills is
+  not.
+- **A Pebble at level 30 earned no activity happiness at all.** `xp_add()` returned at the top
+  of the curve *before* spending the meter, and the activity reward is scaled by what the meter
+  spent — so a maxed Pebble was paid 0 of the 5,500 milli it had earned. One line moved. It
+  changes what the device-wide ledger means (XP handed out, not XP that found a home) and a
+  named case now owns that behaviour source by source.
+- **A cooldown blob could freeze the activity score for the life of the device.**
+  `CooldownTable.act_day` is a u16 that holds 65,535 while the widest day a `uint32_t` epoch can
+  name is 49,710, and the day only ever rolls forward — so a blob in between named a day nothing
+  could beat. Measured: ten simulated years score **146,000** points honestly and **440** with a
+  poisoned field. `act_adopt()` is one clamp at boot, with an unclamped control arm in the test
+  so the guard is guarding something.
+- **Nothing counted a dropped tick.** A gap wider than 16 s is resynchronised away and one
+  second charged — correct, and silent for four phases, so a device stalling for a minute an
+  hour looked identical to a healthy one. Two saturating counters now sit on the ENERGIA page,
+  and the arithmetic moved into `hardware/power.cpp` so a host binary can drive it: the case
+  asserts **both** halves, that the counter moved *and* that exactly one second was charged.
+- **`gt_mono_ms()`'s choice of clock now has a test and not only a grep.** Two ~20-line fake
+  headers let `tests/` compile `hardware/gametime.cpp` a second time with `-DARDUINO`, and four
+  cases drive the DEVICE branch across a wake that zeroes uptime while the RTC keeps counting.
+  **The mutation that justifies the whole exercise: divide the RTC by 1,000,000 instead of
+  1,000 and the gate still prints `GATE OK` while all four cases fail.** A grep can prove the
+  right identifier is in the right function; it can never prove the clock behaves.
+- **Two items were documentation and are recorded as such.** The simulation environment is
+  sampled once per tick rather than once per simulated second, so a slice straddling a day edge
+  is charged on the wrong side by up to 8 s — worst measured care difference over half an hour:
+  **0 milli-points**, and both files that described the charge as environment-exact now say so.
+  And the paragraph explaining that a deep-sleep rung would need `app_loop()`'s uptime clock
+  changed too now sits directly under the `static_assert` that trips it.
+
+**One more untested load-bearing guard, found in review.** `session.cpp` refuses a
+`SESSION_ACCEPT` at a RESPONDER — and deleting the role clause left all 46 host binaries green.
+It is not redundant: one forged, well-formed frame drives a responder out of `SS_SESSION` and
+makes it adopt the attacker's nonce, which is a `session_derive_seed()` input. The consequence
+is bounded to denial, which `session.h` already states; the guard now has a case.
+
+**Fifteen mutations, each making a NAMED case or a NAMED gate fail**, and one of them failed
+nothing — `save_pebble_now()`'s cancellation of a pending deferred write buys one fewer flash
+write and not correctness, because `save_service()` would have written the same RAM. The
+**comment was narrowed and the assertion changed to count puts**, rather than the test stretched
+around a claim wider than the tree.
+
+Sizes: baseline 1,993,954 / 80,484 → **1,994,460 / 80,492** (+506 / +8, and the 8 B are the two
+new counters plus alignment); release **1,269,468 / 56,820**, 79.3 % and 87.4 % of the caps.
+`riscv32-esp-elf-nm` confirms `save_pebble_now`, `act_adopt`, `pwr_tick_budget` and
+`sim_gain_restore` are all **in the release image** — a fix that is not in the shipping artefact
+is not a fix, which is the rule phase 6 left behind.
+
+### Phase 7 in numbers
+
+Host suite 41 → **47 binaries**, 787 → **915 tests**, 3,658,841 → **3,802,956 checks**. Seven
+new host binaries' worth of new subject matter: the ring, discovery, the LINK screen, the trade,
+breeding and the device clock. `CONTENT_VERSION` unchanged. Screen goldens: four added, one
+deleted, none of the existing 59 changed.
+
+`tools/check.sh` gained **nine gates** this phase, each proven to bite by planting the thing it
+forbids: `networking/discovery.{h,cpp}` may not name a hardware address, in a field, a parameter
+or a comment; the ESP-NOW API may be called from exactly one file; `session.cpp`,
+`battle_link.cpp` and `trade_link.cpp` may contain zero preprocessor conditionals; every file
+under `networking/` must be classified pure or impure; `session_init()`/`session_start()` may be
+called only from the LINK screen (the consent gate as a red line); `session_rewards_authorised()`
+has exactly one reader; `ui/screen_battle.cpp` may not include the LINK screen or a networking
+header; `save_pebble()` may not be called from `app/` or `ui/`; and no host test may bind
+`save_set_clock(nullptr, ...)`.
+
+Sizes, all seven matrix variants green with zero project warnings: baseline
+1,948,802 / 73,580 → **1,994,460 / 80,492**; release 1,224,210 / 49,924 → **1,269,468 / 56,820**,
+which is 79.3 % of `GATE_RELEASE_FLASH_MAX` and 87.4 % of `GATE_RELEASE_GLOBALS_MAX` and 40.4 %
+of the 3,145,728 B `app0` slot. **Phase 7 went over its budgeted allowance on both axes** (20–35
+KB flash and 2.0–4.0 KB globals forecast; +45,658 and +6,912 actual) and `docs/budget.md` §7 says
+where: 5,312 of the globals are one receive ring whose depth was measured rather than guessed,
+and 26,520 of the flash is the session, the codec and the wire validator entering the image for
+the first time when the LINK screen finally made them reachable. **`no-web` moved +616,358 flash
+and none of it is a phase-7 feature** — ESP-NOW is a Wi-Fi consumer that needs no web server, so
+that variant now links the Wi-Fi driver it used to compile out, and `all-off` is the only
+variant left with no radio in it.
+
+**Nothing in this phase has run on hardware, and that is a larger caveat here than in any
+earlier one, because the whole subject is two devices talking.** Unobserved: whether two boards
+see each other's beacon at all; the modem-sleep default on an unassociated station; the channel
+after a §40 scan; ESP-NOW's duplicate suppression and real MTU; the receive callback's threading
+(the single-producer/single-consumer claim rests on discipline and two precedents, and a host
+binary is single-threaded); the radio half of the consent gate, since the loopback delivers
+regardless of binding; and a flash erase interrupted mid-page. The plan carries an eleven-item
+bench list in the order to run it, and its **first** item is the modem-sleep check.
 
 ## [0.6.0-activity] — Unreleased
 
@@ -1835,6 +1976,15 @@ The plan cuts tags from Phase 2 onward, so Phase 1 has no `v0.1.0` tag; it is co
 - Repository archaeology: audit of the inherited sketch, the ten-phase implementation
   plan, the decisions log, and a CI skeleton.
 
+[0.7.0-social]: https://github.com/pmirall/Pebblebol/commit/f8f2e51
+<!-- 0.7.0-social names f8f2e51 (P7-C4/C5), the last commit before the exit,
+     for the same reason 0.6.0-activity names e8701ea rather than b434491: an
+     entry cannot contain the hash of the commit that adds it, since writing it
+     in changes the hash. The ANNOTATED TAG v0.7.0-social points at the exit
+     commit itself, which is the accurate anchor; this link points at the last
+     commit that exists independently of it. Neither is on the remote — this
+     session was instructed not to push — so both currently 404, exactly as the
+     0.5.0 note below records for the same situation. -->
 [0.6.0-activity]: https://github.com/pmirall/Pebblebol/commit/e8701ea
 [0.5.0-explore]: https://github.com/pmirall/Pebblebol/commit/6ec3355
 [0.4.0-battle]: https://github.com/pmirall/Pebblebol/commit/250f73e

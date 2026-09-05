@@ -1008,3 +1008,148 @@ TEST(the_gain_ledger_is_left_alone_by_the_migration) {
   CHECK_EQ(kv_get(KV_MAIN, KEY_GAIN, back, sizeof back), (int)sizeof back);
   CHECK_EQ(memcmp(back, gain, sizeof gain), 0);     // byte for byte, untouched
 }
+
+
+// =============================================================================
+//  THE TWO SLOT-WRITE PATHS, AND WHY THERE ARE TWO (P7-C6, the blocking find)
+//
+//  save_pebble(force=true) DEFERS a second write of one key inside
+//  SAVE_MIN_GAP_MS and returns TRUE - correct for the care loop, which calls it
+//  on every action and relies on save_service() to flush. It is a LIE to any
+//  caller whose contract is "the bytes landed", which is why game/trade.cpp's
+//  store seam goes through save_pebble_now() instead. Both halves are pinned
+//  here, because the whole defect was that only one of them had a reader.
+// =============================================================================
+// Reads BOTH copies of a slot's pair straight out of the fake store, so a case
+// can ask "are these bytes on flash right now?" without going through
+// save_load_all() - which rebinds the module and would itself write.
+static bool flash_slot_has_level(uint8_t slot, uint8_t level) {
+  for (uint8_t copy = 0; copy < 2u; ++copy) {
+    char key[KV_KEY_CAP];
+    key[0] = 'p'; key[1] = 'b';
+    key[2] = (char)('0' + slot); key[3] = (char)('0' + copy); key[4] = '\0';
+    PebbleInstance p;
+    if (kv_get(KV_MAIN, key, &p, sizeof p) != (int)sizeof p) continue;
+    if (p.level == level) return true;
+  }
+  return false;
+}
+
+// A whole device with one Pebble in 'slot', so save_load_all() can read it back.
+static void seed_one_slot(GameState& gs, uint8_t slot) {
+  CHECK_EQ(save_load_all(gs), LOAD_FRESH);
+  save_bind(gs);
+  gs.box.slot_mask   = (uint16_t)(1u << slot);
+  gs.box.active_slot = slot;
+  CHECK(save_box_header(gs.box));
+  CHECK(save_config(gs.cfg));
+  CHECK(save_inventory(gs.inv));
+  CHECK(save_cooldowns(gs.cds));
+  CHECK(save_trade_journal(gs.trade));
+}
+
+TEST(a_second_write_of_one_slot_inside_the_floor_is_deferred_and_says_so) {
+  begin();
+  GameState gs;
+  seed_one_slot(gs, 3u);
+
+  const PebbleInstance first = sample_pebble(3);
+  gs.pebbles[3] = first;
+  CHECK(save_pebble(3, first, true));
+  CHECK(save_pebble_landed());                 // the first write always lands
+
+  PebbleInstance second = first;
+  second.level = (uint8_t)(first.level + 5u);
+  gs.pebbles[3] = second;
+
+  advance(SAVE_MIN_GAP_MS / 2u);               // still inside the floor
+  CHECK(save_pebble(3, second, true));         // "true" - and it did NOT land
+  CHECK(!save_pebble_landed());
+
+  // FLASH STILL HOLDS THE FIRST BYTES. This is the exact shape of the defect
+  // P7-C6 found: a caller that read only the return value would have believed
+  // otherwise, written a Box header over it and cleared its journal.
+  CHECK(flash_slot_has_level(3u, first.level));
+  CHECK(!flash_slot_has_level(3u, second.level));
+
+  // save_service() is what makes the deferral honest for the care loop.
+  advance(SAVE_MIN_GAP_MS);
+  save_service();
+  CHECK(save_pebble_landed());
+  CHECK(flash_slot_has_level(3u, second.level));
+
+  GameState back;
+  CHECK_EQ((int)save_load_all(back), (int)LOAD_OK);
+  CHECK_EQ((int)back.pebbles[3].level, (int)second.level);
+}
+
+TEST(save_pebble_now_reaches_flash_twice_inside_the_floor_and_never_says_it_did_not) {
+  begin();
+  GameState gs;
+  seed_one_slot(gs, 2u);
+
+  // THE TRADE'S SHAPE: B1 clears the outgoing slot, B2 files the incoming one
+  // into the slot B1 just released, microseconds apart. Both must land.
+  PebbleInstance out = sample_pebble(2);
+  gs.pebbles[2] = out;
+  CHECK(save_pebble_now(2, out));
+  CHECK(save_pebble_landed());
+
+  PebbleInstance mid = sample_pebble(5);
+  mid.id = 0xFEED0001u;
+  gs.pebbles[2] = mid;
+  const uint32_t puts_b1 = kv_mem_puts();
+  CHECK(save_pebble_now(2, mid));              // B1, same key, same millisecond
+  CHECK(save_pebble_landed());
+  CHECK(kv_mem_puts() > puts_b1);              // it really touched the store
+
+  PebbleInstance in = sample_pebble(9);
+  in.id = 0xFEED0002u;
+  gs.pebbles[2] = in;
+  const uint32_t puts_b2 = kv_mem_puts();
+  CHECK(save_pebble_now(2, in));               // B2, same key, same millisecond
+  CHECK(save_pebble_landed());
+  CHECK(kv_mem_puts() > puts_b2);              // and so did this one
+
+  CHECK(flash_slot_has_level(2u, in.level));   // the LAST write is what is there
+
+  // AND IT CANCELS A PENDING DEFERRAL. What that buys is ONE FEWER FLASH
+  // WRITE, not correctness - save_service() would have written the same RAM -
+  // so the assertion below counts puts rather than comparing bytes, which is
+  // the only thing that can actually tell the two behaviours apart.
+  gs.box.slot_mask = (uint16_t)(gs.box.slot_mask | (1u << 4));
+  CHECK(save_box_header(gs.box));
+  PebbleInstance stale = sample_pebble(1);
+  stale.id = 0xFEED0003u;
+  gs.pebbles[4] = stale;
+  CHECK(save_pebble(4, stale, true));
+  PebbleInstance newer = stale;
+  newer.level = (uint8_t)(stale.level + 3u);
+  gs.pebbles[4] = newer;
+  CHECK(save_pebble(4, newer, true));          // deferred
+  CHECK(!save_pebble_landed());
+  PebbleInstance traded = sample_pebble(6);
+  traded.id = 0xFEED0004u;
+  gs.pebbles[4] = traded;
+  CHECK(save_pebble_now(4, traded));
+  advance(SAVE_MIN_GAP_MS * 2u);
+  const uint32_t puts_svc = kv_mem_puts();
+  save_service();                              // must be a no-op for slot 4
+  CHECK_EQ(kv_mem_puts(), puts_svc);
+  CHECK(flash_slot_has_level(4u, traded.level));
+
+  GameState back;
+  CHECK_EQ((int)save_load_all(back), (int)LOAD_OK);
+  CHECK_EQ(back.pebbles[2].id, 0xFEED0002u);
+  CHECK_EQ(back.pebbles[4].id, 0xFEED0004u);
+}
+
+TEST(a_slot_out_of_range_is_refused_by_both_write_paths) {
+  begin();
+  GameState gs;
+  seed_one_slot(gs, 0u);
+  const PebbleInstance p = sample_pebble(0);
+  CHECK(!save_pebble((uint8_t)BOX_SLOTS, p, true));
+  CHECK(!save_pebble_now((uint8_t)BOX_SLOTS, p));
+  CHECK(!save_pebble_landed());
+}

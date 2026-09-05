@@ -93,6 +93,25 @@ bool xp_add(PebbleInstance& p, uint16_t amount, XpSource src, uint8_t* levels_ga
   if (src >= XP_SRC_COUNT) return false;
 
   if (p.level == 0u) p.level = 1u;
+
+  // THE METER IS SPENT BEFORE THE TOP-OF-CURVE RETURN, SINCE P7-C6, AND THAT
+  // MOVED ONE LINE CHANGES WHAT THE LEDGER MEANS. It used to return first, so a
+  // Pebble at XP_LEVEL_MAX spent nothing - and app/app.cpp's activity reward
+  // reads the meter either side of the award to learn what the score was worth,
+  // so a level-30 Pebble earned ZERO activity happiness as well as zero XP.
+  // MEASURED before the move: level 29 awarded 44 XP_SRC_CARRY paid 5,500 milli
+  // of happiness; level 30 paid 0 of the same 5,500 owed.
+  //
+  // The device-wide ledger now means "XP HANDED OUT", not "XP that found a
+  // home" - which is coherent with why it is device-wide at all: it is a cap on
+  // what a day of play can pay, and a Pebble that cannot use its share has
+  // still been paid it. The consequence is real and is pinned by
+  // the_meter_is_spent_at_the_top_of_the_curve_for_every_metered_source: at
+  // level 30 every metered source now DRAINS the day's budget it used to leave
+  // untouched, so a maxed Pebble no longer banks the day for a Box-mate.
+  amount = meter_take(src, amount);
+  if (amount == 0u) return false;
+
   if (p.level >= (uint8_t)XP_LEVEL_MAX) {
     // The top of the curve. xp stops meaning anything there, so it is pinned at
     // 0 rather than left holding the leftovers of the last level-up.
@@ -100,9 +119,6 @@ bool xp_add(PebbleInstance& p, uint16_t amount, XpSource src, uint8_t* levels_ga
     p.xp    = 0u;
     return false;
   }
-
-  amount = meter_take(src, amount);
-  if (amount == 0u) return false;
 
   const uint8_t level0 = p.level;
   uint32_t acc = (uint32_t)p.xp + (uint32_t)amount;

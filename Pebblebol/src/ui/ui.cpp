@@ -1917,7 +1917,13 @@ static bool ui_tr_store_slot(void* ctx, uint8_t slot)
 {
   (void)ctx;
   if (slot >= (uint8_t)BOX_SLOTS) return false;
-  return save_pebble(slot, gs_state().pebbles[slot], true);
+  // save_pebble_now(), NOT save_pebble(..., true). B1 and B2 write the SAME key
+  // microseconds apart whenever box_add() reuses the slot B1 released, and
+  // save_pebble() DEFERS a second write inside SAVE_MIN_GAP_MS and returns
+  // true - so this shim would tell game/trade.cpp that bytes landed which had
+  // not, and the trade would clear its journal over an empty flash slot. See
+  // persistence/save_manager.h.
+  return save_pebble_now(slot, gs_state().pebbles[slot]);
 }
 static bool ui_tr_store_box(void* ctx)
 {

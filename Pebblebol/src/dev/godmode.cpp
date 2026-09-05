@@ -1210,12 +1210,21 @@ static void draw_sys(void)
       rd_text(2, 35, RD_FONT_TINY, b);
       snprintf(b, sizeof(b), "slept  %lus", (unsigned long)(pwr_slept_ms() / 1000UL));
       rd_text(2, 43, RD_FONT_TINY, b);
+      // THE DROPPED-TICK COUNTER (P7-C6). A gap wider than NT_TICK_MAX_OWED_S
+      // is a stall, not a sleep: it is resynchronised away and one second is
+      // charged. Both halves are here because "how often" without "how much"
+      // cannot tell a hiccup from a device that stops for minutes. A healthy
+      // board reads 0 0 for its whole run - the ladder cannot make one
+      // (PWR_SLEEP_SLICE_MS 8,000 < 16,000, static_asserted in app.cpp).
+      snprintf(b, sizeof(b), "stall  %u x %lus", (unsigned)pwr_tick_stalls(),
+               (unsigned long)pwr_tick_lost_s());
+      rd_text(2, 51, RD_FONT_TINY, b);
       // The pin fact this whole design turns on, on the screen rather than only
       // in a header: LIGHT sleep, both buttons, because PIN_BTN_L cannot wake
       // the chip from deep sleep on this map.
       snprintf(b, sizeof(b), "wake L%u R%u light",
                (unsigned)PIN_BTN_L, (unsigned)PIN_BTN_R);
-      rd_text(2, 51, RD_FONT_TINY, b);
+      rd_text(2, 59, RD_FONT_TINY, b);
       break;
     }
     case GD_SYS_RADIO: {

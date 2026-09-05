@@ -71,6 +71,26 @@ static GameState g_gs;
 
 static uint32_t clock_epoch(void) { return TRD_EPOCH0; }
 
+// THE MILLISECOND CLOCK IS REAL HERE, AND THAT IS THE WHOLE POINT.
+// app/app.cpp:804 binds save_set_clock(&clock_ms, &clock_epoch); a fixture that
+// passes nullptr switches OFF save_manager.cpp's entire wear-filter branch
+// (`if (s_now_ms && s_have_written[slot])`) and therefore tests a save_manager
+// the release artefact never executes. g_ms is FROZEN by default because that
+// is what a real device's millis() does across the microseconds B1 and B2 are
+// apart, which is exactly the window SAVE_MIN_GAP_MS defers in.
+static uint32_t g_ms = 0;
+static uint32_t clock_ms(void) { return g_ms; }
+
+// A REBOOT IS MODELLED BY AGEING THE CLOCK, and here is why rather than a
+// save_reset_write_state() written for a test. save_manager.cpp's per-slot
+// throttle (s_have_written[], s_last_write_ms[]) is file-scope state that is
+// ZERO at every real boot, and save_bind() deliberately does not clear it
+// because on the device there is nothing to clear. This host process keeps it
+// across a fake power cycle, so the fixture walks the clock past
+// SAVE_MIN_GAP_MS instead - which is what a real reboot buys - rather than
+// growing a shipping entry point nothing on the device would call.
+static void age_past_the_write_floor(void) { g_ms += SAVE_MIN_GAP_MS + 1u; }
+
 static Genome sealed_genome(uint32_t seed)
 {
   genome_seed(seed);
@@ -103,7 +123,8 @@ static void mk_free_pebble(PebbleInstance& p, uint8_t species, uint8_t level, ui
 static void device_fresh(void)
 {
   kv_mem_reset();
-  save_set_clock(nullptr, &clock_epoch);
+  age_past_the_write_floor();
+  save_set_clock(&clock_ms, &clock_epoch);
 
   memset(&g_gs, 0, sizeof g_gs);
   for (uint8_t s = 0; s < (uint8_t)BOX_SLOTS; ++s) pebble_clear(g_gs.pebbles[s]);
@@ -139,6 +160,7 @@ static void device_fresh(void)
 // A POWER CYCLE. Nothing in RAM survives it; the whole load pipeline runs.
 static LoadResult device_boot(void)
 {
+  age_past_the_write_floor();
   memset(&g_gs, 0, sizeof g_gs);
   const LoadResult r = save_load_all(g_gs);
   box_bind(g_gs);
@@ -156,10 +178,14 @@ static bool st_write_journal(void* ctx, const PendingTrade& t)
   g_gs.trade = t;
   return save_trade_journal(t);
 }
+// THE SHAPE OF THE SHIPPING SHIMS, and it must stay that shape: ui/ui.cpp's
+// ui_tr_store_slot() and app/app.cpp's app_trade_write_slot() both call
+// save_pebble_now(). A fixture that called save_pebble(..., true) here would be
+// testing a store the release artefact does not have.
 static bool st_write_slot(void* ctx, uint8_t slot)
 {
   (void)ctx; g_store_writes++;
-  return save_pebble(slot, g_gs.pebbles[slot], true);
+  return save_pebble_now(slot, g_gs.pebbles[slot]);
 }
 static bool st_write_box(void* ctx)
 {

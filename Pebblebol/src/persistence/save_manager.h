@@ -120,6 +120,28 @@ bool save_pebble(uint8_t slot, const PebbleInstance& p, bool force);
 // to inherit this module's cadence instead of inventing a second one.
 bool save_pebble_landed(void);
 
+// A SLOT WRITE THAT IS NEVER FILTERED AND NEVER DEFERRED, for the one caller
+// that cannot survive either: game/trade.cpp's apply step.
+//
+// WHY IT HAS TO EXIST. The trade writes TWO slots microseconds apart (B1 clears
+// the outgoing one, B2 files the incoming one) and box_add() fills the lowest
+// free slot, which is USUALLY THE SLOT B1 JUST RELEASED - so the sequence writes
+// one key twice inside SAVE_MIN_GAP_MS. save_pebble(force=true) defers the
+// second write and RETURNS TRUE, which is the right answer for the care loop
+// (save_service() flushes it a second later) and a lie for a caller whose whole
+// contract is "the bytes landed": the trade would then write the Box header and
+// CLEAR ITS JOURNAL over a slot that is still empty on flash, and the boot
+// resolver - the last line of defence - would have nothing left to repair.
+//
+// force=true is deliberately NOT widened to mean this. persistence/
+// game_state.cpp calls it on every care action and RELIES on the deferral for
+// flash wear; changing what force means would take that away from it.
+//
+// The wear argument does not apply here: this runs a handful of times per
+// TRADE, not per tick. Returns whether the bytes reached flash and read back
+// equal - there is no third answer, which is the whole point.
+bool save_pebble_now(uint8_t slot, const PebbleInstance& p);
+
 bool save_box_header(const BoxHeader& b);
 bool save_config(ConfigV2& c);            // seals into the caller's struct
 bool save_inventory(const Inventory& i);

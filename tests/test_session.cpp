@@ -1358,6 +1358,76 @@ TEST(junk_never_reaches_the_state_machine_and_never_holds_the_session_open)
   CHECK(!session_rewards_authorised(T.e[0].s));
 }
 
+// =============================================================================
+//  A RESPONDER REFUSES AN ACCEPT (P7-C6, an untested load-bearing guard)
+//
+//  session.cpp's SS_SESSION arm reads
+//      else if (t == PT_SESSION_ACCEPT && s.role == (uint8_t)SR_INITIATOR)
+//  and until this case existed the ROLE CLAUSE HAD NO TEST: deleting it left
+//  test_session, test_trade, test_link_screen and the whole 46-binary suite
+//  green. It is not redundant. One forged, well-formed SESSION_ACCEPT then
+//  drives the RESPONDER out of SS_SESSION into its operation and makes it adopt
+//  the attacker's nonce as nonce_peer - and nonce_peer is an input to
+//  session_derive_seed(), so the two ends would seed differently.
+//
+//  THE BOUND IS DENIAL, NOT THEFT, and session.h already says so: the session
+//  id travels in clear and an off-path device that reads one frame can inject
+//  well-formed ones. What this guard buys is that the injection is REFUSED AND
+//  COUNTED here rather than acted on and discovered three states later.
+// =============================================================================
+TEST(a_responder_refuses_a_session_accept_and_never_adopts_its_nonce)
+{
+  Trial& T = arena();
+  // SS_SESSION IS TRANSIENT ON A CLEAN LINK - the responder answers the request
+  // in the same poll it arrives - so the case has to HOLD it there. Blocking
+  // SESSION_REQUEST from both endpoints does it and blocks nothing else: only
+  // the initiator ever sends one.
+  LoopbackFault f = {};
+  f.block_type[0] = (uint8_t)PT_SESSION_REQUEST; f.block_left[0] = 0xFFu;
+  f.block_type[1] = (uint8_t)PT_SESSION_REQUEST; f.block_left[1] = 0xFFu;
+  trial_begin(T, 0x5E551011u, f);
+  CHECK_EQ(trial_set_teams(T), VR_OK);
+  session_start(T.e[0].s, T.now);
+  session_start(T.e[1].s, T.now);
+
+  // Whichever endpoint the device-id rule made the RESPONDER is the one under
+  // test; asserting the role rather than hard-coding an index is what keeps
+  // this case honest if the seed or the ids ever change.
+  CHECK(trial_run_until_state(T, 0u, SS_SESSION));
+  const uint8_t who = (T.e[0].s.role == (uint8_t)SR_RESPONDER) ? 0u : 1u;
+  CHECK(trial_run_until_state(T, who, SS_SESSION));
+  CHECK_EQ((int)T.e[who].s.role, (int)SR_RESPONDER);
+  CHECK_EQ((int)session_state(T.e[who].s), (int)SS_SESSION);
+
+  const uint16_t wrong_before = session_end(T.e[who].s).rx_wrong_state;
+  const uint32_t nonce_before = T.e[who].s.nonce_peer;
+
+  // A WELL-FORMED accept under the responder's own session id and next seq:
+  // every field is what its own initiator would have sent, so nothing but the
+  // role clause can refuse it.
+  ProtoMsg m;
+  proto_msg_init(m, PT_SESSION_ACCEPT, T.e[who].s.id,
+                 (uint16_t)(T.e[who].s.rx_seq_last + 1u));
+  m.p.sacc.nonce_b    = 0xDEADBEEFu;
+  m.p.sacc.verdict    = 0u;
+  m.p.sacc.team_count = 3u;
+  m.p.sacc.lvl_lo     = T.e[who].s.lvl_lo;
+  m.p.sacc.lvl_hi     = T.e[who].s.lvl_hi;
+  m.p.sacc.op_echo    = T.e[who].s.op;
+  uint8_t buf[PROTO_FRAME_MAX]; size_t n = 0;
+  CHECK_EQ(proto_encode(m, buf, sizeof buf, n), PE_OK);
+  inject(T.lk, who, buf, (uint16_t)n);
+  session_poll(T.e[who].s, T.now);
+
+  CHECK_EQ((int)session_state(T.e[who].s), (int)SS_SESSION);   // did not move
+  CHECK_EQ(session_end(T.e[who].s).rx_wrong_state, (uint16_t)(wrong_before + 1u));
+  CHECK_EQ(T.e[who].s.nonce_peer, nonce_before);               // and not adopted
+  CHECK(T.e[who].s.nonce_peer != 0xDEADBEEFu);
+  CHECK(!session_closed(T.e[who].s));                          // refused, not fatal
+  CHECK(!session_rewards_authorised(T.e[who].s));
+  CHECK(boxes_untouched(T));
+}
+
 TEST(a_frame_larger_than_the_link_carries_is_refused_and_looks_like_a_loss)
 {
   // mtu is DATA. At 60 bytes the 164-byte TEAM_SUBMIT cannot go out at all, and

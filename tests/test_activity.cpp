@@ -681,3 +681,90 @@ TEST(the_happiness_half_of_the_reward_is_scaled_by_the_xp_the_ledger_granted) {
     CHECK_EQ(act_score_today(t, clk(EP0)), (uint16_t)total);
   }
 }
+
+// =============================================================================
+//  A DAY INDEX THE CLOCK CAN NEVER REACH FREEZES THE SCORE FOR EVER (P7-C6)
+//
+//  open_day()'s only roll condition is `day > t.act_day`. act_day is a u16 that
+//  holds 65,535 and the widest day a u32 epoch can name is 49,710, so a blob
+//  carrying anything in between names a day nothing can beat: the day never
+//  rolls, the score sticks, and every later day is worth one term's cap.
+//  act_adopt() is the one look at that field, at boot, before anything scores.
+// =============================================================================
+TEST(a_day_index_beyond_the_clock_freezes_the_score_and_the_boot_clamp_removes_it) {
+  // THE CEILING IS WHAT THE CLOCK CAN NAME, not what the field can hold.
+  CHECK_EQ((uint32_t)ACT_DAY_MAX_INDEX, 0xFFFFFFFFul / (uint32_t)ACT_DAY_S);
+  CHECK(ACT_DAY_MAX_INDEX < 0xFFFFu);
+
+  // --- THE UNCLAMPED ARM, so the case cannot pass because the defect is gone
+  //     for some other reason. Ten simulated years against a poisoned table.
+  CooldownTable poisoned;
+  fresh(poisoned);
+  poisoned.act_day   = 0xFFFFu;
+  poisoned.act_score = 0u;
+  uint32_t frozen_total = 0u;
+  for (uint16_t d = 0; d < 3650u; ++d) {
+    const uint32_t ep = EP0 + (uint32_t)d * (uint32_t)ACT_DAY_S;
+    act_begin();                                     // a boot every day
+    for (uint8_t k = 0; k < (uint8_t)ACT_CAP_INTERACT; ++k) {
+      frozen_total += act_note_interaction(poisoned, clk(ep));
+    }
+  }
+  CHECK_EQ(poisoned.act_day, 0xFFFFu);               // it never rolled, not once
+  // ONE day's ceiling for TEN YEARS of play: the score saturates at
+  // ACT_SCORE_MAX and, because the day never rolls, nothing ever resets it.
+  CHECK(frozen_total <= (uint32_t)ACT_SCORE_MAX);
+  CHECK_EQ(poisoned.act_score, (uint16_t)frozen_total);
+
+  // --- THE CLAMPED ARM: the same ten years, through the boot clamp.
+  CooldownTable healed;
+  fresh(healed);
+  healed.act_day   = 0xFFFFu;
+  healed.act_score = 1234u;
+  CHECK(act_adopt(healed));                          // it repaired something
+  CHECK_EQ(healed.act_day, 0u);                      // "no day recorded"
+  CHECK_EQ(healed.act_score, 0u);                    // and nothing carried in
+
+  uint32_t honest_total = 0u;
+  for (uint16_t d = 0; d < 3650u; ++d) {
+    const uint32_t ep = EP0 + (uint32_t)d * (uint32_t)ACT_DAY_S;
+    act_begin();
+    for (uint8_t k = 0; k < (uint8_t)ACT_CAP_INTERACT; ++k) {
+      honest_total += act_note_interaction(healed, clk(ep));
+    }
+  }
+  CHECK_EQ(honest_total,
+           3650ul * (uint32_t)ACT_CAP_INTERACT * (uint32_t)ACT_PTS_INTERACT);
+  CHECK(honest_total > frozen_total * 100ul);        // the gap is the defect
+  fprintf(stderr, "     ten years: %u points frozen, %u points healed\n",
+          (unsigned)frozen_total, (unsigned)honest_total);
+
+  // --- AND IT TOUCHES NOTHING ELSE. Every honest table is left alone, so the
+  //     clamp cannot cost a player a day they really earned.
+  CooldownTable honest;
+  fresh(honest);
+  honest.act_day   = act_day_index(EP0);
+  honest.act_score = 321u;
+  CHECK(!act_adopt(honest));
+  CHECK_EQ(honest.act_day, act_day_index(EP0));
+  CHECK_EQ(honest.act_score, 321u);
+
+  CooldownTable edge;
+  fresh(edge);
+  edge.act_day   = ACT_DAY_MAX_INDEX;                // the last reachable day
+  edge.act_score = 7u;
+  CHECK(!act_adopt(edge));
+  CHECK_EQ(edge.act_day, (uint16_t)ACT_DAY_MAX_INDEX);
+  CHECK_EQ(edge.act_score, 7u);
+
+  CooldownTable just_over;
+  fresh(just_over);
+  just_over.act_day = (uint16_t)(ACT_DAY_MAX_INDEX + 1u);
+  CHECK(act_adopt(just_over));                       // one past it is repaired
+  CHECK_EQ(just_over.act_day, 0u);
+
+  CooldownTable empty;
+  fresh(empty);
+  CHECK(!act_adopt(empty));                          // a fresh device, untouched
+  CHECK_EQ(empty.act_day, 0u);
+}

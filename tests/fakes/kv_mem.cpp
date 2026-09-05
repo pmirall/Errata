@@ -99,6 +99,12 @@ bool kv_erase(KvPart part, const char* key) {
   note_key(key);
   if (part >= KV_PART_COUNT || !key) return false;
   if (!s_part[part].healthy) return false;
+  // A DEAD STORE ERASES NOTHING EITHER. Without this line a kill sweep's
+  // "power cut" still let save_checkpoint_all() erase unoccupied checkpoint
+  // slots after the device was supposed to be gone - a fault model that
+  // refuses writes and permits deletes is not a power cut. Found in the P7-C6
+  // review of the trade's atomicity claim, which is measured on this fake.
+  if (s_dead) return false;
   KvmEntry* e = find(part, key);
   if (e) { e->used = false; e->len = 0; e->key[0] = '\0'; }
   return true;                             // already absent counts as erased

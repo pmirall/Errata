@@ -55,6 +55,19 @@
 //  static_assert below fails the build with a message naming the choice. A
 //  deep-sleep branch compiled out behind that condition would be a path nobody
 //  has ever built; a red line puts a human in front of it instead.
+//
+//  AND WHEN THAT DAY COMES, app/app.cpp IS THE SECOND FILE TO OPEN. Its
+//  `const uint32_t ms = millis();` - the tick scheduler's clock and the
+//  ladder's idle clock - is esp_timer, i.e. UPTIME, which is the clock
+//  hardware/gametime.cpp deliberately moved AWAY from at P6-C3. It is correct
+//  today for exactly one reason: esp_light_sleep_start() resynchronises
+//  esp_timer from the RTC on the way out. A DEEP sleep does not, so a deep rung
+//  would take that clock back to zero on every wake - the tick scheduler would
+//  see a backwards jump, pwr_tick_budget() would charge nothing, and the idle
+//  ladder would restart at ACTIVE for ever. The fix is gt_mono32(), which
+//  tests/test_clock_device.cpp now drives across exactly that wake; the point
+//  of this paragraph is that it is a SECOND edit and not a consequence of the
+//  first. Recorded at P7-C6.
 // -----------------------------------------------------------------------------
 #ifndef PB_POWER_H
 #define PB_POWER_H
@@ -253,5 +266,33 @@ uint16_t pwr_loops_per_s(uint8_t state);
 // Total milliseconds pwr_yield() has stopped the CPU for since pwr_begin().
 // Diagnostics and host cases; nothing decides with it.
 uint32_t pwr_slept_ms(void);
+
+// -----------------------------------------------------------------------------
+//  THE DROPPED-TICK COUNTER (P7-C6; the phase-6 exit's fourth carried debt)
+//
+//  app_loop() charges the pet whole seconds of REAL time, and clamps a gap
+//  wider than NT_TICK_MAX_OWED_S back to one second: a stall is not elapsed
+//  game time and must not be charged. That clamp is right and it was also
+//  SILENT - a device that stalls for a minute every hour looked exactly like a
+//  healthy one, because the only trace of it was time nobody counted.
+//
+//  pwr_tick_budget(ms, tick_ms) IS THAT ARITHMETIC, moved here so a host binary
+//  can drive it (app/app.cpp includes Arduino.h and cannot be compiled on the
+//  host). It returns the seconds to charge - never more than
+//  NT_TICK_MAX_OWED_S, never 0 when any whole second is due - and advances
+//  `tick_ms` to the anchor for the next call. On a stall it resynchronises,
+//  charges ONE second and counts the event and the seconds it threw away.
+//
+//  IT LIVES IN THE POWER MODULE and not in the scheduler because the ladder is
+//  what legitimately produces the long gaps this has to tell apart from a
+//  stall - PWR_SLEEP_SLICE_MS is 8,000 and the bound is 16,000, which app.cpp
+//  static_asserts - so the two numbers belong beside each other and on the same
+//  ENERGIA page.
+//
+//  BOTH COUNTERS SATURATE rather than wrap: a counter that wraps reads as
+//  "healthy" exactly when it has the most to say.
+uint32_t pwr_tick_budget(uint32_t now_ms, uint32_t& tick_ms);
+uint16_t pwr_tick_stalls(void);      // gaps wider than the bound, since begin
+uint32_t pwr_tick_lost_s(void);      // whole seconds those gaps discarded
 
 #endif  // PB_POWER_H

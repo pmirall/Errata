@@ -39,6 +39,12 @@ void kv_mem_fail_next_put(void);
 // IT IS A DEAD DEVICE AND NOT A FLAKY ONE: once armed and reached, the store
 // stays dead, because that is what a power cut is. The test reboots by calling
 // kv_mem_power_restore() and then re-running the load path.
+//
+// A DEAD STORE REFUSES ERASES TOO, since the P7-C6 exit. It did not, and the
+// gap mattered: save_checkpoint_all() erases unoccupied checkpoint slots, so a
+// swept cut point could still mutate nvs2 AFTER the device was supposed to be
+// gone. A fault model that refuses writes and permits deletes is not a power
+// cut, and the whole of the trade's atomicity claim is measured on this fake.
 void kv_mem_fail_after_n_puts(uint32_t n);
 
 // Un-does the dead store above without touching a byte of its contents - the

@@ -617,3 +617,104 @@ TEST(an_honest_day_still_pays_what_it_always_paid) {
   // the ordering: cheating is now strictly worse than playing.
   CHECK(spent > (uint32_t)XP_CAP_CARRY - (uint32_t)XP_CAP_CARRY / 4u);
 }
+
+// =============================================================================
+//  THE TOP OF THE CURVE STILL SPENDS THE METER (P7-C6)
+//
+//  xp_add() used to return at XP_LEVEL_MAX BEFORE meter_take(), so `granted`
+//  was 0 for a level-30 Pebble - and app/app.cpp scales the activity happiness
+//  by exactly that number, so the maxed Pebble earned neither XP nor happiness
+//  for a day it really lived. Moving one line fixed the happiness and changed
+//  what the device-wide ledger MEANS at level 30, and both halves are pinned
+//  here because before this pair nothing in the tree measured either.
+// =============================================================================
+TEST(a_pebble_at_the_top_of_the_curve_still_earns_its_activity_happiness) {
+  // Two identical days, one lived by a level-29 Pebble and one by a level-30.
+  // The only difference between the arms is the level.
+  uint32_t happy[2] = { 0u, 0u };
+  uint32_t paid[2]  = { 0u, 0u };
+  for (uint8_t arm = 0; arm < 2u; ++arm) {
+    FarmFlash f;
+    farm_fresh(f, 1);
+    make_pebble(f.pet, (uint8_t)(arm == 0u ? XP_LEVEL_MAX - 1u : XP_LEVEL_MAX));
+    uint32_t now = FARM_EPOCH;
+    for (uint32_t s = 0; s < (uint32_t)ACT_CAP_CARRY_MIN * 60u; s += 60u) {
+      xp_ledger_tick(60u);
+      now += 60u;
+      (void)act_note_carried(f.cds, 60u, farm_clk(now));
+      paid[arm] += farm_pay(f, now, happy[arm]);
+    }
+    for (int i = 0; i < (int)ACT_CAP_INTERACT; ++i) {
+      (void)act_note_interaction(f.cds, farm_clk(now));
+      paid[arm] += farm_pay(f, now, happy[arm]);
+    }
+    farm_scan(f, now);
+    paid[arm] += farm_pay(f, now, happy[arm]);
+  }
+
+  CHECK(happy[0] > 0u);                       // the level-29 control
+  CHECK_EQ(happy[1], happy[0]);               // 0 before the fix, and that is the defect
+  CHECK_EQ(paid[1], paid[0]);                 // the meter drains the same either side
+
+  // AND THE LEVEL IS STILL CAPPED. Spending the meter is not gaining a level.
+  FarmFlash f;
+  farm_fresh(f, 1);
+  make_pebble(f.pet, (uint8_t)XP_LEVEL_MAX);
+  uint8_t ups = 0xFFu;
+  CHECK(!xp_add(f.pet, 500u, XP_SRC_CARRY, &ups));
+  CHECK_EQ((int)ups, 0);
+  CHECK_EQ((int)f.pet.level, (int)XP_LEVEL_MAX);
+  CHECK_EQ((int)f.pet.xp, 0);
+}
+
+TEST(the_meter_is_spent_at_the_top_of_the_curve_for_every_metered_source) {
+  // THE OTHER HALF OF THE ONE-LINE MOVE, AND THE COST IT BUYS. The device-wide
+  // ledger now counts XP HANDED OUT rather than XP that found a home, so a
+  // maxed Pebble DRAINS a source's daily budget it used to leave untouched -
+  // and a Box-mate that plays later gets less. That is a real change of meaning
+  // and this case is its owner: it says, source by source, exactly what a
+  // level-30 award costs the day.
+  uint8_t metered_seen = 0u;
+  for (uint8_t src = 0; src < (uint8_t)XP_SRC_COUNT; ++src) {
+    PebbleInstance maxed, growing;
+    make_pebble(maxed,   (uint8_t)XP_LEVEL_MAX);
+    make_pebble(growing, (uint8_t)1u);
+
+    xp_ledger_reset(1);
+    const uint16_t cap = xp_daily_left(xp_ledger(), (XpSource)src);
+
+    xp_ledger_reset(1);
+    (void)xp_add(maxed, 3u, (XpSource)src, nullptr);
+    const uint16_t left_maxed = xp_daily_left(xp_ledger(), (XpSource)src);
+
+    xp_ledger_reset(1);
+    (void)xp_add(growing, 3u, (XpSource)src, nullptr);
+    const uint16_t left_growing = xp_daily_left(xp_ledger(), (XpSource)src);
+
+    // Whatever the source's own cap does, the two Pebbles cost the day the SAME.
+    CHECK_EQ(left_maxed, left_growing);
+    // 0xFFFF is xp_daily_left()'s word for "this source has no meter", and a
+    // source with no meter cannot be drained by either Pebble - so the "it
+    // really was spent" half only applies to the metered ones, and saying so
+    // is what stops this loop passing vacuously on a tree where none are.
+    if (cap != 0u && cap != 0xFFFFu) {
+      CHECK(left_maxed < cap);                // it really was spent
+      metered_seen++;
+    }
+  }
+
+  CHECK_EQ((int)metered_seen, (int)XP_LEDGER_SLOTS);   // the loop really looked
+
+  // An UNMETERED or absent award still costs nothing, at either level: the move
+  // did not turn xp_add() into something that always spends.
+  PebbleInstance maxed;
+  make_pebble(maxed, (uint8_t)XP_LEVEL_MAX);
+  xp_ledger_reset(1);
+  const uint16_t before = xp_daily_left(xp_ledger(), XP_SRC_CARRY);
+  CHECK(!xp_add(maxed, 0u, XP_SRC_CARRY, nullptr));          // a zero award
+  CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_CARRY), before);
+  PebbleInstance empty;
+  memset(&empty, 0, sizeof empty);
+  CHECK(!xp_add(empty, 10u, XP_SRC_CARRY, nullptr));         // an empty slot
+  CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_CARRY), before);
+}

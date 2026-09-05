@@ -333,10 +333,11 @@ void app_pay_activity(void)
   // ONE BUDGET, BOTH HALVES OF THE REWARD. The award is what spends the meter,
   // so what it spent is read off the meter either side of it rather than
   // guessed: xp_add() takes min(owed, left) and nothing else can move the bucket
-  // in between. A Pebble at XP_LEVEL_MAX is the one case where this pays less
-  // than the score earned - xp_add() returns at the top of the curve before it
-  // would spend anything, so granted is 0 and the happiness stops with the XP.
-  // That is a loss, not a hole, and it is written down in game/activity.h.
+  // in between. A PEBBLE AT XP_LEVEL_MAX USED TO BE THE ONE CASE WHERE THIS PAID
+  // NOTHING - xp_add() returned before it spent the meter, so granted was 0 and
+  // the happiness stopped with the XP. P7-C6 moved meter_take() above that
+  // return; the two halves now agree at every level and game/xp.h states what
+  // the device-wide ledger means as a result.
   uint16_t granted = 0u;
   if (g.xp != 0u) {
     const uint16_t before = xp_daily_left(xp_ledger(), XP_SRC_CARRY);
@@ -487,7 +488,10 @@ static bool app_trade_write_slot(void* ctx, uint8_t slot)
 {
   (void)ctx;
   if (slot >= (uint8_t)BOX_SLOTS) return false;
-  return save_pebble(slot, gs_state().pebbles[slot], true);
+  // save_pebble_now(), NOT save_pebble(..., true) - and this shim is the BOOT
+  // RESOLVER's, so getting it wrong makes the last line of defence destroy what
+  // it exists to save. See persistence/save_manager.h.
+  return save_pebble_now(slot, gs_state().pebbles[slot]);
 }
 static bool app_trade_write_box(void* ctx)
 {
@@ -560,12 +564,16 @@ static void boot_box(void)
   if (gs_have_pebble() && bind_active()) {
     // sim_bind() seeded the hourly gain budget to 0 - safe, but a lie to anyone
     // who just had a power cut ("esta llena" at 19 % satiety for the first
-    // minute, no full meal for 29 min). Replace it with what was actually left
-    // at the last save, aged forward to the moment the device was last alive.
-    // boot_absence()'s catch-up then refills the rest of the interval,
-    // [last_seen, now], through its own gain_refill() - the two terms compose
-    // into min(cap, saved + (now - saved_epoch) * cap / 3600), to within the
-    // one milli-point that the two integer divisions can differ by.
+    // minute). Replace it with what was actually left at the last save.
+    //
+    // IT NO LONGER AGES THAT SNAPSHOT FORWARD (P7-C6). It used to add
+    // (now - saved_epoch) * cap / 3600, and BOTH of those epochs are wall
+    // clocks a player types on the time screen - so 100 rounds of
+    // (clock +1 h, reboot) from a spent ledger manufactured 4,000 happiness
+    // gain points. The remaining refill is boot_absence()'s catch-up, which
+    // spends seconds THIS DEVICE WATCHED PASS. The cost is written into
+    // game/sim.h: off-time no longer refills the hourly budget, so a full meal
+    // can be up to 29 minutes out after an hour away.
     // A missing or corrupt blob leaves sim_bind()'s 0 in place.
     uint8_t  gpts[GS_GAIN_SLOTS];
     uint32_t gepoch = 0;
@@ -586,10 +594,11 @@ static void boot_box(void)
     // scan) x100 spent 990 metered XP in zero real seconds. game/xp.cpp carries
     // the measurement and what the honest player loses for closing it.
     //
-    // THE CARE GAIN LEDGER ABOVE STILL HAS THAT SHAPE and is therefore still
-    // refillable the same way; it bounds hourly stat gains rather than XP, its
-    // clamp is one HOUR rather than one window, and closing it is a phase-7 item
-    // written into the plan rather than something this chunk measured.
+    // THE CARE GAIN LEDGER ABOVE HAD THAT SHAPE UNTIL P7-C6 AND NO LONGER DOES.
+    // Both restores now hand back exactly the bytes of their snapshot and let
+    // the catch-up refill out of observed seconds. The two ledgers are still
+    // different currencies - one bounds hourly stat gains, the other metered XP
+    // - but they have stopped disagreeing about whether a typed date is time.
     // Without a trustworthy snapshot the XP budget stays at the zero
     // xp_ledger_reset(0) seeded: unkind for an hour, but the only direction that
     // cannot be farmed by power-cycling the device after spending the budget.
@@ -856,6 +865,14 @@ void app_setup(void)
   // counters, the two distinct sets and the dirty flag. game/activity.h says
   // plainly what a power cycle therefore still buys and what it cannot.
   act_begin();
+  // THE PERSISTED HALF, CHECKED (P7-C6). act_begin() clears the per-boot
+  // counters; this is the one look at the two fields that came off flash. An
+  // act_day above ACT_DAY_MAX_INDEX names a day the clock can never reach and
+  // would freeze the activity score for the life of the device, so it is
+  // clamped here and the repair is persisted rather than re-made every boot.
+  if (act_adopt(gs_state().cds) && !gs_readonly()) {
+    (void)save_cooldowns(gs_state().cds);
+  }
   god_begin();
 
   ui_bind_recover(&app_recover_save);
@@ -944,6 +961,18 @@ static void logic_tick(uint32_t owed)
 
   if (owed == 0u) owed = 1u;
   const uint32_t step = sim_step_seconds() * owed;
+  // THE ENVIRONMENT IS ONE SAMPLE FOR THE WHOLE SLICE, AND THAT IS NOT EXACT.
+  // build_env() ran once above, so local_hour and day_of_year are read at the
+  // START of the slice and sim_tick(step) charges every second of it against
+  // that reading. A slice that straddles a sleep-window edge or midnight is
+  // therefore charged on the wrong side of it by up to PWR_SLEEP_SLICE_MS
+  // (8 s). MEASURED at the phase-6 exit: the worst care difference over half an
+  // hour at EPOCH0 is 0 MILLI-POINTS, so it is left alone deliberately - the
+  // fix would be a build_env() per simulated second, which is a clock read and
+  // a broken-down-time conversion sixty times a minute for a number nobody can
+  // see. Written down at P7-C6 rather than implied, because both this file and
+  // hardware/power.h used to describe the slice as if the charge were
+  // environment-exact.
   sim_tick(step);
 
   // XP from carried time (plan P3-C2): the ledger refills on real time, and a
@@ -1053,16 +1082,11 @@ void app_loop(void)
   // when the power ladder stopped the CPU for a slice, which is real elapsed
   // time and must reach the pet. NT_TICK_MAX_OWED_S is where a sleep stops
   // being a sleep and starts being a stall - see the macro.
-  uint32_t owed = (uint32_t)(ms - g_tick_ms) / 1000UL;
-  if (owed != 0u) {
-    if (owed > (uint32_t)NT_TICK_MAX_OWED_S) {
-      g_tick_ms = ms;             // long stall: resync, never burst
-      owed      = 1u;
-    } else {
-      g_tick_ms += owed * 1000UL;
-    }
-    logic_tick(owed);
-  }
+  // THE ARITHMETIC MOVED TO hardware/power.cpp AT P7-C6 so a host binary can
+  // drive it, and it now COUNTS the stalls it used to swallow in silence
+  // (pwr_tick_stalls() / pwr_tick_lost_s(), on the ENERGIA page).
+  const uint32_t owed = pwr_tick_budget(ms, g_tick_ms);
+  if (owed != 0u) logic_tick(owed);
 
   // --- 3. per-loop pumps that own presentation timing ----------------------
   ui_service();                   // auto-return, minigames, the hatch ceremony

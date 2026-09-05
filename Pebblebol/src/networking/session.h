@@ -215,9 +215,17 @@ enum SessionEndReason : uint8_t {
 };
 
 // SessionEnd.detail, READ ACCORDING TO reason: a SessionDetail for SE_PROTOCOL,
-// SE_DESYNC and SE_LOST; a VReject for SE_REJECTED; a SessionCapWord for
-// SE_INCOMPATIBLE. One byte, three readings, and the reason says which - the
-// alternative is three bytes that are zero almost always.
+// SE_DESYNC and SE_LOST; a SessionCapWord for SE_INCOMPATIBLE; and for
+// SE_REJECTED a VReject *or* a SessionDetail, because networking/trade_link.cpp
+// closes SE_REJECTED with SD_TRADE_REFUSED at three of its five sites and with
+// a real VReject at the other two. THE TWO ENUMS COLLIDE: SD_TRADE_REFUSED is
+// 22 and VReject 22 is VR_BAD_CARE, so a reader that followed the older
+// two-reading sentence printed "a care value outside range" for a god-taint
+// refusal. Nothing in the product reads detail today, so this is a trap for a
+// log reader or a future refusal line rather than a live defect - recorded at
+// P7-C6 rather than left to be hit. One byte, four readings, and the reason
+// plus the operation say which; the alternative is three bytes that are zero
+// almost always.
 enum SessionDetail : uint8_t {
   SD_NONE = 0,
   SD_SELF,             // the peer's device id is ours: a reflection, not a peer

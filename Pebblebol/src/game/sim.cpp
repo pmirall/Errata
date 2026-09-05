@@ -457,21 +457,29 @@ void sim_gain_snapshot(uint8_t out_pts[ST_COUNT])
 uint8_t sim_gain_restore(const uint8_t* pts, uint8_t n,
                          uint32_t saved_epoch, uint32_t now_epoch)
 {
-  // No snapshot, or no trustworthy clock at either end of the interval: there is
-  // no elapsed time to reconstruct from. Seed 0 - the pre-PH4 behaviour, which
-  // is merely unkind - rather than `cap`, which would be the exploit.
+  // THE ELAPSED TERM IS GONE (P7-C6). It read `saved_epoch` and `now_epoch`,
+  // BOTH of which are wall clocks a player types on the time screen, and one
+  // hour of "elapsed" refilled the whole cap - so (clock +1 h, reboot) x100
+  // from a fully SPENT ledger manufactured 4,000 happiness gain points against
+  // a cap of 40 an hour, in zero real seconds. This is the same hole
+  // xp_ledger_restore() lost at P6-C4 and it is closed the same way: the
+  // restore hands back exactly the bytes of the last snapshot, and every point
+  // past that has to be refilled by gain_refill() out of seconds this device
+  // watched pass (boot_absence()'s catch-up is where they come from).
+  //
+  // THE HONEST COST, WHICH IS REAL AND IS PAID BY EVERY HONEST PLAYER: off-time
+  // no longer refills the hourly budget. A player who leaves the device off for
+  // an hour comes back to whatever the ledger held when it was switched off,
+  // and cannot feed a full meal for up to 29 minutes - which is the exact
+  // complaint app/app.cpp says this restore was added to fix. It is paid
+  // knowingly: an unkind hour is recoverable and a farmable stat budget is not.
+  //
+  // Both epochs still have to be real dates. They no longer buy anything, but
+  // they are what says the blob came from a device that knew what time it was,
+  // and without that the safe seed is ZERO rather than the snapshot.
   const uint8_t trust = (pts != 0 && n != 0 &&
                          saved_epoch >= (uint32_t)NT_EPOCH_SANE_MIN &&
                          now_epoch   >= (uint32_t)NT_EPOCH_SANE_MIN) ? 1u : 0u;
-
-  uint32_t elapsed = 0;
-  if (trust && now_epoch > saved_epoch) {
-    elapsed = now_epoch - saved_epoch;
-  }
-  // One hour refills the whole cap, so clamping here loses nothing and is what
-  // keeps the multiply below inside int32 for an elapsed of years (or of a clock
-  // that jumped): cap <= 90000 milli, elapsed <= 3600 => 324e6 < 2^31.
-  if (elapsed > (uint32_t)SEC_PER_HOUR) elapsed = (uint32_t)SEC_PER_HOUR;
 
   for (uint8_t i = 0; i < ST_COUNT; ++i) {
     int32_t cap = gain_cap_milli(i);
@@ -479,11 +487,9 @@ uint8_t sim_gain_restore(const uint8_t* pts, uint8_t n,
 
     int32_t v = 0;
     if (trust) {
-      int32_t saved = (i < n) ? ((int32_t)pts[i] * 1000) : 0;
-      if (saved > cap) saved = cap;                 // a foreign/edited blob cannot exceed the cap
-      if (saved < 0)   saved = 0;
-      v = saved + (int32_t)((cap * (int32_t)elapsed) / (int32_t)SEC_PER_HOUR);
-      if (v > cap) v = cap;
+      v = (i < n) ? ((int32_t)pts[i] * 1000) : 0;
+      if (v > cap) v = cap;                 // a foreign/edited blob cannot exceed the cap
+      if (v < 0)   v = 0;
     }
     g.gain_budget[i] = v;
     g.gain_rem[i]    = 0;

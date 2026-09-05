@@ -1310,3 +1310,114 @@ TEST(care_a_freshly_bound_sim_advances_one_real_second_per_tick) {
   sim_set_time_scale(0u);
   CHECK_EQ(sim_step_seconds(), 1u);
 }
+
+// =============================================================================
+//  THE HOURLY GAIN LEDGER CANNOT BE REFILLED BY TYPING A DATE (P7-C6)
+//
+//  sim_gain_restore() used to compute min(cap, saved + elapsed * cap / 3600)
+//  from two WALL CLOCKS, and the wall clock is typed on the time screen. One
+//  hour of "elapsed" refilled a whole cap, so a player who spent the budget,
+//  pushed the clock forward an hour and rebooted got the whole thing back for
+//  nothing. This is the shape xp_ledger_restore() lost at P6-C4.
+//
+//  THESE CASES ARE THE GUARD. Delete the fix and the first one fails by name.
+// =============================================================================
+static uint8_t g_gain_snap[ST_COUNT];
+
+// One (spend, snapshot, "reboot" with the clock pushed forward, restore) round.
+// Returns the happiness budget the restore handed back, in milli.
+static int32_t gain_typed_day_round(uint32_t saved_epoch, uint32_t claimed_now)
+{
+  sim_gain_snapshot(g_gain_snap);
+  care_pet();                                    // a power cycle: sim_bind() zeroes it
+  (void)sim_gain_restore(g_gain_snap, (uint8_t)ST_COUNT, saved_epoch, claimed_now);
+  return (int32_t)sim_gain_left(ST_HAPPINESS);
+}
+
+TEST(a_typed_hour_and_a_reboot_cannot_refill_a_spent_gain_budget) {
+  care_pet();
+  const uint16_t cap = sim_gain_left(ST_HAPPINESS);   // a fresh pet is at the cap
+  CHECK(cap > 0u);
+
+  // Spend some of the happiness budget. sim_god_set_stat is what makes the
+  // action legal, and it touches the STAT, never the ledger.
+  sim_god_set_stat(ST_HAPPINESS, 0);
+  ActionResult r0;
+  CHECK(sim_apply_action(ACT_PLAY, r0));
+  const uint16_t spent_to = sim_gain_left(ST_HAPPINESS);
+  CHECK(spent_to < cap);                         // there IS headroom to manufacture
+  sim_gain_snapshot(g_gain_snap);
+
+  // A HUNDRED ROUNDS OF (clock +1 h, reboot). Every one of them claims a whole
+  // hour passed; not one real second did. Each round must hand back the
+  // SNAPSHOT and never a point more - before the fix the very first round came
+  // back at the cap, and a hundred of them manufactured 4,000 points.
+  uint32_t saved = (uint32_t)CARE_EPOCH0;
+  int32_t  manufactured = 0;
+  for (uint8_t k = 0; k < 100u; ++k) {
+    const uint32_t claimed = saved + 3600u;
+    const int32_t got = gain_typed_day_round(saved, claimed);
+    CHECK_EQ(got, (int32_t)spent_to);
+    manufactured += got - (int32_t)spent_to;
+    saved = claimed;
+  }
+  CHECK_EQ((int)manufactured, 0);
+
+  // AND A HUNDRED ROUNDS OF (clock +1 DAY, reboot) are no different: the old
+  // clamp made anything past an hour the same answer as an hour, which is why
+  // a day was the cheapest way to spell "give me the whole cap".
+  saved = (uint32_t)CARE_EPOCH0;
+  for (uint8_t k = 0; k < 100u; ++k) {
+    const uint32_t claimed = saved + 86400u;
+    CHECK_EQ(gain_typed_day_round(saved, claimed), (int32_t)spent_to);
+    saved = claimed;
+  }
+
+  // AND THE SNAPSHOT ITSELF STILL SURVIVES A HONEST REBOOT. What the restore
+  // hands back is exactly what was banked - no more, and no less.
+  care_pet();
+  sim_god_set_stat(ST_HAPPINESS, 0);
+  ActionResult r1;
+  CHECK(sim_apply_action(ACT_PLAY, r1));
+  const uint16_t banked = sim_gain_left(ST_HAPPINESS);
+  CHECK(banked > 0u);
+  sim_gain_snapshot(g_gain_snap);
+  care_pet();
+  CHECK_EQ((int)sim_gain_restore(g_gain_snap, (uint8_t)ST_COUNT,
+                                 (uint32_t)CARE_EPOCH0, (uint32_t)CARE_EPOCH0 + 3600u), 1);
+  // Truncation to whole points is the only difference sim_gain_snapshot()
+  // allows, and it is always in the player's disfavour.
+  CHECK(sim_gain_left(ST_HAPPINESS) <= banked);
+  CHECK(sim_gain_left(ST_HAPPINESS) + 1u >= banked);
+}
+
+TEST(a_gain_snapshot_from_a_device_that_did_not_know_the_date_seeds_zero) {
+  care_pet();
+  sim_god_set_stat(ST_HAPPINESS, 0);
+  ActionResult r;
+  CHECK(sim_apply_action(ACT_PLAY, r));
+  sim_gain_snapshot(g_gain_snap);
+  CHECK(g_gain_snap[ST_HAPPINESS] > 0u);
+
+  // An epoch below NT_EPOCH_SANE_MIN is an uptime counter, not a date, and an
+  // uptime difference does not describe wall-clock time.
+  care_pet();
+  CHECK_EQ((int)sim_gain_restore(g_gain_snap, (uint8_t)ST_COUNT, 100u,
+                                 (uint32_t)CARE_EPOCH0), 0);
+  CHECK_EQ((int)sim_gain_left(ST_HAPPINESS), 0);
+
+  care_pet();
+  CHECK_EQ((int)sim_gain_restore(nullptr, (uint8_t)ST_COUNT,
+                                 (uint32_t)CARE_EPOCH0, (uint32_t)CARE_EPOCH0), 0);
+  CHECK_EQ((int)sim_gain_left(ST_HAPPINESS), 0);
+}
+
+TEST(an_edited_gain_snapshot_can_never_exceed_the_cap) {
+  care_pet();
+  const uint16_t cap = sim_gain_left(ST_HAPPINESS);   // a fresh pet is at the cap
+  for (uint8_t i = 0; i < (uint8_t)ST_COUNT; ++i) g_gain_snap[i] = 0xFFu;
+  care_pet();
+  CHECK_EQ((int)sim_gain_restore(g_gain_snap, (uint8_t)ST_COUNT,
+                                 (uint32_t)CARE_EPOCH0, (uint32_t)CARE_EPOCH0), 1);
+  CHECK_EQ(sim_gain_left(ST_HAPPINESS), cap);
+}

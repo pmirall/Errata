@@ -210,17 +210,27 @@ uint16_t sim_gain_left(StatId id);
 // ST_COUNT elements.
 void     sim_gain_snapshot(uint8_t out_pts[ST_COUNT]);
 
-// Re-seeds the ledger from a snapshot taken at saved_epoch, as of now_epoch:
+// Re-seeds the ledger from a snapshot taken at saved_epoch:
 //
-//     budget = min(cap, saved + elapsed * cap / 3600)
+//     budget = min(cap, saved)
 //
-// integer throughout, with elapsed clamped to one hour before the multiply (an
-// hour refills the whole cap, so anything longer is the same answer and the
-// clamp is what makes an elapsed of years harmless).
+// IT AGES NOTHING FORWARD, SINCE P7-C6, and that is the whole point. It used to
+// be min(cap, saved + elapsed * cap / 3600), which reads a wall clock at BOTH
+// ends of the interval - and the wall clock is typed on the time screen, and
+// one hour of "elapsed" refills a whole cap. Measured: 100 rounds of
+// (clock +1 h, reboot) from a fully spent ledger manufactured 4,000 happiness
+// gain points against a cap of 40 an hour, and the same restore with no gap
+// manufactured 0. That is the same shape xp_ledger_restore() lost at P6-C4.
+//
+// WHAT THE HONEST PLAYER LOSES, stated because it is a real cost and not a
+// rounding error: off-time no longer refills the hourly gain budget. Come back
+// after an hour away and the ledger holds what it held when the device went
+// off, so a full meal may be up to 29 minutes out. An unkind hour is
+// recoverable; a stat budget a power cycle can refill is not.
 //
 // Call it once, immediately after sim_bind(), BEFORE the boot's catch-up: the
-// catch-up's own refill then covers the absence [last_seen, now] on top, which
-// is exactly the remaining term of the same expression.
+// catch-up's gain_refill() then covers the absence [last_seen, now] out of
+// seconds THIS DEVICE WATCHED PASS, which is the only refill left.
 //
 // Returns 1 when the snapshot was used. It returns 0 - and seeds ZERO, today's
 // safe behaviour, never the cap - when there is no snapshot or when either

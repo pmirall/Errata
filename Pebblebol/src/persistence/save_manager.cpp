@@ -367,6 +367,29 @@ bool save_pebble(uint8_t slot, const PebbleInstance& p, bool force) {
   return true;
 }
 
+// No filter, no deferral, no third answer. See save_manager.h for why the trade
+// cannot use save_pebble() and why force=true was not widened to mean this.
+bool save_pebble_now(uint8_t slot, const PebbleInstance& p) {
+  s_landed = false;
+  if (slot >= BOX_SLOTS) return false;
+
+  PebbleInstance blob = p;
+  char prefix[KV_KEY_CAP];
+  prefix[0] = 'p'; prefix[1] = 'b'; prefix[2] = (char)('0' + slot); prefix[3] = '\0';
+  if (!pair_write(KV_MAIN, prefix, OPS_PEBBLE, &blob)) return false;
+
+  // The throttle's bookkeeping is updated exactly as save_pebble() updates it.
+  // Clearing the pending bit COSTS ONE FEWER FLASH WRITE and nothing more: a
+  // deferred flush that did fire would write s_state->pebbles[slot], which is
+  // the same RAM this call just persisted, so the claim here is wear and not
+  // correctness. Said plainly because the wider claim was tempting and false.
+  s_last_write_ms[slot] = now_ms();
+  s_have_written[slot]  = true;
+  s_pending_mask &= (uint16_t)~(1u << slot);
+  s_landed = true;
+  return true;
+}
+
 void save_service(void) {
   if (!s_pending_mask || !s_state) return;
   for (uint8_t slot = 0; slot < BOX_SLOTS; ++slot) {

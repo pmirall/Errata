@@ -92,6 +92,24 @@ $(OBJ)/%.o: fakes/%.cpp fakes/%.h Makefile | $(OBJ)
 $(OBJ)/gametime_nevervalid.o: $(SRC_ROOT)/hardware/gametime.cpp | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -DGT_HOST_NEVER_VALID -c $< -o $@
 
+# THE DEVICE BRANCH OF gametime.cpp, COMPILED ON THE HOST (P7-C6).
+# gt_mono_ms() has two bodies and until now only the host one was ever compiled
+# here: the DEVICE one - the one that reads esp_rtc_get_time_us() instead of
+# millis(), which is the whole point of P6-C3's move off uptime - was guarded
+# by a grep in tools/check.sh and by nothing else. -DARDUINO plus the fake
+# include directory in FRONT of the system ones builds it, and
+# tests/test_clock.cpp drives a deep-sleep wake through it.
+#
+# fakes/arduino/ IS FOR THIS OBJECT AND NOTHING ELSE. Two headers, one symbol
+# each; tools/check.sh fails the build if a second rule reaches for it, because
+# a wider fake would become a second Arduino core that can drift from the real
+# one in silence.
+$(OBJ)/gametime_arduino.o: $(SRC_ROOT)/hardware/gametime.cpp | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -DARDUINO -Ifakes/arduino -c $< -o $@
+
+$(OBJ)/arduino_clocks.o: fakes/arduino_clocks.cpp fakes/arduino/Arduino.h | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
 $(OBJ)/host_shims.o: host_shims.cpp host_shims.h | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
@@ -335,6 +353,18 @@ $(BIN)/test_minigames: $(OBJ)/minigame.o $(OBJ)/manager.o $(OBJ)/ping_logic.o \
                         $(OBJ)/delete_logic.o $(OBJ)/rng.o
 $(BIN)/test_qr:         $(OBJ)/qr.o
 $(BIN)/test_clock:      $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o
+# THE SAME MODULE, COMPILED FOR THE DEVICE (P7-C6). A separate binary and not a
+# second object in test_clock: two gametime.o would be two definitions of every
+# symbol in it. game_state.o + save_manager.o + kv_mem.o are here because
+# gt_load_seed()'s device branch really reads save_last_seen(), gs_boot_cal()
+# and gs_boot_tz() - stubbing them would be testing a gametime the board does
+# not have.
+$(BIN)/test_clock_device: $(OBJ)/gametime_arduino.o $(OBJ)/arduino_clocks.o \
+                        $(OBJ)/cooldowns.o $(OBJ)/game_state.o \
+                        $(OBJ)/save_manager.o $(OBJ)/migration.o $(OBJ)/kv_mem.o \
+                        $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/genome.o $(OBJ)/rng.o \
+                        $(OBJ)/species.o $(OBJ)/validate.o $(OBJ)/pebble.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o
 $(BIN)/test_overflow:   $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o \
                         $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o

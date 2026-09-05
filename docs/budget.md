@@ -28,7 +28,7 @@ Against the 515,268 / 24,408 no-radio floor:
 
 | subsystem | flash | globals | status |
 |---|---|---|---|
-| BLE (`ble_social.cpp`, 1,211 lines) | **712,466** | **23,504** | decided dead — see below |
+| BLE (`ble_social.cpp`, 1,211 lines) | **712,618** | **23,496** | decided dead, **still here** — re-measured at the P7-C6 exit; blocked on a two-board bench test |
 | Wi-Fi stack + HTTP server (`FEATURE_WEB`) | 676,158 | 24,596 | **needed**: P8's creator server is built on it |
 | god mode | 11,884 | 168 | dev only, already off in release |
 
@@ -165,17 +165,23 @@ ESP-IDF drivers, and it survived that.
 
 ### 4.1 Delete BLE — and the reason it is not automatic
 
-712,466 B of flash and 23,504 B of globals, more than the entire remaining headroom.
+**712,618 B of flash and 23,496 B of globals** (re-measured at the P7-C6 exit: baseline minus
+`no-ble`, 1,994,460 − 1,281,842 and 80,492 − 56,996), more than the entire remaining headroom.
 Decision **D2 closed on ESP-NOW** (2026-09-02, owner), and the plan's own inventory says
 `ble_social.cpp` "becomes `transport_ble.cpp` + discovery **if D2 = BLE**" — which it is not.
-P7-C1 already lists it as a removal candidate.
 
 The reason this is a decision and not a cleanup: **ESP-NOW has never run on the board.**
 It is chosen on paper (250 B frames, unicast with a send-callback ACK, the same `WIFI_STA`
-residency the §40 scanner needs) and P4-C5 proved the protocol over a host loopback with no
-radio at all. Deleting BLE removes the only fallback transport before the chosen one has
-been demonstrated on hardware. The cheap order is therefore: **bring ESP-NOW up on the
-device first (P7-C1), confirm a link, then delete BLE in the same chunk** — not before.
+residency the §40 scanner needs); P4-C5 proved the protocol over a host loopback and P7-C1
+built the radio behind the same seam, both with no radio at all. Deleting BLE removes the only
+fallback transport before the chosen one has been demonstrated on hardware.
+
+**STATUS AT v0.7.0-social: STILL NOT DELETED, ON PURPOSE.** Phase 7 built ESP-NOW and did not
+run it. The order is unchanged and the remaining step is one bench test: **flash two boards,
+open LINK on both, confirm each lists the other** (`link_qualified_count()` reaching 1 — three
+beacons at 500 ms above `LINK_RSSI_MIN`). If it passes, `ble_social.{h,cpp}` goes,
+`FEATURE_BLE` goes, `no-ble` becomes the baseline and `BlePeerInfo` leaves
+`core/nt_types.h` — and this 712,618 B is the single largest lever left in the budget.
 
 Until then the budget should be read against the release build, which already excludes it.
 
@@ -277,7 +283,7 @@ will appear, exactly as the NETWORK screen's 136 B `WifiScanJob` did at P5-C3.
 slot. **Globals is the scarce axis and this chunk spent 5,816 of it in one commit** — more
 than phase 5 and phase 6 spent together (504 + 400 = 904) — so the §3 projection's remaining
 headroom for P7-C2..C5 and phases 8-10 is 9,260 B with BLE still compiled out and
-`ble_social.cpp`'s 23,504 B still available to reclaim the day two boards have linked.
+`ble_social.cpp`'s 23,496 B still available to reclaim the day two boards have linked.
 
 **The one number to watch is `LINK_RX_SLOTS`.** It is 5,312 of the 5,816 and it was set from
 a measurement (a lossy link bursts 19 frames in one direction; eight slots refused three per
@@ -341,7 +347,7 @@ rerun.
 
 `release` is **1,260,236 / 56,668** = **78.8 % of `GATE_RELEASE_FLASH_MAX`** and **87.2 % of
 `GATE_RELEASE_GLOBALS_MAX`** — **8,332 B of globals free** for P7-C4 (trade), P7-C5 (breeding)
-and phases 8-10, with `ble_social.cpp`'s 23,504 B still available to reclaim the day two boards
+and phases 8-10, with `ble_social.cpp`'s 23,496 B still available to reclaim the day two boards
 have linked.
 
 **Flash moved twenty-six thousand bytes for a screen, and that is worth naming rather than
@@ -430,4 +436,56 @@ plan says so in the one place a reader will look.
 `release` is **1,269,108 / 56,812** = **79.3 % of `GATE_RELEASE_FLASH_MAX`** and
 **87.4 % of `GATE_RELEASE_GLOBALS_MAX`** — **8,188 B of globals free** for
 `breed_link.cpp`, phase 8's creator and phases 9-10, with `ble_social.cpp`'s
-23,504 B still available to reclaim the day two boards have linked.
+23,496 B still available to reclaim the day two boards have linked.
+
+## 7. Phase 7, chunk 6 — the exit (measured 2026-09-05)
+
+**+506 flash / +8 globals on the baseline**, **+360 / +8 on release**. This is the smallest
+chunk in the phase and it is the one that stopped the trade destroying a Pebble.
+
+### Where the 8 B of globals went
+
+`riscv32-esp-elf-nm -S` over the release `.elf`:
+
+| symbol | B | what holds it |
+|---|---|---|
+| `s_tick_lost_s` (`hardware/power.cpp`) | 4 | whole seconds the dropped-tick clamp has discarded, saturating |
+| `s_tick_stalls` (`hardware/power.cpp`) | 2 | how many times it fired, saturating |
+| | **6** | symbols |
+| | **2** | link alignment |
+| | **8** | **measured image delta** |
+
+`save_pebble_now()`, `act_adopt()` and the narrowed `sim_gain_restore()` add **no state at
+all** — they are a second entry point, a boot-time clamp and a deleted term. The +506 B of
+flash is those three plus `pwr_tick_budget()`.
+
+### The one measurement this chunk exists for
+
+**A clean trade cost 9 flash writes and should have cost 10.** `save_pebble()` deferred the
+second write of one key inside `SAVE_MIN_GAP_MS` and reported it as landed, so the incoming
+Pebble never reached flash while the journal was cleared over it. The counter is in the test
+output (`one committed trade costs 10 flash writes`), which is the cheapest possible regression
+detector for this class of bug and the reason the case prints it.
+
+### Phase 7 against `docs/budget.md`'s own allowance
+
+§3's phase-7 row read **20–35 KB of flash and 2.0–4.0 KB of globals**. Actual: **+45,658 flash
+and +6,912 globals** — **over both lines**, and the overrun has one address. **5,832 of the
+6,912 globals are P7-C1**, and 5,312 of those are `s_rx_bytes`, the session receive ring, whose
+depth was raised from the survey's proposed 8 slots to a MEASURED 32 (one `session_poll()`
+bursts 19 frames at a 10 % drop rate; sixteen would still have overflowed). The flash overrun
+is P7-C2's 26,520, which is the session, the codec, the peer table and the wire half of the
+validator entering the image for the first time — every one of them existed at P7-C1 and none
+was reachable from `setup()`, so `--gc-sections` had dropped the lot.
+
+**Neither is a surprise the budget can absorb quietly.** Release globals are now at **87.4 %**
+of `GATE_RELEASE_GLOBALS_MAX` with **8,180 B free** for phase 8's creator server, phase 9's
+content and phase 10 — and phase 8 is the one that brings up an HTTP server and a 2 KB body
+buffer. **The lever is BLE**: 23,496 B, three times the remaining headroom, blocked on one
+bench test.
+
+### What it leaves
+
+`release` is **1,269,468 / 56,820** = **79.3 % of `GATE_RELEASE_FLASH_MAX`** and **87.4 % of
+`GATE_RELEASE_GLOBALS_MAX`**; baseline **1,994,460 / 80,492** = 83.1 % / 89.4 %. The `app0`
+slot is 3,145,728 B, so the shipping image uses **40.4 %** of it.

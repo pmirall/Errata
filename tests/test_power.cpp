@@ -413,3 +413,82 @@ TEST(only_the_right_button_could_ever_wake_this_board_from_deep_sleep) {
   // stops being true.
   CHECK(!PWR_DEEP_WAKE_BOTH_BUTTONS);
 }
+
+// =============================================================================
+//  THE TICK BUDGET, AND THE STALL IT COUNTS (P7-C6)
+//
+//  app_loop() charges the pet WHOLE SECONDS of real time and clamps a gap wider
+//  than NT_TICK_MAX_OWED_S back to one: a stall is not elapsed game time. That
+//  clamp was silent for four phases - a device stalling for a minute an hour
+//  looked exactly like a healthy one. The arithmetic lives here now so a host
+//  binary can drive it, and BOTH HALVES ARE ASSERTED: that the counter moved,
+//  and that exactly one second was charged. A counter with no second half is a
+//  guard nobody can fail.
+// =============================================================================
+TEST(a_gap_wider_than_the_bound_charges_one_second_and_says_it_lost_the_rest) {
+  fresh(&kThroughJob);
+  CHECK_EQ((int)pwr_tick_stalls(), 0);
+  CHECK_EQ(pwr_tick_lost_s(), 0u);
+
+  // --- an ordinary second: charged, counted as no stall
+  uint32_t anchor = 0u;
+  CHECK_EQ(pwr_tick_budget(1000u, anchor), 1u);
+  CHECK_EQ(anchor, 1000u);
+  CHECK_EQ((int)pwr_tick_stalls(), 0);
+
+  // --- a partial second: nothing due, and the anchor does not move
+  CHECK_EQ(pwr_tick_budget(1999u, anchor), 0u);
+  CHECK_EQ(anchor, 1000u);
+
+  // --- THE WHOLE SLEEP SLICE IS REAL TIME AND IS CHARGED IN FULL. This is the
+  //     case the bound was raised for at P6-C3, and it must not be a stall.
+  CHECK((uint32_t)PWR_SLEEP_SLICE_MS < (uint32_t)NT_TICK_MAX_OWED_S * 1000UL);
+  anchor = 0u;
+  CHECK_EQ(pwr_tick_budget((uint32_t)PWR_SLEEP_SLICE_MS, anchor),
+           (uint32_t)PWR_SLEEP_SLICE_MS / 1000UL);
+  CHECK_EQ((int)pwr_tick_stalls(), 0);
+  CHECK_EQ(pwr_tick_lost_s(), 0u);
+
+  // --- the last second that is still a sleep, not a stall
+  anchor = 0u;
+  CHECK_EQ(pwr_tick_budget((uint32_t)NT_TICK_MAX_OWED_S * 1000UL, anchor),
+           (uint32_t)NT_TICK_MAX_OWED_S);
+  CHECK_EQ((int)pwr_tick_stalls(), 0);
+
+  // --- ONE SECOND MORE IS A STALL: one charged, the rest counted and thrown.
+  anchor = 0u;
+  const uint32_t gap_s = (uint32_t)NT_TICK_MAX_OWED_S + 1u;
+  CHECK_EQ(pwr_tick_budget(gap_s * 1000UL, anchor), 1u);      // exactly one
+  CHECK_EQ(anchor, gap_s * 1000UL);                          // resynchronised
+  CHECK_EQ((int)pwr_tick_stalls(), 1);
+  CHECK_EQ(pwr_tick_lost_s(), gap_s - 1u);
+
+  // --- a 1,800 s gap the loop never observed: one second charged, 1,799 named
+  anchor = 0u;
+  CHECK_EQ(pwr_tick_budget(1800u * 1000UL, anchor), 1u);
+  CHECK_EQ((int)pwr_tick_stalls(), 2);
+  CHECK_EQ(pwr_tick_lost_s(), (gap_s - 1u) + 1799u);
+
+  // --- AND IT SATURATES RATHER THAN WRAPS, because a counter that wraps reads
+  //     as healthy exactly when it has the most to say.
+  for (uint32_t k = 0; k < 70000u; ++k) {
+    anchor = 0u;
+    (void)pwr_tick_budget(20u * 1000UL, anchor);
+  }
+  CHECK_EQ((int)pwr_tick_stalls(), 0xFFFF);
+  CHECK(pwr_tick_lost_s() > 0u);
+
+  // --- pwr_begin() clears both, like every other counter on the ENERGIA page
+  fresh(&kThroughJob);
+  CHECK_EQ((int)pwr_tick_stalls(), 0);
+  CHECK_EQ(pwr_tick_lost_s(), 0u);
+}
+
+TEST(the_tick_budget_survives_the_millis_wrap) {
+  fresh(&kThroughJob);
+  // 500 ms before the wrap, asked again 1,500 ms later: one whole second is due
+  // and the arithmetic is unsigned, so the wrap is not an event.
+  uint32_t anchor = 0xFFFFFFFFul - 500u;
+  CHECK_EQ(pwr_tick_budget(anchor + 1500u, anchor), 1u);
+  CHECK_EQ((int)pwr_tick_stalls(), 0);
+}

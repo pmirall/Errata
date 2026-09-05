@@ -86,11 +86,16 @@ uint32_t pwr_slice_ms(void)
 // =============================================================================
 void pwr_bind(const PowerHooks* h) { s_hooks = h; }
 
+static uint16_t s_tick_stalls;   // defined with pwr_tick_budget(); per-boot
+static uint32_t s_tick_lost_s;
+
 void pwr_begin(void)
 {
   s_state     = (uint8_t)PWR_ACTIVE;
   s_woke      = 0;
   s_slept_ms  = 0;
+  s_tick_stalls = 0;             // per-boot, like every counter on this page
+  s_tick_lost_s = 0;
   s_window_ms    = 0;
   s_window_armed = 0;
   for (uint8_t i = 0; i < (uint8_t)PWR_STATE_COUNT; ++i) {
@@ -224,6 +229,35 @@ bool pwr_take_wake(void)
 }
 
 uint32_t pwr_slept_ms(void) { return s_slept_ms; }
+
+// =============================================================================
+//  THE TICK BUDGET, AND THE STALL IT NOW COUNTS (P7-C6)
+//  See power.h for why this arithmetic lives here rather than in app_loop().
+// =============================================================================
+uint32_t pwr_tick_budget(uint32_t now_ms, uint32_t& tick_ms)
+{
+  // Wrap-safe: the subtraction is unsigned and the anchor is only ever moved
+  // forward by what this function returns.
+  const uint32_t owed = (uint32_t)(now_ms - tick_ms) / 1000UL;
+  if (owed == 0u) return 0u;
+
+  if (owed > (uint32_t)NT_TICK_MAX_OWED_S) {
+    // A STALL, NOT A SLEEP. Resynchronise and charge one second - which is what
+    // this has always done - but say so, because a device that silently
+    // discards minutes is indistinguishable from one that never stalls.
+    const uint32_t lost = owed - 1u;
+    if (s_tick_stalls < 0xFFFFu) s_tick_stalls++;
+    s_tick_lost_s = (s_tick_lost_s > 0xFFFFFFFFul - lost) ? 0xFFFFFFFFul
+                                                          : s_tick_lost_s + lost;
+    tick_ms = now_ms;
+    return 1u;
+  }
+  tick_ms += owed * 1000UL;
+  return owed;
+}
+
+uint16_t pwr_tick_stalls(void) { return s_tick_stalls; }
+uint32_t pwr_tick_lost_s(void) { return s_tick_lost_s; }
 
 // =============================================================================
 //  DIAGNOSTICS

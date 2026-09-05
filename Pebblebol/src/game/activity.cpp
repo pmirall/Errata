@@ -101,6 +101,34 @@ uint16_t act_day_index(uint32_t now_epoch)
 }
 
 // -----------------------------------------------------------------------------
+//  THE PERSISTED HALF, CHECKED ONCE AT BOOT (P7-C6).
+//
+//  open_day()'s only roll condition is `day > t.act_day`, and act_day is a u16
+//  that can hold 65,535 while the widest day a u32 epoch can name is 49,710.
+//  A blob carrying anything above that ceiling therefore names a day the clock
+//  can NEVER reach, so the day never rolls again: the score sticks at whatever
+//  it held and every later day scores one day's carry cap and nothing more.
+//  MEASURED before this clamp: ten simulated years scored 876,000 points from
+//  act_day 0 and 240 from act_day 65,535.
+//
+//  IT IS DENIAL AND NOT A FARM - the holder loses, nobody gains - and the pair
+//  CRC covers random corruption, so it takes a hand-edited or foreign blob. One
+//  line at load removes it, which is cheaper than reasoning about who could
+//  write one.
+//
+//  NOT IN validate.cpp, DELIBERATELY: that validator's subject is a
+//  PebbleInstance and it says in its own header that it takes no policy and no
+//  second subject. Widening it to cover the cooldown table is exactly the scope
+//  creep game/validate.h argues against.
+bool act_adopt(CooldownTable& t)
+{
+  if (t.act_day <= ACT_DAY_MAX_INDEX) return false;
+  t.act_day   = 0u;                // no day recorded: the next real day opens
+  t.act_score = 0u;                // and it opens with nothing carried into it
+  return true;
+}
+
+// -----------------------------------------------------------------------------
 //  IS THIS CLOCK WORTH SCORING AGAINST? Layer 1, in one place so no entry point
 //  can forget it, and BOTH halves of it: an untrustworthy calibration state and
 //  an epoch that is not a date. The second is not redundant - a caller can hand

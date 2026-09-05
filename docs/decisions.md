@@ -12,7 +12,7 @@ may override), **CLOSED** (decided; commit named).
 | # | Decision | Status | Evidence | Default in force | Blocks | Outcome |
 |---|---|---|---|---|---|---|
 | **D1** | GPIO map (pin conflict) | **DEFERRED BY OWNER (2026-09-02)** — keep the values the repository already carries; revisit later | `config.h` compiles `PIN_SDA 8, PIN_SCL 9, PIN_BTN_L 10, PIN_BTN_R 2, PIN_LED 5` with the human comments "tu cableado actual del TinyLLM" / "OBLIGATORIO cambiarlo: 8 ya es SDA". README §2, CHANGELOG, `render.h`, `render.cpp` all document the other map (SDA=6, SCL=7, BTN_L=3, BTN_R=4, LED=8) and warn that GPIO2/8/9 are strapping pins. Nothing has ever run on hardware. | **Values stay exactly as committed.** `PB_PINS_CONFIRMED` is NOT defined, so the guard `static_assert`s added in P2-C8 stay dormant. | P2-C0 first flash (hardware track only), P6-C3 deep sleep | Owner defers; consequences recorded below the table. |
-| **D2** | Peer-session transport: BLE vs Wi-Fi (ESP-NOW) | **CLOSED — ESP-NOW (2026-09-02, owner)** | The legacy BLE advert carries 19 B/frame and cannot carry the §15 message set; GATT was rejected by the original author for stability; each BLE bring-up burns one of 32 sessions with a claimed ~672 B Bluedroid leak; BLE costs 721,632 B flash / 23,688 B static RAM **as measured in phase 1 — re-measured at the phase-4 exit as 712,466 B / 23,504 B (baseline minus `no-ble`); the phase-1 pair is kept because it is what the owner decided on, and the correction is worked through under "D2 — consequences"**. ESP-NOW ships in the core (250 B/frame, unicast + send-callback ACK) and needs the same `WIFI_STA` residency the §40 scanner already requires. | ESP-NOW is the transport, behind the §59 `Transport` seam. `FEATURE_BLE 0` in the release build. | P7-C1 | Decided: ESP-NOW. See the consequences below the table. |
+| **D2** | Peer-session transport: BLE vs Wi-Fi (ESP-NOW) | **CLOSED — ESP-NOW (2026-09-02, owner). BUILT IN PHASE 7 AND UNPROVEN ON HARDWARE: the BLE deletion the decision authorises is still pending a two-board bench test — see "Phase-7 exit" at the end of this file.** | The legacy BLE advert carries 19 B/frame and cannot carry the §15 message set; GATT was rejected by the original author for stability; each BLE bring-up burns one of 32 sessions with a claimed ~672 B Bluedroid leak; BLE costs 721,632 B flash / 23,688 B static RAM **as measured in phase 1 — re-measured at the phase-4 exit as 712,466 B / 23,504 B (baseline minus `no-ble`); the phase-1 pair is kept because it is what the owner decided on, and the correction is worked through under "D2 — consequences"**. ESP-NOW ships in the core (250 B/frame, unicast + send-callback ACK) and needs the same `WIFI_STA` residency the §40 scanner already requires. | ESP-NOW is the transport, behind the §59 `Transport` seam. `FEATURE_BLE 0` in the release build. | P7-C1 | Decided: ESP-NOW. See the consequences below the table. |
 | **D3** | Sketch folder rename and product identity in persisted names | DEFAULT | `sketch_aug30b/` → `Pebblebol/`; `NVS_NS "notta"`, AP prefix `NOTTAMAGOCHI-`, mDNS `nottamagochi.local`. No device has ever run this firmware, so renaming orphans nothing real. | Folder renamed in P2-C1; NVS namespace `"pbbl"` in P2-C9 with a one-shot import of a legacy `"notta"` save; AP prefix `PEBBLEBOL-` in P8-C2; mDNS deleted in P2-C5. | P2-C1, P2-C9 | **CLOSED (P2-C9b, 2026-09-03).** Namespace is `"pbbl"` (`hardware/kv_nvs.h`, `PB_NVS_NAMESPACE`). `kv_begin()` performs a ONE-SHOT import: the raw v1 blobs (`save`, `cfg`, `gl`, `t`) are copied out of `"notta"` under their old key names into `"pbbl"`, where `persistence/migration.cpp` finds them, and `"notta"` is then cleared so a later factory reset cannot resurrect a deleted pet. It runs only when `"pbbl"` holds neither a v2 Box nor an already-imported v1 save, so it can never overwrite live state, and it is idempotent across a power cut in the middle. Verified by `tests/test_compat.cpp` (`compat_migrates_a_v1_save_into_the_live_pet`) and `tests/test_persistence.cpp` (the v1 fixtures). AP prefix and mDNS are unaffected (mDNS was deleted in P2-C5). |
 | **D4** | Language of user-facing UI strings | DEFAULT | Spanish `strings_es.h` (439 strings, `StrId` mechanism) vs English. Spec header allows Spanish UI. | Keep Spanish; new BOX/BATTLE/NET/LINK/CREATOR/ERROR/TIME blocks written in Spanish in the same mechanism. An `strings_en.h` twin is a one-file swap later. | P2-C11 | — |
 | **D5** | Panel variant SSD1306 vs SH1106 | DEFAULT | `DISPLAY_IS_SH1106` (`config.h:64`); both drivers verified to link. | Keep 0 (SSD1306). Flip only with the panel in front of you (README §3 symptoms). | P2-C0 | — |
@@ -129,12 +129,16 @@ phase re-derives them:
   the `Transport` interface of spec §59. The game logic never learns which transport
   carried a packet.
 - **`FEATURE_BLE 0` in the release build.** The BLE plumbing kept in P2-C7b becomes a
-  removal candidate in P7-C1; compiling it out recovers **712,466 B of flash and 23,504 B
-  of static RAM**, re-measured at the P4-C6 exit as baseline minus `no-ble`
-  (1,915,654 − 1,203,188 and 72,676 − 49,172). *(This line said 721,632 / 23,688 — the
-  phase-1 audit's figure for a tree three phases old. The number moves with every commit
-  that touches the BLE-guarded code, so it is dated here rather than left to look
-  permanent.)*
+  removal candidate in P7-C1; compiling it out recovers **712,618 B of flash and 23,496 B
+  of static RAM**, re-measured at the **P7-C6 exit** as baseline minus `no-ble`
+  (1,994,460 − 1,281,842 and 80,492 − 56,996). *(This line said 721,632 / 23,688 at phase 1
+  and 712,466 / 23,504 at the P4-C6 exit. The number moves with every commit that touches the
+  BLE-guarded code, so it is dated here rather than left to look permanent — the drift over
+  three phases was 152 B of flash and 8 B of globals.)*
+  **AND THE PLUMBING IS STILL HERE AT v0.7.0-social.** `ble_social.{h,cpp}`, `FEATURE_BLE`
+  and `BlePeerInfo` are byte-identical across all four phase-7 commits, because P7-C1's own
+  bullet gates that deletion on ESP-NOW having linked two real boards and ESP-NOW has never
+  run on one. The exact bench test that unblocks it is written out at the end of this file.
 - **No stack flip during a link session.** ESP-NOW runs on the same `WIFI_STA` residency the
   §40 scanner already needs, so the single-radio invariant holds without tearing a stack
   down and bringing another up mid-session — which was the weakest point of the BLE path.
@@ -142,6 +146,11 @@ phase re-derives them:
   discovery beacon announces the channel and the session pins it to `PB_LINK_CHANNEL`;
   P7-C1 must handle a peer found on another channel by re-tuning before HELLO, not by
   failing.
+  **NARROWED BY WHAT P7-C1 ACTUALLY BUILT.** The beacon carries NO channel field and there is
+  NO re-tune path: both devices apply `PB_LINK_CHANNEL` on every LINK bring-up, so a peer on
+  another channel is not discoverable at all and there is nothing to re-tune to. The cost,
+  stated: a device left on another channel by something outside this firmware is invisible to
+  LINK, and this firmware cannot tell that from an empty room.
 - **The Bluedroid leak no longer needs measuring** (it was a P7-C1 task only if BLE won).
 - **Unchanged by this decision:** the protocol itself. P4-C5 still proves codec, session
   FSM and lockstep battle over an in-process loopback with drop/dup/reorder injection
@@ -1950,3 +1959,227 @@ so the claim has an owner and a number in the output; the ceiling that CAN be
 broken is the genesis envelope, and the case beside it breaks it deliberately in
 a control arm (200 dynasties × 40 generations, unclamped: **8,655 escapes**,
 clamped: **0**) so the clamp is guarding something measurable.
+
+---
+
+## Phase-7 exit (P7-C6, 2026-09-05)
+
+**Variant matrix.** `tools/build_matrix.sh` compiles all seven feature variants with
+`--warnings all` and fails on any warning pointing into the sketch. Result at the
+`v0.7.0-social` tag, every variant at **0 project warnings**:
+
+| Variant | Overrides | Flash (B) | Static RAM (B) | Δ flash vs 0.6.0-activity | Δ RAM vs 0.6.0-activity |
+|---|---|---|---|---|---|
+| baseline | — | 1,994,460 | 80,492 | +45,658 | +6,912 |
+| no-ble | `FEATURE_BLE=0` | 1,281,842 | 56,996 | +45,402 | +6,912 |
+| no-web | `FEATURE_WEB=0` | 1,936,472 | 78,444 | **+616,358** | **+25,824** |
+| no-god | `GOD_MODE_ENABLED=0` | 1,981,944 | 80,332 | +45,508 | +6,928 |
+| sh1106 | `DISPLAY_IS_SH1106=1` | 1,994,460 | 80,492 | +45,658 | +6,912 |
+| all-off | every `FEATURE_*`=0 + `GOD_MODE_ENABLED=0` | 578,868 | 26,388 | +31,594 | +1,064 |
+| **release** | `GOD_MODE_ENABLED=0 FEATURE_BLE=0` (D2) | **1,269,468** | **56,820** | +45,258 | +6,896 |
+
+**THE `no-web` ROW IS NOT A PHASE-7 FEATURE AND MUST NOT BE READ AS ONE.** `net.cpp`'s
+`NT_NET_WANT_WIFI` was `(FEATURE_WEB)` and is now `(FEATURE_WEB || FEATURE_ESPNOW)`, because
+ESP-NOW is a Wi-Fi consumer that needs no web server. That variant therefore links the whole
+Wi-Fi driver it used to compile out, and it has stopped being the "no Wi-Fi at all" build it
+used to be. `all-off` is now the only variant with no radio in it, and `all-off` moved
+(+31,594 / +1,064) because the LINK screen is in the screen table and drags the session, the
+codec and the peer table with it — what `FEATURE_ESPNOW 0` removes is the RADIO, not the
+screen: the driver compiles to refusal stubs, `link_start()` answers false and the screen
+says "Radio no disponible" rather than hanging.
+
+The baseline sits at **83.1 % of `GATE_FLASH_MAX`** (405,540 B free) and **89.4 % of
+`GATE_GLOBALS_MAX`** (9,508 B free); the release build — the one that ships — is at
+**79.3 % of `GATE_RELEASE_FLASH_MAX`** and **87.4 % of `GATE_RELEASE_GLOBALS_MAX`**, and
+**63.4 %** of the 3,145,728 B `app0` slot (release: **40.4 %**).
+
+**Where the phase-7 cost landed.** Per commit, each delta the difference of two adjacent
+commits' own recorded `flash=`/`globals=` lines; `git log --oneline v0.6.0-activity..HEAD` is
+exactly four commits and the four sum to the table above:
+
+| commit | chunk | flash | globals | after |
+|---|---|---|---|---|
+| `3cd481f` | P7-C1 ESP-NOW behind the §59 seam | **+9,758** | **+5,832** | 1,958,560 / 79,412 |
+| `837223b` | P7-C2/C3 LINK screen, consent, linked battle | **+26,520** | **+928** | 1,985,080 / 80,340 |
+| `f8f2e51` | P7-C4/C5 atomic trade + breeding | **+8,874** | **+144** | 1,993,954 / 80,484 |
+| this commit | P7-C6 exit: the blocking find, seven debts | **+506** | **+8** | 1,994,460 / 80,492 |
+| | **phase 7** | **+45,658** | **+6,912** | |
+
+**The exit's own +8 B of globals, attributed** (`riscv32-esp-elf-nm -S` over the release
+`.elf`): `s_tick_lost_s` 4 + `s_tick_stalls` 2 = **6 B of symbols**, plus 2 B of link
+alignment. `save_pebble_now()`, `act_adopt()` and the narrowed `sim_gain_restore()` add no
+state at all; the +506 B of flash is those three functions and `pwr_tick_budget()`.
+
+**AND EVERY ONE OF THEM IS IN THE RELEASE ARTEFACT, CHECKED RATHER THAN ASSUMED.**
+`riscv32-esp-elf-nm -C` over the `release` `.elf` finds `save_pebble_now`, `act_adopt`,
+`pwr_tick_budget` and `sim_gain_restore` as text symbols. That check is here because of what
+the phase-6 exit found — the shipping build never advanced game time for four phases, because
+a default lived inside a dev-only function — and a fix that is not in the shipping image is
+not a fix.
+
+### The blocking finding this exit opened with: a successful trade destroyed a Pebble
+
+**On the SHIPPING build, every clean trade lost a Pebble, and the boot resolver carried the
+identical defect through the identical shim.** `game/trade.cpp`'s apply step writes B1 (clear
+the outgoing slot) then B2 (file the incoming one), and `box_add()` fills `first_free()` —
+which is the slot B1 just released. So B1 and B2 write **the same key microseconds apart**.
+`save_manager.cpp`'s `save_pebble()` DEFERS a second write of one key inside
+`SAVE_MIN_GAP_MS` (1,000 ms) — `force` does not bypass that branch — **and returns true**.
+The two P7-C4 shims returned that `true` straight back as `TradeStore.write_slot`, whose
+contract in `game/trade.h` is literally "every function returns whether the bytes LANDED". B2
+therefore never reached flash, B3 wrote the Box header over it and W4 cleared the journal to
+IDLE, so nothing was left to repair it.
+
+**Reproduced independently before it was fixed, and it is worse than the report said.** With
+`app/app.cpp`'s own clock wiring bound in `tests/test_trade.cpp` — one line,
+`save_set_clock(&clock_ms, &clock_epoch)` instead of `save_set_clock(nullptr, ...)` — the
+CLEAN trade case fails with **no fault injection at all**: the Box holds 2 Pebbles instead of
+3, `traded == 0`, and the trade costs **9 flash writes instead of 10**. The 15-point kill
+sweep then fails at every cut point past the third.
+
+**THE FIXTURE IS WHY IT SURVIVED 27,819 CHECKS, AND THAT IS THIS PROJECT'S NAMED PATTERN
+WITH THE POLARITY INVERTED.** `save_set_clock(nullptr, ...)` switches OFF `save_manager.cpp`'s
+entire wear-filter branch (`if (s_now_ms && s_have_written[slot])`). A 15-point kill sweep, a
+9-point resolver sweep and an 800-trial lossy table all ran against a `save_manager` **the
+release artefact does not execute**. Phase 6 found a default living inside a dev-only path;
+here the DEFAULT is the safe one and the SHIPPING wiring is the dangerous one.
+
+**The fix is a second entry point, not a widened flag.** `save_pebble_now()` writes with no
+filter and no deferral and returns whether the bytes landed — there is no third answer.
+`force=true` was deliberately NOT widened to mean this: `persistence/game_state.cpp` calls it
+on every care action and RELIES on the deferral for flash wear. Two gates now hold it:
+`save_pebble()` may not be called from `app/` or `ui/` at all, and no host test may bind
+`save_set_clock(nullptr, ...)`. Both were proven to bite.
+
+### Where the trade's atomicity claim stands after that
+
+**Within one device it is proved, and now proved against the clock the device really runs.**
+The sweep cuts the power at every flash write of the sequence, at the four that open the
+journal and at nine points inside the resolver, each followed by a reboot, a resolve, the
+pair invariant and a second reboot that must change nothing — with a real millisecond clock
+bound and `tests/fakes/kv_mem.cpp`'s `kv_erase()` now also refusing once the store is dead
+(it was not, so a swept "power cut" could still erase checkpoint slots after the device was
+supposed to be gone — a fault model that refuses writes and permits deletes is not a power
+cut).
+
+**Across the pair it is still bounded and measured rather than proved**, exactly as
+`game/trade.h` states: 800 trials over four fault arms, 0 split. The cross-pair rendezvous is
+carried to phase 8.
+
+### D2's OUTCOME: ESP-NOW is implemented and UNPROVEN ON HARDWARE
+
+D2 chose ESP-NOW on paper on 2026-09-02. Phase 7 built it. **It has never run on a board, so
+the decision is implemented but not validated, and the deletion D2 authorises is still
+pending.**
+
+| D2 clause | Outcome at v0.7.0-social |
+|---|---|
+| ESP-NOW behind the §59 `Transport` seam | **DONE and demonstrated.** `networking/transport_espnow.cpp` is the only file in the tree that includes `esp_now.h`. `networking/session.cpp` took the radio with no widening, no new field and no `#ifdef`, and a gate fails the build if it grows one. |
+| The game never learns which transport carried a packet | **DONE and gated.** `tests/test_link_transport.cpp` runs a whole battle between two real sessions over a `Transport` whose `recv()` **is** `rxring_pop()`. |
+| No stack flip during a link session | **DONE.** ESP-NOW rides the same `WIFI_STA` residency the §40 scanner needs; `espnow_end()` is inside `wifi_down()` so it cannot outlive the driver. |
+| Same-channel constraint, "the beacon announces the channel and P7-C1 re-tunes" | **NARROWED, and the narrowing is a cost.** The beacon carries no channel field and there is no re-tune path: both devices apply `PB_LINK_CHANNEL` on every LINK bring-up, so a peer on another channel is not discoverable at all rather than discoverable-and-unreachable. A device left on another channel by something outside this firmware is invisible to LINK, and this firmware cannot tell that from an empty room. |
+| The Bluedroid leak no longer needs measuring | **CORRECT — it was never measured, and it did not need to be.** |
+| **`FEATURE_BLE 0` in the release build; `ble_social.cpp` becomes a removal candidate in P7-C1** | **NOT DONE, DELIBERATELY, AND THIS IS THE ONE OPEN CLAUSE.** See below. |
+
+**THE BLE DELETION IS BLOCKED ON A BENCH TEST, AND THE ORDERING IS THE WHOLE POINT.**
+`ble_social.{h,cpp}`, `FEATURE_BLE` and `core/nt_types.h`'s `BlePeerInfo` are byte-identical
+across all four phase-7 commits. ESP-NOW was chosen on paper and has never linked two boards;
+deleting the only fallback before the chosen transport is demonstrated is backwards, and no
+amount of host testing can substitute — a host binary is single-threaded and is not evidence
+about the Wi-Fi task, the channel, modem sleep, or a real receive callback.
+
+**RE-MEASURED AT THIS TAG rather than re-quoted, because the headroom argument rests on it:**
+deleting BLE recovers **712,618 B of flash and 23,496 B of static RAM** (baseline minus
+`no-ble`: 1,994,460 − 1,281,842 and 80,492 − 56,996). The figure the tree has been quoting
+since P4-C6 is **712,466 / 23,504** — a drift of 152 B of flash and 8 B of globals over three
+phases, immaterial to the decision and corrected here so the next reader measures rather than
+inherits.
+
+**WHAT THE OWNER MUST RUN TO UNBLOCK IT, in one sentence:** flash two boards, open LINK on
+both, and confirm **each board lists the other** — which needs `link_qualified_count()` to
+reach 1, i.e. three beacons at 500 ms above `LINK_RSSI_MIN` (−70 dBm), within
+`LINK_JOB_TIMEOUT_MS` (90 s). If both boards list each other, `ble_social.{h,cpp}` may be
+deleted, `FEATURE_BLE` removed, `no-ble` promoted to the baseline and `BlePeerInfo` taken out
+of `core/nt_types.h`. If they do not, **run bench item 1 first** (the modem-sleep check) —
+`WIFI_PS_MIN_MODEM` is the C3 default, it is applied at STA start,
+`CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE=y` makes it bite an UNASSOCIATED station, and
+`net.cpp`'s `scan_begin()` sets the cached value to true in a static that survives a mode
+change and `net_request(RADIO_OFF)`. `link_begin()` calls `WiFi.setSleep(false)` BEFORE
+`WiFi.mode(WIFI_STA)` for exactly that reason; a materially lower beacon count after a
+NETWORK scan means the call is missing or ordered wrong.
+
+### The seven carried debts, and what happened to each
+
+The phase-6 exit carried six bullets, one of which held two independently measured items.
+None was dropped.
+
+| # | Debt | Verdict | What was done |
+|---|---|---|---|
+| D1 | `sim_gain_restore()`'s typed-clock hole | **DEFECT — FIXED** | The `elapsed * cap / 3600` term is gone. Both epochs are wall clocks a player types on the time screen, and one hour of "elapsed" refilled a whole cap: 100 rounds of (clock +1 h, reboot) from a spent ledger manufactured **4,000** happiness gain points against a cap of 40. Same shape `xp_ledger_restore()` lost at P6-C4, closed the same way. |
+| D2 | A Pebble at `XP_LEVEL_MAX` earns no activity happiness | **DEFECT — FIXED** | `meter_take()` moved above the top-of-curve early return in `xp_add()`. Measured before: level 29 paid 5,500 milli of the 5,500 owed, level 30 paid **0**. |
+| D3 | No test for `gt_mono_ms()`'s choice of clock | **COVERAGE GAP — CLOSED** | `tests/fakes/arduino/` (two headers, one symbol each) + `gametime_arduino.o` + `tests/test_clock_device.cpp`: 4 cases driving the DEVICE branch across a wake that zeroes uptime while the RTC keeps counting. |
+| D4 | Nothing counts a dropped tick | **DIAGNOSTICS GAP — CLOSED** | `pwr_tick_budget()` in `hardware/power.cpp` (so a host binary can drive arithmetic `app/app.cpp` cannot compile), two saturating counters on the ENERGIA page, and a case that asserts BOTH halves — the counter moved AND exactly one second was charged. |
+| D5(a) | `CooldownTable.act_day` never validated on load | **DEFECT — FIXED** | `act_adopt()`, called once at boot. Measured: ten simulated years score **146,000** points from an honest table and **440** from one carrying `act_day = 0xFFFF`, because `open_day()`'s only roll condition is `day > t.act_day` and a u16 holds 65,535 while the widest day a u32 epoch can name is 49,710. |
+| D5(b) | The environment is sampled once per `logic_tick()` | **DOCUMENTATION** | Worst measured care difference over half an hour at `EPOCH0`: **0 milli-points**. `app/app.cpp` now says so beside `sim_tick(step)`; the fix would be a broken-down-time conversion sixty times a minute for a number nobody can see. |
+| D6 | A deep-sleep rung would need `app_loop()` changed too | **DOCUMENTATION** | The paragraph now sits directly under `hardware/power.h`'s `static_assert(!PWR_DEEP_WAKE_BOTH_BUTTONS)`, so the person who trips the tripwire opens both files. |
+
+### The exit's mutations
+
+Every fix above was mutation-tested; each mutation made a NAMED case or a NAMED gate fail.
+
+| Mutation | What failed |
+|---|---|
+| The trade's slot shim returns `save_pebble(..., true)` | `a_clean_trade_moves_exactly_one_pebble_each_way_and_clears_its_journal` (4), `a_power_cut_at_every_single_flash_write_leaves_the_box_whole` (46), `a_power_cut_inside_the_resolver_is_finished_by_the_next_boot` (32), `a_write_that_did_not_land_stops_the_sequence_where_it_failed` (7), and four more |
+| `save_pebble_now()` honours the wear floor | `save_pebble_now_reaches_flash_twice_inside_the_floor_and_never_says_it_did_not` (5) + the whole trade sweep |
+| `save_pebble_now()` does not cancel a pending deferral | `save_pebble_now_reaches_flash_twice_inside_the_floor_and_never_says_it_did_not` (1, on the put COUNT) |
+| GATE: `ui/ui.cpp`'s shim back to `save_pebble()` | `GATE FAIL: save_pebble() is called from app/ or ui/ (1)` |
+| GATE: a host test binds `save_set_clock(nullptr, ...)` | `GATE FAIL: a host test binds save_set_clock(nullptr, ...) (2)` |
+| `sim_gain_restore()` ages the snapshot forward again | `a_typed_hour_and_a_reboot_cannot_refill_a_spent_gain_budget` (202) |
+| `xp_add()` returns at the top of the curve before `meter_take()` | `a_pebble_at_the_top_of_the_curve_still_earns_its_activity_happiness` (2), `the_meter_is_spent_at_the_top_of_the_curve_for_every_metered_source` (8) |
+| `act_adopt()`'s bound is 60,000 instead of `ACT_DAY_MAX_INDEX` | `a_day_index_beyond_the_clock_freezes_the_score_and_the_boot_clamp_removes_it` (2) |
+| `act_adopt()` clamps the day and keeps the score | the same case (1) |
+| `pwr_tick_budget()` does not count the stall | `a_gap_wider_than_the_bound_charges_one_second_and_says_it_lost_the_rest` (3) |
+| `pwr_tick_budget()` charges the whole stall | the same case (2) |
+| `pwr_tick_budget()` counts how often, never how much | the same case (3) |
+| `gt_mono_ms()`'s device branch reads `millis()` | all four `test_clock_device` cases — **and the grep gate too** |
+| **`gt_mono_ms()` divides the RTC by 1,000,000 instead of 1,000** | **`GATE OK` — and all four `test_clock_device` cases fail.** This is the one that says why the test was worth building: a grep can prove the right identifier is in the right function and can never prove the clock behaves. |
+| `session.cpp`'s `SS_SESSION` arm drops its `SR_INITIATOR` clause | `a_responder_refuses_a_session_accept_and_never_adopts_its_nonce` (4) — a guard that had NO test before this exit, and whose deletion left all 46 binaries green |
+
+### Three things found in review that were recorded rather than swept
+
+- **`networking/session.cpp` DID change in phase 7, and no earlier sentence says it plainly.**
+  P7-C1's headline — "session.cpp and battle_link.cpp are byte-identical" — is true of P7-C1
+  and stays true through P7-C3. **P7-C4 changed it** (+86/−3 lines, `session.h` +46/−6) to
+  carry the trade as a second `SessionOp`: `SESSION_REQUEST.rules` and `SESSION_ACCEPT.op_echo`
+  became real fields. The LOAD-BEARING claim is intact and gated — every added line was grepped
+  for `esp_now|esp_wifi|WiFi|arduino|#if|espnow|radio|rxring|driver` and matched none — but
+  "the radio chunks did not touch it; the second OPERATION did" is the accurate sentence.
+- **`SessionEnd.detail` has FOUR readings, not three.** `session.h` said "a `VReject` for
+  `SE_REJECTED`"; `networking/trade_link.cpp` closes `SE_REJECTED` with the `SessionDetail`
+  `SD_TRADE_REFUSED` at three of its five sites. The two enums collide — `SD_TRADE_REFUSED`
+  is 22 and `VReject` 22 is `VR_BAD_CARE` — so a reader following the header would print "a
+  care value outside range" for a god-taint refusal. Nothing in the product reads
+  `end.detail` today, so it is a trap for a log reader rather than a live defect; the header
+  now says all four readings.
+- **A pathspec trap for the next verifier.** The source tree is nested at
+  `Pebblebol/Pebblebol/src/`, not `Pebblebol/src/`. `git diff v0.6.0-activity HEAD --
+  src/networking/session.cpp` matches nothing and **exits 0**, which reads exactly like "the
+  seam held". Any exit check written with the short path is a test that cannot fail.
+
+### What phase 7 did NOT measure, stated as unmeasured
+
+**No radio ran, and this is a larger caveat than in any previous phase**, because phase 7's
+whole subject is two devices talking. Unobserved: whether two boards see each other's beacon
+at all; the modem-sleep default on an unassociated station; the channel after a §40 scan;
+ESP-NOW's own duplicate suppression and MTU enforcement; the receive callback's threading and
+preemption (the SPSC claim in `rxring.h` rests on discipline and on two precedents, and a
+host binary is single-threaded); the radio half of the consent gate (the loopback delivers
+regardless of binding, so "an un-bound device's callback really drops the initiator's
+unicast" is bench item 2 and nothing else); and a flash erase interrupted mid-page — a
+`kv_mem` "power cut" is a fake store returning false, not a partially-programmed NVS page, so
+the trade's within-device claim is if anything understated in one direction and untested in
+that one.
+
+**§67's "Local multiplayer works" and P7-C1's "two boards see each other's beacon in LINK"
+are therefore UNTICKED**, and the plan carries an eleven-item bench list in the order to run
+it. Everything else ticked in phase 7 is ticked on the host standard every earlier phase used.

@@ -763,4 +763,62 @@ if [ -f "$SKETCH/src/ui/screen_battle.cpp" ]; then
   [ "$n" -eq 0 ] || fail "ui/screen_battle.cpp includes the LINK screen or a networking header ($n) - the linked battle's session is reached through the ui.h seams (ui.h, THE LINKED BATTLE'S SEAMS)"
 fi
 
+# --- P7-C6: THE TRADE'S SLOT WRITES MAY NOT GO THROUGH THE THROTTLED PATH ---
+# save_pebble(slot, p, force) DEFERS a second write of one key inside
+# SAVE_MIN_GAP_MS and RETURNS TRUE. That is correct for the care loop, which
+# calls it every action and lets save_service() flush; it is a lie for
+# game/trade.cpp's store seam, whose whole contract is "the bytes landed".
+# The trade writes ONE key TWICE microseconds apart (B1 releases the outgoing
+# slot, box_add() refills the slot B1 just released), so with the shipping
+# millisecond clock bound the second write was deferred, reported as landed, and
+# the journal was cleared over an empty flash slot - a Pebble destroyed with no
+# record left to repair it. See persistence/save_manager.h save_pebble_now().
+#
+# THE RULE: app/ and ui/ call save_pebble_now(). The throttled entry point has
+# exactly one family of callers, persistence/game_state.cpp, which already reads
+# save_pebble_landed() on every call.
+#
+# ITS LIMIT, STATED: this is a call-site gate. It cannot see a THIRD shim in
+# persistence/ that returns save_pebble()'s answer without asking
+# save_pebble_landed(); tests/test_persistence.cpp's two named write-path cases
+# and tests/test_trade.cpp's kill sweep (which now binds a real ms clock) are
+# the other half.
+if [ -f "$SKETCH/src/persistence/save_manager.h" ]; then
+  n=$( { grep -rnE '\bsave_pebble[[:space:]]*\(' "$SKETCH/src/app" "$SKETCH/src/ui" \
+          --include='*.cpp' --include='*.h' || true; } \
+        | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "save_pebble() is called from app/ or ui/ ($n) - the throttled write DEFERS and still returns true; the trade's store seam must call save_pebble_now() (persistence/save_manager.h)"
+fi
+
+# --- P7-C6: A HOST BINARY THAT DRIVES save_manager BINDS A REAL ms CLOCK ---
+# save_set_clock(nullptr, ...) switches OFF save_manager.cpp's entire wear-filter
+# branch (`if (s_now_ms && s_have_written[slot])`), so a fixture that passes it
+# is testing a save_manager the release artefact does not execute. That is how
+# 27,819 checks, a 15-point kill sweep and an 800-trial lossy table all missed a
+# Pebble being destroyed on every clean trade. app/app.cpp binds a real one.
+if [ -d "$ROOT/tests" ]; then
+  n=$( { grep -rnE '\bsave_set_clock[[:space:]]*\([[:space:]]*(nullptr|NULL|0)[[:space:]]*,' \
+          "$ROOT/tests" --include='*.cpp' --include='*.h' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "a host test binds save_set_clock(nullptr, ...) ($n) - that disables the wear filter the shipping build runs; bind a fake ms clock the case can freeze (tests/test_trade.cpp)"
+fi
+
+# --- P7-C6: THE FAKE ARDUINO CORE IS FOR ONE OBJECT --------------------------
+# tests/fakes/arduino/ holds two headers with one symbol each (millis(),
+# esp_rtc_get_time_us()) so that hardware/gametime.cpp's DEVICE branch can be
+# compiled and DRIVEN on the host. That branch was guarded by the grep above
+# and by nothing else, and a grep cannot see a unit slip: dividing the RTC by
+# 1,000,000 instead of 1,000 leaves this file green and fails all four cases in
+# tests/test_clock_device.cpp.
+#
+# THE FAKE MUST STAY THAT NARROW. One Makefile rule may pass -Ifakes/arduino; a
+# second would be the beginning of a private Arduino core that can drift from
+# the real one in silence, and every other host object is compiled against no
+# Arduino at all, which is what makes the purity gates above mean anything.
+if [ -d "$ROOT/tests/fakes/arduino" ]; then
+  n=$( { grep -nE -- '-Ifakes/arduino' "$ROOT/tests/Makefile" || true; } | wc -l )
+  [ "$n" -eq 1 ] || fail "tests/fakes/arduino is reached by $n Makefile rules, not 1 - it exists for gametime_arduino.o alone (tests/fakes/arduino/Arduino.h)"
+  n=$( { find "$ROOT/tests/fakes/arduino" -type f | wc -l; } )
+  [ "$n" -eq 2 ] || fail "tests/fakes/arduino holds $n files, not 2 - a wider fake is a second Arduino core nobody diffs against the real one"
+fi
+
 echo "GATE OK"

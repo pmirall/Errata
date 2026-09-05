@@ -115,11 +115,16 @@
 //  reboot at all. The reward for it is bounded by layer 5 and by nothing in this
 //  file. The residual is stated in full at layer 5.
 //
-//  ONE MORE RESIDUAL, IN THE PLAYER'S DISFAVOUR: a Pebble at XP_LEVEL_MAX earns
-//  no activity happiness, because xp_add() returns at the top of the curve
-//  before it spends the meter, and the happiness is scaled by what the meter
-//  spent. It is a loss and not a hole - the safe direction - and it is the one
-//  case where the two halves of the reward do not agree.
+//  THAT RESIDUAL IS CLOSED AS OF P7-C6, AND WHAT REPLACED IT IS WRITTEN HERE.
+//  A Pebble at XP_LEVEL_MAX used to earn NO activity happiness, because
+//  xp_add() returned at the top of the curve before it spent the meter and the
+//  happiness is scaled by what the meter spent (measured: 5,500 milli owed,
+//  0 paid). meter_take() now runs first, so the two halves of the reward agree
+//  at every level. THE PRICE: the device-wide ledger counts XP HANDED OUT
+//  rather than XP that found a home, so a maxed Pebble drains a source's daily
+//  budget it used to leave for a Box-mate. tests/test_xp.cpp's
+//  the_meter_is_spent_at_the_top_of_the_curve_for_every_metered_source owns
+//  that behaviour, source by source, so it cannot drift back unnoticed.
 //
 //  The XP half of the reward does not even have that residual: XP is owed for
 //  crossing ACT_XP_STEP_POINTS thresholds of the day's CUMULATIVE, PERSISTED
@@ -263,6 +268,26 @@ void act_begin(void);
 //   a u16 and cannot overflow before the epoch itself does.
 // -----------------------------------------------------------------------------
 uint16_t act_day_index(uint32_t now_epoch);
+
+// The widest day index any uint32_t epoch can name: 0xFFFFFFFF / ACT_DAY_S =
+// 49,710. CooldownTable.act_day is a u16 and can hold 65,535, so the range
+// between them is a set of days the clock can never reach.
+#define ACT_DAY_MAX_INDEX   ((uint16_t)(0xFFFFFFFFul / ACT_DAY_S))
+
+// act_adopt(t) - CALL ONCE AT BOOT, on the table that just came off flash, and
+// before anything scores against it.
+//
+// open_day() rolls the day only on `day > t.act_day`, so an act_day above
+// ACT_DAY_MAX_INDEX names a day the clock can never reach and FREEZES THE
+// ACTIVITY SCORE FOR EVER: measured at ten simulated years scoring 240 points
+// where an honest table scored 876,000. This clamps it back to "no day
+// recorded" and clears the score that went with it. Returns true when it
+// repaired something, so a caller can persist the repair; returns false - and
+// touches nothing - for every honest table, which is all of them.
+//
+// It is denial rather than a farm (only the holder loses) and the pair CRC
+// covers random corruption, so it takes a hand-edited or foreign blob to reach.
+bool act_adopt(CooldownTable& t);
 
 // -----------------------------------------------------------------------------
 //  THE FOUR INPUTS. Each returns the POINTS ADDED to the day's score - 0 when
