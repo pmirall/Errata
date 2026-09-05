@@ -67,6 +67,9 @@ enum NetPhase : uint8_t {
   NPH_AP_PORTAL,        // softAP + captive DNS up (the creator's own network)
   NPH_BLE_UP,           // Bluedroid initialised
   NPH_SETTLING,         // one stack torn down, waiting RADIO_SETTLE_MS for the other
+  NPH_LINK,             // WIFI_STA on PB_LINK_CHANNEL with ESP-NOW up. NEVER
+                        // associated either: ESP-NOW's whole "association" is
+                        // its peer table and its channel (P7-C1, decision D2).
   NPH_COUNT
 };
 
@@ -84,6 +87,8 @@ enum NetErr : uint8_t {
   NERR_SCAN_FAILED,       // the driver refused to start a scan
   NERR_AP_FAILED,         // softAP() returned false
   NERR_DNS_FAILED,        // captive DNSServer::start() returned false
+  NERR_ESPNOW_DISABLED,   // built with FEATURE_ESPNOW == 0
+  NERR_ESPNOW_FAILED,     // the ESP-NOW bring-up or its broadcast peer did not take
   NERR_COUNT
 };
 
@@ -184,13 +189,35 @@ struct WifiScanDriver;
 const WifiScanDriver &net_scan_driver(void);
 void        net_scan_salt_set(uint32_t device_id);
 
+// -----------------------------------------------------------------------------
+// THE PEER LINK'S RADIO (P7-C1, decision D2 = ESP-NOW; spec sections 42, 43).
+//
+// net_link_driver() hands back the LinkRadioDriver that networking/discovery.h
+// drives: bring WIFI_STA up on PB_LINK_CHANNEL with ESP-NOW resident, put one
+// broadcast beacon on the air, drain what came back, and put the radio back to
+// OFF. It is a THIRD INTENT ON THE SAME WI-FI STACK, exactly like the scan and
+// the creator portal, which is why RadioMode does not gain a value.
+//
+// IT STILL NEVER ASSOCIATES. WiFi.mode(WIFI_STA) is the whole residency ESP-NOW
+// needs - nothing in esp_now.h mentions credentials, an access point, an IP or
+// a netif - so the P5-C1 deletion above is untouched and the gate that counts
+// association call sites still reads zero.
+// -----------------------------------------------------------------------------
+struct LinkRadioDriver;
+const LinkRadioDriver &net_link_driver(void);
+
 // Compile-time sanity on the constants this module contracts against.
 static_assert(RADIO_COUNT == 3, "RadioMode must stay OFF/WIFI/BLE");
 // Was 7. Three of them - the two station phases and the retry backoff - are
 // gone with the station path (P5-C1); NPH_SCANNING is new. The assertion is
 // RESTATED rather than deleted: its job is to make a phase appearing or
 // vanishing a deliberate act, and that job survives its subject changing.
-static_assert(NPH_COUNT == 5, "NetPhase gained or lost a phase");
+// Was 5, and 7 before P5-C1 deleted the station. NPH_LINK is P7-C1's: the peer
+// link is a PHASE of the Wi-Fi stack, not a fourth RadioMode, so the assertion
+// above stays at 3 while this one moves. RESTATED rather than deleted, for the
+// reason the paragraph above gives - its job is to make a phase appearing or
+// vanishing a deliberate act, and that job survives its subject changing.
+static_assert(NPH_COUNT == 6, "NetPhase gained or lost a phase");
 static_assert(BLE_SESSION_CAP > 0 && BLE_SESSION_CAP <= 255, "BLE_SESSION_CAP must fit uint8_t");
 // Was `SSID_MAX_LEN == 32 && PASS_MAX_LEN == 64, "WiFi credential caps"`. There
 // are no credentials any more, so that assertion lost its subject; what these

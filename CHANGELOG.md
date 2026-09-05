@@ -8,6 +8,76 @@ Versions are tagged at phase boundaries of `PEBBLEBOL_IMPLEMENTATION_PLAN.md`; t
 tag for a phase is cut only when its gate (`tools/check.sh`) and its variant matrix
 (`tools/build_matrix.sh`) are both green.
 
+## [Unreleased] — phase 7 (social), in progress
+
+### P7-C1 — the device transport, per decision D2 (ESP-NOW)
+
+Two Pebblebols can now, in principle, find each other. `networking/transport_espnow.cpp`
+brings ESP-NOW up on a `WIFI_STA` residency that still never associates — nothing in
+`esp_now.h` mentions credentials, an access point, an IP or a netif, and the gate that counts
+association call sites under `src/` still reads zero — broadcasts a 24-byte beacon every
+500 ms while the radio is in the new `NPH_LINK` phase, and unicasts session frames to one
+bound peer. `networking/discovery.{h,cpp}` is the beacon codec and a peer table of eight with
+an RSSI moving average, a three-hit threshold and a 60 s TTL; `networking/rxring.{h,cpp}` is
+the single-producer/single-consumer ring the Wi-Fi callback posts into. Both of those are
+PURE and caller-owned and reach the radio through a four-call driver struct, so the whole of
+discovery is driven by two new host binaries with no radio at all: 41 → **43 binaries**,
+787 → **827 tests**.
+
+**The seam held, and that is the headline.** `networking/session.cpp` and
+`networking/battle_link.cpp` are BYTE-IDENTICAL across this chunk. The transport interface
+P4-C5 built for a radio that did not exist took the radio with no widening, no new field and
+no conditional compilation, and `tests/test_link_transport.cpp` runs a whole battle between
+two real sessions over a `Transport` whose `recv()` **is** the ring the radio fills — so the
+claim is demonstrated rather than asserted. A new gate keeps it true: those two files may
+contain zero preprocessor conditionals, and `esp_now_*` may be called from exactly one file.
+
+**The ring depth the design survey proposed was wrong by a factor of four, and it would have
+failed silently.** The survey reasoned from the protocol's shape that eight slots were
+"generous, not tuned". Measured over 300 varied battles: one `session_poll()` puts up to
+**ten** frames in the peer's ring on a clean link and **nineteen** at a 10 % per-frame drop,
+where the retransmission ladder is re-sending while the peer is still catching up. Eight
+slots hold seven and refused three frames per clean battle; sixteen would still have
+overflowed. `LINK_RX_SLOTS` is 32. The reason the number had to be measured is the reason it
+matters: **a frame lost to ring overflow is indistinguishable to the session from a frame the
+radio dropped**, so getting it wrong produces a link that is quietly slower than it should be
+with no error anywhere.
+
+**A peer's hardware address has exactly one home and a gate that says so.** The six bytes live
+in one private array inside `transport_espnow.cpp`; what crosses into the peer table — and
+therefore into the game, the screen and anything persisted — is an opaque slot index. The
+build fails if `discovery.{h,cpp}` so much as names that identifier, in a field, a parameter
+or a comment. The shape being avoided is in this tree right now: `BlePeerInfo` carries the
+raw address as its first member. And the gate's limit is stated rather than glossed — it
+catches a rename and cannot see a value — so a test pins `sizeof(DiscPeer)` and every offset.
+
+`act_note_peer()` finally has a call site, in the peer table where the plan said it belongs
+and paid **once per peer that crosses the hit threshold, never once per beacon**, with the
+activity module linked into the same binary because that rule is a property of the two
+together. It still contributes 0 to every real score, because nothing drives the discovery
+job until the LINK screen exists in P7-C2 and §42's consent belongs there with it.
+
+**BLE IS NOT DELETED.** The plan gates that deletion on ESP-NOW having linked two real
+boards, and the ordering is deliberate: the chosen transport has still never run on hardware,
+so removing the only fallback first would be backwards. `ble_social.cpp` and `FEATURE_BLE`
+are untouched.
+
+**Not measured, not claimed:** no radio ran. Two boards seeing each other's beacon, the
+modem-sleep default that makes an unassociated ESP32-C3 station a duty-cycled receiver, the
+channel, ESP-NOW's own duplicate suppression and the receive callback's threading are all
+bench facts, and the plan carries them as a five-item bench list in the order to run them.
+
+Nineteen source mutations and seven gate mutations were planted; each made a named test or a
+named gate fail, and the table is in `docs/decisions.md`.
+
+Sizes, all seven matrix variants green with zero project warnings: baseline
+1,948,802 / 73,580 → **1,958,560 / 79,412**; release **1,233,762 / 55,740**, which is 77.1 %
+and 85.8 % of the caps `tools/build_matrix.sh` enforces. Two variants changed meaning and
+`docs/budget.md` says so: `no-web` now links the whole Wi-Fi driver (`+580,418` flash) because
+ESP-NOW is a Wi-Fi consumer that needs no web server, and `all-off` is byte-identical at
+547,274 / 25,324 while having become a build that switches the peer link off rather than one
+that never had a switch.
+
 ## [0.6.0-activity] — Unreleased
 
 Phase 6 is about the three things the device does when nobody is pressing a button: it

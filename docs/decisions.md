@@ -1487,3 +1487,202 @@ OF CLOCK is executed rather than grepped — is written into the P7-C6 box, not 
   its one-line remedy, and carried to P7-C6 rather than decided at an exit.
 - **No NVS wear measurement.** The activity half of the `cd` blob is bounded BY THE CAPS at at
   most 270 writes a day; it has not been observed on hardware.
+
+## P7-C1 — the peer link as built (recorded 2026-09-05)
+
+D2 chose ESP-NOW on paper on 2026-09-02. This is what it looks like in the tree, what was
+narrowed on the way, and what is still unmeasured because there is no hardware here.
+
+### 1. The seam took the radio unchanged — the P4-C5 claim, tested
+
+`networking/transport.h` promised at P4-C5 that "P7's transport_espnow.cpp is the only file
+in the tree that will include esp_now.h ... which is why networking/session.cpp and
+networking/battle_link.cpp contain no conditional compilation at all." Both files are
+**byte-identical across P7-C1**. `Transport` gained no field: `ctx` carries the endpoint
+handle, `recv()` drains the ring the Wi-Fi callback fills, `send()` is `esp_now_send()`, and
+`mtu` is `PROTO_FRAME_MAX` (**164, not `ESP_NOW_MAX_DATA_LEN`'s 250** — no legal frame
+exceeds 164, so 164 is the tighter and correct ceiling; 250 would let an encoder bug put a
+longer frame on air that the far end then names `PE_OVERSIZE`).
+
+**The send-callback ACK is a statistic and is deliberately NOT plumbed into `send()`'s
+bool.** `transport.h:36-40` and `transport_loopback.cpp:86-90` both require a refused send
+and a dropped frame to be indistinguishable to the session; wiring the link-layer ACK back
+would create a path the in-process loopback cannot exercise, which is the one thing the seam
+exists to prevent. It surfaces as `espnow_stats().tx_ok/tx_fail` and `espnow_ever_acked()`,
+for P7-C2's "the peer is still there" line.
+
+Two things now hold that in place rather than a comment: a gate that fails the build if
+`session.cpp` or `battle_link.cpp` grows a single preprocessor conditional, and
+`tests/test_link_transport.cpp`, which runs **a whole battle between two real sessions over
+a Transport whose `recv()` is `rxring_pop()`** — the same ring code the radio fills.
+
+### 2. `LINK_RX_SLOTS` is 32, and the survey's 8 was wrong in the direction that hides
+
+The P7-C1 survey reasoned from the protocol's shape: "a lockstep round has at most a handful
+of frames in flight per direction ... Eight is generous, not tuned." Measured instead, over
+300 varied battles per arm on the real ring:
+
+| per-frame drop | worst frames one `session_poll()` put in the peer's ring | battles completed |
+|---|---|---|
+| 0 % | **10** | 300/300 |
+| 10 % | **19** | 300/300 |
+| 20 % | 18 | 300/300 |
+| 30 % | 14 | 291/300 |
+| 40 % | 13 | 229/300 |
+
+A poll drains everything queued and answers all of it, so the answer arrives at the peer as
+one burst; under loss the nine-rung ladder is re-sending while the peer is still catching
+up, which is why the lossy worst is nearly twice the clean one. **Eight slots hold seven and
+refused three frames per clean battle. Sixteen hold fifteen and would still have overflowed.**
+Only frames refused while BOTH endpoints were still draining are counted: after one side
+closes it stops draining altogether and the other's unanswered GOODBYE can fill a ring of any
+size, which says nothing about the depth a live link needs.
+
+**Why the number had to be measured rather than argued:** a frame lost to ring overflow is
+INDISTINGUISHABLE to `networking/session.cpp` from a frame the radio dropped — that is
+`transport.h:36-40`'s whole point — so the symptom of getting this wrong is a link that is
+quietly slower than it should be, with no error anywhere and nothing in the host suite able
+to see it. `EspNowStats.rx_ring_overflow` exists for the bench for the same reason.
+
+Cost: 32 x 164 + 64 = **5,312 B of globals** against 1,328 for eight.
+
+### 3. The hardware address has one home, and a gate says so
+
+The sender's six bytes live in `s_slot_addr[LINK_PEER_CAP][6]` inside
+`networking/transport_espnow.cpp`, plus the six of a bound session peer. What crosses into
+`networking/discovery.h` — and therefore into the game, the UI and anything persisted — is an
+opaque `slot` byte. `esp_now.h:111` says the recv info struct and all three of its pointers
+are valid only inside the callback, so none is retained: the bytes are copied into a ring
+slot and the pointer dies at the return.
+
+`tools/check.sh` fails the build if `discovery.{h,cpp}` NAMES that identifier, in a field, a
+parameter or a comment — the same gate `wifi_scanner.h` carries for a network's name, with
+the prose cost paid in `transport_espnow.h`, the file that legitimately handles it.
+**The shape not to copy is in this tree right now:** `core/nt_types.h`'s `BlePeerInfo` has
+the raw address as its first member and `ble_social.cpp:243` copies it out of the scan
+callback into the table the game reads.
+
+**And the gate's limit is stated rather than glossed.** It catches a RENAME and it cannot see
+a VALUE: six bytes smuggled through two `uint32_t` fields would leave it green, exactly as
+`check.sh:490-509` measured for `ScanResult`'s two padding bytes. That is why
+`a_disc_peer_has_no_room_to_hide_a_hardware_address` pins `sizeof(DiscPeer)` and every
+offset; the struct declares 31 bytes, has one byte of tail padding and no room for six.
+
+Address randomisation (`esp_wifi_set_mac`) is available and is deliberately not used: it
+would break peer stability across a reboot and buys little, because the address is on air
+whatever this firmware does. The honest statement is that the firmware does not amplify it,
+does not store it, and does not show it to the player or to the game.
+
+### 4. A NARROWING OF D2's "same-channel constraint", recorded
+
+D2's consequences say: *"the discovery beacon announces the channel and the session pins it
+to `PB_LINK_CHANNEL`; P7-C1 must handle a peer found on another channel by re-tuning before
+HELLO, not by failing."* **What was built is smaller than that sentence.** The beacon carries
+no channel field and there is no re-tune path. Both devices apply `PB_LINK_CHANNEL` on every
+LINK bring-up, so a peer on another channel is not discoverable at all rather than
+discoverable-and-unreachable — there is nothing to re-tune *to*, because a beacon from
+another channel never lands in the callback.
+
+The cost of the narrowing, stated: **a device left on another channel by something outside
+this firmware is invisible to LINK, and this firmware cannot tell that from an empty room.**
+Only a bench can say whether that happens in practice. The channel is re-applied on every
+bring-up rather than once at boot because it is not stored in NVS and the section 40 scan
+sweeps 1..13 and leaves the radio wherever its last dwell ended.
+
+`PB_LINK_CHANNEL` must be 1..11 and `transport_espnow.cpp` static_asserts it:
+`WiFi.setChannel()` refuses a channel outside the country range and the default country is
+world-safe `"01"` (schan 1, nchan 11), so a 12 or 13 would be silently ignored and every
+beacon would miss.
+
+### 5. What `all-off` and `no-web` now mean — the phase-6 exit's carried bullet, discharged
+
+`FEATURE_ESPNOW` is now a real `#define` in `config.h`, so `tools/build_matrix.sh` stops
+skipping it in the `all-off` variant.
+
+- **`all-off` did not change size and did change meaning: 547,274 / 25,324 at
+  v0.6.0-activity and 547,274 / 25,324 here, identical to the byte.** With `FEATURE_ESPNOW 0`
+  the driver compiles to its refusal stubs and `--gc-sections` drops the two pure modules
+  nothing calls. It is now a build that has switched the peer link OFF rather than one that
+  never had a switch.
+- **`no-web` changed by half a megabyte, and that is the row a future reader would
+  misattribute.** `net.cpp`'s `NT_NET_WANT_WIFI` was `(FEATURE_WEB)`; ESP-NOW is a Wi-Fi
+  consumer that needs no web server, so it is `(FEATURE_WEB || FEATURE_ESPNOW)`.
+  **1,320,114 / 52,620 → 1,900,532 / 77,364, +580,418 flash and +24,744 globals**, none of
+  which is a phase-7 feature: it is the Wi-Fi driver, which that variant used to compile out
+  entirely. `all-off` is now the only variant with no radio in it.
+- `tools/build_matrix.sh` now PRINTS every define it drops. `FEATURE_WEATHER` and
+  `FEATURE_TELEGRAM` are still fictional and now say so on every run. **The silence was the
+  defect, not the define.**
+
+### 6. Mutation testing — nineteen source mutations and seven gate mutations
+
+Every one was planted, built and run, and each made a NAMED case or a NAMED gate fail.
+
+| # | mutation | fails |
+|---|---|---|
+| 1 | `rxring_push` overwrites at `tail` when the ring is full | `a_full_ring_refuses_the_newest_and_keeps_every_older_one` (23 checks — on the PAYLOAD, not merely a counter) |
+| 2 | `rxring_push` clamps an oversize record to `stride` instead of refusing | `an_oversize_record_is_refused_and_never_truncated` (the "ring is still empty" check) |
+| 3 | `rxring_pop` returns 0 for a record that will not fit the caller's buffer | `a_pop_never_returns_zero_while_the_ring_still_holds_a_record` — the "0 is a lie" path `transport_loopback.cpp:107-118` wrote down for P7 |
+| 4 | `LINK_RX_SLOTS` 32 → 16 | `a_lossy_link_bursts_harder_than_a_clean_one_and_the_ring_still_absorbs_it` (9 checks) |
+| 5 | drop the `LINK_RSSI_MIN` floor | `a_peer_below_the_signal_floor_never_reaches_the_table` |
+| 6 | qualify at 1 hit instead of `LINK_PEER_HITS_MIN` | `three_hits_are_what_makes_a_peer_real` |
+| 7 | `act_note_peer()` on every accepted beacon instead of on the crossing | `a_peer_is_scored_once_however_many_beacons_it_sends` + 3 more |
+| 8 | the TTL never expires | `a_peer_unheard_for_the_ttl_leaves_the_table` |
+| 9 | the signal is the last packet, not the EMA | `the_signal_shown_is_an_average_and_not_the_last_packet` |
+| 10 | drop the "never list yourself" filter | `a_device_never_lists_itself` |
+| 11 | beacon on every `service()` instead of on the cadence | `a_beacon_goes_out_on_the_cadence_and_not_at_frame_rate` |
+| 12 | drop the name's padding check (bytes after the first NUL) | `bytes_hidden_after_the_name_are_a_refusal_and_not_padding_to_ignore` |
+| 13 | drop the reserved-capability-bit check | `a_beacon_that_is_wrong_about_itself_is_refused_even_when_it_is_sealed` |
+| 14 | the section 47 ceiling never fires | `the_radio_is_released_exactly_once_on_every_exit_path` + 2 more |
+| 15 | `release()` loses its `stopped` guard | `the_radio_is_released_exactly_once_on_every_exit_path` |
+| 16 | beacon length `>=` instead of `==` | `every_way_a_beacon_can_be_wrong_has_its_own_named_code` |
+| 17 | ignore `LINK_POLL_FAILED` from the driver | `the_radio_is_released_exactly_once_on_every_exit_path` |
+| 18 | evict in place instead of remove-and-append | `a_ninth_device_evicts_the_oldest_and_never_the_newest` (8 checks) |
+| 19 | drain the whole queue instead of `LINK_DRAIN_PER_SERVICE` | `one_service_drains_a_bounded_number_of_beacons_and_loses_none` |
+| G1 | `discovery.h` names the hardware identifier in a comment | `GATE FAIL: networking/discovery.h names a hardware address (1)` |
+| G2 | `net.cpp` includes `esp_now.h` and calls `esp_now_deinit()` | `GATE FAIL: the ESP-NOW API is called outside networking/transport_espnow.cpp (1)` |
+| G3 | `session.cpp` grows an `#if defined(ARDUINO)` / `#endif` pair | `GATE FAIL: networking/session.cpp contains conditional compilation (2)` |
+| G4 | `discovery.cpp` dropped from `PURE_NET_CPP` but kept in `PURE_NET` | `GATE FAIL: check.sh: networking/discovery.cpp is in PURE_NET but not PURE_NET_CPP` |
+| G5 | a new unclassified `networking/trade_link.cpp` | `GATE FAIL: networking/trade_link.cpp is in neither check.sh's PURE_NET nor its IMPURE_NET list` |
+| G6 | `discovery.cpp` grows a used file-scope mutable static | `GATE FAIL: networking/discovery.cpp holds file-scope mutable state (1)` |
+| G7 | `discovery.cpp` includes `ui/gfx.h` | `GATE FAIL: networking/discovery.cpp includes a radio, hardware or renderer header (1)` |
+
+**Two mutations were caught EARLIER than the gate, and that is worth recording rather than
+counting as a gate hit.** An UNUSED file-scope static in `discovery.cpp` fails the firmware
+build on `-Werror` before gate 2 runs (G6 was rewritten to use the static so the gate itself
+could be seen to fire), and `#include <esp_now.h>` in `discovery.cpp` fails the HOST SUITE
+outright, because the header does not exist off the target — a stronger answer than a grep,
+and the structural reason the pure list is worth keeping pure.
+
+**One mutation initially reported a false positive and the harness was fixed, not the
+finding.** Replacing the `peers_age()` call with `(void)0` left `peers_age()` unused, which
+fails `-Werror`, so the STALE binary from the previous mutation ran and reported the previous
+mutation's failures. The mutation runner now reports "BUILD FAILED" instead of running a
+stale binary, and the TTL mutation was re-planted as a TTL that never expires.
+
+### What P7-C1 did NOT measure, stated as unmeasured
+
+- **No radio ran.** Nothing in this environment can bring up ESP-NOW: the channel, the
+  broadcast peer entry, `esp_now_init()` ordering after `esp_wifi_start()`, ESP-NOW's own
+  duplicate suppression and MTU enforcement, and whether two boards hear each other are all
+  bench facts. **The acceptance item "two boards see each other's beacon in LINK" is
+  UNTICKED.**
+- **The modem-sleep hazard is reasoned, not observed.** `WIFI_PS_MIN_MODEM` is the C3's
+  default, it is applied at STA start, `CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE=y` makes
+  it bite an unassociated station, and `net.cpp:scan_begin()` sets the cached value to true —
+  a static that survives a mode change and `net_request(RADIO_OFF)`. `link_begin()` calls
+  `WiFi.setSleep(false)` BEFORE `WiFi.mode(WIFI_STA)`. **No host binary can see any of that**;
+  the beacon-count comparison before and after visiting the NETWORK screen is bench item 1.
+- **The SPSC claim is a discipline, not a measurement.** A host binary is single-threaded, so
+  nothing in `tests/test_link_transport.cpp` is evidence about the Wi-Fi task or about a push
+  preempting a pop. `rxring.h` states the cursor convention, uses acquire/release rather than
+  `volatile` (which is what `ble_social.cpp` does and `input.cpp` does not), and names both
+  precedents; that is the whole argument and it is falsifiable only on a bench.
+- **BLE IS NOT DELETED and `FEATURE_BLE` is untouched**, because the plan gates that deletion
+  on two boards having linked and nothing here can link two boards. Until then `ble_social.cpp`
+  costs the baseline 712,466 B of flash and 23,504 B of globals it has always cost, and the
+  release build is still the one to read the budget against.
+- **The peers-met activity term still contributes 0 to every real score.** `act_note_peer()`
+  now has a call site — `link_service()`, once per peer that crosses the hit threshold, tested
+  with `activity.o` in the same binary — but nothing in the firmware drives `link_service()`
+  until P7-C2's LINK screen, and §42's consent belongs there with it.

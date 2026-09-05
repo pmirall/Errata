@@ -22,6 +22,8 @@
 #include "net.h"
 #include "wifi_scanner.h"      // ScanResult, WifiScanDriver
 #include "net_classify.h"      // NetFacts, the ladder, the salted hash
+#include "discovery.h"         // LinkRadioDriver, DiscRx  (pure, no radio header)
+#include "transport_espnow.h"  // espnow_begin/end/broadcast/beacon_pop
 
 // net.h only forward-declares StrId (it must not pull the string table into
 // every one of its consumers). This TU is one of the few that really indexes
@@ -33,8 +35,13 @@
 #include <stdio.h>
 #include <esp_mac.h>
 
-// WiFi is only linked in when something actually consumes it.
-#define NT_NET_WANT_WIFI (FEATURE_WEB)
+// WiFi is only linked in when something actually consumes it. FEATURE_ESPNOW is
+// a consumer TOO, and it was not one before P7-C1: ESP-NOW rides on a started
+// station and needs no web server, so a build with FEATURE_WEB 0 and
+// FEATURE_ESPNOW 1 must still link the Wi-Fi driver. (The `no-web` matrix
+// variant therefore still carries WiFi from this tag on; the phase-7 exit's
+// variant table says so.)
+#define NT_NET_WANT_WIFI (FEATURE_WEB || FEATURE_ESPNOW)
 // The captive provisioning portal needs an HTTP server to be worth starting.
 #define NT_NET_HAVE_PORTAL (NT_NET_WANT_WIFI && FEATURE_WEB)
 
@@ -59,6 +66,12 @@
 // pumping. One settle window plus a second of slack is the margin.
 #define NET_SCAN_BACKSTOP_MS ((uint32_t)WIFI_SCAN_TIMEOUT_MS + RADIO_SETTLE_MS + 1000UL)
 
+// The NPH_LINK backstop, in exactly the shape and for exactly the reason of the
+// one above: STRICTLY LATER than the discovery job's own LINK_JOB_TIMEOUT_MS,
+// so the job always answers first and this only catches a job nobody is
+// pumping - a screen torn down mid-link, a caller that forgot to service it.
+#define NET_LINK_BACKSTOP_MS ((uint32_t)LINK_JOB_TIMEOUT_MS + RADIO_SETTLE_MS + 1000UL)
+
 // -----------------------------------------------------------------------------
 // Module state
 // -----------------------------------------------------------------------------
@@ -72,9 +85,15 @@ static RadioMode    s_pending        = RADIO_OFF;  // NPH_SETTLING target
 static uint8_t      s_ble_sessions   = 0;    // BLEDevice::init() calls this boot
 static bool         s_ap_up          = false;
 static bool         s_want_scan      = false;  // the next WiFi bring-up is a scan
+static bool         s_want_link      = false;  // ...or the peer link (P7-C1)
 static uint32_t     s_scan_salt      = 0;    // net_scan_salt_set(gs_device_id())
 
-#if NT_NET_WANT_WIFI
+// NT_NET_HAVE_PORTAL AND NOT NT_NET_WANT_WIFI, since P7-C1. These two are the
+// portal's and only the portal's, and WANT_WIFI stopped meaning "the portal is
+// in this build" the moment FEATURE_ESPNOW became a second Wi-Fi consumer: a
+// FEATURE_WEB=0 FEATURE_ESPNOW=1 build compiled them and used neither, which
+// tools/build.sh treats as a project warning and therefore as a failure.
+#if NT_NET_HAVE_PORTAL
 static bool         s_dns_up         = false;
 #endif
 
@@ -109,7 +128,7 @@ static void copy_bounded(char *dst, size_t cap, const char *src) {
   dst[n] = '\0';
 }
 
-#if NT_NET_WANT_WIFI
+#if NT_NET_HAVE_PORTAL
 static void set_ip_str(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
   snprintf(s_ip, sizeof(s_ip), "%u.%u.%u.%u",
            (unsigned)a, (unsigned)b, (unsigned)c, (unsigned)d);
@@ -263,6 +282,13 @@ static void ap_down(void) {
 
 static void wifi_down(void) {
   ap_down();
+  // ESP-NOW GOES DOWN WITH THE DRIVER IT RIDES ON, and it goes down HERE for
+  // the same reason WiFi.scanDelete() below is here: this is the one place
+  // every teardown passes through. Any other route to RADIO_OFF - the player
+  // leaving the screen, the idle ladder navigating home, god mode, a request
+  // for the other stack - would otherwise leave esp_now initialised over a
+  // Wi-Fi driver that has been stopped and deinitialised.
+  espnow_end();
   // FREE THE SCAN ARRAY HERE, not only where a scan is read. WiFiScan::
   // _scanDone() heap-allocates one wifi_ap_record_t per access point and only
   // scanDelete() or the NEXT scan releases it - so any route to RADIO_OFF out
@@ -315,6 +341,73 @@ static bool scan_begin(void) {
   }
   set_mode(RADIO_WIFI, NPH_SCANNING, "-> SCAN");
   return true;
+}
+
+// =============================================================================
+//  THE PEER LINK (P7-C1, decision D2 = ESP-NOW; spec sections 42, 43, 47)
+//
+//  THE RESIDENCY IS WiFi.mode(WIFI_STA) AND NOTHING MORE. Traced through the
+//  installed core (esp32 3.1.1): WiFiGenericClass::mode() -> wifiLowLevelInit()
+//  -> esp_wifi_init() -> esp_wifi_set_mode() -> espWiFiStart() ->
+//  esp_wifi_start(). There is no association call anywhere on that path - the
+//  same finding the scan already rests on - and esp_now.h names no credentials,
+//  no access point, no IP and no netif. ESP-NOW's whole "association" is its
+//  peer table and its channel.
+//
+//  esp_wifi.h IS DELIBERATELY NOT INCLUDED. net.h's structural argument for the
+//  association gate rests on it: WiFi.h does not pull in esp_wifi.h, and
+//  esp_now.h includes only esp_err.h and esp_wifi_types.h, so no translation
+//  unit in this tree has a DECLARATION of the association entry point. Adding
+//  that include here - in the one file that owns the radio - is exactly the
+//  "deliberate second act" net.h:24-26 warns about, and it is unnecessary:
+//  both calls the link needs are wrapped by the Arduino layer.
+//
+//  THE MODEM-SLEEP HAZARD, WHICH NO HOST TEST CAN SEE. On this core the
+//  station's power-save default is WIFI_PS_MIN_MODEM on everything but the S2
+//  (WiFiGeneric.cpp:405-410), it is applied automatically at STA start
+//  (STA.cpp:113-116), and the prebuilt libs have
+//  CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE=y - which is precisely the switch
+//  that makes power-save bite a station that is NOT associated. So the default
+//  state of an unassociated C3 station here is a DUTY-CYCLED RECEIVER, and
+//  ESP-NOW reception is then gated by the wake window. Worse, scan_begin()
+//  above calls WiFi.setSleep(true) and the cached value is a static that
+//  survives both a mode change and net_request(RADIO_OFF): the symptom would be
+//  a link that works on a fresh boot and starts losing beacons only after the
+//  player has visited the NETWORK screen once.
+//
+//  setSleep(false) is therefore called BEFORE the mode change, and the order
+//  matters: setSleep() only reaches esp_wifi_set_ps() when the cached value
+//  CHANGES and the station is already started, so flipping the cache while STA
+//  is down makes the STA_START event apply WIFI_PS_NONE. Paying full receive
+//  current is right here - LINK is foreground, screen-on and ceilinged at
+//  LINK_JOB_TIMEOUT_MS. THIS IS A BENCH ITEM AND IT IS THE FIRST ONE TO RUN.
+// =============================================================================
+static bool link_begin(void) {
+#if !FEATURE_ESPNOW
+  s_err = NERR_ESPNOW_DISABLED;
+  s_want_link = false;
+  NET_LOGF("[net] LINK refused: FEATURE_ESPNOW is 0\r\n");
+  set_mode(RADIO_OFF, NPH_OFF, "-> OFF (no espnow)");
+  return false;
+#else
+  WiFi.persistent(false);
+  WiFi.setSleep(false);                   // BEFORE the mode change - see above
+  WiFi.mode(WIFI_STA);
+  // A CHANNEL SET ON EVERY BRING-UP, not once at boot: it is not stored in NVS
+  // and the section 40 scan leaves the radio wherever its last dwell ended.
+  WiFi.setChannel((uint8_t)PB_LINK_CHANNEL);
+  if (!espnow_begin()) {
+    s_err = NERR_ESPNOW_FAILED;
+    s_want_link = false;
+    NET_LOGF("[net] esp_now bring-up FAILED\r\n");
+    WiFi.mode(WIFI_MODE_NULL);
+    clear_ip();
+    set_mode(RADIO_OFF, NPH_OFF, "LINK FAIL");
+    return false;
+  }
+  set_mode(RADIO_WIFI, NPH_LINK, "-> LINK");
+  return true;
+#endif
 }
 
 #if NT_NET_HAVE_PORTAL
@@ -428,10 +521,15 @@ static bool bring_up(RadioMode want) {
   set_mode(RADIO_OFF, NPH_OFF, "-> OFF (no wifi)");
   return false;
 #else
-  // TWO INTENTS ON ONE STACK, and the caller does not get to confuse them: the
-  // scanner sets s_want_scan through net_scan_driver()'s start(), everything
-  // else lands on the creator's access point. There is no third branch, because
-  // there is no station.
+  // THREE INTENTS ON ONE STACK, and the caller does not get to confuse them:
+  // the scanner sets s_want_scan through net_scan_driver()'s start(), the peer
+  // link sets s_want_link through net_link_driver()'s start(), and everything
+  // else lands on the creator's access point. There is still no station branch,
+  // because there is still no station: all three of these listen or broadcast
+  // and none of them associates.
+  if (s_want_link) {
+    return link_begin();
+  }
   if (s_want_scan) {
     return scan_begin();
   }
@@ -463,6 +561,7 @@ bool net_request(RadioMode want) {
     wifi_down();
 #endif
     s_want_scan = false;            // a scan intent does not survive a power-down
+    s_want_link = false;            // ...and neither does a link intent
     s_pending = RADIO_OFF;          // cancels a settle that was in flight
     if (s_mode != RADIO_OFF || s_phase != NPH_OFF) {
       set_mode(RADIO_OFF, NPH_OFF, "-> OFF");
@@ -585,6 +684,21 @@ void net_service(void) {
       }
       break;
 
+    // THE SAME BACKSTOP FOR THE LINK, and it is later than the discovery job's
+    // own LINK_JOB_TIMEOUT_MS for the same reason: networking/discovery.h owns
+    // the section 47 ceiling and releases the radio through the driver's
+    // stop(). This only fires when NOBODY IS PUMPING THE JOB AT ALL, and
+    // because its deadline is strictly later it can never pre-empt the job's
+    // answer or disagree with it about what happened.
+    case NPH_LINK:
+      if ((uint32_t)(now - s_phase_ms) >= NET_LINK_BACKSTOP_MS) {
+        NET_LOGF("[net] link backstop fired - nobody serviced the job\r\n");
+        wifi_down();
+        s_want_link = false;
+        set_mode(RADIO_OFF, NPH_OFF, "LINK BACKSTOP");
+      }
+      break;
+
     // NPH_AP_PORTAL has no timer of its own. The portal is not a fallback the
     // firmware retries out of any more (plan section 2 row G4): the screen that
     // asked for RADIO_WIFI owns it, and leaving that screen releases it.
@@ -614,6 +728,8 @@ StrId net_last_err_str(void) {
     case NERR_BLE_DISABLED:    return STR_ERR_NO_NET;
     case NERR_AP_FAILED:       return STR_ERR_NO_NET;
     case NERR_DNS_FAILED:      return STR_ERR_NO_NET;
+    case NERR_ESPNOW_DISABLED: return STR_ERR_NO_NET;
+    case NERR_ESPNOW_FAILED:   return STR_ERR_NO_NET;
     case NERR_BAD_ARG:         return STR_ERR_NO_NET;
     default:                   return STR_ERR_NO_NET;
   }
@@ -712,9 +828,10 @@ static bool scan_start(void) {
   if (!s_begun) {
     net_begin();
   }
-  // ONE RADIO, ONE OWNER. The creator portal is the other WiFi intent; refuse
-  // rather than silently hand back a scan that will never run.
-  if (s_mode == RADIO_WIFI && s_phase == NPH_AP_PORTAL) {
+  // ONE RADIO, ONE OWNER. The creator portal and the peer link are the other
+  // two WiFi intents; refuse rather than silently hand back a scan that will
+  // never run. (Symmetric with link_start() below, which refuses for these.)
+  if (s_mode == RADIO_WIFI && (s_phase == NPH_AP_PORTAL || s_phase == NPH_LINK)) {
     s_err = NERR_BUSY;
     return false;
   }
@@ -813,4 +930,96 @@ static const WifiScanDriver s_scan_driver = {
 
 const WifiScanDriver &net_scan_driver(void) {
   return s_scan_driver;
+}
+
+// =============================================================================
+//  THE PEER LINK'S RADIO DRIVER (P7-C1)
+//
+//  Four calls, the same shape as the scanner's, and networking/discovery.cpp
+//  makes no others. THE RADIO IS RELEASED THROUGH stop() AND ONLY THROUGH
+//  stop(): the job calls it exactly once per run on every exit path - done,
+//  failed, timed out or cancelled - which is what makes "the radio shuts down
+//  after use" a property of the machine.
+//
+//  AND THE IDLE LADDER STILL REACHES IT BY NAVIGATING. hardware/power.h's
+//  release() hook runs ui_home(), sm_goto() runs the leaving screen's leave()
+//  hook, and that hook calls link_cancel(). A bare net_request(RADIO_OFF) from
+//  the power path would take the radio out from under a running LinkJob exactly
+//  as it used to for a running WifiScanJob - the job would stay LS_RUNNING with
+//  stopped == 0, link_is_busy() would go on answering true to the very ladder
+//  trying to sleep, and the beacon would stop with nothing saying why.
+//  tools/check.sh gates hardware/power.* for the radio API and that gate covers
+//  this transport too, because it is a grep for the API and not for the scan.
+// =============================================================================
+#if NT_NET_WANT_WIFI
+
+static bool link_start(void) {
+  if (!s_begun) {
+    net_begin();
+  }
+#if !FEATURE_ESPNOW
+  s_err = NERR_ESPNOW_DISABLED;
+  return false;
+#else
+  // ONE RADIO, ONE OWNER - symmetric with scan_start() above.
+  if (s_mode == RADIO_WIFI && (s_phase == NPH_AP_PORTAL || s_phase == NPH_SCANNING)) {
+    s_err = NERR_BUSY;
+    return false;
+  }
+  s_want_link = true;
+  if (!net_request(RADIO_WIFI)) {
+    s_want_link = false;
+    return false;
+  }
+  return true;
+#endif
+}
+
+static bool link_beacon(const uint8_t *frame, uint16_t n) {
+  // A broadcast while the stack is still settling is not an error and is not
+  // retried faster than the cadence: discovery.cpp advances its own beacon
+  // clock whatever this answers.
+  if (s_mode != RADIO_WIFI || s_phase != NPH_LINK) {
+    return false;
+  }
+  return espnow_broadcast(frame, n);
+}
+
+static int8_t link_poll(DiscRx *out) {
+  if (out == nullptr) {
+    return (int8_t)LINK_POLL_FAILED;
+  }
+  if (s_phase == NPH_SETTLING) {
+    return 0;                                 // the radio is still coming up
+  }
+  if (s_mode != RADIO_WIFI || s_phase != NPH_LINK) {
+    return (int8_t)LINK_POLL_FAILED;          // bring-up failed, or somebody
+  }                                           // else took the radio
+  return (int8_t)espnow_beacon_pop(*out);
+}
+
+static void link_stop(void) {
+  s_want_link = false;
+  // Always, and through net_request(RADIO_OFF) so it passes wifi_down(): that
+  // is the one teardown ESP-NOW is taken down inside.
+  (void)net_request(RADIO_OFF);
+}
+
+#else   // NT_NET_WANT_WIFI
+
+// No WiFi consumer in this variant: the job refuses at start() and reports
+// LS_FAILED, which is a defined outcome rather than a screen that hangs.
+static bool   link_start(void) { s_err = NERR_WIFI_DISABLED; return false; }
+static bool   link_beacon(const uint8_t *frame, uint16_t n) { (void)frame; (void)n; return false; }
+static int8_t link_poll(DiscRx *out) { (void)out; return (int8_t)LINK_POLL_FAILED; }
+static void   link_stop(void) { (void)net_request(RADIO_OFF); }
+
+#endif  // NT_NET_WANT_WIFI
+
+static const LinkRadioDriver s_link_driver = {
+  &link_start, &link_beacon, &link_poll, &link_stop
+};
+
+const LinkRadioDriver &net_link_driver(void) {
+  return s_link_driver;
 }

@@ -50,6 +50,7 @@
 // --- Master switches --------------------------------------------------------
 // Set any of these to 0 to compile that part of the game out.
 #define FEATURE_BLE         1   // see other creatures nearby over Bluetooth
+#define FEATURE_ESPNOW      1   // link two Pebblebols directly (trade, battle, breed)
 #define FEATURE_WEB         1   // web page + QR
 #define GOD_MODE_ENABLED    1   // hidden cheat menu (for testing)
 
@@ -448,6 +449,72 @@ static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
 #define BLE_PEER_TTL_S          60
 #define BLE_SESSION_CAP         32           // deinit/init leaks ~672 B per cycle
 #define BLE_QUEUE_CAP           8            // onResult runs on the BTC task: post, never draw
+
+// --- THE PEER LINK (P7-C1, decision D2 = ESP-NOW; spec sections 42, 43, 47) --
+// The transport two devices in the same room talk over. It is a PHASE of the
+// Wi-Fi stack and not a fourth radio: WiFi.mode(WIFI_STA) with no association
+// is the whole residency ESP-NOW needs, so networking/net.h's RadioMode does
+// not grow a value and its single-resident-stack invariant is untouched.
+//
+// THE CHANNEL IS FIXED AND IS SET ON EVERY BRING-UP. Two devices that never
+// associate have no shared reason to be on the same channel, and the section 40
+// scan sweeps 1..13 and leaves the radio wherever the last dwell ended - so
+// "channel 1 by default" is not a property to rely on after a scan.
+// WiFi.setChannel() refuses a channel outside the country range, and the
+// default country is world-safe "01" (channels 1..11), so this must be 1..11:
+// networking/transport_espnow.cpp static_asserts exactly that.
+#define PB_LINK_CHANNEL         1
+// The broadcast beacon cadence while the LINK screen is up.
+#define LINK_BEACON_MS          500UL
+// The peer table. Same three numbers the BLE table used - 8 entries, a 60 s
+// TTL, a -70 dBm floor - because they describe a ROOM and not a radio.
+#define LINK_PEER_CAP           8
+#define LINK_PEER_TTL_S         60
+#define LINK_RSSI_MIN           (-70)
+// Beacons a device must send before it is offered to the player. One stray
+// packet from a passing stranger is not a Pebblebol in the room; at
+// LINK_BEACON_MS this is 1.5 s of company.
+#define LINK_PEER_HITS_MIN      3
+// THE CEILING ON A DISCOVERY BROWSE (spec section 47), and it is load-bearing
+// rather than belt and braces: hardware/power.h clamps the idle ladder at DIM
+// while a screen holds a radio job, so a browse with no ceiling would hold the
+// radio - and the beacon - on a device left face-up on a table. It MUST stay
+// below PWR_IDLE_MS and networking/discovery.h static_asserts that it does.
+#define LINK_JOB_TIMEOUT_MS     90000UL
+// Received beacons drained per service() call. The ring is filled by the Wi-Fi
+// task; this is what stops a crowded room from making one frame arbitrarily
+// long. Anything still queued is drained on the next frame.
+#define LINK_DRAIN_PER_SERVICE  8
+// The two rings networking/transport_espnow.cpp posts into from the receive
+// callback. Powers of two (networking/rxring.h masks with slots-1).
+//
+// 32 AND NOT 8, AND THE NUMBER WAS MEASURED RATHER THAN CHOSEN. The P7-C1
+// survey reasoned that "a lockstep round has at most a handful of frames in
+// flight per direction ... Eight is generous, not tuned", and that was WRONG.
+// Running real battles between two real sessions over this exact ring
+// (tests/test_link_transport.cpp), ONE session_poll() puts up to TEN frames in
+// the peer's ring on a clean link - a poll drains everything queued and answers
+// all of it - and up to NINETEEN at a 10 % per-frame drop, where the nine-rung
+// ladder is re-sending while the peer is still catching up. Measured over 300
+// varied battles per arm, counting only frames refused while BOTH endpoints
+// were still draining - after one side closes it stops draining altogether and
+// the other's unanswered GOODBYE can fill a ring of any size, which says
+// nothing about the depth a live link needs.
+//
+// So eight slots (seven usable) refused three frames per clean battle, and
+// SIXTEEN (fifteen usable) would still have overflowed on a lossy one. A
+// refused frame is INDISTINGUISHABLE to networking/session.cpp from a frame the
+// radio dropped, so the symptom on a bench is a link that is quietly slower
+// than it should be, with no error anywhere - which is why this is sized from a
+// measurement and not from the shape of the protocol. 31 usable slots cost
+// 32 x 164 + 64 = 5,312 B of globals against 1,328, and
+// `a_lossy_link_bursts_harder_than_a_clean_one_...` fails if the constant goes
+// back down.
+//
+// The beacon ring is not under the same pressure: beacons are LINK_BEACON_MS
+// apart from at most LINK_PEER_CAP devices, and 8 x 32 B = 256 B.
+#define LINK_RX_SLOTS           32
+#define LINK_BEACON_SLOTS       8
 
 // =============================================================================
 // 12. CREATOR SERVER

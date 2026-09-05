@@ -348,9 +348,15 @@ fi
 # THE TWO LISTS BELOW ARE DEFINED ONCE AND USED BY ALL OF THEM. Gates 1, 2 and
 # 2b read the same names, because two lists that must agree is the disagreement
 # this project keeps finding.
-PURE_NET="protocol.h protocol.cpp session.h session.cpp battle_link.h battle_link.cpp transport.h transport_loopback.cpp net_classify.h net_classify.cpp wifi_scanner.h wifi_scanner.cpp"
-PURE_NET_CPP="protocol.cpp session.cpp battle_link.cpp transport_loopback.cpp net_classify.cpp wifi_scanner.cpp"
-IMPURE_NET="ble_social.h ble_social.cpp net.h net.cpp webui.h webui.cpp"
+PURE_NET="protocol.h protocol.cpp session.h session.cpp battle_link.h battle_link.cpp transport.h transport_loopback.cpp net_classify.h net_classify.cpp wifi_scanner.h wifi_scanner.cpp rxring.h rxring.cpp discovery.h discovery.cpp"
+PURE_NET_CPP="protocol.cpp session.cpp battle_link.cpp transport_loopback.cpp net_classify.cpp wifi_scanner.cpp rxring.cpp discovery.cpp"
+# transport_espnow.* is IMPURE and that is HONEST rather than a dodge: esp_now.h's
+# two callback typedefs have no user-context argument at all, so the sink a
+# callback posts into is forced to be file-scope. A device has one radio and a
+# singleton is the truth. What is NOT a singleton is the mechanism - the ring is
+# rxring.cpp and the peer table is discovery.cpp, both pure, both caller-owned,
+# both driven by a host binary.
+IMPURE_NET="ble_social.h ble_social.cpp net.h net.cpp webui.h webui.cpp transport_espnow.h transport_espnow.cpp"
 
 # 1. THE PURE NETWORKING MODULES ARE PURE, AND THE SCOPING IS BY FILENAME
 #    BECAUSE THE DIRECTORY IS MIXED. networking/ble_social.cpp:45-53
@@ -627,5 +633,72 @@ if [ -f "$SKETCH/src/hardware/gametime.cpp" ]; then
   n=$( { printf '%s\n' "$dev" | grep -nE '(^|[^_[:alnum:]])millis[[:space:]]*\(' || true; } | wc -l )
   [ "$n" -eq 0 ] || fail "gt_mono_ms()'s device branch reads millis() ($n) - millis() is UPTIME and restarts at a deep-sleep wake; the uncalibrated cooldown table would freeze (game/cooldowns.h)"
 fi
+
+# --- P7-C1: THE PEER TABLE CARRIES NO HARDWARE ADDRESS (spec sections 43, 44)
+# The same gate wifi_scanner.h carries for a network's name, pointed at the
+# module that would carry a peer's. networking/discovery.{h,cpp} is what the
+# game, the UI and anything persisted can see; the six bytes of a sender's
+# address live in ONE private array inside networking/transport_espnow.cpp and
+# the only thing that crosses the seam is an opaque slot index.
+#
+# THE SHAPE NOT TO COPY IS IN THIS TREE RIGHT NOW: core/nt_types.h's BlePeerInfo
+# has the raw address as its FIRST member and ble_social.cpp copies it out of
+# the scan callback into the table the game reads. This gate is what stops that
+# shape being reproduced under a new name.
+#
+# THE PROSE COST IS DELIBERATE AND IS NOT A DODGE: the rule is spelled out in
+# full in networking/transport_espnow.h, which is the file that legitimately
+# handles the address, and discovery.h's banner points at it. A gate its own
+# subject's comments cannot satisfy is a gate somebody eventually filters.
+#
+# AND ITS LIMIT, STATED: it catches a RENAME and it CANNOT SEE A VALUE - six
+# bytes smuggled through two uint32_t fields would leave it green, exactly as
+# the ScanResult finding above measured. tests/test_discovery.cpp pins sizeof
+# and every offset of DiscPeer for that half.
+for f in discovery.h discovery.cpp; do
+  if [ -f "$SKETCH/src/networking/$f" ]; then
+    n=$( { grep -ric "mac" "$SKETCH/src/networking/$f" || true; } )
+    [ "$n" -eq 0 ] || fail "networking/$f names a hardware address ($n) - a DiscPeer carries a device id, a name, capabilities and an opaque slot, and nothing that identifies a piece of hardware (spec 43/44); the prose belongs in networking/transport_espnow.h"
+  fi
+done
+
+# --- P7-C1: ONE FILE OWNS THE ESP-NOW API --------------------------------
+# networking/net.h's rule is "exactly one module touches radio lifecycle", and
+# transport.h promised at P4-C5 that "P7's transport_espnow.cpp is the only file
+# in the tree that will include esp_now.h". This is that promise as a red line.
+# It counts CALL SITES of the API (esp_now_<something>) rather than the include,
+# because a second file that reached the API through a helper would pass an
+# include gate. Prose naming the header is untouched: "esp_now.h" has no
+# trailing identifier and does not match. transport_espnow.h is exempt WITH its
+# .cpp and not instead of it: it is the declared owner's header, it is where
+# discovery.h's privacy gate says the prose cost is paid, and a header does not
+# call anything. Everywhere else the rule is the P5-C1 one - REWORD THE PROSE,
+# do not add a filter - which is why networking/net.h names the failure and not
+# the function.
+if [ -d "$SKETCH/src" ]; then
+  n=$( { grep -rnE 'esp_now_[a-z_]+[[:space:]]*\(' "$SKETCH/src" \
+          --include='*.cpp' --include='*.h' || true; } \
+        | { grep -v 'networking/transport_espnow\.' || true; } \
+        | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "the ESP-NOW API is called outside networking/transport_espnow.cpp ($n) - one file owns the radio API, and it is the one file tests/Makefile never compiles"
+fi
+
+# --- P7-C1: THE SESSION LOGIC HAS NO CONDITIONAL COMPILATION -------------
+# networking/transport.h's whole claim for the seam is "ONE SEAM, TWO
+# IMPLEMENTATIONS, NO #ifdef IN THE SESSION LOGIC ... which is why
+# networking/session.cpp and networking/battle_link.cpp contain no conditional
+# compilation at all". Until P7-C1 that was a sentence about a tree with no
+# radio in it, which is the cheapest kind of true. Now that a real radio sits
+# behind the seam it is a property that can be broken by one line, and the way
+# it breaks is somebody making the radio work by editing the session instead of
+# widening the seam. Neither file has a header guard, so the count is zero and
+# not two: they are .cpp files.
+for f in session.cpp battle_link.cpp; do
+  if [ -f "$SKETCH/src/networking/$f" ]; then
+    n=$( { grep -cE '^[[:space:]]*#[[:space:]]*(if|ifdef|ifndef|else|elif|endif)' \
+            "$SKETCH/src/networking/$f" || true; } )
+    [ "$n" -eq 0 ] || fail "networking/$f contains conditional compilation ($n) - the transport seam exists so the session logic never needs any; widen networking/transport.h instead (transport.h:5-11)"
+  fi
+done
 
 echo "GATE OK"

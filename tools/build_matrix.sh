@@ -11,7 +11,17 @@ B="$ROOT/tools/build.sh"
 CFG="$ROOT/Pebblebol/src/core/config.h"
 has() { grep -qE "^#define[[:space:]]+$1[[:space:]]+[0-9]+" "$CFG"; }
 
-# name|defines (space separated). Macros that no longer exist are skipped.
+# name|defines (space separated). Macros that do not exist in config.h are SKIPPED
+# AND SAID SO ON STDOUT (see the loop below) - which they were not until P7-C1,
+# and the silence was the defect the phase-6 exit carried forward. `all-off`
+# names six macros and only three of them existed: FEATURE_WEATHER,
+# FEATURE_TELEGRAM and FEATURE_ESPNOW had no numeric #define, so the variant was
+# really FEATURE_BLE=0 FEATURE_WEB=0 GOD_MODE_ENABLED=0 and nothing said so.
+# P7-C1 ADDS A REAL FEATURE_ESPNOW, so `all-off` changed meaning at this tag: it
+# now also compiles the peer link out, which is a different and stricter floor
+# than the one v0.6.0-activity measured. That is exactly the change the plan
+# said must not happen with no line in the log, so the log now carries one on
+# every run and the phase-7 exit's variant table records the step.
 VARIANTS=(
   "baseline|"
   "no-ble|FEATURE_BLE=0"
@@ -29,7 +39,15 @@ for v in "${VARIANTS[@]}"; do
   args=()
   for d in $defs; do
     k="${d%%=*}"
-    if has "$k"; then args+=(--define "$d"); fi
+    if has "$k"; then
+      args+=(--define "$d")
+    else
+      # LOUD, not silent. A variant whose name says "all off" and whose defines
+      # are quietly dropped is a floor that means something different from what
+      # it is called, and the difference only shows up as a size number nobody
+      # can explain two phases later.
+      echo "variant $name: SKIPPING $d - no numeric #define $k in config.h"
+    fi
   done
   # The output is captured rather than streamed so the release variant's own size
   # line can be reused below instead of being built a second time; it is printed

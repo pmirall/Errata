@@ -263,6 +263,33 @@ $(BIN)/test_activity:   $(OBJ)/activity.o
 # project keeps finding.
 $(BIN)/test_power:      $(OBJ)/power.o $(OBJ)/wifi_scanner.o
 
+# P7-C1: THE BEACON CODEC, THE PEER TABLE AND THE DISCOVERY JOB. discovery.cpp
+# is pure and reaches the radio through a LinkRadioDriver of function pointers,
+# so the fake driver at the bottom of the test drives every path a real link can
+# take - including the two that are hardest to provoke on hardware, the section
+# 47 ceiling and a bring-up that does not take.
+#
+# activity.o IS THE POINT OF THIS LINK LINE AND NOT A CONVENIENCE. The rule
+# "act_note_peer() once per peer that passes the gate, never once per beacon"
+# is a property of the peer table and the activity score TOGETHER, and P6-C2
+# learned - from an XP farm that shipped - that neither module's own binary can
+# see a cross-module property. crc16.o is what the beacon is sealed with.
+$(BIN)/test_discovery:  $(OBJ)/discovery.o $(OBJ)/activity.o $(OBJ)/crc16.o
+
+# P7-C1: THE RING THE RADIO CALLBACK POSTS INTO, AND THE SEAM OVER IT.
+# Two halves in one binary, deliberately. The first drives rxring.cpp directly:
+# overflow, oversize, wrap and the invariant that a pop returns 0 only when the
+# ring is empty. The second runs a WHOLE BATTLE between two real sessions over
+# a Transport whose recv() is rxring_pop() and whose send() is rxring_push() -
+# the same ring code networking/transport_espnow.cpp fills from the Wi-Fi task -
+# so the claim "the session runs over the radio's ring with NO change to
+# session.cpp" is a thing this binary demonstrates rather than a sentence in a
+# header. That is why the session's whole object set is here.
+$(BIN)/test_link_transport: $(OBJ)/rxring.o $(OBJ)/session.o $(OBJ)/battle_link.o \
+                        $(OBJ)/protocol.o $(OBJ)/validate.o $(OBJ)/battle.o \
+                        $(OBJ)/battle_ai.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 # The minigame contract and the PURE logic of every game. No draw objects and
 # no ui/: if this link line ever needs one, a game has leaked drawing into its

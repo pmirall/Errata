@@ -35,6 +35,12 @@ Against the 515,268 / 24,408 no-radio floor:
 The two radio stacks do not add: turning both off lands exactly on the 515,268 / 24,408 floor,
 and ESP-NOW currently costs nothing because P7-C1 has not built it yet.
 
+**P7-C1 HAS NOW BUILT IT, AND THE LAST CLAUSE IS OBSOLETE — see §4 below.** ESP-NOW costs
+**+9,758 flash and +5,832 globals** on the baseline, five sixths of the globals being one
+buffer whose size was measured rather than guessed. The BLE row is unchanged: `ble_social.cpp`
+is untouched by P7-C1 and its deletion is gated on two boards having linked, which no
+environment without hardware can do.
+
 ## 3. What phases 5-10 will cost
 
 Measured history, baseline deltas:
@@ -216,3 +222,66 @@ allowed for is a budget that has stopped meaning anything.
   over 3,942 frames; it has never run on the board.
 - **Battery life**, which decision D11 says is dominated by the boost module's quiescent
   current — a hardware measurement nobody has taken.
+
+## 4. Phase 7, chunk 1 — the peer link (measured 2026-09-05)
+
+All seven matrix variants, `v0.6.0-activity` -> P7-C1:
+
+| Variant | flash before | flash after | Δ flash | globals before | globals after | Δ globals |
+|---|---|---|---|---|---|---|
+| baseline | 1,948,802 | 1,958,560 | +9,758 | 73,580 | 79,412 | +5,832 |
+| no-ble | 1,236,440 | 1,246,000 | +9,560 | 50,084 | 55,916 | +5,832 |
+| no-web | 1,320,114 | 1,900,532 | **+580,418** | 52,620 | 77,364 | **+24,744** |
+| no-god | 1,936,436 | 1,946,186 | +9,750 | 73,404 | 79,236 | +5,832 |
+| sh1106 | 1,948,802 | 1,958,560 | +9,758 | 73,580 | 79,412 | +5,832 |
+| all-off | 547,274 | 547,274 | **0** | 25,324 | 25,324 | **0** |
+| **release** | **1,224,210** | **1,233,762** | **+9,552** | **49,924** | **55,740** | **+5,816** |
+
+**TWO ROWS ARE NOT WHAT THEY LOOK LIKE AND BOTH ARE EXPLAINED IN `docs/decisions.md`.**
+`no-web`'s half-megabyte is NOT a phase-7 feature: `net.cpp`'s `NT_NET_WANT_WIFI` became
+`(FEATURE_WEB || FEATURE_ESPNOW)`, so that variant now links the whole Wi-Fi driver it used
+to compile out. `all-off` did not move at all because `FEATURE_ESPNOW 0` compiles the driver
+to refusal stubs and `--gc-sections` drops the pure modules nothing calls — it changed
+MEANING (a define that used to be silently skipped is now applied) without changing size.
+
+### Where the 5,832 B of globals went, symbol by symbol
+
+`riscv32-esp-elf-nm -S` over the sketch objects:
+
+| symbol | bytes | what it is |
+|---|---|---|
+| `s_rx_bytes` | 5,248 | the session ring, `LINK_RX_SLOTS` (32) x `PROTO_FRAME_MAX` (164) |
+| `s_bc_bytes` | 256 | the beacon ring, 8 x 32 B |
+| `s_rx_lens` | 64 | the session ring's per-slot byte counts |
+| `s_slot_addr` | 48 | **the only place a peer's hardware address exists in this firmware** |
+| `s_st` | 44 | `EspNowStats`, eleven counters for the DIAG screen |
+| `s_rx`, `s_bc` | 40 | the two `RxRing` headers (cursors, stride, counters) |
+| `s_bc_lens` | 16 | the beacon ring's per-slot byte counts |
+| `s_slot_used`, `s_bound_addr`, `s_ack_ms`, four flags | 22 | the bound peer and the slot table's occupancy |
+| `net.cpp`'s `s_want_link` | 1 | the third intent on the Wi-Fi stack |
+| **symbols** | **5,739** | all of it in `networking/transport_espnow.cpp` bar one byte |
+| unattributed | 93 | link alignment and section padding; not chased further |
+| **measured image delta** | **5,832** | |
+
+`networking/rxring.cpp` and `networking/discovery.cpp` contribute **ZERO** bytes of globals,
+which is not luck: both are on `tools/check.sh`'s pure list and the gate fails the build on
+any file-scope mutable state in either. The peer table and the discovery job live in the
+caller's `LinkJob` (32 B x 8 peers + 24 B of header = **280 B**), which is not in this table
+because nothing declares one yet — P7-C2's LINK screen will, and that is where those 280 B
+will appear, exactly as the NETWORK screen's 136 B `WifiScanJob` did at P5-C3.
+
+### What it leaves
+
+`release` is **1,233,762 / 55,740** = **77.1 % of `GATE_RELEASE_FLASH_MAX`** and **85.8 % of
+`GATE_RELEASE_GLOBALS_MAX`** (9,260 B of globals free), and 39.2 % of the 3,145,728 B `app0`
+slot. **Globals is the scarce axis and this chunk spent 5,816 of it in one commit** — more
+than phase 5 and phase 6 spent together (504 + 400 = 904) — so the §3 projection's remaining
+headroom for P7-C2..C5 and phases 8-10 is 9,260 B with BLE still compiled out and
+`ble_social.cpp`'s 23,504 B still available to reclaim the day two boards have linked.
+
+**The one number to watch is `LINK_RX_SLOTS`.** It is 5,312 of the 5,816 and it was set from
+a measurement (a lossy link bursts 19 frames in one direction; eight slots refused three per
+clean battle and sixteen would still have overflowed). If phase 8's creator server needs
+globals back, that buffer is where they are — and the price of taking them is a link that is
+quietly slower with no error anywhere, which is why the number is in
+`tests/test_link_transport.cpp` as an assertion and not only in a comment.
