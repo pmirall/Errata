@@ -47,10 +47,12 @@
 #include "../hardware/input.h"
 #include "../minigames/manager.h"
 #include "../minigames/registry.h"
+#include "../game/cooldowns.h"   // cd_take_dirty(): the exploration commit
 #include "../game/sim.h"
 #include "../game/genome.h"
 #include "../core/rng.h"
 #include "../persistence/game_state.h"
+#include "../persistence/save_manager.h"  // save_cooldowns / save_inventory (P5-C3)
 #include "../hardware/kv_nvs.h"      // kv_error(), for the DIAG line
 #include "../hardware/gametime.h"
 #include "ceremony.h"  // the hatch / evolution show (P2-C11c)
@@ -1810,6 +1812,57 @@ void ui_battle_result(uint8_t entry, uint8_t won) {
   (void)app_award_xp((uint16_t)XP_BATTLE_WIN, XP_SRC_BATTLE);
   if (pet()) gs_save_active(true);
   ui_toast(STR_BT_XP);
+}
+
+// -----------------------------------------------------------------------------
+//  THE EXPLORATION SEAMS (P5-C3/C4). See ui.h.
+// -----------------------------------------------------------------------------
+const WifiScanDriver& ui_scan_driver(void) { return net_scan_driver(); }
+
+void ui_explore_clock(uint32_t* now_epoch, uint32_t* now_ms, uint8_t* cal)
+{
+  // All three at once, in the shape game/cooldowns.h takes them, so a screen
+  // cannot read two of them a frame apart and decide with a mixed clock.
+  if (now_epoch) *now_epoch = gt_now();
+  if (now_ms)    *now_ms    = millis();
+  if (cal)       *cal       = (uint8_t)gt_cal_state();
+}
+
+uint32_t ui_device_seed(void) { return gs_device_id(); }
+
+// RNG_ENCOUNTER, and this is the only draw from it in the firmware. The
+// ENCOUNTER itself is deterministic from its inputs (game/encounters.h says
+// why); what needs real randomness is the capture roll.
+uint32_t ui_explore_roll(void) { return rng_u32(RNG_ENCOUNTER); }
+
+CooldownTable& ui_cooldowns(void) { return gs_state().cds; }
+Inventory&     ui_inventory(void) { return gs_state().inv; }
+
+void ui_explore_commit(void)
+{
+  GameState& gs = gs_state();
+  // cd_take_dirty() rather than "save after cd_arm": cd_ready() can dirty the
+  // table too, by promoting rows armed while the clock was CAL_UNSET, and a
+  // caller that only saved after arming would drop thirty-two promoted rows on
+  // the next power cut (game/cooldowns.h).
+  if (cd_take_dirty()) (void)save_cooldowns(gs.cds);
+  (void)save_inventory(gs.inv);
+  if (pet()) gs_save_active(true);
+}
+
+Genome ui_fresh_genome(void) { return genome_genesis(); }
+
+PebbleInstance* ui_active_pebble(void)
+{
+  const uint8_t slot = box_active();
+  return (slot < (uint8_t)BOX_SLOTS) ? box_slot(slot) : nullptr;
+}
+
+void ui_award_xp(uint16_t amount, uint8_t src)
+{
+  if (amount == 0u) return;
+  (void)app_award_xp(amount, (XpSource)src);
+  if (pet()) gs_save_active(true);
 }
 
 void ui_hold_fps(uint8_t fps, uint16_t ms) { rd_hold_fps(fps, ms); }

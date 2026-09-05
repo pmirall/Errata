@@ -43,7 +43,9 @@ Measured history, baseline deltas:
 |---|---|---|---|
 | 3 (pet) | 5 | +11,696 | +72 |
 | 4 (battle) | 6 | +22,582 | +2,328 |
-| 5 (exploration), so far: C1+C2 | 2 of 4 | **-1,572** | **-112** |
+| 5 (exploration), C1+C2 | 2 of 4 | -1,572 | -112 |
+| 5 (exploration), C3+C4 | 2 of 4 | **+13,854** | **+616** |
+| **5 total so far** | **4 of 4 built** | **+12,282** | **+504** |
 
 **Phase 5's first two chunks are NEGATIVE on both axes, and that is a rebate rather than a
 discount.** P5-C1 deleted the Wi-Fi station path - credentials, association, retry backoff,
@@ -53,15 +55,27 @@ token table and the cooldown module) is smaller than what went. Measured, baseli
 1,915,654 / 72,676 -> **1,914,082 / 72,564**. All seven matrix variants moved the same way;
 `release` is 1,191,426 / 49,004 -> **1,190,000 / 48,916**.
 
-**THE BILL IS NOT PAID YET, AND THIS IS WHERE THAT IS WRITTEN DOWN.** Nothing in the
-firmware CALLS the scanner or the cooldown table - the NETWORK screen is P5-C3 - so
-`--gc-sections` drops both from the image the figures above measure. Measured with a probe
-that wires a `WifiScanJob`, `net_scan_driver()` and `cd_ready`/`cd_arm` over the existing
-`GameState.cds` and then removed: **1,917,922 / 72,972**, i.e. P5-C3 inherits
-**+3,840 flash and +408 globals** the moment it calls any of it. The 408 is
-264 (game/cooldowns.cpp's per-boot RAM table, 32 rows of 8 B plus a dirty flag)
-+ 136 (one `WifiScanJob`, 8 + 8 x `WIFI_SCAN_MAX_RESULTS`, owned by whichever screen
-declares it) + 8 (net.cpp's scan salt and intent byte).
+**THE BILL P5-C1/C2 LEFT UNPAID IS NOW PAID, AND IT CAME IN AT THE PROBE'S FIGURE.**
+Nothing in the firmware CALLED the scanner or the cooldown table until P5-C3, so
+`--gc-sections` dropped both from the image those figures measured. The probe that wired a
+`WifiScanJob`, `net_scan_driver()` and `cd_ready`/`cd_arm` over the existing `GameState.cds`
+predicted **+3,840 flash and +408 globals** the moment anything called them, and the 408 was
+attributed as 264 (game/cooldowns.cpp's per-boot RAM table) + 136 (one `WifiScanJob`) + 8
+(net.cpp's scan salt and intent byte).
+
+**MEASURED AT P5-C3/C4: 1,914,082 / 72,564 -> 1,927,936 / 73,180, i.e. +13,854 flash and
++616 globals.** The globals figure is the probe's 408 plus 208 for everything the two new
+screens and the inventory hold in their own right - the ENCOUNTER transient's 8 B
+`EncounterResult` and its `CaptureState`, the NETWORK screen's phase bytes, the CARE
+screen's bag mode and cursor, and `game/inventory.cpp`'s 4 B armed battle modifier. The
+flash is the scanner and the cooldown module no longer being collected, plus four new game
+modules (encounters, capture, inventory, corruption), two new screens, a payload table and
+about forty strings.
+
+**Against the phase-5 line of 1.0-2.0 KB of globals, phase 5 has spent 504 net** (the
+P5-C1 rebate of -112 against this +616), so exploration finishes inside half of its own
+allowance. `release` moved 1,190,000 / 48,916 -> **1,203,808 / 49,508**, which is
+75 % of `GATE_RELEASE_FLASH_MAX` and 76 % of `GATE_RELEASE_GLOBALS_MAX`.
 
 Phase 4's globals went almost entirely to ONE chunk — P4-C4, the battle screen and its
 renderer, at +18,780 / +2,304. That is the shape: **code and data cost flash; screens and
@@ -71,9 +85,15 @@ Phases 5-10 are 26 chunks and about ten new screens (SCAN, ENCOUNTER, INVENTORY,
 LINK, TRADE, BREEDING, PIN, QR, and the DIAG expansion). None is as heavy as the battle
 screen, which carries a renderer and a 212 B engine state.
 
+**AND THE FIRST THREE OF THOSE TEN ARE IN, WHICH IS EVIDENCE FOR THAT SENTENCE RATHER THAN
+A RESTATEMENT OF IT.** SCAN, ENCOUNTER and the inventory surface together cost **+208 B of
+globals** outside the modules they drive, 136 of it one `WifiScanJob` - which is a BUFFER
+and not a screen. The battle screen's +2,304 remains the outlier by an order of magnitude
+and the projection below is unchanged.
+
 | item | flash | globals |
 |---|---|---|
-| P5 scanner, encounters, capture, items | 15-25 K | 1.0-2.0 K |
+| ~~P5 scanner, encounters, capture, items~~ **SPENT: +12,282 / +504** | ~~15-25 K~~ | ~~1.0-2.0 K~~ |
 | P6 activity score, power states | 8-12 K | 0.3-0.8 K |
 | P7 ESP-NOW transport, link/trade/breeding | 25-35 K | 1.5-3.0 K |
 | P8 PIN, creator routes, mobile page + sprite editor (PROGMEM) | 30-45 K | 1.5-3.0 K |

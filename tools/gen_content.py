@@ -105,6 +105,7 @@ class Content(object):
         self.items = load("items.json")
         self.evo_all = load("evolution.json")
         self.encounters = load("encounters.json")
+        self.specials = load("specials.json")
         self.networks = load("networks.json")
         self.balance = load("balance.json")
         self.families = families
@@ -118,6 +119,8 @@ class Content(object):
 
         self._check_prefix()
         self._check_field_widths()
+        self._check_items()
+        self._check_specials()
         self._check_strings()
 
     def _check_prefix(self):
@@ -168,6 +171,8 @@ class Content(object):
                 ("cond_value", U16)]),
             ("encounters.json", self.encounters, "weight", [
                 ("weight", U8), ("rarity_min", RAR), ("rarity_max", RAR)]),
+            ("specials.json", self.specials["EVENTS"], "id", [
+                ("id", U8), ("value", U8)]),
         ]
         # networks.json is not a list of rows, so it gets its own shape check
         # rather than a column walk. Every rule below is one the GENERATED
@@ -196,6 +201,137 @@ class Content(object):
                 if int(iid) < 0 or int(iid) > 255 or w < 0 or w > 255:
                     die("balance.json ITEM_DROPS[%s]: item %s weight %r is "
                         "outside the 0..255 ItemDropRow holds" % (cat, iid, w))
+
+    # -------------------------------------------------------------------------
+    #  THE TWO ITEM COLUMNS THAT NAMED NO TARGET (P5-C4, plan line 552)
+    #
+    #  ItemDef.value has always been klass-scoped and so are `target` and
+    #  `param`. Every rule below is one the GENERATED header cannot state for
+    #  itself, because the header sees an ORDINAL and not the name it came from:
+    #  a CARE row that says "ATK", a BATTLE_MOD that names a care stat, a row
+    #  that sets both `duration` and `clears` (they are one emitted byte), or a
+    #  klass carrying a target it has no vocabulary for.
+    # -------------------------------------------------------------------------
+    def _check_items(self):
+        bal = self.balance
+        care_ord, _ = enum_from(bal, "CARE_TARGET_ENUM", "CARE_TGT_")
+        stat_ord, _ = enum_from(bal, "BATTLE_STAT_ENUM", "BSTAT_")
+        klasses = bal["ITEM_KLASS_ENUM"]
+        bits = bal["PEBBLE_STATUS_BITS"]
+        for it in self.items:
+            what = "items.json item %d (%s)" % (it["id"], it["name"])
+            kl = it["klass"]
+            if kl not in klasses:
+                die("%s: klass %r is not one of balance.json's ITEM_KLASS_ENUM %r"
+                    % (what, kl, klasses))
+            for key in ("target", "duration", "clears"):
+                if key not in it:
+                    die("%s: no %s column - every item row must state one, and "
+                        "'the klass has no target' is spelled NONE / 0 / []"
+                        % (what, key))
+            tgt, dur, clr = it["target"], it["duration"], it["clears"]
+            if not isinstance(dur, int) or isinstance(dur, bool) or dur < 0 or dur > 63:
+                die("%s: duration %r is outside the 0..63 the emitted byte holds"
+                    % (what, dur))
+            if dur and clr:
+                die("%s: sets BOTH duration and clears - they are the same emitted "
+                    "byte (ItemDef.param), so one row can only mean one of them"
+                    % what)
+            if kl == "CARE":
+                if tgt not in care_ord:
+                    die("%s: CARE target %r is not one of balance.json's "
+                        "CARE_TARGET_ENUM %r - a care item that does not say which "
+                        "stat it restores is the hole P5-C4 closed"
+                        % (what, tgt, list(care_ord)))
+                if dur:
+                    die("%s: CARE items have no duration" % what)
+                if it["value"] == 0:
+                    die("%s: CARE with value 0 restores nothing. Value is PERCENT "
+                        "OF FULL (balance.json _ITEM_TARGET_doc); an item whose "
+                        "real role is not care belongs on another klass" % what)
+                if it["value"] > 100:
+                    die("%s: CARE value %d is more than 100 %% of a full bar"
+                        % (what, it["value"]))
+            elif kl == "BATTLE_MOD":
+                if tgt not in stat_ord:
+                    die("%s: BATTLE_MOD target %r is not one of balance.json's "
+                        "BATTLE_STAT_ENUM %r" % (what, tgt, list(stat_ord)))
+                if clr:
+                    die("%s: BATTLE_MOD clears no status" % what)
+                if dur < 1:
+                    die("%s: BATTLE_MOD duration is %d rounds - a buff that lasts "
+                        "no rounds is an item with no effect" % (what, dur))
+                if it["value"] < 1 or it["value"] > bal["BUFF_STAGE_MAX"]:
+                    die("%s: BATTLE_MOD value %d is outside 1..BUFF_STAGE_MAX %d, "
+                        "which the battle engine clamps to anyway"
+                        % (what, it["value"], bal["BUFF_STAGE_MAX"]))
+            else:
+                if tgt != "NONE":
+                    die("%s: klass %s has no target vocabulary, so its target must "
+                        "be NONE and not %r" % (what, kl, tgt))
+                if dur or clr:
+                    die("%s: klass %s has no param" % (what, kl))
+            for b in clr:
+                if b not in bits:
+                    die("%s: clears %r, which is not one of balance.json's "
+                        "PEBBLE_STATUS_BITS %r" % (what, b, sorted(bits)))
+        for k in klasses:
+            if not [it for it in self.items if it["klass"] == k]:
+                die("items.json: item class %s has no row - a class no item can "
+                    "fill is a menu entry the player can never reach" % k)
+
+    # -------------------------------------------------------------------------
+    #  THE SPECIAL PAYLOAD TABLE (P5-C3). Same shape of rules as _check_networks:
+    #  everything the emitted header cannot see for itself once the names have
+    #  become ordinals.
+    # -------------------------------------------------------------------------
+    def _check_specials(self):
+        sp = self.specials
+        kinds = self.balance["SPECIAL_KIND_ENUM"]
+        ids = [e["id"] for e in sp["EVENTS"]]
+        if ids != list(range(1, len(ids) + 1)):
+            die("specials.json: EVENTS ids are %r, not the contiguous 1..%d the "
+                "emitted table indexes by (id == index + 1)" % (ids, len(ids)))
+        for e in sp["EVENTS"]:
+            what = "specials.json event %d (%s)" % (e["id"], e["name"])
+            if e["kind"] not in kinds:
+                die("%s: kind %r is not one of balance.json's SPECIAL_KIND_ENUM %r"
+                    % (what, e["kind"], kinds))
+            if e["kind"] == "XP_BURST" and e["value"] < 1:
+                die("%s: an XP_BURST that pays no XP is an event with no effect"
+                    % what)
+            if e["kind"] == "CORRUPTION" and e["value"] != 0:
+                die("%s: CORRUPTION takes its length from balance.json's "
+                    "CORRUPTION.duration_s, so its value column must be 0" % what)
+            if e["value"] * self.balance["SPECIAL_XP_SCALE"] > 65535:
+                die("%s: value %d * SPECIAL_XP_SCALE overflows the u16 the award "
+                    "is carried in" % (what, e["value"]))
+        for k in kinds:
+            if not [e for e in sp["EVENTS"] if e["kind"] == k]:
+                die("specials.json: kind %s has no event - a branch encounters.cpp "
+                    "could never reach" % k)
+        cats = self.balance["NET_CATEGORY_ORDINALS"]
+        for cn in sorted(cats):
+            if cn not in sp["WEIGHTS"]:
+                die("specials.json: no WEIGHTS for category %s, and every category "
+                    "has a SPECIAL encounter row" % cn)
+        for cn, w in sorted(sp["WEIGHTS"].items()):
+            if cn not in cats:
+                die("specials.json: WEIGHTS names category %s, which is not one of "
+                    "balance.json's NET_CATEGORY_ORDINALS %r" % (cn, sorted(cats)))
+            total = 0
+            for eid, wt in sorted(w.items(), key=lambda kv: int(kv[0])):
+                if int(eid) not in ids:
+                    die("specials.json: WEIGHTS[%s] names event %s, which is not in "
+                        "EVENTS" % (cn, eid))
+                if not isinstance(wt, int) or isinstance(wt, bool) or wt < 1 or wt > 255:
+                    die("specials.json: WEIGHTS[%s][%s] = %r is outside the 1..255 "
+                        "the emitted weight byte holds - a zero-weight row is left "
+                        "OUT, not written as 0" % (cn, eid, wt))
+                total += wt
+            if total != 100:
+                die("specials.json: WEIGHTS[%s] sums to %d, not 100 - a SPECIAL is "
+                    "a plain 0..99 draw" % (cn, total))
 
     def _check_networks(self):
         n = self.networks
@@ -277,6 +413,8 @@ class Content(object):
             c_str_literal(a["name"], "attack %d name" % a["id"])
         for it in self.items:
             c_str_literal(it["name"], "item %d name" % it["id"])
+        for ev in self.specials["EVENTS"]:
+            c_str_literal(ev["name"], "special event %d name" % ev["id"])
 
 
 def die(msg):
@@ -336,7 +474,7 @@ def enum_from(balance, key, prefix):
 #  Plan line 668: "CONTENT_VERSION changes when JSON changes". The input set is
 #  stated here rather than left to whoever reads the number later:
 #
-#    * the seven JSON files, in the fixed order below (networks.json joined
+#    * the eight JSON files, in the fixed order below (networks.json joined
 #      them at P5-C1: an RSSI threshold decides a network's category, and a
 #      category is what indexes the encounter table, so a threshold edit changes
 #      what the game hands the player exactly as an encounter weight does);
@@ -352,7 +490,7 @@ def enum_from(balance, key, prefix):
 #  would carry.
 # =============================================================================
 HASH_FILES = ["species", "attacks", "items", "evolution", "encounters",
-              "networks", "balance"]
+              "specials", "networks", "balance"]
 
 
 def strip_notes(o):
@@ -368,6 +506,7 @@ def content_hash(c):
     for name in HASH_FILES:
         obj = {"species": c.species_all, "attacks": c.attacks, "items": c.items,
                "evolution": c.evo_all, "encounters": c.encounters,
+               "specials": c.specials,
                "networks": c.networks, "balance": c.balance}[name]
         parts.append(name + "=" + json.dumps(strip_notes(obj), sort_keys=True,
                                              separators=(",", ":"),
@@ -824,53 +963,77 @@ inline int8_t type_mod_of(uint8_t atk_type, uint8_t def_type) {
 def emit_items(c):
     bal = c.balance
     kl_ord, kl_names = enum_from(bal, "ITEM_KLASS_ENUM", "ITEM_KLASS_")
+    ct_ord, ct_names = enum_from(bal, "CARE_TARGET_ENUM", "CARE_TGT_")
+    st_ord, _st_names = enum_from(bal, "BATTLE_STAT_ENUM", "BSTAT_")
+    pbs = bal["PEBBLE_STATUS_BITS"]
 
-    # A CARE item whose value is 0 restores nothing, by the unit contract three
-    # lines below. That is not a typo: it is how the pack folds the EVOLUTION
-    # KEY into a class list that has no slot for one. Found by hand during the
-    # completeness pass and now DERIVED, so the banner cannot go stale against
-    # the JSON - and so a second one appearing is not silently normal.
+    # THE FIFTH CLASS, DERIVED (P5-C4). Spec section 24 names FOUR item classes
+    # and the pack had a fifth kind of item with nowhere to put it: an evolution
+    # key, folded onto CARE with value 0, i.e. a care item that restores nothing
+    # by this table's own unit contract. The fold is gone - ITEM_KLASS_EVOLUTION
+    # exists - and this paragraph is derived from the JSON so it states what the
+    # pack ACTUALLY carries rather than what somebody remembered.
     keyed = {}
     for r in c.evo_all:
         if r["cond"] == "ITEM":
             keyed.setdefault(r["cond_value"], []).append(r)
-    zero_care = [it for it in c.items
-                 if it["klass"] == "CARE" and it["value"] == 0]
+    evo_items = [it for it in c.items if it["klass"] == "EVOLUTION"]
+    shipped_item_rules = [i for i, r in enumerate(c.evo)
+                          if r["cond"] == "ITEM"]
     hole = []
-    if zero_care:
+    if evo_items:
         hole = ["",
-                "A THIRD, SMALLER HOLE OF THE SAME SHAPE, found the same way and",
-                "left in the content rather than patched here:"]
-        for it in zero_care:
+                "THE FIFTH CLASS, AND WHY SECTION 24's FOUR WERE NOT ENOUGH."]
+        for it in evo_items:
             rules = keyed.get(it["id"], [])
-            hole.append("  item %d %s is CARE with value 0 - a care item that"
+            hole.append("  item %d %s is ITEM_KLASS_EVOLUTION: it restores"
                         % (it["id"], c_str_comment(it["name"])))
-            hole.append("  restores nothing by the contract above. Its real role is")
+            hole.append("  nothing and buffs nothing, it is a KEY.")
             if rules:
-                hole.append("  the EVOC_ITEM key: evolution.json turns species %s"
-                            % ", ".join(str(r["species"]) for r in rules))
-                hole.append("  into %s with cond ITEM, cond_value %d."
-                            % (", ".join(str(r["target"]) for r in rules), it["id"]))
+                hole.append("  evolution.json turns species %s into %s on"
+                            % (", ".join(str(r["species"]) for r in rules),
+                               ", ".join(str(r["target"]) for r in rules)))
+                hole.append("  cond ITEM, cond_value %d." % it["id"])
             else:
-                hole.append("  NOT an evolution key either - no rule names it.")
-        hole.append("  Spec section 24 names no evolution-item class, so the pack")
-        hole.append("  folded it onto CARE. P5-C4 must not read it as a care item.")
+                hole.append("  NO rule anywhere names it - not an evolution key")
+                hole.append("  either, which makes it an item with no use.")
+        hole.append("  IT WAS ITEM_KLASS_CARE WITH value 0 UNTIL P5-C4, which is")
+        hole.append("  a care item that restores nothing by the contract above.")
+        hole.append("  game/inventory.cpp routes this class to EvoContext.item_id")
+        hole.append("  and refuses to spend the key when no rule consumes it.")
+        if not shipped_item_rules:
+            hole.append("  NOT REACHABLE AT THIS ROSTER: the emitted")
+            hole.append("  EVOLUTION_RULES[] carries no EVOC_ITEM row, because the")
+            hole.append("  rule that spends the key is outside the shipped species")
+            hole.append("  prefix. P9 lands it; the class and its consumer are")
+            hole.append("  here so that landing it is a content edit and nothing")
+            hole.append("  more.")
 
     o = [banner("data/items_table.h", [
         "THE ITEM TABLE (plan 1.5.2, spec section 24).",
         "",
-        "ItemDef.value is a MAGNITUDE whose unit depends on klass, which is the",
-        "pack's own contract (balance.json _ITEM_VALUE_doc):",
-        "  XP_CANDY    value * ITEM_XP_CANDY_SCALE = XP granted",
-        "  CAPTURE     value = capture-chance bonus in permille",
-        "  CARE        value = care points restored",
-        "  BATTLE_MOD  value = stat stages granted at battle start",
+        "THREE COLUMNS, ONE CONTRACT. value is a MAGNITUDE, target is WHAT it",
+        "acts on and param is the one extra byte a klass needs; all three are",
+        "klass-scoped and balance.json (_ITEM_VALUE_doc, _ITEM_TARGET_doc) is",
+        "where the contract lives:",
         "",
-        "TWO OF THOSE FOUR UNITS NAME NO TARGET, and the pack has no column for",
-        "one: a CARE item does not say WHICH of the five care stats it restores,",
-        "and a BATTLE_MOD does not say which stat it buffs. P5-C4 and P4-C2",
-        "cannot resolve them from this table alone. Recorded here rather than",
-        "guessed - see the completeness pass in the P4-C1 exit.",
+        "  klass       value                        target        param",
+        "  XP_CANDY    x ITEM_XP_CANDY_SCALE = XP   -             -",
+        "  CAPTURE     x ITEM_CAPTURE_SCALE = the   -             -",
+        "              capture bonus in permille",
+        "  CARE        PERCENT of a full care bar   CareTarget    status bits",
+        "                                           (ALL = five)  it clears",
+        "  BATTLE_MOD  stat stages at battle start  BattleStat    rounds",
+        "  EVOLUTION   -                            -             -",
+        "",
+        "THE TWO UNITS THAT NAMED NO TARGET ARE CLOSED (P5-C4, plan line 552).",
+        "A CARE row now names one of the five care stats or ALL, and a",
+        "BATTLE_MOD row names the stat AND how many rounds it lasts. The",
+        "CAPTURE unit was stated THREE incompatible ways by the pack (the",
+        "generated banner said permille, balance.json's own worked example said",
+        "permille/10, the Spanish flavour line said percent); it is settled as",
+        "a NUMBER below - ITEM_CAPTURE_SCALE - so prose can no longer disagree",
+        "with prose. The player-facing +15 % / +45 % won.",
     ] + hole)]
     o.append("#ifndef PB_ITEMS_TABLE_H\n#define PB_ITEMS_TABLE_H\n")
     o.append('#include <stdint.h>\n#include <stddef.h>\n')
@@ -881,25 +1044,63 @@ def emit_items(c):
         o.append("  %s," % n)
     o.append("  ITEM_KLASS_COUNT")
     o.append("};\n")
-    o.append("// XP_CANDY value is scaled by this to get the XP it grants.")
-    o.append("#define ITEM_XP_CANDY_SCALE  %d\n" % bal["XP_CANDY_SCALE"])
+    o.append("// THE TWO UNITS AS NUMBERS, not as sentences (see the banner).")
+    o.append("#define ITEM_XP_CANDY_SCALE  %d" % bal["XP_CANDY_SCALE"])
+    o.append("#define ITEM_CAPTURE_SCALE   %d\n" % bal["CAPTURE_VALUE_SCALE"])
+    o.append("// WHICH care stat a CARE item restores. ALL is not a sixth stat: it")
+    o.append("// means every one of them. The ordinals 1..5 are CareId + 1, and")
+    o.append("// game/inventory.h asserts that against persistence/save_schema.h -")
+    o.append("// this header cannot see CareId and must not guess at it.")
+    o.append("enum CareTarget : uint8_t {")
+    for n in ct_names:
+        o.append("  %s," % n)
+    o.append("  CARE_TGT_COUNT")
+    o.append("};\n")
+    o.append("// A BATTLE_MOD's target is game/battle.h's BattleStat, and the status")
+    o.append("// bits a CARE item's param clears are save_schema.h's PBS_*. Both are")
+    o.append("// reproduced from the pack as ordinals because a data header may not")
+    o.append("// include a game or a persistence one; game/inventory.h is the single")
+    o.append("// place that sees both sides and asserts they agree.")
+    for n, i in sorted(st_ord.items(), key=lambda kv: kv[1]):
+        o.append("#define ITEM_BSTAT_%-11s %d" % (n, i))
+    mask = 0
+    for n, b in sorted(pbs.items(), key=lambda kv: kv[1]):
+        o.append("#define ITEM_PBS_%-13s 0x%02Xu" % (n, b))
+        mask |= b
+    o.append("#define ITEM_PBS_MASK          0x%02Xu   // every bit a CARE item may clear"
+             % mask)
+    o.append("")
     o.append("""struct ItemDef {            // 8 B, plan 1.5.2
   uint8_t  id;              // 1..ITEM_COUNT, contiguous == index + 1
   uint8_t  klass;           // ItemKlass
   uint8_t  value;           // magnitude, unit per klass (see the banner)
   uint8_t  rarity;          // SPECIES_RARITY_*
   uint16_t name_idx;        // StrId of the Spanish item name
-  uint8_t  reserved[2];     // must be 0
+  uint8_t  target;          // CARE: CareTarget. BATTLE_MOD: ITEM_BSTAT_*. else 0
+  uint8_t  param;           // CARE: the PBS_* bits it clears. BATTLE_MOD: rounds
 };
+// The two bytes were `reserved[2]` until P5-C4 spent them on the columns the
+// pack had no room for. The struct did not grow: 8 B, and item_rows_are_well_
+// formed() checks the new fields where it used to check they were zero.
 static_assert(sizeof(ItemDef) == 8, "ItemDef layout drifted");
 """)
     o.append("inline constexpr ItemDef ITEMS_TABLE[] = {")
-    o.append("  //  id klass                 val rarity                    name")
+    o.append("  //  id klass                 val rarity                    name"
+             "               target             param")
     for it in c.items:
         rar = rarity_name(it["rarity"], "item %d" % it["id"])
-        o.append("  { %2d, %-21s %3d, %-25s %-18s { 0, 0 } },   // %s"
+        if it["klass"] == "CARE":
+            tgt = ct_names[ct_ord[it["target"]]]
+            par = (" | ".join("ITEM_PBS_" + b for b in it["clears"])
+                   if it["clears"] else "0")
+        elif it["klass"] == "BATTLE_MOD":
+            tgt = "ITEM_BSTAT_" + it["target"]
+            par = str(it["duration"])
+        else:
+            tgt, par = "0", "0"
+        o.append("  { %2d, %-21s %3d, %-25s %-18s %-18s %s },   // %s"
                  % (it["id"], kl_names[kl_ord[it["klass"]]] + ",", it["value"],
-                    rar + ",", "STR_ITEM_NAME_%d," % it["id"],
+                    rar + ",", "STR_ITEM_NAME_%d," % it["id"], tgt + ",", par,
                     c_str_comment(it["name"])))
     o.append("};\n")
     o.append("inline constexpr uint8_t ITEM_COUNT =")
@@ -911,13 +1112,13 @@ static_assert(sizeof(ItemDef) == 8, "ItemDef layout drifted");
     if (it.klass >= (uint8_t)ITEM_KLASS_COUNT)          return false;
     if (it.rarity > SPECIES_RARITY_SPECIAL)             return false;
     if (it.name_idx >= (uint16_t)STR_COUNT)             return false;
-    if (it.reserved[0] != 0u || it.reserved[1] != 0u)   return false;
   }
   return true;
 }
 
-// Every one of spec section 24's four classes has at least one row. A class
-// with no item is a menu entry the player can never fill.
+// Every item class has at least one row. A class with no item is a menu entry
+// the player can never fill. Spec section 24 names FOUR classes and calls them
+// "initial"; the fifth is the evolution key, which had been folded onto CARE.
 constexpr bool item_klasses_are_all_populated(void) {
   for (uint8_t k = 0; k < (uint8_t)ITEM_KLASS_COUNT; ++k) {
     bool seen = false;
@@ -928,13 +1129,49 @@ constexpr bool item_klasses_are_all_populated(void) {
   return true;
 }
 
+// EVERY ITEM SAYS WHAT IT ACTS ON (P5-C4). The compile-time half of the two
+// units that named no target: a CARE row must name a care stat and restore a
+// percentage somebody can feel, a BATTLE_MOD row must name a battle stat AND a
+// number of rounds, and a klass with no target vocabulary must carry zero in
+// both bytes rather than a value nothing reads. gen_content.py checks the same
+// rules against the NAMES in tools/content/items.json, where a diagnostic can
+// say which row and which word; this is the half that holds when the emitted
+// ordinal is hand-edited.
+constexpr bool item_targets_are_well_formed(void) {
+  for (uint8_t i = 0; i < ITEM_COUNT; ++i) {
+    const ItemDef& it = ITEMS_TABLE[i];
+    if (it.klass == (uint8_t)ITEM_KLASS_CARE) {
+      if (it.target >= (uint8_t)CARE_TGT_COUNT)       return false;
+      if (it.value == 0u || it.value > 100u)          return false;  // percent of full
+      // Every set bit must be one a Pebble can carry. Written as an OR so the
+      // whole expression stays unsigned: ~ on a uint8_t promotes to a signed
+      // int and this file is compiled with -Wall -Wextra -Werror.
+      if ((it.param | (uint8_t)ITEM_PBS_MASK) != (uint8_t)ITEM_PBS_MASK) return false;
+    } else if (it.klass == (uint8_t)ITEM_KLASS_BATTLE_MOD) {
+      if (it.target > (uint8_t)ITEM_BSTAT_SPD)        return false;
+      if (it.param == 0u)                             return false;  // rounds
+      if (it.value == 0u)                             return false;  // stages
+    } else {
+      if (it.target != 0u || it.param != 0u)          return false;
+    }
+  }
+  return true;
+}
+
 static_assert(ITEM_COUNT >= 1, "the item table is empty");
 static_assert(item_rows_are_well_formed(),
               "an item row has a bad id, klass, rarity or string index");
 static_assert(item_klasses_are_all_populated(),
-              "a spec section 24 item class has no row");
+              "an item class has no row");
+static_assert(item_targets_are_well_formed(),
+              "an item does not say what it acts on: a CARE row with no care stat "
+              "or a value outside 1..100 percent of a full bar, a BATTLE_MOD with "
+              "no stat or no rounds, or a klass carrying a target byte nothing reads");
 
-inline const ItemDef* item_get(uint8_t id) {
+// constexpr since P5-C3: data/encounter_table.h's encounter_item_rows_have_a_drop()
+// guard pairs an ITEM encounter row's rarity band with its own category's drop
+// list AT COMPILE TIME, and it has to read a rarity out of this table to do it.
+inline constexpr const ItemDef* item_get(uint8_t id) {
   if (id < 1u || id > ITEM_COUNT) return nullptr;
   return &ITEMS_TABLE[id - 1u];
 }
@@ -1331,11 +1568,18 @@ def emit_encounter(c):
         "picked here, by weight within the network category, then rejected if the",
         "item's rarity falls outside the row's rarity_min..rarity_max.",
         "",
-        "SPECIAL HAS NO PAYLOAD TABLE AND THAT IS A REAL HOLE. Spec section 22",
-        "names four outcomes and this table has rows for all four, but the pack",
-        "carries nothing behind SPECIAL - no event roster, no per-category",
-        "weights, no ids - while it is 4 to 10 percent of every scan. P5-C3 must",
-        "define it. Recorded here rather than papered over.",
+        "SPECIAL_EVENTS is the SAME SHAPE for the outcome that had NO payload",
+        "at all until P5-C3 (tools/content/specials.json). It is 4 to 10 percent",
+        "of every scan and the pack used to carry no roster, no ids and no",
+        "weights behind it. Now: an event roster indexed by id == index + 1, and",
+        "SPECIAL_DROP_TABLE, per-category weights summing to 100, picked exactly",
+        "the way an item drop is.",
+        "",
+        "AND BOTH TWO-STAGE PICKS ARE GUARDED, which only WILD's was. Every ITEM",
+        "row's rarity band is checked against ITS OWN category's drop list and",
+        "every SPECIAL row against its own category's event list, at compile",
+        "time, next to encounter_wild_rows_have_a_pool() - see the three guards",
+        "at the foot of this file.",
     ] + (["",
           "ROWS CLAMPED FOR THIS ROSTER (%d species): a WILD row whose rarity band"
           % len(c.species),
@@ -1400,6 +1644,55 @@ static_assert(sizeof(ItemDropRow) == 4, "ItemDropRow layout drifted");
     o.append("};\n")
     o.append("inline constexpr uint8_t ITEM_DROP_ROW_COUNT =")
     o.append("    (uint8_t)(sizeof(ITEM_DROP_TABLE) / sizeof(ITEM_DROP_TABLE[0]));\n")
+
+    # --- the SPECIAL payload (P5-C3) -----------------------------------------
+    sp = c.specials
+    kind_ord, kind_names = enum_from(bal, "SPECIAL_KIND_ENUM", "SPEV_")
+    o.append("// --- THE SPECIAL PAYLOAD (P5-C3, tools/content/specials.json) ---------------")
+    o.append("enum SpecialKind : uint8_t {")
+    for n in kind_names:
+        o.append("  %s," % n)
+    o.append("  SPEV_COUNT")
+    o.append("};\n")
+    o.append("// XP_BURST value is scaled by this to get the XP it pays.")
+    o.append("#define SPECIAL_XP_SCALE  %d\n" % bal["SPECIAL_XP_SCALE"])
+    o.append("""struct SpecialEvent {       // 6 B, padding-free
+  uint8_t  id;              // 1..SPECIAL_EVENT_COUNT, contiguous == index + 1
+  uint8_t  kind;            // SpecialKind
+  uint8_t  value;           // XP_BURST: x SPECIAL_XP_SCALE = XP. CORRUPTION: 0
+  uint8_t  reserved;        // must be 0
+  uint16_t name_idx;        // StrId of the Spanish event name
+};
+static_assert(sizeof(SpecialEvent) == 6, "SpecialEvent layout drifted");
+""")
+    o.append("inline constexpr SpecialEvent SPECIAL_EVENTS[] = {")
+    o.append("  //  id kind           val  rsv name")
+    for ev in sp["EVENTS"]:
+        o.append("  { %2d, %-14s %3d, 0, %-22s },   // %s"
+                 % (ev["id"], kind_names[kind_ord[ev["kind"]]] + ",", ev["value"],
+                    "STR_SPECIAL_NAME_%d" % ev["id"], c_str_comment(ev["name"])))
+    o.append("};\n")
+    o.append("inline constexpr uint8_t SPECIAL_EVENT_COUNT =")
+    o.append("    (uint8_t)(sizeof(SPECIAL_EVENTS) / sizeof(SPECIAL_EVENTS[0]));\n")
+    o.append("""// Byte-for-byte the shape of ItemDropRow, on purpose: the two outcomes that
+// need a second stage are resolved by the same walk, so neither picker can
+// drift into a rule the other one does not have.
+struct SpecialDropRow {     // 4 B
+  uint8_t category;         // NetCategory ORDINAL
+  uint8_t event_id;         // into SPECIAL_EVENTS
+  uint8_t weight;           // per-category weights sum to exactly 100
+  uint8_t reserved;         // must be 0
+};
+static_assert(sizeof(SpecialDropRow) == 4, "SpecialDropRow layout drifted");
+""")
+    o.append("inline constexpr SpecialDropRow SPECIAL_DROP_TABLE[] = {")
+    for cn in cats:
+        for eid in sorted(sp["WEIGHTS"][cn].keys(), key=int):
+            o.append("  { NET_CAT_%-9s %3s, %3d, 0 },"
+                     % (cn + ",", eid, sp["WEIGHTS"][cn][eid]))
+    o.append("};\n")
+    o.append("inline constexpr uint8_t SPECIAL_DROP_ROW_COUNT =")
+    o.append("    (uint8_t)(sizeof(SPECIAL_DROP_TABLE) / sizeof(SPECIAL_DROP_TABLE[0]));\n")
 
     o.append("""// --- generator-emitted compile-time guards (plan 1.5.2) ----------------------
 constexpr bool encounter_rows_are_well_formed(void) {
@@ -1478,6 +1771,88 @@ constexpr bool item_drop_rows_are_well_formed(void) {
   return true;
 }
 
+// EVERY ITEM ROW RESOLVES TO A NON-EMPTY DROP POOL - the twin of
+// encounter_wild_rows_have_a_pool() that did not exist until P5-C3, and the
+// reason it had to (plan's carried-forward bullet):
+// item_drop_rows_are_well_formed() above checks category, id, weight and the
+// per-category sum of 100 and NOTHING pairs a row's own rarity band with its
+// own category's drop list - which is the second stage of the pick this table's
+// banner describes. It holds at this pack (100 of 100 eligible weight in all
+// six categories, so the rejection step never fires), which is exactly why one
+// item edit could turn ITEM into an outcome encounter_roll() cannot answer with
+// nothing in the FIRMWARE saying so. tools/content/verify.py has checked the
+// same property since P4-C1, and a Python gate is skipped when python3 is
+// missing (tools/check.sh says so in a word and continues); a static_assert is
+// not skippable.
+constexpr bool encounter_item_rows_have_a_drop(void) {
+  for (uint8_t i = 0; i < ENCOUNTER_ROW_COUNT; ++i) {
+    const EncounterRow& r = ENCOUNTER_TABLE[i];
+    if (r.outcome != (uint8_t)ENC_OUT_ITEM) continue;
+    uint32_t weight = 0;
+    for (uint8_t d = 0; d < ITEM_DROP_ROW_COUNT; ++d) {
+      if (ITEM_DROP_TABLE[d].category != r.category) continue;
+      const ItemDef* it = item_get(ITEM_DROP_TABLE[d].item_id);
+      if (it == nullptr) return false;
+      if (it->rarity < r.rarity_min || it->rarity > r.rarity_max) continue;
+      weight += ITEM_DROP_TABLE[d].weight;
+    }
+    if (weight == 0u) return false;
+  }
+  return true;
+}
+
+constexpr bool special_drop_rows_are_well_formed(void) {
+  for (uint8_t i = 0; i < (uint8_t)(sizeof(SPECIAL_EVENTS) / sizeof(SPECIAL_EVENTS[0])); ++i) {
+    const SpecialEvent& e = SPECIAL_EVENTS[i];
+    if (e.id != (uint8_t)(i + 1u))              return false;
+    if (e.kind >= (uint8_t)SPEV_COUNT)          return false;
+    if (e.reserved != 0u)                       return false;
+    if (e.name_idx >= (uint16_t)STR_COUNT)      return false;
+    // An XP_BURST that pays nothing is an event with no effect - the exact
+    // shape of the item-9 hole this phase closed on the other table.
+    if (e.kind == (uint8_t)SPEV_XP_BURST && e.value == 0u) return false;
+  }
+  for (uint8_t i = 0; i < (uint8_t)(sizeof(SPECIAL_DROP_TABLE) / sizeof(SPECIAL_DROP_TABLE[0])); ++i) {
+    const SpecialDropRow& d = SPECIAL_DROP_TABLE[i];
+    if (d.category >= (uint8_t)NET_CAT_COUNT)   return false;
+    if (d.event_id < 1u || d.event_id > SPECIAL_EVENT_COUNT) return false;
+    if (d.weight == 0u)                         return false;
+    if (d.reserved != 0u)                       return false;
+  }
+  for (uint8_t c = 0; c < (uint8_t)NET_CAT_COUNT; ++c) {
+    uint32_t sum = 0;
+    for (uint8_t i = 0; i < SPECIAL_DROP_ROW_COUNT; ++i)
+      if (SPECIAL_DROP_TABLE[i].category == c) sum += SPECIAL_DROP_TABLE[i].weight;
+    if (sum != ENCOUNTER_WEIGHT_TOTAL) return false;
+  }
+  return true;
+}
+
+// And the same question asked of the outcome that had no payload at all.
+constexpr bool encounter_special_rows_have_an_event(void) {
+  for (uint8_t i = 0; i < ENCOUNTER_ROW_COUNT; ++i) {
+    const EncounterRow& r = ENCOUNTER_TABLE[i];
+    if (r.outcome != (uint8_t)ENC_OUT_SPECIAL) continue;
+    uint32_t weight = 0;
+    for (uint8_t d = 0; d < SPECIAL_DROP_ROW_COUNT; ++d)
+      if (SPECIAL_DROP_TABLE[d].category == r.category)
+        weight += SPECIAL_DROP_TABLE[d].weight;
+    if (weight == 0u) return false;
+  }
+  return true;
+}
+
+// Every kind has an event, so no branch of the SPECIAL switch is unreachable.
+constexpr bool special_kinds_are_all_populated(void) {
+  for (uint8_t k = 0; k < (uint8_t)SPEV_COUNT; ++k) {
+    bool seen = false;
+    for (uint8_t i = 0; i < SPECIAL_EVENT_COUNT; ++i)
+      if (SPECIAL_EVENTS[i].kind == k) seen = true;
+    if (!seen) return false;
+  }
+  return true;
+}
+
 static_assert(ENCOUNTER_ROW_COUNT >= 1, "the encounter table is empty");
 static_assert(encounter_rows_are_well_formed(),
               "an encounter row has a bad category, outcome, weight or rarity band");
@@ -1489,6 +1864,16 @@ static_assert(encounter_wild_rows_have_a_pool(),
               "a WILD encounter row draws from a rarity band no shipped species is in");
 static_assert(item_drop_rows_are_well_formed(),
               "an item drop row has a bad category or item, or a category does not sum to 100");
+static_assert(encounter_item_rows_have_a_drop(),
+              "an ITEM encounter row draws from a rarity band no item in its own "
+              "category's drop list is in: the outcome cannot be answered");
+static_assert(special_drop_rows_are_well_formed(),
+              "a special event or weight row is malformed, or a category does not sum to 100");
+static_assert(encounter_special_rows_have_an_event(),
+              "a SPECIAL encounter row has no event in its category: the outcome "
+              "cannot be answered");
+static_assert(special_kinds_are_all_populated(),
+              "a SpecialKind has no event - a branch encounters.cpp could never reach");
 
 #endif // PB_ENCOUNTER_TABLE_H""")
     return "\n".join(o) + "\n"
@@ -1683,6 +2068,11 @@ def string_enum_block(c):
     for it in c.items:
         o.append("  STR_ITEM_NAME_%d,%s// item %d, %s"
                  % (it["id"], " " * max(1, 6 - len(str(it["id"]))), it["id"], it["name"]))
+    o.append("")
+    o.append("  //     SPECIAL event names, data/encounter_table.h (P5-C3) -----------------")
+    for ev in c.specials["EVENTS"]:
+        o.append("  STR_SPECIAL_NAME_%d,%s// special event %d, %s"
+                 % (ev["id"], " " * max(1, 3 - len(str(ev["id"]))), ev["id"], ev["name"]))
     o.append("  " + GEN_ENUM_END)
     return "\n".join(o)
 
@@ -1699,10 +2089,18 @@ def string_table_block(c):
     for a in c.attacks:
         o.append('  /* STR_ATK_NAME_%-3d */          "%s",'
                  % (a["id"], c_str_literal(a["name"], "attack %d name" % a["id"])))
-    for i, it in enumerate(c.items):
-        comma = "," if i + 1 < len(c.items) else ""
-        o.append('  /* STR_ITEM_NAME_%-3d */         "%s"%s'
-                 % (it["id"], c_str_literal(it["name"], "item %d name" % it["id"]),
+    for it in c.items:
+        o.append('  /* STR_ITEM_NAME_%-3d */         "%s",'
+                 % (it["id"], c_str_literal(it["name"], "item %d name" % it["id"])))
+    # LAST, and its last row is the one with no trailing comma: the hand-written
+    # half of ES[] joins on with a LEADING comma (core/strings_es.h says why), so
+    # exactly one entry in this block must end without one and it has to be the
+    # final line the splice writes.
+    for i, ev in enumerate(c.specials["EVENTS"]):
+        comma = "," if i + 1 < len(c.specials["EVENTS"]) else ""
+        o.append('  /* STR_SPECIAL_NAME_%-3d */      "%s"%s'
+                 % (ev["id"], c_str_literal(ev["name"],
+                                            "special event %d name" % ev["id"]),
                     comma))
     o.append("  " + GEN_TAB_END)
     return "\n".join(o)

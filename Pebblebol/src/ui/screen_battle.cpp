@@ -16,6 +16,7 @@
 #include "battle_renderer.h"
 #include "gfx.h"
 #include "pet_art.h"
+#include "../game/inventory.h"   // the armed BATTLE_MOD (P5-C4)
 #include "screen.h"
 #include "ui.h"
 
@@ -104,6 +105,15 @@ uint8_t  battle_screen_mode(void)    { return s_mode; }
 uint8_t  battle_screen_cursor(void)  { return s_cur; }
 uint8_t  battle_screen_reject(void)  { return s_reject; }
 uint8_t  battle_screen_outcome(void) { return s_st.outcome; }
+
+int8_t battle_screen_lead_stage(uint8_t stat) {
+  if (!s_live || stat >= (uint8_t)BSTAT_COUNT) return 0;
+  return s_st.side[0].team[s_st.side[0].active].stage[stat];
+}
+uint8_t battle_screen_lead_stage_left(uint8_t stat) {
+  if (!s_live || stat >= (uint8_t)BSTAT_COUNT) return 0u;
+  return s_st.side[0].team[s_st.side[0].active].stage_left[stat];
+}
 uint16_t battle_screen_round(void)   { return s_round_shown; }
 uint16_t battle_screen_dropped(void) { return s_dropped; }
 uint8_t  battle_screen_picked(void)  { return s_pick_n; }
@@ -610,6 +620,34 @@ static uint8_t start_battle(void) {
 
   const uint8_t r = (uint8_t)battle_init(s_st, s_setup);
   if (r != (uint8_t)BR_OK) return r;
+
+  // THE ARMED BATTLE MODIFIER (P5-C4). An ITEM_KLASS_BATTLE_MOD used from a
+  // menu before the fight is consumed there and armed in game/inventory.cpp;
+  // this is where it lands, on the player's lead combatant, AFTER battle_init()
+  // has built the state.
+  //
+  // LOCAL-ONLY, AND DELIBERATELY. It is applied to BattleState and NEVER to
+  // BattleSetup: the setup is the REPLAY INPUT and the version-checked record
+  // two peers agree on, and its reserved[2] is asserted zero. So the buff
+  // exists in a practice battle and not in a linked one - stated in
+  // game/inventory.h rather than discovered later.
+  //
+  // A DIAG battle takes NO modifier: the console builds a synthetic team on a
+  // device that may have never filled its Box, and a diagnostic whose numbers
+  // depend on the player's bag is a diagnostic nobody can compare. That also
+  // keeps tests/golden/battle_v1.txt exactly what it was - nothing is armed in
+  // a golden run either.
+  InvBattleMod mod;
+  if (s_entry == BT_ENTRY_PRACTICE && inv_mod_take(mod)) {
+    BattleCombatant& lead_c = s_st.side[0].team[s_st.side[0].active];
+    if (mod.stat < (uint8_t)BSTAT_COUNT) {
+      int16_t st_v = (int16_t)((int16_t)lead_c.stage[mod.stat] + (int16_t)mod.stages);
+      if (st_v > (int16_t)BUFF_STAGE_MAX) st_v = (int16_t)BUFF_STAGE_MAX;
+      if (st_v < (int16_t)BUFF_STAGE_MIN) st_v = (int16_t)BUFF_STAGE_MIN;
+      lead_c.stage[mod.stat]      = (int8_t)st_v;
+      lead_c.stage_left[mod.stat] = mod.rounds;
+    }
+  }
 
   // The AI's own stream. game/battle_ai.h's two-stream argument is that the
   // chooser must never move the battle's cursor, so it is seeded from a value

@@ -46,8 +46,11 @@
 #include "ui/screen_error.h"
 #include "ui/screen_evolution.h"
 #include "ui/screen_home.h"
+#include "ui/screen_encounter.h"
 #include "ui/screen_link.h"
 #include "ui/screen_menu.h"
+#include "ui/screen_network.h"
+#include "networking/wifi_scanner.h"
 #include "ui/screen_settings.h"
 #include "ui/screen_soon.h"
 #include "ui/screen_status.h"
@@ -96,6 +99,37 @@ void ui_start_minigame(uint8_t)   { }
 // The P4-C4 battle seams. This binary drives the REAL table, so SCR_BATTLE's
 // row runs the real screen and these three have to exist for it to link.
 void ui_start_battle(uint8_t e)   { g_battle_entry = e; }
+
+// THE EXPLORATION SEAMS (P5-C3/C4). This binary is about NAVIGATION, so the
+// stubs are the smallest thing that lets the two new screens link and render:
+// a driver that never starts, a clock that never moves, an empty bag and an
+// empty cooldown table. tests/test_screens.cpp is where they are actually
+// driven, with a fake radio that answers.
+static const WifiScanDriver& sm_null_driver(void) {
+  static const WifiScanDriver d = {
+    [](void) -> bool { return false; },
+    [](void) -> int16_t { return WSCAN_POLL_FAILED; },
+    [](ScanResult*, uint8_t) -> uint8_t { return 0; },
+    [](void) { }
+  };
+  return d;
+}
+static CooldownTable g_sm_cds;
+static Inventory     g_sm_inv;
+const WifiScanDriver& ui_scan_driver(void) { return sm_null_driver(); }
+void ui_explore_clock(uint32_t* e, uint32_t* ms, uint8_t* cal) {
+  if (e)   *e   = 1700000000u;
+  if (ms)  *ms  = host_ms();
+  if (cal) *cal = (uint8_t)CAL_USER;
+}
+uint32_t ui_device_seed(void)     { return 0x0BADC0DEu; }
+uint32_t ui_explore_roll(void)    { return 0u; }
+CooldownTable& ui_cooldowns(void) { return g_sm_cds; }
+Inventory&     ui_inventory(void) { return g_sm_inv; }
+void ui_explore_commit(void)      { }
+Genome ui_fresh_genome(void)      { Genome g; memset(&g, 0, sizeof g); return g; }
+void ui_award_xp(uint16_t, uint8_t) { }
+PebbleInstance* ui_active_pebble(void) { return nullptr; }
 void ui_battle_result(uint8_t, uint8_t won) { g_battle_won = won; ++g_battle_reports; }
 void ui_hold_fps(uint8_t f, uint16_t) { g_hold_fps = f; }
 void ui_flash(uint16_t)           { }
@@ -197,8 +231,8 @@ TEST(every_row_is_the_screen_its_position_claims) {
   void (*const kRender[SCR_COUNT])(void) = {
     boot_render, load_save_render, home_render, menu_render, care_render,
     play_render, ui_game_render, box_render, status_a_render, status_b_render,
-    soon_network, link_render, creator_render, settings_render, time_render,
-    soon_generic, soon_generic, soon_encounter, soon_capture, battle_render,
+    network_render, link_render, creator_render, settings_render, time_render,
+    soon_generic, soon_generic, encounter_render, capture_render, battle_render,
     soon_trade, soon_breed, evo_render, soon_item_reward, err_render,
     soon_sleep, diag_render
   };

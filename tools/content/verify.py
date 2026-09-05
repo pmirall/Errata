@@ -25,6 +25,7 @@ J = lambda n: json.load(open(os.path.join(HERE, n), encoding="utf-8"))
 SPECIES, ATTACKS, ITEMS = J("species.json"), J("attacks.json"), J("items.json")
 EVO, ENC, BAL = J("evolution.json"), J("encounters.json"), J("balance.json")
 NET = J("networks.json")
+SPEC = J("specials.json")
 ATK = {a["id"]: a for a in ATTACKS}
 # A species id nothing defines used to reach through this dict and raise
 # `KeyError: 5` out of the section-6 cross-check - a traceback, with no RESULT
@@ -256,12 +257,58 @@ P(); P("=" * 78); P("8. ITEMS  (spec 24)"); P("=" * 78)
 check("~10 items", 9 <= len(ITEMS) <= 12, "%d" % len(ITEMS))
 check("item ids contiguous from 1", [i["id"] for i in ITEMS] == list(range(1, len(ITEMS)+1)))
 kl = collections.Counter(i["klass"] for i in ITEMS)
-check("all four item classes used", set(kl) == set(BAL["ITEM_KLASS_ENUM"]), dict(kl))
+check("every declared item class is used", set(kl) == set(BAL["ITEM_KLASS_ENUM"]), dict(kl))
+# P5-C4: the two units that named no target. These mirror gen_content.py's
+# _check_items() on purpose - this file imports nothing from the generator, so a
+# green run here proves the deliverable consistent even if the emitter is wrong.
+CARE_TGT, BSTAT = BAL["CARE_TARGET_ENUM"], BAL["BATTLE_STAT_ENUM"]
+check("every item row carries the target/duration/clears columns",
+      all(all(k in i for k in ("target", "duration", "clears")) for i in ITEMS),
+      str([i["id"] for i in ITEMS
+           if not all(k in i for k in ("target", "duration", "clears"))]))
+_care = [i for i in ITEMS if i["klass"] == "CARE"]
+check("every CARE item names one of the five care stats (or ALL)",
+      all(i["target"] in CARE_TGT for i in _care),
+      str([(i["id"], i["target"]) for i in _care if i["target"] not in CARE_TGT]))
+check("every CARE value is 1..100 percent of a full bar",
+      all(1 <= i["value"] <= 100 for i in _care),
+      str([(i["id"], i["value"]) for i in _care if not 1 <= i["value"] <= 100]))
+_mod = [i for i in ITEMS if i["klass"] == "BATTLE_MOD"]
+check("every BATTLE_MOD names a battle stat and a duration in rounds",
+      all(i["target"] in BSTAT and i["duration"] >= 1 for i in _mod),
+      str([(i["id"], i["target"], i["duration"]) for i in _mod
+           if not (i["target"] in BSTAT and i["duration"] >= 1)]))
+check("every BATTLE_MOD value is inside the engine's stage clamp",
+      all(1 <= i["value"] <= BAL["BUFF_STAGE_MAX"] for i in _mod))
+_other = [i for i in ITEMS if i["klass"] not in ("CARE", "BATTLE_MOD")]
+check("a klass with no target vocabulary carries none",
+      all(i["target"] == "NONE" and i["duration"] == 0 and not i["clears"]
+          for i in _other),
+      str([i["id"] for i in _other if i["target"] != "NONE" or i["duration"]
+           or i["clears"]]))
+check("no item sets both duration and clears (they are one emitted byte)",
+      all(not (i["duration"] and i["clears"]) for i in ITEMS))
+check("every cleared status is a real PEBBLE_STATUS_BITS name",
+      all(b in BAL["PEBBLE_STATUS_BITS"] for i in ITEMS for b in i["clears"]))
+check("no item is reachable and does nothing (spec 24)",
+      all(i["value"] > 0 or i["klass"] == "EVOLUTION" for i in ITEMS),
+      str([i["id"] for i in ITEMS if i["value"] == 0 and i["klass"] != "EVOLUTION"]))
+check("every EVOLUTION item is the cond_value of a real ITEM rule",
+      all(any(r["cond"] == "ITEM" and r["cond_value"] == i["id"] for r in EVO)
+          for i in ITEMS if i["klass"] == "EVOLUTION"),
+      str([i["id"] for i in ITEMS if i["klass"] == "EVOLUTION"
+           and not any(r["cond"] == "ITEM" and r["cond_value"] == i["id"] for r in EVO)]))
 check("every ItemDef.value fits the uint8_t in the 8 B struct",
       all(0 <= i["value"] <= 255 for i in ITEMS),
       "max %d" % max(i["value"] for i in ITEMS))
 check("the CARE cure item clears corruption and is reachable",
       BAL["CORRUPTION"]["cleared_by_item"] in {i["id"] for i in ITEMS})
+# ...and it does so IN THE COLUMN, not only in balance.json's prose. Until
+# items.json had a `clears` column these two files could not be compared at all.
+_cure = [i for i in ITEMS if i["id"] == BAL["CORRUPTION"]["cleared_by_item"]]
+check("CORRUPTION.cleared_by_item really clears CORRUPTED in its own row",
+      bool(_cure) and "CORRUPTED" in _cure[0]["clears"],
+      str(_cure[0]["clears"]) if _cure else "no such item")
 drops = BAL["ITEM_DROPS"]
 check("ITEM_DROPS covers all six categories", set(drops) == set(CATS))
 check("every ITEM_DROPS entry is a real item",
@@ -293,6 +340,34 @@ noitem = [(r["category"],) for r in ENC if r["outcome"] == "ITEM" and not
            if next(i for i in ITEMS if i["id"] == int(k))["rarity"] in
               range(r["rarity_min"], r["rarity_max"]+1)]]
 check("every ITEM row resolves to a non-empty drop pool", not noitem, str(noitem))
+
+# P5-C3: THE SPECIAL PAYLOAD. Until specials.json existed, SPECIAL was 4-10 % of
+# every scan with no roster, no ids and no weights behind it, and the two checks
+# below could not be written at all. They are the twin of the ITEM pair above.
+SPW = SPEC["WEIGHTS"]
+SPE = SPEC["EVENTS"]
+check("SPECIAL_EVENTS ids contiguous from 1",
+      [e["id"] for e in SPE] == list(range(1, len(SPE) + 1)))
+check("every SPECIAL event kind is declared in SPECIAL_KIND_ENUM",
+      all(e["kind"] in BAL["SPECIAL_KIND_ENUM"] for e in SPE),
+      str(sorted({e["kind"] for e in SPE})))
+check("every declared SPECIAL kind has an event",
+      set(e["kind"] for e in SPE) == set(BAL["SPECIAL_KIND_ENUM"]))
+check("no XP_BURST pays zero XP (an event with no effect)",
+      all(e["value"] >= 1 for e in SPE if e["kind"] == "XP_BURST"))
+check("SPECIAL weights cover all six categories", set(SPW) == set(CATS), str(sorted(SPW)))
+check("every SPECIAL weight table sums to 100",
+      all(sum(SPW[c].values()) == 100 for c in CATS),
+      {c: sum(SPW[c].values()) for c in CATS})
+check("every SPECIAL weight entry is a real event and carries weight",
+      all(int(k) in {e["id"] for e in SPE} and v >= 1
+          for c in SPW for k, v in SPW[c].items()))
+nospec = [c for c in CATS if not SPW[c]]
+check("every SPECIAL row resolves to a non-empty event pool", not nospec, str(nospec))
+check("the corruption event exists and every category can reach one",
+      all(any(next(e for e in SPE if e["id"] == int(k))["kind"] == "CORRUPTION"
+              for k in SPW[c]) for c in CATS),
+      str({c: [int(k) for k in SPW[c]] for c in CATS}))
 
 # ======================================================= 9b. NETWORK CLASSIFIER
 P(); P("=" * 78); P("9b. NETWORK CLASSIFIER  (spec 20, 40, 44)"); P("=" * 78)

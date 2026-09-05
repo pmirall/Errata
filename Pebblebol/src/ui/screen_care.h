@@ -31,9 +31,26 @@ enum CareRow : uint8_t {
   CARE_SNACK,
   CARE_CLEAN,
   CARE_MEDICINE,
+  CARE_BAG,          // P5-C4: the inventory, on the screen the verbs live on
   CARE_BACK,
   CARE_ROWS
 };
+
+// THE BAG IS A SECOND MODE OF THIS SCREEN, not a ScreenId of its own. Spec
+// section 6's state set has no INVENTORY state and this chunk does not get to
+// invent one; SCR_ITEM_REWARD is phase 6's and is a REWARD transient, not a
+// list. So CARE walks into its bag the way BOX walks into its actions, and
+// SF_OWNS_BACK is what lets B come back out one level at a time.
+enum CareMode : uint8_t {
+  CAREM_LIST = 0,    // the five verbs and the way out
+  CAREM_BAG,         // what the player is carrying
+  CAREM_MODE_COUNT
+};
+uint8_t care_mode(void);
+uint8_t care_bag_cursor(void);
+// How many kinds the bag holds, i.e. how many rows CAREM_BAG draws before its
+// own "Volver". 0 is an ordinary state and draws a line saying so.
+uint8_t care_bag_rows(void);
 
 // The PLAY list: one row per game IN MgId ORDER, then the practice battle, then
 // "Volver". The static_assert is what makes a mismatch a build error rather
@@ -64,6 +81,7 @@ static_assert(PLAY_BATTLE < PLAY_BACK,
 #define LIST_ROWS_MAX  ((CARE_ROWS > PLAY_ROWS) ? (uint8_t)CARE_ROWS : (uint8_t)PLAY_ROWS)
 
 void    care_enter(void);
+void    care_leave(void);
 void    care_render(void);
 void    care_input(Gesture g);
 uint8_t care_cursor(void);

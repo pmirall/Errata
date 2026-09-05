@@ -28,6 +28,6 @@
 #define PB_CONTENT_VERSION_H
 
 // 36 species (12 families), 34 attacks, 10 items, 24 evolution rules, 40 encounter rows
-#define CONTENT_VERSION  0x54BDu
+#define CONTENT_VERSION  0x02B5u
 
 #endif // PB_CONTENT_VERSION_H

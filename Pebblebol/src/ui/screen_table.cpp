@@ -27,11 +27,13 @@
 #include "screen_care.h"
 #include "screen_creator.h"
 #include "screen_diag.h"
+#include "screen_encounter.h"
 #include "screen_error.h"
 #include "screen_evolution.h"
 #include "screen_home.h"
 #include "screen_link.h"
 #include "screen_menu.h"
+#include "screen_network.h"
 #include "screen_settings.h"
 #include "screen_soon.h"
 #include "screen_status.h"
@@ -58,8 +60,11 @@ const ScreenDef SCREENS[SCR_COUNT] = {
 
   { menu_enter, nop_update, menu_render, menu_input, nop_leave, 0, 0 },
                                                                   // SCR_MENU
-  { care_enter, nop_update, care_render, care_input, nop_leave, 0, 0 },
-                                                                  // SCR_CARE
+  // CARE owns B since P5-C4: its bag is a second mode one level below the
+  // navigation stack, exactly as the BOX walks its own modes, so B closes the
+  // bag first and only then the screen.
+  { care_enter, nop_update, care_render, care_input, care_leave, 0,
+    SF_OWNS_BACK },                                               // SCR_CARE
   { play_enter, nop_update, play_render, play_input, nop_leave, 0, 0 },
                                                                   // SCR_PLAY
 
@@ -84,9 +89,12 @@ const ScreenDef SCREENS[SCR_COUNT] = {
   { status_b_enter, nop_update, status_b_render, status_input, nop_leave, 0, 0 },
                                                                   // SCR_STATUS_B
 
-  // NETWORK is Phase 5 exploration: the placeholder says so.
-  { nop_enter, nop_update, soon_network, soon_input, nop_leave, 0, 0 },
-                                                                  // SCR_NETWORK
+  // NETWORK (P5-C3). SF_OWNS_BACK because B means CANCEL THE SCAN here, and a
+  // scan holds the radio: turning B into a plain BACK would leave the screen
+  // and the radio behind it. Its leave hook cancels anyway, so there is no
+  // route off this screen that leaves Wi-Fi up (spec sections 40 and 47).
+  { network_enter, network_update, network_render, network_input, network_leave,
+    0, SF_OWNS_BACK },                                            // SCR_NETWORK
   // LINK is a placeholder with a screen of its own (P2-C11c). The BLE peer
   // browser that used to live here owned RADIO_BLE on entry; nothing does now.
   { nop_enter, nop_update, link_render, link_input, nop_leave, 0, 0 },
@@ -118,10 +126,16 @@ const ScreenDef SCREENS[SCR_COUNT] = {
                                                                   // SCR_ALERT
 
   // --- the section 6 transient states that are not built yet ----------------
-  { nop_enter, nop_update, soon_encounter,   soon_input, nop_leave, 0, 0 },
-                                                                  // SCR_ENCOUNTER
-  { nop_enter, nop_update, soon_capture,     soon_input, nop_leave, 0, 0 },
-                                                                  // SCR_CAPTURE
+  // ENCOUNTER and CAPTURE (P5-C3, P5-C4), one module, two rows. Neither is
+  // SF_STICKY: a transient the player walked away from should time out to HOME
+  // like any other screen, and the encounter has already been paid for (the
+  // item is in the bag, the cooldown is armed) by the time it is drawn.
+  { encounter_enter, nop_update, encounter_render, encounter_input,
+    encounter_leave, 0, 0 },                                      // SCR_ENCOUNTER
+  // CAPTURE owns B because it walks back to the encounter one level at a time,
+  // exactly as the BOX walks its modes.
+  { capture_enter, nop_update, capture_render, capture_input, capture_leave, 0,
+    SF_OWNS_BACK },                                               // SCR_CAPTURE
   // BATTLE (P4-C4). SF_OWNS_BACK: B walks its ladder one level at a time -
   // SWITCH back to MENU, RESOLVE to the end of the round - and only the top
   // mode leaves the screen, exactly as the BOX does. SF_STICKY because

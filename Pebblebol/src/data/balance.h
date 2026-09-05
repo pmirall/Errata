@@ -21,6 +21,10 @@
 
 #include <stdint.h>
 
+// ENCOUNTER_COOLDOWN_S, for the one cross-check section 7 makes. config.h is a
+// leaf (stdint plus version.h), so this pulls in no cycle.
+#include "../core/config.h"
+
 // =============================================================================
 // 1. CARE DECAY  -- the hours-scale rates of spec section 27
 //    Indexed by CareId (persistence/save_schema.h): HUNGER, HAPPINESS, HEALTH,
@@ -513,5 +517,56 @@ inline constexpr uint16_t DAYLIGHT_SUNSET_MIN[PB_DAYLIGHT_MONTHS] = {
 // first goes to bed: at dusk it waits until the player has been quiet this
 // long, so bedtime never interrupts somebody mid-caress.
 #define SLEEP_RELAPSE_S         300u
+
+// =============================================================================
+// 7. EXPLORATION - CAPTURE AND THE ENCOUNTER BUCKET  (spec 20, 22, 23; P5-C3/C4)
+//
+//    ALL OF THESE ARE IN tools/content/balance.json TOO, and tools/check.sh's
+//    balance gate compares them value by value - the same treatment the eleven
+//    battle constants get, and for the same reason: they decide what the game
+//    hands the player, they are read by the firmware from HERE, and balance.json
+//    is what feeds CONTENT_VERSION. Retuning one in this file alone would move
+//    every capture chance while the version word two devices exchange stays
+//    where it is.
+// =============================================================================
+
+// The capture chance, in permille, before the clamp:
+//    CAPTURE_BASE_PERMILLE[wild rarity]
+//  - CAPTURE_LEVEL_GAP_PERMILLE * max(0, wild_level - active_level)
+//  + ITEM_CAPTURE_SCALE * item.value          (data/items_table.h)
+// The level term is ONE-SIDED on purpose: a wild creature above you is harder,
+// one below you is not a free catch. Spec section 23's "failure should not feel
+// excessively punishing" is what the floor is for, not a reason to hand out
+// certainties - hence a ceiling as well.
+inline constexpr uint16_t CAPTURE_BASE_PERMILLE[4] = { 700, 500, 320, 160 };
+#define CAPTURE_LEVEL_GAP_PERMILLE  12
+#define CAPTURE_MIN_PERMILLE        50
+#define CAPTURE_MAX_PERMILLE        950
+// Spec section 23: "failure should not feel excessively punishing". Two failed
+// attempts and the creature flees - which bounds the encounter rather than
+// punishing it, and is what stops a player re-rolling one wild Pebble forever.
+#define CAPTURE_MAX_ATTEMPTS        2
+
+// What a successful capture pays, through the UNMETERED XP_SRC_CAPTURE (see
+// game/xp.h). Unmetered is defensible here and only here among the exploration
+// sources, because a capture CONSUMES the encounter: the Box holds ten, the
+// creature is gone from the network either way, and the two-hour cooldown sits
+// in front of the next one. Sized against XP_BATTLE_WIN 25 - a catch is worth
+// less than a won fight and more than a care action.
+#define XP_CAPTURE                  12
+
+// THE TIME BUCKET AN ENCOUNTER IS DETERMINISTIC INSIDE (spec section 20, "time
+// bucket"). Six hours: shorter than a day so a network is worth revisiting, and
+// four times the ENCOUNTER_COOLDOWN_S so a cooldown never spans a whole bucket.
+#define ENCOUNTER_BUCKET_S          21600UL
+
+static_assert(CAPTURE_MIN_PERMILLE > 0 && CAPTURE_MAX_PERMILLE < 1000,
+              "a capture that is certain, or impossible, is not a roll");
+static_assert(CAPTURE_MIN_PERMILLE < CAPTURE_MAX_PERMILLE,
+              "the capture clamp is inverted");
+static_assert(CAPTURE_MAX_ATTEMPTS >= 1, "an encounter with no attempt is not one");
+static_assert(ENCOUNTER_BUCKET_S >= ENCOUNTER_COOLDOWN_S,
+              "a network would come off cooldown inside the bucket that decides "
+              "its encounter, so the second scan would replay the first");
 
 #endif // PB_BALANCE_H

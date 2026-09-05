@@ -616,6 +616,12 @@ enum StrId : uint16_t {
   STR_ITEM_NAME_8,     // item 8, Turbo Chip
   STR_ITEM_NAME_9,     // item 9, Llave Raíz
   STR_ITEM_NAME_10,    // item 10, Escudo RAM
+
+  //     SPECIAL event names, data/encounter_table.h (P5-C3) -----------------
+  STR_SPECIAL_NAME_1,  // special event 1, Caché Suelta
+  STR_SPECIAL_NAME_2,  // special event 2, Nodo Fantasma
+  STR_SPECIAL_NAME_3,  // special event 3, Núcleo Roto
+  STR_SPECIAL_NAME_4,  // special event 4, Virus Errante
   // <<< GEN StrId BLOCK - tools/gen_content.py - DO NOT EDIT BY HAND <<<
 
   // --- 35. THE BATTLE SCREEN (P4-C4) --------------- <= 25 chars @ 5x8 ------
@@ -661,6 +667,44 @@ enum StrId : uint16_t {
   // follow-up: the one outcome that means something went wrong was the one
   // outcome the screen called an ordinary result.
   STR_BT_ABORT,
+
+  // --- 36. EXPLORATION (P5-C3/C4) ------------------ <= 25 chars @ 5x8 ------
+  //     Appended at the END for the reason section 35 gives: every id inside
+  //     the generated block is written into src/data/*_table.h, so inserting
+  //     anything before them renumbers content the generator has emitted.
+  STR_NET_TITLE,
+  STR_NET_SCANNING,
+  STR_NET_NOTHING,
+  STR_NET_COOLING,
+  STR_NET_EMPTY,
+  STR_NET_FAILED,
+  STR_NET_HELP,
+  STR_ENC_TITLE,
+  STR_ENC_WILD,
+  STR_ENC_ITEM,
+  STR_ENC_SPECIAL,
+  STR_ENC_CORRUPT,
+  STR_ENC_CATCH,
+  STR_ENC_LEAVE,
+  STR_ENC_BAG_FULL,
+  STR_ENC_NO_CLOCK,
+  STR_ENC_HELP,
+  STR_CAP_TITLE,
+  STR_CAP_THROW,
+  STR_CAP_NO_ITEM,
+  STR_CAP_CAUGHT,
+  STR_CAP_ESCAPED,
+  STR_CAP_FLED,
+  STR_CAP_BOX_FULL,
+  STR_CAP_TO_BOX,
+  STR_CAP_ERROR,
+  STR_ITEM_BAG,
+  STR_ITEM_BAG_EMPTY,
+  STR_ITEM_USED,
+  STR_ITEM_NO_USE,
+  STR_ITEM_NOT_HERE,
+  STR_ITEM_NO_PET,
+  STR_HLP_BAG,
 
   STR_COUNT
 };
@@ -1188,7 +1232,11 @@ inline constexpr const char* const ES[] = {
   /* STR_ITEM_NAME_7   */         "Antivirus",
   /* STR_ITEM_NAME_8   */         "Turbo Chip",
   /* STR_ITEM_NAME_9   */         "Llave Raíz",
-  /* STR_ITEM_NAME_10  */         "Escudo RAM"
+  /* STR_ITEM_NAME_10  */         "Escudo RAM",
+  /* STR_SPECIAL_NAME_1   */      "Caché Suelta",
+  /* STR_SPECIAL_NAME_2   */      "Nodo Fantasma",
+  /* STR_SPECIAL_NAME_3   */      "Núcleo Roto",
+  /* STR_SPECIAL_NAME_4   */      "Virus Errante"
   /* <<< GEN ES[] BLOCK - tools/gen_content.py - DO NOT EDIT BY HAND <<< */
 
   /* --- 35. the battle screen (P4-C4) --- */
@@ -1226,6 +1274,40 @@ inline constexpr const char* const ES[] = {
   , /* STR_BT_DEF */              "DEF"
   , /* STR_BT_SPD */              "VEL"
   , /* STR_BT_ABORT */            "Combate anulado"
+
+  , /* STR_NET_TITLE */           "RED"
+  , /* STR_NET_SCANNING */        "ESCANEANDO"
+  , /* STR_NET_NOTHING */         "Aquí no hay nada"
+  , /* STR_NET_COOLING */         "Ya exploraste estas redes"
+  , /* STR_NET_EMPTY */           "No se ve ninguna red"
+  , /* STR_NET_FAILED */          "El escáner ha fallado"
+  , /* STR_NET_HELP */            "B cancela el escaneo y apaga la radio."
+  , /* STR_ENC_TITLE */           "ENCUENTRO"
+  , /* STR_ENC_WILD */            "¡PEBBLE SALVAJE!"
+  , /* STR_ENC_ITEM */            "¡HAS ENCONTRADO ALGO!"
+  , /* STR_ENC_SPECIAL */         "¡ALGO RARO PASA!"
+  , /* STR_ENC_CORRUPT */         "Pebble corrompido 24 h"
+  , /* STR_ENC_CATCH */           "CAPTURAR"
+  , /* STR_ENC_LEAVE */           "DEJAR"
+  , /* STR_ENC_BAG_FULL */        "La mochila está llena"
+  , /* STR_ENC_NO_CLOCK */        "Pon la fecha primero"
+  , /* STR_ENC_HELP */            "A elige, B vuelve. Dejarlo ir también vale."
+  , /* STR_CAP_TITLE */           "CAPTURA"
+  , /* STR_CAP_THROW */           "LANZAR"
+  , /* STR_CAP_NO_ITEM */         "Sin cebo"
+  , /* STR_CAP_CAUGHT */          "¡Capturado! Va a la caja."
+  , /* STR_CAP_ESCAPED */         "Se ha escapado. Prueba otra vez."
+  , /* STR_CAP_FLED */            "Ha huido."
+  , /* STR_CAP_BOX_FULL */        "La caja está llena. Haz sitio."
+  , /* STR_CAP_TO_BOX */          "CAJA"
+  , /* STR_CAP_ERROR */           "Algo ha ido mal aquí dentro."
+  , /* STR_ITEM_BAG */            "MOCHILA"
+  , /* STR_ITEM_BAG_EMPTY */      "No llevas nada"
+  , /* STR_ITEM_USED */           "Usado"
+  , /* STR_ITEM_NO_USE */         "Ahora no hace nada"
+  , /* STR_ITEM_NOT_HERE */       "Esto se usa al capturar"
+  , /* STR_ITEM_NO_PET */         "No hay Pebble activo"
+  , /* STR_HLP_BAG */             "Lo que has encontrado explorando."
 };
 
 // -----------------------------------------------------------------------------

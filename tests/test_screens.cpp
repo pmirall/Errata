@@ -41,8 +41,15 @@
 #include "ui/screen_evolution.h"
 #include "ui/screen_error.h"
 #include "ui/screen_home.h"
+#include "ui/screen_encounter.h"
 #include "ui/screen_link.h"
 #include "ui/screen_menu.h"
+#include "ui/screen_network.h"
+#include "networking/wifi_scanner.h"
+#include "game/cooldowns.h"
+#include "game/genome.h"
+#include "game/inventory.h"
+#include "game/xp.h"
 #include "game/battle.h"      // BattleReject / BattleLogEvent, for the battle snapshots
 #include "ui/screen_battle.h"
 #include "ui/battle_renderer.h"
@@ -201,6 +208,93 @@ bool ui_get_clock(uint16_t* y, uint8_t* mo, uint8_t* d, uint8_t* h, uint8_t* mi)
 bool ui_set_clock(uint16_t y, uint8_t mo, uint8_t d, uint8_t h, uint8_t mi) {
   g_set_y = y; g_set_mo = mo; g_set_d = d; g_set_h = h; g_set_mi = mi;
   return g_clock_ok;
+}
+
+// =============================================================================
+//  THE EXPLORATION SEAMS (P5-C3/C4), AND THE FAKE RADIO
+//
+//  Everything ui/screen_network.cpp and ui/screen_encounter.cpp reach outside
+//  themselves. The RADIO is the interesting one: networking/net.cpp is a device
+//  module tests/Makefile never compiles, so the four-function WifiScanDriver
+//  seam is filled in here - which is what makes the 12 s timeout, the B cancel
+//  and "the radio is released exactly once" drivable at 128x64 with no
+//  hardware at all.
+// =============================================================================
+static uint32_t      g_epoch   = 1700000000u;
+static uint8_t       g_cal     = (uint8_t)CAL_USER;
+static uint32_t      g_dev     = 0x0BADC0DEu;
+static uint32_t      g_roll    = 0;
+static int           g_saves   = 0;   // ui_explore_commit() calls
+static uint16_t      g_xp_amt  = 0;
+static uint8_t       g_xp_src  = 0xFF;
+static CooldownTable g_cds;
+static Inventory     g_inv;
+
+// The fake driver, and its instrumentation.
+static int      g_drv_start = 0, g_drv_stop = 0, g_drv_poll = 0;
+static bool     g_drv_ok    = true;      // start() succeeds
+static int16_t  g_drv_ans   = WSCAN_POLL_RUNNING;
+static uint8_t  g_drv_n     = 0;
+static ScanResult g_drv_res[WIFI_SCAN_MAX_RESULTS];
+
+static bool    fk_start(void)  { g_drv_start++; return g_drv_ok; }
+static int16_t fk_poll(void)   { g_drv_poll++;  return g_drv_ans; }
+static uint8_t fk_read(ScanResult* out, uint8_t cap) {
+  const uint8_t n = (g_drv_n < cap) ? g_drv_n : cap;
+  for (uint8_t i = 0; i < n; ++i) out[i] = g_drv_res[i];
+  return n;
+}
+static void    fk_stop(void)   { g_drv_stop++; }
+static const WifiScanDriver g_drv = { fk_start, fk_poll, fk_read, fk_stop };
+
+const WifiScanDriver& ui_scan_driver(void) { return g_drv; }
+void ui_explore_clock(uint32_t* e, uint32_t* ms, uint8_t* cal) {
+  if (e)   *e   = g_epoch;
+  if (ms)  *ms  = g_now;
+  if (cal) *cal = g_cal;
+}
+uint32_t ui_device_seed(void)     { return g_dev; }
+uint32_t ui_explore_roll(void)    { return g_roll; }
+CooldownTable& ui_cooldowns(void) { return g_cds; }
+Inventory&     ui_inventory(void) { return g_inv; }
+void ui_explore_commit(void)      { g_saves++; }
+Genome ui_fresh_genome(void) {
+  Genome g;
+  memset(&g, 0, sizeof g);
+  g.lineage_id = 0x51DE0001u;
+  g.g0 = 0x1234u; g.g1 = 0x5678u; g.g2 = 0x09ABu;
+  g.generation = 1u;
+  genome_seal(g);
+  return g;
+}
+static PebbleInstance* g_active_p = nullptr;
+void ui_award_xp(uint16_t amount, uint8_t src) { g_xp_amt = amount; g_xp_src = src; }
+PebbleInstance* ui_active_pebble(void) { return g_active_p; }
+
+// Everything but the cooldown table, so a case can prove that a network stays
+// armed across a second visit to the screen.
+static void explore_reset_keep_cooldowns(void) {
+  g_drv_start = g_drv_stop = g_drv_poll = 0;
+  g_drv_ok = true;
+  g_drv_ans = WSCAN_POLL_RUNNING;
+  g_drv_n = 0;
+  memset(g_drv_res, 0, sizeof g_drv_res);
+  g_saves = 0;
+  g_xp_amt = 0;
+  g_xp_src = 0xFF;
+  g_push = 0xFF;
+  g_backs = 0;
+  g_toast = STR_EMPTY;
+}
+
+static void explore_reset(void) {
+  explore_reset_keep_cooldowns();
+  memset(&g_cds, 0, sizeof g_cds);
+  inv_begin(g_inv);
+  inv_mod_clear();
+  cd_begin();
+  g_epoch = 1700000000u;
+  g_cal = (uint8_t)CAL_USER;
 }
 
 // =============================================================================
@@ -388,12 +482,22 @@ TEST(table_rows_are_consistent) {
   // half way through a date.
   CHECK((SCREENS[SCR_TIME].flags & (SF_STICKY | SF_LOCK_INPUT))
         == (SF_STICKY | SF_LOCK_INPUT));
+  // CARE LEFT THE ORDINARY LIST AT P5-C4: its bag is a second mode one level
+  // below the navigation stack, so B closes the bag before it closes the
+  // screen - the BOX's rule, for the BOX's reason.
+  CHECK((SCREENS[SCR_CARE].flags & SF_OWNS_BACK) != 0);
+  CHECK_EQ((SCREENS[SCR_CARE].flags & SF_STICKY), 0);
+  CHECK(SCREENS[SCR_CARE].leave != nullptr);
   CHECK(SCREENS[SCR_TIME].update != nullptr);   // the right button's repeat
   // Every other migrated row is an ordinary screen: it times out, and the
   // global navigation grammar runs before its own handler.
+  // SCR_NETWORK LEFT THIS LIST AT P5-C3: B means CANCEL THE SCAN there, and a
+  // scan holds the radio, so the row owns B (asserted by name in
+  // b_cancels_the_scan_releases_the_radio_and_goes_back). SCR_ENCOUNTER joins
+  // it as an ordinary row and SCR_CAPTURE owns B for the BOX screen's reason.
   static const uint8_t kOrdinary[] = {
-    SCR_MENU, SCR_CARE, SCR_PLAY, SCR_STATUS, SCR_STATUS_B,
-    SCR_LINK, SCR_CREATOR, SCR_NETWORK, SCR_SLEEP
+    SCR_MENU, SCR_PLAY, SCR_STATUS, SCR_STATUS_B,
+    SCR_LINK, SCR_CREATOR, SCR_ENCOUNTER, SCR_SLEEP
   };
   for (size_t i = 0; i < sizeof kOrdinary / sizeof kOrdinary[0]; i++)
     CHECK(SCREENS[kOrdinary[i]].flags == 0);
@@ -876,6 +980,13 @@ TEST(care_actions_and_the_rejected_path) {
   care_input(GST_TAP_L);                        // medicine: always a confirmation
   care_input(GST_HOLD_R);
   CHECK_EQ(g_medicine, 1);
+
+  care_input(GST_TAP_L);                        // the bag: a MODE, not an action
+  care_input(GST_HOLD_R);
+  CHECK_EQ(care_mode(), (uint8_t)CAREM_BAG);
+  care_input(GST_TAP_R);                        // ...and B closes it, not the screen
+  CHECK_EQ(care_mode(), (uint8_t)CAREM_LIST);
+  CHECK_EQ(g_backs, 1);                         // still the one from the refusal
 
   care_input(GST_TAP_L);                        // volver
   g_backs = 0;
@@ -1483,10 +1594,14 @@ TEST(box_screen_to_list_leaves_the_emptied_action_list) {
 }
 
 // One placeholder is enough to prove the frame: they differ only in two string
-// ids, and test_statemachine.cpp renders every single row.
-TEST(snapshot_soon_network) {
+// ids, and test_statemachine.cpp renders every single row. It was SCR_NETWORK
+// until P5-C3 built that screen; SCR_TRADE is the same frame with a different
+// pair of strings, and the golden moves with it rather than being kept as a
+// frozen image of a row nothing can reach (which is what P5-C1 deleted
+// snapshot_creator_station for).
+TEST(snapshot_soon_trade) {
   seams2_reset();
-  snapshot(SCR_NETWORK, "soon_network");
+  snapshot(SCR_TRADE, "soon_trade");
 }
 
 // INVARIANT 7, and the audit's S11 defect. The first gesture after the read
@@ -1884,4 +1999,326 @@ TEST(play_launches_the_battle_from_its_own_row) {
   for (uint8_t i = 0; i < PLAY_BACK; ++i) play_input(GST_TAP_L);
   play_input(GST_HOLD_R);
   CHECK_EQ(g_backs, 1);
+}
+
+// =============================================================================
+//  THE EXPLORATION SCREENS (P5-C3/C4)
+//
+//  These are BEHAVIOUR cases first and snapshots second, because the two things
+//  worth proving about the NETWORK screen are not pixels: that B really cancels
+//  a scan and that the radio is released on every route off the screen. Both
+//  run against the fake WifiScanDriver above - the real one lives in
+//  networking/net.cpp, which tests/Makefile never compiles.
+// =============================================================================
+static ScanResult mk_scan(uint32_t hash, uint8_t cat, int8_t rssi) {
+  ScanResult r;
+  memset(&r, 0, sizeof r);
+  r.net_hash = hash;
+  r.category = cat;
+  r.rssi     = rssi;
+  return r;
+}
+
+// Runs the scan to an answer of `n` access points and returns after the update
+// that consumed it.
+static void run_scan(uint8_t n) {
+  network_enter();
+  g_drv_ans = WSCAN_POLL_RUNNING;
+  network_update(g_now);                 // still running
+  g_drv_n   = n;
+  g_drv_ans = (int16_t)n;
+  network_update(g_now);                 // the answer
+}
+
+TEST(the_network_screen_holds_the_radio_only_while_it_is_scanning) {
+  seams2_reset();
+  explore_reset();
+
+  network_enter();
+  CHECK_EQ(g_drv_start, 1);
+  CHECK_EQ(g_drv_stop, 0);               // still held
+  CHECK_EQ(network_screen_phase(), (uint8_t)NSP_SCANNING);
+
+  // ...and the leave hook releases it EXACTLY ONCE however the player left.
+  network_leave();
+  CHECK_EQ(g_drv_stop, 1);
+  network_leave();                       // idempotent: a second route out
+  CHECK_EQ(g_drv_stop, 1);
+}
+
+TEST(b_cancels_the_scan_releases_the_radio_and_goes_back) {
+  seams2_reset();
+  explore_reset();
+  network_enter();
+  CHECK_EQ(g_drv_stop, 0);
+
+  const int backs = g_backs;
+  network_input((Gesture)GST_TAP_R);
+  CHECK_EQ(network_screen_phase(), (uint8_t)NSP_CANCELLED);
+  CHECK_EQ(g_drv_stop, 1);               // the radio went down with the press
+  CHECK_EQ(g_backs, backs + 1);          // and the screen went away
+  // No encounter was rolled and nothing was armed.
+  CHECK_EQ(g_push, 0xFF);
+  CHECK_EQ(g_saves, 0);
+
+  // THE ROW MUST OWN B, or the router would turn it into a plain BACK and the
+  // press above would never reach network_input() on the device.
+  CHECK((SCREENS[SCR_NETWORK].flags & SF_OWNS_BACK) != 0);
+  // ...and it must NOT be sticky: a scan the player walked away from should
+  // time out like anything else, and the leave hook is what frees the radio.
+  CHECK_EQ((SCREENS[SCR_NETWORK].flags & SF_STICKY), 0);
+}
+
+TEST(a_scan_that_times_out_says_so_and_does_not_spin_for_ever) {
+  seams2_reset();
+  explore_reset();
+  network_enter();
+  g_drv_ans = WSCAN_POLL_RUNNING;
+  network_update(g_now);
+  CHECK_EQ(network_screen_phase(), (uint8_t)NSP_SCANNING);
+
+  // Past the software ceiling (spec section 47). The Arduino core's own scan
+  // timeout is five times this and cannot tell "timed out" from "never
+  // started", which is why the job carries its own clock.
+  g_now += (uint32_t)WIFI_SCAN_TIMEOUT_MS + 1u;
+  network_update(g_now);
+  CHECK_EQ(network_screen_phase(), (uint8_t)NSP_FAILED);
+  CHECK_EQ(g_drv_stop, 1);
+  CHECK_EQ(g_toast, (uint16_t)STR_NET_FAILED);
+  g_now -= (uint32_t)WIFI_SCAN_TIMEOUT_MS + 1u;
+}
+
+TEST(a_driver_that_refuses_the_radio_is_a_named_failure_and_not_a_spinner) {
+  seams2_reset();
+  explore_reset();
+  g_drv_ok = false;
+  network_enter();
+  CHECK_EQ(network_screen_phase(), (uint8_t)NSP_FAILED);
+  CHECK_EQ(g_drv_start, 1);
+  CHECK_EQ(g_drv_stop, 1);               // released even though it never ran
+}
+
+TEST(a_scan_that_finds_nothing_toasts_and_goes_back_without_an_encounter) {
+  seams2_reset();
+  explore_reset();
+  run_scan(0);
+  CHECK_EQ(network_screen_phase(), (uint8_t)NSP_EMPTY);
+  CHECK_EQ(network_screen_seen(), 0);
+  CHECK_EQ(g_toast, (uint16_t)STR_NET_EMPTY);
+  CHECK_EQ(g_push, 0xFF);                // no ENCOUNTER
+  CHECK_EQ(g_drv_stop, 1);
+}
+
+TEST(a_scan_that_finds_a_network_arms_its_cooldown_and_hands_off_an_encounter) {
+  seams2_reset();
+  explore_reset();
+  g_drv_res[0] = mk_scan(0xA1B2C3D4u, (uint8_t)NET_CAT_HOME, -55);
+  run_scan(1);
+  CHECK_EQ(network_screen_seen(), 1);
+  CHECK_EQ(network_screen_fresh(), 1);
+  CHECK_EQ(g_drv_stop, 1);
+  CHECK(g_saves > 0);                    // the cooldown reached the commit
+
+  // THE COOLDOWN IS ARMED WHETHER OR NOT ANYTHING WAS FOUND. Re-scanning the
+  // same network now finds it on cooldown - which is the farm spec section 21
+  // exists to close, asserted rather than described.
+  const uint8_t first = network_screen_phase();
+  CHECK(first == (uint8_t)NSP_HANDOFF || first == (uint8_t)NSP_EMPTY);
+  explore_reset_keep_cooldowns();
+  g_drv_res[0] = mk_scan(0xA1B2C3D4u, (uint8_t)NET_CAT_HOME, -55);
+  run_scan(1);
+  CHECK_EQ(network_screen_phase(), (uint8_t)NSP_EMPTY);
+  CHECK_EQ(network_screen_seen(), 1);
+  CHECK_EQ(network_screen_fresh(), 0);   // seen, but not explorable
+  CHECK_EQ(g_toast, (uint16_t)STR_NET_COOLING);
+}
+
+TEST(the_encounter_transient_draws_all_four_outcomes_and_only_wild_can_be_steered) {
+  seams2_reset();
+  explore_reset();
+
+  EncounterResult r;
+  memset(&r, 0, sizeof r);
+
+  // WILD: two options, and A on the first one opens CAPTURE.
+  r.outcome = (uint8_t)ENC_OUT_WILD; r.species_id = 1; r.level = 7;
+  encounter_arm(r, (uint8_t)NET_CAT_HOME);
+  encounter_enter();
+  CHECK_EQ(encounter_screen_cursor(), 0);
+  encounter_input((Gesture)GST_TAP_L);
+  CHECK_EQ(encounter_screen_cursor(), 1);          // moved to DEJAR
+  encounter_input((Gesture)GST_TAP_L);
+  CHECK_EQ(encounter_screen_cursor(), 0);          // and back
+  encounter_input((Gesture)GST_HOLD_L);
+  CHECK_EQ(g_push, (uint8_t)SCR_CAPTURE);
+  // DEJAR is a real answer and leaves without capturing.
+  g_push = 0xFF;
+  const int backs = g_backs;
+  encounter_input((Gesture)GST_TAP_L);
+  encounter_input((Gesture)GST_HOLD_L);
+  CHECK_EQ(g_push, 0xFF);
+  CHECK_EQ(g_backs, backs + 1);
+
+  // ITEM: the drop is in the bag the moment the screen opens, so a stray BACK
+  // cannot lose it.
+  explore_reset();
+  memset(&r, 0, sizeof r);
+  r.outcome = (uint8_t)ENC_OUT_ITEM; r.item_id = 1;
+  encounter_arm(r, (uint8_t)NET_CAT_HOME);
+  CHECK_EQ(inv_count(g_inv, 1), 0);
+  encounter_enter();
+  CHECK_EQ(inv_count(g_inv, 1), 1);
+  CHECK(g_saves > 0);
+  // ...and entering twice does not pay twice.
+  encounter_enter();
+  CHECK_EQ(inv_count(g_inv, 1), 1);
+  // Nothing to steer: A does not push anything.
+  g_push = 0xFF;
+  encounter_input((Gesture)GST_HOLD_L);
+  CHECK_EQ(g_push, 0xFF);
+
+  // SPECIAL / XP burst: paid once, through XP_SRC_SPECIAL.
+  explore_reset();
+  memset(&r, 0, sizeof r);
+  r.outcome = (uint8_t)ENC_OUT_SPECIAL; r.event_id = 1;
+  r.event_kind = (uint8_t)SPEV_XP_BURST; r.event_value = 5;
+  encounter_arm(r, (uint8_t)NET_CAT_HOME);
+  encounter_enter();
+  CHECK_EQ(g_xp_amt, (uint16_t)(5u * SPECIAL_XP_SCALE));
+  CHECK_EQ(g_xp_src, (uint8_t)XP_SRC_SPECIAL);
+
+  // ...and NOT paid at all while the clock is untrustworthy, which is P5-C3's
+  // written-down anti-farm choice for an unmetered source.
+  explore_reset();
+  g_cal = (uint8_t)CAL_UNSET;
+  encounter_arm(r, (uint8_t)NET_CAT_HOME);
+  encounter_enter();
+  CHECK_EQ(g_xp_amt, 0);
+  CHECK_EQ(g_xp_src, 0xFF);
+  CHECK_EQ(g_toast, (uint16_t)STR_ENC_NO_CLOCK);
+  g_cal = (uint8_t)CAL_USER;
+}
+
+TEST(the_exploration_screens_render_without_drawing_off_the_panel) {
+  seams2_reset();
+  explore_reset();
+  network_enter();
+  snapshot(SCR_NETWORK, "network_scanning");
+
+  EncounterResult r;
+  memset(&r, 0, sizeof r);
+  r.outcome = (uint8_t)ENC_OUT_WILD; r.species_id = 1; r.level = 7;
+  encounter_arm(r, (uint8_t)NET_CAT_HOME);
+  encounter_enter();
+  snapshot(SCR_ENCOUNTER, "encounter_wild");
+
+  memset(&r, 0, sizeof r);
+  r.outcome = (uint8_t)ENC_OUT_SPECIAL; r.event_id = 1;
+  r.event_kind = (uint8_t)SPEV_XP_BURST; r.event_value = 5;
+  encounter_arm(r, (uint8_t)NET_CAT_HOME);
+  encounter_enter();
+  snapshot(SCR_ENCOUNTER, "encounter_special");
+
+  memset(&r, 0, sizeof r);
+  r.outcome = (uint8_t)ENC_OUT_WILD; r.species_id = 1; r.level = 7;
+  encounter_arm(r, (uint8_t)NET_CAT_HOME);
+  capture_enter();
+  snapshot(SCR_CAPTURE, "capture_ready");
+  network_leave();
+}
+
+// =============================================================================
+//  THE BAG (P5-C4), which is the only way an item ever gets spent.
+//
+//  Without this surface every ITEM encounter would fill a bag nothing can
+//  empty - which is the exact shape of defect this phase spent its content
+//  budget closing on item 9.
+// =============================================================================
+TEST(the_bag_lists_what_is_held_uses_one_and_walks_back_out) {
+  seams2_reset();
+  explore_reset();
+  care_enter();
+  CHECK_EQ(care_mode(), (uint8_t)CAREM_LIST);
+
+  // Empty is an ordinary state and draws a line saying so.
+  CHECK_EQ(care_bag_rows(), 0);
+  while (care_cursor() != (uint8_t)CARE_BAG) care_input(GST_TAP_L);
+  care_input(GST_HOLD_R);
+  CHECK_EQ(care_mode(), (uint8_t)CAREM_BAG);
+  snapshot(SCR_CARE, "care_bag_empty");
+  care_input(GST_TAP_R);
+  CHECK_EQ(care_mode(), (uint8_t)CAREM_LIST);
+
+  // Two kinds in the bag, one of them a care item the active Pebble needs.
+  uint8_t care_id = 0, cap_id = 0;
+  for (uint8_t i = 0; i < ITEM_COUNT; ++i) {
+    if (ITEMS_TABLE[i].klass == (uint8_t)ITEM_KLASS_CARE && care_id == 0)
+      care_id = ITEMS_TABLE[i].id;
+    if (ITEMS_TABLE[i].klass == (uint8_t)ITEM_KLASS_CAPTURE && cap_id == 0)
+      cap_id = ITEMS_TABLE[i].id;
+  }
+  CHECK(care_id != 0 && cap_id != 0);
+  CHECK_EQ(inv_add(g_inv, care_id, 2), 2);
+  CHECK_EQ(inv_add(g_inv, cap_id, 1), 1);
+  CHECK_EQ(care_bag_rows(), 2);
+
+  PebbleInstance pet;
+  memset(&pet, 0, sizeof pet);
+  pet.magic = (uint16_t)PEBBLE_MAGIC;
+  pet.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  pet.species_id = 1; pet.id = 0x5EED0009u; pet.level = 5;
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) pet.care[i] = 0;
+  g_active_p = &pet;
+
+  care_input(GST_HOLD_R);                       // open the bag again
+  CHECK_EQ(care_mode(), (uint8_t)CAREM_BAG);
+  CHECK_EQ(care_bag_cursor(), 0);
+  snapshot(SCR_CARE, "care_bag_two");
+
+  // THE ROWS ARE IN ITEM-ID ORDER, not pickup order, so the cursor does not
+  // reshuffle under the player when something is spent. Which row is which is
+  // therefore derived rather than assumed - the capture item is id 4 and the
+  // care item id 6, so the bag lists them in that order whatever order they
+  // were picked up in.
+  const uint8_t care_row = (care_id < cap_id) ? 0u : 1u;
+  const uint8_t cap_row  = (uint8_t)(1u - care_row);
+
+  while (care_bag_cursor() != care_row) care_input(GST_TAP_L);
+  care_input(GST_HOLD_R);
+  CHECK_EQ(g_toast, (uint16_t)STR_ITEM_USED);
+  CHECK_EQ(inv_count(g_inv, care_id), 1);
+  CHECK(pet.care[0] > 0);
+  CHECK(g_saves > 0);
+
+  // A CAPTURE item refuses BY NAME from a menu and is not consumed: it is the
+  // one item a player could otherwise throw away by accident.
+  while (care_bag_cursor() != cap_row) care_input(GST_TAP_L);
+  care_input(GST_HOLD_R);
+  CHECK_EQ(g_toast, (uint16_t)STR_ITEM_NOT_HERE);
+  CHECK_EQ(inv_count(g_inv, cap_id), 1);
+
+  // The last row is the way out of the mode, not out of the screen.
+  const int backs = g_backs;
+  while (care_bag_cursor() != care_bag_rows()) care_input(GST_TAP_L);
+  care_input(GST_HOLD_R);
+  CHECK_EQ(care_mode(), (uint8_t)CAREM_LIST);
+  CHECK_EQ(g_backs, backs);
+  g_active_p = nullptr;
+}
+
+TEST(an_item_used_with_no_active_pebble_is_refused_by_name_and_kept) {
+  seams2_reset();
+  explore_reset();
+  g_active_p = nullptr;
+  const uint8_t candy = 1;
+  CHECK_EQ(item_get(candy)->klass, (uint8_t)ITEM_KLASS_XP_CANDY);
+  CHECK_EQ(inv_add(g_inv, candy, 1), 1);
+
+  care_enter();
+  while (care_cursor() != (uint8_t)CARE_BAG) care_input(GST_TAP_L);
+  care_input(GST_HOLD_R);
+  CHECK_EQ(care_mode(), (uint8_t)CAREM_BAG);
+  care_input(GST_HOLD_R);
+  CHECK_EQ(g_toast, (uint16_t)STR_ITEM_NO_PET);
+  CHECK_EQ(inv_count(g_inv, candy), 1);
 }

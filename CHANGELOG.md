@@ -66,6 +66,79 @@ so a pack change moves every round hash by design. **Every event line in the tra
 byte-identical** — only the version-stamped hashes and the header's `content=` field moved,
 which was checked by diffing the file with the hash fields masked out.
 
+### P5-C3 encounters · P5-C4 capture, inventory and items
+
+**Exploring is a loop now.** The MENU's RED row opens a real screen: it asks the radio for one
+passive scan, spins for at most twelve seconds, takes B as a cancel, and on an answer picks the
+first access point that is off cooldown, arms that cooldown and rolls an encounter against the
+generated tables. A wild Pebble can be caught into the Box, an item goes into a bag the CARE
+screen can spend, and a special event pays experience or corrupts the creature for a day.
+
+**The roll is a pure function of what §20 says it should be** — the salted network hash, the
+six-hour bucket, the per-device seed, the category, the signal and how many Pebbles are filed —
+and draws from no global stream. That is a **deviation from the plan's `RNG_ENCOUNTER`**, with a
+reason: a shared stream would make two scans of the same network in the same bucket answer
+differently, which is the opposite of §20's "deterministic from a seed", and would make the
+stream position part of the answer so no host test could pin one. `RNG_ENCOUNTER` is where the
+CAPTURE roll comes from, which is the draw that must be real.
+
+**A defect in that seeding was found by a distribution test and fixed.** The first version took
+successive steps of one xorshift32 — pick the outcome, then pick the payload. The SPECIAL branch
+is only reached when the first draw lands in a 4-to-10 wide band mod 100, and the second draw is
+a deterministic function of the first, so conditioning on that band left it badly structured.
+Measured over 8,000 scans per category: HIDDEN's four events, weighted 20/30/20/30, came out
+53/32/**0**/15 per cent — one event was **unreachable** in two of the six categories, and the
+membership-only test passed anyway because the commonest event is in every category's list.
+Every stage now derives its own seed from the encounter seed and a one-byte tag.
+
+**THE FIVE CARRIED-FORWARD DEBTS, ALL DISCHARGED**
+
+- **SPECIAL had no payload table.** `tools/content/specials.json` is one now — an event roster
+  and per-category weights summing to 100, shaped exactly like `ITEM_DROPS` so both two-stage
+  picks are the same walk, with three generated guards. Exactly the two kinds the plan promised:
+  an XP burst and a corruption event. **The 24-hour timer had nowhere to live**: `PebbleInstance`
+  carried the status bit and no deadline, so corruption could be set and never expire. Four of
+  the twelve reserved bytes are `corrupt_until_epoch` — no migration (nothing in the tree set the
+  bit before this commit), no wire change (`reserved[12]` is not in the 48-byte record and
+  `PBW_STATUS_MASK` refuses the bit outright) and no new VReject. The tripwire that pinned
+  `CONTENT_VERSION` **fired as designed and is deleted rather than re-derived**: it guarded a hole
+  that no longer exists, and what replaces it asks the same question of the thing that does.
+- **The ITEM outcome had no resolvability guard.** `encounter_item_rows_have_a_drop()` is emitted
+  beside its WILD twin. The bullet's claim was half wrong and the correction is recorded: the
+  pack's own `verify.py` has checked this since P4-C1 and is in the gate — what was missing was
+  the firmware half, which is not skippable when python3 is. **And the host case that named the
+  property could not fail on it (instance eighteen)**: measured, it stayed green under the exact
+  mutation the plan asked for.
+- **Item 9 does something.** It gets `ITEM_KLASS_EVOLUTION`, the class §24 lacks — it is what the
+  item is, the `EVOC_ITEM` machinery was already built and already tested, and §24 says "initial"
+  classes. At this roster no shipped rule spends it, so `inv_use()` offers it to the rules and
+  **does not consume it** when none bites: a key that vanished into a lock that does not exist is
+  one step worse than the hole.
+- **The two item units name a target.** `items.json` gains `target`, `duration` and `clears`;
+  `ItemDef` spends its two `reserved` bytes on `target` and `param` **without growing**; and a
+  third unit nobody had named — the CAPTURE bonus, which the pack stated three incompatible ways —
+  is settled as a number (`ITEM_CAPTURE_SCALE`), so prose can no longer disagree with prose.
+- **A captured Pebble passes the validator**, and the shape of that answer was measured first:
+  across 36 species × 30 levels, a sealed genome gives **0 of 1,080** rejects and an unsealed one
+  gives `VR_BAD_GENOME` on **all 1,080**. The seal is the only input that can make a constructed
+  Pebble invalid, so capture refuses it by name before it builds anything and validates the filed
+  slot as a post-condition. The Pebble is **not destroyed** on that path, and that is a decision:
+  `box_new_pebble()` files as it constructs, the first Pebble in an empty Box becomes the active
+  one, and `box_release()` refuses the active slot — so "file, validate, undo" would have an
+  unreachable branch in exactly the case a first-boot player hits.
+
+**Measured.** Baseline **1,914,082 / 72,564 → 1,927,936 / 73,180** (+13,854 flash, +616 globals);
+`release` **1,190,000 / 48,916 → 1,203,808 / 49,508**. The +616 is the +408 the P5-C1 probe
+predicted for calling the scanner and the cooldown table at all, plus 208 for the two new screens,
+the CARE screen's bag mode and the inventory's four-byte armed modifier. **Phase 5 has spent 328
+of its 1–2 KB globals line, net of P5-C1's rebate.** Host suite **33 → 37 binaries, 643 → 708
+tests, 798,806 → 1,802,703 checks**.
+
+`tests/golden/battle_v1.txt` was re-recorded again, for the same reason and with the same check:
+the pack changed, `battle_hash_basis()` mixes `CONTENT_VERSION`, and diffing the transcript with
+the hash fields masked out is empty — every event line is byte-identical. `care_list.pbm` and
+`care_list_back.pbm` moved because the CARE list gained a row.
+
 ## [0.4.0-battle] — Unreleased
 
 Phase 4 gives the pet something to do with the stats phase 3 gave it. The content stopped

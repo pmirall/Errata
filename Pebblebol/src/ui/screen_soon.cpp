@@ -27,14 +27,13 @@ static void frame(uint16_t title, uint16_t phase) {
   gfx_affordance(nullptr, S(STR_AF_BACK));
 }
 
-void soon_network(void)     { frame(STR_SOON_NETWORK,   STR_PHASE_5);  }
-void soon_encounter(void)   { frame(STR_SOON_ENCOUNTER, STR_PHASE_5);  }
-void soon_capture(void)     { frame(STR_SOON_CAPTURE,   STR_PHASE_5);  }
-// soon_battle() IS GONE. P4-C4 gave SCR_BATTLE a real screen, so this line
-// stopped being reachable the moment the table row moved - and an
-// unreferenced non-static function raises no warning, so nothing would ever
-// have failed on account of it. STR_PHASE_4 is now the one string in
-// core/strings_es.h with no consumer; it stays because deleting an id
+// soon_battle() IS GONE, and so are soon_network(), soon_encounter() and
+// soon_capture(). P4-C4 gave SCR_BATTLE a real screen and P5-C3/C4 gave the
+// other three theirs, so each line stopped being reachable the moment its table
+// row moved - and an unreferenced non-static function raises no warning, so
+// nothing would ever have failed on account of one. STR_PHASE_4, STR_PHASE_5,
+// STR_SOON_NETWORK, STR_SOON_ENCOUNTER and STR_SOON_CAPTURE are now strings in
+// core/strings_es.h with no consumer; they stay because deleting an id
 // renumbers the generated block behind it.
 void soon_trade(void)       { frame(STR_SOON_TRADE,     STR_PHASE_7);  }
 void soon_breed(void)       { frame(STR_SOON_BREED,     STR_PHASE_7);  }

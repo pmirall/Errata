@@ -154,6 +154,14 @@ uint8_t  battle_screen_cursor_reject(void);
 // nothing.
 uint8_t  battle_screen_blocked_rows(void);
 
+// The player's LEAD combatant's stage on `stat` and the rounds it has left.
+// P5-C4's armed ITEM_KLASS_BATTLE_MOD is the only thing in the firmware that
+// can set one BEFORE the first round, and these two are how a host case sees
+// that it landed. Both answer 0 for a stat out of range or a battle that never
+// started, so a caller cannot read a stale byte.
+int8_t   battle_screen_lead_stage(uint8_t stat);
+uint8_t  battle_screen_lead_stage_left(uint8_t stat);
+
 // The HP the RESOLVE playback is drawing for `side` right now, which is the HP
 // as it stood at the beat being shown and NOT the state's current value: a
 // whole round is resolved before its first frame is drawn, so reading hp_cur

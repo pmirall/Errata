@@ -12,8 +12,8 @@
 //  screen table is the enumeration of them: "every state must define enter,
 //  update, render, handleInput, exit". A table with holes in it is not an
 //  enumeration - it is a switch with a default branch, which is exactly the
-//  shape section 6 forbids. So NETWORK, ENCOUNTER, CAPTURE, TRADE,
-//  BREED, ITEM_REWARD and SLEEP all have real rows from today: they can be
+//  shape section 6 forbids. So TRADE, BREED, ITEM_REWARD and
+//  SLEEP all still have real rows from today: they can be
 //  navigated to, they draw, they take BACK and HELP, and each one says what it
 //  is and which phase brings it to life. Nothing here is a stub that silently
 //  does nothing; a menu entry that answers with a blank screen is

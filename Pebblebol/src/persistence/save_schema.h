@@ -147,7 +147,27 @@ struct NT_PACKED PebbleInstance {
   char     nickname[PB_NICKNAME_CAP];    //  96  NUL-terminated, may be empty
   uint8_t  custom_sprite;                // 109  PB_CUSTOM_SPRITE_NONE or a cs slot
   uint32_t seq;                          // 110  pair sequence number
-  uint8_t  reserved[12];                 // 114  must be 0
+  // THE CORRUPTION DEADLINE (P5-C3, spec sections 22 and 55). Four of the
+  // twelve reserved bytes, spent deliberately.
+  //
+  // PBS_CORRUPTED existed with NOWHERE TO PUT ITS EXPIRY, which meant the
+  // status could only ever be set and never time out - a 24 h effect with no
+  // 24 h in it, clearable only by item 7. Nothing set the bit before this
+  // commit (measured: no writer anywhere in src/), so no save in existence
+  // carries a stale one and this needs no migration: an old blob reads 0,
+  // which is exactly "not corrupted".
+  //
+  // IT IS NOT ON THE WIRE and it must never become so. networking/protocol.h's
+  // 48 B record has its own field list, reserved[12] is not in it, and
+  // PBW_STATUS_MASK already refuses PBS_CORRUPTED outright because the bit is
+  // EVOC_CORRUPTED's input. A peer therefore cannot send either half.
+  //
+  // NO VALIDATOR RULE, and game/validate.h already states the reason for the
+  // whole class: every epoch in this struct is "checked against NOTHING here,
+  // because no rule exists to check them against". A deadline in the past is
+  // simply an expired one, and game/corruption.cpp clears it on the next tick.
+  uint32_t corrupt_until_epoch;          // 114  0 = not corrupted
+  uint8_t  reserved[8];                  // 118  must be 0
   uint16_t crc16;                        // 126  over bytes 0..125
 };
 NT_PACK_POP
@@ -160,6 +180,10 @@ static_assert(offsetof(PebbleInstance, moves)      ==  62, "PebbleInstance.moves
 static_assert(offsetof(PebbleInstance, genome)     ==  80, "PebbleInstance.genome moved");
 static_assert(offsetof(PebbleInstance, nickname)   ==  96, "PebbleInstance.nickname moved");
 static_assert(offsetof(PebbleInstance, seq)        == 110, "PebbleInstance.seq moved");
+static_assert(offsetof(PebbleInstance, corrupt_until_epoch) == 114,
+              "PebbleInstance.corrupt_until_epoch moved - it was carved out of "
+              "reserved[12] and every byte after it must stay where it was");
+static_assert(offsetof(PebbleInstance, reserved)   == 118, "PebbleInstance.reserved moved");
 static_assert(offsetof(PebbleInstance, crc16)      == 126, "PebbleInstance.crc16 moved");
 static_assert(PEBBLE_CRC_BYTES == sizeof(PebbleInstance) - 2, "PebbleInstance CRC span drifted");
 

@@ -30,6 +30,9 @@
 
 #include "../core/config.h"
 #include "../core/nt_types.h"
+// P5-C3: the exploration seams below hand out references to two persisted
+// blobs and a Genome by value. Types only - ui.h still names no hardware.
+#include "../persistence/save_schema.h"
 
 // -----------------------------------------------------------------------------
 //  Geometry the module contracts against (render.h owns the strip constants).
@@ -344,6 +347,62 @@ void     ui_start_battle(uint8_t entry);
 // practice win awards XP_BATTLE_WIN" does not say to whom. Per-combatant XP
 // needs a per-Pebble ledger and belongs with P4-C5's real battles.
 void     ui_battle_result(uint8_t entry, uint8_t won);
+
+// -----------------------------------------------------------------------------
+//  THE EXPLORATION SEAMS (P5-C3/C4)
+//
+//  ui/screen_network.cpp and ui/screen_encounter.cpp are pure translation
+//  units - they run whole on the host, which is the only way the scan timeout,
+//  the cancel and the capture roll get a test at all. What they cannot do for
+//  themselves is exactly six things, and each gets one line here rather than a
+//  hole in the layering.
+// -----------------------------------------------------------------------------
+
+// THE RADIO. networking/net.cpp fills in the four-function WifiScanDriver seam
+// and is the ONLY route from the game to a scan; a host test hands the same
+// screen a fake driver through this call.
+struct WifiScanDriver;
+const WifiScanDriver& ui_scan_driver(void);
+
+// THE CLOCK, all three facts at once and in the shape game/cooldowns.h takes
+// them: the wall clock, a monotonic millisecond count and HOW the clock came to
+// hold its value. The third is what decides whether a cooldown is persisted or
+// per-boot, and whether a SPECIAL XP burst is paid at all.
+void     ui_explore_clock(uint32_t* now_epoch, uint32_t* now_ms, uint8_t* cal);
+
+// gs_device_id(): stable per device, persisted, never 0. It salts the encounter
+// seed so two units standing side by side do not see the same creature.
+uint32_t ui_device_seed(void);
+
+// One draw from RNG_ENCOUNTER. The capture roll is REAL randomness and must be
+// - re-entering an encounter and getting the same failure again is not a game -
+// which is why it is drawn here and not folded into the deterministic
+// encounter seed.
+uint32_t ui_explore_roll(void);
+
+// The two persisted blobs the exploration path reads and writes. References
+// into the one live GameState; ui_explore_commit() is what puts a changed
+// cooldown table, a changed bag or a changed Pebble on flash, and it polls
+// cd_take_dirty() rather than saving after every arm (game/cooldowns.h says
+// why: cd_ready() can dirty the table too).
+CooldownTable& ui_cooldowns(void);
+Inventory&     ui_inventory(void);
+void           ui_explore_commit(void);
+
+// A fresh sealed genome for a captured Pebble. It draws through RNG_BREEDING
+// (game/genome.cpp), which is a named global stream and therefore out of a pure
+// screen's reach - and the trap worth naming: a caller that wanted a
+// deterministic capture must NOT reseed that stream, because every later
+// breeding roll in the boot would move with it.
+Genome   ui_fresh_genome(void);
+
+// XP from an exploration source, through app_award_xp() so the ledger and the
+// level-up choreography are the same ones every other source uses.
+void     ui_award_xp(uint16_t amount, uint8_t src);
+
+// The Pebble the player is carrying, or NULL. A screen that only wants to point
+// an item at it should not have to bind the Box to do so.
+PebbleInstance* ui_active_pebble(void);
 
 // -----------------------------------------------------------------------------
 //  THE THREE render.h EFFECTS A PURE SCREEN CANNOT REACH (P4-C4)

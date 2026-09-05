@@ -81,7 +81,7 @@ else
 fi
 
 # --- P4-C2/C3 FOLLOW-UP: THE FIRMWARE'S TUNING MATCHES THE CONTENT PACK'S ---
-# THIRTEEN NUMBERS LIVE IN TWO PLACES AND NOTHING COMPARED THEM. Every one of
+# NUMBERS THAT LIVE IN TWO PLACES AND NOTHING COMPARED. Every one of
 # them is in tools/content/balance.json - which feeds CONTENT_VERSION, and which
 # tools/content/sim_engine.py tuned the 36-species roster against - AND in
 # Pebblebol/src/data/balance.h, which the firmware actually compiles. balance.h
@@ -112,10 +112,18 @@ fi
 # the moment a drift between them would be invisible - but the gate's own
 # justification is about the eleven, not about these two.
 #
+# P5-C3/C4 ADDED SIX MORE AND THEY ARE NOT BATTLE NUMBERS. The capture clamp,
+# the level-gap penalty, the attempt cap, the base-chance array and the 24 h
+# corruption timer decide what EXPLORING hands the player; the mechanism that
+# makes them belong here is identical (read from balance.h, tuned in
+# balance.json, and balance.h is not generated), and the count in the first line
+# is deliberately no longer a number this comment has to keep up to date.
+#
 # It compares VALUES, not formatting: the header writes (-2) and (+2) where the
-# JSON writes -2 and 2, and the two files disagree on two names on purpose
+# JSON writes -2 and 2, and the two files disagree on several names on purpose
 # (JSON K is BATTLE_K, JSON LEVEL_MAX is XP_LEVEL_MAX), so the map is explicit.
-# TYPE_MUL_NUM/DEN are arrays and are compared element by element.
+# A DOTTED name reads a nested key (CORRUPTION.duration_s). TYPE_MUL_NUM/DEN and
+# CAPTURE_BASE_PERMILLE are arrays and are compared element by element.
 #
 # Skipped with a WORD if python3 is missing, like the content gate above.
 if [ -f "$ROOT/tools/content/balance.json" ] && [ -f "$SKETCH/src/data/balance.h" ]; then
@@ -144,8 +152,23 @@ SCALARS = {
     "EVASION_MAX_SPD_GAP":"EVASION_MAX_SPD_GAP",
     "ACCURACY_MIN":       "ACCURACY_MIN",
     "RISK_SELF_HP_PCT":   "RISK_SELF_HP_PCT",
+    # P5-C3/C4. Not battle numbers, and the paragraph above is careful about
+    # that: these decide what EXPLORING hands the player. They are in this gate
+    # for the same mechanical reason - the firmware reads them from balance.h,
+    # the pack tunes them in balance.json, balance.json feeds CONTENT_VERSION
+    # and balance.h is not generated, so nothing else compares the two.
+    "CAPTURE_LEVEL_GAP_PERMILLE": "CAPTURE_LEVEL_GAP_PERMILLE",
+    "CAPTURE_MIN_PERMILLE":       "CAPTURE_MIN_PERMILLE",
+    "CAPTURE_MAX_PERMILLE":       "CAPTURE_MAX_PERMILLE",
+    "CAPTURE_MAX_ATTEMPTS":       "CAPTURE_MAX_ATTEMPTS",
+    # A DOTTED PATH reads a nested key. The 24 h corruption timer is inside
+    # balance.json's CORRUPTION block and has to be compared from there rather
+    # than copied to the top level: a second copy inside the pack would be one
+    # more pair of numbers nothing compares, which is the defect this gate is.
+    "CORRUPTION.duration_s":      "CORRUPT_DURATION_S",
+    "CORRUPTION.battle_infect_permille": "CORRUPT_BATTLE_INFECT_PERMILLE",
 }
-ARRAYS = ["TYPE_MUL_NUM", "TYPE_MUL_DEN"]
+ARRAYS = ["TYPE_MUL_NUM", "TYPE_MUL_DEN", "CAPTURE_BASE_PERMILLE"]
 
 def macro(name):
     m = re.search(r"^#define\s+%s\s+(\S+)" % re.escape(name), hdr, re.M)
@@ -166,9 +189,20 @@ def array(name):
         return None
     return [int(x.strip(), 0) for x in m.group(1).split(",") if x.strip()]
 
+def packed(path):
+    """balance.json's value at a dotted path, or None."""
+    node = pack
+    for part in path.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
+
 bad = 0
 for jname, hname in sorted(SCALARS.items()):
-    want = pack.get(jname)
+    want = packed(jname)
+    if want is None:
+        print("balance gate: %s is not in balance.json" % jname); bad += 1
     got  = macro(hname)
     if got is None:
         print("balance gate: %s is not a plain #define in balance.h" % hname); bad += 1
@@ -176,7 +210,7 @@ for jname, hname in sorted(SCALARS.items()):
         print("balance gate: %s is %r in balance.h but %s is %r in balance.json"
               % (hname, got, jname, want)); bad += 1
 for name in ARRAYS:
-    want = pack.get(name)
+    want = packed(name)
     got  = array(name)
     if got != want:
         print("balance gate: %s is %r in balance.h but %r in balance.json" % (name, got, want))

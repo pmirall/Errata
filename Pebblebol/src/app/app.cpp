@@ -23,6 +23,7 @@
 #include "../core/strings_es.h"
 #include "../game/genome.h"
 #include "../core/rng.h"
+#include "../game/cooldowns.h"   // cd_begin() from setup (P5-C2/C3)
 #include "../game/sim.h"
 #include "../persistence/game_state.h"
 #include "../game/box.h"
@@ -547,6 +548,12 @@ void app_setup(void)
   // id, so every armed cooldown goes stale at once - correct, a wiped device is
   // a new device, but it looks like a bug when nobody has said it.
   net_scan_salt_set(gs_device_id());
+  // THE PER-BOOT HALF OF THE COOLDOWN TABLE (P5-C2, and P5-C3's obligation to
+  // call it). The persisted rows come off flash with the rest of GameState;
+  // this clears the RAM table an uncalibrated device falls back to, and the
+  // dirty flag. Without it the fallback would carry whatever the .bss happened
+  // to hold, and cd_take_dirty() could report a save nobody made.
+  cd_begin();
   god_begin();
 
   ui_bind_recover(&app_recover_save);

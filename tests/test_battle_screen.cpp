@@ -46,6 +46,7 @@
 #include "game/genome.h"
 #include "ui/battle_renderer.h"
 #include "ui/pet_art.h"
+#include "game/inventory.h"
 #include "ui/screen_battle.h"
 #include "ui/ui.h"
 #include "ui/xbm_mirror.h"
@@ -1020,4 +1021,85 @@ TEST(no_frame_of_a_battle_allocates) {
   CHECK_EQ(g_allocs, 0L);
   printf("  %d real update+render frames across all six modes, %ld allocations\n",
          frames, g_allocs);
+}
+
+// =============================================================================
+//  THE ARMED BATTLE MODIFIER (P5-C4)
+//
+//  An ITEM_KLASS_BATTLE_MOD is used from a menu BEFORE a fight: game/inventory.cpp
+//  consumes it and arms it, and ui/screen_battle.cpp is where it lands. These
+//  cases are the other end of test_inventory.cpp's arm/take pair, and the one
+//  that matters is the DIAG one: a diagnostic whose numbers move with the
+//  player's bag is a diagnostic nobody can compare against another device.
+// =============================================================================
+TEST(an_armed_battle_modifier_reaches_the_players_lead_and_is_spent_doing_it) {
+  inv_mod_clear();
+  // No item armed: the lead starts at stage 0 on every stat, which is the
+  // control that makes the next half mean something.
+  battle_arm(BT_ENTRY_PRACTICE, 0x51DE0042u);
+  battle_enter();
+  pick_team((uint8_t)BATTLE_TEAM_MAX);
+  for (uint8_t k = 0; k < (uint8_t)BSTAT_COUNT; ++k) {
+    CHECK_EQ((int)battle_screen_lead_stage(k), 0);
+    CHECK_EQ(battle_screen_lead_stage_left(k), 0);
+  }
+  battle_leave();
+
+  // Now arm one through the REAL inventory path - inv_use() on a real table
+  // row, not a hand-built InvBattleMod - so the case covers the whole seam.
+  Inventory inv;
+  inv_begin(inv);
+  uint8_t mod_id = 0;
+  for (uint8_t i = 0; i < ITEM_COUNT; ++i)
+    if (ITEMS_TABLE[i].klass == (uint8_t)ITEM_KLASS_BATTLE_MOD &&
+        ITEMS_TABLE[i].target == (uint8_t)ITEM_BSTAT_DEF) mod_id = ITEMS_TABLE[i].id;
+  CHECK(mod_id != 0);                       // DEF, so a stat that is NOT ordinal 0
+  const ItemDef* def = item_get(mod_id);
+  CHECK(def != nullptr);
+  if (!def) return;
+  CHECK_EQ(inv_add(inv, mod_id, 1), 1);
+  ItemEffect eff;
+  CHECK_EQ(inv_use(inv, mod_id, nullptr, 0u, (uint8_t)CAL_USER, eff), (uint8_t)IU_OK);
+  CHECK(inv_mod_armed());
+
+  battle_arm(BT_ENTRY_PRACTICE, 0x51DE0042u);
+  battle_enter();
+  pick_team((uint8_t)BATTLE_TEAM_MAX);
+  CHECK_EQ((int)battle_screen_lead_stage(def->target), (int)def->value);
+  CHECK_EQ(battle_screen_lead_stage_left(def->target), def->param);
+  // ...and ONLY that stat moved.
+  for (uint8_t k = 0; k < (uint8_t)BSTAT_COUNT; ++k)
+    if (k != def->target) CHECK_EQ((int)battle_screen_lead_stage(k), 0);
+  // SPENT: the next battle starts clean, because inv_mod_take() disarms.
+  CHECK(!inv_mod_armed());
+  battle_leave();
+
+  battle_arm(BT_ENTRY_PRACTICE, 0x51DE0042u);
+  battle_enter();
+  pick_team((uint8_t)BATTLE_TEAM_MAX);
+  CHECK_EQ((int)battle_screen_lead_stage(def->target), 0);
+  battle_leave();
+}
+
+TEST(a_diagnostic_battle_takes_no_modifier_however_full_the_bag_is) {
+  inv_mod_clear();
+  Inventory inv;
+  inv_begin(inv);
+  uint8_t mod_id = 0;
+  for (uint8_t i = 0; i < ITEM_COUNT; ++i)
+    if (ITEMS_TABLE[i].klass == (uint8_t)ITEM_KLASS_BATTLE_MOD) mod_id = ITEMS_TABLE[i].id;
+  CHECK(mod_id != 0);
+  CHECK_EQ(inv_add(inv, mod_id, 1), 1);
+  ItemEffect eff;
+  CHECK_EQ(inv_use(inv, mod_id, nullptr, 0u, (uint8_t)CAL_USER, eff), (uint8_t)IU_OK);
+  CHECK(inv_mod_armed());
+
+  battle_arm(BT_ENTRY_DIAG, (uint32_t)BT_DIAG_SEED);
+  battle_enter();
+  for (uint8_t k = 0; k < (uint8_t)BSTAT_COUNT; ++k)
+    CHECK_EQ((int)battle_screen_lead_stage(k), 0);
+  // AND IT IS STILL ARMED: the console did not spend the player's item either.
+  CHECK(inv_mod_armed());
+  battle_leave();
+  inv_mod_clear();
 }

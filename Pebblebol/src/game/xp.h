@@ -50,6 +50,20 @@ enum XpSource : uint8_t {
   XP_SRC_BATTLE,        // a practice-battle win             (metered, hourly)
   XP_SRC_CAPTURE,       // P5 capture                        (unmetered)
   XP_SRC_ITEM,          // P6 XP candy                       (unmetered)
+  // P5-C3. UNMETERED LIKE THE TWO ABOVE, AND WITH A WEAKER ARGUMENT FOR IT,
+  // which is why the argument is written down instead of assumed. A capture
+  // consumes an encounter and an item consumes the item; a SPECIAL XP burst
+  // consumes NEITHER, so the only thing behind it is the two-hour
+  // ENCOUNTER_COOLDOWN_S - and game/cooldowns.h says plainly that while
+  // gt_cal_state() is CAL_UNSET that table is per-boot, so a reboot frees every
+  // network. Metering it properly is not available: Inventory.xp_ledger is four
+  // persisted bytes and the static_assert below pins the metered sources to
+  // exactly those four, so a fifth would be a save-schema change. The answer is
+  // in game/encounters.cpp's encounter_special_xp(): on an uncalibrated device
+  // the burst pays NOTHING. The event still fires; the award does not.
+  XP_SRC_SPECIAL,       // P5 SPECIAL encounter              (unmetered, and
+                        //                                    withheld while the
+                        //                                    clock is CAL_UNSET)
   XP_SRC_COUNT
 };
 static_assert((int)XP_SRC_BATTLE + 1 == XP_LEDGER_SLOTS,

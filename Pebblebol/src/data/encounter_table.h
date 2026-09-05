@@ -15,11 +15,18 @@
 //  picked here, by weight within the network category, then rejected if the
 //  item's rarity falls outside the row's rarity_min..rarity_max.
 //
-//  SPECIAL HAS NO PAYLOAD TABLE AND THAT IS A REAL HOLE. Spec section 22
-//  names four outcomes and this table has rows for all four, but the pack
-//  carries nothing behind SPECIAL - no event roster, no per-category
-//  weights, no ids - while it is 4 to 10 percent of every scan. P5-C3 must
-//  define it. Recorded here rather than papered over.
+//  SPECIAL_EVENTS is the SAME SHAPE for the outcome that had NO payload
+//  at all until P5-C3 (tools/content/specials.json). It is 4 to 10 percent
+//  of every scan and the pack used to carry no roster, no ids and no
+//  weights behind it. Now: an event roster indexed by id == index + 1, and
+//  SPECIAL_DROP_TABLE, per-category weights summing to 100, picked exactly
+//  the way an item drop is.
+//
+//  AND BOTH TWO-STAGE PICKS ARE GUARDED, which only WILD's was. Every ITEM
+//  row's rarity band is checked against ITS OWN category's drop list and
+//  every SPECIAL row against its own category's event list, at compile
+//  time, next to encounter_wild_rows_have_a_pool() - see the three guards
+//  at the foot of this file.
 //
 //  ROWS CLAMPED FOR THIS ROSTER (36 species): a WILD row whose rarity band
 //  holds no species in the shipped prefix is folded down to the highest
@@ -161,6 +168,73 @@ inline constexpr ItemDropRow ITEM_DROP_TABLE[] = {
 inline constexpr uint8_t ITEM_DROP_ROW_COUNT =
     (uint8_t)(sizeof(ITEM_DROP_TABLE) / sizeof(ITEM_DROP_TABLE[0]));
 
+// --- THE SPECIAL PAYLOAD (P5-C3, tools/content/specials.json) ---------------
+enum SpecialKind : uint8_t {
+  SPEV_XP_BURST,
+  SPEV_CORRUPTION,
+  SPEV_COUNT
+};
+
+// XP_BURST value is scaled by this to get the XP it pays.
+#define SPECIAL_XP_SCALE  8
+
+struct SpecialEvent {       // 6 B, padding-free
+  uint8_t  id;              // 1..SPECIAL_EVENT_COUNT, contiguous == index + 1
+  uint8_t  kind;            // SpecialKind
+  uint8_t  value;           // XP_BURST: x SPECIAL_XP_SCALE = XP. CORRUPTION: 0
+  uint8_t  reserved;        // must be 0
+  uint16_t name_idx;        // StrId of the Spanish event name
+};
+static_assert(sizeof(SpecialEvent) == 6, "SpecialEvent layout drifted");
+
+inline constexpr SpecialEvent SPECIAL_EVENTS[] = {
+  //  id kind           val  rsv name
+  {  1, SPEV_XP_BURST,   5, 0, STR_SPECIAL_NAME_1     },   // Caché Suelta
+  {  2, SPEV_XP_BURST,  12, 0, STR_SPECIAL_NAME_2     },   // Nodo Fantasma
+  {  3, SPEV_XP_BURST,  25, 0, STR_SPECIAL_NAME_3     },   // Núcleo Roto
+  {  4, SPEV_CORRUPTION,   0, 0, STR_SPECIAL_NAME_4     },   // Virus Errante
+};
+
+inline constexpr uint8_t SPECIAL_EVENT_COUNT =
+    (uint8_t)(sizeof(SPECIAL_EVENTS) / sizeof(SPECIAL_EVENTS[0]));
+
+// Byte-for-byte the shape of ItemDropRow, on purpose: the two outcomes that
+// need a second stage are resolved by the same walk, so neither picker can
+// drift into a rule the other one does not have.
+struct SpecialDropRow {     // 4 B
+  uint8_t category;         // NetCategory ORDINAL
+  uint8_t event_id;         // into SPECIAL_EVENTS
+  uint8_t weight;           // per-category weights sum to exactly 100
+  uint8_t reserved;         // must be 0
+};
+static_assert(sizeof(SpecialDropRow) == 4, "SpecialDropRow layout drifted");
+
+inline constexpr SpecialDropRow SPECIAL_DROP_TABLE[] = {
+  { NET_CAT_UNKNOWN,    1,  55, 0 },
+  { NET_CAT_UNKNOWN,    2,  30, 0 },
+  { NET_CAT_UNKNOWN,    4,  15, 0 },
+  { NET_CAT_HOME,       1,  60, 0 },
+  { NET_CAT_HOME,       2,  30, 0 },
+  { NET_CAT_HOME,       4,  10, 0 },
+  { NET_CAT_PUBLIC,     1,  50, 0 },
+  { NET_CAT_PUBLIC,     2,  35, 0 },
+  { NET_CAT_PUBLIC,     4,  15, 0 },
+  { NET_CAT_BUSINESS,   1,  35, 0 },
+  { NET_CAT_BUSINESS,   2,  40, 0 },
+  { NET_CAT_BUSINESS,   3,  10, 0 },
+  { NET_CAT_BUSINESS,   4,  15, 0 },
+  { NET_CAT_OPEN,       1,  45, 0 },
+  { NET_CAT_OPEN,       2,  35, 0 },
+  { NET_CAT_OPEN,       4,  20, 0 },
+  { NET_CAT_HIDDEN,     1,  20, 0 },
+  { NET_CAT_HIDDEN,     2,  30, 0 },
+  { NET_CAT_HIDDEN,     3,  20, 0 },
+  { NET_CAT_HIDDEN,     4,  30, 0 },
+};
+
+inline constexpr uint8_t SPECIAL_DROP_ROW_COUNT =
+    (uint8_t)(sizeof(SPECIAL_DROP_TABLE) / sizeof(SPECIAL_DROP_TABLE[0]));
+
 // --- generator-emitted compile-time guards (plan 1.5.2) ----------------------
 constexpr bool encounter_rows_are_well_formed(void) {
   for (uint8_t i = 0; i < (uint8_t)(sizeof(ENCOUNTER_TABLE) / sizeof(ENCOUNTER_TABLE[0])); ++i) {
@@ -238,6 +312,88 @@ constexpr bool item_drop_rows_are_well_formed(void) {
   return true;
 }
 
+// EVERY ITEM ROW RESOLVES TO A NON-EMPTY DROP POOL - the twin of
+// encounter_wild_rows_have_a_pool() that did not exist until P5-C3, and the
+// reason it had to (plan's carried-forward bullet):
+// item_drop_rows_are_well_formed() above checks category, id, weight and the
+// per-category sum of 100 and NOTHING pairs a row's own rarity band with its
+// own category's drop list - which is the second stage of the pick this table's
+// banner describes. It holds at this pack (100 of 100 eligible weight in all
+// six categories, so the rejection step never fires), which is exactly why one
+// item edit could turn ITEM into an outcome encounter_roll() cannot answer with
+// nothing in the FIRMWARE saying so. tools/content/verify.py has checked the
+// same property since P4-C1, and a Python gate is skipped when python3 is
+// missing (tools/check.sh says so in a word and continues); a static_assert is
+// not skippable.
+constexpr bool encounter_item_rows_have_a_drop(void) {
+  for (uint8_t i = 0; i < ENCOUNTER_ROW_COUNT; ++i) {
+    const EncounterRow& r = ENCOUNTER_TABLE[i];
+    if (r.outcome != (uint8_t)ENC_OUT_ITEM) continue;
+    uint32_t weight = 0;
+    for (uint8_t d = 0; d < ITEM_DROP_ROW_COUNT; ++d) {
+      if (ITEM_DROP_TABLE[d].category != r.category) continue;
+      const ItemDef* it = item_get(ITEM_DROP_TABLE[d].item_id);
+      if (it == nullptr) return false;
+      if (it->rarity < r.rarity_min || it->rarity > r.rarity_max) continue;
+      weight += ITEM_DROP_TABLE[d].weight;
+    }
+    if (weight == 0u) return false;
+  }
+  return true;
+}
+
+constexpr bool special_drop_rows_are_well_formed(void) {
+  for (uint8_t i = 0; i < (uint8_t)(sizeof(SPECIAL_EVENTS) / sizeof(SPECIAL_EVENTS[0])); ++i) {
+    const SpecialEvent& e = SPECIAL_EVENTS[i];
+    if (e.id != (uint8_t)(i + 1u))              return false;
+    if (e.kind >= (uint8_t)SPEV_COUNT)          return false;
+    if (e.reserved != 0u)                       return false;
+    if (e.name_idx >= (uint16_t)STR_COUNT)      return false;
+    // An XP_BURST that pays nothing is an event with no effect - the exact
+    // shape of the item-9 hole this phase closed on the other table.
+    if (e.kind == (uint8_t)SPEV_XP_BURST && e.value == 0u) return false;
+  }
+  for (uint8_t i = 0; i < (uint8_t)(sizeof(SPECIAL_DROP_TABLE) / sizeof(SPECIAL_DROP_TABLE[0])); ++i) {
+    const SpecialDropRow& d = SPECIAL_DROP_TABLE[i];
+    if (d.category >= (uint8_t)NET_CAT_COUNT)   return false;
+    if (d.event_id < 1u || d.event_id > SPECIAL_EVENT_COUNT) return false;
+    if (d.weight == 0u)                         return false;
+    if (d.reserved != 0u)                       return false;
+  }
+  for (uint8_t c = 0; c < (uint8_t)NET_CAT_COUNT; ++c) {
+    uint32_t sum = 0;
+    for (uint8_t i = 0; i < SPECIAL_DROP_ROW_COUNT; ++i)
+      if (SPECIAL_DROP_TABLE[i].category == c) sum += SPECIAL_DROP_TABLE[i].weight;
+    if (sum != ENCOUNTER_WEIGHT_TOTAL) return false;
+  }
+  return true;
+}
+
+// And the same question asked of the outcome that had no payload at all.
+constexpr bool encounter_special_rows_have_an_event(void) {
+  for (uint8_t i = 0; i < ENCOUNTER_ROW_COUNT; ++i) {
+    const EncounterRow& r = ENCOUNTER_TABLE[i];
+    if (r.outcome != (uint8_t)ENC_OUT_SPECIAL) continue;
+    uint32_t weight = 0;
+    for (uint8_t d = 0; d < SPECIAL_DROP_ROW_COUNT; ++d)
+      if (SPECIAL_DROP_TABLE[d].category == r.category)
+        weight += SPECIAL_DROP_TABLE[d].weight;
+    if (weight == 0u) return false;
+  }
+  return true;
+}
+
+// Every kind has an event, so no branch of the SPECIAL switch is unreachable.
+constexpr bool special_kinds_are_all_populated(void) {
+  for (uint8_t k = 0; k < (uint8_t)SPEV_COUNT; ++k) {
+    bool seen = false;
+    for (uint8_t i = 0; i < SPECIAL_EVENT_COUNT; ++i)
+      if (SPECIAL_EVENTS[i].kind == k) seen = true;
+    if (!seen) return false;
+  }
+  return true;
+}
+
 static_assert(ENCOUNTER_ROW_COUNT >= 1, "the encounter table is empty");
 static_assert(encounter_rows_are_well_formed(),
               "an encounter row has a bad category, outcome, weight or rarity band");
@@ -249,5 +405,15 @@ static_assert(encounter_wild_rows_have_a_pool(),
               "a WILD encounter row draws from a rarity band no shipped species is in");
 static_assert(item_drop_rows_are_well_formed(),
               "an item drop row has a bad category or item, or a category does not sum to 100");
+static_assert(encounter_item_rows_have_a_drop(),
+              "an ITEM encounter row draws from a rarity band no item in its own "
+              "category's drop list is in: the outcome cannot be answered");
+static_assert(special_drop_rows_are_well_formed(),
+              "a special event or weight row is malformed, or a category does not sum to 100");
+static_assert(encounter_special_rows_have_an_event(),
+              "a SPECIAL encounter row has no event in its category: the outcome "
+              "cannot be answered");
+static_assert(special_kinds_are_all_populated(),
+              "a SpecialKind has no event - a branch encounters.cpp could never reach");
 
 #endif // PB_ENCOUNTER_TABLE_H

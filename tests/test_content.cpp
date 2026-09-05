@@ -424,87 +424,112 @@ TEST(every_item_class_and_every_encounter_outcome_has_a_row) {
   }
 }
 
-// THE HOLE THE COMPLETENESS PASS FOUND, ASSERTED AS A HOLE.
-// Spec section 22 names four outcomes and all four have rows, but SPECIAL has
-// NO payload table anywhere: no event roster, no ids, no per-category weights,
-// while it is 4 to 10 % of every scan. ITEM has the same shape of problem and
-// was rescued by ITEM_DROPS; SPECIAL has no equivalent.
+// THE HOLE THE COMPLETENESS PASS FOUND, NOW ASSERTED AS A CLOSED ONE.
 //
-// THE TRIPWIRE, NARROWED IN THE P4-C6 FOLLOW-UP. This comment used to say the
-// case "will FAIL when P5-C3 fills it". It would not have: every assertion
-// below is about the ENCOUNTER rows, so a SPECIAL_EVENTS table could have
-// landed beside them and this case would have stayed green - a claim asserting
-// a hole that was already closed, which is the exact failure shape the phase-3
-// exit shipped. So the last line is now a real tripwire and its reach is
-// stated: CONTENT_VERSION is a hash of tools/content/*.json, and ADDING the
-// payload table means editing the pack, so it fires. What it catches is ANY
-// pack edit (that is its cost - re-derive the constant, then read this
-// comment), and what it misses is a SPECIAL table hand-written OUTSIDE the
-// pack (that is its gap; the banner in data/encounter_table.h and plan line
-// 541 are what stand behind it there).
-TEST(the_special_encounter_outcome_still_has_no_payload_table) {
+// P4-C1 found that spec section 22 names four outcomes, all four have rows, and
+// SPECIAL had NO payload table anywhere - no event roster, no ids, no
+// per-category weights - while it is 4 to 10 % of every scan. ITEM had the same
+// shape of problem and was rescued by ITEM_DROPS; SPECIAL had no equivalent.
+//
+// P5-C3 FILLED IT (tools/content/specials.json -> SPECIAL_EVENTS[] and
+// SPECIAL_DROP_TABLE[]), so the tripwire fired exactly as designed: the case
+// pinned CONTENT_VERSION and the pack changed. THE PIN IS DELETED RATHER THAN
+// RE-DERIVED, because it was a tripwire for a hole that no longer exists and a
+// constant somebody re-derives on every pack edit is a chore, not a guard. What
+// replaces it is the same question asked of the thing that now exists: does
+// every category's SPECIAL slice resolve to a real event, and does the roster
+// behind it have both of the two outcomes the plan promised?
+//
+// The three generated static_asserts (special_drop_rows_are_well_formed,
+// encounter_special_rows_have_an_event, special_kinds_are_all_populated) are
+// the compile-time half; this is the runtime half, and it is not a duplicate:
+// it walks the PICKER, which a constexpr guard cannot call.
+TEST(the_special_outcome_has_a_payload_table_and_every_category_resolves) {
   int special_rows = 0;
   for (uint8_t i = 0; i < ENCOUNTER_ROW_COUNT; ++i)
     if (ENCOUNTER_TABLE[i].outcome == (uint8_t)ENC_OUT_SPECIAL) {
       special_rows++;
       // PER CATEGORY, not summed: a total would let one category fall to a
-      // sliver while the others carried it, and the point of this case is that
-      // EVERY network has a meaningful slice of unanswerable outcome.
+      // sliver while the others carried it.
       CHECK(ENCOUNTER_TABLE[i].weight >= 4);
       CHECK(ENCOUNTER_TABLE[i].weight <= 10);
     }
   CHECK_EQ(special_rows, (int)NET_CAT_COUNT);      // one per category
-  // ITEM has a drop table. SPECIAL has nothing of the kind, and there is no
-  // structure in data/ for it to live in yet.
-  CHECK(ITEM_DROP_ROW_COUNT > 0);
-  // AND THE LINE THAT ACTUALLY FIRES (see the banner above): the pack hash.
-  // Change the pack - which is what filling this hole is - and this case fails
-  // until somebody comes back and says what they did.
-  //
-  // IT FIRED AT P5-C1, AND THE ANSWER IS: NOT THIS. 0x5B4A was the phase-4
-  // exit; 0x54BD is P5-C1, which added tools/content/networks.json - the
-  // network classifier's RSSI bands and token lists - to the pack and
-  // therefore to the hash. SPECIAL STILL HAS NO PAYLOAD TABLE: there is no
-  // specials.json, no SPECIAL_EVENTS[] in data/, and no ids behind
-  // ENC_OUT_SPECIAL. Everything this case asserts is still true and it is
-  // still P5-C3's debt. The re-pin is the tripwire doing its job - it made
-  // somebody come back and write this paragraph - and NOT a weakening: the
-  // constant is re-derived, not deleted.
-  //
-  // The cost the comment above already named (any pack edit fires it) is
-  // exactly what happened. Re-derive with `python3 tools/gen_content.py`.
-  CHECK_EQ((unsigned)CONTENT_VERSION, 0x54BDu);
+
+  // The roster exists, is contiguous, and every row means something.
+  CHECK(SPECIAL_EVENT_COUNT >= 1);
+  for (uint8_t i = 0; i < SPECIAL_EVENT_COUNT; ++i) {
+    const SpecialEvent& e = SPECIAL_EVENTS[i];
+    CHECK_EQ(e.id, (uint8_t)(i + 1u));
+    CHECK(e.kind < (uint8_t)SPEV_COUNT);
+    CHECK_EQ(e.reserved, 0);
+    CHECK(e.name_idx < (uint16_t)STR_COUNT);
+    CHECK(S(e.name_idx)[0] != '\0');
+    // An XP burst that pays nothing is the item-9 hole in another table.
+    if (e.kind == (uint8_t)SPEV_XP_BURST) CHECK(e.value >= 1);
+  }
+  // BOTH of the two outcomes the plan's P5-C3 bullet promised are reachable,
+  // and neither is a kind with no event behind it.
+  for (uint8_t k = 0; k < (uint8_t)SPEV_COUNT; ++k) {
+    int n = 0;
+    for (uint8_t i = 0; i < SPECIAL_EVENT_COUNT; ++i)
+      if (SPECIAL_EVENTS[i].kind == k) n++;
+    CHECK(n > 0);
+  }
+  // Every category's weights sum to 100 and name real events.
+  for (uint8_t c = 0; c < (uint8_t)NET_CAT_COUNT; ++c) {
+    uint32_t sum = 0;
+    for (uint8_t i = 0; i < SPECIAL_DROP_ROW_COUNT; ++i)
+      if (SPECIAL_DROP_TABLE[i].category == c) {
+        sum += SPECIAL_DROP_TABLE[i].weight;
+        CHECK(SPECIAL_DROP_TABLE[i].event_id >= 1);
+        CHECK(SPECIAL_DROP_TABLE[i].event_id <= SPECIAL_EVENT_COUNT);
+        CHECK(SPECIAL_DROP_TABLE[i].weight >= 1);
+        CHECK_EQ(SPECIAL_DROP_TABLE[i].reserved, 0);
+      }
+    CHECK_EQ(sum, (uint32_t)ENCOUNTER_WEIGHT_TOTAL);
+  }
 }
 
-// A FOURTH HOLE OF THE SAME SHAPE, missed by the first completeness pass and
-// caught by the P4-C1 review: item 9 Llave Raiz is ITEM_KLASS_CARE with value
-// 0, and items_table.h's own unit contract says a CARE item's value is "care
-// points restored". A care item that restores nothing is not a typo - spec
-// section 24 names no evolution-item class, so the pack folded its EVOC_ITEM
-// key onto CARE (evolution.json turns species 53 into 54 on cond ITEM,
-// cond_value 9). This roster ships neither that rule nor any other EVOC_ITEM
-// rule, so nothing in this build can consume the key and nothing may treat it
-// as a care item either. Both halves are pinned: give item 9 a real value, or
-// ship an ITEM rule, and this case fails and the banner gets rewritten.
-TEST(the_care_item_that_restores_nothing_is_an_evolution_key_with_no_class) {
-  int zero_care = 0;
-  int last_id   = 0;
+// A FOURTH HOLE OF THE SAME SHAPE, CLOSED THE WAY P5-C4 CHOSE TO CLOSE IT.
+//
+// Item 9 Llave Raiz was ITEM_KLASS_CARE with value 0, and items_table.h's own
+// unit contract says a CARE item's value is what it restores - so it was a care
+// item that restores nothing, reachable at about 2.4 % of every HIDDEN scan.
+// The pack folded it onto CARE because spec section 24 names no evolution-item
+// class. The old case pinned BOTH halves of the fold and said "give item 9 a
+// real value, or ship an ITEM rule, and this case fails".
+//
+// P5-C4 took the third option instead - ITEM_KLASS_EVOLUTION, the class section
+// 24 lacks - so this case is rewritten rather than deleted, and what it now
+// pins is the closure and the ONE thing that is still open about it: the key
+// has no lock at this roster. game/inventory.h carries the argument for the
+// choice; here is the part that can fail.
+TEST(the_evolution_key_has_its_own_class_and_no_shipped_rule_spends_it) {
+  // No item anywhere is reachable and does nothing. That was the defect, and
+  // this is the general form of it rather than a pin on one id.
   for (uint8_t i = 0; i < ITEM_COUNT; ++i) {
-    if (ITEMS_TABLE[i].klass == (uint8_t)ITEM_KLASS_CARE &&
-        ITEMS_TABLE[i].value == 0u) {
-      zero_care++;
-      last_id = (int)ITEMS_TABLE[i].id;
-    }
+    const ItemDef& it = ITEMS_TABLE[i];
+    if (it.klass == (uint8_t)ITEM_KLASS_EVOLUTION) continue;   // a key, not a dose
+    CHECK(it.value > 0);
   }
-  CHECK_EQ(zero_care, 1);
-  CHECK_EQ(last_id, 9);
-  // Every OTHER care item does restore something, so "value 0" is a marker and
-  // not just the low end of a range.
+  // Item 9 is the key, and it is the only one.
+  int keys = 0, last = 0;
   for (uint8_t i = 0; i < ITEM_COUNT; ++i)
-    if (ITEMS_TABLE[i].klass == (uint8_t)ITEM_KLASS_CARE &&
-        ITEMS_TABLE[i].id != 9u)
-      CHECK(ITEMS_TABLE[i].value > 0u);
-  // And no shipped rule can spend it, which is why the fold is survivable here.
+    if (ITEMS_TABLE[i].klass == (uint8_t)ITEM_KLASS_EVOLUTION) {
+      keys++;
+      last = (int)ITEMS_TABLE[i].id;
+    }
+  CHECK_EQ(keys, 1);
+  CHECK_EQ(last, 9);
+  // No care item is a key any more: the fold is gone, not merely documented.
+  for (uint8_t i = 0; i < ITEM_COUNT; ++i)
+    if (ITEMS_TABLE[i].klass == (uint8_t)ITEM_KLASS_CARE)
+      CHECK(ITEMS_TABLE[i].value > 0);
+  // AND THE HALF THAT IS STILL OPEN, asserted rather than described: no shipped
+  // rule can spend the key, because the species 53 -> 54 rule is outside the
+  // 36-species prefix. When P9 lands it this fails, and the person who lands it
+  // reads game/inventory.h's paragraph and deletes this line.
   for (uint8_t i = 0; i < EVOLUTION_RULES_COUNT; ++i)
     CHECK(EVOLUTION_RULES[i].cond != (uint8_t)EVOC_ITEM);
 }
@@ -521,8 +546,21 @@ TEST(item_rows_are_well_formed_at_runtime) {
     CHECK(it.rarity <= SPECIES_RARITY_SPECIAL);
     CHECK(it.name_idx < (uint16_t)STR_COUNT);
     CHECK(S(it.name_idx)[0] != '\0');
-    CHECK_EQ(it.reserved[0], 0);
-    CHECK_EQ(it.reserved[1], 0);
+    // The two bytes that were `reserved[2]` are `target` and `param` since
+    // P5-C4, so what used to be "they are zero" is now "they say what the item
+    // acts on" - the same question, asked of a column that exists.
+    if (it.klass == (uint8_t)ITEM_KLASS_CARE) {
+      CHECK(it.target < (uint8_t)CARE_TGT_COUNT);
+      CHECK(it.value >= 1 && it.value <= 100);          // percent of a full bar
+      CHECK_EQ((uint8_t)(it.param | (uint8_t)ITEM_PBS_MASK), (uint8_t)ITEM_PBS_MASK);
+    } else if (it.klass == (uint8_t)ITEM_KLASS_BATTLE_MOD) {
+      CHECK(it.target <= (uint8_t)ITEM_BSTAT_SPD);
+      CHECK(it.param >= 1);                             // rounds
+      CHECK(it.value >= 1);                             // stages
+    } else {
+      CHECK_EQ(it.target, 0);
+      CHECK_EQ(it.param, 0);
+    }
   }
   CHECK(item_get(0) == nullptr);
   CHECK(item_get((uint8_t)(ITEM_COUNT + 1)) == nullptr);
@@ -669,6 +707,83 @@ TEST(every_item_drop_row_resolves_and_the_two_stage_pick_respects_rarity) {
   CHECK_EQ(item_pick_drop((uint8_t)NET_CAT_HOME, SPECIES_RARITY_SPECIAL,
                           SPECIES_RARITY_SPECIAL, 0), 0);
   CHECK_EQ(item_pick_drop((uint8_t)NET_CAT_COUNT, 0, 3, 0), 0);
+}
+
+// INSTANCE EIGHTEEN OF THIS PROJECT'S RECURRING DEFECT, FOUND INSIDE THE CASE
+// THAT LOOKED LIKE THE GUARD, AND MEASURED RATHER THAN ARGUED.
+//
+// The case above is named "...the_two_stage_pick_respects_rarity" and it checks
+// per-category sums, row well-formedness, that a COMMON..COMMON band yields only
+// commons and that HOME/SPECIAL..SPECIAL yields 0. It NEVER ONCE pairs an ITEM
+// encounter row's OWN band with its OWN category's drop list - which is the
+// property the plan says nothing asserts, and the one that decides whether
+// encounter_roll() can answer the ITEM outcome at all.
+//
+// THE MUTATION THAT PROVES THIS CASE CAN FAIL, run before it was written: set
+// tools/content/encounters.json's HIDDEN ITEM row band from 1..2 to 3..3 and
+// regenerate. The mutated tree ACCEPTS the edit (gen_content.py exits 0,
+// --check reports in sync, every static_assert in the OLD headers passed), the
+// old case above stays GREEN, and item_pick_drop(HIDDEN, 3, 3, roll) returns 0
+// for all 100 rolls - an ITEM outcome nothing can resolve. Only the pack's
+// Python gate caught it, and tools/check.sh skips that one with a word when
+// python3 is missing.
+//
+// Two things close it. The compile-time half is the generated
+// encounter_item_rows_have_a_drop(), the twin of encounter_wild_rows_have_a_pool()
+// that did not exist; this is the runtime half, and it walks the real picker
+// over the real band, which a constexpr guard cannot do.
+TEST(every_item_encounter_row_can_actually_produce_an_item) {
+  int item_rows = 0;
+  for (uint8_t i = 0; i < ENCOUNTER_ROW_COUNT; ++i) {
+    const EncounterRow& r = ENCOUNTER_TABLE[i];
+    if (r.outcome != (uint8_t)ENC_OUT_ITEM) continue;
+    item_rows++;
+
+    // The eligible weight of THIS row's band inside THIS row's category.
+    uint32_t eligible = 0;
+    for (uint8_t d = 0; d < ITEM_DROP_ROW_COUNT; ++d) {
+      if (ITEM_DROP_TABLE[d].category != r.category) continue;
+      const ItemDef* it = item_get(ITEM_DROP_TABLE[d].item_id);
+      CHECK(it != nullptr);
+      if (it == nullptr) continue;
+      if (it->rarity < r.rarity_min || it->rarity > r.rarity_max) continue;
+      eligible += ITEM_DROP_TABLE[d].weight;
+    }
+    CHECK(eligible > 0);
+    if (eligible == 0) continue;
+
+    // ...and the picker really answers, for every roll across that weight, with
+    // an item that is IN the band and IN the category's list.
+    for (uint32_t roll = 0; roll < eligible; ++roll) {
+      const uint8_t id = item_pick_drop(r.category, r.rarity_min, r.rarity_max,
+                                        (uint16_t)roll);
+      CHECK(id != 0);
+      const ItemDef* it = item_get(id);
+      CHECK(it != nullptr);
+      if (!it) continue;
+      CHECK(it->rarity >= r.rarity_min && it->rarity <= r.rarity_max);
+      bool listed = false;
+      for (uint8_t d = 0; d < ITEM_DROP_ROW_COUNT; ++d)
+        if (ITEM_DROP_TABLE[d].category == r.category &&
+            ITEM_DROP_TABLE[d].item_id == id) listed = true;
+      CHECK(listed);
+    }
+  }
+  CHECK(item_rows >= (int)NET_CAT_COUNT);   // every category has one
+
+  // The SPECIAL twin, for the outcome that had no payload at all until P5-C3.
+  int special_rows = 0;
+  for (uint8_t i = 0; i < ENCOUNTER_ROW_COUNT; ++i) {
+    const EncounterRow& r = ENCOUNTER_TABLE[i];
+    if (r.outcome != (uint8_t)ENC_OUT_SPECIAL) continue;
+    special_rows++;
+    uint32_t eligible = 0;
+    for (uint8_t d = 0; d < SPECIAL_DROP_ROW_COUNT; ++d)
+      if (SPECIAL_DROP_TABLE[d].category == r.category)
+        eligible += SPECIAL_DROP_TABLE[d].weight;
+    CHECK(eligible > 0);
+  }
+  CHECK_EQ(special_rows, (int)NET_CAT_COUNT);
 }
 
 // =============================================================================

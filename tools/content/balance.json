@@ -97,8 +97,9 @@
     "switch": "switching consumes the whole turn (spec 14) and resets the switched-in Pebble's stages to 0",
     "budget_cost": "budget_cost = power*accuracy/100 + 12*max(0,priority if power>0 else 0) + effect_weight(effect,value,duration) - min(12, 4*cooldown) - 2*recoil/3, clamped to >= 1",
     "creator_power_pct": "round(100 * (stat_used/CREATOR_TOTAL_STAT_POINTS + attack_used/CREATOR_ATTACK_BUDGET) / 2)",
-    "capture_permille": "base_by_rarity(700/500/320/160) - 12*max(0, wild_level - active_level) + 10*item.value/10, clamp 50..950",
-    "evo_cond_units": "HAPPINESS_GE percent 0..100; ACTIVITY_GE hours of lifetime_active_s; BATTLES_WON_GE count (reserved, unused by the built-in roster); ITEM item id; CORRUPTED 0"
+    "capture_permille": "CAPTURE_BASE_PERMILLE[wild.rarity] - CAPTURE_LEVEL_GAP_PERMILLE*max(0, wild_level - active_level) + CAPTURE_VALUE_SCALE*item.value, clamped to [CAPTURE_MIN_PERMILLE, CAPTURE_MAX_PERMILLE]",
+    "evo_cond_units": "HAPPINESS_GE percent 0..100; ACTIVITY_GE hours of lifetime_active_s; BATTLES_WON_GE count (reserved, unused by the built-in roster); ITEM item id; CORRUPTED 0",
+    "special_xp": "SPECIAL_XP_SCALE * event.value, withheld while the clock is CAL_UNSET"
   },
   "EFFECT_WEIGHTS": {
     "NONE": "0",
@@ -116,7 +117,7 @@
   },
   "_EFFECT_WEIGHTS_doc": "budget_cost is COMPUTED from this table for every row in attacks.json and for every creator move, so the built-in roster and a custom Pebble are priced by one rule (spec 36). Never hand-typed. Priority is charged on offensive moves only - charging it on PROTECT prices defensive archetypes out of the game (finding grafted from draft_B-balance).",
   "XP_CANDY_SCALE": 8,
-  "_ITEM_VALUE_doc": "ItemDef.value is a uint8_t in the 8 B struct, so it carries a MAGNITUDE whose unit depends on klass: XP_CANDY value*XP_CANDY_SCALE = XP granted (5/24/100 -> 40/192/800); CAPTURE value = capture permille bonus /10 (15/45 -> +150/+450 permille); CARE value = care points restored (0 = the item is a key, not a consumable effect); BATTLE_MOD value = stat stages granted at battle start. No shipped value exceeds 255, and verify.py asserts it - so the table generates without widening the struct. If a later item needs > 255 the schema fix is to spend one reserved byte on a u16 value; do NOT invent a second out-of-band scale constant.",
+  "_ITEM_VALUE_doc": "ItemDef.value is a uint8_t in the 8 B struct, so it carries a MAGNITUDE whose unit depends on klass: XP_CANDY value*XP_CANDY_SCALE = XP granted (5/24/100 -> 40/192/800); CAPTURE value = capture-chance bonus in PERCENT, scaled to permille by CAPTURE_VALUE_SCALE (15/45 -> +150/+450 permille, which is what the Spanish flavour line has always promised the player); CARE value = care points restored (0 = the item is a key, not a consumable effect); BATTLE_MOD value = stat stages granted at battle start. No shipped value exceeds 255, and verify.py asserts it - so the table generates without widening the struct. If a later item needs > 255 the schema fix is to spend one reserved byte on a u16 value; do NOT invent a second out-of-band scale constant.",
   "EVASION_PER_SPD": 2,
   "EVASION_MAX_SPD_GAP": 10,
   "ACCURACY_MIN": 40,
@@ -214,7 +215,8 @@
     "XP_CANDY",
     "CAPTURE",
     "CARE",
-    "BATTLE_MOD"
+    "BATTLE_MOD",
+    "EVOLUTION"
   ],
   "EVO_COND_ENUM": [
     "NONE",
@@ -486,5 +488,42 @@
     "EvolutionRule[i].species is the species whose evo_rule is i",
     "attack.id and item.id are contiguous from 1",
     "anim_id is an ANIM_FILMS index, not an attack id (see _ANIM_doc)"
-  ]
+  ],
+  "CARE_TARGET_ENUM": [
+    "ALL",
+    "HUNGER",
+    "HAPPINESS",
+    "HEALTH",
+    "CLEANLINESS",
+    "ENERGY"
+  ],
+  "BATTLE_STAT_ENUM": [
+    "ATK",
+    "DEF",
+    "SPD"
+  ],
+  "PEBBLE_STATUS_BITS": {
+    "SICK": 1,
+    "ASLEEP": 2,
+    "CORRUPTED": 4,
+    "FAINTED": 8
+  },
+  "_ITEM_TARGET_doc": "ItemDef.target and ItemDef.param are the two columns P4-C1's completeness pass found MISSING (plan line 552): a CARE item did not say WHICH of the five care stats it restores and a BATTLE_MOD did not say which stat, for how long. target is klass-scoped - CARE reads it as CARE_TARGET_ENUM (ALL restores all five), BATTLE_MOD as BATTLE_STAT_ENUM (which is game/battle.h's BattleStat ordering, not a second one), and every other klass carries NONE == 0. param is one byte with one meaning per klass too: CARE puts the PEBBLE_STATUS_BITS mask it also clears there (items.json 'clears'), BATTLE_MOD puts the buff's length in ROUNDS there (items.json 'duration'), and no row may set both. A CARE item's value is PERCENT OF FULL: care[] is 0..PB_CARE_MILLI_MAX milli-points, so value 40 means +40 % of a full bar, which is the only reading a uint8_t can carry against a 100000-point scale.",
+  "CAPTURE_BASE_PERMILLE": [
+    700,
+    500,
+    320,
+    160
+  ],
+  "CAPTURE_LEVEL_GAP_PERMILLE": 12,
+  "CAPTURE_VALUE_SCALE": 10,
+  "CAPTURE_MIN_PERMILLE": 50,
+  "CAPTURE_MAX_PERMILLE": 950,
+  "CAPTURE_MAX_ATTEMPTS": 2,
+  "_CAPTURE_doc": "spec 23. base by the WILD species' rarity, minus CAPTURE_LEVEL_GAP_PERMILLE per level the wild creature is ABOVE the active one (never a bonus for being below - 'failure should not feel excessively punishing' is not the same as free), plus CAPTURE_VALUE_SCALE * the capture item's value, clamped to [CAPTURE_MIN_PERMILLE, CAPTURE_MAX_PERMILLE] so no catch is certain and none is impossible. CAPTURE_MAX_ATTEMPTS failures and the creature flees.",
+  "SPECIAL_KIND_ENUM": [
+    "XP_BURST",
+    "CORRUPTION"
+  ],
+  "SPECIAL_XP_SCALE": 8
 }

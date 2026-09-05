@@ -198,6 +198,42 @@ $(BIN)/test_cooldowns:  $(OBJ)/cooldowns.o $(OBJ)/save_manager.o \
                         $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o
 
+# P5-C3: THE ENCOUNTER ROLL. encounters.cpp is pure and deterministic from its
+# inputs - no clock, no global RNG stream - so this binary is the roll and the
+# generated tables and nothing else. species.o is the accessor layer the WILD
+# and ITEM pickers go through; rng.o is the local Rng the seed drives.
+$(BIN)/test_encounters: $(OBJ)/encounters.o $(OBJ)/species.o $(OBJ)/rng.o \
+                        $(OBJ)/corruption.o
+# corruption.o because the SPECIAL outcome's second kind IS the corruption
+# status: the encounter is the only writer of PBS_CORRUPTED in the tree, so
+# the status and its 24 h deadline are tested where they are produced.
+
+# P5-C4: CAPTURE. The REAL box.cpp, because the whole point of the case set is
+# that a captured Pebble comes out of the tree's one constructor and passes the
+# tree's one validator - a fake Box would prove neither. validate.o drags the
+# pair it always drags (evolution.o + xp.o call each other) and genome.o drags
+# crc16.o and rng.o, exactly as tests/test_validate.cpp does.
+$(BIN)/test_capture:    $(OBJ)/capture.o $(OBJ)/encounters.o $(OBJ)/box.o \
+                        $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
+
+# The Box-full branches of the same path, kept in their own binary for the
+# reason tests/test_battle_screen.cpp is: it links what it drives and nothing
+# else, so it cannot start passing because another module happened to be there.
+$(BIN)/test_box_full_capture: $(OBJ)/capture.o $(OBJ)/encounters.o $(OBJ)/box.o \
+                        $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
+
+# P5-C4: THE INVENTORY AND WHAT AN ITEM DOES. xp.o + evolution.o are the two
+# consumers inv_use() routes to (a candy really levels a Pebble, the evolution
+# key really asks game/evolution.h), corruption.o is the status half a CARE
+# item's `clears` column reaches, and species.o is the accessor layer.
+$(BIN)/test_inventory:  $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/xp.o \
+                        $(OBJ)/evolution.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 # The minigame contract and the PURE logic of every game. No draw objects and
 # no ui/: if this link line ever needs one, a game has leaked drawing into its
@@ -241,6 +277,11 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/screen_time.o $(OBJ)/screen_view.o \
                $(OBJ)/screen_link.o $(OBJ)/screen_diag.o \
                $(OBJ)/screen_evolution.o $(OBJ)/screen_creator.o \
+               $(OBJ)/screen_network.o $(OBJ)/screen_encounter.o \
+               $(OBJ)/wifi_scanner.o $(OBJ)/net_classify.o \
+               $(OBJ)/cooldowns.o $(OBJ)/encounters.o $(OBJ)/capture.o \
+               $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/species.o \
+               $(OBJ)/validate.o $(OBJ)/evolution.o $(OBJ)/xp.o \
                $(OBJ)/dialog.o $(OBJ)/qr.o $(OBJ)/box.o \
                $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o \
                $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
@@ -248,7 +289,16 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/xbm_mirror.o \
                $(OBJ)/battle.o $(OBJ)/battle_ai.o $(OBJ)/pebble.o
 
-# P4-C4 added the last six. ui/screen_battle.cpp is a PURE translation unit that
+# P5-C3/C4 added the exploration half. ui/screen_network.cpp and
+# ui/screen_encounter.cpp are pure translation units like every other migrated
+# screen, and they drag the real modules they drive - the scan job, the
+# classifier, the cooldown table, the encounter roll, capture and the inventory
+# - because a screen test against fakes of all six would prove nothing about the
+# thing that ships. The RADIO is still a fake: net.cpp is never compiled here,
+# and the screen reaches it through ui_scan_driver(), which test_screens.cpp
+# stubs with a driver of its own.
+#
+# P4-C4 added the six before them. ui/screen_battle.cpp is a PURE translation unit that
 # runs the real engine and the real AI, so the host renders a real battle at
 # 128x64 rather than a mock of one: battle.o and battle_ai.o are the same
 # objects tests/test_battle.cpp links, pebble.o is the stat derivation they
@@ -281,10 +331,14 @@ $(BIN)/test_screens:    $(SCREEN_OBJS) $(MG_FRAME_OBJS)
 # else, so it cannot start passing because some other screen happens to define
 # a seam it needs. gfx_widgets.o + gfx_fb.o come along because the screen draws
 # and because the mirror case reads pixels back.
+# inventory.o + its two consumers since P5-C4: the battle screen takes the armed
+# BATTLE_MOD from it, which is where a capture-menu item finally reaches a fight.
 $(BIN)/test_battle_screen: $(OBJ)/screen_battle.o $(OBJ)/battle_renderer.o \
                         $(OBJ)/xbm_mirror.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
                         $(OBJ)/pebble.o $(OBJ)/box.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o \
+                        $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/xp.o \
+                        $(OBJ)/evolution.o $(OBJ)/species.o \
                         $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o
 
 # The navigation machine and the section 7 router, over the REAL table.
