@@ -120,6 +120,19 @@ void     ui_bind_config(Config* cfg);
 // back to full brightness and leave it there until the pet woke up.
 void     ui_note_brightness(uint8_t contrast);
 
+// THE POWER LADDER'S DIM (P6-C3, hardware/power.h). An override on top of the
+// user's brightness and the asleep-pet dim, applied by the same
+// bright_service() the other two go through, so the contrast base keeps having
+// exactly one owner and no two writers race each other through
+// rd_contrast_ramp(). ui.cpp takes the LOWER of the two dims when both are on.
+void     ui_note_power_dim(bool on);
+
+// Is a screen holding a radio job right now? The power ladder's `held` input:
+// while this is true the ladder is clamped at DIM and will not drop the radio.
+// It is a query, not a handle - the release itself is a navigation, so it runs
+// the owning screen's leave() hook and cancels through wifi_scan_cancel().
+bool     ui_radio_job_busy(void);
+
 // Drain one sim_take_events() bitmask into the UI: evolution freeze, hatch,
 // alerts, poop/sick toasts.
 // Call every logic tick with the value sim_take_events() returned.

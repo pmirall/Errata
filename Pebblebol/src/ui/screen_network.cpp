@@ -30,6 +30,9 @@ uint8_t network_screen_phase(void) { return s_phase; }
 uint8_t network_screen_seen(void)  { return s_seen; }
 uint8_t network_screen_fresh(void) { return s_fresh; }
 
+// See screen_network.h: a query for the power ladder, never a handle on the job.
+bool network_screen_busy(void) { return wifi_scan_is_busy(s_job); }
+
 // The level a wild creature is clamped around. An empty Box - which is only
 // reachable if the player released everything - reads as 1 rather than 0, so
 // the encounter clamp still has a legal centre.

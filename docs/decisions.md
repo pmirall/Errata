@@ -43,10 +43,52 @@ phase re-derives them:
   board. Design consequence: the on-screen `ERROR` state (decision T10, built in P2-C11a)
   is the only diagnostic channel a user can actually see, which raises its priority rather
   than lowering it.
-- **Deep sleep (P6-C3).** On the ESP32-C3 only GPIO0..GPIO5 can wake the chip from deep
-  sleep. `PIN_BTN_R 2` qualifies; `PIN_BTN_L 10` does not. P6-C3 therefore implements light
-  sleep with wake on both buttons, and keeps the deep-sleep path behind
-  `PB_PINS_CONFIRMED` so it turns on by itself the day the map is confirmed.
+- **Deep sleep (P6-C3) — BUILT, AND THE ANSWER IS LIGHT SLEEP ON BOTH BUTTONS.** On the
+  ESP32-C3 only GPIO0..GPIO5 can wake the chip from deep sleep. `PIN_BTN_R 2` qualifies;
+  `PIN_BTN_L 10` does not. P6-C3 therefore implements light sleep with wake on both
+  buttons. Verified against the installed core rather than from memory:
+  `SOC_GPIO_DEEP_SLEEP_WAKE_VALID_GPIO_MASK` is `BIT0|…|BIT5` and `SOC_RTCIO_PIN_COUNT` is
+  0, so `esp_deep_sleep_enable_gpio_wakeup()` returns `ESP_ERR_INVALID_ARG` for anything
+  outside those six pads and ext0/ext1 are not compiled for this chip at all. From *light*
+  sleep the digital pad domain stays powered and `gpio_wakeup_enable()` accepts every GPIO,
+  which is why both buttons work there and only there.
+
+  **Three consequences the owner should hear in these words.**
+  1. **A deep sleep on this map would leave the left button dead.** Not slow, not
+     unreliable — physically incapable of waking the device. That is a product decision
+     dressed as a pin decision, and it is the reason the ladder stops at light sleep.
+  2. **It would also make every wake a reset taken with a finger on GPIO2**, which
+     `config.h` §2 lists as a strapping pin ("never wire a button to them" — and
+     `PIN_BTN_R` is 2, which is why the dormant `PB_PINS_CONFIRMED` assert would fail
+     today). Whether the C3 re-samples GPIO2 into a different boot mode at a
+     deep-sleep wake could not be established from any installed header, so it is an
+     **unresolved bench risk**, not an asserted failure. Deep sleep on this map must not be
+     trusted until somebody checks it on a board.
+  3. **The battery cost of choosing light is small next to D11.** On D11's own published
+     model (680 mAh usable, 60 min/day active) light sleep instead of deep costs roughly
+     **2.7 days out of ~26** at a 20 µA boost module and **0.8 out of ~14** at a mediocre
+     one — while D11's own unmeasured 100× spread swings the same answer from 26 days to 9.
+     *The boost module nobody has measured matters about ten times more than deep-vs-light.*
+     These are arithmetic on D11's four published points, not measurements; ~5 µA deep
+     sleep is this repo's own citation and the ~130 µA light-sleep figure is a vendor
+     number that appears nowhere in this repo and is the weakest input.
+
+  **The earlier wording of this bullet said the deep-sleep path would be kept "behind
+  `PB_PINS_CONFIRMED` so it turns on by itself the day the map is confirmed". P6-C3 did
+  not do that, deliberately, and this records why.** `PB_PINS_CONFIRMED` is not the
+  condition — a *confirmed* map with `PIN_BTN_L 10` still cannot deep-sleep on two buttons,
+  and a confirmed map with `PIN_BTN_R 2` fails the strapping assert. The real condition is
+  "are both buttons inside the wake mask", so `hardware/power.h` computes exactly that as
+  `PWR_DEEP_WAKE_BOTH_BUTTONS` and carries a `static_assert(!PWR_DEEP_WAKE_BOTH_BUTTONS)`
+  that **fails the build**, with a message naming the choice, the day the pin map changes.
+  A compiled-out deep-sleep branch would have been a path nobody had ever built, switching
+  itself on unattended; a red line puts a human in front of it. Measured: editing
+  `PIN_BTN_L` to 4 stops the build with that message.
+- **Battery sense (D10) is still not in the firmware after P6-C3**, and the P6-C3 row of
+  the D10 line above should be read with that. `PIN_VBAT_ADC 0` points at a divider that is
+  not populated, so a NORMAL/LOW/CRITICAL reading would be a made-up number on a floating
+  pin. The power ladder needs no battery input to work — it runs on idle time — so nothing
+  was invented to fill the gap.
 - **Reversal cost stays one commit:** the five `#define`s sit in a single
   `// DECISION D1 PENDING` block in `src/core/config.h`.
 

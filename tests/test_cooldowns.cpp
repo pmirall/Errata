@@ -319,6 +319,76 @@ TEST(the_uncalibrated_fallback_is_cleared_by_a_reboot_and_that_limit_is_asserted
   CHECK(cd_ready(t, H, clk(60u, 1000u, CAL_UNSET)));
 }
 
+// =============================================================================
+//  P6-C3: THE CARRIED COOLDOWN DEBT, AND WHY THE LADDER LIGHT-SLEEPS
+//
+//  The phase-5 exit left this written down: "deep sleep empties the
+//  uncalibrated cooldown table, which turns a disclosed limit into a cheap
+//  exploit". The case above - the_uncalibrated_fallback_is_cleared_by_a_reboot
+//  - is that limit, and it is a LINEAR farm because a reboot costs the player a
+//  boot. A DEEP sleep would have made the device perform that reboot by itself,
+//  ten idle minutes at a time, with no keystroke at all.
+//
+//  The discharge is structural rather than clever: hardware/power.h's deepest
+//  rung is a LIGHT sleep, so the CPU never resets, cd_begin() never runs again
+//  and the RAM table is simply still there. The other half is the clock it is
+//  measured in - ui.cpp hands cooldowns.cpp gt_mono32(), the RTC counter, and
+//  not millis(), so the deadlines advance through the gap instead of being
+//  paused by it. These two cases pin both halves.
+// =============================================================================
+TEST(an_uncalibrated_cooldown_is_still_armed_on_the_far_side_of_a_sleep) {
+  CooldownTable t; begin(t);
+  const uint32_t H = 0x51EEu;
+  const uint32_t t0 = 1000u;
+  CHECK(cd_arm(t, H, clk(60u, t0, CAL_UNSET)));
+
+  // Ten idle minutes with the CPU stopped. Nothing sampled anything; the
+  // monotonic clock carried the gap and the table was never cleared.
+  const uint32_t after_sleep = t0 + 600000u;
+  CHECK(!cd_ready(t, H, clk(60u, after_sleep, CAL_UNSET)));
+  CHECK_EQ((int)cd_ram_used(), 1);
+
+  // It expires when it was always going to expire - two hours after it was
+  // armed - and the sleep neither shortened nor lengthened that.
+  const uint32_t period_ms = (uint32_t)ENCOUNTER_COOLDOWN_S * 1000u;
+  CHECK(!cd_ready(t, H, clk(60u, t0 + period_ms - 1u, CAL_UNSET)));
+  CHECK(cd_ready(t, H, clk(60u, t0 + period_ms, CAL_UNSET)));
+  CHECK_EQ((int)rows_used(t), 0);          // and nothing reached flash
+}
+
+TEST(a_full_uncalibrated_table_survives_a_night_of_eight_second_sleep_slices) {
+  // The shape the ladder really produces: PWR_SLEEP_SLICE_MS at a time, all
+  // night. Every one of the thirty-two rows has to still be armed at dawn, and
+  // then expire on its own schedule - which is the difference between "the
+  // sleep did nothing to the table" and "the sleep happened not to be noticed".
+  CooldownTable t; begin(t);
+  const uint32_t t0 = 5000u;
+  for (uint8_t i = 0; i < (uint8_t)COOLDOWN_SLOTS; ++i) {
+    CHECK(cd_arm(t, 0x7000u + i, clk(60u, t0, CAL_UNSET)));
+  }
+  CHECK_EQ((int)cd_ram_used(), (int)COOLDOWN_SLOTS);
+
+  // 450 slices of 8 s = one hour, i.e. half of ENCOUNTER_COOLDOWN_S.
+  uint32_t ms = t0;
+  for (uint32_t i = 0; i < 450u; ++i) {
+    ms += (uint32_t)PWR_SLEEP_SLICE_MS;
+    CHECK(!cd_ready(t, 0x7000u, clk(60u, ms, CAL_UNSET)));   // polled at every wake
+  }
+  CHECK_EQ(ms, t0 + 3600000u);
+  CHECK_EQ((int)cd_ram_used(), (int)COOLDOWN_SLOTS);
+  for (uint8_t i = 0; i < (uint8_t)COOLDOWN_SLOTS; ++i) {
+    CHECK(!cd_ready(t, 0x7000u + i, clk(60u, ms, CAL_UNSET)));
+  }
+
+  // The second hour, and every row comes free together because they were all
+  // armed together. A reboot in the middle would have freed them an hour early
+  // and for nothing - that is the exploit this rung refuses to build.
+  ms = t0 + (uint32_t)ENCOUNTER_COOLDOWN_S * 1000u;
+  for (uint8_t i = 0; i < (uint8_t)COOLDOWN_SLOTS; ++i) {
+    CHECK(cd_ready(t, 0x7000u + i, clk(60u, ms, CAL_UNSET)));
+  }
+}
+
 TEST(the_ram_table_also_evicts_the_row_that_ends_soonest) {
   CooldownTable t; begin(t);
   // Skewed the same way and for the same reason as the persisted case above:

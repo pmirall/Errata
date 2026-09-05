@@ -251,6 +251,14 @@ $(BIN)/test_motion:     $(OBJ)/motion_null.o
 # if it ever needs a second object something has leaked into the pure half.
 $(BIN)/test_activity:   $(OBJ)/activity.o
 
+# P6-C3: THE IDLE LADDER. power.cpp is host-compilable by construction (every
+# ESP-IDF call is behind #if defined(ARDUINO)), and wifi_scanner.o comes with it
+# for ONE reason worth naming: the carried radio debt is only a real property if
+# the case holds a REAL WifiScanJob while the ladder drops the radio. A fake job
+# would have proved that the fake behaves, which is the shape of test this
+# project keeps finding.
+$(BIN)/test_power:      $(OBJ)/power.o $(OBJ)/wifi_scanner.o
+
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 # The minigame contract and the PURE logic of every game. No draw objects and
 # no ui/: if this link line ever needs one, a game has leaked drawing into its

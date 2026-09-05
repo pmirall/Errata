@@ -1049,3 +1049,190 @@ TEST(care_a_fortnight_of_neglect_only_pins_the_stats_the_player_owns) {
   CHECK(sim_view()->stage < STAGE_COUNT);
   CHECK(sim_stat_milli(ST_HEALTH) > 0);
 }
+
+// -----------------------------------------------------------------------------
+//  P6-C3: RECOVERY ACCRUES ACROSS A SLEEP
+//
+//  A sleep gap is not a special kind of time. The whole of the power ladder's
+//  correctness, once elapsed time is right (tests/test_clock.cpp), is that the
+//  gap reaches the same two integrators a boot gap reaches: sim_catch_up_ex()
+//  for the active pebble and box_recover() for the stored ones. These cases pin
+//  that at the plan's own bench number - "a 30 min deep sleep charges 30 min of
+//  care and box recovery" - so the acceptance can be read off a host run
+//  instead of a multimeter.
+// -----------------------------------------------------------------------------
+static GameState g_sleep_state;
+
+TEST(care_a_thirty_minute_sleep_charges_thirty_minutes_of_care) {
+  // WHAT THE LADDER ACTUALLY DOES, and it is why this case is about sim_tick()
+  // and not about sim_catch_up_ex(): a light sleep is not a reboot, so the loop
+  // comes back and settles up through the ordinary 1 Hz tick with the whole
+  // slice as its step (app.cpp, logic_tick(owed)). PWR_SLEEP_SLICE_MS is 8 s,
+  // so half an hour of sleeping is 225 of those.
+  static int32_t awake[PB_CARE_COUNT];
+  care_pet_at(g_care, 10);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+    g_care.care_rem[i] = 0;
+  }
+  for (uint16_t sec = 0; sec < 1800u; ++sec) sim_tick(1);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) awake[i] = g_care.care[i];
+
+  // The same half hour, spent asleep in eight-second slices.
+  care_pet_at(g_care, 10);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+    g_care.care_rem[i] = 0;
+  }
+  const uint32_t slice_s = (uint32_t)PWR_SLEEP_SLICE_MS / 1000u;
+  for (uint32_t t = 0; t < 1800u; t += slice_s) sim_tick(slice_s);
+
+  bool moved = false;
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    CHECK_EQ(g_care.care[i], awake[i]);                        // to the byte
+    if (g_care.care[i] != (int32_t)PB_CARE_MILLI_MAX / 2) moved = true;
+  }
+  // Not every bar decays in half an hour (health regenerates while the others
+  // are still above their thresholds), so the claim is that the half hour was
+  // CHARGED, not that all five bars fell.
+  CHECK(moved);
+
+  // And in one call, which is what a stall-shaped catch-up would hand over.
+  care_pet_at(g_care, 10);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+    g_care.care_rem[i] = 0;
+  }
+  sim_tick(1800);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) CHECK_EQ(g_care.care[i], awake[i]);
+}
+
+TEST(care_a_sleep_the_scheduler_resynchronised_away_would_charge_one_second) {
+  // THE DEFECT THE TICK BOUND EXISTS TO STOP, stated as a measurement. Before
+  // P6-C3 app_loop() advanced its cursor by exactly 1000 ms per pass and
+  // resynchronised past anything longer than four seconds, so an eight-second
+  // sleep slice would have reached the pet as ONE second. This is what that
+  // looks like: thirty minutes of sleeping charged as 225 seconds.
+  static int32_t slept[PB_CARE_COUNT];
+  care_pet_at(g_care, 10);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+    g_care.care_rem[i] = 0;
+  }
+  for (uint32_t t = 0; t < 1800u; t += 8u) sim_tick(8);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) slept[i] = g_care.care[i];
+
+  care_pet_at(g_care, 10);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+    g_care.care_rem[i] = 0;
+  }
+  for (uint32_t t = 0; t < 1800u; t += 8u) sim_tick(1);        // one per wake
+  bool any_lost = false;
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    if (g_care.care[i] > slept[i]) any_lost = true;            // decayed less
+  }
+  CHECK(any_lost);
+}
+
+TEST(care_a_sleep_charged_as_an_unknown_clock_would_move_nothing_at_all) {
+  // The counter-case for the OTHER route a sleep gap can take - a deep-sleep
+  // wake, which is a reboot and therefore goes through boot_absence() and
+  // sim_catch_up_ex(). Hand the gap over with clock_known = 0, which is what an
+  // absence the device cannot vouch for gets, and the pet is charged NOTHING. A
+  // sleep wrongly classed as a crash or a soft reset looks exactly like this,
+  // and it is silent. tests/test_clock.cpp holds the list that decides it.
+  care_pet_at(g_care, 10);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+    g_care.care_rem[i] = 0;
+  }
+  SimEnv env;
+  sim_env_defaults(env);
+  env.now_epoch   = CARE_EPOCH0 + 1800u;
+  env.clock_valid = 1;
+  env.local_hour  = 10;
+  env.local_min   = 30;
+  env.day_of_year = 100;
+  sim_set_env(env);
+
+  AbsenceReport rep;
+  sim_catch_up_ex(1800u, 0 /* no trustworthy clock */, rep);
+  CHECK_EQ(rep.clock_known, 0);
+  CHECK_EQ(rep.absence_s, 0u);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    CHECK_EQ(g_care.care[i], (int32_t)PB_CARE_MILLI_MAX / 2);
+  }
+
+  // And with the clock known - which is what BOOT_DEEPSLEEP gets - the same
+  // gap is integrated in full.
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+    g_care.care_rem[i] = 0;
+  }
+  sim_set_env(env);
+  sim_catch_up_ex(1800u, 1, rep);
+  CHECK_EQ(rep.clock_known, 1);
+  CHECK_EQ(rep.absence_s, 1800u);
+  bool moved = false;
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    if (g_care.care[i] != (int32_t)PB_CARE_MILLI_MAX / 2) moved = true;
+  }
+  CHECK(moved);
+}
+
+TEST(care_a_stored_pebble_recovers_across_a_sleep_exactly_as_it_does_across_a_boot) {
+  // box_recover() is the OTHER half of the plan's bench line ("a 30 min sleep
+  // charges 30 min of care AND box recovery"). Stored pebbles are not
+  // simulated, they only refill - so the property to pin is that the sleep gap
+  // reaches them at all, and that thirty minutes of it is thirty minutes' worth
+  // and not a day's.
+  memset(&g_sleep_state, 0, sizeof g_sleep_state);
+  for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
+    g_sleep_state.pebbles[i].magic      = (uint16_t)PEBBLE_MAGIC;
+    g_sleep_state.pebbles[i].layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  }
+  g_sleep_state.box.magic           = (uint16_t)BOX_MAGIC;
+  g_sleep_state.box.active_slot     = (uint8_t)BOX_ACTIVE_NONE;
+  g_sleep_state.box.next_id_counter = 1;
+  g_sleep_state.cfg.device_id       = 0xB0FFE503u;
+  box_bind(g_sleep_state);
+
+  Genome gz;
+  memset(&gz, 0, sizeof gz);
+  // TWO pebbles, and the first is made active: box_recover() refuses the active
+  // slot outright, because the sim owns that one.
+  const uint8_t held   = box_new_pebble(SPECIES_ID_STARTER, 1, (uint8_t)ORIGIN_STARTER,
+                                        gz, 0x1003u, CARE_EPOCH0);
+  const uint8_t stored = box_new_pebble(SPECIES_ID_STARTER, 1, (uint8_t)ORIGIN_WILD,
+                                        gz, 0x1004u, CARE_EPOCH0);
+  CHECK(held   != (uint8_t)BOX_SLOT_NONE);
+  CHECK(stored != (uint8_t)BOX_SLOT_NONE);
+  CHECK(box_set_active(held));
+  PebbleInstance* p = box_slot(stored);
+  CHECK(p != nullptr);
+
+  static int32_t half_hour[PB_CARE_COUNT];
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) { p->care[i] = 0; p->care_rem[i] = 0; }
+  box_recover(stored, 1800u);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    half_hour[i] = p->care[i];
+    CHECK(half_hour[i] > 0);                                  // the gap arrived
+    CHECK(half_hour[i] < (int32_t)PB_CARE_MILLI_MAX);         // and only that much
+  }
+
+  // Three ten-minute slices - the shape the ladder really produces - land on
+  // the same bytes as one thirty-minute gap. That is what care_rem is for, and
+  // it is the property a sliced sleep needs.
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) { p->care[i] = 0; p->care_rem[i] = 0; }
+  box_recover(stored, 600u);
+  box_recover(stored, 600u);
+  box_recover(stored, 600u);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) CHECK_EQ(p->care[i], half_hour[i]);
+
+  // A sleep of zero seconds - a wake on the very millisecond it slept - charges
+  // nothing and cannot overshoot.
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) { p->care[i] = 0; p->care_rem[i] = 0; }
+  box_recover(stored, 0u);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) CHECK_EQ(p->care[i], 0);
+}

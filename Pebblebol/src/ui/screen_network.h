@@ -38,6 +38,20 @@ void network_render(void);
 void network_input(Gesture g);
 void network_leave(void);
 
+// -----------------------------------------------------------------------------
+// network_screen_busy()
+//   Is the WifiScanJob this screen owns actually holding the radio right now
+//   (wifi_scan_is_busy(), i.e. WSCAN_RUNNING)?
+//
+//   THE POWER LADDER IS THE CALLER (hardware/power.h, plan P6-C3: "a screen
+//   holding a radio job counts as activity for the idle timer"). It is a
+//   QUERY and not a way in: the job stays a file-static, so the only thing the
+//   ladder can do about a busy one is wait, and the only way it ever drops the
+//   radio is by navigating - which runs network_leave() and cancels through
+//   wifi_scan_cancel(). That asymmetry is the point of the function.
+// -----------------------------------------------------------------------------
+bool network_screen_busy(void);
+
 // What the screen is doing, for tests and for the DIAG console.
 enum NetScreenPhase : uint8_t {
   NSP_SCANNING = 0,   // the radio is up and the job is in flight

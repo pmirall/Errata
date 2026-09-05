@@ -62,6 +62,7 @@
 #include "screen_creator.h"   // CreatorInfo, for the radio seam below
 #include "screen_diag.h"
 #include "screen_evolution.h"
+#include "screen_network.h"  // network_screen_busy(): the power ladder's `held` input
 #include "../networking/net.h"
 #include "../networking/webui.h"      // web_pin() only - no network header comes with it
 #include "../dev/godmode.h"    // GodEvt, god_active/handle/draw/entry_progress/marker
@@ -381,11 +382,20 @@ static uint8_t s_bright_now   = OLED_CONTRAST_DEFAULT;  // last value handed to 
 // bright_service() returned without writing, and the panel stayed on
 // OLED_CONTRAST_DEFAULT - the setting silently lost at every power-up.
 static uint8_t s_bright_valid = 0;
+// The power ladder's DIM rung, an override on top of both of the above.
+static uint8_t s_pwr_dim      = 0;
 
 static void bright_service(void) {
   const SimView* p = pet();
-  const uint8_t want = (p && (p->flags & PF_ASLEEP)) ? (uint8_t)OLED_CONTRAST_DIM
-                                                     : s_bright_base;
+  uint8_t want = (p && (p->flags & PF_ASLEEP)) ? (uint8_t)OLED_CONTRAST_DIM
+                                               : s_bright_base;
+  // THE POWER LADDER'S DIM RUNG (P6-C3), and it is a third input to the same
+  // decision rather than a fourth writer of the register. It is about the
+  // PLAYER being away where the two above are about the pet and the setting,
+  // so when both are true the panel takes the lower of them - a sleeping pet
+  // on a device nobody has touched for a minute must not be BRIGHTER than
+  // either case alone.
+  if (s_pwr_dim && want > (uint8_t)PWR_DIM_CONTRAST) want = (uint8_t)PWR_DIM_CONTRAST;
   if (s_bright_valid && want == s_bright_now) return;
   // Falling asleep is slow and reluctant; waking is quicker. Not symmetric on
   // purpose: 2 s down reads as drifting off, 2 s up reads as a fault. The FIRST
@@ -1411,6 +1421,15 @@ void ui_note_brightness(uint8_t contrast) {
   bright_service();
 }
 
+void ui_note_power_dim(bool on) {
+  const uint8_t want = on ? 1u : 0u;
+  if (want == s_pwr_dim) return;
+  s_pwr_dim = want;
+  bright_service();
+}
+
+bool ui_radio_job_busy(void) { return network_screen_busy(); }
+
 // Defined with the rest of the seams in section 20; ui_begin() binds it.
 static const PebbleView* ui_fill_view(void);
 
@@ -1846,7 +1865,15 @@ void ui_explore_clock(uint32_t* now_epoch, uint32_t* now_ms, uint8_t* cal)
   // All three at once, in the shape game/cooldowns.h takes them, so a screen
   // cannot read two of them a frame apart and decide with a mixed clock.
   if (now_epoch) *now_epoch = gt_now();
-  if (now_ms)    *now_ms    = millis();
+  // gt_mono32(), NOT millis(), AND THIS ONE DECIDES A GAME OUTCOME (P6-C3).
+  // While the clock is CAL_UNSET the cooldown table's deadlines are monotonic
+  // MILLISECONDS (game/cooldowns.h), and millis() is uptime: it is the clock
+  // that stops at a deep-sleep wake, and the one that only carries a light
+  // sleep because esp_timer happens to be resynchronised from the RTC on the
+  // way out. gt_mono32() IS the RTC counter, so an armed cooldown survives
+  // every sleep this device can take. The other two millis() readers in this
+  // file are animation phase and modal lifetimes and stay as they are.
+  if (now_ms)    *now_ms    = gt_mono32();
   if (cal)       *cal       = (uint8_t)gt_cal_state();
 }
 

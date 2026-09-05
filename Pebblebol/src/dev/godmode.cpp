@@ -63,6 +63,7 @@ static void heap_trend_service(void)
 #include "../hardware/kv_nvs.h"
 #include "../hardware/gametime.h"
 #include "../hardware/input.h"
+#include "../hardware/power.h"      // the P6-C3 ladder, for the ENERGIA page
 #include "../networking/net.h"
 
 // The gene-name block in strings_es.h 34c must stay index-parallel to GENES[].
@@ -191,7 +192,12 @@ static const GodGene GD_GENES[GOD_GENE_COUNT] = {
 #define GD_SYS_HEAP     2
 #define GD_SYS_RADIO    3
 #define GD_SYS_STORE    4
-#define GD_SYS_PAGES    5
+// P6-C3: "DIAG shows loop iterations/s per power state". The acceptance number
+// this page exists to read is the plan's own - loop rate in IDLE <= 10/s - and
+// it is the one figure that says whether the ladder is really stopping the CPU
+// or only turning the panel off.
+#define GD_SYS_POWER    5
+#define GD_SYS_PAGES    6
 
 // =============================================================================
 //  4. MODULE STATE
@@ -1181,6 +1187,35 @@ static void draw_sys(void)
       snprintf(b, sizeof(b), "dF %u/%ld", (unsigned)god_frame_heap_moves(),
                (long)god_frame_heap_worst());
       rd_text_right(OLED_W - 2, 43, RD_FONT_TINY, b);
+      break;
+    }
+    case GD_SYS_POWER: {
+      draw_title(S(STR_GOD_POWER));
+      // ACT/DIM/IDL/SLP, and the rung in force is bracketed. The four labels
+      // are ASCII scaffolding for an operator, not user-facing prose.
+      static const char* const kRung[PWR_STATE_COUNT] = { "ACT", "DIM", "IDL", "SLP" };
+      const uint8_t st = pwr_state();
+      snprintf(b, sizeof(b), "state  %s%s%s",
+               st < (uint8_t)PWR_STATE_COUNT ? "[" : "",
+               st < (uint8_t)PWR_STATE_COUNT ? kRung[st] : "?",
+               st < (uint8_t)PWR_STATE_COUNT ? "]" : "");
+      rd_text(2, 27, RD_FONT_TINY, b);
+      // Loops per second per rung. A rung nobody has been in this run reads 0,
+      // which is the honest answer and not a measurement of 0/s.
+      snprintf(b, sizeof(b), "%u %u %u %u /s",
+               (unsigned)pwr_loops_per_s((uint8_t)PWR_ACTIVE),
+               (unsigned)pwr_loops_per_s((uint8_t)PWR_DIM),
+               (unsigned)pwr_loops_per_s((uint8_t)PWR_IDLE),
+               (unsigned)pwr_loops_per_s((uint8_t)PWR_SLEEP));
+      rd_text(2, 35, RD_FONT_TINY, b);
+      snprintf(b, sizeof(b), "slept  %lus", (unsigned long)(pwr_slept_ms() / 1000UL));
+      rd_text(2, 43, RD_FONT_TINY, b);
+      // The pin fact this whole design turns on, on the screen rather than only
+      // in a header: LIGHT sleep, both buttons, because PIN_BTN_L cannot wake
+      // the chip from deep sleep on this map.
+      snprintf(b, sizeof(b), "wake L%u R%u light",
+               (unsigned)PIN_BTN_L, (unsigned)PIN_BTN_R);
+      rd_text(2, 51, RD_FONT_TINY, b);
       break;
     }
     case GD_SYS_RADIO: {

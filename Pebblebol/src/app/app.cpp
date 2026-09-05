@@ -36,6 +36,7 @@
 #include "../hardware/kv_nvs.h"
 #include "../hardware/gametime.h"
 #include "../hardware/input.h"
+#include "../hardware/power.h"    // the idle ladder (P6-C3)
 #include "../hardware/audio.h"
 #include "../ui/render.h"
 #include "../networking/net.h"
@@ -44,13 +45,25 @@
 #include "../ui/screen_error.h"   // the ERROR screen's retry / LED bindings
 #include "../networking/webui.h"
 #include "../dev/godmode.h"
+#include "state_machine.h"       // sm_current(): the power ladder's release hook reads it
 // data/index_html.h is deliberately NOT included: networking/webui.cpp is its
 // single translation unit (a second inclusion doubles the page blob in .rodata).
 
-// Guard rail for the 1 Hz scheduler: a stall longer than this (a long offline
-// catch-up, an NVS write storm) resynchronises instead of firing a burst of
-// catch-up ticks.
-#define NT_TICK_RESYNC_MS   4000UL
+// Guard rail for the 1 Hz scheduler. NT_TICK_MAX_OWED_S is in config.h beside
+// the sleep slices, because it is the same number seen from the other side.
+//
+// P6-C3 RAISED IT FROM NT_TICK_RESYNC_MS's 4 s AND TURNED IT FROM A DROP INTO A
+// CHARGE, and the difference is the whole point of the sleep rung. Before, the
+// loop advanced g_tick_ms by exactly 1000 ms per pass and resynchronised past
+// anything longer than 4 s - so an 8 s light-sleep slice would have run ONE
+// second of simulation and thrown the other seven away, which is a pet whose
+// timers stop while it sleeps (tests/test_care.cpp measures that shape). The
+// bound still exists for the case it was written for: a stall is not elapsed
+// game time and must not be charged.
+static_assert((uint32_t)NT_TICK_MAX_OWED_S * 1000UL > (uint32_t)PWR_SLEEP_SLICE_MS,
+              "a sleep slice must fit inside the tick scheduler's catch-up "
+              "bound, or the seconds the device slept would be resynchronised "
+              "away instead of charged to the pet");
 
 // Gestures drained per loop(). input_poll() hands out one queued gesture per
 // call; four is more than a human can generate inside one pass.
@@ -74,13 +87,31 @@ static uint8_t  g_clock_was_valid = 0;     // edge detector for a landing calibr
 static uint8_t  g_nvs_ok          = 0;
 static uint8_t  g_display_ok      = 0;     // rd_begin() answered on the I2C bus
 
+// THE POWER LADDER'S OWN IDLE CLOCK (P6-C3). millis() of the last gesture this
+// file dispatched. hardware/power.h says why it is not sm_idle_ms(): the IDLE
+// rung releases the radio by navigating, and a navigation resets the NAVIGATION
+// idle clock, so the ladder would have reset its own timer at the instant it
+// arrived and oscillated for ever.
+static uint32_t g_input_ms       = 0;
+// A press that ended a light sleep was aimed at the DEVICE - the panel was dark
+// - so the first gesture inside this window is consumed for the wake and never
+// reaches the screen. The window exists so that a wake nobody followed up on
+// cannot swallow an unrelated press a minute later.
+#define NT_WAKE_SWALLOW_MS  1500UL
+static uint32_t g_wake_ms        = 0;
+static uint8_t  g_wake_armed     = 0;
+
 // =============================================================================
 //  THE TWO CLOCKS persistence/save_manager.cpp CANNOT COMPUTE ITSELF
 //  A monotonic millisecond counter for the flash-wear filter, and the wall
 //  clock for saved_epoch. Injecting them is what keeps the save policy pure and
 //  host-testable (save_manager.h).
 // =============================================================================
-static uint32_t clock_ms(void)    { return millis(); }
+// gt_mono32(), not millis(): the wear filter defers a write by a millisecond
+// period, and a period measured in UPTIME would be paused for the whole of a
+// sleep - so the first tick after a ten-minute sleep would find the last write
+// "recent" and defer again. gametime.h says which clock decides what.
+static uint32_t clock_ms(void)    { return gt_mono32(); }
 static uint32_t clock_epoch(void) { return gt_now(); }
 
 // =============================================================================
@@ -526,8 +557,11 @@ static void boot_absence(void)
     const BootKind bk       = boot_kind();
     const bool     real_gap = (g_boot_last_seen >= (uint32_t)NT_EPOCH_SANE_MIN) &&
                               (absence_s != 0u);
-    if (bk == BOOT_FIRST_RUN || bk == BOOT_CRASH || bk == BOOT_SOFT_RESET ||
-        !real_gap) {
+    // The list is nt_boot_charges_absence() in core/nt_types.h now, so this
+    // file and tests/test_clock.cpp read the same one. BOOT_DEEPSLEEP is in the
+    // charging set: a sleep gap IS elapsed time, and P6-C3's ladder is the
+    // thing that makes the device produce one on purpose.
+    if (!nt_boot_charges_absence(bk) || !real_gap) {
       known      = 1;     // nothing was abandoned: charge the true zero
       absence_s  = 0;
     }
@@ -548,6 +582,64 @@ static void boot_absence(void)
   ui_note_events(sim_take_events());
   (void)gs_save_active(true);
 }
+
+// =============================================================================
+//  THE POWER LADDER'S FOUR HOOKS (P6-C3, hardware/power.h)
+//  The ladder is pure and knows nothing about Config, the panel, the radio or
+//  the store. These four are the whole of what it can do to the device, and
+//  each one is a single call into the module that already owns that thing.
+// =============================================================================
+static void pwr_hook_dim(bool on)
+{
+  // Through ui, not through rd_contrast_ramp(): ui.cpp's bright_service() is
+  // the one owner of the contrast base and already arbitrates the user's
+  // brightness against the asleep-pet dim. A second writer would fight it on
+  // whichever of the two moved last.
+  ui_note_power_dim(on);
+}
+
+static void pwr_hook_panel(bool on)
+{
+  rd_power(on);
+}
+
+static void pwr_hook_release(void)
+{
+  // NOTHING TO RELEASE FROM HOME, and skipping it there is not an optimisation.
+  // The radio is only ever held by the screen that asked for it - NETWORK's scan
+  // job, CREATOR's access point - and both give it back in their own leave()
+  // hook, so on HOME it is already off. Re-entering HOME anyway would re-run its
+  // enter hook, cut the shared interpolators and close whatever modal was up,
+  // every time the device idled.
+  if (sm_current() == SCR_HOME) return;
+
+  // *** THE CARRIED RADIO DEBT, DISCHARGED HERE AND NOWHERE ELSE ***
+  // NOT net_request(RADIO_OFF). ui_home() navigates; sm_goto() runs the
+  // leaving screen's leave() hook; network_leave() calls wifi_scan_cancel(),
+  // which is the single idempotent path that stops the driver and releases the
+  // radio exactly once - and, inside wifi_down(), calls WiFi.scanDelete() on
+  // the per-access-point array the driver heap-allocated. Going round that
+  // would leave the job WSCAN_RUNNING with stopped == 0: wifi_scan_is_busy()
+  // would go on answering true to this very ladder, and the next poll would
+  // report FAILED to a player who did nothing. CREATOR's leave hook releases
+  // the AP the same way. tools/check.sh gates hardware/power.* for the radio
+  // call; tests/test_power.cpp is the case that watches the job end CANCELLED.
+  ui_home();
+}
+
+static void pwr_hook_persist(void)
+{
+  // Once, on the way into IDLE, while the device is definitely awake and a
+  // clean save is still cheap. save_touch_lastseen() first: without it the
+  // absence baseline is however long ago the last 1 Hz tick was, and a sleep
+  // measured from a stale baseline charges the awake time too.
+  save_touch_lastseen(gt_now());
+  (void)gs_save_active(true);
+}
+
+static const PowerHooks kPowerHooks = {
+  &pwr_hook_dim, &pwr_hook_panel, &pwr_hook_release, &pwr_hook_persist
+};
 
 // =============================================================================
 //  SETUP
@@ -685,7 +777,16 @@ void app_setup(void)
   // every question above is moot until the user has a display again.
   if (!g_display_ok) ui_note_display_failure();
 
-  g_tick_ms        = millis();
+  // THE POWER LADDER, last: it must not be able to dim, blank or sleep the
+  // device while the boot pipeline above is still putting questions on the
+  // panel, and pwr_begin() starts it at PWR_ACTIVE with nothing applied.
+  pwr_bind(&kPowerHooks);
+  pwr_begin();
+
+  g_tick_ms         = millis();
+  g_input_ms        = g_tick_ms;      // the boot itself counts as activity
+  g_wake_ms         = 0;
+  g_wake_armed      = 0;
   g_clock_was_valid = gt_is_valid() ? 1u : 0u;
 
   Serial.printf("[nt] boot=%u nvs=%u load=%u slot=%u stage=%u free=%u\r\n",
@@ -699,14 +800,23 @@ void app_setup(void)
 //  The ONLY place the simulation advances. millis() here is scheduling, not
 //  game time: how far the world moves is sim_step_seconds() (1 s, or the god
 //  mode multiplier), exactly as the layering rule requires.
+//
+//  `owed` is how many WHOLE SECONDS of real time this call is being asked to
+//  charge - 1 on an ordinary pass, more only when the CPU was stopped by the
+//  power ladder (hardware/power.h) and the loop is settling up on the far side.
+//  It multiplies the step, so every consumer below - the care sim, the XP
+//  ledger, the carry drip, the activity score - sees one longer second rather
+//  than a special case, which is exactly the shape god mode's speed multiplier
+//  already put through here.
 // =============================================================================
-static void logic_tick(void)
+static void logic_tick(uint32_t owed)
 {
   SimEnv env;
   build_env(env);
   sim_set_env(env);               // every tick, not once at boot
 
-  const uint32_t step = sim_step_seconds();
+  if (owed == 0u) owed = 1u;
+  const uint32_t step = sim_step_seconds() * owed;
   sim_tick(step);
 
   // XP from carried time (plan P3-C2): the ledger refills on real time, and a
@@ -782,22 +892,49 @@ void app_loop(void)
 {
   const uint32_t ms = millis();
 
+  // --- 0. the power ladder's bookkeeping ------------------------------------
+  pwr_note_loop(ms);              // DIAG's loop rate, counted against the rung
+
+  // A light sleep that ended on a button, rather than on its own timer. The
+  // panel was dark, so that press was aimed at the device: arm the swallow
+  // window and count it as activity so the ladder climbs straight back up.
+  if (pwr_take_wake()) {
+    g_wake_ms    = ms;
+    g_wake_armed = 1;
+    g_input_ms   = ms;
+  }
+  if (g_wake_armed && (uint32_t)(ms - g_wake_ms) > NT_WAKE_SWALLOW_MS) {
+    g_wake_armed = 0;             // nobody followed it up; stop swallowing
+  }
+
   // --- 1. input -------------------------------------------------------------
   for (uint8_t i = 0; i < NT_GESTURES_PER_LOOP; ++i) {
     const Gesture g = input_poll();
     if (g == GST_NONE) {
       break;
     }
+    g_input_ms = ms;              // the ladder's idle clock; see g_input_ms
+    if (g_wake_armed) {
+      g_wake_armed = 0;           // this is the press that did the waking
+      continue;
+    }
     ui_handle(g);
   }
 
   // --- 2. logic, at 1 Hz of REAL time --------------------------------------
-  if ((uint32_t)(ms - g_tick_ms) >= 1000UL) {
-    g_tick_ms += 1000UL;
-    if ((uint32_t)(ms - g_tick_ms) >= NT_TICK_RESYNC_MS) {
+  // WHOLE SECONDS OWED, CHARGED IN ONE CALL. Normally exactly one; more only
+  // when the power ladder stopped the CPU for a slice, which is real elapsed
+  // time and must reach the pet. NT_TICK_MAX_OWED_S is where a sleep stops
+  // being a sleep and starts being a stall - see the macro.
+  uint32_t owed = (uint32_t)(ms - g_tick_ms) / 1000UL;
+  if (owed != 0u) {
+    if (owed > (uint32_t)NT_TICK_MAX_OWED_S) {
       g_tick_ms = ms;             // long stall: resync, never burst
+      owed      = 1u;
+    } else {
+      g_tick_ms += owed * 1000UL;
     }
-    logic_tick();
+    logic_tick(owed);
   }
 
   // --- 3. per-loop pumps that own presentation timing ----------------------
@@ -805,14 +942,28 @@ void app_loop(void)
   audio_service(ms);              // one tone step at most; never blocks (P6-C1)
   god_service();                  // soak log, serial genome paste
 
-  // --- 4. render ------------------------------------------------------------
-  rd_set_fps(ui_fps());
-  if (rd_begin_frame()) {
+  // --- 4. the power ladder --------------------------------------------------
+  // Before the render, so a rung entered on this pass owns this pass's frame
+  // rate. `held` is the plan's "a screen holding a radio job counts as
+  // activity": while a scan is in flight the ladder is clamped at DIM and
+  // cannot reach the rung that drops the radio.
+  PowerInput pin;
+  pin.idle_ms = (uint32_t)(ms - g_input_ms);
+  pin.held    = ui_radio_job_busy() ? 1u : 0u;
+  (void)pwr_service(pin);
+
+  // --- 5. render ------------------------------------------------------------
+  // pwr_fps() CLAMPS what the screen asked for. It has to be applied here and
+  // not set once by the ladder, because this line runs every pass and would
+  // otherwise put the screen's rate straight back.
+  rd_set_fps(pwr_fps(ui_fps()));
+  const bool drew = rd_begin_frame();
+  if (drew) {
     ui_draw();
     rd_end_frame();
   }
 
-  // --- 5. radio ------------------------------------------------------------
+  // --- 6. radio ------------------------------------------------------------
   // NO POLICY HERE. The radio is OFF at boot and stays off:
   // the screen that needs it asks for it and releases it on the way out -
   // QR owns RADIO_WIFI, SOCIAL owns RADIO_BLE. net_service() only pumps
@@ -821,4 +972,34 @@ void app_loop(void)
   net_service();
   web_service();
   ble_scan_service();
+
+  // --- 7. yield -------------------------------------------------------------
+  // AUDIT RISK 16: the loop must not run at 100 % duty cycle. Two rungs of one
+  // rule, and both of them measure "how long until this loop owes anything",
+  // which is the next 1 Hz logic tick.
+  //
+  //   ACTIVE / DIM  ->  delay(1). Cheap, keeps input_poll() well inside
+  //                     INPUT_POLL_MS, and costs nothing to be wrong about.
+  //   IDLE / SLEEP  ->  pwr_yield() STOPS THE CPU until the next tick or a
+  //                     button. The wake is a hardware level interrupt on both
+  //                     pins, so a press cannot be missed however long the
+  //                     slice is - which is why this is better than polling
+  //                     with a long delay(), not merely cheaper.
+  //
+  // The slice IS the tick cadence below DIM: IDLE's is one second, so the pet
+  // goes on ticking at 1 Hz for a player who is probably still in the room;
+  // SLEEP's is PWR_SLEEP_SLICE_MS, and the seconds it swallowed are charged in
+  // one logic_tick(owed) on the far side. Nothing is lost either way, because
+  // `owed` is computed from the clock and not from a count of passes.
+  const uint32_t slice = pwr_slice_ms();
+  if (slice != 0u) {
+    (void)pwr_yield(slice);
+  } else if (!drew && !pin.held) {
+    delay(1);                     // no frame was due and no job is pending
+  }
+  // The `!pin.held` exception is the plan's own wording and it is worth naming
+  // what it costs: while a scan is in flight ACTIVE and DIM spin without the
+  // millisecond. It is bounded by WIFI_SCAN_TIMEOUT_MS (12 s) and it happens
+  // with the radio already drawing far more than the core does, so it is the
+  // cheap half of an expensive operation - but it is a spin, not a nap.
 }

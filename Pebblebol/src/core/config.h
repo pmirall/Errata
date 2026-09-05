@@ -189,6 +189,40 @@ static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
 #define EGG_RUB_WINDOW_MS       20000UL
 
 // =============================================================================
+// 6b. POWER STATES (P6-C3, spec section 67 "Device sleeps correctly")
+//     The idle ladder hardware/power.h implements. Every threshold is measured
+//     from sm_idle_ms(), i.e. from the last gesture, and each rung is a
+//     SUPERSET of the one above it: DIM only dims, IDLE also drops the panel
+//     and the radio, SLEEP also stops the CPU between logic ticks.
+// =============================================================================
+#define PWR_DIM_MS              30000UL      // ACTIVE -> DIM
+#define PWR_IDLE_MS             120000UL     // DIM    -> IDLE  (2 min)
+#define PWR_SLEEP_MS            600000UL     // IDLE   -> SLEEP (10 min)
+// The DIM rung's contrast. It is applied THROUGH ui.cpp's bright_service(),
+// which is already the one owner of the contrast base (the user's brightness
+// and the asleep-pet dim are the other two inputs), so the ramp duration is
+// that function's asymmetric one - slow down, quick up - and not a fourth
+// number here.
+#define PWR_DIM_CONTRAST        40
+#define PWR_IDLE_FPS            1            // the panel is off; this is the floor
+// The longest the CPU may be stopped in one go, per rung. IDLE stays inside one
+// logic tick so the pet keeps ticking at 1 Hz for a player who is still nearby;
+// SLEEP coalesces up to PWR_SLEEP_SLICE_MS of them into a single wake, and
+// app.cpp charges the whole slice to the simulation on the far side. Both are
+// bounded by NT_TICK_MAX_OWED_S, which is what stops a slice from being
+// resynchronised away instead of charged.
+#define PWR_IDLE_SLICE_MS       1000UL
+#define PWR_SLEEP_SLICE_MS      8000UL
+// Whole seconds app_loop() will CHARGE to the simulation in one logic tick.
+// Past it the 1 Hz scheduler resynchronises instead of firing a burst, because
+// past it the gap is a stall (a long offline catch-up, an NVS write storm) and
+// a stall is not elapsed game time. It lives beside the slices because it is
+// the same number seen from the other side: a slice wider than this bound would
+// be seconds the device really slept and the pet never received. app.cpp
+// static_asserts the pair, and tests/test_power.cpp names it.
+#define NT_TICK_MAX_OWED_S      16u
+
+// =============================================================================
 // 6. UI NAVIGATION
 // =============================================================================
 #define UI_AUTORETURN_MS        20000UL      // every screen except S0 and S4

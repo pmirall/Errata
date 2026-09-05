@@ -187,6 +187,31 @@ enum BootKind : uint8_t {
   BOOT_COUNT
 };
 
+// -----------------------------------------------------------------------------
+// nt_boot_charges_absence(k)
+//   Does this boot kind describe an interval that REALLY ELAPSED, and may
+//   therefore be charged to the pet as an absence?
+//
+//   THE ONE THAT MATTERS IS BOOT_DEEPSLEEP, AND IT ANSWERS TRUE. A timed wake
+//   is not a restart: the sleep interval is elapsed game time and care, box
+//   recovery and the cooldown table all have to be charged over it exactly as
+//   they are after a power cut (hardware/boot.cpp says the same thing in prose;
+//   v1 folded ESP_RST_DEEPSLEEP into BOOT_SOFT_RESET and lost it). The three
+//   that answer false do so for three different reasons: BOOT_FIRST_RUN has
+//   nobody to have abandoned, BOOT_CRASH is the firmware dying and must never
+//   be dressed up as neglect, and BOOT_SOFT_RESET is a ~0 s gap.
+//
+//   This lives here, as a pure inline over the enum, so app.cpp's
+//   boot_absence() and a host test read the SAME list. It used to be four
+//   literals inside one `if` in app.cpp, where nothing could see it: adding
+//   BOOT_DEEPSLEEP to that list would have silently stopped every sleep from
+//   charging, with no test able to fail (tests/test_clock.cpp now has one).
+// -----------------------------------------------------------------------------
+inline bool nt_boot_charges_absence(BootKind k)
+{
+  return !(k == BOOT_FIRST_RUN || k == BOOT_CRASH || k == BOOT_SOFT_RESET);
+}
+
 // Daily wish.
 enum WishId : uint8_t {
   WISH_NONE = 0,

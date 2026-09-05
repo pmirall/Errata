@@ -386,6 +386,7 @@ enum StrId : uint16_t {
   STR_GOD_HEAP,
   STR_GOD_RADIO,
   STR_GOD_STORE,
+  STR_GOD_POWER,
 
   // --- 34b. feedback lines -------------------------------- <= 25 ch @ 5x8 --
   STR_GOD_PASTE,
@@ -1030,6 +1031,7 @@ inline constexpr const char* const ES[] = {
   /* STR_GOD_HEAP */              "MEMORIA",
   /* STR_GOD_RADIO */             "RADIO",
   /* STR_GOD_STORE */             "GUARDADO",
+  /* STR_GOD_POWER */             "ENERGIA",
 
   /* --- 34b. god mode: feedback lines --- */
   /* STR_GOD_PASTE */             "Pega 32 hex y ENTER.",

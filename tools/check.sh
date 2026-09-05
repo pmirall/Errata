@@ -553,4 +553,53 @@ if [ -f "$SKETCH/src/game/activity.h" ]; then
   [ "$n" -eq 0 ] || fail "act_take_gain() is called outside app/app.cpp ($n) - the activity reward is paid in exactly one place (game/activity.h)"
 fi
 
+# --- P6-C3: THE POWER LADDER NEVER NAMES THE RADIO ------------------------
+# THE CARRIED DEBT FROM THE PHASE-5 EXIT, AS A RED LINE. IDLE turns the radio
+# off after two minutes and the NETWORK screen is the one consumer that can be
+# mid-job: it owns a WifiScanJob and pumps it. A bare net_request(RADIO_OFF)
+# from the power path leaves that job WSCAN_RUNNING with stopped == 0 - so
+# wifi_scan_is_busy() goes on answering true to the very ladder that is trying
+# to sleep, and the next poll reports FAILED to a player who caused nothing -
+# while wifi_down()'s scanDelete() is what frees the driver's per-access-point
+# array. wifi_scan_cancel() is the single path that stops the driver and
+# releases the radio exactly once, and hardware/power.cpp reaches it by
+# NAVIGATING: ui_home() runs the leaving screen's leave() hook.
+#
+# NARROW, AND THE NARROWNESS IS THE POINT, exactly like the PIN_ and
+# act_take_gain() gates: it counts every mention of the radio API in
+# hardware/power.* and says nothing about what any other file does with it.
+# What it catches is the one-line "optimisation" that skips the navigation,
+# which is the failure that survives a review because it looks more direct.
+# Comment lines are dropped: power.h and power.cpp both explain the rule in
+# prose and must not trip their own gate.
+if ls "$SKETCH"/src/hardware/power.* >/dev/null 2>&1; then
+  n=$( { grep -rnE '\b(net_request|net_service|WiFi\.|esp_wifi_|btStart|BLEDevice)' \
+          "$SKETCH"/src/hardware/power.* || true; } \
+        | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "hardware/power.* names the radio directly ($n) - the power ladder releases the radio by navigating, so the owning screen's leave() hook cancels through wifi_scan_cancel() (hardware/power.h)"
+fi
+
+# --- P6-C3: THE EXPLORATION CLOCK SURVIVES A SLEEP ------------------------
+# ui_explore_clock() is the ONE place game/cooldowns.h's monotonic millisecond
+# clock comes from, and while gt_cal_state() == CAL_UNSET the cooldown table's
+# deadlines are the only thing between an uncalibrated device and free
+# encounters. millis() is UPTIME: it restarts at a deep-sleep wake and only
+# carries a light sleep because esp_timer happens to be resynchronised from the
+# RTC on the way out. gt_mono32() IS the RTC counter (hardware/gametime.h).
+#
+# This extracts the body of ui_explore_clock() and requires that it hands out
+# gt_mono32() and not millis(). It proves NOTHING about the other millis()
+# readers in ui.cpp, which are animation phase and modal lifetimes and are
+# meant to stay: this is about the one reading that decides a game outcome.
+if [ -f "$SKETCH/src/ui/ui.cpp" ]; then
+  body=$(sed -n '/^void ui_explore_clock/,/^}/p' "$SKETCH/src/ui/ui.cpp")
+  if [ -z "$body" ]; then
+    fail "ui_explore_clock() not found in ui.cpp - the gate that keeps the cooldown clock sleep-proof has lost its subject"
+  fi
+  n=$( { printf '%s\n' "$body" | grep -nE 'now_ms[[:space:]]*=[[:space:]]*millis' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "ui_explore_clock() hands out millis() ($n) - the cooldown table's deadlines must be measured in gt_mono32(), which survives a sleep"
+  n=$( { printf '%s\n' "$body" | grep -nE 'now_ms[[:space:]]*=[[:space:]]*gt_mono32' || true; } | wc -l )
+  [ "$n" -eq 1 ] || fail "ui_explore_clock() does not hand out gt_mono32() - see hardware/gametime.h on which clock decides a game outcome"
+fi
+
 echo "GATE OK"
