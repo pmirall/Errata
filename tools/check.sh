@@ -485,4 +485,26 @@ if [ -f "$SKETCH/src/networking/wifi_scanner.h" ]; then
   [ "$n" -eq 0 ] || fail "networking/wifi_scanner.h names a network identifier ($n) - ScanResult carries a salted hash and nothing that identifies a network (spec 44)"
 fi
 
+# 3. THE TWO BYTES THE SCAN RESULT DOES NOT USE STAY ZERO (spec section 44).
+#    Gate 2 and tests/test_exploration_hash.cpp's offset case both catch a RENAME:
+#    give those bytes a network's name and either the words appear in the header or
+#    the test stops compiling against a member that no longer exists. NEITHER CAN
+#    SEE A VALUE, and that gap was measured on this tree at the phase-5 exit rather
+#    than argued about: assigning them two bytes of a beacon name inside net.cpp's
+#    read path left `GATE OK` and `ALL PASS 37/37`. net.cpp is on the IMPURE list,
+#    tests/Makefile never compiles it, and the only host coverage of those bytes is
+#    a fake driver that zeroes them itself - so the leak that needs no rename had no
+#    gate at all, and two bytes of every beacon name would have flowed into 136 B of
+#    globals by way of the NETWORK screen's job.
+#
+#    This one is greppable where a host test is not. Count every assignment to one
+#    of those bytes under src/networking; count the ones whose right-hand side is a
+#    literal zero; require the two counts to agree. No comment filter and no
+#    exception list: a carve-out here would be the mistake gate 1 above records.
+if [ -d "$SKETCH/src/networking" ]; then
+  n_all=$(  { grep -rn "reserved\[[01]\][[:space:]]*=" "$SKETCH/src/networking" || true; } | wc -l )
+  n_zero=$( { grep -rn "reserved\[[01]\][[:space:]]*=[[:space:]]*0[uU]*[[:space:]]*;" "$SKETCH/src/networking" || true; } | wc -l )
+  [ "$n_all" -eq "$n_zero" ] || fail "a ScanResult padding byte is assigned something other than 0 ($((n_all - n_zero)) of $n_all under src/networking) - those bytes are padding, and a network name is exactly what fits in them (spec 44)"
+fi
+
 echo "GATE OK"

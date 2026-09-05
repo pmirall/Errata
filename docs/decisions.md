@@ -786,3 +786,199 @@ recovers **712,466 B / 23,504 B**, not the phase-1 audit's 721,632 / 23,688.
 - **Battery life.** D11 is still OPEN and is the single biggest open factor.
 - **The 1 h heap soak (P2-C12) and the ×3600 neglect soak (P3-C5)** are still pending first
   flash. **This firmware has still never run on a physical board.**
+
+## Phase-5 exit (P5-C5, 2026-09-05)
+
+**Variant matrix.** `tools/build_matrix.sh` compiles all seven feature variants with
+`--warnings all` and fails on any warning pointing into the sketch. Result at the
+`v0.5.0-explore` tag, every variant at **0 project warnings**:
+
+| Variant | Overrides | Flash (B) | Static RAM (B) | Δ flash vs 0.4.0-battle | Δ RAM vs 0.4.0-battle |
+|---|---|---|---|---|---|
+| baseline | — | 1,927,936 | 73,180 | +12,282 | +504 |
+| no-ble | `FEATURE_BLE=0` | 1,215,574 | 49,676 | +12,386 | +504 |
+| no-web | `FEATURE_WEB=0` | 1,299,260 | 52,236 | +13,132 | +504 |
+| no-god | `GOD_MODE_ENABLED=0` | 1,916,046 | 73,012 | +12,276 | +504 |
+| sh1106 | `DISPLAY_IS_SH1106=1` | 1,927,936 | 73,180 | +12,282 | +504 |
+| all-off | every `FEATURE_*`=0 + `GOD_MODE_ENABLED=0` | 526,824 | 24,912 | +11,556 | +504 |
+| **release** | `GOD_MODE_ENABLED=0 FEATURE_BLE=0` (D2) | **1,203,808** | **49,508** | +12,382 | +504 |
+
+**+504 on all seven**, which is not a coincidence and is worth stating: nothing exploration
+added lives inside a removable subsystem. The baseline sits at **80.3 % of `GATE_FLASH_MAX`**
+(472,064 B free) and **81.3 % of `GATE_GLOBALS_MAX`** (16,820 B free); the release build —
+the one that ships — is at **75.2 % of `GATE_RELEASE_FLASH_MAX`** and **76.2 % of
+`GATE_RELEASE_GLOBALS_MAX`**, the caps `tools/build_matrix.sh` has enforced since `f496a3a`,
+and **38.3 %** of the 3,145,728 B `app0` slot.
+
+**Where the phase-5 cost landed.** Per commit, each delta the difference of two adjacent
+commits' own recorded `flash=`/`globals=` lines; `git log --oneline v0.4.0-battle..HEAD` is
+exactly four commits and the four sum to the table above:
+
+| commit | chunk | flash | globals | after |
+|---|---|---|---|---|
+| `f496a3a` | budget + release caps (docs, `#define`s) | 0 | 0 | 1,915,654 / 72,676 |
+| `84a8dae` | P5-C1 scan-only Wi-Fi + P5-C2 cooldowns | **−1,572** | **−112** | 1,914,082 / 72,564 |
+| `6ec3355` | P5-C3 encounters + P5-C4 capture/items | **+13,854** | **+616** | 1,927,936 / 73,180 |
+| this commit | P5-C5 exit (documents, one gate, comments) | 0 | 0 | 1,927,936 / 73,180 |
+| | **phase 5** | **+12,282** | **+504** | |
+
+**A phase that begins with a rebate.** P5-C1 deleted the Wi-Fi station path — credentials,
+association, retry backoff, link-loss re-association, three `NetPhase` values, two `NetErr`
+values, the creator screen's station branch and the golden that froze it — and the passive
+scanner, the pure classifier, an 88-row token table and the cooldown module that replaced it
+are **smaller than what went**. This is the only phase so far whose first commit is negative
+on both axes.
+
+**Every one of the +616 B of globals is attributed, symbol by symbol** (`riscv32-esp-elf-nm
+-S` over the sketch objects of the baseline build), and the sum is checked against the linked
+image rather than asserted:
+
+| object | globals (B) | what holds them |
+|---|---|---|
+| `game/cooldowns.cpp` | 257 | `s_ram[32]` 256 + `s_dirty` — the per-boot fallback table |
+| `ui/screen_care.cpp` (bag mode) | 178 | `bag_render()::rows` 176 (8 × 22 of list text) + mode + cursor |
+| `ui/screen_network.cpp` | 143 | **`s_job` 136**, one `WifiScanJob`, + `s_t0` 4 + three phase bytes |
+| `ui/screen_encounter.cpp` | 19 | `s_enc` 8 + `s_cap` 4 + `s_reward` 2 + five flag bytes |
+| `networking/net.cpp` (new) | 5 | `s_scan_salt` 4 + `s_want_scan` |
+| `game/inventory.cpp` | 4 | `s_mod`, the armed battle modifier |
+| `game/{encounters,capture,corruption}.cpp` | **0** | pure functions over caller state |
+| | **606** | symbols |
+| | **10** | link alignment |
+| | **616** | **measured image delta** |
+
+The 136 B `WifiScanJob` is confirmed to be linked **once** by a second, independent
+measurement: rebuilding with `WIFI_SCAN_MAX_RESULTS=8` moves globals 73,180 → **73,116**,
+exactly −64 B, i.e. eight fewer 8 B rows in one buffer.
+
+**Against `docs/budget.md`'s allowance, phase 5 came in under both lines.** The phase-5 row
+read **15–25 KB of flash and 1.0–2.0 KB of globals**. Actual: **+12,282 flash** — below the
+low end, because P5-C1's deletion offset 1,572 B of the 13,854 the loop then cost — and
+**+504 globals**, which is **half the low end of that line and a quarter of its ceiling**. Two forecasts the phase-4 exit made about
+phase 5 can now be scored instead of repeated:
+
+- **"Phase 5 costs 0 new globals for its persisted state" — CORRECT.** `Inventory` and
+  `CooldownTable` were already members of the one `GameState`, and none of the +616 is a
+  persisted structure: it is the RAM fallback table, three screens' own fields and one
+  scan buffer.
+- **"What phase 5 actually adds is a `ScanResult` buffer and two screens at non-battle
+  scale" — RIGHT IN SHAPE, SHORT BY 435 B.** The buffer is 136 B and the two screens are
+  162 B together, which is the non-battle scale the forecast named. It did not anticipate the **257 B** per-boot cooldown
+  table (which exists so that one calibration cannot free all 32 networks at once) or the **178 B**
+  row cache the CARE screen's bag mode needs to render a list. Both are real and neither is
+  a battle screen: the largest single object phase 5 adds is smaller than phase 4's
+  `s_setup` alone.
+
+**Does the globals trend still close? Yes, and by more margin than at the last exit.** At
+the phase-4 exit, 17,324 B were free with six phases to go — 2,887 B a phase. Phase 5 spent
+**504**, 17 % of its share, leaving **16,820 B free with five phases to go, 3,364 B a
+phase**. `docs/budget.md`'s remaining projection (P6 0.3–0.8 K, P7 1.5–3.0 K, P8 1.5–3.0 K,
+P9 0.2–0.5 K, P10 0.5–1.5 K) totals **4.0–8.8 KB**, so the ending state moves from the
+document's ~80,700 to **~77,200–82,000 with BLE kept** and **~53,500–58,300 without**. The
+conclusion is unchanged and so is its shape: **it fits on flash either way; on globals it
+fits comfortably only if BLE goes**, and P7-C1 owns that deletion in the order the plan
+fixes — ESP-NOW up on a board first, BLE out second.
+
+**Host suite.** 37 binaries, **708 tests, 1,802,703 checks** (phase 4 shipped 31 / 603 /
+728,779). Phase 5 added 6 binaries, 105 tests and 1,073,924 checks and changed 4 existing
+binaries. Screen goldens 55 → **60**: six added (`network_scanning`, `encounter_wild`,
+`encounter_special`, `capture_ready`, `care_bag_empty`, `care_bag_two`), one **deleted**
+with the branch it froze (`creator_station`, a picture of a station link that no longer
+exists), one renamed (`soon_network` → `soon_trade`, because SCR_NETWORK is a real screen
+now) and two re-recorded (the CARE list gained a row). `tests/golden/battle_v1.txt` was
+re-recorded twice, once per content commit, and both times the check was the same: mask the
+`h=`/`hash=`/`content=` fields and diff — **empty both times**, so no balance number moved.
+
+**Content gates.** `python3 tools/gen_content.py --check` → **9 files in sync,
+CONTENT_VERSION 0x02B5** (phase 4: 8 files, 0x5B4A); `cd tools/content && python3 verify.py`
+→ **127 checks, 0 FAILED** (phase 4: 99). `tools/check.sh` now proves **20** tuning constants
+agree between `src/data/balance.h` and `tools/content/balance.json`, up from 13, and the gate
+list itself grew by three greps: no association call anywhere under `src/`, no network
+identifier named in `networking/wifi_scanner.h`, and — added at this exit — every assignment
+to `ScanResult`'s padding pair under `src/networking` a literal zero.
+
+**The third gate exists because the first two could not see the defect, and that was
+measured, not argued.** Assigning those two padding bytes two bytes of a beacon name inside
+`net.cpp`'s scan read path left **`GATE OK` and `ALL PASS 37/37`**: `net.cpp` is on
+`check.sh`'s IMPURE list, `tests/Makefile` never compiles it, and the only host coverage of
+those bytes is a fake driver that zeroes them itself. The existing layers catch a **rename**
+— the header grep bites, and the offset case stops compiling because it names the member —
+and neither can see a **value**. With gate 3 in place the same planted line fails by name.
+
+**A MESSAGE THAT COULD NOT FIRE, in the matrix's own cap check.** `tools/build_matrix.sh`
+verifies the release build against `GATE_RELEASE_*_MAX` and has an `else` arm reading
+`MATRIX FAIL: could not read the release build's size line`. That arm was **unreachable**:
+under `set -euo pipefail`, `rf=$(printf … | grep -oE 'flash=[0-9]+' | cut …)` dies on the
+assignment when the grep matches nothing, so a failed release build ended the run with exit
+1 and **no named reason at all**. Reproduced against the original file with a stub builder
+that fails the release variant, before changing anything, so the finding is pre-existing
+(`f496a3a`) and not introduced by this exit's edit to the same block. Fixed with the house
+`{ … || true; }` form and then driven four ways — pass, flash cap breached, globals cap
+breached, release build failing — each ending with a named line. It is the same defect the
+dormant `WiFi.begin(` gate had when P5-C1 armed it, which is twice now in one phase: **a
+gate whose grep can abort the thing it guards is this repository's most reliable way of
+producing a check that cannot fail.**
+
+**A ledger that did not add up, found by a verifier and fixed here.** `docs/budget.md`
+attributed the 136 B `WifiScanJob` **twice** — once inside the +408 the P5-C1 probe
+predicted, once inside the +208 it gave for the new screens — while the same document
+asserts 408 + 208 = 616. The sentence was the one offered as *evidence* for the phases 6–10
+projection, and it gave 208 B where the measured figure is 344 — 65 % more than it said. Which paragraph was wrong was
+measured rather than reasoned about (the two measurements above), and only that paragraph
+changed: **the three surfaces hold 344 B, of which 136 is a buffer**. This is the second
+exit in a row to find its own cost ledger wrong in the same way — the P4-C6 follow-up found
+"P4-C1 and P4-C2 moved the baseline not at all", true of globals and false of flash by
+3,022 B. Two instances is a pattern, and the cheap defence is the one used here: make the
+per-object attribution sum to the measured image delta, and print both.
+
+**Sanitizers.** `make -C tests check` under `-fsanitize=address,undefined
+-fno-sanitize-recover=all` → **ALL PASS 37/37, 1,802,703 checks, zero ASan reports, zero
+UBSan runtime errors**, so all six of phase 5's new binaries are clean under both. Run by
+hand on a COPY of the tree, deliberately not in `tools/check.sh`, because the gate must build
+the firmware on a toolchain that does not have these sanitizers.
+
+**It now needs TWO lines neutralised, not one, and the count is a leading indicator rather
+than noise.** The phase-4 exit reported one: `data/evolution_table.h:112`, where GCC 13.3
+will not fold `&SPECIES_TABLE[0] == nullptr` inside a `constexpr` evaluation under ASan.
+Phase 5 adds the second, `data/encounter_table.h:336` (`&ITEMS_TABLE[0] == nullptr`, inside
+`encounter_item_rows_have_a_drop()` — one of the guards this phase added). Both are the same
+pre-existing compiler limitation and both sit in GENERATED headers, so the count grows by one
+every time `gen_content.py` emits another compile-time guard that null-checks a table
+pointer. That is the cost of the guards, it is real, and it is worth a line here so the next
+exit does not rediscover it: at some point the fix is one shape of guard in the generator,
+not N neutralised lines in a hand-copied tree.
+
+### What phase 5 did NOT measure, stated as unmeasured
+
+- **No radio has ever scanned anything.** Every scan in every test came from a fake
+  `WifiScanDriver` behind the four-function seam that exists so the 12 s timeout and the B
+  cancel could be host-driven at all. §67's "Wi-Fi scanning works" and "Wi-Fi shuts down
+  after use" are therefore **left unticked**, and the P5-C5 bench line — NETWORK → scan →
+  encounter within ≈ 5 s, radio off afterwards, a cooldown surviving a power cycle — is
+  **not done**. What IS true and was not true at P5-C1: the scanner has a caller, so
+  `--gc-sections` no longer drops it from the image these figures measure.
+- **The salted hash's collision behaviour is arithmetic, not a measurement over real air.**
+  48 bits of hardware address folded into 32 bits of FNV-1a; a 4,000-input sweep shows no
+  zero output after the fold, and nothing has ever been scanned to say how many distinct
+  access points a real room produces.
+- **The evolution key opens nothing at this roster**, and the phase-5 exit says so in those
+  words rather than "item 9 does something": debt 4 is discharged for the **class** and the
+  **consumer** — item 9 has `ITEM_KLASS_EVOLUTION`, is obtainable (the HIDDEN drop row), and
+  is offered to the rules and **kept** when none bites — and **not for the effect**, because
+  `evolution.json`'s single `EVOC_ITEM` rule is species 53 → 54 and 53 is past the 36-species
+  prefix. `the_evolution_key_has_its_own_class_and_no_shipped_rule_spends_it` asserts that
+  emptiness, so the day P9 lands the rule the case fails and points at the paragraph.
+- **One mutant survives.** Deleting `cap_attempt()`'s `validate_pebble()` post-condition
+  leaves every host case green, because with a sealed genome the validator answers `VR_OK` on
+  all 1,080 roster × level rows and the post-condition has no reachable falsifier at this
+  roster — including under adversarial caller inputs, since `box_new_pebble()` clamps the
+  level and a bad species is refused before construction. The **pre**-check is where the
+  requirement bites and it is covered: dropping it turns all 1,080 rows red by name.
+- **One commit title in this phase is wider than its own tree and cannot be edited.**
+  `84a8dae` ends "…cooldowns that an uncalibrated clock cannot farm". What the design
+  actually prevents is the CATASTROPHIC farm — one calibration freeing all 32 rows at once
+  — and `game/cooldowns.h` says plainly that an uncalibrated device can still farm by
+  rebooting, which is a trade and not a fix. The header, this section, the CHANGELOG and
+  the §67 tracker all state the limit; the commit title stays as history.
+- **The 1 h heap soak (P2-C12), the ×3600 neglect soak (P3-C5) and every battery figure
+  (D11)** are still pending first flash. **This firmware has still never run on a physical
+  board.**

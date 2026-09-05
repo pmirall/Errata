@@ -17,6 +17,17 @@
 //  the passive scan (networking/wifi_scanner.h) and the creator's own access
 //  point, and neither one associates to anything.
 //
+//  WHAT THE GATE IS, EXACTLY (narrowed at the phase-5 exit): ONE grep for ONE
+//  spelling of ONE call. It catches the regression that actually happens - the
+//  line comes back - and it is not a proof that nothing can associate. Two ways
+//  past it were tried on this tree: spaces around the dot compile and pass, and
+//  the IDF entry point is not declared in this translation unit at all (no WiFi
+//  library header pulls in esp_wifi.h), so reaching it needs a deliberate second
+//  act - adding that include to a file no gate forbids it in. What makes the rule
+//  STRUCTURAL is the deletion itself: there are no credentials to associate with,
+//  no NPH_STA_* phase to enter and no retry state to re-enter it from. The gate
+//  guards the deletion; it does not replace it.
+//
 //  INVARIANT (binding): exactly one radio stack is resident.
 //    RADIO_OFF  -> no WiFi, no Bluedroid. Simulation + OLED only.
 //    RADIO_WIFI -> WiFi up as a scanner or as the AP portal. Bluedroid down.

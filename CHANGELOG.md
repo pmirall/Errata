@@ -8,7 +8,54 @@ Versions are tagged at phase boundaries of `PEBBLEBOL_IMPLEMENTATION_PLAN.md`; t
 tag for a phase is cut only when its gate (`tools/check.sh`) and its variant matrix
 (`tools/build_matrix.sh`) are both green.
 
-## [Unreleased] — Phase 5 (exploration), in progress
+## [0.5.0-explore] — Unreleased
+
+Phase 5 gives the pet a world outside itself, and the first thing it did was take a
+capability away. Wi-Fi stopped being a thing the device joins and became a thing it
+listens to: one passive scan, every access point turned into a salted 32-bit hash and one
+of six abstract categories on the device, the radio off again. No name and no hardware
+address survives the function that reads them, and the code that could have associated to
+a network is deleted rather than disabled, so §44's promise is a property of the tree and
+not of a setting. On top of that sensor sit an exploration loop — a NETWORK screen behind
+a twelve-second timeout with a cancel, a two-hour per-network cooldown that no single
+calibration can unlock wholesale (an uncalibrated device can still farm by rebooting, and
+the header says so), a seeded encounter, a capture that files a validator-clean Pebble
+through the tree's one constructor, and a bag the CARE screen can spend. There is still no
+radio in the sense that matters: none of this has run on a board.
+
+Measured at the exit, each figure re-derived by running the command rather than copied
+forward:
+
+- **Firmware:** baseline **1,927,936 B of flash and 73,180 B of static RAM**, up
+  **+12,282 / +504** on `0.4.0-battle`. All seven `build_matrix.sh` variants at 0 project
+  warnings; the release build (`GOD_MODE_ENABLED=0 FEATURE_BLE=0`, decision D2) is
+  **1,203,808 / 49,508** — **75.2 %** of `GATE_RELEASE_FLASH_MAX` and **76.2 %** of
+  `GATE_RELEASE_GLOBALS_MAX`, the caps `build_matrix.sh` has enforced since `f496a3a`.
+- **The phase cost 504 B of globals against a budget line of 1.0–2.0 KB**, and the two
+  halves pull opposite ways: P5-C1/C2 is a **rebate** of −1,572 / −112 (a deletion bigger
+  than what replaced it), P5-C3/C4 is **+13,854 / +616**. Six objects hold the whole +616
+  and `riscv32-esp-elf-nm` names them: the cooldown RAM table 257, the CARE bag's row cache
+  178, the NETWORK screen 143 (136 of it one `WifiScanJob` buffer), the ENCOUNTER screen
+  19, `net.cpp`'s scan salt and intent byte 5, the armed battle modifier 4 — 606 of symbols
+  and 10 of link alignment. `game/encounters.cpp`, `game/capture.cpp` and
+  `game/corruption.cpp` hold **zero**: they are pure functions over caller state.
+- **Host suite:** 31 → **37 binaries, 603 → 708 tests, 728,779 → 1,802,703 checks.** Six
+  new binaries (`test_exploration_hash`, `test_cooldowns`, `test_encounters`,
+  `test_capture`, `test_box_full_capture`, `test_inventory`) and four existing ones changed.
+  Screen goldens 55 → **60**: six added, one deleted with the branch it froze, one renamed.
+- **Content pack:** 8 → **9 generated files**, `CONTENT_VERSION` **0x5B4A → 0x02B5**,
+  `tools/content/verify.py` **99 → 127 checks, 0 FAILED**. `tools/check.sh` now proves
+  **20** tuning constants agree between `src/data/balance.h` and `tools/content/balance.json`
+  (13 before), and gained three gates: no association call under `src/`, no network
+  identifier named in `wifi_scanner.h`, and every write to `ScanResult`'s padding pair a
+  literal zero.
+
+**Two defects in this phase's own work were found by running something rather than reading
+it, and both are recorded where they happened**: an encounter picker whose second draw was
+conditioned on its first, which made one SPECIAL event unreachable in the only two
+categories that carry it (measured over 8,000 scans per category), and an eviction test
+that passed a mutant because the row it armed first was also the row that expired first.
+
 
 ### P5-C1 scan-only Wi-Fi · P5-C2 cooldowns
 
@@ -129,15 +176,94 @@ Every stage now derives its own seed from the encounter seed and a one-byte tag.
 
 **Measured.** Baseline **1,914,082 / 72,564 → 1,927,936 / 73,180** (+13,854 flash, +616 globals);
 `release` **1,190,000 / 48,916 → 1,203,808 / 49,508**. The +616 is the +408 the P5-C1 probe
-predicted for calling the scanner and the cooldown table at all, plus 208 for the two new screens,
-the CARE screen's bag mode and the inventory's four-byte armed modifier. **Phase 5 has spent 328
-of its 1–2 KB globals line, net of P5-C1's rebate.** Host suite **33 → 37 binaries, 643 → 708
-tests, 798,806 → 1,802,703 checks**.
+predicted for calling the scanner and the cooldown table at all, plus 208 the two new screens, the
+CARE bag mode and the inventory's armed modifier hold in their own right. **Phase 5 has spent 504
+of its 1–2 KB globals line, net of P5-C1's rebate** — this entry first said **328**, which is
+not 616 − 112 and is not any other pair of figures in the tree; the exit re-derived it and
+attributed all 616 symbol by symbol (`riscv32-esp-elf-nm`, `docs/budget.md` §3). Host suite
+**33 → 37 binaries, 643 → 708 tests, 798,806 → 1,802,703 checks**.
 
 `tests/golden/battle_v1.txt` was re-recorded again, for the same reason and with the same check:
 the pack changed, `battle_hash_basis()` mixes `CONTENT_VERSION`, and diffing the transcript with
 the hash fields masked out is empty — every event line is byte-identical. `care_list.pbm` and
 `care_list_back.pbm` moved because the CARE list gained a row.
+
+### Fixed (P5-C5 — what three hostile verifiers found in the exit tree)
+
+- **`docs/budget.md`'s own ledger did not add up, and it was the sentence offered as
+  evidence for the phases 6–10 projection.** The 136 B `WifiScanJob` was attributed twice —
+  once inside the +408 the P5-C1 probe predicted, once inside the +208 the paragraph two
+  below it gave for the new screens — while the same document says 408 + 208 = 616. Which
+  of the three paragraphs was wrong was **measured, twice and independently**: a build with
+  `WIFI_SCAN_MAX_RESULTS=8` moves globals by exactly **−64 B**, so exactly one job of 136 B
+  is linked and it is counted once; and `riscv32-esp-elf-nm` attributes all 616 B symbol by
+  symbol, agreeing to the byte. The three new surfaces hold **344 B**, not 208 — 136 of it
+  a buffer rather than screen state. The totals, the caps and the phase-5 figure are
+  unchanged; the arithmetic under them now closes.
+- **A leak that needed no rename had no gate at all.** `ScanResult`'s two padding bytes were
+  guarded by an offset test and by a grep for the words a network is named by — between them
+  a *rename*, from two directions. Neither can see a *value*: assigning those bytes two bytes
+  of a beacon name inside `net.cpp`'s read path left **`GATE OK` and `ALL PASS 37/37`**,
+  because `net.cpp` is on the impure list and `tests/Makefile` never compiles it. `check.sh`
+  gate 3 requires every assignment to that pair under `src/networking` to be a literal zero;
+  the same planted leak now fails the gate by name. Measured on this tree, both ways.
+- **`tools/build_matrix.sh` built the release variant twice** and said in a comment that this
+  "costs nothing but the comparison". It cost one whole compile: the seven-variant matrix was
+  eight builds. It is seven again, and the whole run is **8 m 11 s** wall on this machine.
+- **And the cap block's own failure message could never fire.** Found while re-testing the
+  block that change touches, against a stub builder that fails the release variant: under
+  `set -euo pipefail` a `grep` that matches nothing fails, the command substitution around it
+  fails with it, and the script **dies on the assignment** — so `MATRIX FAIL: could not read
+  the release build's size line` was unreachable and a failed release build ended the matrix
+  in silence with exit 1 and no named reason. **Pre-existing since `f496a3a`**, reproduced on
+  the original file before the fix, and it is the same shape as the dormant `WiFi.begin(` gate
+  P5-C1 armed — a gate that aborts the run instead of reporting. The house `|| true` form makes
+  the branch reachable; all four paths were then driven with the stub (pass, flash cap
+  breached, globals cap breached, release build failing) and each now ends with a named line. The cap check now reads the size line the loop already printed, which is also
+  the stricter reading — the capped figures cannot be a different compile's.
+- **Sentences narrowed to what the tree does.** `net.h` claimed a gate "counts them and fails
+  the build at anything but zero"; that gate is one grep for one spelling of one call, two
+  ways past it were tried on this tree, and what makes "never joins a network" structural is
+  the deletion, not the grep — the banner now says so. `wifi_scanner.h` claimed its two layers
+  covered the struct; they cover a rename, gate 3 covers the value, and the note that said the
+  offset case would *pass* a renamed member with eight green checks is corrected against a re-run:
+  the header-only swap **does not compile** (the test names the member at five sites), the swap
+  applied everywhere passes **24/24, 69,702 checks** — so `sizeof` and `offsetof` really cannot
+  tell one two-byte member from another, which is the argument's content — and the grep gate bites.
+  The mechanism was the compiler, not the assertion. The plan's P5-C1 line still quoted
+  `CONTENT_VERSION 0x54BD`, three content commits stale. **And this entry corrected itself
+  twice**: it said phase 5 had spent **328** globals (it is **504**, and 328 is not the
+  difference of any two figures in the tree), and its own opening called the cooldown one
+  "an uncalibrated clock cannot farm" — it stops one calibration freeing thirty-two rows and
+  it does not stop a reboot, which `cooldowns.h` has said all along. Commit title `84a8dae`
+  carries the same overstatement and is history; `docs/decisions.md` records that.
+
+### Not verified
+
+**This firmware has still never run on a physical board.** No ESP32-C3, no panel, no cells,
+and — the one that matters most for this phase — **no radio has ever scanned anything.**
+Every scan in every test came from a fake `WifiScanDriver` behind the four-function seam.
+`§67 "Wi-Fi scanning works"` and `"Wi-Fi shuts down after use"` are therefore left **unticked**:
+the code path is real and reachable (`--gc-sections` no longer drops the scanner, because the
+NETWORK screen calls it), the release-once-per-run property has six host cases, and neither
+fact is an observation on hardware. The P5-C5 bench line — NETWORK → scan → encounter within
+≈ 5 s, radio off afterwards, a cooldown surviving a power cycle — is **not done** and stays
+open in the plan.
+
+**The exploration loop has three known holes, all of them written into headers rather than
+left to be discovered.** An access point that rotates its hardware address reads as a new
+network on every scan and no cooldown can close that. An uncalibrated device can still farm
+by rebooting: with no trustworthy timestamp there is nothing to persist, so the per-boot RAM
+table trades a catastrophic farm (one calibration frees all 32) for a linear one. And the
+evolution key (item 9) has its class, its consumer arm and no lock at this roster — it is
+offered to the rules and kept when none bites; the rule that would spend it is species 53,
+past the 36-species prefix, and lands in P9.
+
+**One mutant survives and is reported rather than hidden.** Deleting `cap_attempt()`'s
+`validate_pebble()` post-condition leaves every host case green: with a sealed genome the
+validator answers `VR_OK` on all 1,080 roster × level rows, so the post-condition has no
+reachable falsifier at this roster. The *pre*-check is where the requirement bites and it is
+covered — dropping it turns all 1,080 rows red by name.
 
 ## [0.4.0-battle] — Unreleased
 
@@ -1335,6 +1461,7 @@ The plan cuts tags from Phase 2 onward, so Phase 1 has no `v0.1.0` tag; it is co
 - Repository archaeology: audit of the inherited sketch, the ten-phase implementation
   plan, the decisions log, and a CI skeleton.
 
+[0.5.0-explore]: https://github.com/pmirall/Pebblebol/commit/6ec3355
 [0.4.0-battle]: https://github.com/pmirall/Pebblebol/commit/250f73e
 [0.3.0-pet]: https://github.com/pmirall/Pebblebol/commit/e2004e7
 [0.2.0-core]: https://github.com/pmirall/Pebblebol/commit/db3feb3
@@ -1371,4 +1498,20 @@ The plan cuts tags from Phase 2 onward, so Phase 1 has no `v0.1.0` tag; it is co
      link stays at the last commit the remote actually has, and the repoint
      belongs in the FIRST COMMIT AFTER THE BRANCH IS PUSHED - at which point it
      should point at the exit commit, the way the 0.3.0-pet link points at
-     e2004e7. -->
+     e2004e7.
+
+     THE 0.5.0-explore LINK IS 6ec3355 AND IT DOES NOT RESOLVE YET. SAID
+     PLAINLY BECAUSE THE ALTERNATIVE IS WORSE. 6ec3355 is phase 5's last
+     commit of substance (P5-C3/C4) - the same role 250f73e plays for phase 4,
+     and the correct anchor for this entry. It is NOT on the remote: at the
+     phase-5 exit `git rev-parse origin/claude/repo-exploration-sync-bbonku`
+     is f496a3a, so the two exploration commits and this exit exist on one
+     machine, and this session was instructed not to push. The rule the 0.4.0
+     paragraph above states - link the last commit the remote actually has -
+     would have pointed 0.5.0-explore at f496a3a, which is the BUDGET commit:
+     it precedes every line of exploration code and would name the wrong thing
+     to a reader who could reach it. A link that is right and temporarily 404s
+     beats a link that resolves and lies, so the rule is narrowed rather than
+     followed: point at the phase's last substance commit, and say here when it
+     is not yet pushed. Both repoints - 0.4.0-battle to d21f20f and this one's
+     verification - belong in the first commit after the branch is pushed. -->

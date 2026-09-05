@@ -38,9 +38,27 @@
 // ONE ACCESS POINT, AS THE GAME IS ALLOWED TO SEE IT. 8 B.
 //
 // The layout is pinned by offset and not only by size, because a size-only
-// check cannot fail in the way that matters: swapping `reserved` for two bytes
-// of a network's name keeps sizeof at 8. tests/test_exploration_hash.cpp pins
-// every member's offset, and the grep gate covers the words.
+// check cannot fail in the way that matters: renaming the padding pair into two
+// bytes of a network's name keeps sizeof at 8. tests/test_exploration_hash.cpp
+// pins every member's offset and the grep gate covers the words.
+//
+// WHAT THOSE TWO CATCH, STATED AT THE WIDTH THAT WAS MEASURED (phase-5 exit).
+// Between them they catch a RENAME, from two directions: rename the pair here
+// and the gate's grep bites, while the test stops compiling because its offset
+// case names the member. (An earlier note claimed the layout case would PASS a
+// renamed pair with eight green checks. It cannot: the case names the member, so
+// a header-only rename is a compile error, and only a rename applied everywhere
+// would reach the assertion - which was run too, and then the suite passes 24/24
+// with 69,702 checks. The architectural point stands - sizeof and offsetof
+// genuinely cannot tell one two-byte member from another of the same width - but
+// the mechanism there is the compiler, not the assertion.)
+//
+// NEITHER CAN SEE A VALUE. Assigning the pair two bytes of a beacon name needs no
+// rename at all, and net.cpp - which is where a scan is read - is on check.sh's
+// IMPURE list and is never compiled by tests/Makefile, so no host case can reach
+// that assignment. Measured: the leak left GATE OK and ALL PASS 37/37. Gate 3 in
+// tools/check.sh is the third layer that closes it, by requiring every assignment
+// to the pair under src/networking to be a literal zero.
 // -----------------------------------------------------------------------------
 struct ScanResult {
   uint32_t net_hash;     // 0  salted, never 0 - net_classify.h derives it

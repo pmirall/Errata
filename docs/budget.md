@@ -86,10 +86,45 @@ LINK, TRADE, BREEDING, PIN, QR, and the DIAG expansion). None is as heavy as the
 screen, which carries a renderer and a 212 B engine state.
 
 **AND THE FIRST THREE OF THOSE TEN ARE IN, WHICH IS EVIDENCE FOR THAT SENTENCE RATHER THAN
-A RESTATEMENT OF IT.** SCAN, ENCOUNTER and the inventory surface together cost **+208 B of
-globals** outside the modules they drive, 136 of it one `WifiScanJob` - which is a BUFFER
-and not a screen. The battle screen's +2,304 remains the outlier by an order of magnitude
-and the projection below is unchanged.
+A RESTATEMENT OF IT.** SCAN, ENCOUNTER and the inventory surface together hold **344 B of
+globals** - the +616 less the 264 the cooldown table keeps and the 8 `net.cpp` keeps - and
+**136 of that 344 is one `WifiScanJob`, which is a BUFFER and not screen state**, leaving
+208 for the three surfaces' own fields. The battle screen's +2,304 remains the outlier by
+an order of magnitude and the projection below is unchanged.
+
+**This paragraph said "+208 B ... 136 of it one `WifiScanJob`" until the phase-5 exit, and
+that was this project's own signature defect: a ledger that does not add up.** The 136 was
+inside the 408 of the paragraph two above AND inside the 208 of the paragraph above it,
+while the document also said 408 + 208 = 616 - so one of the three had to be wrong, and the
+sentence offered as EVIDENCE for the phases 6-10 projection gave 208 B where the measured
+figure is 344 - 65 % more than it said. Which one was wrong was MEASURED, not reasoned about, twice and independently.
+**(1)** `tools/build.sh --quiet --variant probe8 --define WIFI_SCAN_MAX_RESULTS=8` gives
+`flash=1927936 globals=73116` against the baseline's 73,180: exactly **-64 B**, i.e. 8 fewer
+`ScanResult` rows of 8 B in exactly **one** linked `WifiScanJob`, so the 136 is in the +616
+once and not twice. **(2)** `riscv32-esp-elf-nm -S` over the sketch objects attributes the
++616 symbol by symbol, and the two halves agree to the byte:
+
+| object | globals (B) | what holds them |
+|---|---|---|
+| `game/cooldowns.cpp` | 257 | `s_ram[32]` 256 + `s_dirty` - the per-boot RAM table |
+| `ui/screen_care.cpp` (bag mode) | 178 | `bag_render()::rows` 176 (8 x 22 list text) + mode + cursor |
+| `ui/screen_network.cpp` | 143 | **`s_job` 136** + `s_t0` 4 + three phase bytes |
+| `ui/screen_encounter.cpp` | 19 | `s_enc` 8 + `s_cap` 4 + `s_reward` 2 + five flag bytes |
+| `networking/net.cpp` (new) | 5 | `s_scan_salt` 4 + `s_want_scan` |
+| `game/inventory.cpp` | 4 | `s_mod`, the armed battle modifier |
+| `game/{encounters,capture,corruption}.cpp` | **0** | pure logic, no file-scope state |
+| **symbols** | **606** | |
+| link alignment | 10 | |
+| **measured image delta** | **616** | |
+
+**The two attributions reconcile exactly, which is the check that makes them worth
+printing.** 143 + 178 + 19 + 4 = **344** is the three surfaces' own columns; 257 + 5 = 262
+is what the two modules behind them keep in symbols, and the 10 B of link alignment falls
+entirely on those two (257 -> 264, 5 -> 8), which is why the probe's link-level figures are
+264 and 8 where `nm`'s symbol sums are 257 and 5. Either way round the surfaces hold 344.
+The CARE bag's 176 B row cache is the single largest object of the three - larger than the
+scan buffer - and nothing in the earlier prose named it at all, which is the other half of
+why this enumeration was worth measuring instead of restating.
 
 | item | flash | globals |
 |---|---|---|
