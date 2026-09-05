@@ -111,7 +111,7 @@ static void en_on_recv(const esp_now_recv_info_t* info, const uint8_t* data, int
   const uint16_t n = (uint16_t)len;
 
   // rx_ctrl->rssi is a `signed rssi : 8` bitfield. Clamped rather than trusted,
-  // the same way ble_social.cpp:244-245 clamps BLE's int.
+  // the same way ble_social.cpp:244-245 clamped BLE's int (P8-C0; ed9b099).
   int8_t rssi = -128;
   if (info->rx_ctrl != nullptr) {
     const int r = (int)info->rx_ctrl->rssi;
@@ -230,8 +230,9 @@ void espnow_end(void)
   // UNREGISTER FIRST. After these two calls no producer exists, which is what
   // makes the memset of both rings below safe - the one case where storing 0
   // into head AND tail is correct, and it is correct only because the other
-  // writer is provably gone (ble_social.cpp:345-350 has the same reset with the
-  // opposite conclusion, because its producer was still running).
+  // writer is provably gone (ble_social.cpp:345-350 had the same reset with the
+  // opposite conclusion, because its producer was still running - P8-C0 deleted
+  // that file; ed9b099).
   (void)esp_now_unregister_recv_cb();
   (void)esp_now_unregister_send_cb();
   if (s_bound) (void)esp_now_del_peer(s_bound_addr);

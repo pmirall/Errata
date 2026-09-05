@@ -915,16 +915,34 @@ Every commit lists tasks (files), acceptance (the gate is implied; extras named)
 **WHAT PHASE 7 HANDS PHASE 8, AND WHAT IT DOES NOT.** Written at the P7-C6 exit so none of it
 is rediscovered. Five items; the first two are the ones that can stop phase 8 dead.
 
-1. **GLOBALS ARE THE BINDING CONSTRAINT NOW, AND PHASE 8 IS THE PHASE THAT WILL FEEL IT.**
-   `release` is at **87.4 %** of `GATE_RELEASE_GLOBALS_MAX` with **8,180 B free**, and phase 8
-   brings up an HTTP server, a 2 KB raw-body buffer (`CS_BODY_MAX`), a 48 KB page blob in
-   `.rodata` and a sprite staging area. `docs/budget.md` §3 forecast **1.5-3.0 KB of globals**
-   for phase 8; that fits, but only just, and phases 9 and 10 are behind it. **The lever is
-   BLE — 712,618 B of flash and 23,496 B of globals, three times the remaining headroom — and
-   it is blocked on one bench test.** If the two-board test passes, delete BLE FIRST and give
-   phase 8 the room; if it fails, phase 8 starts by measuring `no-web` against the caps,
-   because `no-web` is no longer the no-radio build (see item 4).
+1. **GLOBALS ARE THE BINDING CONSTRAINT, AND THE PARAGRAPH THAT USED TO BE HERE WAS WRONG
+   ABOUT WHY.** It read: *"The lever is BLE - 712,618 B of flash and 23,496 B of globals,
+   three times the remaining headroom - and it is blocked on one bench test."* **There was no
+   lever.** The `release` variant was `GOD_MODE_ENABLED=0 FEATURE_BLE=0`, so the image the
+   release caps police never contained BLE; that 23,496 B is `baseline` minus `no-ble`, a DEV
+   build figure quoted against a SHIPPING build's headroom. P8-C0 deleted BLE anyway (the owner
+   authorised it without the bench test - `docs/decisions.md`, "D2's LAST CLAUSE, CLOSED ON A
+   BET") and **release globals moved by sixteen bytes.**
+
+   **The number was right; the explanation was not.** `release` is at **87.4 %** of
+   `GATE_RELEASE_GLOBALS_MAX` with **8,196 B free**, and phase 8 brings up an HTTP server, a
+   2 KB raw-body buffer (`CS_BODY_MAX`), a 48 KB page blob in `.rodata` and a sprite staging
+   area. `docs/budget.md` §3 forecast **1.5-3.0 KB of globals** for phase 8: it fits, leaving
+   5.2-6.7 KB for phases 9 and 10. Tight, not critical. **The 48 KB page blob is `.rodata` and
+   costs FLASH** - release is at 79.3 % of a 1.6 MB cap with 331 KB free - so the row to watch
+   while writing the creator is globals, and the one thing in phase 8 large enough to matter on
+   its own is `CS_BODY_MAX`.
+
+   **WHAT P8-C0 IS ACTUALLY WORTH** is that `baseline` is now **1,281,500 / 56,980**, within
+   12,374 B of flash and 176 B of globals of the artefact, where it was 725 KB and 23.7 KB away.
+   `tools/check.sh` polices the baseline, so the gate now polices a build shaped like the one
+   that ships - which is phases 6 and 7's standing lesson applied to the gate itself.
 2. **NEITHER BENCH ITEM WAS RUN AND THE ELEVEN-ITEM LIST IS THE FIRST TASK ON A BOARD.**
+   **STILL TRUE AFTER P8-C0, AND MORE SO:** the BLE deletion went ahead on the owner's explicit
+   bet that ESP-NOW works, not on evidence that it does. Item 2 (two boards list each other) is
+   now the test that decides whether a `git revert` of the P8-C0 commit is needed, and that
+   revert restores BLE, `BlePeerInfo`, `RADIO_BLE`, the settle window and the `no-ble` variant
+   whole.
    P7-C1 wrote five items, P7-C2/C3 wrote five more, P7-C4/C5 wrote one; they are above, in the
    order to run them, and item 1 is the modem-sleep check. **Everything downstream — the BLE
    deletion, `breed_link.cpp`, the cross-pair trade rendezvous — waits on item 2 (two boards
@@ -954,6 +972,27 @@ is rediscovered. Five items; the first two are the ones that can stop phase 8 de
    binds — and where they cannot be, the difference belongs in a comment at the top of the
    fixture, not in a diff nobody reads.
 
+
+**P8-C0 Delete BLE** — S — *done 2026-09-05, one revertible commit*
+- [x] `networking/ble_social.{h,cpp}`, `FEATURE_BLE`, the fourteen `BLE_*` constants,
+  `BlePeerInfo`, `RADIO_BLE`, `net.cpp`'s BLE lifecycle and session counters, the three
+  `NERR_BLE_*` codes, the `no-ble` matrix variant and `app_loop()`'s `ble_scan_service()` rung.
+  **The settle window went with it** (`NPH_SETTLING`, `RADIO_SETTLE_MS`, `begin_settle()`,
+  `s_pending`, the deferred bring-up and both driver arms): it existed only because Bluedroid
+  and the Wi-Fi driver could not both be resident.
+- [x] `CF_BLE_ENABLED` (0x04) renamed `CF_RESERVED_BLE`, **value unchanged and still carried
+  through both directions of the v1/v2 conversion** - `tests/fixtures/config_v1.bin` has the bit
+  set and reusing 0x04 would make that fixture assert something it never recorded. Fresh devices
+  mint it clear.
+- [x] Every comment citing `ble_social.cpp:NNN` as precedent (discovery, rxring, transport,
+  protocol, taint, ui, godmode, test_link_transport) rewritten to
+  `git show ed9b099:Pebblebol/src/networking/ble_social.cpp` - a dangling line reference is
+  worse than none in a tree whose comments are the documentation.
+- [x] Measured: baseline 1,994,460 / 80,492 -> **1,281,500 / 56,980**; release 1,269,468 /
+  56,820 -> **1,269,126 / 56,804**. `nm` over the release `.elf`: no Bluedroid, no `BLEDevice`,
+  only the two `esp_bt_controller_*_mem_release` stubs the core links unconditionally.
+- [x] MATRIX OK on six variants (was seven), 0 project warnings; gate green 47/47.
+- [ ] **THE BENCH TEST IS STILL OWED.** §67 "Local multiplayer works" stays unticked.
 
 **P8-C1 PIN state** — S
 - [ ] `ConfigV2.creator_pin` generated at first CREATOR entry (random 4 digits, shown on the device only), `pin_fail_count` + `pin_lock_until` (5 failures → 60 s); `pin_ok()` (rewritten from scratch; the pre-P2-C5 body is at `git show aa2b7ee:Pebblebol/webui.cpp` and used the 64-bit accumulator fix) reads it from an `X-Pin` header or JSON field; PIN removed from the QR payload (`net_url`, net.cpp:653-671; §39).

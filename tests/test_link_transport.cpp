@@ -237,7 +237,8 @@ TEST(records_of_different_lengths_keep_their_own_exact_counts)
 }
 
 // rxring_drain() is the consumer emptying the ring by moving ITS OWN cursor.
-// ble_social.cpp:345-350 records what the other implementation costs.
+// ble_social.cpp:345-350 recorded what the other implementation cost (that file
+// went with BLE in P8-C0; `git show ed9b099:Pebblebol/src/networking/ble_social.cpp`).
 TEST(drain_empties_the_ring_from_the_consumer_side_and_leaves_the_producer_alone)
 {
   RingBox b;

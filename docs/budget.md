@@ -489,3 +489,69 @@ bench test.
 `release` is **1,269,468 / 56,820** = **79.3 % of `GATE_RELEASE_FLASH_MAX`** and **87.4 % of
 `GATE_RELEASE_GLOBALS_MAX`**; baseline **1,994,460 / 80,492** = 83.1 % / 89.4 %. The `app0`
 slot is 3,145,728 B, so the shipping image uses **40.4 %** of it.
+
+## 8. Phase 8, chunk 0 — BLE deleted, and §7's headroom claim corrected (measured 2026-09-05)
+
+**−712,960 flash / −23,512 globals on the baseline. −342 / −16 on release.**
+
+| build | v0.7.0-social | after P8-C0 | delta | against its cap |
+|---|---|---|---|---|
+| `baseline` | 1,994,460 / 80,492 | 1,281,500 / 56,980 | −712,960 / −23,512 | 53.4 % / 63.3 % |
+| `release` | 1,269,468 / 56,820 | 1,269,126 / 56,804 | **−342 / −16** | **79.3 % / 87.4 %** |
+| `all-off` | 578,868 / 26,388 | 578,510 / 26,364 | −358 / −24 | — |
+
+### §7 OF THIS DOCUMENT WAS WRONG AND THIS SECTION IS THE CORRECTION
+
+§7 wrote: *"Release globals are now at 87.4 % of `GATE_RELEASE_GLOBALS_MAX` with 8,180 B free
+for phase 8's creator server, phase 9's content and phase 10 — and phase 8 is the one that
+brings up an HTTP server and a 2 KB body buffer. **The lever is BLE**: 23,496 B, three times the
+remaining headroom, blocked on one bench test."*
+
+**There was no lever.** The `release` variant has been `GOD_MODE_ENABLED=0 FEATURE_BLE=0` since
+the variant was written, so the image the release caps police has never contained BLE. The
+23,496 B is `baseline` minus `no-ble` — what BLE costs the DEV build — and §7 quoted it against
+the SHIPPING build's headroom. Deleting BLE for real moved release globals by sixteen bytes,
+and even those sixteen are the settle window, not BLE.
+
+**The headroom figure §7 gave was right; only its explanation was wrong.** Release globals were
+at 87.4 % of the cap and they still are: **8,196 B free** (65,000 − 56,804), against §3's
+forecast of **1.5–3.0 KB for phase 8**. Phase 8 fits, with 5.2–6.7 KB left for phases 9 and 10
+— which is tight but is not the crisis §7 described, and the difference between those two
+readings is one variant definition nobody re-read.
+
+### What actually threatens the globals cap now, in order
+
+1. **Phase 8's `CS_BODY_MAX` 2 KB raw-body buffer** — a fixed array, and the largest single
+   allocation the creator adds. It is 24 % of the remaining headroom on its own.
+2. **Phase 9's roster** — 60 species. The tables are `const` and land in `.rodata`, so the
+   flash line moves and the globals line should not; `tools/check.sh`'s content gate is what
+   would catch a table that accidentally is not `const`.
+3. **Phase 10's diagnostics** — historically where counters accumulate.
+
+**The 48 KB page blob is `.rodata` and costs FLASH, not globals**, which the flash column can
+absorb four times over: release is at 79.3 % of a 1.6 MB cap with 331 KB free, and the `app0`
+partition is 3.1 MB.
+
+### The measurement, and the grep that nearly lied about it
+
+`riscv32-esp-elf-nm -S -C` over the release `.elf` matches **433 symbols** case-insensitively
+against `ble` — `ATTACKS_TABLE`, `soc_get_available_memory_regions`, `PebbleInstance`,
+`mimeTable`. **Two of them are Bluetooth**, both ESP-IDF stubs the core links unconditionally:
+
+```
+42081052 0000006c T esp_bt_controller_mem_release
+42080fce 00000084 T esp_bt_controller_rom_mem_release
+```
+
+No Bluedroid, no `BLEDevice`, no `BLEScan`, no `btc_task`. Recorded because the first grep
+returned 433 and looked like a failed deletion; the substring `ble` is in too many English
+words to be a symbol filter, and the useful pattern is
+`bluedroid|btc_task|esp_bt_controller|BLEDevice|BLEScan|BLEAdvertising`.
+
+### What it leaves
+
+`release` is **1,269,126 / 56,804** = **79.3 % of `GATE_RELEASE_FLASH_MAX`** and **87.4 % of
+`GATE_RELEASE_GLOBALS_MAX`**. `baseline` is **1,281,500 / 56,980** — within **12,374 B of
+flash and 176 B of globals of the artefact**, where it was 725 KB and 23.7 KB away before. That
+is the number this chunk is actually worth: **`tools/check.sh` now polices a build shaped like
+the one that ships**, which is the standing lesson of phases 6 and 7 applied to the gate itself.

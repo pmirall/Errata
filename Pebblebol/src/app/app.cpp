@@ -42,7 +42,6 @@
 #include "../hardware/audio.h"
 #include "../ui/render.h"
 #include "../networking/net.h"
-#include "../networking/ble_social.h"
 #include "../ui/ui.h"
 #include "../ui/screen_error.h"   // the ERROR screen's retry / LED bindings
 #include "../networking/webui.h"
@@ -1120,11 +1119,11 @@ void app_loop(void)
   // CREATOR owns the access point, NETWORK owns the scan and LINK owns the
   // peer link (P7-C2), and each one releases through its own leave() hook.
   // net_service() only pumps the state machine the screen put it in, including
-  // the settle timer that replaced the blocking delay between the two stacks
-  // and the NPH_LINK backstop that catches a link job nobody is servicing.
+  // the NPH_SCANNING and NPH_LINK backstops that catch a job nobody is
+  // servicing. It used to pump a settle timer too; that went with BLE (P8-C0),
+  // and so did the ble_scan_service() call that stood on the line below.
   net_service();
   web_service();
-  ble_scan_service();
 
   // --- 7. yield -------------------------------------------------------------
   // AUDIT RISK 16: the loop must not run at 100 % duty cycle. Two rungs of one

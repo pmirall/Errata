@@ -59,8 +59,9 @@
 // -----------------------------------------------------------------------------
 //  WHAT THE RECEIVE CALLBACK MAY DO, AND IT IS A SHORT LIST
 // -----------------------------------------------------------------------------
-//  It runs on the Wi-Fi task. ble_social.cpp's banner states the rule for the
-//  BTC task and this file inherits it verbatim: filter, clamp, copy, publish
+//  It runs on the Wi-Fi task. ble_social.cpp's banner stated the rule for the
+//  BTC task and this file inherited it verbatim (that file went in P8-C0; it is
+//  at `git show ed9b099:Pebblebol/src/networking/ble_social.cpp`): filter, clamp, copy, publish
 //  one index, return. NO U8g2, no I2C, no Preferences, no Serial (net.cpp:52-54
 //  already says never block on HWCDC), no allocation, nothing that touches game
 //  or UI state, and - the one that is specific to this radio - NO esp_now_*

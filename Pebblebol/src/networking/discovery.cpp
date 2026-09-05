@@ -10,8 +10,11 @@
 //
 //  INTEGER ONLY. The signal average is an exponential moving average held in
 //  QUARTER-dBm so a 1/4 alpha never rounds a slow drift away to nothing - the
-//  same arithmetic ble_social.cpp:186-196 uses, restated here rather than
-//  shared, because that file is going away and this one is not.
+//  same arithmetic ble_social.cpp:186-196 used, restated here rather than
+//  shared, because that file was going away and this one was not. IT HAS NOW
+//  GONE (P8-C0): read it at `git show ed9b099:Pebblebol/src/networking/
+//  ble_social.cpp`, which is where every citation of it in this directory
+//  points.
 // =============================================================================
 #include "discovery.h"
 
@@ -155,7 +158,7 @@ static void peer_remove(LinkJob& j, uint8_t idx)
 }
 
 // Oldest entry wins the eviction lottery; ties go to the weakest signal. The
-// CHOICE is ble_social.cpp:161-174's, and with the same limitation named:
+// CHOICE is ble_social.cpp:161-174's (deleted in P8-C0; ed9b099), same limitation:
 // a QUALIFIED peer can be evicted by a stranger's third beacon. That is not a
 // scoring hole - game/activity.cpp keeps a per-DAY set of credited device ids,
 // so a peer evicted and rediscovered is not paid twice, and
@@ -198,7 +201,7 @@ static bool peer_touch(LinkJob& j, const DiscBeacon& b, const DiscRx& rx, uint32
   if (idx < 0) {
     if (j.count >= (uint8_t)LINK_PEER_CAP) {
       // REMOVE AND APPEND rather than overwrite in place, which is the one
-      // place this table deliberately differs from ble_social.cpp's. The index
+      // place this table deliberately differed from ble_social.cpp's. The index
       // order IS the order P7-C2's list draws in, and overwriting the victim
       // slot would drop a newcomer into the middle of a list the player is
       // reading. peer_remove() shifts the rest down and keeps their order.

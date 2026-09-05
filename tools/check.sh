@@ -356,13 +356,13 @@ PURE_NET_CPP="protocol.cpp session.cpp battle_link.cpp trade_link.cpp transport_
 # singleton is the truth. What is NOT a singleton is the mechanism - the ring is
 # rxring.cpp and the peer table is discovery.cpp, both pure, both caller-owned,
 # both driven by a host binary.
-IMPURE_NET="ble_social.h ble_social.cpp net.h net.cpp webui.h webui.cpp transport_espnow.h transport_espnow.cpp"
+IMPURE_NET="net.h net.cpp webui.h webui.cpp transport_espnow.h transport_espnow.cpp"
 
 # 1. THE PURE NETWORKING MODULES ARE PURE, AND THE SCOPING IS BY FILENAME
-#    BECAUSE THE DIRECTORY IS MIXED. networking/ble_social.cpp:45-53
-#    legitimately includes Arduino.h, esp_bt_device.h and the BLE headers, and
-#    net.cpp and webui.cpp are device modules too - so a directory-wide gate
-#    here could only ever be a gate somebody disables. The list below is the
+#    BECAUSE THE DIRECTORY IS MIXED. net.cpp, webui.cpp and
+#    transport_espnow.cpp legitimately include Arduino.h and the radio headers
+#    - so a directory-wide gate here could only ever be a gate somebody
+#    disables. (Until P8-C0 the fourth impure file was ble_social.cpp.) The list below is the
 #    files that are compiled by tests/Makefile and must stay host-compilable;
 #    each is checked only if it exists, so the entries for P4-C5's second half
 #    (session, battle_link, transport) arm themselves when those files land.
@@ -641,10 +641,13 @@ fi
 # address live in ONE private array inside networking/transport_espnow.cpp and
 # the only thing that crosses the seam is an opaque slot index.
 #
-# THE SHAPE NOT TO COPY IS IN THIS TREE RIGHT NOW: core/nt_types.h's BlePeerInfo
-# has the raw address as its FIRST member and ble_social.cpp copies it out of
-# the scan callback into the table the game reads. This gate is what stops that
-# shape being reproduced under a new name.
+# THE SHAPE NOT TO COPY WAS IN THIS TREE UNTIL P8-C0: core/nt_types.h's
+# BlePeerInfo had the raw address as its FIRST member and ble_social.cpp copied
+# it out of the scan callback into the table the game read. Both are deleted
+# (`git show ed9b099:Pebblebol/src/networking/ble_social.cpp`), and THIS GATE IS
+# WHY THE DELETION DOES NOT RELAX ANYTHING: what it forbids is the shape, not
+# the file, so it goes on stopping that shape being reproduced under a new
+# name.
 #
 # THE PROSE COST IS DELIBERATE AND IS NOT A DODGE: the rule is spelled out in
 # full in networking/transport_espnow.h, which is the file that legitimately

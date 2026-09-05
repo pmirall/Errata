@@ -2183,3 +2183,86 @@ that one.
 **§67's "Local multiplayer works" and P7-C1's "two boards see each other's beacon in LINK"
 are therefore UNTICKED**, and the plan carries an eleven-item bench list in the order to run
 it. Everything else ticked in phase 7 is ticked on the host standard every earlier phase used.
+
+## D2's LAST CLAUSE, CLOSED ON A BET (P8-C0, 2026-09-05)
+
+**The owner authorised the BLE deletion WITHOUT the bench test, in those words: "nos la
+jugamos diciendo que ESP-NOW funcionará."** This section records what was deleted, what the
+deletion actually bought — which is **not what the phase-7 exit said it would buy** — and what
+is still owed.
+
+### What went
+
+`networking/ble_social.{h,cpp}` (602 lines), `FEATURE_BLE`, the fourteen `BLE_*` tuning
+constants, `core/nt_types.h`'s `BlePeerInfo` and `RADIO_BLE`, `net.cpp`'s `ble_up()` /
+`ble_down()` / `ble_resident()` and the session counters, `net.h`'s three `NERR_BLE_*` codes,
+the `no-ble` matrix variant, and `app_loop()`'s `ble_scan_service()` rung.
+
+**AND THE SETTLE WINDOW WENT WITH IT, which is the second-largest thing this commit removes.**
+`NPH_SETTLING`, `RADIO_SETTLE_MS`, `begin_settle()`, `s_pending`, the deferred-bring-up half of
+`net_request()`, the settle timer in `net_service()` and the two `NPH_SETTLING` arms in the
+scan and link drivers all existed for ONE reason: Bluedroid and the Wi-Fi driver could not both
+be resident, so every transition between them cost 250 ms parked with the radio off. There is
+one stack now. A Wi-Fi-to-Wi-Fi transition never settled even when BLE was here, so nothing
+that survives ever entered that phase. `net.h`'s "exactly one radio stack is resident"
+invariant went too — it was a real constraint and it has no subject left.
+
+**ONE PERSISTED BYTE WAS RESERVED RATHER THAN REUSED.** `CF_BLE_ENABLED` (0x04) is now
+`CF_RESERVED_BLE`, same value, still carried through both directions of the v1/v2 config
+conversion. `tests/fixtures/config_v1.bin` was written when that bit meant "BLE enabled" and
+still has it set; giving 0x04 a new meaning would make that fixture assert something it never
+recorded. A fresh device now mints it CLEAR, which is a change to new saves only.
+
+### WHAT IT BOUGHT, AND THE PHASE-7 EXIT WAS WRONG ABOUT THIS
+
+| build | before (v0.7.0-social) | after | delta |
+|---|---|---|---|
+| `baseline` | 1,994,460 / 80,492 | 1,281,500 / 56,980 | **−712,960 / −23,512** |
+| `release` | 1,269,468 / 56,820 | 1,269,126 / 56,804 | **−342 / −16** |
+
+**THE SHIPPING ARTEFACT GAINED SIXTEEN BYTES OF RAM.** The `release` variant was
+`GOD_MODE_ENABLED=0 FEATURE_BLE=0` — it has had BLE compiled out since the variant existed —
+so there was never any BLE in the image the caps police, and deleting it could not free room
+there. The −342 / −16 that did move is the settle window and the two backstop constants, not
+BLE.
+
+The phase-7 exit called BLE "the lever" for the 8,180 B of headroom under
+`GATE_RELEASE_GLOBALS_MAX`, "23,496 B, three times the remaining headroom". **That number is
+the `baseline` minus `no-ble` delta — a DEV-BUILD figure — read as if it were a shipping one.**
+docs/budget.md §7 and the phase-8 preamble in the plan both carried the same misreading and are
+corrected alongside this entry.
+
+**THIS IS THE THIRD TIME IN THREE PHASES THAT THE BUILD UNDER DISCUSSION WAS NOT THE BUILD THAT
+SHIPS.** Phase 6: `sim_step_seconds()` got its only non-zero value inside `#if
+GOD_MODE_ENABLED`, so the release build never advanced game time. Phase 7: `test_trade.cpp`
+bound a null millisecond clock, so a kill sweep ran against a `save_manager` the release
+artefact does not execute. Phase 8: a headroom argument quoted a variant the release build is
+not. The habit that catches all three is the same one — **measure the artefact, not the one
+next to it** — and it is now cheap here, because `baseline` and `release` differ only by god
+mode and the legacy web UI.
+
+### So why do it at all
+
+Three reasons that survive the correction, none of them headroom:
+
+1. **`tools/check.sh` polices the `baseline`, and the baseline is now shaped like the artefact.**
+   It was 1.99 MB against a 1.27 MB shipping image — 723 KB of code the gate measured and
+   nobody flashes. That gap is what let the phase-6 and phase-7 defects hide.
+2. **700 KB of code with no caller.** Nothing has called `ble_begin()`, `ble_service()` or
+   `ble_peer()` since P7-C2 gave the LINK screen ESP-NOW. It was a fallback that had already
+   stopped being reachable, and an unreachable fallback is not one.
+3. **The settle window.** A phase, a timer, a deferred bring-up and two driver arms, all
+   maintained for a transition the firmware can no longer make.
+
+### WHAT IS STILL OWED, AND THE BET IS NOT SETTLED BY THIS COMMIT
+
+**No bench test was run. There is no hardware in this environment, and ESP-NOW has still never
+linked two boards.** §67 "Local multiplayer works" stays unticked. The eleven-item bench list
+in the plan is unchanged and item 2 is still the one that matters: flash two boards, open LINK
+on both, confirm each lists the other (`link_qualified_count()` reaching 1 — three beacons at
+500 ms above `LINK_RSSI_MIN`, within `LINK_JOB_TIMEOUT_MS`).
+
+**IF IT FAILS, `git revert` THE P8-C0 COMMIT.** That is why the deletion is one commit and
+touches no chunk of phase 8: it restores `ble_social.{h,cpp}`, `FEATURE_BLE`, `BlePeerInfo`,
+`RADIO_BLE`, the settle window and the `no-ble` variant whole. What a revert would NOT restore
+is the misreading above, which is corrected in the documents and stays corrected.

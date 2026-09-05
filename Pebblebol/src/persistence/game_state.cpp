@@ -82,7 +82,7 @@ static void cfg_from_v2(const ConfigV2& v2, Config& out) {
   uint8_t f = 0;
   if (v2.flags & CFGV2_F_MUTE) f |= CF_MUTE;
   if (v2.flags & CFGV2_F_WEB)  f |= CF_WEB_ENABLED;
-  if (v2.flags & CFGV2_F_BLE)  f |= CF_BLE_ENABLED;
+  if (v2.flags & CFGV2_F_BLE)  f |= CF_RESERVED_BLE;
   out.flags = f;
 
   // The pet's display name. v2 keeps it on the Pebble; the v1 UI reads it from
@@ -118,7 +118,7 @@ static void cfg_to_v2(const Config& c, ConfigV2& v2) {
                                                  CFGV2_F_BLE | CFGV2_F_SBAR_MASK));
   if (c.flags & CF_MUTE)        f |= CFGV2_F_MUTE;
   if (c.flags & CF_WEB_ENABLED) f |= CFGV2_F_WEB;
-  if (c.flags & CF_BLE_ENABLED) f |= CFGV2_F_BLE;
+  if (c.flags & CF_RESERVED_BLE) f |= CFGV2_F_BLE;
   f |= (uint16_t)(((uint16_t)c.statusbar_mode << CFGV2_F_SBAR_SH) & CFGV2_F_SBAR_MASK);
   v2.flags = f;
 
@@ -139,10 +139,11 @@ void gs_cfg_defaults(Config& c) {
 
   // CF_WEB_ENABLED is DELIBERATELY CLEAR on a fresh device (plan section 2 row
   // G4): the radio is off by default and the creator server is opt-in.
+  // CF_RESERVED_BLE (0x04) is DELIBERATELY CLEAR on a fresh device now that BLE
+  // is deleted (P8-C0). The bit is still carried through both directions of the
+  // v1/v2 conversion above, because a save written before the deletion has it
+  // set and round-tripping a stored byte is not the same as minting one.
   uint8_t f = 0;
-#if FEATURE_BLE
-  f |= CF_BLE_ENABLED;
-#endif
   c.flags          = f;
   c.brightness     = (uint8_t)OLED_CONTRAST_DEFAULT;
   c.statusbar_mode = (uint8_t)SBAR_ICONS;

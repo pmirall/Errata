@@ -4,11 +4,19 @@
 //
 //  P2-C7b deleted peer_block_reason() along with the rest of the BLE mating
 //  protocol, and the rule went with it: a god-tainted unit must not pollute a
-//  real dynasty. The MARKERS survived - networking/ble_social.cpp still builds
-//  BLE_BF_DEBUG into the beacon and still stores it into BlePeerInfo.peer_flags
-//  - and until this header nothing in the tree read either of them for a
-//  gameplay decision. Correct for a transport-only module; wrong as a permanent
-//  state, because a taint that nothing enforces is a taint that spreads.
+//  real dynasty. The MARKERS survived in the transport - ble_social.cpp built
+//  BLE_BF_DEBUG into the beacon and stored it into BlePeerInfo.peer_flags - and
+//  nothing in the tree read either of them for a gameplay decision until this
+//  header. Correct for a transport-only module; wrong as a permanent state,
+//  because a taint that nothing enforces is a taint that spreads.
+//
+//  AND THE TRANSPORT THAT CARRIED THEM IS GONE (P8-C0 deleted BLE; the file is
+//  at `git show ed9b099:Pebblebol/src/networking/ble_social.cpp`). THAT CHANGES
+//  NOTHING HERE, WHICH IS THE POINT OF THE PARAGRAPH ABOVE: the two markers
+//  this header reads are the GENOME BIT and the PebbleInstance FLAG, both of
+//  which live on flash and on the 48 B wire record. ESP-NOW's DiscPeer carries
+//  no taint marker at all - it carries DISC_CAP_* and nothing else - so a peer's
+//  beacon never was and still is not where this rule gets its answer.
 //
 // -----------------------------------------------------------------------------
 //  WHERE IT IS NOT

@@ -8,6 +8,56 @@ Versions are tagged at phase boundaries of `PEBBLEBOL_IMPLEMENTATION_PLAN.md`; t
 tag for a phase is cut only when its gate (`tools/check.sh`) and its variant matrix
 (`tools/build_matrix.sh`) are both green.
 
+## [0.8.0-creator] — Unreleased
+
+### Removed
+
+- **Bluetooth Low Energy, entirely.** `networking/ble_social.{h,cpp}`, `FEATURE_BLE`, the
+  fourteen `BLE_*` tuning constants, `BlePeerInfo`, `RADIO_BLE`, the three `NERR_BLE_*` codes,
+  the `no-ble` build variant and `app_loop()`'s `ble_scan_service()` rung. Decision D2 chose
+  ESP-NOW for the peer link in phase 7 and nothing has called `ble_begin()`, `ble_service()` or
+  `ble_peer()` since P7-C2 gave the LINK screen the new transport.
+  **The bench test that D2 gated this on was NOT run** — there is no hardware in this
+  environment — and the owner authorised the deletion on that basis. §67 "Local multiplayer
+  works" stays unticked. It is one commit; `git revert` restores BLE whole.
+- **The radio settle window**, with it: `NPH_SETTLING`, `RADIO_SETTLE_MS`, `begin_settle()`,
+  the deferred half of `net_request()`, the settle timer in `net_service()` and the
+  `NPH_SETTLING` arms in the scan and link drivers. It existed only because Bluedroid and the
+  Wi-Fi driver could not both be resident; a Wi-Fi-to-Wi-Fi transition never entered it.
+  `net.h`'s "exactly one radio stack is resident" invariant went the same way — it was a real
+  constraint with no subject left.
+
+### Changed
+
+- `CF_BLE_ENABLED` (0x04) is now `CF_RESERVED_BLE`. **Same value, still round-tripped through
+  the v1/v2 config conversion**: a save written before the deletion has the bit set, and
+  `tests/fixtures/config_v1.bin` is one. Fresh devices mint it clear.
+- Comments across `networking/`, `game/taint.h`, `ui/ui.h` and `tests/` that cited
+  `ble_social.cpp` line numbers as precedent now cite
+  `git show ed9b099:Pebblebol/src/networking/ble_social.cpp`.
+
+### Fixed
+
+- **`docs/budget.md` §7's headroom argument, which was wrong.** It called BLE "the lever" for
+  the 8,180 B free under `GATE_RELEASE_GLOBALS_MAX` — "23,496 B, three times the remaining
+  headroom". The `release` variant was `GOD_MODE_ENABLED=0 FEATURE_BLE=0`, so BLE was never in
+  the image those caps police: that 23,496 B is the `baseline` minus `no-ble` delta, a dev-build
+  figure read as a shipping one. **Deleting BLE moved release globals by sixteen bytes.** The
+  headroom figure itself was right and is unchanged. Corrected in `docs/budget.md` §8,
+  `docs/decisions.md` and the plan's phase-8 preamble.
+
+### Measured
+
+- `baseline` 1,994,460 / 80,492 → **1,281,500 / 56,980** (−712,960 / −23,512).
+- `release` 1,269,468 / 56,820 → **1,269,126 / 56,804** (−342 / −16) = 79.3 % and 87.4 % of
+  the release caps. The baseline is now within 12,374 B of flash and 176 B of globals of the
+  artefact, where it was 725 KB and 23.7 KB away — so `tools/check.sh`, which polices the
+  baseline, now polices a build shaped like the one that ships.
+- `nm` over the release `.elf`: no Bluedroid, no `BLEDevice`, no `BLEScan`; the only Bluetooth
+  symbols are `esp_bt_controller_mem_release` and `esp_bt_controller_rom_mem_release`, ESP-IDF
+  stubs the core links unconditionally.
+- Gate green (47 host binaries), MATRIX OK on six variants at 0 project warnings.
+
 ## [0.7.0-social] — Unreleased
 
 Phase 7 is the phase where a Pebblebol stops being alone. Two devices find each other over
@@ -21,11 +71,12 @@ forward.
 **Two acceptance items are deliberately UNTICKED and neither was run.** §67's "Local
 multiplayer works" and P7-C1's "two boards see each other's beacon in LINK" are BENCH tests,
 there is no hardware in this environment, and a bench item is not something a host binary can
-tick. **BLE is therefore still in the tree**: D2 authorises its deletion, and P7-C1's own
-bullet gates that deletion on ESP-NOW having linked two real boards. Deleting the only fallback
-before the chosen transport has ever run would be exactly backwards, and the 712,618 B of flash
-and 23,496 B of static RAM it holds are the largest lever left in the budget — waiting on one
-bench test that takes two boards and ten seconds.
+tick. **BLE is therefore still in the tree at this tag**: D2 authorises its deletion, and
+P7-C1's own bullet gates that deletion on ESP-NOW having linked two real boards. Deleting the
+only fallback before the chosen transport has ever run would be exactly backwards.
+*(0.8.0-creator deleted it anyway, on the owner's explicit decision to bet on ESP-NOW without
+the bench test — and measured that the 23,496 B of static RAM this paragraph calls a lever was
+never in the shipping image at all. See that entry.)*
 
 
 ### P7-C1 — the device transport, per decision D2 (ESP-NOW)

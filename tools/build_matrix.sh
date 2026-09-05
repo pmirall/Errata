@@ -16,20 +16,24 @@ has() { grep -qE "^#define[[:space:]]+$1[[:space:]]+[0-9]+" "$CFG"; }
 # and the silence was the defect the phase-6 exit carried forward. `all-off`
 # names six macros and only three of them existed: FEATURE_WEATHER,
 # FEATURE_TELEGRAM and FEATURE_ESPNOW had no numeric #define, so the variant was
-# really FEATURE_BLE=0 FEATURE_WEB=0 GOD_MODE_ENABLED=0 and nothing said so.
+# really FEATURE_WEB=0 GOD_MODE_ENABLED=0 (and, until P8-C0, FEATURE_BLE=0) and
+# nothing said so.
 # P7-C1 ADDS A REAL FEATURE_ESPNOW, so `all-off` changed meaning at this tag: it
 # now also compiles the peer link out, which is a different and stricter floor
 # than the one v0.6.0-activity measured. That is exactly the change the plan
 # said must not happen with no line in the log, so the log now carries one on
 # every run and the phase-7 exit's variant table records the step.
+#
+# THE `no-ble` VARIANT WENT IN P8-C0 with FEATURE_BLE itself. It was here to
+# measure what deleting BLE would be worth; the answer was taken and acted on,
+# so the row it produced is now `baseline`. Seven variants became six.
 VARIANTS=(
   "baseline|"
-  "no-ble|FEATURE_BLE=0"
   "no-web|FEATURE_WEB=0"
   "no-god|GOD_MODE_ENABLED=0"
   "sh1106|DISPLAY_IS_SH1106=1"
-  "all-off|FEATURE_WEATHER=0 FEATURE_TELEGRAM=0 FEATURE_BLE=0 FEATURE_WEB=0 FEATURE_ESPNOW=0 GOD_MODE_ENABLED=0"
-  "release|GOD_MODE_ENABLED=0 FEATURE_BLE=0"
+  "all-off|FEATURE_WEATHER=0 FEATURE_TELEGRAM=0 FEATURE_WEB=0 FEATURE_ESPNOW=0 GOD_MODE_ENABLED=0"
+  "release|GOD_MODE_ENABLED=0"
 )
 
 rc=0
@@ -56,10 +60,11 @@ for v in "${VARIANTS[@]}"; do
   printf '%s\n' "$out"
   if [ "$name" = "release" ]; then rel_line=$(printf '%s' "$out" | tail -1); fi
 done
-# THE SHIPPING BUILD'S OWN CAPS. check.sh polices the baseline, which carries BLE and
-# the legacy web UI - neither ships. Measured at the phase-4 exit the two differ by
-# 724,228 B of flash and 23,672 B of globals (docs/budget.md section 1), so the number
-# under pressure was one that corresponds to no artefact.
+# THE SHIPPING BUILD'S OWN CAPS. check.sh polices the baseline, which carries the
+# legacy web UI and god mode - neither ships. It also carried BLE until P8-C0, which
+# is where most of the gap went: measured at the phase-4 exit the two builds differed
+# by 724,228 B of flash and 23,672 B of globals (docs/budget.md section 1), so the
+# number under pressure was one that corresponded to no artefact.
 #
 # The size line comes from the release variant the loop above ALREADY built. Until the
 # phase-5 exit this block built it a second time and said "this costs nothing but the

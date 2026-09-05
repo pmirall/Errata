@@ -35,9 +35,12 @@
 //  This is net.cpp:750-780's trick with the same shape - a hardware address
 //  goes into the read loop, a salted hash comes out, and ScanResult carries
 //  nothing that identifies a network - and it is deliberately NOT
-//  core/nt_types.h:453-461's shape, where BlePeerInfo's first member is the
-//  raw six bytes and ble_social.cpp:243 copies them out of the callback into
-//  the table the game reads. That is the shape section 43 rules out.
+//  BlePeerInfo's shape, whose first member was the raw six bytes that
+//  ble_social.cpp:243 copied out of the scan callback into the table the game
+//  read. That is the shape section 43 rules out. BOTH WERE DELETED IN P8-C0 AND
+//  THE CITATION IS KEPT ANYWAY: `git show ed9b099:Pebblebol/src/networking/
+//  ble_social.cpp` is the shape this file exists not to be, and a rule whose
+//  counter-example has been tidied away is a rule nobody can check.
 //
 //  tools/check.sh fails the build if this file or its .cpp so much as NAMES
 //  that identifier, in a field, a parameter or a comment - the same gate

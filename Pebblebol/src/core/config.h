@@ -49,7 +49,12 @@
 
 // --- Master switches --------------------------------------------------------
 // Set any of these to 0 to compile that part of the game out.
-#define FEATURE_BLE         1   // see other creatures nearby over Bluetooth
+// FEATURE_BLE WAS HERE AND IS GONE (P8-C0). Decision D2 chose ESP-NOW for the
+// peer link; BLE was kept one whole phase as the fallback and never became one.
+// It cost 712 KB of flash and 23 KB of globals - three times the headroom left
+// under GATE_RELEASE_GLOBALS_MAX - and phase 8 needs that room for the creator's
+// HTTP server. THE BENCH TEST THAT WOULD HAVE PROVEN ESP-NOW FIRST WAS NOT RUN:
+// see docs/decisions.md D2. Reverting the P8-C0 commit brings BLE back whole.
 #define FEATURE_ESPNOW      1   // link two Pebblebols directly (trade, battle, breed)
 #define FEATURE_WEB         1   // web page + QR
 #define GOD_MODE_ENABLED    1   // hidden cheat menu (for testing)
@@ -414,8 +419,6 @@ static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
 #define AP_IP_C                 4
 #define AP_IP_D                 1
 
-#define RADIO_SETTLE_MS         250
-
 // --- SCAN-ONLY Wi-Fi (P5-C1, spec sections 20, 40, 44, 47) ------------------
 // PASSIVE: the device listens for beacons and never sends a probe request, so
 // nothing about it is broadcast while it explores.
@@ -434,21 +437,6 @@ static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
 // used by game/cooldowns.cpp for both the persisted table and the uncalibrated
 // RAM fallback, so the two cannot be tuned apart.
 #define ENCOUNTER_COOLDOWN_S    7200UL
-
-// BLE (connectionless, advertisement only)
-#define BLE_COMPANY_ID          0xFFFF
-#define BLE_MSD_LEN             22           // company_id(2) + frame_type(1) + payload(19)
-#define BLE_FRAME_BEACON        0x01
-#define BLE_ADV_MIN_RAW         0x0640       // RAW 0.625 ms units = 1000 ms
-#define BLE_ADV_MAX_RAW         0x0C80       // RAW 0.625 ms units = 2000 ms
-#define BLE_SCAN_INTERVAL_MS    1000         // BLEScan::setInterval - MILLISECONDS
-#define BLE_SCAN_WINDOW_MS      100          // BLEScan::setWindow   - MILLISECONDS
-#define BLE_SCAN_DURATION_S     6
-#define BLE_RSSI_MIN            (-70)
-#define BLE_PEER_CAP            8
-#define BLE_PEER_TTL_S          60
-#define BLE_SESSION_CAP         32           // deinit/init leaks ~672 B per cycle
-#define BLE_QUEUE_CAP           8            // onResult runs on the BTC task: post, never draw
 
 // --- THE PEER LINK (P7-C1, decision D2 = ESP-NOW; spec sections 42, 43, 47) --
 // The transport two devices in the same room talk over. It is a PHASE of the
@@ -552,13 +540,15 @@ static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
 // =============================================================================
 // 14. SIZE CAPS / BUILD GATES
 // =============================================================================
-// The BASELINE caps: every feature on, including BLE and the legacy web UI, neither
-// of which V1 ships. This is a dev-build guard, not the number that matters.
+// The BASELINE caps: every feature on, including the legacy web UI, which V1 does
+// not ship. This is a dev-build guard, not the number that matters. It used to
+// carry BLE as well; P8-C0 deleted that, which is most of the step down you will
+// see in this file's history and in docs/budget.md.
 #define GATE_FLASH_MAX          2400000UL
 #define GATE_GLOBALS_MAX        90000UL
 
 // The RELEASE caps, enforced by tools/build_matrix.sh on the `release` variant
-// (GOD_MODE_ENABLED=0 FEATURE_BLE=0) - the artefact that actually gets flashed.
+// (GOD_MODE_ENABLED=0) - the artefact that actually gets flashed.
 // docs/budget.md measured release at 1,191,426 / 49,004 against a baseline of
 // 1,915,654 / 72,676, so for four phases the gate was policing a build nobody
 // would run. These are set at the projected phase-10 ending state plus margin:

@@ -50,10 +50,6 @@
 #include <DNSServer.h>
 #endif
 
-#if FEATURE_BLE
-#include <BLEDevice.h>
-#endif
-
 // -----------------------------------------------------------------------------
 // Logging. Serial is USB CDC (HWCDC) - never block on it, never gate boot on it.
 // HWCDC::write drops silently when the host has not enumerated.
@@ -63,14 +59,17 @@
 // The NPH_SCANNING backstop (net_service()). STRICTLY LATER than the scan job's
 // own WIFI_SCAN_TIMEOUT_MS so the two clocks can never disagree about what
 // happened: the job always answers first, and this only catches a job nobody is
-// pumping. One settle window plus a second of slack is the margin.
-#define NET_SCAN_BACKSTOP_MS ((uint32_t)WIFI_SCAN_TIMEOUT_MS + RADIO_SETTLE_MS + 1000UL)
+// pumping. THE MARGIN WAS ONE SETTLE WINDOW PLUS A SECOND OF SLACK; P8-C0 took
+// the settle window away with BLE, and the slack alone still satisfies the only
+// property either backstop needs - strictly later than the job's own clock.
+#define NET_BACKSTOP_SLACK_MS  1000UL
+#define NET_SCAN_BACKSTOP_MS ((uint32_t)WIFI_SCAN_TIMEOUT_MS + NET_BACKSTOP_SLACK_MS)
 
 // The NPH_LINK backstop, in exactly the shape and for exactly the reason of the
 // one above: STRICTLY LATER than the discovery job's own LINK_JOB_TIMEOUT_MS,
 // so the job always answers first and this only catches a job nobody is
 // pumping - a screen torn down mid-link, a caller that forgot to service it.
-#define NET_LINK_BACKSTOP_MS ((uint32_t)LINK_JOB_TIMEOUT_MS + RADIO_SETTLE_MS + 1000UL)
+#define NET_LINK_BACKSTOP_MS ((uint32_t)LINK_JOB_TIMEOUT_MS + NET_BACKSTOP_SLACK_MS)
 
 // -----------------------------------------------------------------------------
 // Module state
@@ -81,8 +80,6 @@ static NetPhase     s_phase          = NPH_OFF;
 static NetErr       s_err            = NERR_NONE;
 
 static uint32_t     s_phase_ms       = 0;    // millis() when the phase was entered
-static RadioMode    s_pending        = RADIO_OFF;  // NPH_SETTLING target
-static uint8_t      s_ble_sessions   = 0;    // BLEDevice::init() calls this boot
 static bool         s_ap_up          = false;
 static bool         s_want_scan      = false;  // the next WiFi bring-up is a scan
 static bool         s_want_link      = false;  // ...or the peer link (P7-C1)
@@ -99,7 +96,6 @@ static bool         s_dns_up         = false;
 
 static char         s_ip[16]         = "0.0.0.0";
 static char         s_ap_ssid[SSID_MAX_LEN + 1];
-static char         s_ble_name[16];
 
 static NetHeapStats s_heap;
 
@@ -166,24 +162,15 @@ static void set_mode(RadioMode m, NetPhase p, const char *tag) {
   net_heap_log(tag);
 }
 
-// A radio stack was just torn down: give the driver / controller a moment
-// before bringing the other one up. That moment used to be delay(250), a
-// quarter of a second in which no frame was drawn, no button was drained and
-// the 1 Hz tick slipped. It is now a PHASE: park in NPH_SETTLING with the
-// requested target remembered, return to the caller, and let net_service()
-// finish the bring-up once RADIO_SETTLE_MS have passed.
-// Only a build that can host BOTH stacks ever has something to settle between;
-// with NT_NET_WANT_WIFI off there is nothing to tear down before BLE comes up.
-#if NT_NET_WANT_WIFI
-static void begin_settle(RadioMode target) {
-  s_pending = target;
-  set_mode(RADIO_OFF, NPH_SETTLING, "-> SETTLING");
-}
-#endif
+// THE SETTLE WINDOW WENT WITH BLE (P8-C0) AND net.h SAYS SO. It parked the
+// radio in NPH_SETTLING for RADIO_SETTLE_MS between tearing one stack down and
+// bringing the other up, because Bluedroid and the Wi-Fi driver could not both
+// be resident. There is one stack now: every transition this module can make is
+// Wi-Fi to Wi-Fi, which never settled even when BLE was here.
 
 // -----------------------------------------------------------------------------
-// Identity: AP SSID and BLE device name, derived from the station MAC.
-// esp_read_mac() works before WiFi or Bluedroid have been started.
+// Identity: the AP SSID, derived from the station MAC.
+// esp_read_mac() works before WiFi has been started.
 // -----------------------------------------------------------------------------
 static void build_identity(void) {
   uint8_t mac[6] = {0, 0, 0, 0, 0, 0};
@@ -195,71 +182,6 @@ static void build_identity(void) {
   }
   snprintf(s_ap_ssid, sizeof(s_ap_ssid), "%s%02X%02X",
            AP_SSID_PREFIX, (unsigned)mac[4], (unsigned)mac[5]);
-  snprintf(s_ble_name, sizeof(s_ble_name), "NT-%02X%02X",
-           (unsigned)mac[4], (unsigned)mac[5]);
-}
-
-// =============================================================================
-//  BLE lifecycle - the ONLY place BLEDevice::init/deinit are called.
-// =============================================================================
-static void ble_down(void) {
-#if FEATURE_BLE
-  if (!BLEDevice::getInitialized()) {
-    return;
-  }
-  // Order matters: quiesce the radio activity, drop the result map, then
-  // deinit. BLEDevice::deinit(true) is FORBIDDEN - BLEDevice.cpp:622-641 only
-  // clears `initialized` in the else branch, so a later init() silently
-  // no-ops at the if (!initialized) guard. One-way trip.
-  BLEAdvertising *adv = BLEDevice::getAdvertising();
-  if (adv) {
-    adv->stop();
-  }
-  BLEScan *scan = BLEDevice::getScan();
-  if (scan) {
-    scan->stop();
-    scan->clearResults();
-  }
-  BLEDevice::deinit(false);
-  NET_LOGF("[net] BLE down (session %u/%u)\r\n",
-           (unsigned)s_ble_sessions, (unsigned)BLE_SESSION_CAP);
-#endif
-}
-
-static inline bool ble_up(void) {
-#if FEATURE_BLE
-  if (BLEDevice::getInitialized()) {
-    return true;
-  }
-  // deinit(false)/init() cycling leaks ~672 B per cycle (scan map, m_pScan,
-  // m_pClient, m_bleAdvertising are never freed). Fail deterministically
-  // instead of dying of a mystery OOM 200 cycles later.
-  if (s_ble_sessions >= BLE_SESSION_CAP) {
-    s_err = NERR_BLE_SESSION_CAP;
-    NET_LOGF("[net] BLE refused: session cap %u reached\r\n",
-             (unsigned)BLE_SESSION_CAP);
-    return false;
-  }
-  BLEDevice::init(String(s_ble_name));
-  if (!BLEDevice::getInitialized()) {
-    s_err = NERR_BLE_INIT_FAILED;
-    NET_LOGF("[net] BLEDevice::init() failed\r\n");
-    return false;
-  }
-  ++s_ble_sessions;
-  return true;
-#else
-  s_err = NERR_BLE_DISABLED;
-  return false;
-#endif
-}
-
-static inline bool ble_resident(void) {
-#if FEATURE_BLE
-  return BLEDevice::getInitialized();
-#else
-  return false;
-#endif
 }
 
 // =============================================================================
@@ -478,9 +400,9 @@ void net_begin(void) {
   s_phase = NPH_OFF;
   s_err   = NERR_NONE;
   net_heap_log("BEGIN");
-  NET_LOGF("[net] ap=\"%s\" ble=\"%s\" wifi=%u ble_feature=%u\r\n",
-           s_ap_ssid, s_ble_name,
-           (unsigned)(NT_NET_WANT_WIFI), (unsigned)(FEATURE_BLE));
+  NET_LOGF("[net] ap=\"%s\" wifi=%u espnow=%u web=%u\r\n",
+           s_ap_ssid, (unsigned)(NT_NET_WANT_WIFI),
+           (unsigned)(FEATURE_ESPNOW), (unsigned)(FEATURE_WEB));
 }
 
 RadioMode net_mode(void) {
@@ -495,32 +417,19 @@ NetErr net_last_err(void) {
   return s_err;
 }
 
-// Second half of a deferred bring-up: everything net_request() would have done
-// after settle(). Called either straight from net_request() (nothing had to be
-// torn down) or from net_service() when the settle timer expires.
+// The bring-up. It was the second half of a deferred one while the settle
+// window existed; with one radio stack left it is simply where net_request()
+// ends up once it knows nothing has to come down first.
+//
+// #if'd OUT ENTIRELY IN A BUILD WITH NO Wi-Fi CONSUMER, rather than kept with a
+// refusing body: RADIO_WIFI is the only mode that can reach it now that BLE is
+// gone (P8-C0), so in that build it has no caller at all and -Wunused-function
+// is right about it. net_request()'s own !NT_NET_WANT_WIFI arm already answers
+// NERR_WIFI_DISABLED before it would be called.
+#if NT_NET_WANT_WIFI
 static bool bring_up(RadioMode want) {
-  s_pending = RADIO_OFF;
+  (void)want;                       // RADIO_WIFI is the only thing that gets here
 
-  if (want == RADIO_BLE) {
-#if !FEATURE_BLE
-    s_err = NERR_BLE_DISABLED;
-    set_mode(RADIO_OFF, NPH_OFF, "-> OFF (no ble)");
-    return false;
-#else
-    if (!ble_up()) {
-      set_mode(RADIO_OFF, NPH_OFF, "-> OFF (ble fail)");
-      return false;
-    }
-    set_mode(RADIO_BLE, NPH_BLE_UP, "-> BLE");
-    return true;
-#endif
-  }
-
-#if !NT_NET_WANT_WIFI
-  s_err = NERR_WIFI_DISABLED;
-  set_mode(RADIO_OFF, NPH_OFF, "-> OFF (no wifi)");
-  return false;
-#else
   // THREE INTENTS ON ONE STACK, and the caller does not get to confuse them:
   // the scanner sets s_want_scan through net_scan_driver()'s start(), the peer
   // link sets s_want_link through net_link_driver()'s start(), and everything
@@ -541,8 +450,8 @@ static bool bring_up(RadioMode want) {
   set_mode(RADIO_OFF, NPH_OFF, "-> OFF (no portal)");
   return false;
 #endif
-#endif
 }
+#endif  // NT_NET_WANT_WIFI
 
 bool net_request(RadioMode want) {
   if (!s_begun) {
@@ -556,62 +465,15 @@ bool net_request(RadioMode want) {
 
   // ---------------------------------------------------------------- OFF ----
   if (want == RADIO_OFF) {
-    ble_down();
 #if NT_NET_WANT_WIFI
     wifi_down();
 #endif
     s_want_scan = false;            // a scan intent does not survive a power-down
     s_want_link = false;            // ...and neither does a link intent
-    s_pending = RADIO_OFF;          // cancels a settle that was in flight
     if (s_mode != RADIO_OFF || s_phase != NPH_OFF) {
       set_mode(RADIO_OFF, NPH_OFF, "-> OFF");
     }
     return true;
-  }
-
-  // A settle window is already running: the stack that was resident is down
-  // and NOTHING may come up until it expires (BRIEF 1.3 - that is the whole
-  // point of the window). Retarget it and keep waiting; net_service() brings
-  // up whichever stack was asked for last. Falling through to the branches
-  // below would test "did I have to tear anything down?", find the answer is
-  // no - because the teardown already happened - and bring the new stack up
-  // right on top of it.
-  if (s_phase == NPH_SETTLING) {
-    // The session cap is checked before anything is torn down everywhere else;
-    // here nothing is torn down at all, so check it before accepting a target
-    // that ble_up() would only refuse RADIO_SETTLE_MS later.
-    if (want == RADIO_BLE && !ble_resident() && s_ble_sessions >= BLE_SESSION_CAP) {
-      s_err = NERR_BLE_SESSION_CAP;
-      return false;
-    }
-    s_pending = want;
-    return true;                    // finished by net_service()
-  }
-
-  // ---------------------------------------------------------------- BLE ----
-  if (want == RADIO_BLE) {
-#if !FEATURE_BLE
-    s_err = NERR_BLE_DISABLED;
-    return false;
-#else
-    if (s_mode == RADIO_BLE && ble_resident()) {
-      return true;
-    }
-    // Refuse before tearing anything down, so a capped request is a no-op.
-    if (!ble_resident() && s_ble_sessions >= BLE_SESSION_CAP) {
-      s_err = NERR_BLE_SESSION_CAP;
-      return false;
-    }
-#if NT_NET_WANT_WIFI
-    const bool tore_down = (WiFi.getMode() != WIFI_MODE_NULL);
-    wifi_down();
-    if (tore_down) {
-      begin_settle(RADIO_BLE);
-      return true;                  // finished by net_service()
-    }
-#endif
-    return bring_up(RADIO_BLE);
-#endif
   }
 
   // --------------------------------------------------------------- WIFI ----
@@ -619,20 +481,6 @@ bool net_request(RadioMode want) {
   s_err = NERR_WIFI_DISABLED;
   return false;
 #else
-  {
-    const bool tore_down = ble_resident();
-    ble_down();
-    // Binding precondition (BRIEF 1.3): Bluedroid must be gone before WiFi.
-    if (ble_resident()) {
-      s_err = NERR_BUSY;
-      NET_LOGF("[net] refusing WIFI: Bluedroid still initialised\r\n");
-      return false;
-    }
-    if (tore_down) {
-      begin_settle(RADIO_WIFI);
-      return true;                  // finished by net_service()
-    }
-  }
   if (s_mode == RADIO_WIFI && s_phase != NPH_OFF) {
     return true;   // already on the WiFi track (scanning or portal)
   }
@@ -644,27 +492,9 @@ void net_service(void) {
   if (!s_begun) {
     return;
   }
+#if NT_NET_WANT_WIFI
   const uint32_t now = millis();
 
-  // The settle timer that replaced delay(RADIO_SETTLE_MS). One stack is down,
-  // the other is not up yet, and the radio is genuinely OFF meanwhile.
-  if (s_phase == NPH_SETTLING) {
-    if ((uint32_t)(now - s_phase_ms) < (uint32_t)RADIO_SETTLE_MS) {
-      return;
-    }
-    (void)bring_up(s_pending);
-    return;
-  }
-
-#if FEATURE_BLE
-  if (s_mode == RADIO_BLE && !BLEDevice::getInitialized()) {
-    // Somebody deinitialised behind our back, or init silently failed.
-    set_mode(RADIO_OFF, NPH_OFF, "BLE vanished");
-    return;
-  }
-#endif
-
-#if NT_NET_WANT_WIFI
   switch (s_phase) {
 
     // A BACKSTOP, AND IT IS DELIBERATELY LATER THAN THE JOB'S OWN CLOCK.
@@ -721,11 +551,8 @@ StrId net_last_err_str(void) {
   switch (s_err) {
     case NERR_NONE:            return STR_EMPTY;
     case NERR_BUSY:            return STR_ERR_BUSY;
-    case NERR_BLE_SESSION_CAP: return STR_SO_CAP;
-    case NERR_BLE_INIT_FAILED: return STR_ERR_MEM;
     case NERR_SCAN_FAILED:     return STR_ERR_NO_WIFI;
     case NERR_WIFI_DISABLED:   return STR_ERR_NO_WIFI;
-    case NERR_BLE_DISABLED:    return STR_ERR_NO_NET;
     case NERR_AP_FAILED:       return STR_ERR_NO_NET;
     case NERR_DNS_FAILED:      return STR_ERR_NO_NET;
     case NERR_ESPNOW_DISABLED: return STR_ERR_NO_NET;
@@ -766,15 +593,6 @@ const NetHeapStats &net_heap_last(void) {
   return s_heap;
 }
 
-uint8_t net_ble_sessions_used(void) {
-  return s_ble_sessions;
-}
-
-uint8_t net_ble_sessions_left(void) {
-  return (s_ble_sessions >= BLE_SESSION_CAP)
-             ? 0
-             : (uint8_t)(BLE_SESSION_CAP - s_ble_sessions);
-}
 
 // =============================================================================
 //  THE SCANNER'S RADIO DRIVER (P5-C1)
@@ -844,9 +662,9 @@ static bool scan_start(void) {
 }
 
 static int16_t scan_poll(void) {
-  if (s_phase == NPH_SETTLING) {
-    return (int16_t)WSCAN_POLL_RUNNING;      // the radio is still coming up
-  }
+  // THE NPH_SETTLING ARM WENT WITH BLE (P8-C0). It answered RUNNING while the
+  // radio was between stacks; there is one stack now and net_request() brings
+  // Wi-Fi up before it returns, so a bring-up is never in flight here.
   if (s_mode != RADIO_WIFI || s_phase != NPH_SCANNING) {
     return (int16_t)WSCAN_POLL_FAILED;       // bring-up failed, or somebody
   }                                          // else took the radio
@@ -988,9 +806,6 @@ static bool link_beacon(const uint8_t *frame, uint16_t n) {
 static int8_t link_poll(DiscRx *out) {
   if (out == nullptr) {
     return (int8_t)LINK_POLL_FAILED;
-  }
-  if (s_phase == NPH_SETTLING) {
-    return 0;                                 // the radio is still coming up
   }
   if (s_mode != RADIO_WIFI || s_phase != NPH_LINK) {
     return (int8_t)LINK_POLL_FAILED;          // bring-up failed, or somebody

@@ -130,7 +130,7 @@ static Config config_v1(void) {
   memset(&c, 0, sizeof c);
   c.magic       = NT_CFG_MAGIC;
   c.version     = NT_CFG_VERSION;
-  c.flags       = (uint8_t)(CF_BLE_ENABLED | CF_WEB_ENABLED);
+  c.flags       = (uint8_t)(CF_RESERVED_BLE | CF_WEB_ENABLED);   // 0x04 unchanged
   c.saved_epoch = 1700200000u;
   copy_str(c.wifi_ssid, sizeof c.wifi_ssid, "legacy-ssid");
   copy_str(c.wifi_pass, sizeof c.wifi_pass, "legacy-pass");

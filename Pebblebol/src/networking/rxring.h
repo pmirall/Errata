@@ -26,9 +26,12 @@
 //  THE CURSOR CONVENTION, PICKED DELIBERATELY BECAUSE THE TREE HAS TWO
 // -----------------------------------------------------------------------------
 //  hardware/input.cpp's timer ring advances TAIL from the producer and HEAD
-//  from the consumer; networking/ble_social.cpp's BTC ring does the opposite.
+//  from the consumer; networking/ble_social.cpp's BTC ring did the opposite.
 //  A third ring inheriting a mixed convention is how one of them ends up read
-//  the wrong way round, so this file states its choice once:
+//  the wrong way round, so this file states its choice once - and states it in
+//  its own terms rather than by reference, which is why P8-C0 deleting
+//  ble_social.cpp costs this banner nothing. Every citation of that file below
+//  is `git show ed9b099:Pebblebol/src/networking/ble_social.cpp`.
 //
 //      tail  is advanced by the PRODUCER and by nothing else (the Wi-Fi task)
 //      head  is advanced by the CONSUMER and by nothing else (loop())
@@ -36,15 +39,15 @@
 //
 //  i.e. input.cpp's. rxring_drain() empties the ring by moving HEAD up to
 //  tail - the consumer moving its OWN cursor - for exactly the reason
-//  ble_social.cpp:345-350 records: a reset that stores 0 into both races a
+//  ble_social.cpp:345-350 recorded: a reset that stores 0 into both races a
 //  producer that is mid-publish and can leave the ring holding stale records.
 //
 //  AND IT USES ACQUIRE/RELEASE, NOT `volatile`. input.cpp gets away with plain
 //  volatile because its producer is an esp_timer callback that does not preempt
 //  loop() in the way that matters. THE WI-FI TASK IS A REAL FreeRTOS TASK and
 //  can preempt loop() in the middle of a pop, so the payload copy must not be
-//  reordered past the index publish. ble_social.cpp:236-247 is the precedent
-//  that got this right and this file copies it.
+//  reordered past the index publish. ble_social.cpp:236-247 was the precedent
+//  that got this right and this file copied it.
 //
 //  WHAT NO HOST TEST HERE PROVES, SAID PLAINLY: a host binary is
 //  single-threaded, so nothing below is evidence about real preemption or
@@ -58,7 +61,7 @@
 //  TWO REFUSAL RULES, AND THE SECOND ONE CLOSES A HOLE THE LOOPBACK LEFT FOR P7
 // -----------------------------------------------------------------------------
 //  ON A FULL RING THE NEWEST RECORD LOSES AND THE OLDEST IS KEPT. Both existing
-//  rings in this tree do that (input.cpp:304-305, ble_social.cpp:238-241), so
+//  rings in this tree did that (input.cpp:304-305, ble_social.cpp:238-241), so
 //  the tree keeps one rule - but the reason that actually decides it is the
 //  third: networking/session.h's retransmission is BY REGENERATION FROM STATE,
 //  so the peer re-sends what it still owes and the newest frame costs at most
@@ -128,7 +131,7 @@ uint8_t rxring_pending(const RxRing& r);
 
 // Empties the ring FROM THE CONSUMER SIDE (head := tail). Never touches tail:
 // the producer owns it, and storing 0 into both is the race ble_social.cpp
-// records. Safe to call while a producer is running; safe to call when there is
+// recorded (see the banner). Safe to call while a producer is running; safe to call when there is
 // no producer at all.
 void rxring_drain(RxRing& r);
 

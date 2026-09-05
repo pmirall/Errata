@@ -1,11 +1,10 @@
 // =============================================================================
-//  net.h - Nottamagochi radio state machine.
+//  net.h - Pebblebol radio state machine.
 //
 //  THE ONLY MODULE ALLOWED TO TOUCH RADIO LIFECYCLE.
 //  Nothing else in the firmware may call WiFi.mode(), the station association
-//  entry point, WiFi.softAP(), WiFi.scanNetworks(), DNSServer::start(),
-//  BLEDevice::init() or BLEDevice::deinit(). Consumers ask for a RadioMode and
-//  poll the accessors.
+//  entry point, WiFi.softAP(), WiFi.scanNetworks() or DNSServer::start().
+//  Consumers ask for a RadioMode and poll the accessors.
 //
 //  THIS FIRMWARE NEVER JOINS A NETWORK (P5-C1, spec section 68 r5). The station
 //  path - credentials, association, retry backoff, link-loss re-association -
@@ -28,15 +27,18 @@
 //  no NPH_STA_* phase to enter and no retry state to re-enter it from. The gate
 //  guards the deletion; it does not replace it.
 //
-//  INVARIANT (binding): exactly one radio stack is resident.
-//    RADIO_OFF  -> no WiFi, no Bluedroid. Simulation + OLED only.
-//    RADIO_WIFI -> WiFi up as a scanner or as the AP portal. Bluedroid down.
-//    RADIO_BLE  -> Bluedroid up. WiFi driver deinitialised (WIFI_MODE_NULL).
-//  Therefore net_is_ap_up() == true implies BLEDevice::getInitialized()
-//  == false: a consumer that has the portal up needs no separate BLE check.
+//  THERE IS ONE RADIO STACK (P8-C0). The invariant used to be "exactly one is
+//  resident" and it was a real constraint: Bluedroid and the Wi-Fi driver could
+//  not both be up, so every transition between them cost a RADIO_SETTLE_MS
+//  window in NPH_SETTLING. BLE is deleted, so what is left is:
+//    RADIO_OFF  -> nothing resident. Simulation + OLED only.
+//    RADIO_WIFI -> Wi-Fi up as a scanner, as the peer link, or as the AP.
+//  A Wi-Fi to Wi-Fi transition never settled even when BLE was here, which is
+//  why NPH_SETTLING and its timer went with it rather than being kept "just in
+//  case": a phase nothing can enter is a phase nobody maintains.
 //
 //  This header deliberately pulls in NO network headers (no WiFi.h, no
-//  BLEDevice.h, no WebServer.h) so ui/render/qr may include it without
+//  WebServer.h) so ui/render/qr may include it without
 //  breaking the layering rule. The IP is exposed as a dotted-quad string.
 //
 //  All user-facing text is Spanish and lives in strings_es.h; every
@@ -48,7 +50,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "../core/nt_types.h"     // -> config.h  (RadioMode, SSID_MAX_LEN, BLE_SESSION_CAP)
+#include "../core/nt_types.h"     // -> config.h  (RadioMode, SSID_MAX_LEN)
 
 // NOT #include "strings_es.h". The only thing this header needs from the string
 // table is the TYPE of net_last_err_str()'s return value, and every consumer of
@@ -65,8 +67,6 @@ enum NetPhase : uint8_t {
   NPH_OFF = 0,          // RADIO_OFF, nothing resident
   NPH_SCANNING,         // WIFI_STA enabled for a passive scan. NEVER associated.
   NPH_AP_PORTAL,        // softAP + captive DNS up (the creator's own network)
-  NPH_BLE_UP,           // Bluedroid initialised
-  NPH_SETTLING,         // one stack torn down, waiting RADIO_SETTLE_MS for the other
   NPH_LINK,             // WIFI_STA on PB_LINK_CHANNEL with ESP-NOW up. NEVER
                         // associated either: ESP-NOW's whole "association" is
                         // its peer table and its channel (P7-C1, decision D2).
@@ -79,11 +79,8 @@ enum NetPhase : uint8_t {
 enum NetErr : uint8_t {
   NERR_NONE = 0,
   NERR_BAD_ARG,           // mode out of range
-  NERR_BUSY,              // the other stack refused to go down
+  NERR_BUSY,              // reserved: nothing can refuse to go down any more
   NERR_WIFI_DISABLED,     // built with no WiFi consumer enabled
-  NERR_BLE_DISABLED,      // built with FEATURE_BLE == 0
-  NERR_BLE_SESSION_CAP,   // BLE_SESSION_CAP init/deinit cycles used this boot
-  NERR_BLE_INIT_FAILED,   // BLEDevice::init() did not take
   NERR_SCAN_FAILED,       // the driver refused to start a scan
   NERR_AP_FAILED,         // softAP() returned false
   NERR_DNS_FAILED,        // captive DNSServer::start() returned false
@@ -119,17 +116,15 @@ void        net_begin(void);
 // The stack that is resident right now.
 RadioMode   net_mode(void);
 
-// Ask for a stack. Tears the other one down first (BLE: stop advertising,
-// stop scan, clearResults, deinit(false); WiFi: DNS stop, softAP
-// down, WIFI_MODE_NULL). Returns false and sets net_last_err() when the
-// request cannot be honoured (BLE session cap, feature disabled, ...).
+// Ask for the stack. RADIO_OFF tears Wi-Fi down (DNS stop, softAP down,
+// WIFI_MODE_NULL). Returns false and sets net_last_err() when the request
+// cannot be honoured (feature disabled, the driver refused, ...).
 //
-// NEVER BLOCKS, so the bring-up may be DEFERRED. When the other stack had to
-// be torn down first, the driver needs RADIO_SETTLE_MS to itself: the phase
-// becomes NPH_SETTLING, the request returns true, and net_service() finishes
-// the bring-up when the timer expires. A caller that needs the stack resident
-// (SOCIAL before ble_begin(), god mode's GBS_RADIO) must therefore POLL
-// net_mode() rather than assume the call was enough.
+// NEVER BLOCKS. It no longer DEFERS either: the deferral existed to give the
+// other stack RADIO_SETTLE_MS to itself, and there is no other stack (P8-C0).
+// POLLING net_mode() REMAINS THE CONTRACT ANYWAY - a bring-up can still fail
+// inside the driver, and a caller that assumes the call was enough is wrong for
+// that reason rather than for the timer's.
 // RADIO_OFF is the exception: it is always immediate and always succeeds.
 //
 // RADIO_WIFI brings up the AP PORTAL. The scan is a different intent on the
@@ -165,10 +160,6 @@ size_t      net_url(char *out, size_t cap, uint16_t pin);
 // allocations so the debug screen shows the real peak).
 const NetHeapStats &net_heap_last(void);
 void        net_heap_log(const char *tag);
-
-// BLEDevice::deinit(false)/init() leaks ~672 B per cycle -> hard cap.
-uint8_t     net_ble_sessions_used(void);
-uint8_t     net_ble_sessions_left(void);
 
 // -----------------------------------------------------------------------------
 // THE SCANNER'S RADIO (P5-C1, spec sections 20, 40, 44).
@@ -226,18 +217,17 @@ bool        net_link_bind(uint8_t slot);
 void        net_link_unbind(void);
 
 // Compile-time sanity on the constants this module contracts against.
-static_assert(RADIO_COUNT == 3, "RadioMode must stay OFF/WIFI/BLE");
-// Was 7. Three of them - the two station phases and the retry backoff - are
-// gone with the station path (P5-C1); NPH_SCANNING is new. The assertion is
-// RESTATED rather than deleted: its job is to make a phase appearing or
-// vanishing a deliberate act, and that job survives its subject changing.
-// Was 5, and 7 before P5-C1 deleted the station. NPH_LINK is P7-C1's: the peer
-// link is a PHASE of the Wi-Fi stack, not a fourth RadioMode, so the assertion
-// above stays at 3 while this one moves. RESTATED rather than deleted, for the
-// reason the paragraph above gives - its job is to make a phase appearing or
-// vanishing a deliberate act, and that job survives its subject changing.
-static_assert(NPH_COUNT == 6, "NetPhase gained or lost a phase");
-static_assert(BLE_SESSION_CAP > 0 && BLE_SESSION_CAP <= 255, "BLE_SESSION_CAP must fit uint8_t");
+// Was 3 (OFF/WIFI/BLE) until P8-C0 deleted RADIO_BLE. BOTH ASSERTIONS ARE
+// RESTATED RATHER THAN DELETED EVERY TIME THEIR SUBJECT MOVES, which is the
+// third time for one and the fourth for the other: their job is to make a mode
+// or a phase appearing or vanishing a DELIBERATE act, and that job outlives any
+// particular count.
+static_assert(RADIO_COUNT == 2, "RadioMode must stay OFF/WIFI");
+// Was 7 before P5-C1 deleted the station path, 5 after it, 6 when P7-C1 added
+// NPH_LINK - the peer link is a PHASE of the Wi-Fi stack, not a second
+// RadioMode, which is why that change moved this line and not the one above -
+// and 4 now that NPH_BLE_UP and NPH_SETTLING have gone with BLE.
+static_assert(NPH_COUNT == 4, "NetPhase gained or lost a phase");
 // Was `SSID_MAX_LEN == 32 && PASS_MAX_LEN == 64, "WiFi credential caps"`. There
 // are no credentials any more, so that assertion lost its subject; what these
 // two constants still size is this module's ACCESS POINT name buffer and the

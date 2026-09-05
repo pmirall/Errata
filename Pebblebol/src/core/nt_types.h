@@ -110,11 +110,11 @@ enum Mood : uint8_t {
   MOOD_COUNT
 };
 
-// Exactly one radio stack may be resident.
+// The radio. RADIO_BLE was the third value until P8-C0 deleted BLE; nothing
+// persists or transmits a RadioMode, so the renumbering reaches no stored byte.
 enum RadioMode : uint8_t {
   RADIO_OFF = 0,
   RADIO_WIFI,
-  RADIO_BLE,
   RADIO_COUNT
 };
 
@@ -391,7 +391,11 @@ static_assert(sizeof(PendingEgg) == 24, "PendingEgg must be 24 bytes");
 #define NT_CFG_MAGIC     0x4643u   // 'C','F'
 #define NT_CFG_VERSION   1
 #define CF_PROVISIONED   0x01u     // WiFi credentials confirmed working at least once
-#define CF_BLE_ENABLED   0x04u
+// 0x04 WAS CF_BLE_ENABLED AND IS RESERVED, NOT REUSED (P8-C0). BLE is deleted
+// from the firmware but not from the SAVES: a v1 blob written before the
+// deletion has this bit set, tests/fixtures/config_v1.bin is one, and giving it
+// a new meaning would make that fixture assert something it never recorded.
+#define CF_RESERVED_BLE  0x04u
 #define CF_WEB_ENABLED   0x08u
 #define CF_MUTE          0x20u
 
@@ -454,17 +458,6 @@ struct ActionResult {
   int16_t  d[ST_COUNT];    // applied delta per StatId
   int16_t  d_cq;
   uint16_t str_id;         // StrId of the reaction line, 0 = none
-};
-
-// One BLE peer seen in the last BLE_PEER_TTL_S seconds.
-struct BlePeerInfo {
-  uint8_t  mac[6];
-  Genome   genome;
-  uint8_t  stage;          // Stage
-  uint8_t  cq_hi;          // cq >> 2
-  uint8_t  peer_flags;     // b0 = debug/godmode, b1 = seeking
-  int8_t   rssi;
-  uint32_t last_seen_ms;
 };
 
 // The absence report handed from sim_catch_up_ex() to the UI.

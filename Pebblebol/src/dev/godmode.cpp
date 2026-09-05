@@ -1237,8 +1237,11 @@ static void draw_sys(void)
       // No rssi line: net_rssi() was station-only and went with the station
       // (P5-C1). Per-access-point signal strength lives in ScanResult.rssi,
       // which the NETWORK screen reads, not here.
-      snprintf(b, sizeof(b), "ble %u/%u",
-               (unsigned)net_ble_sessions_used(), (unsigned)BLE_SESSION_CAP);
+      // Was `ble n/32`, the BLE init/deinit session counter, until P8-C0
+      // deleted BLE. The row it replaces is the one a soak log wants here:
+      // whether the peer link is actually up.
+      snprintf(b, sizeof(b), "espnow %s",
+               (net_phase() == NPH_LINK) ? "up" : "-");
       rd_text(2, 43, RD_FONT_TINY, b);
       break;
     }

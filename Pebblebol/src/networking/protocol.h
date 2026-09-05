@@ -81,8 +81,9 @@
 //  content tables and game/validate.h. NO Arduino.h, no esp_now.h, no WiFi.h,
 //  no renderer, no heap, no float, no clock, no RNG, no file-scope mutable in
 //  protocol.cpp - which is what lets one process run two endpoints.
-//  tools/check.sh gates all of that by FILENAME, because networking/ble_social.cpp
-//  legitimately includes Arduino.h and the BLE headers.
+//  tools/check.sh gates all of that by FILENAME, because the directory is MIXED:
+//  net.cpp, webui.cpp and transport_espnow.cpp legitimately include Arduino.h
+//  and the radio headers. (Until P8-C0 the example here was ble_social.cpp.)
 // =============================================================================
 #ifndef PB_NETWORKING_PROTOCOL_H
 #define PB_NETWORKING_PROTOCOL_H

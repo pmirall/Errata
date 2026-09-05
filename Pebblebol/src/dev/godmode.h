@@ -38,7 +38,7 @@
 // -----------------------------------------------------------------------------
 // 1. TUNABLES THAT ARE NOT (YET) IN config.h
 //    Every one is #ifndef-guarded so it can be lifted into config.h verbatim
-//    without touching this file (the ble_social.h pattern). config.h already
+//    without touching this file (the pattern ble_social.h set, P8-C0). config.h already
 //    owns GOD_MODE_ENABLED, GOD_ENTER_HOLD_MS, GOD_SCALE_0..4,
 //    GOD_SCALE_COUNT, GOD_ABSENCE_COUNT, GOD_CMD_COUNT and GOD_BAR_H.
 // -----------------------------------------------------------------------------
