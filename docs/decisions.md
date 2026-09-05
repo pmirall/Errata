@@ -18,7 +18,7 @@ may override), **CLOSED** (decided; commit named).
 | **D5** | Panel variant SSD1306 vs SH1106 | DEFAULT | `DISPLAY_IS_SH1106` (`config.h:64`); both drivers verified to link. | Keep 0 (SSD1306). Flip only with the panel in front of you (README §3 symptoms). | P2-C0 | — |
 | **D6** | Partition table / OTA room (§61) | DEFAULT | `huge_app.csv` = nvs 20 KB, otadata 8 KB, app0 3 MB, spiffs 896 KB unused, coredump 64 KB; no OTA slot. Core 3.1.1 honours a `partitions.csv` in the sketch folder. `initArduino()` erases the whole `nvs` partition on `ESP_ERR_NVS_NO_FREE_PAGES` / `NEW_VERSION_FOUND` before `setup()`. | Custom `Pebblebol/partitions.csv`: `nvs 0x9000 0x5000 · otadata 0xE000 0x2000 · app0 0x10000 0x300000 · nvs2 0x310000 0x10000 · spiffs 0x320000 0xD0000 (reserved) · coredump 0x3F0000 0x10000`. `nvs2` = checkpoint partition. OTA stays a V1 non-goal. | P2-C9d | **CLOSED (P2-C9d, 2026-09-03).** `Pebblebol/partitions.csv` committed exactly as proposed: `nvs 0x9000 0x5000 · otadata 0xE000 0x2000 · app0 0x10000 0x300000 · nvs2 0x310000 0x10000 · spiffs 0x320000 0xD0000 · coredump 0x3F0000 0x10000`, filling 4 MB with no gap. **`PartitionScheme=huge_app` STAYS in the FQBN**, contrary to the plan's wording, and the reason is worth recording: arduino-cli copies a sketch-local `partitions.csv` into the build directory and esptool flashes THAT — so the table in force is ours either way — but `upload.maximum_size`, the ceiling the compile is checked against, comes from the board menu. Dropping the option left the check at the default scheme's 1,310,720 B and failed a 1.87 MB build that fits `app0` perfectly. `huge_app`'s ceiling is 3,145,728 B, which is exactly `app0` in our CSV, so the two agree. `tools/build.sh` now gates both facts: the reported app maximum must equal 3,145,728, and the partition table about to be flashed must contain `nvs2`. |
 | **D7** | Creator inactivity grace (§34) | DEFAULT | 120 s vs 300 s. | `ConfigV2.creator_idle_s` default 300, editable in SETTINGS. | P8-C2 | — |
-| **D8** | Piezo GPIO (new hardware, V1 baseline §6) | **OPEN — owner confirms when soldering** | A passive ~15 mm piezo joins the V1 BOM. Free, non-strapping GPIOs on this board: 3, 4, 6, 7. GPIO0 is kept for the battery divider (D10). `tone()`/`noTone()` and the LEDC driver are both in the installed core, so no library is needed. | Propose `PIN_PIEZO 3`. The tone engine is written against the macro, so changing it is a one-line edit. | P6-C3 (sleep GPIO states), P10-C2 (tone engine) | — |
+| **D8** | Piezo GPIO (new hardware, V1 baseline §6) | **STILL OPEN — owner confirms when soldering** | A passive ~15 mm piezo joins the V1 BOM. Free, non-strapping GPIOs on this board: 3, 4, 6, 7. GPIO0 is kept for the battery divider (D10). `tone()`/`noTone()` and the LEDC driver are both in the installed core, so no library is needed. | `PIN_PIEZO 3` is now **committed as the proposal** in `core/config.h` §2 (P6-C1). The tone engine is written against the macro, so changing it is a one-line edit, and `tools/check.sh` fails any other file that defines a `PIN_` macro. | P6-C3 (sleep GPIO states); the tone engine landed EARLY, in **P6-C1**, not P10-C2 | **The engine shipped against an open decision — see "D8 — the tone engine landed…" below.** The pin itself is unconfirmed and nothing has been heard. |
 | **D9** | Supply architecture for 2×AAA | **CLOSED — 3.3 V boost converter (2026-09-03, owner)** | Alkaline AAA pairs sag from ~2.8 V loaded to ~2.4 V at 80 % discharge, while the core arms brownout at level 7 (~3.0 V, verified `CONFIG_ESP_BROWNOUT_DET_LVL 7`), and the board's LDO cannot step 3.0 V up. A boost module removes the whole problem: the 3.3 V rail stays flat across the discharge curve and ~90 % of cell capacity becomes usable. | Boost module fitted, feeding 3.3 V. The board's always-on power LED is being desoldered (it cost ~48 mAh/day, more than the rest of the device combined). | — | Decided: boost. Two follow-ups it creates are tracked as D11 and D12. |
 | **D10** | Battery sense divider on GPIO0 | OPEN | Spec §26 wants NORMAL/LOW/CRITICAL levels. `PIN_VBAT_ADC 0` is already reserved and GPIO0 is ADC1_CH0, so this needs only two resistors. Without it those levels cannot exist and a flat pack corrupts a save instead of warning. | Two resistors; the firmware side lands with the power states in P6-C3. | P6-C3 | — |
 | **D11** | Boost module quiescent current | **OPEN — now the single biggest factor in battery life** | With the voltage window solved and the power LED gone, the dominant idle load is whatever the boost module draws doing nothing. Cheap PFM modules range from ~20 µA to ~2 mA, a 100× spread that decides the runtime outright. Budget from ~680 mAh of usable energy at 3.3 V and the spec's 60 min/day profile: 25 µA idle → ~26 days · 200 µA → ~23 days · 1 mA → ~14 days · 2 mA → ~9 days. | Measure it: multimeter in series with the cells, ESP32 in deep sleep, OLED off, radios off. Anything above ~200 µA and the ≥30-day target needs a different module, not firmware work. | Battery-life target | — |
@@ -982,3 +982,95 @@ not N neutralised lines in a hand-copied tree.
 - **The 1 h heap soak (P2-C12), the ×3600 neglect soak (P3-C5) and every battery figure
   (D11)** are still pending first flash. **This firmware has still never run on a physical
   board.**
+
+## D8 — the tone engine landed against an open decision (recorded 2026-09-05, P6-C1)
+
+D8 is still **OPEN**: the owner confirms the piezo GPIO when the sounder is soldered, and
+nothing here has been heard on hardware. What P6-C1 committed is the code that will drive
+it, plus the proposal `PIN_PIEZO 3` in `core/config.h` §2 — and three things worth
+recording, because two of them are measurements and one is a rule.
+
+### The pin has exactly one home, and that is now checked
+
+`PIN_PIEZO` is defined once, beside the D1 map, and `hardware/audio.cpp` names the macro and
+never a number. `tools/check.sh` gained a gate that fails any `#define PIN_...` outside
+`core/config.h`; planting `#define PIN_PIEZO_ALT 4` in `audio.cpp` prints
+
+    GATE FAIL: a PIN_ macro is defined outside core/config.h (1) - while D1 and D8 are open
+    the pin map has exactly one home (spec section 68 r3)
+
+The gate matches `#define` lines only, so prose may name the macro, and it says nothing
+about a bare number handed to `pinMode()` — that is a different and much harder grep, and
+this is a check on a SECOND DEFINITION, which is the failure that survives review.
+
+**`PB_PINS_CONFIRMED` is still not defined anywhere.** Two dormant `static_assert`s were
+added for D8 (the piezo may not share a pin with SDA, SCL, either button, the LED or the
+battery divider; and it may not sit on a strapping pin), and they were checked by mutation
+rather than by reading: compiled with `-DPB_PINS_CONFIRMED`, moving the piezo to 5 fails
+*"D8: the piezo needs a pin of its own"* and moving it to 8 fails *"D8: no piezo on a
+strapping pin (GPIO2/8/9)"*. **That compile also found a real latent defect and it is
+fixed**: `PIN_VBAT_ADC` was declared *after* the guard block, so a build with the macro
+defined did not fail an assertion, it failed to compile — `'PIN_VBAT_ADC' was not declared
+in this scope`. Every pin the guards talk about is now declared before them. The
+pre-existing *"D1: no button on a strapping pin"* failure is untouched and expected: D1 is
+deferred, `PIN_BTN_R` is 2, and that is the owner's call to make.
+
+### LEDC, not the core's `tone()` — and the reason is a number
+
+The plan bullet allows either. Arduino-ESP32 3.1.1's `Tone.cpp` lazily creates a FreeRTOS
+task with a **3,500-word (14,000 B) stack** and a **128 × 16 B = 2,048 B queue** the first
+time `tone()` is called, at priority 10, and its `noTone()` calls `xQueueReset()` — which
+discards a start that was queued and not yet run. Sixteen kilobytes of heap and a task to
+click a piezo is not a trade this device can make, and the dropped-start race is the kind of
+defect that would only ever appear on hardware. Read from the core source
+(`cores/esp32/Tone.cpp`), **not measured on a board**. `tone()` would also not have been
+cheaper in flash: it reaches the piezo through `ledcAttach`/`ledcWriteTone`/`ledcDetach`,
+so it drags in the same driver *plus* the task and the queue.
+
+`hardware/audio.cpp`'s device sink therefore attaches an LEDC channel for the duration of a
+note and **detaches it between effects**, then drives the pin low — spec §18's "GPIO
+inactive except during sound playback" and "avoid continuous PWM", and the §66 checklist
+line "piezo output is inactive between effects".
+
+### What it costs, attributed
+
+Baseline **1,927,936 / 73,180 → 1,936,964 / 73,316**: **+9,028 B flash, +136 B globals**.
+Release **1,203,808 / 49,508 → 1,212,844 / 49,660** (+9,036 / +152), against caps of
+1,600,000 / 65,000.
+
+The globals are attributed with `riscv32-esp-elf-nm` over both linked images:
+
+| what | bytes |
+|---|---|
+| the engine's own state (`s_q`, head/count, current effect and step, step clock, sink and mute pointers, the sink's `s_attached`) | **22** |
+| the ESP-IDF LEDC driver's statics (`s_ledc_fade_rec` 24, `p_ledc_obj`, `s_ledc_mutex`, `s_ledc_fade_isr_handle`, `s_ledc_slow_clk_rc_fast_freq`, `ledc_handle`, `clock_source`, `fade_initialized`, `s_periph_use_8m_flag`) | **50** |
+| `__func__.0` — the LEDC HAL's IRAM-resident assert string | **24** |
+| **named total** | **96** |
+| link alignment and the HAL's other DRAM-resident assert strings (`/IDF/components/hal/ledc_hal_iram.c`, `range == 0`, found by diffing the two images' `.dram0.data` contents) | **40** |
+| **measured `.dram0.data` +72 and `.dram0.bss` +64** | **136** |
+
+The `.bss` half is exact: 64 B of named symbols, 64 B measured. The 40 B of slack is all in
+`.data`, and the string diff above says what it is.
+
+**The step table costs no RAM.** `kSteps` (92 B), `kFirst`, `kCount` and `kDeviceSink` link
+into DROM at `0x3C1E_xxxx`, i.e. flash.
+
+**Read against `docs/budget.md`, this is most of phase 6's flash line for one chunk of
+three** (P6 is allowed 8–12 K flash and 0.3–0.8 K globals). About 7.5 KB of the 9,028 is
+the LEDC driver and its log strings arriving with the first PWM output in the tree, and it
+is paid once: P6-C3's power states and any later LED breathing reuse the same driver. The
+globals are 17–45 % of the phase's line. If P7 needs the flash back, the cheap lever is a
+`FEATURE_AUDIO` compile flag, which the seam already makes a one-file change — that is a
+suggestion, not something P6-C1 built or measured.
+
+### What is NOT covered by a test, said plainly
+
+`hardware/audio.cpp` is a pure translation unit and `tests/test_audio.cpp` drives every path
+of the engine through a recording sink. The **wiring** is a different claim. Of the four
+places P6-C1 arms a cue, exactly one is reachable from a host binary —
+`ui/screen_battle.cpp`'s hit and faint beats, covered by
+`a_hit_and_a_faint_each_arm_their_own_cue_exactly_once` in `tests/test_battle_screen.cpp`.
+The other three (`ui/ceremony.cpp`'s four phase edges, `ui/ui.cpp`'s level-up and its care
+refusal) live in device translation units that no host binary compiles, so they are checked
+by the compiler and by reading, and by nothing else. **Nothing has been heard.**
+

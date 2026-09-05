@@ -17,6 +17,7 @@
 #include "gfx.h"
 #include "pet_art.h"
 #include "../game/inventory.h"   // the armed BATTLE_MOD (P5-C4)
+#include "../hardware/audio.h"    // one cue per beat (P6-C1); pure, no GPIO
 #include "screen.h"
 #include "ui.h"
 
@@ -456,8 +457,10 @@ static void enter_beat(uint16_t i) {
   s_ev_ms   = ui_now_ms();
   build_message();
   const uint8_t k = battle_screen_event();
-  if (k == RLE_HIT)   ui_shake(1u, 120u);
-  if (k == RLE_FAINT) ui_flash(140u);
+  // The two frame effects and their two cues are armed together, on the same
+  // edge and for the same reason: a beat is entered exactly once.
+  if (k == RLE_HIT)   { ui_shake(1u, 120u); audio_play(SFX_BUZZ); }
+  if (k == RLE_FAINT) { ui_flash(140u);     audio_play(SFX_FALL); }
 }
 
 static void advance_playback(void) {

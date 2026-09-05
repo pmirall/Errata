@@ -35,6 +35,7 @@
 #include "../hardware/kv_nvs.h"
 #include "../hardware/gametime.h"
 #include "../hardware/input.h"
+#include "../hardware/audio.h"
 #include "../ui/render.h"
 #include "../networking/net.h"
 #include "../networking/ble_social.h"
@@ -116,6 +117,13 @@ static bool app_retry_display(void)
   apply_config();
   return true;
 }
+
+// hardware/audio.h asks the firmware exactly one question - "is sound off?" -
+// and this is the whole answer. It reads CF_MUTE off the live Config every
+// time instead of the engine holding a copy, because a copy is a second place
+// the flag lives and ui/screen_settings.cpp and ui/screen_home.cpp both toggle
+// the original.
+static bool app_audio_muted(void) { return (g_cfg.flags & CF_MUTE) != 0u; }
 
 static void app_led(bool on)
 {
@@ -539,6 +547,13 @@ void app_setup(void)
 
   // --- everything that reads Config or the pet ------------------------------
   input_begin();
+  // THE PIEZO (P6-C1, decision D8). Bind first, begin second - audio_begin()
+  // idles the pin THROUGH the bound sink, so the order is what makes PIN_PIEZO
+  // quiet rather than floating from this line onwards. g_cfg is already loaded
+  // by the time we get here, and the hook re-reads it on every cue, so a mute
+  // toggled in SETTINGS needs nothing to be kept in step.
+  audio_bind(audio_device_sink(), &app_audio_muted);
+  audio_begin();
   net_begin();
   // The scan's per-device salt (spec section 44). gs_device_id() is drawn once
   // from RNG_MISC, is never 0 and is persisted, so the same access point hashes
@@ -706,6 +721,7 @@ void app_loop(void)
 
   // --- 3. per-loop pumps that own presentation timing ----------------------
   ui_service();                   // auto-return, minigames, the hatch ceremony
+  audio_service(ms);              // one tone step at most; never blocks (P6-C1)
   god_service();                  // soak log, serial genome paste
 
   // --- 4. render ------------------------------------------------------------

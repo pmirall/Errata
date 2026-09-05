@@ -47,6 +47,7 @@
 #include "ui/battle_renderer.h"
 #include "ui/pet_art.h"
 #include "game/inventory.h"
+#include "hardware/audio.h"
 #include "ui/screen_battle.h"
 #include "ui/ui.h"
 #include "ui/xbm_mirror.h"
@@ -86,6 +87,52 @@ static void seams_reset(void) {
   g_backs = 0; g_wiggles = 0; g_results = 0;
   g_res_entry = 0xFF; g_res_won = 0xFF;
   g_hold_fps = 0; g_holds = 0; g_flashes = 0; g_shakes = 0;
+}
+
+// =============================================================================
+//  THE TENTH SEAM (P6-C1): THE PIEZO.
+//
+//  ui/screen_battle.cpp now arms one cue per beat beside the shake and the
+//  flash, and hardware/audio.cpp reaches the sounder through an AudioSink - so
+//  the recorder below is what a battle sounds like on a machine with no piezo.
+//  It is bound by ONE case and unbound again afterwards: every other case in
+//  this file leaves the engine with no sink, which is silent and free.
+//
+//  DRAINING. The screen only ever QUEUES; audio_service() is app_loop()'s job
+//  and there is no app_loop here, so the drain below is this file standing in
+//  for it. The step clock is jumped a full second per call on purpose - the
+//  engine advances one step per call whatever the gap, so a big jump walks an
+//  effect to its end in as many calls as it has steps.
+// =============================================================================
+static int      g_tone_on  = 0;
+static int      g_tone_off = 0;
+static uint32_t g_audio_t  = 0;
+static bool     g_drain_audio = false;
+
+static void rec_tone_on(uint16_t) { ++g_tone_on; }
+static void rec_tone_off(void)    { ++g_tone_off; }
+static const AudioSink kAudioRec = { rec_tone_on, rec_tone_off };
+
+static void audio_drain(void) {
+  for (int i = 0; i < 4000 && (audio_busy() || audio_queued() > 0); ++i) {
+    audio_service(g_audio_t);
+    g_audio_t += 1000u;
+  }
+}
+
+static void audio_rec_bind(void) {
+  audio_bind(&kAudioRec, nullptr);
+  audio_begin();
+  g_tone_on = 0; g_tone_off = 0; g_audio_t = 0;
+}
+
+// How many notes one effect emits, measured through the same recorder rather
+// than copied out of hardware/audio.cpp's table.
+static int notes_in(uint8_t sfx) {
+  audio_rec_bind();
+  CHECK(audio_play(sfx));
+  audio_drain();
+  return g_tone_on;
 }
 
 // =============================================================================
@@ -187,6 +234,10 @@ static void run_battle(uint32_t seed, uint8_t entry, RunStats& out) {
       if (k == RLE_FAINT) ++out.faint_beats;
       if (battle_screen_round() > out.widest_round) out.widest_round = battle_screen_round();
       battle_input(GST_TAP_L);
+      // The cue for the beat this input ENTERS is armed inside that call, so
+      // the drain has to follow it. Off by default: every other case here runs
+      // with no sink bound and this line costs them two loads.
+      if (g_drain_audio) audio_drain();
       continue;
     }
     break;                                     // no other mode is reachable here
@@ -490,6 +541,42 @@ TEST(a_hit_shakes_once_and_a_faint_flashes_once) {
   CHECK_EQ(g_shakes, r.hit_beats);
   CHECK_EQ(g_flashes, r.faint_beats);
   battle_leave();
+}
+
+// P6-C1: the same two edges now also carry a cue, and this is the only place in
+// the tree where the WIRING of the tone engine - as opposed to the engine - is
+// driven by a test. ui/ceremony.cpp and ui/ui.cpp arm three more cues and are
+// device translation units no host binary compiles, so they are NOT covered
+// here and this comment is where that gap is written down.
+//
+// The counts distinguish the two cues rather than merely proving that something
+// sounded: a buzz is one note and a fall is five, so wiring both edges to the
+// same effect - or to each other's - fails on the note total while the
+// tone_off total (one per effect end) still matches.
+TEST(a_hit_and_a_faint_each_arm_their_own_cue_exactly_once) {
+  const int nb = notes_in(SFX_BUZZ);
+  const int nf = notes_in(SFX_FALL);
+  CHECK(nb > 0);
+  CHECK(nf > nb);
+
+  seams_reset();
+  box_fixture(3);
+  audio_rec_bind();
+  g_drain_audio = true;
+  RunStats r;
+  run_battle(0x6000u, BT_ENTRY_PRACTICE, r);
+  g_drain_audio = false;
+
+  CHECK(r.hit_beats > 0);
+  CHECK(r.faint_beats > 0);
+  CHECK_EQ(g_tone_on,  r.hit_beats * nb + r.faint_beats * nf);
+  CHECK_EQ(g_tone_off, r.hit_beats + r.faint_beats);
+  battle_leave();
+
+  // Leave the engine as the rest of this file expects to find it: no sink, so
+  // every other case runs silent and costs nothing.
+  audio_bind(nullptr, nullptr);
+  audio_begin();
 }
 
 // 20 fps is HELD, not requested: rd_fps() caps a bare request at FPS_LOW while

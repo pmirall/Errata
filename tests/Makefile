@@ -234,6 +234,15 @@ $(BIN)/test_inventory:  $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/xp.o \
                         $(OBJ)/evolution.o $(OBJ)/species.o $(OBJ)/pebble.o \
                         $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
+# P6-C1: THE TONE ENGINE AND THE MOTION CAPABILITY. audio.cpp keeps its LEDC
+# half behind `#if defined(ARDUINO)` exactly as input.cpp keeps its
+# digitalRead(), so ONE object and no others is the whole binary: the queue, the
+# step clock and both halves of CF_MUTE are decided above the sink, and the test
+# binds a recorder in place of a piezo. If this link line ever needs a second
+# object, something device-shaped has leaked below the seam.
+$(BIN)/test_audio:      $(OBJ)/audio.o
+$(BIN)/test_motion:     $(OBJ)/motion_null.o
+
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 # The minigame contract and the PURE logic of every game. No draw objects and
 # no ui/: if this link line ever needs one, a game has leaked drawing into its
@@ -285,10 +294,16 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/dialog.o $(OBJ)/qr.o $(OBJ)/box.o \
                $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o \
                $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
+               $(OBJ)/audio.o \
                $(OBJ)/screen_battle.o $(OBJ)/battle_renderer.o \
                $(OBJ)/xbm_mirror.o \
                $(OBJ)/battle.o $(OBJ)/battle_ai.o $(OBJ)/pebble.o
 
+# P6-C1 added audio.o: ui/screen_battle.cpp arms one cue per battle beat, and
+# hardware/audio.cpp is a pure translation unit (its LEDC half is behind
+# `#if defined(ARDUINO)`), so the screen binaries link the REAL engine with no
+# sink bound - which is the silent, side-effect-free default and needs no stub.
+#
 # P5-C3/C4 added the exploration half. ui/screen_network.cpp and
 # ui/screen_encounter.cpp are pure translation units like every other migrated
 # screen, and they drag the real modules they drive - the scan job, the
@@ -334,6 +349,7 @@ $(BIN)/test_screens:    $(SCREEN_OBJS) $(MG_FRAME_OBJS)
 # inventory.o + its two consumers since P5-C4: the battle screen takes the armed
 # BATTLE_MOD from it, which is where a capture-menu item finally reaches a fight.
 $(BIN)/test_battle_screen: $(OBJ)/screen_battle.o $(OBJ)/battle_renderer.o \
+                        $(OBJ)/audio.o \
                         $(OBJ)/xbm_mirror.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
                         $(OBJ)/pebble.o $(OBJ)/box.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o \

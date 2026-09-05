@@ -507,4 +507,27 @@ if [ -d "$SKETCH/src/networking" ]; then
   [ "$n_all" -eq "$n_zero" ] || fail "a ScanResult padding byte is assigned something other than 0 ($((n_all - n_zero)) of $n_all under src/networking) - those bytes are padding, and a network name is exactly what fits in them (spec 44)"
 fi
 
+# --- P6-C1: ONE PLACE DEFINES A PIN (spec section 68 r3) ------------------
+# "No pin invented" is a rule the plan repeats three times - at P1 (line 375),
+# at the hardware-abstraction row (line 178) and at the motion bullet (line 723)
+# - and until this gate it was enforced by nobody. Decisions D1 (the button and
+# LED map) and D8 (the piezo GPIO) are both OPEN, so the one thing that has to
+# stay true while the owner is still holding a soldering iron is that every GPIO
+# number in the firmware is in core/config.h section 2 and nowhere else. A
+# second `#define PIN_...` in a driver is how a pin map comes to have two
+# answers, and the owner would be reading the wrong one.
+#
+# NARROW, AND THE NARROWNESS IS THE POINT: it matches #define LINES ONLY, so a
+# file may name PIN_PIEZO in prose - hardware/audio.cpp does, several times -
+# and it says NOTHING about a bare number handed to pinMode() or ledcAttach().
+# That is a different and much harder grep, and claiming it here would be the
+# "sentence wider than the tree" this project keeps finding. What it catches is
+# a SECOND DEFINITION, which is the failure that survives a review.
+if [ -d "$SKETCH/src" ]; then
+  n=$( { grep -rnE '^[[:space:]]*#[[:space:]]*define[[:space:]]+PIN_' "$SKETCH/src" \
+          --include='*.cpp' --include='*.h' || true; } \
+        | { grep -v 'core/config\.h' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "a PIN_ macro is defined outside core/config.h ($n) - while D1 and D8 are open the pin map has exactly one home (spec section 68 r3)"
+fi
+
 echo "GATE OK"

@@ -55,6 +55,7 @@
 #include "../persistence/save_manager.h"  // save_cooldowns / save_inventory (P5-C3)
 #include "../hardware/kv_nvs.h"      // kv_error(), for the DIAG line
 #include "../hardware/gametime.h"
+#include "../hardware/audio.h"   // the P6-C1 tone engine: cues, never policy
 #include "ceremony.h"  // the hatch / evolution show (P2-C11c)
 #include "dialog.h"    // the CONFIRM / ALERT / HELP overlays (P2-C11c)
 #include "screen_creator.h"   // CreatorInfo, for the radio seam below
@@ -465,13 +466,21 @@ static bool do_action(ActionId a) {
     if (act_earns_xp(a)) (void)app_award_xp(xp_care_action_amount(), XP_SRC_CARE);
     const SimView* p = pet();
     if (p) gs_save_active(true);
-  } else if (r.err == AERR_COOLDOWN && r.cooldown_s) {
-    // The base line has no {t}; the countdown is appended so the wait is honest.
-    char buf[64];
-    snprintf(buf, sizeof(buf), "%s %u s", S(STR_AERR_COOLDOWN), (unsigned)r.cooldown_s);
-    toast_text(buf);
   } else {
-    ui_toast(r.str_id ? r.str_id : (uint16_t)(STR_AERR_NONE + r.err));
+    // A REFUSAL IS WHERE A CUE EARNS ITS KEEP: the toast says why, but the
+    // player pressing A on a pet in a pocket only finds out that nothing
+    // happened. One SFX_BUZZ for every refusal, whichever branch names it -
+    // armed once here rather than once per branch, so a fourth refusal reason
+    // cannot arrive silent.
+    audio_play(SFX_BUZZ);
+    if (r.err == AERR_COOLDOWN && r.cooldown_s) {
+      // The base line has no {t}; the countdown is appended so the wait is honest.
+      char buf[64];
+      snprintf(buf, sizeof(buf), "%s %u s", S(STR_AERR_COOLDOWN), (unsigned)r.cooldown_s);
+      toast_text(buf);
+    } else {
+      ui_toast(r.str_id ? r.str_id : (uint16_t)(STR_AERR_NONE + r.err));
+    }
   }
   rd_request_frame();
   return ok;
@@ -1481,7 +1490,11 @@ void ui_note_events(uint32_t ev) {
   // the player doing anything to the sprite, so it gets the flash as well as
   // the toast: HOME's XP rule snaps back to empty and the level in the strip
   // ticks over, and the frame flash is what points at it.
-  if (ev & SIM_EV_LEVEL_UP)  { rd_flash(HATCH_FLASH_MS); ui_toast(STR_RX_LEVEL_UP); }
+  if (ev & SIM_EV_LEVEL_UP)  {
+    rd_flash(HATCH_FLASH_MS);
+    audio_play(SFX_RISE);          // the numbers went up; so does the cue
+    ui_toast(STR_RX_LEVEL_UP);
+  }
   if (ev & SIM_EV_POOP)        ui_alert(AL_POOP);
   if (ev & SIM_EV_SICK_START)  ui_alert(AL_SICK);
   if (ev & SIM_EV_SICK_END)    ui_toast(STR_RX_MED);

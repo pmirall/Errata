@@ -15,6 +15,7 @@
 #include "../core/nt_types.h"
 #include "../core/strings_es.h"
 #include "../data/sprites.h"
+#include "../hardware/audio.h"
 #include "petfx.h"
 #include "render.h"
 #include "ui.h"
@@ -71,6 +72,7 @@ bool ceremony_begin(uint8_t kind, uint32_t now_ms) {
     s_phase = CP_FLASH;
     s_t0    = (uint32_t)(now_ms - HATCH_T_FLASH);
     rd_flash(HATCH_FLASH_MS);
+    audio_play(SFX_CHIRP);   // the CP_CRACK edge that arms it is never crossed
   } else {
     s_phase = CP_WOBBLE;
     s_t0    = now_ms;
@@ -82,14 +84,32 @@ bool ceremony_begin(uint8_t kind, uint32_t now_ms) {
 // -----------------------------------------------------------------------------
 //  PHASE EDGES
 //
-//  WHERE THE SOUND GOES (spec section 18's fourth item). The plan sequences
-//  hardware/audio.{h,cpp} in P6, so there is no tone engine to call yet - but
-//  this function is where the calls belong when there is one, beside the
-//  rd_flash() / rd_shake() lines below: it is the ONE place a phase edge is
-//  crossed, and every effect here is armed exactly once. Doing it from
-//  ceremony_draw() would re-trigger on every frame. P6 adds one cue per edge
-//  (the crack jolts, the flash, the reveal, the name) and nothing else here
-//  has to move.
+//  WHERE THE SOUND GOES (spec section 18's fourth item). P2-C11c marked this
+//  function as the place and P6-C1 filled it in: it is the ONE place a phase
+//  edge is crossed, so every cue below is armed EXACTLY ONCE per show. Doing it
+//  from ceremony_draw() would re-trigger on every frame - which is precisely
+//  the bug the shake and the flash were put here to avoid, and a tone engine
+//  re-armed at 20 fps would never advance past its first step.
+//
+//  FOUR EDGES CARRY A CUE AND THREE DO NOT, which is a choice rather than an
+//  omission:
+//    CP_CRACK   one SFX_BUZZ per jolt, beside the rd_shake() it belongs to.
+//               The shell gives way in three steps and it should sound like it.
+//    CP_FLASH   SFX_CHIRP, the bright moment.
+//    CP_GROW    SFX_RISE, the body coming up out of the dither.
+//    CP_NAME    SFX_DOUBLE_BEEP - named, done.
+//    CP_SHARDS  SILENT: it is HATCH_FLASH_MS (80 ms) after the flash, closer
+//               together than the shortest effect in the vocabulary, so a cue
+//               here would only queue behind the one the player is still
+//               hearing.
+//    CP_WOBBLE / CP_LOOK  SILENT: nothing changes state at those edges.
+//
+//  The EVOLVE arm starts the clock at CP_FLASH, so an evolution gets the last
+//  three cues and no jolts - which is the same asymmetry the visuals already
+//  have, for the same reason: there is no shell.
+//
+//  Nothing here checks CF_MUTE. audio_play() is the one place that asks, so a
+//  muted device runs the identical code path and queues nothing.
 // -----------------------------------------------------------------------------
 void ceremony_service(uint32_t now_ms) {
   if (!ceremony_active()) return;
@@ -108,8 +128,13 @@ void ceremony_service(uint32_t now_ms) {
       while (s_jolts < want && s_jolts < 3u) {
         ++s_jolts;
         rd_shake(HATCH_JOLT_PX, HATCH_JOLT_MS);
+        audio_play(SFX_BUZZ);
       }
-      if (el >= HATCH_T_FLASH) { s_phase = CP_FLASH; rd_flash(HATCH_FLASH_MS); }
+      if (el >= HATCH_T_FLASH) {
+        s_phase = CP_FLASH;
+        rd_flash(HATCH_FLASH_MS);
+        audio_play(SFX_CHIRP);
+      }
       break;
     }
 
@@ -118,7 +143,7 @@ void ceremony_service(uint32_t now_ms) {
       break;
 
     case CP_SHARDS:
-      if (el >= HATCH_T_GROW) s_phase = CP_GROW;
+      if (el >= HATCH_T_GROW) { s_phase = CP_GROW; audio_play(SFX_RISE); }
       break;
 
     case CP_GROW:
@@ -135,7 +160,11 @@ void ceremony_service(uint32_t now_ms) {
         s_look = 2;
         petfx_face_point(OLED_W - 1);
       }
-      if (el >= HATCH_T_NAME) { s_phase = CP_NAME; petfx_face_point(OLED_W / 2); }
+      if (el >= HATCH_T_NAME) {
+        s_phase = CP_NAME;
+        petfx_face_point(OLED_W / 2);
+        audio_play(SFX_DOUBLE_BEEP);
+      }
       break;
 
     case CP_NAME:

@@ -82,6 +82,23 @@
 #define PIN_BTN_R               2
 #define PIN_LED                 5    // has to move: 8 is already SDA
 
+// DECISION D8 IS OPEN (docs/decisions.md): the owner confirms the piezo GPIO
+// when the sounder is soldered. 3 is the PROPOSAL - D8 lists 3, 4, 6 and 7 as
+// the free non-strapping pins and keeps GPIO0 for the battery divider (D10) -
+// and it is written down HERE, once. hardware/audio.cpp drives PIN_PIEZO and
+// never a number, so closing D8 on 4, 6 or 7 is an edit to this line and to
+// nothing else; tools/check.sh fails any other file that defines a PIN_ macro,
+// so a second pin cannot be invented somewhere the owner would not look
+// (spec section 68 r3). NOTHING here defines PB_PINS_CONFIRMED.
+#define PIN_PIEZO               3    // D8 PROPOSED, not confirmed on hardware
+// MOVED ABOVE THE GUARD BLOCK BY P6-C1, and it is a real fix rather than
+// tidying: the D8 assert below names PIN_VBAT_ADC, and while this line sat
+// after the `#endif` a build with PB_PINS_CONFIRMED defined did not fail on an
+// assertion, it failed to COMPILE - "'PIN_VBAT_ADC' was not declared in this
+// scope". Measured with `g++ -DPB_PINS_CONFIRMED -c` over this header. Every
+// pin the guards talk about is now declared before them.
+#define PIN_VBAT_ADC            0           // reserved, not populated in v1
+
 #ifdef PB_PINS_CONFIRMED
 static_assert(PIN_SDA != PIN_LED, "D1: the LED cannot share a pin with I2C SDA");
 static_assert(PIN_SCL != PIN_LED, "D1: the LED cannot share a pin with I2C SCL");
@@ -90,9 +107,15 @@ static_assert(PIN_BTN_L != PIN_BTN_R, "D1: the two buttons need two pins");
 static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
               PIN_BTN_R != 2 && PIN_BTN_R != 8 && PIN_BTN_R != 9,
               "D1: no button on a strapping pin (GPIO2/8/9)");
+// D8, dormant beside D1 and for the same reason: the piezo is a PWM output
+// held low between effects, so sharing it with any other function is a short.
+static_assert(PIN_PIEZO != PIN_SDA && PIN_PIEZO != PIN_SCL &&
+              PIN_PIEZO != PIN_BTN_L && PIN_PIEZO != PIN_BTN_R &&
+              PIN_PIEZO != PIN_LED && PIN_PIEZO != PIN_VBAT_ADC,
+              "D8: the piezo needs a pin of its own");
+static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
+              "D8: no piezo on a strapping pin (GPIO2/8/9)");
 #endif
-
-#define PIN_VBAT_ADC            0           // reserved, not populated in v1
 
 // LED polarity. Clone-to-clone difference: validate on the physical board.
 // LED_ON/LED_OFF are the numeric values of Arduino's LOW/HIGH so that this
@@ -469,5 +492,21 @@ static_assert(PIN_BTN_L != 2 && PIN_BTN_L != 8 && PIN_BTN_L != 9 &&
 // =============================================================================
 #define RTC_NONCE_MAGIC         0xB1C0FEEDUL
 #define RTC_STRUCT_MAX_BYTES    64
+
+// =============================================================================
+// 17. AUDIO  (P6-C1; the pin is PIN_PIEZO in section 2, decision D8)
+//     Hardware spec section 18: "use a short event queue". This is how short.
+//     Four is what the ceremony needs at its widest - the shell gives way in
+//     three jolts HATCH_JOLT_GAP_MS apart and each cue is shorter than the gap
+//     - and the whole queue holds well under a second of sound, so a fifth
+//     entry would be a beeper playing what the player did five events ago.
+//     hardware/audio.cpp refuses the NEWEST play when it is full, which is
+//     what keeps an effect that has started able to finish.
+// =============================================================================
+#define AUDIO_QUEUE_LEN         4
+// LEDC duty resolution for the square wave. 10 bits is what the core's own
+// ledcWriteTone() reconfigures the timer to, so asking for anything else here
+// would be silently overwritten on the first note.
+#define AUDIO_PWM_BITS          10
 
 #endif // NT_CONFIG_H
