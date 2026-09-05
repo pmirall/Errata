@@ -436,6 +436,17 @@ def die(msg):
 #  lookup below raises on a name it does not know rather than guessing.
 # =============================================================================
 TYPE_ORD = {"SIGNAL": 0, "CORRUPT": 1, "SYSTEM": 2, "NEUTRAL": 3}
+
+# THE CREATOR API VERSION IS DEFINED IN Pebblebol/src/core/version.h AND COPIED
+# HERE, not carried in tools/content/balance.json, and the reason is mechanical
+# rather than aesthetic: CONTENT_VERSION is a HASH OF THE JSON, so a key added
+# there moves the content version, which is stamped into BoxHeader and into
+# every BattleState - and therefore into every recorded battle hash in
+# tests/golden/battle_v1.txt. The API contract the phone speaks has nothing to
+# do with the roster and must not move a golden. The copy is pinned by a
+# static_assert in the emitted data/creator_schema_json.h, so a drift is a build
+# failure and not a comment.
+CREATOR_API_VERSION = 1
 TYPE_NAME = ["TYPE_SIGNAL", "TYPE_CORRUPT", "TYPE_SYSTEM", "TYPE_NEUTRAL"]
 
 RARITY_NAME = ["SPECIES_RARITY_COMMON", "SPECIES_RARITY_UNCOMMON",
@@ -771,10 +782,36 @@ static_assert(species_spawn_sums_are_usable(),
 static_assert(SPECIES_TABLE[SPECIES_ID_STARTER - 1].id == SPECIES_ID_STARTER,
               "the starter species must be the first row");
 
-// Resolves a built-in species id. Returns nullptr for 0 (empty slot), for an
-// id beyond the roster and for the custom range - P8 resolves cs* records here
-// so no battle or validator code ever branches on "custom".
+// -----------------------------------------------------------------------------
+// THE CUSTOM SPECIES RESOLVER (P8-C3), which is the "P8 resolves cs* records
+// here so no battle or validator code ever branches on custom" this comment
+// promised for four phases.
+//
+// A creator species (ids SPECIES_ID_BUILTIN_MAX+1 .. +CREATOR_SPECIES_SLOTS)
+// has no row in the table above: it lives in a CustomSpeciesRec on flash and is
+// projected into a SpeciesDef by game/species_custom.cpp, which binds itself
+// here on the load path. The indirection exists so that species_get() STAYS THE
+// ONE ANSWER TO "what is this creature": game/validate.cpp, game/battle.cpp,
+// game/box.cpp and every screen call it unchanged and none of them has an `if`
+// about custom Pebbles in it.
+//
+// UNBOUND IT ANSWERS nullptr, which is what every host binary that links no
+// species_custom.o gets, and what the firmware gets before the save is loaded -
+// the same "unknown species" answer the range check below has always given, so
+// a Pebble whose cs record is gone is quarantined by name rather than resolved
+// to something else.
+// -----------------------------------------------------------------------------
+typedef const SpeciesDef* (*SpeciesCustomResolver)(uint8_t id);
+inline SpeciesCustomResolver SPECIES_CUSTOM_RESOLVER = nullptr;
+inline void species_bind_custom(SpeciesCustomResolver fn) {
+  SPECIES_CUSTOM_RESOLVER = fn;
+}
+
+// Resolves a species id. Returns nullptr for 0 (empty slot), for an id beyond
+// the roster, and for a custom id whose slot holds no record.
 inline const SpeciesDef* species_get(uint8_t id) {
+  if (id > SPECIES_ID_BUILTIN_MAX)
+    return SPECIES_CUSTOM_RESOLVER ? SPECIES_CUSTOM_RESOLVER(id) : nullptr;
   if (id < SPECIES_ID_MIN || id > SPECIES_TABLE_COUNT) return nullptr;
   return &SPECIES_TABLE[id - 1u];
 }
@@ -1906,18 +1943,32 @@ def emit_creator_schema(c):
         "  attacks_table.h::species_learnsets_are_legal() already holds every",
         "  built-in row to.",
         "",
-        "  EIGHT HAVE NO ROW ANYWHERE and P8 cannot invent them from this",
-        "  header. They are listed rather than guessed:",
-        "    sprite dimensions and sprite data size",
-        "    palette limits",
-        "    name length and the allowed character set",
-        "    creator payload size",
-        "    the creator protocol version",
-        "    whether a custom Pebble may carry an evolution rule at all",
+        "  EIGHT HAD NO ROW ANYWHERE when this header was written. P8-C3",
+        "  gave each of them one, and NONE of them landed here, because",
+        "  none is a content-pack number:",
+        "    sprite dimensions / data size   save_schema.h CS_SPRITE_BYTES,",
+        "                                    CS_SPRITE_FRAMES",
+        "    palette limits                  none exist: an XBM is 1 bpp, so",
+        "                                    monochrome is the format, not a rule",
+        "    name length                     core/config.h NAME_MAX_LEN 12",
+        "    allowed character set           networking/creator_parse.h - it is",
+        "                                    core/strings_es.h Latin-1 subset,",
+        "                                    enforced where UTF-8 is converted",
+        "    creator payload size            core/config.h CS_BODY_MAX",
+        "    the creator protocol version    core/version.h CREATOR_API_VERSION,",
+        "                                    pinned to this header below",
+        "    evolution rule on a custom      NO. A creator species has no family",
+        "                                    and evo_rule SPECIES_EVO_NONE, so it",
+        "                                    is structural rather than a check",
+        "",
+        "  WHAT P8-C3 DID ADD HERE is CREATOR_STAT_POINTS_MIN, because the",
+        "  stat rule is the one section 36 left genuinely open - see the",
+        "  band argument below.",
     ])]
     o.append("#ifndef PB_CREATOR_SCHEMA_H\n#define PB_CREATOR_SCHEMA_H\n")
     o.append('#include <stdint.h>\n')
-    o.append('#include "species_table.h"\n#include "attacks_table.h"\n')
+    o.append('#include "species_table.h"\n#include "attacks_table.h"\n'
+             '#include "../core/version.h"\n')
     o.append("// Custom species ids: cs0..cs9 live directly above the built-in roster.")
     o.append("#define CREATOR_SPECIES_ID_MIN   (SPECIES_ID_BUILTIN_MAX + 1u)")
     o.append("#define CREATOR_SPECIES_SLOTS    10u")
@@ -1925,6 +1976,20 @@ def emit_creator_schema(c):
     o.append("// Spec section 36: a custom Pebble is capped at the STAGE-1 budget so it can")
     o.append("// never out-stat a final evolution (spec section 68 r17).")
     o.append("#define CREATOR_TOTAL_STAT_POINTS  %d" % bal["CREATOR_TOTAL_STAT_POINTS"])
+    o.append("// THE STAT RULE IS A BAND, NOT AN EQUALITY, and P8-C3 settled it because")
+    o.append("// three shipped sentences disagreed. Spec section 36 writes the rule with")
+    o.append("// `<=`; the note below requires a custom Pebble to be never WEAKER than a")
+    o.append("// stage-0 one, which is a floor and not equality; and Appendix C's own")
+    o.append("// worked example (the POWER bar at 72 %) is UNREACHABLE at a full stat")
+    o.append("// budget - the cheapest legal four-move set costs 84..86 depending on type,")
+    o.append("// which prices at 73 %% when S = 22, while 72 %% needs S = 21. Requiring")
+    o.append("// equality would have made the product spec's own screenshot impossible.")
+    o.append("//")
+    o.append("// DERIVED, NOT A NEW CONTENT KEY: it IS the stage-0 total, and adding a")
+    o.append("// second copy to balance.json would have moved CONTENT_VERSION - which is a")
+    o.append("// hash of that file, is stamped into every BattleState, and would have moved")
+    o.append("// every recorded battle hash for a constant the roster does not contain.")
+    o.append("#define CREATOR_STAT_POINTS_MIN    %d" % bal["TOTAL_STAT_POINTS_BY_STAGE"][0])
     o.append("#define CREATOR_ATTACK_BUDGET      %d" % bal["CREATOR_ATTACK_BUDGET"])
     o.append("#define CREATOR_MOVE_COUNT         PB_MOVE_COUNT")
     o.append("#define CREATOR_BASE_STAT_MIN      %d" % bal["BASE_STAT_MIN"])
@@ -1954,6 +2019,11 @@ static_assert(CREATOR_BASE_STAT_MIN >= 1 && CREATOR_BASE_STAT_MAX <= 10,
 static_assert(CREATOR_SPECIES_ID_MAX <= 255u,
               "custom species ids must fit PebbleInstance.species_id");
 static_assert(CREATOR_MOVE_COUNT == 4u, "spec section 13: exactly four attacks");
+static_assert(CREATOR_STAT_POINTS_MIN == CREATOR_STAT_POINTS_BY_STAGE[0],
+              "the creator stat FLOOR is the stage-0 budget: below it the creator "
+              "becomes a way to make deliberately useless trade bait");
+static_assert(CREATOR_STAT_POINTS_MIN <= CREATOR_TOTAL_STAT_POINTS,
+              "the creator stat band is empty");
 
 // Every built-in row is inside the budgets the creator is held to for its own
 // stage. A roster that breaks its own rules cannot be used to judge a player's.
@@ -1997,6 +2067,134 @@ static_assert(builtin_rows_respect_the_creator_budgets(),
               "id is out of range, which the tables themselves name first)");
 
 #endif // PB_CREATOR_SCHEMA_H""")
+    return "\n".join(o) + "\n"
+
+
+def emit_creator_schema_json(c):
+    """data/creator_schema_json.h - the SERVED form of creator_schema.h.
+
+    GET /api/schema hands this blob to send_P verbatim. It exists so the phone
+    page and the device cannot disagree about a budget (plan T4), and it is
+    emitted from the SAME Content object as creator_schema.h in the same run -
+    so `gen_content.py --check` covers it exactly as it covers every other
+    generated table, and a hand edit to either half fails the gate.
+    """
+    bal = c.balance
+    api = CREATOR_API_VERSION
+    smin = bal["TOTAL_STAT_POINTS_BY_STAGE"][0]
+    smax = bal["CREATOR_TOTAL_STAT_POINTS"]
+    slo = bal["BASE_STAT_MIN"]
+    shi = bal["BASE_STAT_MAX"]
+    abud = bal["CREATOR_ATTACK_BUDGET"]
+    pcap = bal["POWER_CAP_BY_STAGE"][1]
+    nmax = 12                      # core/config.h NAME_MAX_LEN, pinned below
+
+    rows = ",".join(
+        "[%d,%d,%d,%d,%d]" % (a["id"], TYPE_ORD[a["type"]], a["power"],
+                              a["accuracy"], a["budget_cost"])
+        for a in c.attacks)
+
+    doc = (
+        '{"v":%d,"types":3,'
+        '"stat":{"min":%d,"max":%d,"lo":%d,"hi":%d},'
+        '"atkbudget":%d,"powcap":%d,"moves":4,'
+        '"sprite":{"w":24,"h":24,"f":2,"bytes":72},'
+        '"name":{"max":%d},'
+        '"id":{"min":200,"max":209,"slots":10},'
+        '"atk":[%s]}'
+    ) % (api, smin, smax, slo, shi, abud, pcap, nmax, rows)
+
+    for ch in doc:
+        if ord(ch) > 126 or ord(ch) < 32:
+            die("creator schema JSON is not printable ASCII: %r" % ch)
+    if ")JSON" in doc:
+        die("creator schema JSON contains the raw-string delimiter")
+
+    o = [banner("data/creator_schema_json.h", [
+        "THE CREATOR SCHEMA, AS THE BYTES GET /api/schema SERVES (plan T4).",
+        "",
+        "One document, generated from the SAME content object as",
+        "data/creator_schema.h in the same run, so the numbers the phone page",
+        "reads and the numbers the on-device validator enforces cannot drift.",
+        "THREE THINGS HOLD THAT, and each catches what the others cannot:",
+        "  1. `tools/gen_content.py --check` fails the gate on a hand edit to",
+        "     either header.",
+        "  2. The CREATOR_SCHEMA_JSON_* defines below are static_asserted",
+        "     against the compiled constants, so two emitters in one script",
+        "     drifting from each other is a BUILD failure.",
+        "  3. tests/test_creator_api.cpp reads the blob's TEXT and asserts the",
+        "     numbers in it, which is the only half that can see an emitter",
+        "     whose defines are right and whose document is not.",
+        "",
+        "NO Arduino.h AND NO PROGMEM, DELIBERATELY. On this target .rodata is",
+        "memory-mapped and send_P's PGM_P is an ordinary pointer, so the",
+        "attribute buys nothing - and leaving it off is what lets a HOST test",
+        "include this header at all. A blob no host binary can read is a blob",
+        "whose agreement with the schema is a comment.",
+        "",
+        "Serve it with the FOUR-argument send_P; the 3-arg form strlen_P()s",
+        "the blob (WebServer.cpp:619) and the 1-arg sendContent_P has the",
+        "same bug.",
+        "",
+        "The attack rows are POSITIONAL - [id, type, power, accuracy, cost] -",
+        "and not objects, which is the difference between this size and about",
+        "twice it. The page reads a[4] for the spec section 36 cost.",
+        "",
+        "IT IS .rodata AND COSTS ZERO GLOBALS.",
+    ])]
+    o.append("#ifndef PB_CREATOR_SCHEMA_JSON_H\n#define PB_CREATOR_SCHEMA_JSON_H\n")
+    o.append("#include <stddef.h>\n")
+    o.append('#include "creator_schema.h"    // and, through it, core/version.h')
+    o.append('#include "../core/config.h"     // NAME_MAX_LEN, WEB_HTML_MAX\n')
+    o.append("// The numbers the document below declares, as values a static_assert can")
+    o.append("// compare. They are a COPY: the definitions are creator_schema.h's and")
+    o.append("// core/config.h's, and the asserts fail the build the moment a copy stops")
+    o.append("// matching. What they cannot see is the document TEXT itself, which is")
+    o.append("// what tests/test_creator_api.cpp reads.")
+    o.append("#define CREATOR_SCHEMA_JSON_API        %d" % api)
+    o.append("#define CREATOR_SCHEMA_JSON_STAT_MIN   %d" % smin)
+    o.append("#define CREATOR_SCHEMA_JSON_STAT_MAX   %d" % smax)
+    o.append("#define CREATOR_SCHEMA_JSON_ATK_BUDGET %d" % abud)
+    o.append("#define CREATOR_SCHEMA_JSON_POW_CAP    %d" % pcap)
+    o.append("#define CREATOR_SCHEMA_JSON_NAME_MAX   %d" % nmax)
+    o.append("#define CREATOR_SCHEMA_JSON_SPR_W      24")
+    o.append("#define CREATOR_SCHEMA_JSON_SPR_H      24")
+    o.append("#define CREATOR_SCHEMA_JSON_SPR_FRAMES 2")
+    o.append("#define CREATOR_SCHEMA_JSON_SPR_BYTES  72")
+    o.append("#define CREATOR_SCHEMA_JSON_ID_MIN     200")
+    o.append("#define CREATOR_SCHEMA_JSON_ID_SLOTS   10")
+    o.append("#define CREATOR_SCHEMA_JSON_MOVES      4")
+    o.append("#define CREATOR_SCHEMA_JSON_TYPES      3\n")
+    o.append('static const char CREATOR_SCHEMA_JSON[] = R"JSON(%s)JSON";' % doc)
+    o.append("static const size_t CREATOR_SCHEMA_JSON_LEN = sizeof(CREATOR_SCHEMA_JSON) - 1;\n")
+    o.append("""static_assert(CREATOR_SCHEMA_JSON_API == CREATOR_API_VERSION,
+              "the served schema declares an API version core/version.h does not");
+static_assert(CREATOR_SCHEMA_JSON_STAT_MIN == CREATOR_STAT_POINTS_MIN,
+              "the served stat floor is not the compiled one");
+static_assert(CREATOR_SCHEMA_JSON_STAT_MAX == CREATOR_TOTAL_STAT_POINTS,
+              "the served stat budget is not the compiled one");
+static_assert(CREATOR_SCHEMA_JSON_ATK_BUDGET == CREATOR_ATTACK_BUDGET,
+              "the served attack budget is not the compiled one");
+static_assert(CREATOR_SCHEMA_JSON_POW_CAP == CREATOR_POWER_CAP_BY_STAGE[1],
+              "the served power cap is not the stage-1 cap the validator uses");
+static_assert(CREATOR_SCHEMA_JSON_NAME_MAX == NAME_MAX_LEN,
+              "the served name length is not core/config.h's");
+static_assert(CREATOR_SCHEMA_JSON_SPR_W == CS_SPRITE_W &&
+              CREATOR_SCHEMA_JSON_SPR_H == CS_SPRITE_H &&
+              CREATOR_SCHEMA_JSON_SPR_FRAMES == CS_SPRITE_FRAMES &&
+              CREATOR_SCHEMA_JSON_SPR_BYTES == CS_SPRITE_BYTES,
+              "the served sprite geometry is not the one CustomSpeciesRec holds: "
+              "the page would draw a grid the record cannot store");
+static_assert(CREATOR_SCHEMA_JSON_ID_MIN == CREATOR_SPECIES_ID_MIN &&
+              CREATOR_SCHEMA_JSON_ID_SLOTS == CREATOR_SPECIES_SLOTS,
+              "the served custom id range is not the compiled one");
+static_assert(CREATOR_SCHEMA_JSON_MOVES == CREATOR_MOVE_COUNT &&
+              CREATOR_SCHEMA_JSON_TYPES == (int)TYPE_COUNT,
+              "the served move count or type count is not the compiled one");
+static_assert(CREATOR_SCHEMA_JSON_LEN < WEB_HTML_MAX,
+              "the schema document has outgrown the page budget, which means it "
+              "has stopped being a schema");""")
+    o.append("\n#endif // PB_CREATOR_SCHEMA_JSON_H")
     return "\n".join(o) + "\n"
 
 
@@ -2146,6 +2344,7 @@ def build_all(families):
         os.path.join(DATA, "network_table.h"): emit_networks(c),
         os.path.join(DATA, "encounter_table.h"): emit_encounter(c),
         os.path.join(DATA, "creator_schema.h"): emit_creator_schema(c),
+        os.path.join(DATA, "creator_schema_json.h"): emit_creator_schema_json(c),
     }
     with open(STRINGS_H, encoding="utf-8") as f:
         files[STRINGS_H] = emit_strings(c, f.read())

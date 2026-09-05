@@ -540,6 +540,43 @@ static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
 #define CREATOR_IDLE_S_DEFAULT  300          // D7
 #define CREATOR_IDLE_S_MAX      3600
 
+// --- THE RAW BODY CAP (spec section 38, audit section 12 "Body limits: none")
+// EVERY BYTE BOUNDED HERE ARRIVES FROM OUTSIDE THE DEVICE. Without a raw
+// handler the Arduino core reads a POST body through Parsing.cpp's
+// readBytesWithTimeout(), whose ONLY bound on a malloc/realloc growth loop is
+// the attacker's own Content-Length header - so "Content-Length: 4000000" plus
+// a slow trickle walks the heap to exhaustion while handleClient() blocks
+// loop(), i.e. the whole firmware. networking/creator_server.cpp registers
+// every POST route with the 4-arg on() so the core uses its fixed
+// HTTP_RAW_BUFLEN (1436 B, heap, freed per request) instead, and the chunks
+// land in ONE fixed buffer of this size.
+//
+// WHY 2048 AND WHAT IT COSTS, MEASURED RATHER THAN GUESSED. The largest
+// LEGITIMATE upload is 384 B: name 12 + type + base[4] + moves[4] + two 144-
+// character sprite frames + the JSON syntax around them (the arithmetic is
+// beside CreatorBody in networking/creator_body.h). 2048 is 5.3x that, and it
+// is 2,048 B of .bss - 25 % of the release globals headroom this phase started
+// with. It buys room for a page that grows a field without a firmware change.
+// If a later chunk needs those bytes back, 1024 is still 2.7x the worst case
+// and this is the one constant to move.
+#define CS_BODY_MAX             2048
+
+// The band between "refuse politely" and "hang up". A handler CANNOT stop the
+// core's read loop (Parsing.cpp reads until totalSize == Content-Length), so a
+// body above CS_BODY_MAX is DRAINED and answered 413 - which is only affordable
+// while the drain is bounded. Above this the socket is closed from inside
+// RAW_START, which makes the next readBytes() return 0 -> RAW_ABORTED -> the
+// client is dropped with NO response. The split is deliberate and stated: a
+// polite 413 up to 8 KB, an abrupt close above it, because a client declaring
+// 100 MB would otherwise hold loop() for as long as it kept trickling.
+#define CS_BODY_DRAIN_MAX       8192
+
+// The creator server's own response scratch, separate from WEB_JSON_BUF so two
+// files never write one buffer through calls that can nest. The widest response
+// is GET /api/state at about 160 characters; 256 leaves room for a longer
+// FW_VERSION without a silent truncation.
+#define CS_OUT_BUF              256
+
 // How long the CREATOR screen waits for the access point before giving up and
 // going back (spec section 47: every radio wait has an exit). The screen is
 // SF_STICKY - the 20 s navigation auto-return would otherwise tear the portal

@@ -53,6 +53,22 @@
 // -----------------------------------------------------------------------------
 static bool moveset_is_learnable(const SpeciesDef& sp, const uint8_t* moves)
 {
+  // A SPECIES TEACHES ITS OWN LEARNSET. For a built-in row this changes
+  // NOTHING - the walk below finds the row itself, since a species is always in
+  // its own family at its own stage - and tests/test_validate.cpp's
+  // `the_two_learnset_checkers_agree_on_every_roster_row` is what holds that.
+  // For a CREATOR species it is the whole rule: a custom row has family 0 and
+  // no row in SPECIES_TABLE, so the walk can never match it, and without this
+  // line every creator Pebble would be VR_UNLEARNABLE_MOVESET one instruction
+  // after being built. THE ALTERNATIVE WAS AN `if (custom)` INSIDE THE
+  // VALIDATOR, which is the branch data/species_table.h has spent four phases
+  // saying no validator would ever need.
+  {
+    bool same = true;
+    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m)
+      if (moves[m] != sp.moves[m]) { same = false; break; }
+    if (same) return true;
+  }
   for (uint8_t i = 0; i < (uint8_t)SPECIES_TABLE_COUNT; ++i) {
     const SpeciesDef& cand = SPECIES_TABLE[i];
     if (cand.family != sp.family || cand.stage > sp.stage) continue;
@@ -243,6 +259,171 @@ VReject validate_battle_ready(const PebbleInstance* m, uint8_t count,
   return VR_OK;
 }
 
+// =============================================================================
+//  THE CREATOR DEFINITION (P8-C3). See validate.h for why this is a second
+//  entry point and not a policy flag, and for the pipeline it sits in.
+//
+//  EVERYTHING IT READS ARRIVED FROM OUTSIDE THE DEVICE - over HTTP from a page
+//  this firmware cannot tell apart from curl, or off a flash blob that survived
+//  a CRC and proves nothing else. The page's own budget bar is a COURTESY TO
+//  THE USER AND NEVER A CONTROL: it exists so the user is not refused after
+//  five minutes of drawing, and this function is what actually decides.
+// =============================================================================
+
+bool creator_name_char_ok(uint8_t ch)
+{
+  if (ch >= 0x20u && ch <= 0x7Eu) return true;       // printable ASCII
+  switch (ch) {
+    case 0xA1u:                                      // inverted !
+    case 0xAAu:                                      // feminine ordinal
+    case 0xB0u:                                      // degree sign
+    case 0xB7u:                                      // middle dot
+    case 0xBAu:                                      // masculine ordinal
+    case 0xBFu:                                      // inverted ?
+    case 0xC1u: case 0xC9u: case 0xCDu: case 0xD3u: case 0xDAu:   // A E I O U acute
+    case 0xD1u:                                      // N tilde
+    case 0xDCu:                                      // U diaeresis
+    case 0xE1u: case 0xE9u: case 0xEDu: case 0xF3u: case 0xFAu:   // a e i o u acute
+    case 0xF1u:                                      // n tilde
+    case 0xFCu:                                      // u diaeresis
+      return true;
+    default:
+      return false;
+  }
+}
+
+void creator_cost_of(const CustomSpeciesRec& c,
+                     uint16_t& stat_used, uint16_t& attack_used)
+{
+  uint16_t stats = 0u;
+  for (uint8_t i = 0; i < (uint8_t)CS_BASE_COUNT; ++i)
+    stats = (uint16_t)(stats + c.base[i]);
+
+  uint16_t cost = 0u;
+  for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) {
+    const AttackDef* a = attack_get(c.moves[m]);
+    // An unresolvable move costs 0 rather than skipping the write: the caller
+    // gets a number on every path and validate_custom_species() is what names
+    // the move as the reason.
+    if (a != nullptr) cost = (uint16_t)(cost + a->budget_cost);
+  }
+
+  stat_used   = stats;
+  attack_used = cost;
+}
+
+uint8_t creator_power_pct(uint16_t stat_used, uint16_t attack_used)
+{
+  // The integer form of balance.json's FORMULAS.creator_power_pct, rounding
+  // half up. Widest intermediate: 50 * (185*22 + 22*185) + 2035 = 409,035,
+  // which is why the accumulator is 32-bit and no wider.
+  const uint32_t D = (uint32_t)CREATOR_TOTAL_STAT_POINTS *
+                     (uint32_t)CREATOR_ATTACK_BUDGET;
+  const uint32_t n = 50u * ((uint32_t)CREATOR_ATTACK_BUDGET * (uint32_t)stat_used +
+                            (uint32_t)CREATOR_TOTAL_STAT_POINTS * (uint32_t)attack_used);
+  const uint32_t pct = (n + D / 2u) / D;
+  return (pct > 100u) ? (uint8_t)100u : (uint8_t)pct;
+}
+
+VReject validate_custom_species(const CustomSpeciesRec& c)
+{
+  // THE RECORD'S OWN IDENTITY FIRST. A blob whose magic or schema version is
+  // not ours is not a creator species that happens to be wrong - it is not a
+  // creator species at all, and reading its fields would be reading a different
+  // struct. The CRC is persistence/save_manager.cpp's half and has already run
+  // by the time a record read from flash arrives here.
+  if (c.magic != (uint16_t)CS_MAGIC) return VR_CS_BAD_HEADER;
+  if (c.version != (uint8_t)SAVE_SCHEMA_VERSION) return VR_CS_BAD_HEADER;
+  if (c.slot >= (uint8_t)CUSTOM_SPECIES_SLOTS) return VR_CS_BAD_HEADER;
+
+  // The reserve is a field from a version we do not speak. Accepting a value
+  // there is how a forward-compatible validator becomes a lying one - the same
+  // rule the wire decoder holds with VR_WIRE_RESERVED.
+  for (uint8_t i = 0; i < (uint8_t)sizeof c.reserved; ++i)
+    if (c.reserved[i] != 0u) return VR_CS_RESERVED;
+
+  // TYPE. A SPECIES may never be TYPE_NEUTRAL, which shares the value 3 with
+  // TYPE_COUNT: data/species_table.h states that at length, and it is why this
+  // reads `>= TYPE_COUNT` where the ATTACK guard reads `> TYPE_NEUTRAL`.
+  if (c.type >= (uint8_t)TYPE_COUNT) return VR_CS_BAD_TYPE;
+
+  // STATS, per field and then as a total.
+  for (uint8_t i = 0; i < (uint8_t)CS_BASE_COUNT; ++i) {
+    if (c.base[i] < (uint8_t)CREATOR_BASE_STAT_MIN ||
+        c.base[i] > (uint8_t)CREATOR_BASE_STAT_MAX) return VR_CS_BAD_STAT;
+  }
+
+  uint16_t stat_used = 0u, attack_used = 0u;
+  creator_cost_of(c, stat_used, attack_used);
+
+  // THE SECTION 36 BAND. Not equality: data/creator_schema.h carries the
+  // argument, and the short version is that Appendix C's own worked example is
+  // unreachable at a full stat budget.
+  if (stat_used < (uint16_t)CREATOR_STAT_POINTS_MIN ||
+      stat_used > (uint16_t)CREATOR_TOTAL_STAT_POINTS) return VR_CS_STAT_BUDGET;
+
+  // MOVES. Four halves, four codes, in the order attacks_table.h's own
+  // species_learnsets_are_legal() holds every built-in row to - so a custom
+  // species is judged by the rule the roster is judged by, and not by a second
+  // one written for the creator.
+  for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m)
+    if (attack_get(c.moves[m]) == nullptr) return VR_CS_UNKNOWN_MOVE;
+
+  for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m)
+    for (uint8_t n2 = (uint8_t)(m + 1u); n2 < (uint8_t)PB_MOVE_COUNT; ++n2)
+      if (c.moves[m] == c.moves[n2]) return VR_CS_MOVE_REPEATED;
+
+  bool    has_damage = false;
+  uint8_t max_power  = 0u;
+  for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) {
+    const AttackDef& a = *attack_get(c.moves[m]);
+    if (a.type != c.type && a.type != (uint8_t)TYPE_NEUTRAL) return VR_CS_MOVE_OFF_TYPE;
+    if (a.power > 0u) has_damage = true;
+    if (a.power > max_power) max_power = a.power;
+  }
+  if (!has_damage) return VR_CS_NO_DAMAGING_MOVE;
+
+  // A custom Pebble is a STAGE-1 creature (game/species_custom.cpp projects it
+  // as one), so it is held to the stage-1 power cap and the stage-1 budget -
+  // never to the stage-2 numbers, which is spec section 68 r17.
+  if (max_power > CREATOR_POWER_CAP_BY_STAGE[1]) return VR_CS_POWER_CAP;
+  if (attack_used > (uint16_t)CREATOR_ATTACK_BUDGET) return VR_CS_ATTACK_BUDGET;
+
+  // THE ONE FIELD A CLIENT COULD OTHERWISE SET. budget_used is checked against
+  // the recomputation rather than trusted, because a page that prices its own
+  // Pebble is a page that can price it at zero.
+  if (c.budget_used != attack_used) return VR_CS_BUDGET_MISMATCH;
+
+  // THE NAME. Terminated inside the field, non-empty, inside NAME_MAX_LEN, and
+  // every character one the panel can draw. The termination rule is the same
+  // memory-safety rule validate_pebble() holds on the nickname: the name is
+  // handed out as a bare const char* and snprintf'd with "%s".
+  {
+    uint8_t len = 0u;
+    bool terminated = false;
+    for (uint8_t i = 0; i < (uint8_t)CS_NAME_CAP; ++i) {
+      if (c.name[i] == '\0') { terminated = true; break; }
+      len++;
+    }
+    if (!terminated) return VR_CS_BAD_NAME;
+    if (len == 0u || len > (uint8_t)NAME_MAX_LEN) return VR_CS_BAD_NAME;
+    for (uint8_t i = 0; i < len; ++i)
+      if (!creator_name_char_ok((uint8_t)c.name[i])) return VR_CS_BAD_NAME;
+    // A leading or trailing space is refused rather than trimmed: trimming is a
+    // repair, and this file cannot repair - its argument is const.
+    if (c.name[0] == ' ' || c.name[len - 1u] == ' ') return VR_CS_BAD_NAME;
+  }
+
+  // BREEDING. A custom species has no family, so game/breeding.cpp has no child
+  // species to derive from a pairing; compat_group 0 is the value that module
+  // already refuses by name (BRD_COMPAT_GROUP), and pinning it here is what
+  // makes "a custom Pebble does not breed" a rule with a test instead of a
+  // consequence somebody could undo by setting a group.
+  if (c.compat_group != 0u) return VR_CS_BAD_COMPAT;
+
+  return VR_OK;
+}
+
 // -----------------------------------------------------------------------------
 //  validate_reject_name - English, for the event log. TOTAL.
 // -----------------------------------------------------------------------------
@@ -256,7 +437,12 @@ static const char* const VR_NAMES[] = {
   "VR_BAD_FLAGS_BITS", "VR_BAD_ORIGIN", "VR_BAD_TRAIT", "VR_BAD_CUSTOM_SPRITE",
   "VR_BAD_CARE", "VR_BAD_NICKNAME",
   "VR_TEAM_SIZE", "VR_DUPLICATE_ID",
-  "VR_LEVEL_OUT_OF_BAND", "VR_MEMBER_FAINTED"
+  "VR_LEVEL_OUT_OF_BAND", "VR_MEMBER_FAINTED",
+  "VR_CS_BAD_HEADER", "VR_CS_RESERVED", "VR_CS_BAD_TYPE", "VR_CS_BAD_STAT",
+  "VR_CS_STAT_BUDGET", "VR_CS_UNKNOWN_MOVE", "VR_CS_MOVE_REPEATED",
+  "VR_CS_MOVE_OFF_TYPE", "VR_CS_NO_DAMAGING_MOVE", "VR_CS_POWER_CAP",
+  "VR_CS_ATTACK_BUDGET", "VR_CS_BUDGET_MISMATCH", "VR_CS_BAD_NAME",
+  "VR_CS_BAD_COMPAT"
 };
 static_assert(sizeof(VR_NAMES) / sizeof(VR_NAMES[0]) == (size_t)VR_REJECT_COUNT,
               "a VReject was added without its name: the event log would print "

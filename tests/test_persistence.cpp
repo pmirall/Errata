@@ -23,6 +23,8 @@
 #include "game/species.h"         // species_base_of_family()
 #include "game/xp.h"              // xp_hp_max()
 #include "game/validate.h"        // the load path is a spec 15 consumer (P4-C5)
+#include "game/species_custom.h"   // the creator registry the load path rebuilds (P8-C3)
+#include "data/creator_schema.h"
 
 // --- a fake clock so the wear filter and the 1 s floor are deterministic -----
 static uint32_t s_ms    = 0;
@@ -537,6 +539,133 @@ TEST(a_valid_box_is_quarantined_nowhere) {
   for (uint8_t slot = 0; slot < BOX_SLOTS; ++slot)
     CHECK_EQ((int)save_quarantine_reason(slot), (int)VR_OK);
   CHECK_EQ((int)validate_pebble(back.pebbles[6]), (int)VR_OK);
+}
+
+// -----------------------------------------------------------------------------
+//  THE CREATOR RECORD ON THE LOAD PATH (P8-C3).
+//
+//  THE ORDER save_load_all() RUNS IN IS THE WHOLE POINT: load, then rebuild the
+//  creator registry, THEN quarantine_scan(). Move the rebuild after the scan -
+//  or delete it - and a Pebble the user made in the creator comes back
+//  VR_UNKNOWN_SPECIES on the first power cycle, because species_get(200)
+//  resolves through that registry and through nothing else.
+// -----------------------------------------------------------------------------
+static CustomSpeciesRec creator_record(uint8_t slot) {
+  CustomSpeciesRec c;
+  memset(&c, 0, sizeof c);
+  c.magic   = (uint16_t)CS_MAGIC;
+  c.version = (uint8_t)SAVE_SCHEMA_VERSION;
+  c.slot    = slot;
+  c.type    = (uint8_t)TYPE_SIGNAL;
+  c.base[0] = 6; c.base[1] = 5; c.base[2] = 5; c.base[3] = 5;      // 21, in band
+  c.moves[0] = 1; c.moves[1] = 6; c.moves[2] = 32; c.moves[3] = 34;
+  memcpy(c.name, "Bicho", 6);
+  uint16_t stat_used = 0, attack_used = 0;
+  creator_cost_of(c, stat_used, attack_used);
+  c.budget_used = attack_used;
+  custom_species_seal(c);
+  return c;
+}
+
+static PebbleInstance creator_pebble(uint8_t slot, uint8_t cs_slot) {
+  const uint8_t species = (uint8_t)(CREATOR_SPECIES_ID_MIN + cs_slot);
+  PebbleInstance p;
+  pebble_clear(p);
+  p.species_id    = species;
+  p.id            = 0xCEA70000u + slot;
+  p.level         = 1;
+  p.origin        = (uint8_t)ORIGIN_CREATOR;
+  p.flags         = (uint8_t)(PBF_CUSTOM | PBF_HAS_CUSTOM_SPRITE);
+  p.custom_sprite = cs_slot;
+  p.moves[0] = 1; p.moves[1] = 6; p.moves[2] = 32; p.moves[3] = 34;
+  p.hp_cur    = xp_hp_max(6u, 1u);        // base_hp 6, the record's first stat
+  p.evo_state = 1u;                       // a creator species is stage 1
+  for (uint8_t i = 0; i < PB_CARE_COUNT; ++i) p.care[i] = (int32_t)PB_CARE_MILLI_MAX;
+  memcpy(p.nickname, "Bicho", 6);
+  p.genome.lineage_id = 0x5EED0000u + slot;
+  p.genome.g0 = 0x1234; p.genome.g1 = 0x5678; p.genome.g2 = 0x09AB;
+  genome_seal(p.genome);
+  pebble_seal(p);
+  return p;
+}
+
+TEST(a_creator_pebble_survives_a_reboot_instead_of_being_quarantined) {
+  begin();
+  csp_reset();
+  GameState gs;
+  CHECK_EQ(save_load_all(gs), LOAD_FRESH);
+
+  const CustomSpeciesRec rec = creator_record(3);
+  CHECK(save_custom_species(rec));
+  gs.pebbles[2] = creator_pebble(2, 3);
+  gs.box.slot_mask   = 0x0004u;
+  gs.box.active_slot = 2;
+  CHECK(save_pebble(2, gs.pebbles[2], true));
+  CHECK(save_box_header(gs.box));
+
+  // Forget everything a running device would know, so the reload really is a
+  // reboot and not a read of state this process still holds.
+  csp_reset();
+  CHECK(species_get((uint8_t)(CREATOR_SPECIES_ID_MIN + 3u)) == nullptr);
+
+  GameState back;
+  CHECK_EQ(save_load_all(back), LOAD_OK);
+  // THE REGISTRY WAS REBUILT BEFORE THE SCAN.
+  CHECK(species_get((uint8_t)(CREATOR_SPECIES_ID_MIN + 3u)) != nullptr);
+  CHECK_EQ((int)save_quarantine_mask(), 0);
+  CHECK_EQ((int)save_quarantine_reason(2), (int)VR_OK);
+  CHECK_EQ((int)validate_pebble(back.pebbles[2]), (int)VR_OK);
+  CHECK_EQ((int)back.pebbles[2].origin, (int)ORIGIN_CREATOR);
+  CHECK_STR_EQ(back.pebbles[2].nickname, "Bicho");
+  csp_reset();
+}
+
+TEST(a_creator_pebble_whose_record_is_gone_is_quarantined_by_name) {
+  // The other direction, and it is what makes the case above mean something: a
+  // Pebble whose cs* record was lost or refused must be flagged BY NAME rather
+  // than resolved to whatever else happens to be in the registry.
+  begin();
+  csp_reset();
+  GameState gs;
+  CHECK_EQ(save_load_all(gs), LOAD_FRESH);
+  gs.pebbles[2] = creator_pebble(2, 3);      // no cs3 record is ever written
+  gs.box.slot_mask   = 0x0004u;
+  gs.box.active_slot = 2;
+  CHECK(save_pebble(2, gs.pebbles[2], true));
+  CHECK(save_box_header(gs.box));
+
+  GameState back;
+  CHECK_EQ(save_load_all(back), LOAD_OK);
+  CHECK_EQ((int)save_quarantine_mask(), 0x0004);
+  CHECK_EQ((int)save_quarantine_reason(2), (int)VR_UNKNOWN_SPECIES);
+  // AND THE PEBBLE IS STILL THERE. Quarantine flags, it never destroys.
+  CHECK_EQ((unsigned long)back.pebbles[2].id, 0xCEA70002UL);
+  csp_reset();
+}
+
+TEST(a_stored_record_that_breaks_the_rules_leaves_its_slot_empty) {
+  // "It survived a CRC" is not evidence about a stat total. A hand-written or
+  // rotted-but-resealed cs* blob is judged by the SAME validator an upload is,
+  // on the load path, and a refused one leaves species_get() answering nullptr.
+  begin();
+  csp_reset();
+  GameState gs;
+  CHECK_EQ(save_load_all(gs), LOAD_FRESH);
+
+  CustomSpeciesRec bad = creator_record(3);
+  bad.base[0] = 10; bad.base[1] = 10; bad.base[2] = 10; bad.base[3] = 10;  // 40
+  custom_species_seal(bad);                 // a perfectly valid CRC
+  CHECK(save_custom_species(bad));
+  CHECK(custom_species_blob_ok(bad));       // the CRC really does pass
+
+  // LOAD_FRESH, not LOAD_OK: only the cs* record was written, so there is no
+  // Box to read - and the registry is still rebuilt, because save_load_all()
+  // does it on EVERY outcome rather than on the happy one.
+  GameState back;
+  CHECK_EQ(save_load_all(back), LOAD_FRESH);
+  CHECK_EQ((int)validate_custom_species(bad), (int)VR_CS_STAT_BUDGET);
+  CHECK(species_get((uint8_t)(CREATOR_SPECIES_ID_MIN + 3u)) == nullptr);
+  csp_reset();
 }
 
 TEST(a_load_quarantines_an_invalid_pebble_by_name_and_repairs_nothing) {

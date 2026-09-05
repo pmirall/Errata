@@ -175,9 +175,15 @@ $(BIN)/test_battle_ai:  $(OBJ)/battle_ai.o $(OBJ)/battle.o $(OBJ)/pebble.o \
 # genome.o drags crc16.o and rng.o. battle.o is here for the CONTAINMENT case:
 # the claim "validate_team accepts => battle_init does not refuse for any reason
 # but BR_MEMBER_FAINTED" is only checkable with the real engine in the binary.
+# species_custom.o SINCE P8-C3, and it is the point of the creator cases rather
+# than a convenience: "a creator Pebble validates" is only a claim about the
+# SHIPPING firmware if species_get() really resolves the id through the real
+# registry. A fixture that stubbed the resolver would have proved that the stub
+# resolves.
 $(BIN)/test_validate:   $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o \
-                        $(OBJ)/rng.o $(OBJ)/battle.o $(OBJ)/box.o
+                        $(OBJ)/rng.o $(OBJ)/battle.o $(OBJ)/box.o \
+                        $(OBJ)/species_custom.o
 
 # THE SECTION 15 CODEC (P4-C5). protocol.o on top of the validator's objects,
 # because pbw_decode() IS a decode in front of validate_pebble(). rng.o is also
@@ -219,7 +225,7 @@ $(BIN)/test_cooldowns:  $(OBJ)/cooldowns.o $(OBJ)/save_manager.o \
                         $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/crc16.o \
                         $(OBJ)/genome.o $(OBJ)/rng.o $(OBJ)/species.o \
                         $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
-                        $(OBJ)/xp.o
+                        $(OBJ)/xp.o $(OBJ)/species_custom.o
 
 # P5-C3: THE ENCOUNTER ROLL. encounters.cpp is pure and deterministic from its
 # inputs - no clock, no global RNG stream - so this binary is the roll and the
@@ -335,7 +341,7 @@ $(BIN)/test_breeding:   $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/validate.o \
 # accessor layer AND the translation unit that instantiates every generated
 # table's compile-time guards.
 $(BIN)/test_trade:      $(OBJ)/trade.o $(OBJ)/box.o $(OBJ)/save_manager.o \
-                        $(OBJ)/migration.o $(OBJ)/kv_mem.o \
+                        $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/species_custom.o \
                         $(OBJ)/trade_link.o $(OBJ)/session.o \
                         $(OBJ)/battle_link.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
                         $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
@@ -350,6 +356,29 @@ $(BIN)/test_trade:      $(OBJ)/trade.o $(OBJ)/box.o $(OBJ)/save_manager.o \
 # tripwire: if this line ever needs a second object, something device-shaped has
 # leaked into the rules and webui.cpp has started deciding things again.
 $(BIN)/test_creator_gate: $(OBJ)/creator_gate.o
+
+# P8-C3: THE RAW-BODY CAP, THE FIXED-SCHEMA READER AND THE CREATOR PIPELINE.
+#
+# THREE PURE MODULES AND THE REAL VALIDATOR, AND NO DEVICE OBJECT AT ALL.
+# networking/creator_server.cpp is where the sockets are and tests/Makefile
+# never compiles it (it includes Arduino.h and WebServer.h), so everything this
+# binary drives is the half that DECIDES: creator_body.o is the cap, with the
+# core's HTTP_RAW_BUFLEN chunking reproduced by the fixture; creator_parse.o is
+# the document reader; creator_gate.o is the PIN parser the reader shares;
+# validate.o + species_custom.o + box.o are the rules and the pipeline the
+# accepted document runs through, so the end-to-end case files a REAL Pebble in
+# a REAL Box through the tree's one constructor and runs the tree's one
+# validator on it.
+#
+# THE FIXTURE STATES WHERE IT DIFFERS FROM app_setup(), in its own banner: there
+# is no socket, so the chunk sizes and the RAW_* sequence are reproduced from
+# the pinned core rather than delivered by it, and the response codes are
+# creator_server.cpp's one-line mapping of the states this binary asserts.
+$(BIN)/test_creator_api: $(OBJ)/creator_body.o $(OBJ)/creator_parse.o \
+                        $(OBJ)/creator_gate.o $(OBJ)/validate.o \
+                        $(OBJ)/species_custom.o $(OBJ)/box.o $(OBJ)/species.o \
+                        $(OBJ)/pebble.o $(OBJ)/evolution.o $(OBJ)/xp.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 # The minigame contract and the PURE logic of every game. No draw objects and
@@ -372,7 +401,7 @@ $(BIN)/test_clock_device: $(OBJ)/gametime_arduino.o $(OBJ)/arduino_clocks.o \
                         $(OBJ)/save_manager.o $(OBJ)/migration.o $(OBJ)/kv_mem.o \
                         $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/genome.o $(OBJ)/rng.o \
                         $(OBJ)/species.o $(OBJ)/validate.o $(OBJ)/pebble.o \
-                        $(OBJ)/evolution.o $(OBJ)/xp.o
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/species_custom.o
 $(BIN)/test_overflow:   $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o \
                         $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
@@ -388,11 +417,11 @@ $(BIN)/test_persistence: $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/crc16.o \
                         $(OBJ)/genome.o $(OBJ)/rng.o $(OBJ)/species.o \
                         $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
-                        $(OBJ)/xp.o
+                        $(OBJ)/xp.o $(OBJ)/species_custom.o
 $(BIN)/test_game_state: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o \
                         $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
-                        $(OBJ)/xp.o $(OBJ)/genome.o
+                        $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/species_custom.o
 # The screen table's migrated rows are pure translation units, so they compile
 # here exactly as they do in the firmware; gfx_fb.o is the host end of gfx.h
 # and gfx_widgets.o is the SHARED half of it, linked into both.

@@ -26,12 +26,14 @@
 #include <string.h>
 
 #include "data/attacks_table.h"
+#include "data/creator_schema.h"
 #include "data/species_table.h"
 #include "game/battle.h"
 #include "game/box.h"
 #include "game/evolution.h"
 #include "game/genome.h"
 #include "game/pebble.h"
+#include "game/species_custom.h"
 #include "game/validate.h"
 #include "game/xp.h"
 
@@ -76,6 +78,58 @@ static void mk_valid(PebbleInstance& p, uint8_t species, uint8_t level, uint32_t
   memcpy(p.moves, sp->moves, sizeof p.moves);
   p.hp_cur    = xp_hp_max(sp->base_hp, level);
   p.evo_state = (uint8_t)(sp->stage & (uint8_t)EVO_STATE_STAGE_MASK);
+}
+
+// -----------------------------------------------------------------------------
+//  THE CREATOR FIXTURES (P8-C3). Attack ids by name, so a case reads as the set
+//  it is rather than as four numbers, and so a content edit that renumbers a row
+//  fails HERE with a named move instead of somewhere downstream.
+// -----------------------------------------------------------------------------
+#define MV_PING          1u   // SIGNAL,  power 35, cost 35
+#define MV_PULSO         2u   // SIGNAL,  power 55, cost 52
+#define MV_AMPLIFICAR    6u   // SIGNAL,  power  0, cost 21
+#define MV_ANTENA        7u   // SIGNAL,  power  0, cost 21
+#define MV_ECO_DOBLE     8u   // SIGNAL,  power 90, cost 51
+#define MV_BYTAZO        9u   // CORRUPT, power 35, cost 35  <- off type for SIGNAL
+#define MV_CHOQUE       27u   // NEUTRAL, power 50, cost 50
+#define MV_APUESTA      28u   // NEUTRAL, power 100, cost 47 <- over the stage-1 cap
+#define MV_DEFRAG       29u   // NEUTRAL, power  0, cost 16
+#define MV_OVERCLOCK    32u   // NEUTRAL, power  0, cost 21
+#define MV_DEPURAR      34u   // NEUTRAL, power  0, cost 14
+
+// Recompute budget_used after a case has changed the moves, so the ONE thing a
+// case makes wrong is the thing it names - otherwise every move edit would also
+// trip VR_CS_BUDGET_MISMATCH and the codes would be indistinguishable.
+static void cs_price(CustomSpeciesRec& c)
+{
+  uint16_t stat_used = 0, attack_used = 0;
+  creator_cost_of(c, stat_used, attack_used);
+  c.budget_used = attack_used;
+}
+
+static void cs_moves(CustomSpeciesRec& c, uint8_t a, uint8_t b, uint8_t d, uint8_t e)
+{
+  c.moves[0] = a; c.moves[1] = b; c.moves[2] = d; c.moves[3] = e;
+  cs_price(c);
+}
+
+// A definition validate_custom_species() accepts, and it is DELIBERATELY
+// APPENDIX C's OWN EXAMPLE: stats 6/5/5/5 = 21 and a legal four-move set costing
+// 91, which the spec's POWER bar prices at 72 %. That number is not decoration -
+// it is the one worked example the product spec ships, and it is UNREACHABLE at
+// a full 22-point stat budget (the cheapest legal set costs 84..86, which prices
+// at 73 %), which is how P8-C3 settled that the section 36 stat rule is a BAND.
+static void mk_cs(CustomSpeciesRec& c)
+{
+  memset(&c, 0, sizeof c);
+  c.magic   = (uint16_t)CS_MAGIC;
+  c.version = (uint8_t)SAVE_SCHEMA_VERSION;
+  c.slot    = 0u;
+  c.type    = (uint8_t)TYPE_SIGNAL;
+  c.base[0] = 6u; c.base[1] = 5u; c.base[2] = 5u; c.base[3] = 5u;   // 21
+  memcpy(c.name, "Bicho", 6);
+  c.compat_group = 0u;                       // a custom species does not breed
+  cs_moves(c, MV_PING, MV_AMPLIFICAR, MV_OVERCLOCK, MV_DEPURAR);    // cost 91
 }
 
 static uint16_t hp_max_of(const PebbleInstance& p)
@@ -475,6 +529,34 @@ TEST(every_content_and_team_reject_is_reachable_and_no_wire_code_is) {
     OBSERVE(validate_battle_ready(m, 3u, bad));
     CHECK_EQ(bad, 2);
   }
+
+  // THE FOURTEEN CREATOR CODES (P8-C3). Same rule as every code above: each is
+  // produced by the function that owns it, on a fixture in which its own field
+  // is the only illegal thing. Section 5 below is where each one gets its
+  // positive control; this sweep is what fails when a code is added and no case
+  // ever produces it.
+  {
+    CustomSpeciesRec c;
+    mk_cs(c);                                     OBSERVE(validate_custom_species(c));
+    mk_cs(c); c.magic ^= 1u;                      OBSERVE(validate_custom_species(c));
+    mk_cs(c); c.reserved[0] = 1u;                 OBSERVE(validate_custom_species(c));
+    mk_cs(c); c.type = (uint8_t)TYPE_NEUTRAL;     OBSERVE(validate_custom_species(c));
+    mk_cs(c); c.base[0] = 11u;                    OBSERVE(validate_custom_species(c));
+    mk_cs(c); c.base[0] = (uint8_t)(c.base[0] + 4u); OBSERVE(validate_custom_species(c));
+    mk_cs(c); c.moves[0] = 0u;    cs_price(c);    OBSERVE(validate_custom_species(c));
+    mk_cs(c); c.moves[1] = c.moves[0]; cs_price(c); OBSERVE(validate_custom_species(c));
+    mk_cs(c); c.moves[1] = MV_BYTAZO; cs_price(c); OBSERVE(validate_custom_species(c));
+    mk_cs(c); cs_moves(c, MV_AMPLIFICAR, MV_ANTENA, MV_DEFRAG, MV_DEPURAR);
+                                                  OBSERVE(validate_custom_species(c));
+    mk_cs(c); cs_moves(c, MV_PING, MV_APUESTA, MV_DEFRAG, MV_DEPURAR);
+                                                  OBSERVE(validate_custom_species(c));
+    mk_cs(c); cs_moves(c, MV_RAFAGA, MV_ECO_DOBLE, MV_PULSO, MV_CHOQUE);
+                                                  OBSERVE(validate_custom_species(c));
+    mk_cs(c); c.budget_used = (uint16_t)(c.budget_used + 1u);
+                                                  OBSERVE(validate_custom_species(c));
+    mk_cs(c); c.name[0] = '\0';                   OBSERVE(validate_custom_species(c));
+    mk_cs(c); c.compat_group = 1u;                OBSERVE(validate_custom_species(c));
+  }
   #undef OBSERVE
 
   // Every CONTENT, TEAM and SESSION code has been produced by the function that
@@ -686,4 +768,350 @@ TEST(a_constructed_pebble_validates) {
   // Two thirds of the roster is stage 1 or 2, so deleting the one line in
   // box.cpp cannot pass this case by accident.
   CHECK(stage_nonzero > 0);
+}
+
+// =============================================================================
+//  6. THE CREATOR DEFINITION (P8-C3, spec sections 35 and 36)
+//
+//  THE SAME THREE RULES THE REST OF THIS FILE OBEYS: every case starts from
+//  mk_cs(), which validate_custom_species() accepts, and makes exactly ONE
+//  thing wrong; every case asserts the EXACT VReject; and every case carries a
+//  positive control that proves it reached the guard it names.
+// =============================================================================
+
+TEST(the_creator_fixture_itself_is_accepted) {
+  CustomSpeciesRec c;
+  mk_cs(c);
+  const VReject r = validate_custom_species(c);
+  if (r != VR_OK) fprintf(stderr, "    mk_cs -> %s\n", validate_reject_name(r));
+  CHECK_EQ((int)r, (int)VR_OK);
+  // Without this the whole section is vacuous: a zeroed record is refused by
+  // VR_CS_BAD_HEADER before any other guard can be reached.
+  CustomSpeciesRec zero;
+  memset(&zero, 0, sizeof zero);
+  CHECK_EQ((int)validate_custom_species(zero), (int)VR_CS_BAD_HEADER);
+}
+
+TEST(appendix_c_prices_the_spec_example_at_seventy_two_percent) {
+  CustomSpeciesRec c;
+  mk_cs(c);
+  uint16_t stat_used = 0, attack_used = 0;
+  creator_cost_of(c, stat_used, attack_used);
+  CHECK_EQ((int)stat_used, 21);
+  CHECK_EQ((int)attack_used, 91);
+  CHECK_EQ((int)creator_power_pct(stat_used, attack_used), 72);
+
+  // THE WHOLE 72 % BAND, AND ITS EDGES, because the spec ships one number and a
+  // formula that has to reproduce it on every input near it. balance.json
+  // writes it in floats; core arithmetic here is integer, rounding half up.
+  CHECK_EQ((int)creator_power_pct(22, 79), 71);
+  CHECK_EQ((int)creator_power_pct(22, 80), 72);
+  CHECK_EQ((int)creator_power_pct(22, 83), 72);
+  CHECK_EQ((int)creator_power_pct(22, 84), 73);
+  CHECK_EQ((int)creator_power_pct(21, 88), 72);
+  CHECK_EQ((int)creator_power_pct(21, 91), 72);
+  CHECK_EQ((int)creator_power_pct(21, 92), 73);
+  // A full budget on both axes is 100 %, and nothing can exceed it.
+  CHECK_EQ((int)creator_power_pct(CREATOR_TOTAL_STAT_POINTS,
+                                 CREATOR_ATTACK_BUDGET), 100);
+  CHECK_EQ((int)creator_power_pct(0, 0), 0);
+  CHECK_EQ((int)creator_power_pct(60000, 60000), 100);   // saturates, never wraps
+}
+
+TEST(the_spec_example_is_unreachable_at_a_full_stat_budget) {
+  // THE MEASUREMENT THAT SETTLED THE STAT RULE, run rather than quoted. If the
+  // creator required stats == CREATOR_TOTAL_STAT_POINTS, Appendix C's own
+  // worked example could not be produced on this device: the cheapest legal
+  // four-move set for every type costs more than the 80..83 that 72 % needs.
+  uint16_t cheapest[TYPE_COUNT];
+  for (uint8_t t = 0; t < (uint8_t)TYPE_COUNT; ++t) cheapest[t] = 0xFFFFu;
+
+  for (uint8_t t = 0; t < (uint8_t)TYPE_COUNT; ++t) {
+    for (uint8_t a = 1; a <= ATTACK_COUNT; ++a)
+    for (uint8_t b = (uint8_t)(a + 1u); b <= ATTACK_COUNT; ++b)
+    for (uint8_t d = (uint8_t)(b + 1u); d <= ATTACK_COUNT; ++d)
+    for (uint8_t e = (uint8_t)(d + 1u); e <= ATTACK_COUNT; ++e) {
+      CustomSpeciesRec c;
+      mk_cs(c);
+      c.type = t;
+      cs_moves(c, a, b, d, e);
+      if (validate_custom_species(c) != VR_OK) continue;
+      if (c.budget_used < cheapest[t]) cheapest[t] = c.budget_used;
+    }
+  }
+  for (uint8_t t = 0; t < (uint8_t)TYPE_COUNT; ++t) {
+    CHECK(cheapest[t] != 0xFFFFu);                 // every type can build one
+    // 72 % at a full 22-point stat budget needs an attack cost of 80..83.
+    CHECK(cheapest[t] > 83u);
+    CHECK_EQ((int)creator_power_pct(CREATOR_TOTAL_STAT_POINTS, cheapest[t]), 73);
+  }
+  // And the band's floor is what makes the spec example possible at all.
+  CHECK_EQ((int)CREATOR_STAT_POINTS_MIN, (int)CREATOR_STAT_POINTS_BY_STAGE[0]);
+  CHECK(CREATOR_STAT_POINTS_MIN < CREATOR_TOTAL_STAT_POINTS);
+}
+
+TEST(a_definition_that_is_too_strong_is_refused_on_every_axis) {
+  CustomSpeciesRec c;
+
+  // STATS over the band.
+  mk_cs(c); c.base[0] = 10u; c.base[1] = 10u;    // 10+10+5+5 = 30
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_STAT_BUDGET);
+  // ...and under it. A creator that could make deliberately useless trade bait
+  // is the other half of the rule, and it is the half a `<=` alone would miss.
+  mk_cs(c); c.base[0] = 1u; c.base[1] = 1u; c.base[2] = 1u; c.base[3] = 1u;
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_STAT_BUDGET);
+  mk_cs(c); c.base[0] = 1u; c.base[1] = 5u; c.base[2] = 5u; c.base[3] = 5u;  // 16
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_OK);   // exactly the floor
+  mk_cs(c); c.base[0] = 7u; c.base[1] = 5u; c.base[2] = 5u; c.base[3] = 5u;  // 22
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_OK);   // exactly the ceiling
+  mk_cs(c); c.base[0] = 8u; c.base[1] = 5u; c.base[2] = 5u; c.base[3] = 5u;  // 23
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_STAT_BUDGET);
+
+  // A SINGLE STAT out of 1..10, which is a different rule and a different code.
+  mk_cs(c); c.base[3] = 0u;
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_BAD_STAT);
+  mk_cs(c); c.base[3] = 11u;
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_BAD_STAT);
+
+  // THE ATTACK BUDGET.
+  mk_cs(c); cs_moves(c, MV_RAFAGA, MV_ECO_DOBLE, MV_PULSO, MV_CHOQUE);   // 216
+  CHECK(c.budget_used > (uint16_t)CREATOR_ATTACK_BUDGET);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_ATTACK_BUDGET);
+
+  // THE STAGE-1 POWER CAP. Apuesta is power 100 against a cap of 90, and its
+  // set is well inside the attack budget - so this case can only be the cap.
+  mk_cs(c); cs_moves(c, MV_PING, MV_APUESTA, MV_DEFRAG, MV_DEPURAR);
+  CHECK(c.budget_used <= (uint16_t)CREATOR_ATTACK_BUDGET);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_POWER_CAP);
+  // Eco Doble is power 90, exactly the cap, and must be ACCEPTED: a cap that
+  // refused its own boundary would be a different rule than the one the roster
+  // is held to.
+  mk_cs(c); cs_moves(c, MV_ECO_DOBLE, MV_AMPLIFICAR, MV_DEFRAG, MV_DEPURAR);
+  CHECK_EQ((int)attack_get(MV_ECO_DOBLE)->power, (int)CREATOR_POWER_CAP_BY_STAGE[1]);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_OK);
+}
+
+TEST(the_move_rules_are_the_ones_the_shipped_roster_is_held_to) {
+  CustomSpeciesRec c;
+
+  mk_cs(c); c.moves[2] = 0u;              cs_price(c);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_UNKNOWN_MOVE);
+  mk_cs(c); c.moves[2] = (uint8_t)(ATTACK_COUNT + 1u); cs_price(c);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_UNKNOWN_MOVE);
+
+  mk_cs(c); c.moves[3] = c.moves[0];      cs_price(c);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_MOVE_REPEATED);
+
+  // OFF-TYPE. Bytazo is CORRUPT and the fixture is SIGNAL; the same set on a
+  // CORRUPT species is the positive control, which is what proves the rule is
+  // "own type or NEUTRAL" and not "this particular move is banned".
+  mk_cs(c); c.moves[1] = MV_BYTAZO;       cs_price(c);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_MOVE_OFF_TYPE);
+  mk_cs(c); c.type = (uint8_t)TYPE_CORRUPT;
+  cs_moves(c, MV_BYTAZO, MV_DEFRAG, MV_OVERCLOCK, MV_DEPURAR);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_OK);
+
+  // FOUR STATUS MOVES CANNOT WIN A BATTLE - attacks_table.h's own rule for the
+  // built-in roster, applied to a player's Pebble by the same words.
+  mk_cs(c); cs_moves(c, MV_AMPLIFICAR, MV_ANTENA, MV_DEFRAG, MV_DEPURAR);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_NO_DAMAGING_MOVE);
+  // One damaging move is enough, and it is the ONLY difference here.
+  mk_cs(c); cs_moves(c, MV_PING, MV_ANTENA, MV_DEFRAG, MV_DEPURAR);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_OK);
+}
+
+TEST(the_page_may_not_price_its_own_pebble) {
+  CustomSpeciesRec c;
+  mk_cs(c);
+  const uint16_t honest = c.budget_used;
+  c.budget_used = 0u;                       // "this Pebble is free"
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_BUDGET_MISMATCH);
+  c.budget_used = (uint16_t)(honest + 1u);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_BUDGET_MISMATCH);
+  c.budget_used = honest;
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_OK);
+}
+
+TEST(the_name_charset_is_the_one_the_panel_can_draw) {
+  CustomSpeciesRec c;
+
+  // EMPTY, and the positive control is one character.
+  mk_cs(c); c.name[0] = '\0';
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_BAD_NAME);
+  mk_cs(c); memset(c.name, 0, sizeof c.name); c.name[0] = 'A';
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_OK);
+
+  // UNTERMINATED inside the field. This is a MEMORY SAFETY rule and not a
+  // spelling one: the name is handed out as a bare const char* and snprintf'd
+  // with "%s", so an unterminated one reads forward into the next field.
+  mk_cs(c); memset(c.name, 'x', sizeof c.name);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_BAD_NAME);
+
+  // EXACTLY NAME_MAX_LEN is legal, one more is not.
+  mk_cs(c); memset(c.name, 0, sizeof c.name); memset(c.name, 'x', NAME_MAX_LEN);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_OK);
+
+  // THE CHARACTER SET. Latin-1 accents are drawable and must be accepted; a
+  // control byte and a codepoint the _tf fonts do not carry must not be.
+  mk_cs(c); memset(c.name, 0, sizeof c.name);
+  c.name[0] = (char)0xF1; c.name[1] = (char)0xE1; c.name[2] = (char)0xBF;  // n-tilde, a-acute, inverted ?
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_OK);
+  mk_cs(c); c.name[1] = (char)0x01;
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_BAD_NAME);
+  mk_cs(c); c.name[1] = (char)0x7F;
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_BAD_NAME);
+  mk_cs(c); c.name[1] = (char)0x80;                 // a C1 control, not Latin-1 text
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_BAD_NAME);
+
+  // A LEADING OR TRAILING SPACE IS REFUSED, NOT TRIMMED. Trimming is mending,
+  // and this validator takes its record const so it could not mend if it wanted
+  // to; a space in the middle is an ordinary character.
+  mk_cs(c); memset(c.name, 0, sizeof c.name); memcpy(c.name, " Bicho", 7);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_BAD_NAME);
+  mk_cs(c); memset(c.name, 0, sizeof c.name); memcpy(c.name, "Bicho ", 7);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_BAD_NAME);
+  mk_cs(c); memset(c.name, 0, sizeof c.name); memcpy(c.name, "Bi ho", 6);
+  CHECK_EQ((int)validate_custom_species(c), (int)VR_OK);
+
+  // The predicate and the validator agree on every byte, because they are the
+  // same function: creator_name_char_ok() is what networking/creator_parse.cpp
+  // asks of a UTF-8 upload and what this file asks of a flash record.
+  for (int ch = 0; ch < 256; ++ch) {
+    mk_cs(c); memset(c.name, 0, sizeof c.name);
+    c.name[0] = (char)ch;
+    const bool ok = validate_custom_species(c) == VR_OK;
+    CHECK_EQ((int)ok, (int)(creator_name_char_ok((uint8_t)ch) && ch != ' '));
+  }
+}
+
+TEST(a_custom_species_never_breeds_and_never_carries_an_evolution) {
+  CustomSpeciesRec c;
+  mk_cs(c);
+  // The record half: any non-zero compat group is refused, so "it does not
+  // breed" cannot be undone by setting a field.
+  for (uint8_t g = 1; g < 8u; ++g) {
+    mk_cs(c); c.compat_group = g;
+    CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_BAD_COMPAT);
+  }
+  // The projection half: no family, no evolution rule, no spawn weight - so
+  // game/breeding.cpp has no child species to derive and game/evolution.cpp has
+  // nothing to evolve into. All three are structural, not checks.
+  mk_cs(c);
+  csp_reset();
+  CHECK(csp_install(c));
+  const SpeciesDef* sp = species_get(csp_species_id(0));
+  CHECK(sp != nullptr);
+  if (sp) {
+    CHECK_EQ((int)sp->family, 0);
+    CHECK_EQ((int)sp->evo_rule, (int)SPECIES_EVO_NONE);
+    CHECK_EQ((int)sp->spawn_weight, 0);
+    CHECK_EQ((int)sp->compat_group, 0);
+    CHECK_EQ((int)sp->stage, 1);          // the budget it was measured against
+    CHECK_EQ((int)sp->category_mask, 0);  // never a wild encounter
+  }
+  csp_reset();
+}
+
+TEST(a_refused_definition_is_never_installed) {
+  CustomSpeciesRec c;
+  csp_reset();
+  CHECK_EQ((int)csp_count(), 0);
+  CHECK(species_get((uint8_t)CREATOR_SPECIES_ID_MIN) == nullptr);
+
+  mk_cs(c); c.base[0] = 11u;                       // one illegal field
+  CHECK(!csp_install(c));
+  CHECK_EQ((int)csp_count(), 0);
+  // AND THE ID STILL DOES NOT RESOLVE, which is the property that matters: a
+  // record that survived a CRC and failed the rules must leave the slot EMPTY,
+  // so the Pebble pointing at it is quarantined by name at the next scan rather
+  // than resolved to a creature with a 30-point stat total.
+  CHECK(species_get((uint8_t)CREATOR_SPECIES_ID_MIN) == nullptr);
+
+  mk_cs(c);
+  CHECK(csp_install(c));
+  CHECK_EQ((int)csp_count(), 1);
+  CHECK(species_get((uint8_t)CREATOR_SPECIES_ID_MIN) != nullptr);
+  csp_reset();
+  CHECK(species_get((uint8_t)CREATOR_SPECIES_ID_MIN) == nullptr);
+}
+
+TEST(the_registry_hands_out_ten_slots_and_no_eleventh) {
+  csp_reset();
+  for (uint8_t i = 0; i < (uint8_t)CREATOR_SPECIES_SLOTS; ++i) {
+    CHECK_EQ((int)csp_free_slot(), (int)i);
+    CustomSpeciesRec c;
+    mk_cs(c);
+    c.slot = i;
+    CHECK(csp_install(c));
+    CHECK_EQ((int)csp_species_id(i), (int)(CREATOR_SPECIES_ID_MIN + i));
+    CHECK_EQ((int)csp_slot_of((uint8_t)(CREATOR_SPECIES_ID_MIN + i)), (int)i);
+  }
+  CHECK_EQ((int)csp_count(), (int)CREATOR_SPECIES_SLOTS);
+  CHECK_EQ((int)csp_free_slot(), (int)CSP_SLOT_NONE);
+  // One past the range resolves to nothing, and so does a built-in id.
+  CHECK(species_get((uint8_t)(CREATOR_SPECIES_ID_MAX + 1u)) == nullptr);
+  CHECK(csp_get(1u) == nullptr);
+  CHECK_EQ((int)csp_slot_of(1u), (int)CSP_SLOT_NONE);
+
+  csp_forget(3u);
+  CHECK_EQ((int)csp_free_slot(), 3);
+  CHECK(species_get((uint8_t)(CREATOR_SPECIES_ID_MIN + 3u)) == nullptr);
+  csp_reset();
+}
+
+TEST(a_creator_pebble_is_an_ordinary_pebble_to_the_one_validator) {
+  // THE WHOLE PIPELINE MINUS THE SOCKET, over the REAL registry, the REAL
+  // constructor and the REAL validator - which is the only way this claim means
+  // anything about the firmware. It is also the defect that was already waiting
+  // in the tree: before the registry, species_get(200) answered nullptr, so
+  // box_new_pebble() refused outright and a Pebble filed any other way was
+  // quarantined with VR_UNKNOWN_SPECIES on the next boot.
+  csp_reset();
+  box_fixture();
+  CustomSpeciesRec c;
+  mk_cs(c);
+
+  // Before installation the constructor refuses, by name.
+  CHECK_EQ((int)box_new_pebble((uint8_t)CREATOR_SPECIES_ID_MIN, 1u,
+                               (uint8_t)ORIGIN_CREATOR, sealed_genome(0x51u),
+                               0xC0FFEEu, 1000u),
+           (int)BOX_SLOT_NONE);
+
+  CHECK(csp_install(c));
+  const uint8_t species_id = csp_species_id(0);
+  const uint8_t slot = box_new_pebble(species_id, 1u, (uint8_t)ORIGIN_CREATOR,
+                                      sealed_genome(0x51u), 0xC0FFEEu, 1000u);
+  CHECK(slot != (uint8_t)BOX_SLOT_NONE);
+  PebbleInstance* p = box_slot(slot);
+  CHECK(p != nullptr);
+  if (p == nullptr) { csp_reset(); return; }
+
+  // The two fields the constructor cannot know, exactly as
+  // networking/creator_server.cpp sets them.
+  p->flags = (uint8_t)(p->flags | PBF_CUSTOM | PBF_HAS_CUSTOM_SPRITE);
+  p->custom_sprite = 0u;
+  memset(p->nickname, 0, sizeof p->nickname);
+  memcpy(p->nickname, c.name, 6);
+
+  const VReject r = validate_pebble(*p);
+  if (r != VR_OK) fprintf(stderr, "    creator Pebble -> %s\n", validate_reject_name(r));
+  CHECK_EQ((int)r, (int)VR_OK);
+  CHECK_EQ((int)p->origin, (int)ORIGIN_CREATOR);
+  CHECK_EQ((int)(p->evo_state & EVO_STATE_STAGE_MASK), 1);
+
+  // THE LEARNSET RULE IS THE ONE THAT WOULD HAVE BROKEN SILENTLY. A custom row
+  // has family 0 and no row in SPECIES_TABLE, so the family walk can never match
+  // it: without "a species teaches its own learnset" this is
+  // VR_UNLEARNABLE_MOVESET one instruction after the Pebble is built.
+  CHECK_EQ((int)species_get(species_id)->family, 0);
+
+  // And the record's own moves are what the creature carries - no repair, no
+  // substitution.
+  for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m)
+    CHECK_EQ((int)p->moves[m], (int)c.moves[m]);
+
+  // Forgetting the record makes the SAME Pebble unknown again, which is what a
+  // lost or refused cs* blob looks like on the next boot.
+  csp_reset();
+  CHECK_EQ((int)validate_pebble(*p), (int)VR_UNKNOWN_SPECIES);
 }

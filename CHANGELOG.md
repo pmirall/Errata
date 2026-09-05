@@ -32,6 +32,41 @@ tag for a phase is cut only when its gate (`tools/check.sh`) and its variant mat
 - **The D7 inactivity shutdown (P8-C2).** `ConfigV2.creator_idle_s` (default 300 s), measured on
   the monotonic clock and reset **only by a request that passed the PIN gate** — otherwise
   anyone in radio range holds the access point up forever by fetching one URL every 299 s.
+- **All seven spec §38 routes (P8-C3).** `GET /`, `GET /api/schema`, `GET /api/state`,
+  `POST /api/validate`, `POST /api/pebble`, `POST /api/time` and `POST /api/ping`.
+  `/api/schema` is served from the generated `data/creator_schema_json.h` with the 4-arg
+  `send_P` — 744 B of `.rodata`, **zero globals** — so the page and the device cannot disagree
+  about a budget; `/api/time` calls `gt_set_epoch(CAL_PHONE)`. `/api/schema` is the one ungated
+  route (compiled constants, identical on every device); everything else needs the PIN, which
+  may now ride in an `X-Pin` header **or** the JSON body, through the same one gate and the same
+  one failure counter.
+- **`networking/creator_body.{h,cpp}` — THE RAW-BODY CAP, and it closes audit §12's
+  "Body limits: none".** Every POST route is registered with the 4-arg `on()` overload, so a
+  body arrives in the core's fixed 1436 B chunks instead of `readBytesWithTimeout()` growing a
+  `malloc` to the attacker's own `Content-Length`. `RAW_START` decides the whole body's fate
+  from the declared length: over `CS_BODY_MAX` (2048) it is drained and answered **413**; over
+  `CS_BODY_DRAIN_MAX` (8192), or NEGATIVE, the socket is closed from inside the hook, because a
+  client declaring 100 MB would otherwise hold `loop()` — no render, no simulation — for as long
+  as it kept trickling. A `Content-Length` of 0 is **411**, never an empty upload: chunked and
+  absent look identical to the core and would hand the validator an empty Pebble.
+- **`networking/creator_parse.{h,cpp}` — a fixed-schema reader, and no JSON library.** It reads
+  exactly the two documents the page may send and answers everything else with a named code. It
+  is **length-bounded, never NUL-bounded** (an embedded NUL is `CP_NUL`, not a terminator),
+  duplicate keys are `CP_DUP_KEY` rather than last-wins, and **there is no recursion and no
+  depth counter**: no value reader can read an object or an array that was not expected there,
+  so ten thousand open braces is one error and a constant amount of stack.
+- **`validate_custom_species()` in the ONE validator (spec §15).** Fourteen new named
+  `VR_CS_*` codes over the §35/§36 rules — type, the stat band, the four move rules, the
+  stage-1 power cap, the attack budget, the name and its character set, the reserve, and
+  `budget_used`, which is **recomputed and refused on disagreement** because a page that prices
+  its own Pebble prices it at zero. The same function runs on every `cs*` record read off flash
+  at boot: "it survived a CRC" is not evidence about a stat total.
+- **`game/species_custom.{h,cpp}` — creator species resolve through `species_get()`.**
+  `data/species_table.h` has promised since P4-C1 that "P8 resolves cs* records here so no
+  battle or validator code ever branches on custom"; this is that resolution, through a bound
+  resolver in the generated header. A custom row is projected with `family = 0`,
+  `evo_rule = SPECIES_EVO_NONE`, `spawn_weight = 0` and `compat_group = 0`, which answers §35's
+  evolution and breeding inputs structurally instead of with a check.
 
 ### Fixed
 
@@ -42,6 +77,31 @@ tag for a phase is cut only when its gate (`tools/check.sh`) and its variant mat
   time than joining a network takes. The row is `SF_STICKY` now, with two screen-owned exits in
   its place — `CREATOR_AP_WAIT_MS` (§47) and the D7 grace period — both leaving through the same
   teardown a B press runs.
+- **A CREATOR PEBBLE WOULD HAVE BEEN QUARANTINED ON THE FIRST POWER CYCLE, and the defect was
+  already waiting in the tree.** `species_get(200)` answered `nullptr`, so `box_new_pebble()`
+  refused a creator species outright and a Pebble filed any other way was flagged
+  `VR_UNKNOWN_SPECIES` by `save_manager.cpp`'s `quarantine_scan()` at the next boot. The load
+  path now rebuilds the registry from the `cs*` records **before** the scan runs, and
+  `tests/test_validate.cpp::a_creator_pebble_is_an_ordinary_pebble_to_the_one_validator` drives
+  both halves.
+- **An over-long string left the reader's cursor inside it.** `cp_read_string()` returned
+  `CP_STRING_LEN` the moment the buffer filled, without consuming to the closing quote — so the
+  one caller that tolerates that code (`cp_read_pin()`, for which an unusable PIN is not a
+  malformed document) read the tail of the value as the next token, and a body carrying a long
+  `"pin"` was refused as `CP_SYNTAX` instead of being read and gated. Found by
+  `tests/test_creator_api.cpp`, fixed at the reader.
+- **A throttled or PIN-refused client could still degrade the display.** `note_request()` ran
+  BEFORE the rate limiter in `h_root` and `h_notfound`, so a client being answered 429 still
+  dropped the renderer to `FPS_LOW` — a permanent, free degradation for anyone in radio range.
+  P8-C2 recorded it; the order is now rate limit, then hint.
+- **`POST /anything-else` still walked the unbounded body reader.** Registering raw handlers
+  protects only the URIs that have them: `Parsing.cpp` requires `_currentHandler` non-null, and
+  `onNotFound()` is not a handler. A catch-all `Uri` is now registered LAST, with the same body
+  hook, and `onNotFound()` is gone.
+- **A multipart POST was a null dereference any client could ask for.** The same function is
+  invoked as the UPLOAD hook on the multipart path, where `_currentRaw` is null and
+  `WebServer::raw()` dereferences it with no check. The hook now reads the collected
+  `Content-Type` first — which is why `Content-Type` joined `X-Pin` in `collectHeaders()`.
 - **A PIN could not survive a reboot.** `gs_load()` zeroed `creator_pin`, `pin_fail_count` and
   `pin_lock_until` on every load — a correct P2-era guard for a feature that did not exist yet,
   and the reason the first round-trip test failed. Removed; the concern it named is answered by
@@ -58,6 +118,19 @@ tag for a phase is cut only when its gate (`tools/check.sh`) and its variant mat
   choice.
 - `ConfigV2.pin_fail_count` holds **0 or 5 and nothing between** — only the armed edge reaches
   flash, so an attack episode costs two writes rather than one per guess.
+- **The spec §36 stat rule is a BAND, not an equality (P8-C3):**
+  `CREATOR_STAT_POINTS_MIN (16) <= hp+atk+def+spd <= CREATOR_TOTAL_STAT_POINTS (22)`. Three
+  shipped sentences disagreed, and the measurement that settles it is Appendix C's own worked
+  example: **72 % is unreachable at a full 22-point stat budget** — the cheapest legal four-move
+  set costs 84..86 depending on type, which prices at 73 % — so requiring equality would have
+  made the product spec's own screenshot impossible to produce. `docs/decisions.md` carries the
+  enumeration; `tests/test_validate.cpp` runs it rather than quoting it.
+- **A custom Pebble does not travel.** `networking/protocol.cpp` already refuses a wire record
+  with `species > 199` as `VR_WIRE_CUSTOM_UNRESOLVED`; that now has a stated consequence —
+  custom Pebbles are local until a later phase sends the `cs*` record alongside them.
+- **`CS_SPRITE_W` / `CS_SPRITE_H`** name the 24x24 geometry that had lived only in a comment,
+  with a `static_assert` tying them to `CS_SPRITE_BYTES`. §35's "sprite dimensions" now has a
+  source the served schema can quote.
 
 ### Removed
 

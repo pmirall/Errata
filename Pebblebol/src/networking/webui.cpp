@@ -56,6 +56,7 @@
 #include "../hardware/gametime.h"         // gt_mono32() - see creator_gate.h
 #include "../persistence/game_state.h"    // gs_creator_load / gs_creator_store
 #include "../data/index_html.h"   // EXACTLY ONE TU. See the file header.
+#include "creator_server.h"                // the five creator routes + the cap
 
 #if FEATURE_WEB
 
@@ -85,7 +86,14 @@ static CreatorGate s_gate = { 0, 0, 0, 0, 0, 0, 0, 0 };
 // and the gate would refuse the correct PIN forever. collectAllHeaders() is the
 // wrong fix: it allocates a String pair per unknown header, which is unbounded
 // heap growth from a hostile header list.
-static const char* const HDR_KEYS[] = { "X-Pin" };
+// Content-Type joined X-Pin in P8-C3, and it is not decoration: the shared raw
+// hook is ALSO invoked as the UPLOAD hook when the body is multipart, where
+// server.raw() dereferences a null unique_ptr. Reading the header is the only
+// way the hook can tell which invocation it is in, and an unregistered header
+// reads as the empty string on every request - so without this entry the guard
+// would be a comment and a POST with a multipart Content-Type would be a crash
+// any client could ask for.
+static const char* const HDR_KEYS[] = { "X-Pin", "Content-Type" };
 
 // Token bucket, held in MILLI-tokens so the refill never needs a float and
 // never truncates to zero on a fast poll. Capacity WEB_RATE_TOKENS * 1000
@@ -126,7 +134,7 @@ static bool web_enabled(void)
 //    when the bucket is dry. The empty body is deliberate: it says "you are
 //    hammering me" and carries no state a client could act on.
 // =============================================================================
-static bool rate_take(uint8_t cost_tokens)
+bool web_rate_take(uint8_t cost_tokens)
 {
   const uint32_t now = millis();
   uint32_t dt = now - s_bucket_ms;          // unsigned: wrap-safe
@@ -147,7 +155,7 @@ static bool rate_take(uint8_t cost_tokens)
 //  4. RESPONSE PRIMITIVES
 // =============================================================================
 
-static void note_request(void)
+void web_note_request(void)
 {
   rd_note_web_activity();                   // render drops to FPS_LOW
 }
@@ -165,8 +173,9 @@ static void send_err(int code, const char* err)
   send_json(code, s_json);
 }
 
-// 429, empty body. Rate limiter only.
-static void send_throttled(void)
+// 429, empty body. Rate limiter only. The empty body is deliberate: it says
+// "you are hammering me" and carries no state a client could act on.
+void web_send_throttled(void)
 {
   s_srv.send(429, "application/json", "");
 }
@@ -182,13 +191,20 @@ static void send_throttled(void)
 // =============================================================================
 
 // ---- GET / ------------------------------------------------------------------
+//
+//  THE RATE LIMIT IS FIRST AND THE RENDER HINT IS SECOND (P8-C3). It used to be
+//  the other way round, which meant a client being REFUSED still dropped the
+//  renderer to FPS_LOW - a permanent display degradation available to anyone in
+//  radio range for the price of a throttled request. P8-C2 recorded it as an
+//  open defect and this is the one line it asked for.
 static void h_root(void)
 {
-  note_request();
-  if (!rate_take(WEB_COST_READ)) { send_throttled(); return; }
+  if (!web_rate_take(WEB_COST_READ)) { web_send_throttled(); return; }
+  web_note_request();
   s_srv.sendHeader(F("Cache-Control"), F("no-cache"));
   // FOUR-arg send_P. The 3-arg form strlen_P()s the blob (WebServer.cpp:619).
   s_srv.send_P(200, PSTR("text/html; charset=utf-8"), INDEX_HTML, INDEX_HTML_LEN);
+  cs_body_done();
 }
 
 // ---- catch-all / captive portal --------------------------------------------
@@ -197,11 +213,17 @@ static void h_root(void)
 //  and iOS probe a known URL and read the status: a 302 to our own root is what
 //  makes the "sign in to network" sheet appear. When the Host header already IS
 //  us, the request is a genuine 404.
+//
+//  SINCE P8-C3 IT IS A REGISTERED HANDLER, not onNotFound(): only a registered
+//  handler gets the core's bounded raw path, so this is also where
+//  `POST /anything-else` with a nine-digit Content-Length is caught instead of
+//  walking readBytesWithTimeout()'s malloc growth loop. creator_server.cpp
+//  registers it LAST, after every real route, and hands it the same body hook.
 // ----------------------------------------------------------------------------
 static void h_notfound(void)
 {
-  note_request();
-  if (!rate_take(WEB_COST_READ)) { send_throttled(); return; }
+  if (!web_rate_take(WEB_COST_READ)) { web_send_throttled(); cs_body_done(); return; }
+  web_note_request();
 
   const char* ip = net_ip();
   const String host = s_srv.hostHeader();
@@ -219,9 +241,11 @@ static void h_notfound(void)
     s_srv.sendHeader(F("Location"), loc, true);
     s_srv.sendHeader(F("Cache-Control"), F("no-store"));
     s_srv.send(302, "text/plain", "");
+    cs_body_done();
     return;
   }
   send_err(404, "arg");
+  cs_body_done();
 }
 
 // =============================================================================
@@ -261,12 +285,22 @@ static void pin_persist_edge(void)
 // therefore in the browser's history and in any Referer the page sends. The
 // same cg_verify() takes a plain string, so P8-C3's JSON tokenizer can hand it
 // a `"pin"` field from a request body without a second gate existing.
-static bool pin_ok(void)
+// Was an X-Pin header sent at all? A route that carries a BODY falls back to
+// the body's "pin" field when it was not; see creator_server.cpp's
+// pin_ok_with_body() for the ordering and why it is that way round.
+bool web_pin_present(void)
 {
-  const String supplied = s_srv.header(F("X-Pin"));
+  return s_srv.header(F("X-Pin")).length() > 0;
+}
+
+// The one gate. Everything else in this file and in creator_server.cpp reaches
+// cg_verify() through here, so there is exactly one failure counter and exactly
+// one lockout.
+static bool pin_verify(const char* supplied)
+{
   const uint32_t now = gt_mono32();
 
-  switch (cg_verify(s_gate, supplied.c_str(), now)) {
+  switch (cg_verify(s_gate, supplied, now)) {
     case CG_OK:
       pin_persist_edge();
       return true;
@@ -298,6 +332,24 @@ static bool pin_ok(void)
   }
 }
 
+bool web_pin_ok(void)
+{
+  const String supplied = s_srv.header(F("X-Pin"));
+  return pin_verify(supplied.c_str());
+}
+
+// A PIN that arrived some other way - today, a JSON body field. It is FORMATTED
+// BACK INTO FOUR DIGITS and run through the same cg_verify(), rather than
+// compared as a number: cg_parse_pin() is the module's one input bound and the
+// place the recorded "4294971117 authenticates as 3821" overflow is made unable
+// to exist, so a second path that skipped it would be a second parser.
+bool web_pin_ok_u16(uint16_t supplied)
+{
+  char text[CREATOR_PIN_DIGITS + 1];
+  snprintf(text, sizeof(text), "%04u", (unsigned)(supplied % (unsigned)WEB_PIN_MAX));
+  return pin_verify(text);
+}
+
 // ---- POST /api/ping ---------------------------------------------------------
 //
 //  The keep-alive, and spec section 38 names it. It is here in P8-C2 rather
@@ -305,38 +357,21 @@ static bool pin_ok(void)
 //  it is what an authorised page uses to say "I am still here", and cg_verify()
 //  moving last_seen_ms on success is the whole idle timer. It is also what
 //  gives the PIN gate a caller in the shipping firmware in this chunk instead
-//  of leaving pin_ok() as a dead export nobody executes.
+//  of leaving the gate a dead export nobody executes.
 static void h_ping(void)
 {
-  note_request();
-  if (!rate_take(WEB_COST_READ)) { send_throttled(); return; }
+  if (!web_rate_take(WEB_COST_READ)) { web_send_throttled(); cs_body_done(); return; }
+  web_note_request();
   // HOSTILE UNTIL PROVEN: a ping carries no body, so a declared one is a
   // malformed request and not something to parse. Refused BEFORE the PIN gate
-  // because it costs nothing to answer and the body has already been drained
-  // by the raw hook below.
-  if (s_srv.clientContentLength() != 0) { send_err(400, "body"); return; }
-  if (!pin_ok()) return;                      // pin_ok() has already answered
+  // because it costs nothing to answer and the bytes have already been drained
+  // - or the socket already closed - by the shared body hook.
+  if (s_srv.clientContentLength() != 0) { send_err(400, "body"); cs_body_done(); return; }
+  if (!web_pin_ok()) { cs_body_done(); return; }   // it has already answered
   send_json(200, "{\"ok\":1}");
+  cs_body_done();
 }
 
-// The raw/upload hook for the one POST route this chunk registers.
-//
-// ITS ONLY JOB IS TO EXIST. WebServer::canRaw() (detail/RequestHandlersImpl.h)
-// is satisfied by a non-null fourth argument on a non-GET route, and that is
-// what routes a request body through the core's fixed HTTP_RAW_BUFLEN buffer
-// instead of Parsing.cpp's readBytesWithTimeout(), whose only bound on a
-// malloc/realloc growth loop is the attacker's own Content-Length header. Every
-// POST route this server ever registers must pass one of these; P8-C3's version
-// also counts bytes and answers 413.
-//
-// IT MUST NEVER TOUCH server.raw(). The SAME function is invoked as the UPLOAD
-// hook when the body is multipart (Parsing.cpp's _parseForm path), and there
-// _currentRaw is null while WebServer::raw() dereferences it with no check - so
-// a POST with a multipart Content-Type would be a null dereference, i.e. a
-// crash any client can ask for.
-static void h_body_discard(void)
-{
-}
 
 // =============================================================================
 //  8. LIFECYCLE
@@ -405,9 +440,15 @@ bool web_begin(uint16_t port)
     // wins).
     s_srv.on("/", HTTP_GET, h_root);
     // THE FOUR-ARG on(). The fourth argument is what makes canRaw() true and
-    // keeps a hostile Content-Length off the heap - see h_body_discard().
-    s_srv.on("/api/ping", HTTP_POST, h_ping, h_body_discard);
-    s_srv.onNotFound(h_notfound);
+    // keeps a hostile Content-Length off the heap; cs_body_hook() is the shared
+    // one every POST route in this server passes, so /api/ping gets the same
+    // 2 KB cap and the same multipart guard as the routes that carry a body.
+    s_srv.on("/api/ping", HTTP_POST, h_ping, cs_body_hook);
+    // THE OTHER FIVE, AND THE CATCH-ALL, REGISTERED LAST. First match wins
+    // (Parsing.cpp:132-136), so this call must come after every route above -
+    // and onNotFound() is gone with it, because a not-found HANDLER is what the
+    // core needs before it will use the bounded raw path at all.
+    cs_register(s_srv, h_notfound);
 
     // Without this the PIN header is invisible: WebServer keeps only the keys
     // it was asked for. Order does not matter - begin() re-initialises the list
@@ -479,6 +520,17 @@ void web_stop(void)
 
 bool     web_begin(uint16_t)          { return false; }
 void     web_service(void)            {}
+// The creator server's seam, stubbed for the same reason the lifecycle is: with
+// no server there is nothing to rate-limit, nothing to authorise and nothing to
+// answer. web_rate_take() answers FALSE rather than true - "there is no budget"
+// is the honest reading of "there is no server", and a caller that ever runs in
+// this build must take the refusing branch.
+bool     web_rate_take(uint8_t)       { return false; }
+void     web_note_request(void)       {}
+bool     web_pin_present(void)        { return false; }
+bool     web_pin_ok(void)             { return false; }
+bool     web_pin_ok_u16(uint16_t)     { return false; }
+void     web_send_throttled(void)     {}
 void     web_stop(void)               {}
 bool     web_running(void)            { return false; }
 uint16_t web_port(void)               { return 0; }

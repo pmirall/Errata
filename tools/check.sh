@@ -348,15 +348,15 @@ fi
 # THE TWO LISTS BELOW ARE DEFINED ONCE AND USED BY ALL OF THEM. Gates 1, 2 and
 # 2b read the same names, because two lists that must agree is the disagreement
 # this project keeps finding.
-PURE_NET="protocol.h protocol.cpp session.h session.cpp battle_link.h battle_link.cpp trade_link.h trade_link.cpp transport.h transport_loopback.cpp net_classify.h net_classify.cpp wifi_scanner.h wifi_scanner.cpp rxring.h rxring.cpp discovery.h discovery.cpp creator_gate.h creator_gate.cpp"
-PURE_NET_CPP="protocol.cpp session.cpp battle_link.cpp trade_link.cpp transport_loopback.cpp net_classify.cpp wifi_scanner.cpp rxring.cpp discovery.cpp creator_gate.cpp"
+PURE_NET="protocol.h protocol.cpp session.h session.cpp battle_link.h battle_link.cpp trade_link.h trade_link.cpp transport.h transport_loopback.cpp net_classify.h net_classify.cpp wifi_scanner.h wifi_scanner.cpp rxring.h rxring.cpp discovery.h discovery.cpp creator_gate.h creator_gate.cpp creator_body.h creator_body.cpp creator_parse.h creator_parse.cpp"
+PURE_NET_CPP="protocol.cpp session.cpp battle_link.cpp trade_link.cpp transport_loopback.cpp net_classify.cpp wifi_scanner.cpp rxring.cpp discovery.cpp creator_gate.cpp creator_body.cpp creator_parse.cpp"
 # transport_espnow.* is IMPURE and that is HONEST rather than a dodge: esp_now.h's
 # two callback typedefs have no user-context argument at all, so the sink a
 # callback posts into is forced to be file-scope. A device has one radio and a
 # singleton is the truth. What is NOT a singleton is the mechanism - the ring is
 # rxring.cpp and the peer table is discovery.cpp, both pure, both caller-owned,
 # both driven by a host binary.
-IMPURE_NET="net.h net.cpp webui.h webui.cpp transport_espnow.h transport_espnow.cpp"
+IMPURE_NET="net.h net.cpp webui.h webui.cpp creator_server.h creator_server.cpp transport_espnow.h transport_espnow.cpp"
 
 # 1. THE PURE NETWORKING MODULES ARE PURE, AND THE SCOPING IS BY FILENAME
 #    BECAUSE THE DIRECTORY IS MIXED. net.cpp, webui.cpp and
@@ -424,6 +424,39 @@ if [ -d "$SKETCH/src/networking" ]; then
       *) fail "networking/$b is in neither check.sh's PURE_NET nor its IMPURE_NET list - classify it (a pure module is gated for Arduino.h and file-scope mutable state; an impure one is a declared device module)" ;;
     esac
   done
+fi
+
+# 2c. EVERY BODY-CARRYING ROUTE PASSES THE RAW HOOK (P8-C3, audit section 12).
+#    The FOURTH argument of WebServer::on() is what makes canRaw() true
+#    (detail/RequestHandlersImpl.h:97-103), and canRaw() is the only thing that
+#    keeps a request body off Parsing.cpp:44-74's malloc/realloc growth loop -
+#    whose sole bound is the attacker's own Content-Length header. A POST route
+#    registered with the 3-arg on() is therefore not a smaller version of the
+#    same route: it is an unbounded heap allocation any client can ask for, and
+#    it would look identical in review.
+#
+#    NARROW, AND THE NARROWNESS IS THE POINT: it matches registration lines that
+#    name a non-GET method and requires each to name the shared hook. It proves
+#    NOTHING about what the hook does - tests/test_creator_api.cpp is what does
+#    that - and it cannot see a route registered across two lines. Comment lines
+#    are dropped: creator_server.h discusses the overload in prose.
+if [ -d "$SKETCH/src/networking" ]; then
+  n=$( { grep -rnE '\.on\(.*(HTTP_POST|HTTP_PUT|HTTP_PATCH|HTTP_DELETE|HTTP_ANY)' \
+          "$SKETCH/src/networking" || true; } \
+        | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true; } \
+        | { grep -v 'cs_body_hook' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "a non-GET route is registered without the raw body hook ($n) - the 4-arg on() overload is what keeps a hostile Content-Length off the heap (audit section 12)"
+
+  # AND THE CATCH-ALL MUST EXIST. Registering raw handlers protects only the
+  # URIs that have them: Parsing.cpp:182 requires _currentHandler non-null and
+  # onNotFound() is NOT a handler, so without a registered catch-all every
+  # unmatched POST still walks the growth loop. This gate is the reason
+  # onNotFound() was deleted rather than kept "just in case".
+  n=$( { grep -rn 'UriAny' "$SKETCH/src/networking" || true; } | wc -l )
+  [ "$n" -ge 2 ] || fail "the catch-all route is gone: POST /anything-else would walk readBytesWithTimeout()'s unbounded growth loop again"
+  n=$( { grep -rn 'onNotFound' "$SKETCH/src/networking" || true; } \
+        | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "onNotFound() is registered again ($n) - it is consulted AFTER the body has been parsed, so it cannot bound one; the catch-all handler is what does"
 fi
 
 # 3. A TRIPWIRE, AND IT IS LABELLED AS ONE. spec section 15 says never trust a

@@ -171,8 +171,9 @@
 #include <stdint.h>
 
 #include "../data/balance.h"               // XP_LEVEL_MAX, BATTLE_TEAM_MAX
-#include "../core/config.h"                // STAT_MILLI_MAX
-#include "../persistence/save_schema.h"    // PebbleInstance and its masks
+#include "../data/creator_schema.h"        // the section 35/36 creator budgets
+#include "../core/config.h"                // STAT_MILLI_MAX, NAME_MAX_LEN
+#include "../persistence/save_schema.h"    // PebbleInstance, CustomSpeciesRec
 
 // -----------------------------------------------------------------------------
 //  TWO RELATIONSHIPS NOTHING ELSE IN THE TREE COMPARES, and this header is the
@@ -252,6 +253,39 @@ enum VReject : uint8_t {
                              // BR_MEMBER_FAINTED, named ONE LAYER EARLIER so a
                              // peer that sends one is answered as a peer.
 
+  // --- THE CREATOR DEFINITION (P8-C3). Produced ONLY by
+  //     validate_custom_species(), which judges a SPECIES DEFINITION and not a
+  //     creature - see the function's own comment for why that is a second
+  //     entry point into this module rather than a flag inside the first.
+  //
+  //     APPENDED AT THE END ON PURPOSE. The values above are read back from
+  //     BoxHeader-era quarantine records and named in logs; inserting a code in
+  //     the middle would renumber every one after it.
+  VR_CS_BAD_HEADER,          // magic, version or slot: not a record this
+                             // firmware wrote, or one filed under a slot that
+                             // cannot exist
+  VR_CS_RESERVED,            // reserved[] carried a value - a field from a
+                             // version we do not speak
+  VR_CS_BAD_TYPE,            // type >= TYPE_COUNT. A SPECIES may never be
+                             // TYPE_NEUTRAL, which shares the value 3 with
+                             // TYPE_COUNT (data/species_table.h says why)
+  VR_CS_BAD_STAT,            // a base stat outside CREATOR_BASE_STAT_MIN..MAX
+  VR_CS_STAT_BUDGET,         // the four stats outside the section 36 BAND -
+                             // see data/creator_schema.h for why it is a band
+  VR_CS_UNKNOWN_MOVE,        // attack_get() answers nullptr for one of the four
+  VR_CS_MOVE_REPEATED,       // the four moves are not distinct
+  VR_CS_MOVE_OFF_TYPE,       // a move that is neither the species' own type
+                             // nor NEUTRAL
+  VR_CS_NO_DAMAGING_MOVE,    // four status moves cannot win a battle
+  VR_CS_POWER_CAP,           // a move above CREATOR_POWER_CAP_BY_STAGE[1]
+  VR_CS_ATTACK_BUDGET,       // sum(budget_cost) over CREATOR_ATTACK_BUDGET
+  VR_CS_BUDGET_MISMATCH,     // budget_used disagrees with the recomputation.
+                             // The page may not price its own Pebble
+  VR_CS_BAD_NAME,            // empty, too long, unterminated, or a character
+                             // core/strings_es.h's fonts cannot draw
+  VR_CS_BAD_COMPAT,          // compat_group != 0: a custom species has no
+                             // family, so it has no child to derive
+
   VR_REJECT_COUNT
 };
 
@@ -294,6 +328,93 @@ VReject validate_level_band(const PebbleInstance* m, uint8_t count,
 // reached the identical dead end with nobody lying at all.
 VReject validate_battle_ready(const PebbleInstance* m, uint8_t count,
                               uint8_t& bad_index);
+
+// -----------------------------------------------------------------------------
+//  THE CREATOR (P8-C3). THIS IS THE THIRD CALL SITE THE HEADER ABOVE HAS BEEN
+//  SAYING DOES NOT EXIST YET, AND IT IS NOW LIVE.
+//
+//  IT IS A SECOND ENTRY POINT AND NOT A FLAG, and the reason is that it judges
+//  A DIFFERENT OBJECT. validate_pebble() takes a PebbleInstance - a creature,
+//  with a level, an xp, a genome and a health. A creator upload is a
+//  CustomSpeciesRec - a species DEFINITION, with base stats and a learnset and
+//  no creature anywhere in it. There is no policy parameter that could make one
+//  function judge both; there is a pipeline, and it runs in this order:
+//
+//      cp_parse_species()        the bytes are the shape of a document
+//      validate_custom_species() the definition is legal            <- HERE
+//      species_get() resolves it through game/species_custom.cpp
+//      box_new_pebble()          the creature is built from it
+//      validate_pebble()         the creature is legal
+//
+//  SO SPEC SECTION 15's "the same validator used for custom Pebbles should be
+//  used for exchanged Pebbles" IS SATISFIED LITERALLY: the CREATURE a creator
+//  upload becomes goes through validate_pebble(), the same one call the wire
+//  and the save path make, with no creator branch inside it. What is here is
+//  the rule set that has no other object to be applied to.
+//
+//  IT IS ALSO THE FLASH GUARD. persistence/save_manager.cpp runs it over every
+//  cs* record it reads at boot, so a rotted or hand-written blob leaves its
+//  slot empty rather than resolving to a creature with a 400-point stat total.
+//  The record arriving over HTTP and the record arriving off flash are judged
+//  by the same function, because "it is already stored" is not evidence.
+//
+//  `budget_used` IS CHECKED, NOT TAKEN. It must equal the recomputation from
+//  the moves and the stats: a number the page sends is a number the page can
+//  lie about, and this is the one field of the record whose value the device
+//  could otherwise inherit from a client.
+// -----------------------------------------------------------------------------
+VReject validate_custom_species(const CustomSpeciesRec& c);
+
+// -----------------------------------------------------------------------------
+//  MAY THIS CHARACTER APPEAR IN A CREATOR NAME?
+//
+//  `ch` is ONE LATIN-1 BYTE, never a UTF-8 sequence: the conversion happens in
+//  networking/creator_parse.cpp, at the point where a codepoint stops being
+//  representable, and this is the membership half of that question.
+//
+//  IT LIVES HERE, IN THE GAME LAYER, BECAUSE TWO CALLERS ASK IT AND ONE OF THEM
+//  IS NOT THE PARSER. validate_custom_species() asks it of a record read back
+//  from FLASH, which never went through an HTTP request at all. Two copies of
+//  an allowed set is exactly the disagreement this project keeps finding, and
+//  putting the predicate in networking/ would have inverted the layering as
+//  well - game may not include networking, and networking already includes
+//  game/validate.h (networking/protocol.cpp does).
+//
+//  THE SET IS core/strings_es.h's, VERBATIM: printable ASCII plus the accented
+//  vowels, u-diaeresis, n-tilde, the two inverted marks, the degree sign, the
+//  two ordinals and the middle dot. The reason is not taste - the _tf fonts
+//  carry ASCII + Latin-1 and nothing else, so a character outside this set is
+//  one the panel draws as a wrong glyph or not at all.
+// -----------------------------------------------------------------------------
+bool creator_name_char_ok(uint8_t ch);
+
+// -----------------------------------------------------------------------------
+//  THE SECTION 36 BUDGET ARITHMETIC, as the integers this device can do.
+//
+//  tools/content/balance.json's FORMULAS.creator_power_pct writes it in floats:
+//      round(100 * (stat_used/TOTAL + attack_used/ATTACK_BUDGET) / 2)
+//  and plan rule 1.3 forbids a float in a stat path. The exact integer form,
+//  rounding half up, is
+//      D   = TOTAL * BUDGET
+//      pct = (50 * (BUDGET*S + TOTAL*A) + D/2) / D
+//  which agrees with the float sentence on every input in range - tested, not
+//  asserted, in tests/test_validate.cpp against Appendix C's own example.
+//
+//  THE PAGE MUST IMPLEMENT THIS AND NOT THE SENTENCE. Two bars that disagree at
+//  one input is a user who is told 72 % and refused at 73 %.
+//
+//  Total: it saturates at 100 rather than reporting a percentage above it, and
+//  it takes its inputs as they are - it is arithmetic, not a rule.
+// -----------------------------------------------------------------------------
+uint8_t creator_power_pct(uint16_t stat_used, uint16_t attack_used);
+
+// The section 36 costs of a definition, so a caller can price a Pebble without
+// re-deriving the loop. `stat_used` is the four base stats; `attack_used` is
+// the sum of the four budget_cost columns. Both are written on every path,
+// including the ones where a move id resolves to nothing (that move costs 0),
+// so a caller can never read a stale one.
+void creator_cost_of(const CustomSpeciesRec& c,
+                     uint16_t& stat_used, uint16_t& attack_used);
 
 // The English name of a code, for the event log and the host tests. NOT a UI
 // string: Spanish lives in core/strings_es.h. Total - an out-of-range value

@@ -9,12 +9,19 @@
 //    top of exactly this shell (spec S38: bind only when needed, stop when
 //    inactive, minimal endpoints, validate everything).
 //
-//  ROUTE TABLE
+//  ROUTE TABLE - ALL SEVEN OF SPEC SECTION 38 SINCE P8-C3
 //    GET  /            index_html.h, served with the 4-arg send_P, no-cache
 //    POST /api/ping    the keep-alive. PIN-gated, and the ONLY thing that
-//                      extends the portal's life (P8-C2). One of spec section
-//                      38's seven; the other six are P8-C3's.
-//    *    anything else  captive-portal 302 to http://<ip>/, else 404
+//                      extends the portal's life (P8-C2).
+//    GET  /api/schema  } the five creator routes, registered by
+//    GET  /api/state   } networking/creator_server.cpp, which also owns the
+//    POST /api/validate} raw-body cap every POST route stands on. Its header
+//    POST /api/pebble  } is where the hostile-input posture is written down.
+//    POST /api/time    }
+//    *    anything else  captive-portal 302 to http://<ip>/, else 404 - and
+//                      since P8-C3 it is a REGISTERED catch-all rather than
+//                      onNotFound(), because only a registered handler gets
+//                      the core's bounded raw path (creator_server.h says why).
 //
 //  LAYERING
 //    webui is integration-layer code: it may include WebServer.h, render.h,
@@ -131,6 +138,37 @@ uint16_t web_port(void);
 //    creator_gate.h says exactly what that is and is not worth.
 // -----------------------------------------------------------------------------
 uint16_t web_pin(void);
+
+// -----------------------------------------------------------------------------
+//  THE SEAM networking/creator_server.cpp USES, AND NOTHING ELSE MAY.
+//
+//  The shell stays here - the WebServer object, the token bucket, the render
+//  hint and the live CreatorGate - and the creator routes live one file over,
+//  so these six functions are how a route reaches the shell without a second
+//  copy of any of it. They are declared in webui.h rather than a private header
+//  because webui.h is already the file that promises to pull in NO network
+//  header: creator_server.cpp includes both, ui.cpp includes only this one.
+//
+//  web_rate_take()      one bucket for the whole server; the cost is the
+//                       caller's (WEB_COST_READ / WEB_COST_MUTATE).
+//  web_note_request()   the render hint. CALL IT AFTER THE RATE LIMIT: a
+//                       refused client must not be able to drop the renderer to
+//                       FPS_LOW, which is what it could do until P8-C3.
+//  web_pin_present()    was an X-Pin header sent at all? A route with a body
+//                       falls back to the body's "pin" when it was not.
+//  web_pin_ok()         verify the X-Pin header. Answers the client on refusal.
+//  web_pin_ok_u16()     verify a PIN that arrived some other way - today, a
+//                       JSON body field. SAME GATE, SAME COUNTER: it formats
+//                       the number and runs the one cg_verify() call, so there
+//                       is no second lockout to get out of step.
+//  web_send_throttled() 429 with an empty body.
+// -----------------------------------------------------------------------------
+bool web_rate_take(uint8_t cost_tokens);
+void web_note_request(void);
+bool web_pin_present(void);
+bool web_pin_ok(void);
+bool web_pin_ok_u16(uint16_t supplied);
+void web_send_throttled(void);
 
 // -----------------------------------------------------------------------------
 //  CONFIG BINDING

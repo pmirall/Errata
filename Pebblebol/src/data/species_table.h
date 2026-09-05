@@ -257,10 +257,36 @@ static_assert(species_spawn_sums_are_usable(),
 static_assert(SPECIES_TABLE[SPECIES_ID_STARTER - 1].id == SPECIES_ID_STARTER,
               "the starter species must be the first row");
 
-// Resolves a built-in species id. Returns nullptr for 0 (empty slot), for an
-// id beyond the roster and for the custom range - P8 resolves cs* records here
-// so no battle or validator code ever branches on "custom".
+// -----------------------------------------------------------------------------
+// THE CUSTOM SPECIES RESOLVER (P8-C3), which is the "P8 resolves cs* records
+// here so no battle or validator code ever branches on custom" this comment
+// promised for four phases.
+//
+// A creator species (ids SPECIES_ID_BUILTIN_MAX+1 .. +CREATOR_SPECIES_SLOTS)
+// has no row in the table above: it lives in a CustomSpeciesRec on flash and is
+// projected into a SpeciesDef by game/species_custom.cpp, which binds itself
+// here on the load path. The indirection exists so that species_get() STAYS THE
+// ONE ANSWER TO "what is this creature": game/validate.cpp, game/battle.cpp,
+// game/box.cpp and every screen call it unchanged and none of them has an `if`
+// about custom Pebbles in it.
+//
+// UNBOUND IT ANSWERS nullptr, which is what every host binary that links no
+// species_custom.o gets, and what the firmware gets before the save is loaded -
+// the same "unknown species" answer the range check below has always given, so
+// a Pebble whose cs record is gone is quarantined by name rather than resolved
+// to something else.
+// -----------------------------------------------------------------------------
+typedef const SpeciesDef* (*SpeciesCustomResolver)(uint8_t id);
+inline SpeciesCustomResolver SPECIES_CUSTOM_RESOLVER = nullptr;
+inline void species_bind_custom(SpeciesCustomResolver fn) {
+  SPECIES_CUSTOM_RESOLVER = fn;
+}
+
+// Resolves a species id. Returns nullptr for 0 (empty slot), for an id beyond
+// the roster, and for a custom id whose slot holds no record.
 inline const SpeciesDef* species_get(uint8_t id) {
+  if (id > SPECIES_ID_BUILTIN_MAX)
+    return SPECIES_CUSTOM_RESOLVER ? SPECIES_CUSTOM_RESOLVER(id) : nullptr;
   if (id < SPECIES_ID_MIN || id > SPECIES_TABLE_COUNT) return nullptr;
   return &SPECIES_TABLE[id - 1u];
 }

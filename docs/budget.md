@@ -610,3 +610,70 @@ The row still to watch is unchanged and is P8-C3's: **`CS_BODY_MAX`, the 2 KB ra
 is 25.0 % of what is left on its own** — 128 times this chunk. Nothing here pre-spends it.
 `P8-C2` also leaves the page blob untouched: it is `.rodata` and lands on the flash line, which
 can absorb it four times over.
+
+
+## 10. Phase 8, chunk 3 — the seven routes, the raw-body cap and the creator registry (measured 2026-09-05)
+
+**+13,046 flash / +2,576 globals on `release`; +13,044 / +2,576 on `baseline`.** Every figure names its
+variant; `tools/build.sh` produced all of them at this commit and the release `.elf` was built
+with `GOD_MODE_ENABLED=0` and its size line read back before any symbol was.
+
+| build | after P8-C1/C2 | after P8-C3 | delta | against its cap |
+|---|---|---|---|---|
+| `baseline` | 1,284,074 / 56,996 | 1,297,118 / 59,572 | +13,044 / **+2,576** | 54.1 % / 66.2 % |
+| `release`  | 1,271,700 / 56,820 | **1,284,746 / 59,396** | +13,046 / **+2,576** | **80.3 % / 91.4 %** |
+| `no-web`   | 1,222,900 / 54,924 | 1,224,890 / 55,172 | +1,990 / **+248** | — |
+| `all-off`  | 578,598 / 26,364 | 580,588 / 26,612 | +1,990 / **+248** | — |
+
+### The 2,576 bytes, by name
+
+`riscv32-esp-elf-nm -S -td` over the **release** `.elf`:
+
+```
+1070156992 00002060 b _ZL6s_body                 <- the raw-body accumulator
+1070156736 00000256 b _ZL5s_out                  <- creator_server's response scratch
+1070156236 00000240 b _ZL6s_rows                 <- the 10 projected SpeciesDef rows
+1070197964 00000004 b _ZL5s_srv                  <- creator_server's WebServer*
+1070197728 00000004 V SPECIES_CUSTOM_RESOLVER    <- the bound resolver
+1070197748 00000002 b _ZL6s_mask                 <- the registry's occupancy mask
+                    ------
+                     2,566 named, +10 B of alignment
+1007711080 00000745 d _ZL19CREATOR_SCHEMA_JSON   <- .rodata: FLASH, not globals
+1070165268 00000364 b _ZL5s_srv                  <- webui's WebServer, unchanged
+1070164932 00000320 b _ZL6s_json                 <- unchanged
+1070165252 00000016 b _ZL6s_gate                 <- unchanged (P8-C1)
+```
+
+Section cross-check on the same `.elf`: `.dram0.data` 0x3a24 = 14,884 (**unchanged**) and
+`.dram0.bss` 0xade0 = 44,512 (was 0xa3d0 = 41,936, **+2,576**), summing to exactly the 59,396
+the compiler printed.
+
+**THE `+248` ON `no-web` AND `all-off` IS THE SHAPE THAT MATTERS, and it is the half of this
+chunk that is NOT the web server.** `game/species_custom.cpp` is reached by
+`persistence/save_manager.cpp`'s load path, which every variant links, so the registry (240 B of
+rows + 2 B of mask) and the 4 B resolver pointer are paid even in a build with no radio at all.
+The web-only cost is therefore **2,576 − 248 = 2,328 B**: the 2,060 B accumulator, the 256 B
+response scratch, a 4 B pointer and 8 B of padding.
+
+**`CS_BODY_MAX` IS 2,060 B OF IT — 80 % OF THIS CHUNK AND 25.2 % OF THE HEADROOM THE CHUNK
+STARTED WITH.** That is what the phase-8 preamble said it would be, and it landed on the number.
+The worst LEGITIMATE upload is ~410 B (`networking/creator_body.h` carries the arithmetic beside
+the struct), so the cap is five times the largest document the schema can produce. **If a later
+chunk needs the bytes back, 1024 is still 2.7× the worst case and is one constant.**
+
+### What it leaves
+
+`release` globals are at **59,396 of 65,000 — 5,604 B free**, where §9 left 8,180. This chunk
+spent **2,576 B, 31.5 % of the remaining headroom**, and phase 8's running total is **2,592 B**
+against §3's 1.5–3.0 KB forecast for the whole phase: **inside the forecast, at the top of it.**
+
+Flash is at **80.3 %** with **315,254 B free**, and that is the line P8-C4 spends: the page blob
+is `.rodata`, `WEB_HTML_MAX` caps it at 49,152 B, and the flash line can absorb six of those.
+
+**WHAT PHASES 9 AND 10 HAVE LEFT, SAID PLAINLY:** 5,604 B of globals. P8-C4 and P8-C5 should
+cost nothing on that line (a page blob and a QR payload are both flash), so this is close to the
+number phase 9 inherits. Phase 9's roster grows `SPECIES_TABLE`, `ATTACKS_TABLE` and the sprite
+atlas — all `inline constexpr`, all flash — but P9-C5's corruption effects and P10-C1's
+diagnostics are RAM. The one row to watch next is no longer `CS_BODY_MAX`: it is spent. It is
+whether P10-C1's `dev/diagnostics.cpp` needs a buffer, and the honest advice is to check this
+table before it writes one.

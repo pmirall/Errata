@@ -10,6 +10,7 @@
 #include "kv_store.h"
 #include "migration.h"
 #include "../core/crc16.h"
+#include "../game/species_custom.h"   // the creator species registry (P8-C3)
 
 // The widest blob in the schema; every scratch buffer here is one of these.
 #define SAVE_BLOB_MAX  sizeof(CooldownTable)
@@ -659,6 +660,36 @@ VReject save_quarantine_reason(uint8_t slot) {
   return (VReject)s_quarantine_why[slot];
 }
 
+// -----------------------------------------------------------------------------
+//  THE CREATOR SPECIES REGISTRY, REBUILT ON EVERY LOAD (P8-C3).
+//
+//  IT MUST RUN BEFORE quarantine_scan(), and that ordering is the whole point
+//  of the function. A creator Pebble carries species_id 200..209, which
+//  species_get() resolves through game/species_custom.cpp - so a scan that ran
+//  first would answer VR_UNKNOWN_SPECIES for every custom Pebble in the Box and
+//  quarantine the user's own creature on the first power cycle after it was
+//  made. That defect was already waiting in the tree before this chunk: the
+//  resolver simply did not exist.
+//
+//  A RECORD THAT DOES NOT VALIDATE LEAVES ITS SLOT EMPTY, which is deliberate
+//  and is why csp_install() returns a bool nobody has to check here. The
+//  consequence is stated rather than hidden: the Pebble that pointed at that
+//  slot is then quarantined by NAME (VR_UNKNOWN_SPECIES) instead of being
+//  resolved to a species whose stats survived a CRC and nothing else.
+//  save_manager.h's own policy line - "a custom species is content, not state,
+//  and a bad CRC costs a sprite rather than a Pebble" - is about the CRC half;
+//  this is the rules half, and a species with a 400-point stat total is not a
+//  sprite problem.
+// -----------------------------------------------------------------------------
+static void custom_species_install_all(void) {
+  csp_reset();                      // also binds the resolver into species_get()
+  for (uint8_t slot = 0; slot < (uint8_t)CUSTOM_SPECIES_SLOTS; ++slot) {
+    CustomSpeciesRec rec;
+    if (!save_load_custom_species(slot, rec)) continue;   // absent or rotten
+    (void)csp_install(rec);                               // refused -> stays empty
+  }
+}
+
 static LoadResult load_all_inner(GameState& gs) {
   state_defaults(gs);
   save_bind(gs);
@@ -782,6 +813,10 @@ static LoadResult load_all_inner(GameState& gs) {
 // The scan runs on every outcome so no return path can forget it.
 LoadResult save_load_all(GameState& gs) {
   const LoadResult r = load_all_inner(gs);
+  // ORDER IS LOAD -> RESOLVE -> SCAN, and the middle step is P8-C3's. See
+  // custom_species_install_all(): a scan that runs first quarantines every
+  // creator Pebble the device made.
+  custom_species_install_all();
   quarantine_scan(gs);
   return r;
 }
@@ -792,6 +827,10 @@ LoadResult save_load_all(GameState& gs) {
 bool save_factory_reset(void) {
   const bool a = kv_wipe(KV_MAIN);
   const bool b = kv_wipe(KV_CKPT);
+  // The cs* records went with the partition, so the registry must go with them:
+  // an id that still resolved after a reset would hand the fresh save a species
+  // whose record no longer exists.
+  csp_reset();
   for (uint8_t slot = 0; slot < BOX_SLOTS; ++slot) s_have_written[slot] = false;
   s_pending_mask  = 0;
   s_lastseen      = 0;

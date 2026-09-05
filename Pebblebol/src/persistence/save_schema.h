@@ -429,6 +429,13 @@ static_assert(CD_CRC_BYTES == sizeof(CooldownTable) - 2, "CooldownTable CRC span
 #define CS_CRC_BYTES            190
 #define CS_SPRITE_BYTES         72        // 24x24 XBM, 3 B per row
 #define CS_SPRITE_FRAMES        2
+// SPEC SECTION 35's "sprite dimensions", which had no name anywhere until
+// P8-C3 needed to SERVE them to the phone page. They are not new geometry: the
+// atlas has drawn 24x24 bodies since P2 and the byte count above was derived
+// from them in a comment. Naming them is what lets the assert below exist and
+// what lets data/creator_schema_json.h quote a number rather than a literal.
+#define CS_SPRITE_W             24
+#define CS_SPRITE_H             24
 #define CS_NAME_CAP             13
 #define CS_BASE_COUNT           4         // hp, atk, def, spd
 
@@ -436,9 +443,21 @@ struct CustomSpeciesRec {
   uint16_t magic;                                     //   0  CS_MAGIC
   uint8_t  version;                                   //   2  SAVE_SCHEMA_VERSION
   uint8_t  slot;                                      //   3  0..9, must match the key
-  uint16_t budget_used;                               //   4  spec section 36
+  uint16_t budget_used;                               //   4  spec section 36:
+                                                      //      THE ATTACK BUDGET,
+                                                      //      sum(budget_cost) over
+                                                      //      moves[]. Recomputed and
+                                                      //      REFUSED on disagreement
+                                                      //      by validate_custom_species()
+                                                      //      - a page that prices its
+                                                      //      own Pebble prices it at 0
   uint8_t  type;                                      //   6  PebbleType
-  uint8_t  compat_group;                              //   7  breeding, spec section 17
+  uint8_t  compat_group;                              //   7  breeding, spec section 17.
+                                                      //      ALWAYS 0 for a creator
+                                                      //      species: it has no family,
+                                                      //      so a pairing has no child
+                                                      //      species to derive. See
+                                                      //      game/species_custom.h
   uint8_t  base[CS_BASE_COUNT];                       //   8  hp, atk, def, spd
   uint8_t  moves[PB_MOVE_COUNT];                      //  12  learnset
   char     name[CS_NAME_CAP];                         //  16
@@ -447,6 +466,9 @@ struct CustomSpeciesRec {
   uint16_t crc16;                                     // 190  over bytes 0..189
 };
 
+static_assert(CS_SPRITE_BYTES == (((CS_SPRITE_W + 7) / 8) * CS_SPRITE_H),
+              "the sprite byte count and the sprite dimensions disagree: an XBM "
+              "row is ceil(w/8) bytes");
 static_assert(sizeof(CustomSpeciesRec) == 192, "CustomSpeciesRec layout drifted");
 static_assert(offsetof(CustomSpeciesRec, name)   ==  16, "CustomSpeciesRec.name moved");
 static_assert(offsetof(CustomSpeciesRec, sprite) ==  46, "CustomSpeciesRec.sprite moved");

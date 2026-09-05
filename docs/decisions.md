@@ -2296,3 +2296,118 @@ on both, confirm each lists the other (`link_qualified_count()` reaching 1 — t
 touches no chunk of phase 8: it restores `ble_social.{h,cpp}`, `FEATURE_BLE`, `BlePeerInfo`,
 `RADIO_BLE`, the settle window and the `no-ble` variant whole. What a revert would NOT restore
 is the misreading above, which is corrected in the documents and stays corrected.
+
+## P8-C3 — the seven routes, the body cap, and the four things spec 35 left open (recorded 2026-09-05)
+
+Five decisions this chunk had to take, each because a shipped sentence was ambiguous or
+because nothing in the tree had an answer. All five are code with a named test; this is where
+the reasoning lives.
+
+### 1. THE SECTION 36 STAT RULE IS A BAND, NOT AN EQUALITY
+
+Three shipped sentences disagreed about what `hp+atk+def+spd` must be:
+
+* **Spec §36** writes the rule with `<=`.
+* **`data/creator_schema.h`** says a custom Pebble must be *"never weaker than a stage-0 one"*
+  — a FLOOR of 16, which is not equality either.
+* **`builtin_rows_respect_the_creator_budgets()`** requires EXACT equality — of built-in rows.
+
+**The measurement that settles it is Appendix C's own worked example.** The spec ships one
+screenshot with `POWER ███████░░░ 72%`, and 72 % is **unreachable at a full 22-point stat
+budget**: `tests/test_validate.cpp::the_spec_example_is_unreachable_at_a_full_stat_budget`
+enumerates every legal four-move set (own type or NEUTRAL, ≥1 damaging, power ≤ the stage-1 cap
+90, cost ≤ 185) and the cheapest costs **86 SIGNAL / 85 CORRUPT / 84 SYSTEM** — all of which
+price at **73 %** when S = 22. 72 % needs A ∈ 80..83 at S = 22, which is below every legal
+floor; at S = 21 it is A ∈ 88..91, which is buildable. **Requiring equality would have made the
+product spec's own screenshot impossible to produce on the device.**
+
+So the rule is `CREATOR_STAT_POINTS_MIN (16) <= S <= CREATOR_TOTAL_STAT_POINTS (22)`, refused by
+name as `VR_CS_STAT_BUDGET` on both sides. The floor is the stage-0 total, which keeps the
+other half of the schema's sentence: the creator still cannot make deliberately useless trade
+bait.
+
+**`CREATOR_STAT_POINTS_MIN` IS DERIVED IN `tools/gen_content.py`, NOT ADDED TO
+`balance.json`, AND THE REASON IS MECHANICAL.** `CONTENT_VERSION` is a *hash of that file*; it
+is stamped into `BoxHeader` and into every `BattleState`, so a key added there moves every
+recorded battle hash in `tests/golden/battle_v1.txt`. Measured: adding the key moved
+`CONTENT_VERSION` from `0x02B5` to `0xBB4B` and turned `test_battle_golden` red on 40 lines of
+state hashes with **no battle behaviour changed at all**. The constant IS the stage-0 total,
+which `balance.json` already carries, so it is emitted from that. The same argument applies to
+`CREATOR_API_VERSION`, which is `core/version.h`'s and is copied into `gen_content.py` with a
+`static_assert` in the generated `creator_schema_json.h` pinning the two.
+
+### 2. A CUSTOM SPECIES HAS NO FAMILY — WHICH ANSWERS EVOLUTION AND BREEDING STRUCTURALLY
+
+Spec §35's thirteenth validation input is "evolution validity", and `CustomSpeciesRec` has no
+`evo_rule`, `stage` or `rarity` field to validate. Rather than invent one,
+`game/species_custom.cpp` projects a creator record into a `SpeciesDef` with `family = 0`,
+`evo_rule = SPECIES_EVO_NONE`, `spawn_weight = 0` and `compat_group = 0`:
+
+* **No evolution**, because there is no next stage of a family that does not exist.
+* **No breeding**, because `game/breeding.cpp` derives the child's species from the parents'
+  FAMILIES and already refuses a zero compat group by name (`BRD_COMPAT_GROUP`).
+  `validate_custom_species()` refuses a non-zero one (`VR_CS_BAD_COMPAT`) so the property
+  cannot be undone by setting a field.
+* **Never a wild encounter.** The creator makes one Pebble, not a species the world hands out.
+* **`stage = 1`**, because that is the budget it was measured against — and `validate_pebble()`
+  checks `evo_state`'s stage bits against the row, so any other value would be
+  `VR_BAD_EVO_STAGE` on the creature the upload produces.
+
+**AND IT DOES NOT TRAVEL.** `networking/protocol.cpp` refuses any wire record with
+`species > SPECIES_ID_BUILTIN_MAX` as `VR_WIRE_CUSTOM_UNRESOLVED`, because the receiver holds no
+`cs*` record. A custom Pebble is therefore **untradeable and unbattleable over the link in
+phase 8**. That is defensible and it is now written down; sending the record alongside the
+Pebble is a later phase's work, not an accident of this one.
+
+### 3. THE DEVICE PICKS THE `cs` SLOT, AND A FULL BOX IS ASKED ABOUT BEFORE ANYTHING IS WRITTEN
+
+The upload document has **no `slot` field and no `budget_used` field**, and both omissions are
+load-bearing. A page-chosen slot is an attacker-chosen slot: writing `cs4` would silently change
+the species of a Pebble already in the Box. A page-supplied budget is a page that can price its
+own Pebble at zero. `POST /api/pebble` picks the lowest free slot, recomputes the cost, and
+tells the page which slot it used.
+
+`POST /api/validate` reports the free Box and `cs` slots so the page can say "free a slot"
+**before** the user has spent five minutes on a sprite — which is `game/capture.h`'s rule
+applied here ("if the Box is full the player must decide", because discovering it afterwards
+spends the attempt). On a full Box `POST /api/pebble` answers 409 and **writes nothing, not
+even the `cs` record**: an accepted definition whose Pebble could not be filed would leak a
+slot the user has no way to reclaim.
+
+**WHAT FREES A `cs` SLOT IS STILL OPEN.** `box_release()` releases a Pebble and nothing
+reference-counts the record. `csp_forget()` exists and no shipping path calls it. The rule that
+belongs in P8-C4's screen is: a `cs` slot is freed only by an explicit CREATOR-screen action,
+and only when no Pebble in the Box points at it.
+
+### 4. THE 413 BAND, AND WHY THERE ARE TWO OF THEM
+
+A raw handler **cannot stop the core's read loop**. `Parsing.cpp:192` loops until
+`totalSize == Content-Length` and `RAW_START` cannot abort it, so an oversize body is DRAINED
+and answered afterwards. That is only affordable while the drain is bounded:
+
+* `CS_BODY_MAX` (2048) < body ≤ `CS_BODY_DRAIN_MAX` (8192) → **drain, then 413**.
+* body > `CS_BODY_DRAIN_MAX`, or a NEGATIVE `Content-Length` → **`server.client().stop()` from
+  inside `RAW_START`**, which makes the next `readBytes()` return 0 → `RAW_ABORTED` → the client
+  is dropped with **no response at all**. A client declaring 100 MB would otherwise hold
+  `loop()` — no render, no simulation — for as long as it kept trickling bytes.
+
+`Content-Length` is an `int` in the core (`WebServer.h:307`, from `headerValue.toInt()`), so
+`-1` promotes the comparison to `SIZE_MAX`. That is why negative is in the second band.
+
+**AND `Content-Length: 0` IS 411, NOT AN EMPTY UPLOAD.** A chunked body and an absent header
+both leave `_clientContentLength` at 0, the read loop never runs, and the handler is offered a
+legitimate-looking empty document. Answering 400 would tell the page its JSON was wrong when its
+framing was.
+
+### 5. THE NAME'S CHARACTER SET IS `strings_es.h`'s, AND THE CONVERSION IS WHERE IT IS ENFORCED
+
+The name arrives as UTF-8 from a phone and is stored as Latin-1, because the `_tf` fonts carry
+ASCII + Latin-1 and nothing else. `networking/creator_parse.cpp` does the conversion — rejecting
+three- and four-byte sequences, overlong encodings, lone continuation bytes and truncated ones —
+and asks `game/validate.h`'s `creator_name_char_ok()` whether the resulting byte is drawable.
+**ONE predicate, in the game layer**, because `validate_custom_species()` asks the same question
+of a record read back from FLASH, which never went through an HTTP request. Length is counted in
+Latin-1 CHARACTERS, not UTF-8 bytes: twelve n-tildes are 24 bytes and a legal name.
+
+A leading or trailing space is **refused, not trimmed**. Trimming is mending, and this validator
+takes its record `const` so it could not mend if it wanted to.

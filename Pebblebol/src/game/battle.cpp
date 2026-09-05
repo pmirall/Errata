@@ -285,6 +285,20 @@ void battle_setup_clear(BattleSetup& s)
 // a per-species rule would refuse every evolved Pebble in the box.
 static bool moveset_is_learnable(const SpeciesDef& sp, const uint8_t* moves)
 {
+  // A SPECIES TEACHES ITS OWN LEARNSET (P8-C3). Identical to the line
+  // game/validate.cpp's copy carries, and the two are pinned to each other by
+  // tests/test_validate.cpp's `the_two_learnset_checkers_agree_on_every_roster_row`
+  // - two checkers with the SAME bounds is defence in depth, two with DIFFERENT
+  // bounds is the disagreement this project keeps finding. For a built-in row
+  // this changes nothing (the walk finds the row itself); for a CREATOR species
+  // it is the whole rule, because a custom row has family 0 and no row in
+  // SPECIES_TABLE for the walk to match.
+  {
+    bool same = true;
+    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m)
+      if (moves[m] != sp.moves[m]) { same = false; break; }
+    if (same) return true;
+  }
   for (uint8_t i = 0; i < (uint8_t)SPECIES_TABLE_COUNT; ++i) {
     const SpeciesDef& cand = SPECIES_TABLE[i];
     if (cand.family != sp.family || cand.stage > sp.stage) continue;
