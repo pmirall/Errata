@@ -38,7 +38,14 @@
 // changes and a hand-maintained number does not. This header stays include-free
 // (the pure layers pull it in), so the define is not forwarded from here -
 // persistence/save_schema.h includes both.
-#define PROTOCOL_VERSION        1
+// BUMPED 1 -> 2 BY P7-C4. Plan rule 1.3 section 5 - "persisted or transmitted
+// layouts are never edited in place" - makes this mandatory: the trade needs
+// four message types and networking/protocol.h's type space was CLOSED at 1..12
+// (proto_decode() refuses anything else with PE_TYPE, and there is no reserved
+// forward channel to smuggle them through). A peer speaking version 1 is
+// refused politely at CAPABILITIES rather than handed a frame it would read as
+// a different message. BoxHeader.protocol_version follows automatically.
+#define PROTOCOL_VERSION        2
 #define CREATOR_API_VERSION     1
 
 // The legacy Nottamagochi save generation, kept as a name so the migration

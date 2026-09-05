@@ -397,6 +397,31 @@ void ui_link_unbind(void);
 uint32_t ui_link_nonce(void);
 
 // -----------------------------------------------------------------------------
+//  THE TRADE'S TWO SEAMS (P7-C4)
+//
+//  ui/screen_link.cpp owns the trade the same way it owns the battle: it holds
+//  the Session and the caller-owned TradeLink, and it drives them. What a PURE
+//  screen cannot do is write flash or read the load path's quarantine mask, so
+//  those two arrive through here and networking/trade_link.cpp's TradeHooks is
+//  the shape they arrive in.
+//
+//  FORWARD-DECLARED AND RETURNED BY POINTER on purpose: `struct TradeHooks`
+//  lives in networking/trade_link.h, which drags networking/session.h and
+//  game/battle.h behind it, and ui.h is included by every screen in the tree.
+//  A pointer to an incomplete type costs those screens nothing.
+//
+//  A BUILD MAY ANSWER nullptr, and ui/screen_link.cpp treats that as "this
+//  device cannot trade" rather than as a fault.
+// -----------------------------------------------------------------------------
+struct TradeHooks;
+const TradeHooks* ui_trade_hooks(void);
+
+// persistence/save_manager.h's save_quarantine_mask(). game/trade.h takes it as
+// a PARAMETER and not an include, because the RULE ("a quarantined Pebble may
+// not enter a trade") is a game rule and the DATUM belongs to the load path.
+uint16_t ui_trade_quarantine(void);
+
+// -----------------------------------------------------------------------------
 //  THE LINKED BATTLE'S SEAMS (P7-C3)
 //
 //  ui/screen_battle.cpp runs the ENGINE; the SESSION that keeps two engines

@@ -28,6 +28,8 @@
 #include "../game/sim.h"
 #include "../persistence/game_state.h"
 #include "../game/box.h"
+#include "../game/trade.h"        // the boot resolver (P7-C4)
+#include "../networking/trade_link.h"   // trade_wire_codec()
 #include "../game/xp.h"
 #include "../game/evolution.h"
 #include "../data/species_table.h"
@@ -466,6 +468,86 @@ static bool bind_active(void)
   return true;
 }
 
+// =============================================================================
+//  THE TRADE STORE SEAM (game/trade.h). Four one-line shims, and they exist so
+//  that game/trade.cpp - a pure module - can own the WRITE ORDER without
+//  including persistence/kv_store.h. Each returns whether the bytes LANDED:
+//  save_manager.cpp verifies its own writes by reading them back, and a write
+//  that did not land has to stop the sequence rather than be assumed.
+// =============================================================================
+static uint16_t g_trade_toast = 0;      // STR_* queued for the first HOME frame
+
+static bool app_trade_write_journal(void* ctx, const PendingTrade& t)
+{
+  (void)ctx;
+  gs_state().trade = t;
+  return save_trade_journal(t);
+}
+static bool app_trade_write_slot(void* ctx, uint8_t slot)
+{
+  (void)ctx;
+  if (slot >= (uint8_t)BOX_SLOTS) return false;
+  return save_pebble(slot, gs_state().pebbles[slot], true);
+}
+static bool app_trade_write_box(void* ctx)
+{
+  (void)ctx;
+  return save_box_header(gs_state().box);
+}
+static void app_trade_checkpoint(void* ctx)
+{
+  (void)ctx;
+  // A failed checkpoint does not invalidate the trade: the same sentence
+  // app_evolve() makes about the evolution ceremony. Only the nvs2 recovery
+  // copy is stale.
+  (void)save_checkpoint_all();
+}
+
+// =============================================================================
+//  BOOT: AN INTERRUPTED TRADE (P7-C4, spec section 16)
+//
+//  THIS RUNS BEFORE THE PET IS BOUND AND IT IS THE ONLY REASON THE JOURNAL IS
+//  WORTH WRITING. game/trade.h's whole property - "at every power-loss point
+//  the next boot leaves the Box holding either the outgoing Pebble or the
+//  incoming one, never both and never neither" - is a property of THIS CALL
+//  existing on the shipping path. Without it the journal is bytes nobody reads,
+//  which is exactly what it was before this commit: save_load_all() loaded
+//  gs.trade and `grep -rn 'gs.trade' app/ ui/ game/` returned nothing.
+//
+//  IT RUNS ON EVERY BOOT, INCLUDING THE ONES WITH NO TRADE IN THEM: a record
+//  that is absent, rotten or IDLE answers TRS_NONE and costs one struct read.
+//
+//  ORDER. After gs_load() (the journal comes off flash there) and BEFORE
+//  boot_box(), because the resolver can change WHICH Pebble is in the Box and
+//  which slot is active, and boot_box() is what binds the simulation to it.
+// =============================================================================
+static void boot_trade(void)
+{
+  box_bind(gs_state());                       // the resolver mutates the Box
+
+  // NO "is there a trade?" TEST HERE. game/trade.cpp's trade_journal_live()
+  // already answers it - magic, version and phase - and a second copy of that
+  // question in this file would be a second thing to keep true. An absent,
+  // rotten or IDLE record answers TRS_NONE and costs one struct read.
+  TradeStore store;
+  store.write_journal = &app_trade_write_journal;
+  store.write_slot    = &app_trade_write_slot;
+  store.write_box     = &app_trade_write_box;
+  store.checkpoint    = &app_trade_checkpoint;
+  store.ctx           = nullptr;
+
+  PendingTrade j = gs_state().trade;
+  const TradeResolution r = trade_resolve(j, trade_wire_codec(), store, gt_now());
+  gs_state().trade = j;
+
+  // The player is told. A Pebble that silently appeared or silently went is the
+  // failure mode this line exists against; the toast is queued here and drawn
+  // over HOME once the UI is up.
+  if      (r == TRS_COMPLETED)    g_trade_toast = (uint16_t)STR_TR_RESOLVED;
+  else if (r == TRS_ROLLED_BACK)  g_trade_toast = (uint16_t)STR_TR_ROLLED_BACK;
+  else if (r == TRS_LOST)         g_trade_toast = (uint16_t)STR_TR_LOST;
+}
+
 static void boot_box(void)
 {
   box_bind(gs_state());
@@ -738,6 +820,10 @@ void app_setup(void)
   // one, and that write is what retires a stale snapshot on a unit whose clock
   // is gone.
   gs_bind_gain(&gain_source);
+  // AN INTERRUPTED TRADE IS FINISHED OR UNDONE BEFORE THE PET IS BOUND. It has
+  // to be before boot_box(), because the resolver can change which Pebble the
+  // Box holds and which slot is active.
+  boot_trade();
   boot_box();
 
   // --- everything that reads Config or the pet ------------------------------
@@ -788,6 +874,13 @@ void app_setup(void)
 
   if (!g_nvs_ok) {
     ui_toast(STR_ERR_NVS);
+  } else if (g_trade_toast != 0u) {
+    // AN INTERRUPTED TRADE OUTRANKS THE BOOT LINE. A Pebble changing hands
+    // while the device was off is the most surprising thing that can have
+    // happened to this Box, and "Hola. Soy nuevo aquí." is not what to say
+    // about it. NVS being dead still wins: nothing below it can be trusted.
+    ui_toast(g_trade_toast);
+    g_trade_toast = 0u;
   } else if (boot == BOOT_FIRST_RUN) {
     ui_toast(STR_BOOT_FIRST);
   } else if (boot == BOOT_CRASH) {

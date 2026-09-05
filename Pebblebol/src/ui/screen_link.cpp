@@ -14,6 +14,9 @@
 #include "../networking/battle_link.h"
 #include "../networking/discovery.h"
 #include "../networking/session.h"
+#include "../networking/trade_link.h"   // the P7-C4 trade driver
+#include "../game/trade.h"                // trade_offer_check()
+#include "../data/species_table.h"        // the two species names on the review line
 #include "gfx.h"
 #include "screen.h"
 #include "screen_battle.h"     // the BattleSetup / BattleState / BattleLog the
@@ -48,6 +51,11 @@
 // -----------------------------------------------------------------------------
 static LinkJob  s_job;
 static Session  s_sess;
+// THE TRADE (P7-C4). 112 B, caller-owned exactly as the LinkJob and the Session
+// are, and for the same reason networking/trade_link.h gives: two endpoints
+// share one host process and a module that held its own could not.
+static TradeLink s_tl;
+static uint8_t   s_trade_slot = (uint8_t)BOX_SLOT_NONE;
 
 static uint8_t  s_mode      = LKM_BROWSE;
 static uint8_t  s_cur       = 0;
@@ -75,6 +83,13 @@ uint8_t  link_screen_peers(void)   { return link_qualified_count(s_job); }
 uint8_t  link_screen_consents(void){ return s_consents; }
 uint8_t  link_screen_end_reason(void) { return s_end_reason; }
 const char* link_screen_peer_name(void) { return s_peer_name; }
+
+uint8_t  link_trade_slot(void)     { return s_trade_slot; }
+uint32_t link_trade_peer_id(void)  { return s_live ? s_sess.peer_device_id : 0u; }
+uint8_t  link_trade_phase(void)    { return s_live ? s_tl.phase : (uint8_t)TLP_IDLE; }
+bool     link_trade_wants_consent(void) {
+  return s_live && s_op == (uint8_t)LOP_TRADE && trade_link_wants_consent(s_sess);
+}
 
 uint8_t link_screen_session_state(void) {
   return s_live ? (uint8_t)session_state(s_sess) : (uint8_t)SS_IDLE;
@@ -108,14 +123,21 @@ bool link_screen_busy(void) { return link_is_busy(s_job); }
 //  from two bytes of the station address and those two bytes stay out of the
 //  one payload section 43 governs.
 //
-//  THE CAPABILITIES ARE WHAT THIS BUILD CAN ACTUALLY DO. DISC_CAP_BATTLE is
-//  claimed because P7-C3 ships the linked battle; TRADE and BREED are P7-C4 and
-//  P7-C5 and are NOT claimed, so a peer running this firmware offers the player
-//  exactly the operations that exist. A reserved bit is a refusal on the far
-//  side (discovery.h), which is what stops a future capability being silently
-//  accepted by a build that predates it.
+//  THE CAPABILITIES ARE WHAT THIS BUILD CAN ACTUALLY DO, AND THE WORD "CAN" IS
+//  LOAD-BEARING. DISC_CAP_BATTLE has been claimed since P7-C3; DISC_CAP_TRADE
+//  joins it in P7-C4, because from this commit an A on the INTERCAMBIO row
+//  really opens a trade session. DISC_CAP_BREED IS STILL NOT CLAIMED:
+//  game/breeding.cpp is complete and tested and NO WIRE DRIVER CARRIES A
+//  BREEDING (P7-C5's breed_link.cpp is not built), so claiming it would offer a
+//  player an operation whose only possible outcome is a nine-second timeout.
+//  A peer running this firmware offers exactly the operations that exist.
+//
+//  A reserved bit is a refusal on the far side (discovery.h), which is what
+//  stops a future capability being silently accepted by a build that predates
+//  it - and it is also what makes THIS line the one that has to move when
+//  breed_link.cpp lands, rather than something noticing on its own.
 // -----------------------------------------------------------------------------
-#define LK_SELF_CAPS  ((uint16_t)DISC_CAP_BATTLE)
+#define LK_SELF_CAPS  ((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE))
 
 static void fill_self(DiscBeacon& b) {
   memset(&b, 0, sizeof b);
@@ -165,8 +187,18 @@ static void start_browse(void) {
 // per started job (networking/discovery.h) and stop() reaches
 // net_request(RADIO_OFF), which passes wifi_down(), which calls espnow_end().
 static void release_all(void) {
+  // A TRADE THAT NEVER REACHED ITS COMMIT LEAVES A JOURNAL BEHIND, and leaving
+  // it there would make the NEXT boot roll back a trade the player already
+  // walked away from - correct, but a whole power cycle later and with a toast
+  // nobody asked for. The abort hook clears it now; the boot resolver stays the
+  // backstop for the case this line cannot reach, which is the power cut.
+  if (s_live && s_op == (uint8_t)LOP_TRADE && s_tl.applied == 0u &&
+      s_tl.hooks.abort != nullptr) {
+    s_tl.hooks.abort(s_tl.hooks.ctx);
+  }
   if (s_live && !session_closed(s_sess)) session_cancel(s_sess, s_now);
   s_live = 0;
+  s_trade_slot = (uint8_t)BOX_SLOT_NONE;
   ui_link_unbind();
   // link_cancel() KEEPS THE PEER LIST on purpose (networking/discovery.cpp says
   // why): "CONEXIÓN PERDIDA / A: Reintentar" needs to know who the player was
@@ -215,13 +247,63 @@ static uint8_t build_team(PebbleInstance* out, uint8_t cap) {
 //  other half is the radio, which delivers a unicast frame only from the peer
 //  this device has BOUND, and it binds here and nowhere else.
 // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+//  THE ONE PEBBLE THIS DEVICE OFFERS IN A TRADE
+//
+//  The BOX's pre-selection leads (link_arm_intent); otherwise the first slot
+//  game/trade.cpp will accept. The RULES are game/trade.cpp's - the active
+//  Pebble is not for sale, a quarantined one may not enter a trade, an object
+//  the one validator refuses may not be offered - and this function does not
+//  re-derive one of them: it asks, and it reports the refusal BY NAME so a
+//  player who armed a slot the rules refuse is told which rule.
+// -----------------------------------------------------------------------------
+static uint8_t pick_trade_slot(uint8_t& why) {
+  const uint16_t q = ui_trade_quarantine();
+  if (s_intent_slot < (uint8_t)BOX_SLOTS) {
+    why = (uint8_t)trade_offer_check(s_intent_slot, q);
+    if (why == (uint8_t)TDR_OK) return s_intent_slot;
+    // A slot the BOX armed and the rules refuse is NOT quietly replaced with a
+    // different Pebble: the player chose that one.
+    return (uint8_t)BOX_SLOT_NONE;
+  }
+  // KEEP THE MOST INFORMATIVE REFUSAL, and the order matters because slot 0 is
+  // usually the ACTIVE one: "guarda ese Pebble primero" is the right answer for
+  // a player whose only other Pebbles are fine, and the WRONG one for a player
+  // whose other Pebbles are all quarantined. So an empty slot's reason is
+  // beaten by any other, and TDR_ACTIVE is beaten by anything that is not it.
+  why = (uint8_t)TDR_NO_SLOT;
+  for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
+    const uint8_t r = (uint8_t)trade_offer_check(i, q);
+    if (r == (uint8_t)TDR_OK) { why = r; return i; }
+    if (why == (uint8_t)TDR_NO_SLOT) why = r;
+    else if (why == (uint8_t)TDR_ACTIVE && r != (uint8_t)TDR_NO_SLOT) why = r;
+  }
+  return (uint8_t)BOX_SLOT_NONE;
+}
+
 static bool open_session(void) {
   const DiscPeer* p = nth_qualified(s_cur);
   if (p == nullptr) { ui_toast(STR_LK_NOBODY); return false; }
 
+  const bool trading = (s_op == (uint8_t)LOP_TRADE);
   PebbleInstance team[BATTLE_TEAM_MAX];
-  const uint8_t n = build_team(team, (uint8_t)BATTLE_TEAM_MAX);
-  if (n == 0u) { ui_toast(STR_LK_NO_TEAM); return false; }
+  uint8_t n = 0;
+  uint8_t offer_slot = (uint8_t)BOX_SLOT_NONE;
+
+  if (trading) {
+    if (ui_trade_hooks() == nullptr) { ui_toast(STR_UI_SOON); return false; }
+    uint8_t why = (uint8_t)TDR_NO_SLOT;
+    offer_slot = pick_trade_slot(why);
+    if (offer_slot >= (uint8_t)BOX_SLOTS) {
+      ui_toast((why == (uint8_t)TDR_ACTIVE)      ? STR_LK_TR_ACTIVE
+             : (why == (uint8_t)TDR_QUARANTINED) ? STR_LK_TR_QUARANTINED
+                                                 : STR_LK_NO_TEAM);
+      return false;
+    }
+  } else {
+    n = build_team(team, (uint8_t)BATTLE_TEAM_MAX);
+    if (n == 0u) { ui_toast(STR_LK_NO_TEAM); return false; }
+  }
 
   if (!ui_link_bind(p->slot)) { ui_toast(STR_LK_RADIO_ERR); return false; }
 
@@ -253,14 +335,35 @@ static bool open_session(void) {
   // made the initiator. A shared constant is what makes that impossible.
   cfg.lvl_lo    = 1u;
   cfg.lvl_hi    = (uint8_t)XP_LEVEL_MAX;
+  // THE OPERATION, AGREED IN THE HANDSHAKE (networking/session.h). It is the
+  // last cheap moment for two devices to discover they came here to do
+  // different things: the beacon does not carry it (spec 43/44 lists what a
+  // beacon may say and an intention is not on the list).
+  cfg.op        = trading ? (uint8_t)SOP_TRADE : (uint8_t)SOP_BATTLE;
+  cfg.tl        = trading ? &s_tl : nullptr;
   session_init(s_sess, cfg);
 
-  uint8_t bad = 0xFFu;
-  const VReject v = session_set_team(s_sess, team, n, bad);
-  if (v != VR_OK) {
-    ui_link_unbind();
-    ui_toast(STR_LK_TEAM_BAD);
-    return false;
+  if (trading) {
+    const PebbleInstance* mine = box_peek(offer_slot);
+    if (mine == nullptr) { ui_link_unbind(); ui_toast(STR_LK_NO_TEAM); return false; }
+    // session_set_trade() runs the ONE validator and NOT validate_battle_ready():
+    // a fainted Pebble is a legal thing to have stored and therefore a legal
+    // thing to give away (networking/session.h says so at the declaration).
+    if (session_set_trade(s_sess, *mine) != VR_OK) {
+      ui_link_unbind();
+      ui_toast(STR_LK_TEAM_BAD);
+      return false;
+    }
+    trade_link_init(s_tl, s_sess, mine->id, *ui_trade_hooks());
+    s_trade_slot = offer_slot;
+  } else {
+    uint8_t bad = 0xFFu;
+    const VReject v = session_set_team(s_sess, team, n, bad);
+    if (v != VR_OK) {
+      ui_link_unbind();
+      ui_toast(STR_LK_TEAM_BAD);
+      return false;
+    }
   }
 
   s_live = 1;
@@ -388,15 +491,32 @@ void link_update(uint32_t now_ms) {
   }
 
   if (s_mode == (uint8_t)LKM_WAIT) {
+    const uint8_t was_phase = s_tl.phase;
     pump(now_ms);
     if (session_closed(s_sess)) {
       note_end();
-      s_mode = (uint8_t)LKM_LOST;
+      // A TRADE THAT FINISHED IS NOT A LOST LINK. The battle path never reaches
+      // this line - it hands off to SCR_BATTLE long before the session closes -
+      // so the single LKM_LOST here was true of every case that could get to
+      // it. It stopped being true the moment a trade could END on this screen,
+      // and printing "CONEXI�N PERDIDA" over a completed exchange would be the
+      // same mistake as printing "has perdido" over a desync.
+      s_mode = (s_end_reason == (uint8_t)SE_DONE) ? (uint8_t)LKM_ENDED
+                                                  : (uint8_t)LKM_LOST;
       release_all();
       return;
     }
+    // The review became available, or the player's consent moved the trade on:
+    // both change what this frame says, and neither is driven by a button.
+    if (s_op == (uint8_t)LOP_TRADE && s_tl.phase != was_phase) ui_request_frame();
     // SS_VERIFY is the first state in which the BattleState exists, so it is
     // the earliest honest moment to show the fight.
+    //
+    // THE `s_op == LOP_BATTLE` GUARD IS LOAD-BEARING AND WAS NOT THERE BEFORE
+    // P7-C4. SS_TRADE is numbered 8 - after SS_ENDING, for the reason
+    // networking/session.h gives - so it satisfies `>= SS_VERIFY &&
+    // < SS_CLOSED` exactly as a battle state does, and without the guard a
+    // trade would push SCR_BATTLE onto a BattleState nobody ever built.
     if (s_op == (uint8_t)LOP_BATTLE &&
         session_state(s_sess) >= SS_VERIFY && session_state(s_sess) < SS_CLOSED) {
       hand_off_to_battle();
@@ -558,7 +678,25 @@ static void draw_wait(void) {
   gfx_text_center(GF_BODY, (int16_t)(UI_HDR_H + 20),
                   s_peer_name[0] ? s_peer_name : S(STR_LK_SEARCH));
   gfx_text_center(GF_BODY, (int16_t)(UI_HDR_H + 29), op_label(s_op));
-  gfx_text_center(GF_BODY, (int16_t)(UI_HDR_H + 38), state_word());
+  // THE TRADE'S REVIEW LIVES IN THIS FRAME AND NOT IN A SIXTH MODE. Once both
+  // devices have decoded and validated both records there is exactly one thing
+  // left to say - what goes and what comes - and it replaces the state word,
+  // which by then says nothing the player did not already know.
+  if (link_trade_wants_consent()) {
+    // 9 + 3 + 9 = 21 characters against GF_BODY's 25-character line, so two
+    // long species names cannot push the line off the panel. The separator is
+    // ">" and not an arrow glyph: core/strings_es.h forbids arrows outright,
+    // because the _tf fonts carry ASCII + Latin-1 and nothing else.
+    char line[24];
+    const SpeciesDef* give = species_get(s_tl.out_rec[PBW_OFF_SPECIES]);
+    const SpeciesDef* get  = species_get(s_tl.in_rec[PBW_OFF_SPECIES]);
+    snprintf(line, sizeof line, "%.9s > %.9s",
+             give ? S(give->name_idx) : "?",
+             get ? S(get->name_idx) : "?");
+    gfx_text_center(GF_BODY, (int16_t)(UI_HDR_H + 38), line);
+  } else {
+    gfx_text_center(GF_BODY, (int16_t)(UI_HDR_H + 38), state_word());
+  }
   // INVARIANT 3 APPLIES HERE AND THE BAR IS HONEST ABOUT IT: this row is not
   // SF_STICKY, so twenty silent seconds return the player to HOME. It can never
   // cut a handshake short, and the arithmetic is why rather than the intention:
@@ -566,7 +704,11 @@ static void draw_wait(void) {
   // peer that is coming has answered, and one that is not has already been
   // named CONEXIÓN PERDIDA, long before the auto-return arrives.
   gfx_countdown(ui_idle_ms());
-  gfx_affordance(nullptr, S(STR_AF_CANCEL));
+  // A IS OFFERED ONLY WHERE IT MEANS SOMETHING. Before the review there is
+  // nothing for the player to agree to and a second A would be a second consent
+  // for a session that already has ours.
+  gfx_affordance(link_trade_wants_consent() ? S(STR_AF_OK) : nullptr,
+                 S(STR_AF_CANCEL));
 }
 
 // Spec section 47's wording, on the screen, with both ways on.
@@ -584,8 +726,9 @@ static void draw_ended(void) {
   gfx_text_center(GF_BODY, (int16_t)(UI_HDR_H + 14),
                   s_peer_name[0] ? s_peer_name : S(STR_LK_SEARCH));
   gfx_text_center(GF_BODY, (int16_t)(UI_HDR_H + 26),
-                  (s_end_reason == (uint8_t)SE_DONE) ? S(STR_LK_ENDED)
-                                                     : S(STR_LK_BROKEN));
+                  (s_end_reason != (uint8_t)SE_DONE)   ? S(STR_LK_BROKEN)
+                  : (s_op == (uint8_t)LOP_TRADE)       ? S(STR_TR_RESOLVED)
+                                                       : S(STR_LK_ENDED));
   gfx_countdown(ui_idle_ms());
   gfx_affordance(nullptr, S(STR_AF_BACK));
 }
@@ -638,17 +781,17 @@ static void choose_op(void) {
       s_mode = LKM_BROWSE;
       gfx_list_reset();
       return;
-    case LOP_TRADE:
     case LOP_BREED:
-      // The rows exist because spec section 9 and spec section 42 both list
-      // them and a Box menu already routes here; the PROTOCOL behind them is
-      // P7-C4 and P7-C5. Nothing is opened and no radio state changes.
+      // CRIAR IS STILL AN ENTRY POINT AND NOT AN OPERATION. game/breeding.cpp
+      // is complete and tested, and no wire driver carries a breeding: P7-C5's
+      // breed_link.cpp is not built, and the plan says so in the one place that
+      // should. Nothing is opened and no radio state changes.
       ui_toast(op_offered(s_op) ? STR_UI_SOON : STR_LK_NO_CAP);
       return;
     default:
       break;
   }
-  if (!op_offered(LOP_BATTLE)) { ui_toast(STR_LK_NO_CAP); return; }
+  if (!op_offered(s_op)) { ui_toast(STR_LK_NO_CAP); return; }
   // CONSENT. The browse stops here and THE RADIO DOES NOT: link_hold() is what
   // separates those two, and calling link_cancel() instead would put the stack
   // down one frame after the two players agreed to use it.
@@ -684,8 +827,18 @@ void link_input(Gesture g) {
       break;
 
     case LKM_WAIT:
-      // Only one thing to say here and it is "stop". A second A would be a
-      // second consent for a session that already has ours.
+      // THE SECOND CONSENT OF A TRADE, and it is a different question from the
+      // first. The A on the card agreed to TALK TO THIS PEER; this one agrees
+      // to THESE TWO PEBBLES, which neither player could see until both records
+      // were on the table. Nothing moves without it: networking/trade_link.cpp
+      // applies only where it holds BOTH confirms.
+      if (g == GST_HOLD_R && link_trade_wants_consent()) {
+        trade_link_accept(s_sess);
+        ui_request_frame();
+        break;
+      }
+      // Otherwise the only thing to say here is "stop". A second A on a session
+      // that already has our consent is not a second consent.
       if (g == GST_TAP_R || g == GST_HOLD_R) {
         release_all();
         s_end_reason = (uint8_t)SE_LOCAL_CANCEL;

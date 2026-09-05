@@ -114,10 +114,14 @@ static void mk_msg(ProtoMsg& m, ProtoType t)
       break;
     case PT_SESSION_REQUEST:
       m.p.sreq.nonce_a = 0xCAFEBABEu; m.p.sreq.team_count = 3u;
-      m.p.sreq.lvl_lo = 8u; m.p.sreq.lvl_hi = 16u; m.p.sreq.rules = 0u; break;
+      // `rules` IS THE OPERATION SINCE P7-C4 and is no longer a reserved byte.
+      // A nonzero value here is what proves the round trip carries it.
+      m.p.sreq.lvl_lo = 8u; m.p.sreq.lvl_hi = 16u;
+      m.p.sreq.rules = 1u; break;      // SOP_TRADE, without dragging session.h in
     case PT_SESSION_ACCEPT:
       m.p.sacc.nonce_b = 0xFEEDFACEu; m.p.sacc.verdict = 0u;
-      m.p.sacc.team_count = 3u; m.p.sacc.lvl_lo = 8u; m.p.sacc.lvl_hi = 16u; break;
+      m.p.sacc.team_count = 3u; m.p.sacc.lvl_lo = 8u; m.p.sacc.lvl_hi = 16u;
+      m.p.sacc.op_echo = 1u; break;    // the same operation, echoed
     case PT_TEAM_SUBMIT: {
       m.p.team.count    = (uint8_t)BATTLE_TEAM_MAX;
       m.p.team.team_crc = 0x9E3Au;
@@ -147,6 +151,18 @@ static void mk_msg(ProtoMsg& m, ProtoType t)
       m.p.bend.final_hash = 0x0A0B0C0Du; m.p.bend.rounds = 22u; break;
     case PT_GOODBYE:
       m.p.bye.reason = 4u; break;
+    case PT_TRADE_OFFER: {
+      PebbleInstance p; mk_valid(p, 5u, 12u, 0x7A1u);
+      pbw_encode(p, m.p.toffer.rec);
+      break;
+    }
+    case PT_TRADE_READY:
+      m.p.tready.verdict = (uint8_t)VR_OK; m.p.tready.policy = 0u;
+      m.p.tready.offer_crc_echo = 0x4C7Bu; break;
+    case PT_TRADE_CONFIRM:
+      m.p.tconfirm.accept = 1u; m.p.tconfirm.pair_crc = 0xB19Du; break;
+    case PT_TRADE_COMMIT:
+      m.p.tcommit.pair_crc = 0xB19Du; break;
     default: break;
   }
 }
@@ -214,10 +230,73 @@ static ProtoErr guarded_decode(const uint8_t* buf, size_t n, uint32_t sess)
 // =============================================================================
 //  1. THE GOLDEN BYTES, AND THE FIELD POSITIONS THEY ARE CROSS-CHECKED AGAINST
 // =============================================================================
+// RE-RECORDED BY P7-C4, AND ONLY TWO KINDS OF BYTE MOVED: byte 0 (the protocol
+// version, 1 -> 2) and the two trailing CRC bytes that cover it. Every field
+// position is unchanged, which is the point of appending the four trade types
+// after section 15's twelve instead of inserting them among them - and the
+// hand-read cross-checks below are what say so rather than this comment.
 static const uint8_t GOLDEN_ACTION_FRAME[24] = {
-  0x01, 0x08, 0x01, 0x07, 0x44, 0x33, 0x22, 0x11, 0xEF, 0xBE, 0x02, 0x01,
-  0x08, 0x00, 0x01, 0x02, 0x00, 0x00, 0xEF, 0xBE, 0xAD, 0xDE, 0x3D, 0xFB
+  0x02, 0x08, 0x01, 0x07, 0x44, 0x33, 0x22, 0x11, 0xEF, 0xBE, 0x02, 0x01,
+  0x08, 0x00, 0x01, 0x02, 0x00, 0x00, 0xEF, 0xBE, 0xAD, 0xDE, 0x55, 0x4D
 };
+
+// THE TRADE FRAME, PINNED THE SAME WAY (P7-C4). The 48 B record inside it is
+// GOLDEN_WIRE_PEBBLE below, so this array pins only what is NEW: the type byte,
+// the 52-byte length, the four reserved bytes before the record and the offset
+// the record sits at. A golden that re-pinned the record would be a second copy
+// of a fact the next case already owns.
+static const uint8_t GOLDEN_TRADE_OFFER_HEAD[18] = {
+  0x02, 0x0D, 0x00, 0x00, 0x44, 0x33, 0x22, 0x11, 0x0D, 0x10,
+  0x0D, 0x20, 0x34, 0x00,                       // len 52, little-endian
+  0x00, 0x00, 0x00, 0x00                        // the four reserved payload bytes
+};
+
+TEST(the_trade_offer_frame_is_pinned_and_carries_the_record_at_offset_four) {
+  ProtoMsg m; mk_msg(m, PT_TRADE_OFFER);
+  uint8_t buf[PROTO_FRAME_MAX];
+  const size_t n = encode_ok(m, buf, sizeof buf);
+  CHECK_EQ((int)n, (int)(PROTO_HDR_BYTES + 52u + PROTO_CRC_BYTES));
+  for (size_t i = 0; i < sizeof GOLDEN_TRADE_OFFER_HEAD; ++i) {
+    if (buf[i] != GOLDEN_TRADE_OFFER_HEAD[i])
+      fprintf(stderr, "    byte %u: got 0x%02X want 0x%02X\n",
+              (unsigned)i, (unsigned)buf[i], (unsigned)GOLDEN_TRADE_OFFER_HEAD[i]);
+    CHECK_EQ((int)buf[i], (int)GOLDEN_TRADE_OFFER_HEAD[i]);
+  }
+  // The record is at payload offset 4 and is byte-identical to what
+  // pbw_encode() produced - no re-framing, no second copy.
+  CHECK_EQ(memcmp(buf + PROTO_HDR_BYTES + 4, m.p.toffer.rec, (size_t)PBW_BYTES), 0);
+  // A trade has no round, and the decoder refuses one at step 9.
+  CHECK_EQ((int)buf[3], 0);
+  CHECK(!PROTO_HAS_ROUND[(int)PT_TRADE_OFFER]);
+  // trade_rec_crc() reads the identity out of the record itself rather than out
+  // of a field the frame would otherwise have to carry twice.
+  CHECK_EQ((int)trade_rec_crc(m.p.toffer.rec),
+           (int)((uint16_t)m.p.toffer.rec[PBW_OFF_CRC] |
+                 ((uint16_t)m.p.toffer.rec[PBW_OFF_CRC + 1] << 8)));
+  // And it survives the round trip, which is what a READY echoes.
+  CHECK_EQ((int)guarded_decode(buf, n, TEST_SESSION), (int)PE_OK);
+  CHECK_EQ((int)trade_rec_crc(g_arena.m.p.toffer.rec),
+           (int)trade_rec_crc(m.p.toffer.rec));
+}
+
+TEST(the_pair_identity_is_order_dependent_and_that_is_the_whole_point) {
+  ProtoMsg a; mk_msg(a, PT_TRADE_OFFER);
+  PebbleInstance other; mk_valid(other, 9u, 7u, 0x7B2u);
+  uint8_t rec_b[PBW_BYTES];
+  pbw_encode(other, rec_b);
+
+  const uint16_t ab = trade_pair_crc(a.p.toffer.rec, rec_b);
+  const uint16_t ba = trade_pair_crc(rec_b, a.p.toffer.rec);
+  CHECK(ab != ba);          // a symmetric identity could not name WHO gives WHAT
+  CHECK_EQ((int)trade_pair_crc(a.p.toffer.rec, rec_b), (int)ab);   // and stable
+
+  // One flipped byte in either record changes it: the identity covers both
+  // whole records and not just their two CRCs.
+  uint8_t poked[PBW_BYTES];
+  memcpy(poked, rec_b, sizeof poked);
+  poked[PBW_OFF_LEVEL] = (uint8_t)(poked[PBW_OFF_LEVEL] ^ 0x01u);
+  CHECK(trade_pair_crc(a.p.toffer.rec, poked) != ab);
+}
 
 TEST(one_known_frame_is_pinned_byte_for_byte_and_field_by_field) {
   ProtoMsg m;
@@ -377,6 +456,21 @@ static void expect_same_payload(const ProtoMsg& a, const ProtoMsg& b)
       break;
     case PT_GOODBYE:
       CHECK_EQ((int)a.p.bye.reason, (int)b.p.bye.reason);
+      break;
+    case PT_TRADE_OFFER:
+      CHECK_EQ(memcmp(a.p.toffer.rec, b.p.toffer.rec, (size_t)PBW_BYTES), 0);
+      break;
+    case PT_TRADE_READY:
+      CHECK_EQ((int)a.p.tready.verdict, (int)b.p.tready.verdict);
+      CHECK_EQ((int)a.p.tready.policy, (int)b.p.tready.policy);
+      CHECK_EQ((int)a.p.tready.offer_crc_echo, (int)b.p.tready.offer_crc_echo);
+      break;
+    case PT_TRADE_CONFIRM:
+      CHECK_EQ((int)a.p.tconfirm.accept, (int)b.p.tconfirm.accept);
+      CHECK_EQ((int)a.p.tconfirm.pair_crc, (int)b.p.tconfirm.pair_crc);
+      break;
+    case PT_TRADE_COMMIT:
+      CHECK_EQ((int)a.p.tcommit.pair_crc, (int)b.p.tcommit.pair_crc);
       break;
     default: CHECK(false); break;
   }
@@ -544,7 +638,7 @@ TEST(an_unsupported_protocol_version_is_refused_by_name) {
   }
   // The ENCODER refuses one too, so a build cannot emit a frame its own peer
   // would name PE_VERSION.
-  ProtoMsg bad = m; bad.version = 2u;
+  ProtoMsg bad = m; bad.version = (uint8_t)(PROTO_VERSION + 1u);
   size_t out = 1;
   CHECK_EQ((int)proto_encode(bad, buf, sizeof buf, out), (int)PE_VERSION);
   CHECK_EQ((int)out, 0);
@@ -695,8 +789,13 @@ TEST(a_reserved_payload_byte_that_carries_a_value_is_refused_by_name) {
   static const Poke POKES[] = {
     { PT_HELLO,           8 }, { PT_HELLO,          11 },
     { PT_CAPABILITIES,    3 },
-    { PT_SESSION_REQUEST, 7 }, { PT_SESSION_REQUEST, 8 },
-    { PT_SESSION_ACCEPT,  8 }, { PT_SESSION_ACCEPT, 11 },
+    // SESSION_REQUEST byte 7 (`rules`) and SESSION_ACCEPT byte 8 (`op_echo`)
+    // WERE reserved and became REAL FIELDS in P7-C4. They are off this list
+    // rather than deleted from the comment: a reserved byte that acquires a
+    // meaning has to lose its guard in the same commit, or the guard fails for
+    // a frame that is now perfectly legal.
+    { PT_SESSION_REQUEST, 8 }, { PT_SESSION_REQUEST, 11 },
+    { PT_SESSION_ACCEPT,  9 }, { PT_SESSION_ACCEPT, 11 },
     { PT_TEAM_SUBMIT,     1 },
     { PT_TEAM_VALIDATION, 4 }, { PT_TEAM_VALIDATION, 7 },
     { PT_BATTLE_STATE,    6 }, { PT_BATTLE_STATE,   11 },
@@ -704,7 +803,10 @@ TEST(a_reserved_payload_byte_that_carries_a_value_is_refused_by_name) {
     { PT_ACTION_RESULT,   3 },
     { PT_ROUND_RESULT,    9 }, { PT_ROUND_RESULT,   11 },
     { PT_BATTLE_END,      3 }, { PT_BATTLE_END,     10 }, { PT_BATTLE_END, 15 },
-    { PT_GOODBYE,         1 }, { PT_GOODBYE,         3 }
+    { PT_GOODBYE,         1 }, { PT_GOODBYE,         3 },
+    { PT_TRADE_OFFER,     0 }, { PT_TRADE_OFFER,     3 },
+    { PT_TRADE_CONFIRM,   1 },
+    { PT_TRADE_COMMIT,    0 }, { PT_TRADE_COMMIT,    1 }
   };
   for (size_t i = 0; i < sizeof POKES / sizeof POKES[0]; ++i) {
     ProtoMsg m; mk_msg(m, POKES[i].t);
@@ -720,13 +822,23 @@ TEST(a_reserved_payload_byte_that_carries_a_value_is_refused_by_name) {
               (int)POKES[i].t, (unsigned)POKES[i].off, proto_err_name(e));
     CHECK_EQ((int)e, (int)PE_RESERVED);
   }
-  // The encoder refuses the one reserved field a caller can actually set.
-  ProtoMsg m; mk_msg(m, PT_SESSION_REQUEST);
-  m.p.sreq.rules = 1u;
-  uint8_t buf[PROTO_FRAME_MAX];
-  size_t out = 1;
-  CHECK_EQ((int)proto_encode(m, buf, sizeof buf, out), (int)PE_RESERVED);
-  CHECK_EQ((int)out, 0);
+  // PT_TRADE_READY IS THE ONE TYPE WITH NO RESERVED PAYLOAD BYTE, and saying so
+  // is better than leaving it silently absent from the list above: all four of
+  // its bytes are fields (verdict, policy and a 16-bit echo), which is why
+  // networking/protocol.h gives the two refusal codes two bytes instead of
+  // collapsing them into one enum.
+  {
+    ProtoMsg m; mk_msg(m, PT_TRADE_READY);
+    uint8_t buf[PROTO_FRAME_MAX];
+    const size_t n = encode_ok(m, buf, sizeof buf);
+    for (uint16_t off = 0; off < 4u; ++off) {
+      uint8_t poke[PROTO_FRAME_MAX];
+      memcpy(poke, buf, n);
+      poke[PROTO_HDR_BYTES + off] = 0x5Au;
+      reseal(poke, n);
+      CHECK_EQ((int)guarded_decode(poke, n, TEST_SESSION), (int)PE_OK);
+    }
+  }
 }
 
 TEST(a_team_count_that_cannot_index_the_slots_is_refused_by_name) {

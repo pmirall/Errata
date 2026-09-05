@@ -24,6 +24,27 @@ void kv_mem_reset(void);
 // nothing. One-shot: it re-arms only when called again.
 void kv_mem_fail_next_put(void);
 
+// THE POWER CUT AT AN ARBITRARY DEPTH (P7-C4). After `n` further SUCCESSFUL
+// puts, every put fails and writes nothing, for ever, until this is called
+// again or kv_mem_reset() runs. n == 0 means "the very next put fails".
+//
+// kv_mem_fail_next_put() cannot express this and that is why it exists: it is
+// one-shot, so a test built on it can only ever cut at a point it already knew
+// the index of. The trade journal's whole claim is that a cut ANYWHERE in the
+// sequence leaves the pair invariant intact, and the only honest way to say
+// that is to sweep k over every put the sequence performs - which needs a knob
+// that counts. A sweep is a test that can fail; three hand-picked cut points
+// are three tests that happen to pass.
+//
+// IT IS A DEAD DEVICE AND NOT A FLAKY ONE: once armed and reached, the store
+// stays dead, because that is what a power cut is. The test reboots by calling
+// kv_mem_power_restore() and then re-running the load path.
+void kv_mem_fail_after_n_puts(uint32_t n);
+
+// Un-does the dead store above without touching a byte of its contents - the
+// device is plugged back in and reads exactly what survived.
+void kv_mem_power_restore(void);
+
 // Flips every bit of one byte of a stored value. The key is looked up in both
 // partitions (the key names are disjoint by construction, save_schema.h
 // section 9). Returns false when the key does not exist or the byte is past

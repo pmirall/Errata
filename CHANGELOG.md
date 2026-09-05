@@ -152,6 +152,108 @@ of the caps. The 26 KB of flash is not the screen's drawing: it is the session, 
 peer table and the wire half of the validator entering the image for the first time, because
 until this commit nothing reachable from `setup()` called any of them.
 
+### P7-C4 / P7-C5 — the atomic trade, breeding, and the god-taint gate
+
+**Two Pebblebols can trade, and a power cut in the middle cannot make a Pebble twice or
+none.** `game/trade.{h,cpp}` owns the journal and the write order; `networking/trade_link.cpp`
+owns the five wire steps; `ui/screen_link.cpp` drives both, so the INTERCAMBIO row that
+answered "Aún no está listo" since P7-C2 opens a real session now and `LK_SELF_CAPS` claims
+`DISC_CAP_TRADE`. `app_setup()` calls the boot resolver between the save load and the pet
+binding — until this commit `save_load_all()` filled `gs.trade` and
+`grep -rn 'gs.trade' app/ ui/ game/` returned nothing, so the journal was bytes nobody read.
+
+**The fault injection is a SWEEP, and the knob for it did not exist.** `tests/fakes/kv_mem.h`
+offered a one-shot `kv_mem_fail_next_put()`, so a test built on it could only cut where it
+already knew the index — which is to say at the moments whoever wrote it was already thinking
+about. `kv_mem_fail_after_n_puts(n)` plus `kv_mem_power_restore()` turn the cut into a
+parameter, and `tests/test_trade.cpp` sweeps **every flash write the sequence performs** (a
+committed trade costs 10: five through the store seam and five inside `save_checkpoint_all()`),
+plus the four that open the journal, plus nine cut points **inside the resolver itself** — each
+followed by a reboot, a resolve, the pair invariant, and a second reboot that must change
+nothing.
+
+**Across the pair it is bounded and measured, not proved, and the header says so.** Two parties
+over a lossy link with no third party cannot make an exchange atomic; `COMMIT` subsumes
+`CONFIRM` so losing it needs two frames gone for a whole ladder rather than one, and the test
+reports the residual as a table instead of asserting it away: 800 trials over four fault arms,
+**0 split**, 195/200 completing at 30 % drop with 20 % reorder.
+
+**Two defects the lossy arm found that a clean link could not**, both the same shape as the R4
+hole P4-C5 found — an endpoint deciding from the arrival that happened to be last instead of
+from its own state. A READY that arrived before its own OFFER left an endpoint parked with both
+halves in hand (**74 of 200 at 10 % drop, 183 of 200 at 30 %**), and the ladder's regeneration
+of `SESSION_REQUEST` dropped the new operation byte, so the retransmitted request said "battle"
+while its sender was trading and the responder's refusal was read as an agreement (**34 of 200
+at 10 % drop, 0 of 200 clean**). A field added to a message is two edits, not one: the sender
+and the regeneration.
+
+**`PROTOCOL_VERSION` 1 → 2, and the reason this repository gave for the bump was false.** The
+plan and `docs/protocol.md` both said P7's trade messages would exceed `PROTO_PAYLOAD_MAX 148`.
+A `TRADE_OFFER` is 52 bytes and the cap did not move; the bump was mandatory because the TYPE
+SPACE was closed at 1..12. Four types appended (13..16), two reserved bytes became real fields
+(`SESSION_REQUEST.rules` is the operation, `SESSION_ACCEPT.op_echo` the answer), and the golden
+ACTION frame was re-recorded with only byte 0 and its two CRC bytes moved.
+
+**Two pre-existing persistence defects, fixed because the journal rests on them.**
+`commit_all()` rewrote five of the six blobs and not `tr`, so after the SAVE ERROR screen's
+"Recuperar" RAM said IDLE and flash still held a live record. And `save_checkpoint_all()` does
+NOT checkpoint the journal and must not — a mid-trade checkpoint is a second, stale source of
+truth for one transaction — which is now written down instead of left as an omission.
+
+**Breeding.** `game/breeding.{h,cpp}` over `genome_breed()`: the same non-zero `compat_group`,
+both parents at stage ≥ 1, distinct ids. `SpeciesDef.compat_group` has existed since P4-C1 and
+was read by nothing in `src/`. The compat matrix test sweeps all **36 × 36 roster pairs with
+the exact reject code** for each, because a handful of hand-picked pairs still passes with the
+stage rule deleted. Determinism comes from a scripted `genome_set_rng()` source seeded from the
+shared seed and never a `genome_seed()` reseed — `game/capture.h` named that trap and this is
+the first caller to walk around it.
+
+**Two plan bullets were rewritten rather than implemented, with the measurement behind each.**
+"One inherited move from each parent" cannot be built against the shipped validator: any
+substituted move is `VR_UNLEARNABLE_MOVESET`, the child would be quarantined on the next load,
+and widening the rule reverses a measurement (attack 11 on a Paketo took a scripted 1v1 from
+0/200 wins to 100). And `lineage_id = hash(A,B)` is a trap: `Genome.crc16` covers `lineage_id`,
+so overwriting it without resealing produces `VR_BAD_GENOME` on the next load.
+
+**The "hard balance ceiling" is two halves and only one can be broken, and the tests say which.**
+The battle half is structural — `gvar(v) = v*3/16` folds 0..15 to 0..2 whatever any number of
+generations does — so the case asserting it is labelled as one that cannot fail. What is not
+free is the CARE envelope, and `breed_compute()` clamps the six numeric genes back into the
+genesis band: **200 dynasties × 40 generations unclamped left the band 8,655 times and reached
+the full 0..15; clamped, 0 times**, and the case asserts the control arm escapes so the clamp is
+guarding something measurable.
+
+**The god-taint gate is back, in the game layer.** `game/taint.h` — two inline functions, no
+`.cpp` — shared verbatim by trade and breeding. Not in `validate_pebble()` (a tainted Pebble is
+a legal object and the flag is inside the accepted mask on purpose), not in the transport (what
+P2-C7b correctly removed). It reads BOTH markers, because `migration.cpp` sets the instance flag
+from a v1 save without touching the genome bit, and it is honour-based, which the header says
+rather than implies.
+
+Twenty-five mutations were planted and the table is in `docs/decisions.md`. **One was not
+caught**: deleting every "the write did not land" check left the sweep green, because once the
+fake store is dead a reboot cannot tell "stopped at the failure" from "carried on regardless" —
+the case that catches it asserts what a reboot hides, and a `TDR_LAST_PEBBLE` code was written,
+measured to be unreachable and deleted in the same spirit.
+
+Two new host binaries — 44 → **46**, 854 → **898 tests**, 3,672,806 → **3,802,557 checks**.
+
+**Not measured, not claimed:** no radio ran. §67's "Trade is atomic" is host-proved within one
+device and measured, not proved, across the pair; the two-board bench item is written into the
+plan. `breed_link.cpp` is NOT built and `DISC_CAP_BREED` is NOT claimed, so CRIAR still says
+so honestly rather than opening a session that could only time out. BLE is untouched.
+
+**And `game/breeding.cpp` is NOT IN THE RELEASE IMAGE — measured with `nm`, not assumed.** No
+`breed_check`, no `breed_compute`, no `genome_breed`: nothing reachable from `setup()` calls
+them, so `--gc-sections` dropped the module. The flash below is the TRADE's, end to end. That
+check exists because of what phase 6 found — the shipping build never advanced game time for
+four phases — and the rule it left behind is to ask what the RELEASE artefact does rather than
+what the build in front of you compiles. `game/trade.cpp` passes it: the boot resolver, the
+journal writers, the wire codec and `s_tl` are all in the image.
+
+Sizes, all seven matrix variants green with zero project warnings: baseline
+1,985,080 / 80,340 → **1,993,954 / 80,484**; release **1,269,108 / 56,812**, 79.3 % and 87.4 % of the caps.
+
 ## [0.6.0-activity] — Unreleased
 
 Phase 6 is about the three things the device does when nobody is pressing a button: it

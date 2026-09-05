@@ -52,12 +52,18 @@
 // -----------------------------------------------------------------------------
 //  NOT FORWARD COMPATIBLE, AND IT DOES NOT PRETEND TO BE
 // -----------------------------------------------------------------------------
-//  Any type outside 1..12, any version other than 1, any length other than its
-//  type's exact length and any nonzero reserved byte is REFUSED. There is no
-//  reserved-field forward channel and no downgrade path: a version mismatch is
-//  a refusal, not a negotiation. P7's trade messages will exceed
-//  PROTO_PAYLOAD_MAX and the answer must be a VERSION BUMP, never quietly
-//  raising the cap toward 234 where it breaks ESP-NOW irreversibly.
+//  Any type outside 1..16, any version other than PROTO_VERSION, any length
+//  other than its type's exact length and any nonzero reserved byte is REFUSED.
+//  There is no reserved-field forward channel and no downgrade path: a version
+//  mismatch is a refusal, not a negotiation.
+//
+//  P7-C4 ADDED FOUR TYPES AND BUMPED THE VERSION TO 2, AND THE SENTENCE THAT
+//  USED TO SIT HERE WAS WRONG. It said "P7's trade messages will exceed
+//  PROTO_PAYLOAD_MAX and the answer must be a VERSION BUMP": a TRADE_OFFER is
+//  one 48 B record plus four bytes = 52, comfortably under the 148 TEAM_SUBMIT
+//  already costs, and PROTO_PAYLOAD_MAX did not move. The real constraint was
+//  the CLOSED TYPE SPACE, not the length cap - the answer was the same bump for
+//  a different reason, and the reason is worth having right.
 //
 // -----------------------------------------------------------------------------
 //  WHERE THE LINE BETWEEN THIS LAYER AND THE SESSION LAYER IS DRAWN
@@ -92,7 +98,7 @@
 // -----------------------------------------------------------------------------
 //  1. THE FRAME
 // -----------------------------------------------------------------------------
-#define PROTO_VERSION       1u
+#define PROTO_VERSION       2u
 static_assert((int)PROTO_VERSION == (int)PROTOCOL_VERSION,
               "networking/protocol.h and core/version.h disagree about byte 0 of "
               "every radio frame");
@@ -121,6 +127,14 @@ enum ProtoType : uint8_t {
   PT_ROUND_RESULT,
   PT_BATTLE_END,
   PT_GOODBYE,
+  // --- P7-C4, THE TRADE (spec section 16). Appended after section 15's twelve
+  //     rather than inserted among them, so every existing type keeps its
+  //     number and the golden frames of the first twelve move only by their
+  //     version byte.
+  PT_TRADE_OFFER,         // 13  the 48 B wire Pebble this device is giving
+  PT_TRADE_READY,         // 14  "I decoded and validated yours": a VReject
+  PT_TRADE_CONFIRM,       // 15  "my player pressed A on this exact pair"
+  PT_TRADE_COMMIT,        // 16  "I have applied it" - and it IMPLIES my CONFIRM
   PT_TYPE_COUNT           // one past the last legal type, never a type itself
 };
 #define PROTO_TYPE_MAX  ((uint8_t)(PT_TYPE_COUNT - 1))
@@ -144,7 +158,11 @@ inline constexpr uint16_t PROTO_LEN_OF[(size_t)PT_TYPE_COUNT] = {
   8,                       // 9  ACTION_RESULT
   12,                      // 10 ROUND_RESULT
   16,                      // 11 BATTLE_END
-  4                        // 12 GOODBYE
+  4,                       // 12 GOODBYE
+  4 + PBW_BYTES,           // 13 TRADE_OFFER   (52)
+  4,                       // 14 TRADE_READY
+  4,                       // 15 TRADE_CONFIRM
+  4                        // 16 TRADE_COMMIT
 };
 
 // Which types carry a ROUND in the header. Every other type must send 0 there:
@@ -155,7 +173,10 @@ inline constexpr bool PROTO_HAS_ROUND[(size_t)PT_TYPE_COUNT] = {
   true,                    // 8  ACTION
   true,                    // 9  ACTION_RESULT
   true,                    // 10 ROUND_RESULT
-  false, false
+  false, false,
+  // A trade has no rounds. The four below must send 0 there, exactly as the
+  // handshake types do, and proto_decode() refuses any other value at step 9.
+  false, false, false, false
 };
 
 // DERIVED, never chosen. See the banner.
@@ -335,7 +356,13 @@ struct ProtoCaps         { uint16_t engine_ver, hash_ver, content_ver, max_paylo
                            uint32_t hash_basis;
                            uint8_t  wire_ver, team_max, level_max; };
 struct ProtoSessionReq   { uint32_t nonce_a; uint8_t team_count, lvl_lo, lvl_hi, rules; };
-struct ProtoSessionAcc   { uint32_t nonce_b; uint8_t verdict, team_count, lvl_lo, lvl_hi; };
+// `op_echo` (P7-C4) is the responder's answer to ProtoSessionReq.rules: the
+// operation it will actually run. On an accept it equals what was asked; on a
+// refusal it is the responder's OWN operation, which is what lets the initiator
+// name SD_OP instead of reading a refusal out of a VReject field that has no
+// code for "we are here to do different things".
+struct ProtoSessionAcc   { uint32_t nonce_b;
+                           uint8_t  verdict, team_count, lvl_lo, lvl_hi, op_echo; };
 struct ProtoTeamSubmit   { uint16_t team_crc; uint8_t count;
                            uint8_t  rec[BATTLE_TEAM_MAX][PBW_BYTES]; };
 struct ProtoTeamValid    { uint16_t team_crc_echo; uint8_t verdict, bad_index; };
@@ -354,6 +381,35 @@ struct ProtoRoundResult  { uint32_t hash_before, hash_after; uint8_t outcome; };
 struct ProtoBattleEnd    { uint32_t final_hash; uint16_t rounds;
                            uint8_t  reason, outcome, detail; };
 struct ProtoGoodbye      { uint8_t reason; };
+// --- P7-C4. THE OFFER KEEPS ITS RECORD RAW, for TEAM_SUBMIT's reason: the
+//     caller decodes it straight into the PebbleInstance it means to fill, so
+//     there is never a second source of truth for a journalled record.
+//
+//     THERE IS NO SEPARATE offer_crc FIELD AND THERE MUST NOT BE. The 48 B
+//     record already carries its own CRC at PBW_OFF_CRC over its own bytes, so
+//     trade_rec_crc() below reads the offer's identity out of the record rather
+//     than transmitting a second copy of it that could disagree.
+struct ProtoTradeOffer   { uint8_t  rec[PBW_BYTES]; };
+// TWO REFUSAL BYTES AND NOT ONE, because they are two different enums and
+// game/taint.h argues the distinction: `verdict` is a VReject (the codec and
+// the one validator refused the RECORD) and `policy` is a TradeReject (the
+// record is a legal Pebble and this device will not take it - a taint, a
+// duplicate id, a peer that is us). Collapsing them would put a policy flag
+// inside the validator's own enum by the back door.
+struct ProtoTradeReady   { uint16_t offer_crc_echo; uint8_t verdict, policy; };
+struct ProtoTradeConfirm { uint16_t pair_crc; uint8_t accept; };
+struct ProtoTradeCommit  { uint16_t pair_crc; };
+
+// The identity of one offer: the record's OWN trailing CRC, read in the codec's
+// own little-endian convention. Used to echo "the offer I validated" in READY
+// without a second field on the wire.
+uint16_t trade_rec_crc(const uint8_t rec[PBW_BYTES]);
+
+// The identity of one TRADE: crc16 over the two 48 B records in the CANONICAL
+// order (the initiator's first), so both devices compute the same number for
+// the same exchange and a CONFIRM cannot be replayed onto a different pair.
+uint16_t trade_pair_crc(const uint8_t initiator_rec[PBW_BYTES],
+                        const uint8_t responder_rec[PBW_BYTES]);
 
 // One decoded frame. The header fields are section 15's six plus the two
 // diagnostics.
@@ -393,6 +449,10 @@ struct ProtoMsg {
     ProtoRoundResult  rres;
     ProtoBattleEnd    bend;
     ProtoGoodbye      bye;
+    ProtoTradeOffer   toffer;
+    ProtoTradeReady   tready;
+    ProtoTradeConfirm tconfirm;
+    ProtoTradeCommit  tcommit;
   } p;
 };
 

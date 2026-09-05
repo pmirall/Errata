@@ -62,4 +62,25 @@ void lf_bind_transport(const Transport* t);
 void lf_set_nonce(uint32_t n);
 void lf_set_pet_name(const char* name);
 
+// -----------------------------------------------------------------------------
+//  THE TRADE'S TWO ui.h SEAMS (P7-C4), AND WHAT IS REAL IN THEM
+//
+//  The HOOKS are the real ones in shape and in policy: `judge` runs the real
+//  game/trade.cpp's trade_accept_check() over the real Box, and `commit` runs
+//  the real trade_execute() - the same W3/B1/B2/B3/W4 order the device runs -
+//  over a TradeStore whose writes always succeed and reach no flash. What is
+//  FAKE is the flash, and only the flash: neither binary that uses this fake
+//  links persistence/save_manager.cpp or tests/fakes/kv_mem.cpp, and the
+//  atomicity of those five writes is tests/test_trade.cpp's subject, not this
+//  one's. Here the subject is the SCREEN: that it offers the right Pebble,
+//  refuses the ones the rules refuse, asks the player before anything moves,
+//  and that the Box really swaps when both players say yes.
+// -----------------------------------------------------------------------------
+void     lf_trade_reset(void);               // also run by lf_reset()
+void     lf_set_quarantine(uint16_t mask);   // what ui_trade_quarantine() answers
+uint8_t  lf_trade_phase(void);               // the journal phase the fake holds
+int      lf_trade_commits(void);             // times the commit hook ran and won
+int      lf_trade_aborts(void);
+uint32_t lf_trade_out_id(void);              // what W1 recorded
+
 #endif  // PB_TESTS_LINK_FAKE_H

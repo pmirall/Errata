@@ -25,6 +25,9 @@ struct KvmPartition {
 
 static KvmPartition s_part[KV_PART_COUNT];
 static bool         s_fail_next_put = false;
+static bool         s_countdown_armed = false;
+static uint32_t     s_puts_until_death = 0;
+static bool         s_dead            = false;
 static uint32_t     s_puts          = 0;
 static uint32_t     s_put_attempts  = 0;
 static size_t       s_longest_key   = 0;
@@ -74,6 +77,10 @@ bool kv_put(KvPart part, const char* key, const void* buf, size_t n) {
   note_key(key);
   s_put_attempts++;
   if (s_fail_next_put) { s_fail_next_put = false; return false; }
+  // The power cut. Checked BEFORE the write and never re-armed: a dead store
+  // stays dead until the test plugs the device back in.
+  if (s_dead) return false;
+  if (s_countdown_armed && s_puts_until_death == 0u) { s_dead = true; return false; }
   if (part >= KV_PART_COUNT || !key || key[0] == '\0' || !buf) return false;
   if (!s_part[part].healthy) return false;
   if (n == 0 || n > KVM_MAX_VALUE) return false;
@@ -84,6 +91,7 @@ bool kv_put(KvPart part, const char* key, const void* buf, size_t n) {
   memcpy(e->data, buf, n);
   e->len = n;
   s_puts++;
+  if (s_countdown_armed && s_puts_until_death > 0u) s_puts_until_death--;
   return true;
 }
 
@@ -112,13 +120,30 @@ bool kv_healthy(KvPart part) {
 void kv_mem_reset(void) {
   memset(s_part, 0, sizeof s_part);
   for (size_t i = 0; i < KV_PART_COUNT; ++i) s_part[i].healthy = true;
-  s_fail_next_put = false;
-  s_puts          = 0;
-  s_put_attempts  = 0;
-  s_longest_key   = 0;
+  s_fail_next_put   = false;
+  s_countdown_armed = false;
+  s_puts_until_death = 0;
+  s_dead            = false;
+  s_puts            = 0;
+  s_put_attempts    = 0;
+  s_longest_key     = 0;
 }
 
 void kv_mem_fail_next_put(void) { s_fail_next_put = true; }
+
+void kv_mem_fail_after_n_puts(uint32_t n)
+{
+  s_countdown_armed  = true;
+  s_puts_until_death = n;
+  s_dead             = false;
+}
+
+void kv_mem_power_restore(void)
+{
+  s_countdown_armed  = false;
+  s_puts_until_death = 0;
+  s_dead             = false;
+}
 
 bool kv_mem_corrupt(const char* key, size_t byte_index) {
   for (uint8_t part = 0; part < KV_PART_COUNT; ++part) {

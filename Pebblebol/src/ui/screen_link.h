@@ -150,6 +150,38 @@ uint8_t  link_screen_consents(void);    // how many times A opened a session
 const char* link_screen_peer_name(void);    // never NULL
 
 // -----------------------------------------------------------------------------
+//  THE TRADE'S SEAM (P7-C4)
+//
+//  A trade uses the SAME Session, the SAME handshake, the SAME ladder and the
+//  SAME consent gate as a battle; what differs is the operation agreed in
+//  SS_SESSION and the driver that runs after it (networking/trade_link.cpp).
+//  There is NO new screen mode: the review happens inside LKM_WAIT, which
+//  already shows the peer name, the operation and the state, and which gains
+//  the two Pebbles and an "A: aceptar" affordance the moment both sides have
+//  validated both records. A mode whose only difference is two lines of text is
+//  a mode nobody can reason about.
+//
+//  THE PLAYER HAS ABOUT NINE SECONDS TO ANSWER THE REVIEW, AND THAT IS THE
+//  SESSION'S LADDER RATHER THAN THIS SCREEN'S. Once both READYs are in, this
+//  endpoint owes a CONFIRM; rule R4 says only PROGRESS resets the ladder, and a
+//  peer that has already confirmed sends nothing new, so a review nobody answers
+//  closes SE_LOST after PROTO_RETX_MAX * PROTO_RETX_MS. It is the SAME
+//  constraint P7-C3 measured for a linked battle round (9,950 ms through the
+//  real screen) and it has the SAME remedy and the same cost: the two constants
+//  in networking/session.h, which lengthen every other wait in the protocol
+//  with them. Nothing is lost when it expires - the journal rolls back and both
+//  players keep what they had - which is why it is recorded here rather than
+//  worked around.
+//
+//  ui/ui.cpp reads the two below to answer ui_trade_hooks()'s judge: the RULE
+//  is game/trade.cpp's and the two facts it needs are this screen's.
+// -----------------------------------------------------------------------------
+uint8_t  link_trade_slot(void);        // the Box slot being offered, or BOX_SLOT_NONE
+uint32_t link_trade_peer_id(void);     // the peer's device id, or 0
+uint8_t  link_trade_phase(void);       // TradeLinkPhase, TLP_IDLE when there is none
+bool     link_trade_wants_consent(void);   // both records validated; the player decides
+
+// -----------------------------------------------------------------------------
 //  THE LINKED BATTLE'S SEAM (P7-C3)
 //
 //  ui/screen_battle.cpp runs the ENGINE; the SESSION that keeps two engines

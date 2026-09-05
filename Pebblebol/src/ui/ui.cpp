@@ -64,6 +64,8 @@
 #include "screen_evolution.h"
 #include "screen_network.h"  // network_screen_busy(): the power ladder's `held` input
 #include "screen_link.h"     // link_screen_busy() and the P7-C3 session seams
+#include "../game/trade.h"           // the P7-C4 journal, driven from here
+#include "../networking/trade_link.h" // TradeHooks: the screen's trade seam
 #include "../networking/net.h"
 #include "../networking/webui.h"      // web_pin() only - no network header comes with it
 #include "../dev/godmode.h"    // GodEvt, god_active/handle/draw/entry_progress/marker
@@ -1894,6 +1896,113 @@ void     ui_link_unbind(void)                 { net_link_unbind(); }
 // may not reach a named global stream, which is the whole reason this line is
 // here and not in ui/screen_link.cpp.
 uint32_t ui_link_nonce(void)                  { return rng_u32(RNG_MISC); }
+
+// -----------------------------------------------------------------------------
+//  THE TRADE'S SEAM (P7-C4). See ui.h for why it is a pointer to an incomplete
+//  type over there and a whole struct here.
+//
+//  THE FIVE HOOKS ARE THE ONLY PLACE THE TRADE TOUCHES FLASH, and every one of
+//  them returns whether the bytes LANDED: save_manager.cpp verifies its own
+//  writes by reading them back, and game/trade.cpp stops the sequence on a
+//  false rather than assuming. The WRITE ORDER - W3, B1, B2, B3, W4 - belongs
+//  to game/trade.cpp and not to this file; these are the four verbs it drives.
+// -----------------------------------------------------------------------------
+static bool ui_tr_store_journal(void* ctx, const PendingTrade& t)
+{
+  (void)ctx;
+  gs_state().trade = t;
+  return save_trade_journal(t);
+}
+static bool ui_tr_store_slot(void* ctx, uint8_t slot)
+{
+  (void)ctx;
+  if (slot >= (uint8_t)BOX_SLOTS) return false;
+  return save_pebble(slot, gs_state().pebbles[slot], true);
+}
+static bool ui_tr_store_box(void* ctx)
+{
+  (void)ctx;
+  return save_box_header(gs_state().box);
+}
+static void ui_tr_store_checkpoint(void* ctx)
+{
+  (void)ctx;
+  // A failed checkpoint does not invalidate the trade - the same sentence
+  // app/app.cpp makes about the evolution ceremony. Only the nvs2 copy is stale.
+  (void)save_checkpoint_all();
+}
+
+static TradeStore ui_trade_store(void)
+{
+  TradeStore s;
+  s.write_journal = &ui_tr_store_journal;
+  s.write_slot    = &ui_tr_store_slot;
+  s.write_box     = &ui_tr_store_box;
+  s.checkpoint    = &ui_tr_store_checkpoint;
+  s.ctx           = nullptr;
+  return s;
+}
+
+// W1: our offer is on the wire.
+static bool ui_tr_journal_sent(void* ctx, uint32_t out_id, uint32_t peer_id)
+{
+  (void)ctx;
+  PendingTrade t;
+  trade_journal_sent(t, out_id, peer_id);
+  return ui_tr_store_journal(nullptr, t);
+}
+
+// THE POLICY VERDICT, which is game/trade.cpp's and not the transport's: the
+// taint gate, a duplicate id, a peer that is us. The decode has already run in
+// networking/trade_link.cpp, so what is left is what a legal Pebble may do.
+static uint8_t ui_tr_judge(void* ctx, const uint8_t rec[48])
+{
+  (void)ctx;
+  PebbleInstance in;
+  if (pbw_decode(rec, in) != VR_OK) return (uint8_t)TDR_PEER_INVALID;
+  const PebbleInstance* mine = box_peek(link_trade_slot());
+  if (mine == nullptr) return (uint8_t)TDR_NO_SLOT;
+  return (uint8_t)trade_accept_check(*mine, in, gs_device_id(), link_trade_peer_id());
+}
+
+// W2: theirs is here and ours is not gone.
+static bool ui_tr_journal_received(void* ctx, const uint8_t rec[48])
+{
+  (void)ctx;
+  PendingTrade t = gs_state().trade;
+  trade_journal_received(t, rec);
+  return ui_tr_store_journal(nullptr, t);
+}
+
+// W3 -> B1 -> B2 -> B3 -> W4, in that order, inside game/trade.cpp.
+static bool ui_tr_commit(void* ctx)
+{
+  (void)ctx;
+  PendingTrade t = gs_state().trade;
+  const TradeStore st = ui_trade_store();
+  const TradeReject r = trade_execute(t, trade_wire_codec(), st, gt_now());
+  gs_state().trade = t;
+  return r == TDR_OK;
+}
+
+static void ui_tr_abort(void* ctx)
+{
+  (void)ctx;
+  PendingTrade t;
+  trade_journal_idle(t);
+  (void)ui_tr_store_journal(nullptr, t);
+}
+
+const TradeHooks* ui_trade_hooks(void)
+{
+  static const TradeHooks H = {
+    &ui_tr_journal_sent, &ui_tr_judge, &ui_tr_journal_received,
+    &ui_tr_commit, &ui_tr_abort, nullptr
+  };
+  return &H;
+}
+
+uint16_t ui_trade_quarantine(void) { return save_quarantine_mask(); }
 
 uint8_t  ui_link_battle_status(void)          { return link_battle_status(); }
 uint8_t  ui_link_battle_side(void)            { return link_battle_side(); }

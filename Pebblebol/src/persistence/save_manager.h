@@ -137,6 +137,13 @@ void save_service(void);
 
 // Writes the Box header, every occupied slot and the config to KV_CKPT, which
 // the Arduino core's wholesale erase of "nvs" cannot reach (decision D6).
+//
+// IT DELIBERATELY DOES NOT CHECKPOINT THE TRADE JOURNAL, and that is a decision
+// rather than an omission (P7-C4). The checkpoint is a snapshot of a CONSISTENT
+// Box, and game/trade.h's write order takes one immediately AFTER the journal
+// has been cleared. A mid-trade checkpoint would be a second, stale source of
+// truth for the same transaction, and the boot resolver would then have to
+// choose between two records that disagree. The "tr" key lives in KV_MAIN only.
 bool save_checkpoint_all(void);
 
 // The checkpoint CADENCE. Safe to call every tick with the wall clock: it

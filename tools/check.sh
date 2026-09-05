@@ -348,8 +348,8 @@ fi
 # THE TWO LISTS BELOW ARE DEFINED ONCE AND USED BY ALL OF THEM. Gates 1, 2 and
 # 2b read the same names, because two lists that must agree is the disagreement
 # this project keeps finding.
-PURE_NET="protocol.h protocol.cpp session.h session.cpp battle_link.h battle_link.cpp transport.h transport_loopback.cpp net_classify.h net_classify.cpp wifi_scanner.h wifi_scanner.cpp rxring.h rxring.cpp discovery.h discovery.cpp"
-PURE_NET_CPP="protocol.cpp session.cpp battle_link.cpp transport_loopback.cpp net_classify.cpp wifi_scanner.cpp rxring.cpp discovery.cpp"
+PURE_NET="protocol.h protocol.cpp session.h session.cpp battle_link.h battle_link.cpp trade_link.h trade_link.cpp transport.h transport_loopback.cpp net_classify.h net_classify.cpp wifi_scanner.h wifi_scanner.cpp rxring.h rxring.cpp discovery.h discovery.cpp"
+PURE_NET_CPP="protocol.cpp session.cpp battle_link.cpp trade_link.cpp transport_loopback.cpp net_classify.cpp wifi_scanner.cpp rxring.cpp discovery.cpp"
 # transport_espnow.* is IMPURE and that is HONEST rather than a dodge: esp_now.h's
 # two callback typedefs have no user-context argument at all, so the sink a
 # callback posts into is forced to be file-scope. A device has one radio and a
@@ -691,9 +691,10 @@ fi
 # radio in it, which is the cheapest kind of true. Now that a real radio sits
 # behind the seam it is a property that can be broken by one line, and the way
 # it breaks is somebody making the radio work by editing the session instead of
-# widening the seam. Neither file has a header guard, so the count is zero and
-# not two: they are .cpp files.
-for f in session.cpp battle_link.cpp; do
+# widening the seam. No file below has a header guard, so the count is zero and
+# not three: they are .cpp files. P7-C4 added trade_link.cpp, because the trade
+# runs over the identical seam and the identical session.
+for f in session.cpp battle_link.cpp trade_link.cpp; do
   if [ -f "$SKETCH/src/networking/$f" ]; then
     n=$( { grep -cE '^[[:space:]]*#[[:space:]]*(if|ifdef|ifndef|else|elif|endif)' \
             "$SKETCH/src/networking/$f" || true; } )

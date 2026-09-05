@@ -1725,6 +1725,11 @@ capability word is what the card uses to grey a row the peer cannot do — and t
 claims `DISC_CAP_BATTLE` only, because P7-C3 ships the linked battle and P7-C4/C5 have not
 shipped trade or breeding. A peer that claims TRADE still gets the honest answer.
 
+**UPDATED AT P7-C4:** the word is now `DISC_CAP_BATTLE | DISC_CAP_TRADE`, because an A on
+INTERCAMBIO really opens a trade session. `DISC_CAP_BREED` is STILL not claimed —
+`game/breeding.cpp` is complete and tested and no wire driver carries a breeding — so the
+sentence above holds unchanged for CRIAR, which is what a capability word is for.
+
 ### 3. `link_hold()` — a call that was not in the plan, and the reason it had to exist
 
 `link_cancel()` reaches `net_request(RADIO_OFF)`, which passes `wifi_down()`, which calls
@@ -1860,3 +1865,88 @@ where the left answered false. That is a sentence wider than the tree, so the
 sentence was narrowed to `link_is_busy(s_job)` with the dependency on
 `link_hold()` written beside it, rather than the test being stretched to cover
 an unreachable branch.
+
+---
+
+## P7-C4/C5 — the atomic trade, breeding, and the god-taint gate
+
+### The mutation table
+
+Every row was applied to the tree, the suite was run, and the named case is what
+went red. **Two of them failed nothing on the first run, and both times the
+answer was to widen the test rather than to accept the green.**
+
+| # | mutation | what failed |
+|---|---|---|
+| 1 | `W3` (the COMMIT record) is never written to flash | `a_power_cut_at_every_single_flash_write_leaves_the_box_whole` (5), `a_power_cut_inside_the_resolver_is_finished_by_the_next_boot` (55), `the_journal_names_the_id_the_incoming_pebble_will_have_here` (6), and two more |
+| 2 | the incoming id is minted at APPLY time instead of before `W3` | six cases, including both wire cases — a replayed COMMIT mints a different id and the resolver cannot tell "done" from "not started" |
+| 3 | the incoming presence test is dropped (`if (!box_id_in_use(in.id))` → `if (true)`) | the sweep (11) and the resolver sweep (14): a replay files the Pebble twice |
+| 4 | a record below COMMIT rolls FORWARD instead of back | `a_power_cut_while_the_journal_is_being_opened_rolls_the_trade_back` (6) and two more |
+| 5 | a COMMIT record rolls BACK instead of forward | four cases (24 checks) |
+| 6 | a write that did not land is IGNORED (every `if (!write) return TDR_STORE` deleted) | **NOT CAUGHT.** See below |
+| 7 | the quarantine rule is dropped from the offer path | `the_pebble_you_are_holding_is_not_for_sale_and_every_refusal_is_named` |
+| 8 | the god-taint gate is dropped from the accept path | `a_tainted_pebble_cannot_enter_a_clean_dynasty_through_a_trade`, `a_tainted_offer_is_refused_on_the_wire_by_name_and_moves_nothing` |
+| 9 | `commit_all()` stops writing the journal (the pre-existing defect, restored) | `the_checkpoint_recovery_path_no_longer_leaves_a_stale_journal_behind` |
+| 10 | `maybe_ask_player()` is not called from `on_offer()` | `a_ready_that_arrives_before_its_own_offer_still_reaches_the_player` |
+| 11 | the ladder's `SESSION_REQUEST` drops the operation byte | `the_retransmitted_session_request_still_says_which_operation_it_is` |
+| 12 | consent is not required to apply (`local_accept` no longer checked) | four cases, both files |
+| 13 | COMMIT no longer implies its sender's CONFIRM | `a_commit_frame_carries_its_senders_confirm_and_that_is_what_saves_the_pair` |
+| 14 | the responder ignores `SESSION_REQUEST.rules` | `a_battle_session_and_a_trade_session_refuse_each_other_by_name` |
+| 15 | the trade offer skips `game/trade.cpp`'s rules entirely | `the_pebble_the_player_is_holding_is_never_the_one_put_on_the_wire` (6) |
+| 16 | walking away leaves the journal behind | `a_trade_the_local_player_never_accepts_moves_nothing_and_clears_its_journal` |
+| 17 | a completed trade is reported as a lost link | `two_players_who_both_press_a_swap_one_pebble_each_and_the_box_says_so` |
+| 18 | the session is opened as a BATTLE whatever the player picked | two cases (12 checks) |
+| 19 | the second A is not required (the review auto-accepts) | two cases (17 checks) |
+| 20 | the envelope clamp is deleted | `ten_thousand_bred_pairs_never_leave_the_genesis_care_envelope` |
+| 21 | the `stage >= 1` rule is deleted from breeding | the 36 × 36 compat matrix, by species pair and by exact code |
+| 22 | the `compat_group` rule is deleted | the same matrix |
+| 23 | the taint gate is deleted from breeding | `a_clean_dynasty_refuses_a_tainted_parent_and_a_tainted_one_accepts_anything` |
+| 24 | the offspring's family always comes from parent A | `the_offspring_is_the_base_stage_of_a_parents_family_and_passes_the_validator` |
+| 25 | breeding reseeds `RNG_BREEDING` instead of installing a scripted source | `breeding_never_reseeds_or_consumes_the_shared_breeding_stream` |
+
+### Mutation 6 was not caught, and a reboot is why
+
+Deleting every `if (!write) return TDR_STORE` from `game/trade.cpp` left the
+whole kill sweep **green**. The reason is not a weak assertion, it is the shape
+of the experiment: once the fake store is dead, the RAM changes never reach
+flash either way, so a reboot cannot tell "stopped at the failure" from "carried
+on regardless". The difference is only visible **without** the reboot — a device
+whose NVS page went bad and which keeps running — so
+`a_write_that_did_not_land_stops_the_sequence_where_it_failed` asserts the two
+things a reboot hides: the call reports `TDR_STORE` rather than `TDR_OK`, and
+RAM stopped exactly where the write failed (a table of five cut points with the
+expected Box state at each). With that case in place, mutation 6 fails by name.
+
+### The two defects the lossy arm found, and why one arm would not have
+
+Both are in `docs/protocol.md` §25 with their numbers. The shape is worth
+repeating here because it is now the third time this project has found it: **an
+endpoint deciding from the arrival that happened to be last instead of from its
+own state.** P4-C5 found it in `on_action_result()`; P7-C4 found it twice more,
+in `maybe_ask_player()` and in the ladder's regeneration of `SESSION_REQUEST`.
+Neither shows on a clean link: 0 of 200 clean trials failed, 74 and 34 of 200 at
+10 % drop. **A lossy arm that runs one fault level is a lossy arm that can
+hide a defect at another**, which is why the case reports a table of four.
+
+### A named reject nothing can return is a name, not a rule
+
+`TDR_LAST_PEBBLE` was written, measured to be unreachable and deleted:
+`box_active()` runs `mask_sync()`, which repairs an `active_slot` pointing
+nowhere to the lowest occupied slot, so a Box holding one Pebble always reports
+that Pebble as active and `TDR_ACTIVE` answers first. The same test was applied
+to `BRD_UNKNOWN_SPECIES` in breeding, which WAS unreachable in the order first
+written (`validate_pebble()` answers `VR_UNKNOWN_SPECIES` before the species
+lookup could) — there the fix was to reorder the two checks so the code has a
+producer, because "this content pack does not carry that species" deserves its
+own word.
+
+### One test that cannot fail is shipped, and it says so
+
+`the_battle_variation_ceiling_is_structural_and_this_case_says_so` asserts that
+a bred genome's stat variation stays in 0..2. It **cannot fail**:
+`gvar(v) = v*3/16` folds 0..15 to 0..2 by construction and `game/validate.h`
+rule (b) already says a gene-range check is a guard nobody can break. It is here
+so the claim has an owner and a number in the output; the ceiling that CAN be
+broken is the genesis envelope, and the case beside it breaks it deliberately in
+a control arm (200 dynasties × 40 generations, unclamped: **8,655 escapes**,
+clamped: **0**) so the clamp is guarding something measurable.

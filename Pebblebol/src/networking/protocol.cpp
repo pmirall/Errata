@@ -180,6 +180,24 @@ VReject pbw_decode(const uint8_t rec[PBW_BYTES], PebbleInstance& out)
   return VR_OK;
 }
 
+uint16_t trade_rec_crc(const uint8_t rec[PBW_BYTES])
+{
+  return get_u16(rec + PBW_OFF_CRC);
+}
+
+uint16_t trade_pair_crc(const uint8_t initiator_rec[PBW_BYTES],
+                        const uint8_t responder_rec[PBW_BYTES])
+{
+  // ONE crc16 over 96 bytes in a FIXED order. Not the two record CRCs xored or
+  // summed, which would be symmetric and could not tell "A gives X and B gives
+  // Y" from "A gives Y and B gives X" - the exact confusion a CONFIRM replayed
+  // onto a reversed pair would exploit.
+  uint8_t both[(size_t)PBW_BYTES * 2u];
+  memcpy(both, initiator_rec, (size_t)PBW_BYTES);
+  memcpy(both + PBW_BYTES, responder_rec, (size_t)PBW_BYTES);
+  return crc16_ccitt(both, sizeof both);
+}
+
 // =============================================================================
 //  THE FRAME
 // =============================================================================
@@ -254,8 +272,14 @@ ProtoErr proto_encode(const ProtoMsg& m, uint8_t* buf, size_t cap, size_t& n_out
   if (m.type == (uint8_t)PT_TEAM_SUBMIT &&
       (m.p.team.count < 1u || m.p.team.count > (uint8_t)BATTLE_TEAM_MAX))
     return PE_COUNT_RANGE;
-  if (m.type == (uint8_t)PT_SESSION_REQUEST && m.p.sreq.rules != 0u)
-    return PE_RESERVED;
+  // SESSION_REQUEST.rules WAS A RESERVED BYTE AND IS NOW THE OPERATION (P7-C4).
+  // The frame carries which of the operations spec section 42 offers the two
+  // devices are about to run - a battle or a trade - because it is the last
+  // moment before a Pebble is on the wire at which the two can still disagree
+  // cheaply. The codec does NOT range-check it, for the reason protocol.h gives
+  // about TEAM_VALIDATION.bad_index: it has no memory-safety consequence here
+  // and the session FSM is the layer that knows which operations this build
+  // speaks. An unknown one is refused BY NAME one layer up (SD_OP).
 
   memset(buf, 0, n);                     // every reserved byte of every payload
   buf[0] = m.version;
@@ -296,7 +320,8 @@ ProtoErr proto_encode(const ProtoMsg& m, uint8_t* buf, size_t cap, size_t& n_out
       q[5] = m.p.sacc.team_count;
       q[6] = m.p.sacc.lvl_lo;
       q[7] = m.p.sacc.lvl_hi;
-      break;
+      q[8] = m.p.sacc.op_echo;
+      break;                                        // q[9..11] reserved
     case PT_TEAM_SUBMIT:
       q[0] = m.p.team.count;
       put_u16(q + 2, m.p.team.team_crc);
@@ -342,6 +367,21 @@ ProtoErr proto_encode(const ProtoMsg& m, uint8_t* buf, size_t cap, size_t& n_out
     case PT_GOODBYE:
       q[0] = m.p.bye.reason;
       break;
+    case PT_TRADE_OFFER:
+      memcpy(q + 4, m.p.toffer.rec, (size_t)PBW_BYTES);
+      break;                                        // q[0..3] reserved
+    case PT_TRADE_READY:
+      q[0] = m.p.tready.verdict;
+      q[1] = m.p.tready.policy;
+      put_u16(q + 2, m.p.tready.offer_crc_echo);
+      break;
+    case PT_TRADE_CONFIRM:
+      q[0] = m.p.tconfirm.accept;
+      put_u16(q + 2, m.p.tconfirm.pair_crc);
+      break;
+    case PT_TRADE_COMMIT:
+      put_u16(q + 2, m.p.tcommit.pair_crc);
+      break;                                        // q[0..1] reserved
     default:
       return PE_TYPE;         // unreachable: header_rules_ok() already refused
   }
@@ -430,9 +470,9 @@ ProtoErr proto_decode(const uint8_t* buf, size_t n, uint32_t expect_session,
       m.p.caps.hash_basis  = get_u32(q + 12);
       break;
     case PT_SESSION_REQUEST:
-      // `rules` has exactly one defined value today, so a nonzero one is a rule
-      // set we do not speak - the same argument as a reserved byte.
-      if (q[7] != 0u || !all_zero(q + 8, 4)) return PE_RESERVED;
+      // q[7] IS THE OPERATION SINCE P7-C4 and is no longer required to be zero.
+      // See the encoder for why it is not range-checked here.
+      if (!all_zero(q + 8, 4)) return PE_RESERVED;
       m.p.sreq.nonce_a    = get_u32(q + 0);
       m.p.sreq.team_count = q[4];
       m.p.sreq.lvl_lo     = q[5];
@@ -440,12 +480,14 @@ ProtoErr proto_decode(const uint8_t* buf, size_t n, uint32_t expect_session,
       m.p.sreq.rules      = q[7];
       break;
     case PT_SESSION_ACCEPT:
-      if (!all_zero(q + 8, 4)) return PE_RESERVED;
+      // q[8] IS THE OPERATION ECHO SINCE P7-C4; q[9..11] are still reserved.
+      if (!all_zero(q + 9, 3)) return PE_RESERVED;
       m.p.sacc.nonce_b    = get_u32(q + 0);
       m.p.sacc.verdict    = q[4];
       m.p.sacc.team_count = q[5];
       m.p.sacc.lvl_lo     = q[6];
       m.p.sacc.lvl_hi     = q[7];
+      m.p.sacc.op_echo    = q[8];
       break;
     case PT_TEAM_SUBMIT: {
       if (q[1] != 0u) return PE_RESERVED;
@@ -507,6 +549,26 @@ ProtoErr proto_decode(const uint8_t* buf, size_t n, uint32_t expect_session,
     case PT_GOODBYE:
       if (!all_zero(q + 1, 3)) return PE_RESERVED;
       m.p.bye.reason = q[0];
+      break;
+    case PT_TRADE_OFFER:
+      if (!all_zero(q + 0, 4)) return PE_RESERVED;
+      // THE RECORD STAYS RAW, exactly as TEAM_SUBMIT's do: pbw_decode() is the
+      // caller's to run, straight into the instance it means to fill.
+      memcpy(m.p.toffer.rec, q + 4, (size_t)PBW_BYTES);
+      break;
+    case PT_TRADE_READY:
+      m.p.tready.verdict        = q[0];
+      m.p.tready.policy         = q[1];
+      m.p.tready.offer_crc_echo = get_u16(q + 2);
+      break;
+    case PT_TRADE_CONFIRM:
+      if (q[1] != 0u) return PE_RESERVED;
+      m.p.tconfirm.accept   = q[0];
+      m.p.tconfirm.pair_crc = get_u16(q + 2);
+      break;
+    case PT_TRADE_COMMIT:
+      if (!all_zero(q + 0, 2)) return PE_RESERVED;
+      m.p.tcommit.pair_crc = get_u16(q + 2);
       break;
     default:
       return PE_TYPE;         // unreachable: step 6 already refused

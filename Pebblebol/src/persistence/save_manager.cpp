@@ -567,6 +567,20 @@ static bool commit_all(GameState& gs) {
   ok = save_config(gs.cfg) && ok;
   ok = save_inventory(gs.inv) && ok;
   ok = save_cooldowns(gs.cds) && ok;
+  // THE TRADE JOURNAL, AND IT WAS MISSING (found by P7-C4's survey, fixed here).
+  // This function rewrites a whole state that flash does not hold - after a
+  // migration and after "Recuperar" on the SAVE ERROR screen - and it wrote
+  // five of the six blobs. save_restore_checkpoint() calls state_defaults(),
+  // which sets tmp.trade to IDLE in RAM, so before this line RAM said IDLE and
+  // FLASH still held the old "tr" record: the next boot read the flash copy and
+  // resolved a trade against a Box restored from a checkpoint that predates it.
+  // The v1 migration branch had the same hole from the other direction.
+  //
+  // IT WRITES A SEALED IDLE RECORD RATHER THAN kv_erase()ing THE KEY, on
+  // purpose: an absent key and a rotted key look identical to single_load()
+  // (both fail), and what the resolver wants to know is "there is nothing
+  // pending", which only a record can say.
+  ok = save_trade_journal(gs.trade) && ok;
   return ok;
 }
 

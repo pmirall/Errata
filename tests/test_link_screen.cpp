@@ -59,6 +59,9 @@
 #include "networking/battle_link.h"
 #include "networking/discovery.h"
 #include "networking/session.h"
+#include "networking/trade_link.h"
+#include "game/trade.h"
+#include "networking/protocol.h"
 #include "networking/transport.h"
 #include "ui/screen.h"
 #include "ui/screen_battle.h"
@@ -276,6 +279,56 @@ static void peer_init(void) {
   g_peer_moves = 0;
 }
 
+// -----------------------------------------------------------------------------
+//  THE PEER, AS A TRADER (P7-C4)
+//
+//  The SAME Session, the SAME codec and the REAL networking/trade_link.cpp -
+//  only its journal and its Box are a model, because game/box.cpp is a
+//  file-scope singleton and the ONE real Box in this process belongs to the
+//  screen under test. That is the same split tests/test_trade.cpp makes and for
+//  the same reason.
+// -----------------------------------------------------------------------------
+static TradeLink g_peer_tl;
+static int       g_peer_trade_commits = 0;
+static int       g_peer_trade_aborts  = 0;
+static uint8_t   g_peer_judge = 0;          // what the peer says about OUR record
+
+static bool    ptr_sent(void* c, uint32_t a, uint32_t b) { (void)c;(void)a;(void)b; return true; }
+static uint8_t ptr_judge(void* c, const uint8_t r[48])   { (void)c;(void)r; return g_peer_judge; }
+static bool    ptr_recv(void* c, const uint8_t r[48])    { (void)c;(void)r; return true; }
+static bool    ptr_commit(void* c) { (void)c; ++g_peer_trade_commits; return true; }
+static void    ptr_abort(void* c)  { (void)c; ++g_peer_trade_aborts; }
+static const TradeHooks g_peer_hooks = {
+  &ptr_sent, &ptr_judge, &ptr_recv, &ptr_commit, &ptr_abort, nullptr
+};
+
+// Re-opens the peer as a TRADE session offering one Pebble of its own.
+static void peer_init_trade(uint32_t pebble_id) {
+  memset(&g_peer, 0, sizeof g_peer);
+  memset(&g_peer_tl, 0, sizeof g_peer_tl);
+  g_peer_trade_commits = 0;
+  g_peer_trade_aborts  = 0;
+  g_peer_judge = 0;
+
+  SessionCfg cfg;
+  memset(&cfg, 0, sizeof cfg);
+  cfg.tp        = &g_tp1;
+  cfg.tl        = &g_peer_tl;
+  cfg.op        = (uint8_t)SOP_TRADE;
+  cfg.device_id = g_peer_id;
+  cfg.nonce     = 0x5EED0002u;
+  cfg.lvl_lo    = 1u;
+  cfg.lvl_hi    = (uint8_t)XP_LEVEL_MAX;
+  session_init(g_peer, cfg);
+
+  PebbleInstance mine;
+  make_member(mine, 7u, 11u, pebble_id);
+  CHECK_EQ((int)session_set_trade(g_peer, mine), (int)VR_OK);
+  trade_link_init(g_peer_tl, g_peer, mine.id, g_peer_hooks);
+  g_peer_ai_ready = false;
+  g_peer_moves = 0;
+}
+
 // THE PEER'S CONSENT. Nothing above this line puts a frame on the wire; this
 // is the far device's player pressing A.
 static void peer_consent(void) {
@@ -283,9 +336,16 @@ static void peer_consent(void) {
   session_start(g_peer, g_now);
 }
 
+// Set false to model a peer whose player never presses the SECOND A - the one
+// that agrees to these two Pebbles rather than to this peer.
+static bool g_peer_accepts_trade = true;
+
 static void peer_step(void) {
   if (!g_peer_live) return;
   session_poll(g_peer, g_now);
+  if (g_peer_accepts_trade && trade_link_wants_consent(g_peer)) {
+    trade_link_accept(g_peer);
+  }
   if (link_wants_action(g_peer)) {
     if (!g_peer_ai_ready) {
       battle_ai_init(g_peer_ai, g_peer.side, 0xA11CE001u);
@@ -336,6 +396,7 @@ static void harness_reset(uint32_t my_id, uint32_t peer_id) {
   lf_bind_transport(&g_tp0);
   lf_set_pet_name("BOLOTA");
   g_peer_live = false;
+  g_peer_accepts_trade = true;
   box_fixture(3u);
   peer_init();
   nav_goto((uint8_t)SCR_LINK);
@@ -530,18 +591,175 @@ TEST(an_operation_the_peer_cannot_do_is_refused_by_name_and_opens_nothing) {
   CHECK_EQ(g_backs, 0);
 }
 
-// A PEER THAT CLAIMS TRADE STILL GETS THE HONEST ANSWER: the protocol is
-// P7-C4's, the ROW is P7-C2's, and the two are different sentences.
+// A CAPABILITY THIS BUILD HAS NO PROTOCOL FOR STILL GETS THE HONEST ANSWER, and
+// after P7-C4 that is CRIAR and no longer INTERCAMBIO. game/breeding.cpp is
+// complete and tested; no wire driver carries a breeding, and the row says so
+// rather than opening a session that could only ever end in a timeout.
 TEST(a_capability_this_build_has_no_protocol_for_says_so_and_opens_nothing) {
   harness_reset(0x11110000u, 0x22220000u);
   see_peer((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE | DISC_CAP_BREED), -40, 0u);
   link_input(GST_HOLD_R);
-  while (link_screen_op() != (uint8_t)LOP_TRADE) link_input(GST_TAP_L);
+  while (link_screen_op() != (uint8_t)LOP_BREED) link_input(GST_TAP_L);
   g_toast = STR_EMPTY;
   link_input(GST_HOLD_R);
   CHECK_EQ(g_toast, STR_UI_SOON);
   CHECK_EQ(lf_binds(), 0);
   CHECK_EQ(link_screen_session_state(), (uint8_t)SS_IDLE);
+  CHECK_EQ(link_screen_mode(), (uint8_t)LKM_CARD);
+}
+
+// =============================================================================
+//  THE TRADE, THROUGH THE SCREEN (P7-C4)
+//
+//  The whole five-step exchange, driven by two gestures a player could make and
+//  no back door. The journal here is a MODEL (tests/fakes/link_fake.h says
+//  exactly what is fake and what is not); the atomicity of the five flash
+//  writes is tests/test_trade.cpp's subject. What THIS binary proves is that
+//  the SCREEN offers the right Pebble, refuses the ones the rules refuse, asks
+//  the player before anything moves, and that the real Box really swaps.
+// =============================================================================
+static uint32_t offered_id(void) {
+  const uint8_t sl = link_trade_slot();
+  const PebbleInstance* p = (sl < (uint8_t)BOX_SLOTS) ? box_peek(sl) : nullptr;
+  return p ? p->id : 0u;
+}
+
+static uint8_t traded_in_box(void) {
+  uint8_t n = 0;
+  for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
+    const PebbleInstance* p = box_peek(i);
+    if (p && (p->flags & (uint8_t)PBF_TRADED) != 0u) n++;
+  }
+  return n;
+}
+
+TEST(two_players_who_both_press_a_swap_one_pebble_each_and_the_box_says_so) {
+  harness_reset(0x11110000u, 0x22220000u);
+  peer_init_trade(0x7EE0BEEFu);
+  see_peer((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE), -40, 0u);
+
+  consent_to((uint8_t)LOP_TRADE);
+  CHECK_EQ(link_screen_mode(), (uint8_t)LKM_WAIT);
+  CHECK_EQ(lf_binds(), 1);
+  CHECK_EQ(link_screen_op(), (uint8_t)LOP_TRADE);
+  // NOT THE ACTIVE ONE. game/trade.h's TDR_ACTIVE is why, and box_fixture()
+  // makes slot 0 active.
+  CHECK(link_trade_slot() != box_active());
+  const uint32_t out_id = offered_id();
+  CHECK(out_id != 0u);
+
+  peer_consent();
+  for (int i = 0; i < 400 && !link_trade_wants_consent(); ++i) tick(50u);
+  CHECK(link_trade_wants_consent());
+  CHECK_EQ((int)link_trade_phase(), (int)TLP_ASK_PLAYER);
+
+  // BOTH OFFERS ARE ON THE TABLE AND BOTH WERE VALIDATED ON BOTH SIDES, AND
+  // NOTHING HAS MOVED. This is the state the second A exists for.
+  CHECK_EQ((int)box_count(), 3);
+  CHECK(box_id_in_use(out_id));
+  CHECK_EQ((int)traded_in_box(), 0);
+  CHECK_EQ(lf_trade_commits(), 0);
+  CHECK_EQ(g_peer_trade_commits, 0);
+  CHECK_EQ((int)lf_trade_phase(), (int)TRADE_RECEIVED);   // W1 and W2 are down
+  CHECK_EQ((long long)lf_trade_out_id(), (long long)out_id);
+  // The frame the player is looking at draws inside the panel.
+  fb_reset(); link_render(); CHECK_EQ(fb_oob(), 0u);
+
+  link_input(GST_HOLD_R);                       // THE SECOND CONSENT
+  for (int i = 0; i < 400 && link_screen_mode() == (uint8_t)LKM_WAIT; ++i) tick(50u);
+
+  CHECK_EQ(lf_trade_commits(), 1);
+  CHECK_EQ(g_peer_trade_commits, 1);
+  CHECK_EQ((int)link_screen_end_reason(), (int)SE_DONE);
+  CHECK_EQ(link_screen_mode(), (uint8_t)LKM_ENDED);
+  // THE BOX SWAPPED, and it is the REAL game/box.cpp.
+  CHECK_EQ((int)box_count(), 3);
+  CHECK(!box_id_in_use(out_id));
+  CHECK_EQ((int)traded_in_box(), 1);
+  CHECK_EQ((int)lf_trade_phase(), (int)TRADE_IDLE);       // W4 cleared it
+  // AND THE RADIO IS BACK. A trade that ends leaves nothing bound.
+  CHECK_EQ(lf_unbinds(), 1);
+  CHECK(!lf_bound());
+  fb_reset(); link_render(); CHECK_EQ(fb_oob(), 0u);
+}
+
+TEST(a_trade_the_local_player_never_accepts_moves_nothing_and_clears_its_journal) {
+  harness_reset(0x11110000u, 0x22220000u);
+  peer_init_trade(0x7EE0CAFEu);
+  see_peer((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE), -40, 0u);
+  consent_to((uint8_t)LOP_TRADE);
+  const uint32_t out_id = offered_id();
+  const uint32_t before = box_fingerprint();
+
+  peer_consent();
+  for (int i = 0; i < 400 && !link_trade_wants_consent(); ++i) tick(50u);
+  CHECK(link_trade_wants_consent());
+
+  // The player looks at it and never presses A. Both ladders run out.
+  for (int i = 0; i < 800 && link_screen_mode() == (uint8_t)LKM_WAIT; ++i) tick(200u);
+  CHECK_EQ(link_screen_mode(), (uint8_t)LKM_LOST);
+  CHECK_EQ((int)link_screen_end_reason(), (int)SE_LOST);
+  CHECK_EQ(lf_trade_commits(), 0);
+  CHECK_EQ(g_peer_trade_commits, 0);
+  CHECK(box_id_in_use(out_id));
+  CHECK_EQ((long long)box_fingerprint(), (long long)before);      // byte-identical
+  // THE JOURNAL IS CLEARED HERE AND NOT LEFT FOR THE NEXT BOOT. The boot
+  // resolver stays the backstop for the case this cannot reach - the power cut.
+  CHECK_EQ((int)lf_trade_phase(), (int)TRADE_IDLE);
+  CHECK(lf_trade_aborts() > 0);
+  CHECK_EQ(lf_unbinds(), 1);
+}
+
+TEST(the_pebble_the_player_is_holding_is_never_the_one_put_on_the_wire) {
+  harness_reset(0x11110000u, 0x22220000u);
+  peer_init_trade(0x7EE0D00Du);
+  see_peer((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE), -40, 0u);
+
+  // The BOX armed the ACTIVE slot. game/trade.cpp refuses it, and the refusal
+  // is a sentence the player can act on rather than a silent substitution of a
+  // different Pebble - which is the failure mode the comment at pick_trade_slot()
+  // names.
+  link_leave();
+  link_arm_intent((uint8_t)LOP_TRADE, box_active());
+  link_enter();
+  see_peer((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE), -40, 0u);
+  g_toast = STR_EMPTY;
+  consent_to((uint8_t)LOP_TRADE);
+  CHECK_EQ(g_toast, STR_LK_TR_ACTIVE);
+  CHECK_EQ(lf_binds(), 0);
+  CHECK_EQ(link_screen_mode(), (uint8_t)LKM_CARD);
+  CHECK_EQ((int)link_trade_slot(), (int)BOX_SLOT_NONE);
+
+  // A QUARANTINED SLOT IS REFUSED TOO, and by its own name. save_manager.h:
+  // "A quarantined Pebble may be shown to its owner. It may NOT enter a battle
+  // or a trade" - P7's obligation, discharged where the offer is made.
+  link_leave();
+  link_arm_intent((uint8_t)LOP_TRADE, 1u);
+  link_enter();
+  see_peer((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE), -40, 0u);
+  lf_set_quarantine((uint16_t)(1u << 1));
+  g_toast = STR_EMPTY;
+  consent_to((uint8_t)LOP_TRADE);
+  CHECK_EQ(g_toast, STR_LK_TR_QUARANTINED);
+  CHECK_EQ(lf_binds(), 0);
+}
+
+TEST(a_peer_that_refuses_our_pebble_is_answered_by_name_and_nothing_moves) {
+  harness_reset(0x11110000u, 0x22220000u);
+  peer_init_trade(0x7EE0FEEDu);
+  g_peer_judge = (uint8_t)TDR_TAINT;        // the far device's policy says no
+  see_peer((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE), -40, 0u);
+  consent_to((uint8_t)LOP_TRADE);
+  const uint32_t before = box_fingerprint();
+  peer_consent();
+  for (int i = 0; i < 800 && link_screen_mode() == (uint8_t)LKM_WAIT; ++i) tick(50u);
+
+  CHECK_EQ(link_screen_mode(), (uint8_t)LKM_LOST);
+  CHECK_EQ((int)link_screen_end_reason(), (int)SE_REJECTED);
+  CHECK_EQ(lf_trade_commits(), 0);
+  CHECK_EQ((long long)box_fingerprint(), (long long)before);
+  CHECK_EQ((int)lf_trade_phase(), (int)TRADE_IDLE);
+  CHECK_EQ(lf_unbinds(), 1);
 }
 
 // THE BOX'S ENTRY POINT: an operation and a Pebble, pre-selected, consenting to

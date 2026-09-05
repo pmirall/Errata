@@ -166,13 +166,35 @@ enum SessionState : uint8_t {
   SS_IDLE = 0,   // no session; only HELLO is meaningful
   SS_HELLO,      // our HELLO is out, waiting for the peer's
   SS_CAPS,       // versions on the wire, waiting for the peer's
-  SS_SESSION,    // SESSION_REQUEST / SESSION_ACCEPT: the band and the seed
+  SS_SESSION,    // SESSION_REQUEST / SESSION_ACCEPT: the band, the seed AND the
+                 // OPERATION (SessionOp) - the last cheap moment to disagree
   SS_TEAM,       // TEAM_SUBMIT / TEAM_VALIDATION: the validator runs on BOTH sides
   SS_VERIFY,     // the round-1 agreement barrier: one open hash each
   SS_BATTLE,     // the lockstep (networking/battle_link.cpp)
   SS_ENDING,     // BATTLE_END exchanged; rewards commit HERE and nowhere else
+  // P7-C4. APPENDED AFTER SS_ENDING AND NOT INSERTED NEXT TO SS_TEAM, although
+  // that is where it belongs in the story: three places compare this enum with
+  // `<` (`state < SS_SESSION`, `state < SS_TEAM`), so inserting a value in the
+  // middle would silently change what "an earlier phase" means. The state table
+  // in docs/protocol.md carries the reading order; this enum carries the
+  // numbering, and the two are allowed to differ as long as one of them says so.
+  SS_TRADE,      // TRADE_OFFER / READY / CONFIRM / COMMIT (networking/trade_link.cpp)
   SS_CLOSED,     // terminal
   SS_STATE_COUNT
+};
+
+// WHAT THE TWO DEVICES AGREED TO DO. Carried in ProtoSessionReq.rules - a byte
+// that was reserved until P7-C4 - and echoed in ProtoSessionAcc.op_echo, so a
+// mismatch is named (SD_OP) at the last moment before a Pebble is on the wire
+// rather than discovered by one side sending a frame the other cannot place.
+//
+// A DEVICE RUNS ONE OPERATION PER SESSION. There is no mode switch inside a
+// live session and there must not be: the consent the player gave on the LINK
+// card (ui/screen_link.h) was consent to THIS operation.
+enum SessionOp : uint8_t {
+  SOP_BATTLE = 0,
+  SOP_TRADE,
+  SOP_COUNT
 };
 
 enum SessionRole : uint8_t { SR_UNSET = 0, SR_INITIATOR, SR_RESPONDER };
@@ -219,6 +241,13 @@ enum SessionDetail : uint8_t {
   SD_TX_BUDGET,        // SESSION_MAX_TX
   SD_BAND,             // the level band was refused
   SD_VERDICT,          // SESSION_ACCEPT carried a nonzero verdict
+  SD_OP,               // the two devices are here to do different things
+  SD_TRADE_REFUSED,    // the peer's TradeReject on our offer: a legal Pebble it
+                       // will not take. NOT a VReject, for game/taint.h's reason
+  SD_TRADE_STORE,      // OUR OWN flash refused a write inside the trade journal.
+                       // A local fault, named as one rather than blamed on the
+                       // peer, and the journal is what finishes it at the next
+                       // boot
   SD_DETAIL_COUNT
 };
 
@@ -302,14 +331,18 @@ const LinkEvent* link_log_at(const LinkLog& l, uint16_t i);
 //  a hashed team and never a second 780 B BattleSetup - the linked path borrows
 //  the one ui/screen_battle.cpp already owns at file scope.
 // -----------------------------------------------------------------------------
+struct TradeLink;           // networking/trade_link.h, caller-owned like the rest
+
 struct SessionCfg {
   const Transport* tp;
   BattleSetup*     setup;
   BattleState*     st;
   BattleLog*       blog;      // may be nullptr
   LinkLog*         llog;      // may be nullptr
+  TradeLink*       tl;        // may be nullptr; REQUIRED when op is SOP_TRADE
   uint32_t         device_id; // the tie-break that fixes the roles
   uint32_t         nonce;     // from RNG_MISC ("tokens, nonces, PINs, canaries")
+  uint8_t          op;        // SessionOp, agreed with the peer in SS_SESSION
   uint8_t          lvl_lo;    // the level band this device will accept, inclusive
   uint8_t          lvl_hi;
 };
@@ -321,6 +354,7 @@ struct Session {
   BattleState*     st;
   BattleLog*       blog;
   LinkLog*         llog;
+  TradeLink*       tl;
 
   // --- identity
   uint32_t device_id, peer_device_id;
@@ -330,6 +364,7 @@ struct Session {
 
   // --- role and state
   uint8_t  role, side, state, lvl_lo, lvl_hi;
+  uint8_t  op;                 // SessionOp: what this session is FOR
 
   // --- the sequence window (see the banner)
   uint16_t tx_seq, rx_seq_last;
@@ -381,6 +416,15 @@ struct Session {
 //  API
 // -----------------------------------------------------------------------------
 void session_init(Session& s, const SessionCfg& cfg);
+
+// FREEZES THE ONE PEBBLE THIS DEVICE IS OFFERING IN A TRADE. The trade twin of
+// session_set_team(), and a SEPARATE function rather than a count of one,
+// because validate_battle_ready() must NOT run here: hp_cur == 0 / PBS_FAINTED
+// is a legal thing to have stored and therefore a legal thing to trade, and
+// game/validate.h says exactly that about why the rule lives outside the shared
+// body. Everything else is identical - the Pebble is encoded to the 48 B record
+// and the record is the only copy the session ever reads again.
+VReject session_set_trade(Session& s, const PebbleInstance& p);
 
 // Freezes the local team: it is ENCODED to the wire here and decoded back
 // through pbw_decode() when the battle is built, so the local team enters the

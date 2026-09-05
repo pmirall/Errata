@@ -15,6 +15,7 @@
 #include "../core/crc16.h"
 #include "../data/content_version.h"
 #include "battle_link.h"
+#include "trade_link.h"
 
 // -----------------------------------------------------------------------------
 //  THE EVENT RING - the BattleLog idiom, including the saturating `dropped`.
@@ -100,7 +101,7 @@ uint16_t session_team_crc(const uint8_t rec[BATTLE_TEAM_MAX][PBW_BYTES])
 // -----------------------------------------------------------------------------
 static const char* const SS_NAMES[] = {
   "SS_IDLE", "SS_HELLO", "SS_CAPS", "SS_SESSION", "SS_TEAM", "SS_VERIFY",
-  "SS_BATTLE", "SS_ENDING", "SS_CLOSED"
+  "SS_BATTLE", "SS_ENDING", "SS_TRADE", "SS_CLOSED"
 };
 static_assert(sizeof(SS_NAMES) / sizeof(SS_NAMES[0]) == (size_t)SS_STATE_COUNT,
               "a SessionState was added without its name");
@@ -117,7 +118,7 @@ static const char* const SD_NAMES[] = {
   "SD_OPEN_HASH", "SD_INPUTS", "SD_RULES", "SD_RESTATED", "SD_PROBE",
   "SD_ROUND_GAP", "SD_SETUP", "SD_END_DISAGREE", "SD_PEER_GOODBYE",
   "SD_INTERNAL", "SD_BO_ABORT", "SD_ACTION_REJECT", "SD_RX_BUDGET",
-  "SD_TX_BUDGET", "SD_BAND", "SD_VERDICT"
+  "SD_TX_BUDGET", "SD_BAND", "SD_VERDICT", "SD_OP", "SD_TRADE_REFUSED", "SD_TRADE_STORE"
 };
 static_assert(sizeof(SD_NAMES) / sizeof(SD_NAMES[0]) == (size_t)SD_DETAIL_COUNT,
               "a SessionDetail was added without its name");
@@ -307,6 +308,8 @@ void session_init(Session& s, const SessionCfg& cfg)
   s.st     = cfg.st;
   s.blog   = cfg.blog;
   s.llog   = cfg.llog;
+  s.tl     = cfg.tl;
+  s.op     = (cfg.op < (uint8_t)SOP_COUNT) ? cfg.op : (uint8_t)SOP_BATTLE;
   s.device_id   = cfg.device_id;
   s.nonce_local = cfg.nonce;
   s.lvl_lo = cfg.lvl_lo;
@@ -318,6 +321,21 @@ void session_init(Session& s, const SessionCfg& cfg)
   s.end.bad_index = 0xFFu;
   if (s.setup != nullptr) battle_setup_clear(*s.setup);
   if (s.st != nullptr) memset(s.st, 0, sizeof *s.st);
+}
+
+VReject session_set_trade(Session& s, const PebbleInstance& p)
+{
+  memset(s.my_rec, 0, sizeof s.my_rec);
+  s.my_count = 0u;
+  // THE ONE VALIDATOR, and ONLY it. validate_battle_ready() is deliberately not
+  // called - see session.h. A trade is not a battle and a fainted Pebble is a
+  // legal thing to give away.
+  const VReject r = validate_pebble(p);
+  if (r != VR_OK) return r;
+  pbw_encode(p, s.my_rec[0]);
+  s.my_count = 1u;
+  s.team_crc_local = session_team_crc(s.my_rec);
+  return VR_OK;
 }
 
 VReject session_set_team(Session& s, const PebbleInstance* m, uint8_t count,
@@ -364,6 +382,7 @@ static void send_request(Session& s)
   m.p.sreq.team_count = s.my_count;
   m.p.sreq.lvl_lo     = s.lvl_lo;
   m.p.sreq.lvl_hi     = s.lvl_hi;
+  m.p.sreq.rules      = s.op;        // P7-C4: the operation, not a reserved byte
   session_emit(s, m);
 }
 
@@ -561,8 +580,14 @@ static bool band_acceptable(const Session& s, uint8_t lo, uint8_t hi)
   return (lo >= s.lvl_lo) && (hi <= s.lvl_hi);
 }
 
-static void enter_team(Session& s)
+// THE FORK BETWEEN THE TWO OPERATIONS, AND THE ONLY ONE IN THIS FILE. Everything
+// above it - HELLO, CAPABILITIES, the roles, the band, the nonces, the shared
+// seed, the sequence window and the ladder - is the same code for a battle and
+// for a trade, which is the point of agreeing the operation in the handshake
+// rather than building a second session.
+static void enter_operation(Session& s)
 {
+  if (s.op == (uint8_t)SOP_TRADE) { trade_link_begin(s); return; }
   if (!load_own_team(s)) { session_close(s, SE_PROTOCOL, (uint8_t)SD_INTERNAL); return; }
   send_team(s);
   s.waiting_for = (uint8_t)PT_TEAM_VALIDATION;
@@ -577,7 +602,24 @@ static void on_session_request(Session& s, const ProtoMsg& m)
   r.p.sacc.team_count = s.my_count;
   r.p.sacc.lvl_lo     = m.p.sreq.lvl_lo;
   r.p.sacc.lvl_hi     = m.p.sreq.lvl_hi;
-  if (!band_acceptable(s, m.p.sreq.lvl_lo, m.p.sreq.lvl_hi)) {
+  r.p.sacc.op_echo    = s.op;         // OURS, whatever was asked: on a refusal
+                                      // it is what tells the initiator why
+  // THE OPERATION IS CHECKED BEFORE THE BAND, because a level band is a rule
+  // about a battle and it is meaningless for a trade: refusing "1..30 is
+  // outside my band" to a device that came to trade would answer the wrong
+  // question. Both players consented to an operation on their own LINK card
+  // (ui/screen_link.h) and this is where the two consents are compared.
+  if (m.p.sreq.rules != s.op) {
+    r.p.sacc.verdict = 0u;
+    session_emit(s, r);
+    send_goodbye(s, (uint8_t)SE_REJECTED);
+    session_close(s, SE_REJECTED, (uint8_t)SD_OP);
+    return;
+  }
+  // A BATTLE IS THE ONLY OPERATION WITH A BAND. Keeping the check inside the
+  // battle arm is what stops a trade being refused for a reason a trade does
+  // not have.
+  if (s.op == (uint8_t)SOP_BATTLE && !band_acceptable(s, m.p.sreq.lvl_lo, m.p.sreq.lvl_hi)) {
     r.p.sacc.verdict = (uint8_t)VR_LEVEL_OUT_OF_BAND;
     session_emit(s, r);
     send_goodbye(s, (uint8_t)SE_REJECTED);
@@ -591,8 +633,10 @@ static void on_session_request(Session& s, const ProtoMsg& m)
   s.lvl_hi = m.p.sreq.lvl_hi;
   // The responder submits its team UNPROMPTED, before it has seen the
   // initiator's: an honest implementation therefore CANNOT counter-pick, which
-  // is the exact boundary of that claim - see docs/protocol.md.
-  enter_team(s);
+  // is the exact boundary of that claim - see docs/protocol.md. The same is
+  // true of a trade offer, and for the stronger reason: neither player may see
+  // what is being offered before committing what they offer.
+  enter_operation(s);
 }
 
 static void on_session_accept(Session& s, const ProtoMsg& m)
@@ -601,12 +645,16 @@ static void on_session_accept(Session& s, const ProtoMsg& m)
     session_close(s, SE_REJECTED, (uint8_t)m.p.sacc.verdict);
     return;
   }
+  if (m.p.sacc.op_echo != s.op) {
+    session_close(s, SE_REJECTED, (uint8_t)SD_OP);
+    return;
+  }
   if (m.p.sacc.lvl_lo != s.lvl_lo || m.p.sacc.lvl_hi != s.lvl_hi) {
     session_close(s, SE_PROTOCOL, (uint8_t)SD_BAND);
     return;
   }
   s.nonce_peer = m.p.sacc.nonce_b;
-  enter_team(s);
+  enter_operation(s);
 }
 
 static void on_team_validation(Session& s, const ProtoMsg& m)
@@ -667,7 +715,11 @@ bool session_reanswer_earlier_phase(Session& s, const ProtoMsg& m)
       send_caps(s);
       return true;
     case PT_SESSION_REQUEST: {
-      if (s.role != (uint8_t)SR_RESPONDER || s.state < (uint8_t)SS_TEAM) return false;
+      // SS_TRADE is numbered ABOVE SS_CLOSED's neighbours (session.h says why),
+      // so the "we are past the handshake" test is spelt out rather than left
+      // to a comparison that would be false for exactly one state.
+      if (s.role != (uint8_t)SR_RESPONDER) return false;
+      if (s.state < (uint8_t)SS_TEAM && s.state != (uint8_t)SS_TRADE) return false;
       s.hs_reack++;
       session_note(s, LEK_REACK, m.type, 0u, 0u, m.seq);
       ProtoMsg r; session_prepare(s, r, PT_SESSION_ACCEPT, 0u);
@@ -675,6 +727,7 @@ bool session_reanswer_earlier_phase(Session& s, const ProtoMsg& m)
       r.p.sacc.nonce_b = s.nonce_local; r.p.sacc.team_count = s.my_count;
       r.p.sacc.verdict = 0u;
       r.p.sacc.lvl_lo = s.lvl_lo; r.p.sacc.lvl_hi = s.lvl_hi;
+      r.p.sacc.op_echo = s.op;
       session_emit(s, r);
       return true;
     }
@@ -754,6 +807,9 @@ static void dispatch(Session& s, const ProtoMsg& m)
     case SS_ENDING:
       link_on_msg(s, m);
       break;
+    case SS_TRADE:
+      trade_link_on_msg(s, m);
+      break;
     case SS_CLOSED:
     default:
       break;                       // terminal: everything is dropped
@@ -789,6 +845,17 @@ static void resend(Session& s)
         m.flags = (uint8_t)PF_RETX;
         m.p.sreq.nonce_a = s.nonce_local; m.p.sreq.team_count = s.my_count;
         m.p.sreq.lvl_lo = s.lvl_lo; m.p.sreq.lvl_hi = s.lvl_hi;
+        // THE OPERATION, AND THIS LINE IS THE ONE P7-C4 FORGOT FIRST. The
+        // ladder REGENERATES a frame from state rather than replaying stored
+        // bytes (session.h), so a field added to a message is TWO edits and not
+        // one - the sender and the regeneration - and a field missed here does
+        // not fail on a clean link, only on a lossy one. MEASURED: the
+        // retransmitted request carried rules 0 (SOP_BATTLE) while its sender
+        // was trading, so the responder refused SD_OP and the initiator read
+        // the refusal's SESSION_ACCEPT as an agreement. 34 of 200 trials at
+        // 10 % drop, and 0 of 200 on a clean link - which is why
+        // tests/test_trade.cpp's lossy arm is a table and not a single run.
+        m.p.sreq.rules = s.op;
         session_emit(s, m);
       }
       break;
@@ -810,6 +877,9 @@ static void resend(Session& s)
     case SS_BATTLE:
     case SS_ENDING:
       link_resend(s);
+      break;
+    case SS_TRADE:
+      trade_link_resend(s);
       break;
     default:
       break;

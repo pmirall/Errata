@@ -38,10 +38,10 @@ arrays**, which is what catches an endianness shortcut a grep could not.
 
 | off | sz | field | rule |
 |---|---|---|---|
-| 0 | 1 | `version` | `== 1`, `static_assert`ed equal to `core/version.h`'s `PROTOCOL_VERSION` |
-| 1 | 1 | `type` | 1..12, §15's order. **0 is reserved**, so an all-zero buffer is not a frame |
+| 0 | 1 | `version` | `== 2` since P7-C4, `static_assert`ed equal to `core/version.h`'s `PROTOCOL_VERSION` |
+| 1 | 1 | `type` | 1..16 — §15's twelve in §15's order, then P7-C4's four trade types **appended after them**. **0 is reserved**, so an all-zero buffer is not a frame |
 | 2 | 1 | `flags` | `PF_RETX 0x01` — "this is a retransmission", **diagnostic only, never branched on**. Every other bit must be 0 |
-| 3 | 1 | `round` | 1..60 for BATTLE_STATE, ACTION, ACTION_RESULT and ROUND_RESULT; **0 for the other eight**. A per-type rule in the same table as the length |
+| 3 | 1 | `round` | 1..60 for BATTLE_STATE, ACTION, ACTION_RESULT and ROUND_RESULT; **0 for the other twelve** — a trade has no rounds. A per-type rule in the same table as the length |
 | 4 | 4 | `session` | 0 on HELLO (which predates the session); the session id on the other eleven |
 | 8 | 2 | `seq` | per-sender, **fresh on every frame including retransmissions** — see §4 |
 | 10 | 2 | `ack` | **diagnostic only**: carried, logged, never compared. `test_protocol.cpp` fuzzes it across a whole round trip |
@@ -53,6 +53,36 @@ arrays**, which is what catches an endianness shortcut a grep could not.
 **148**, computed at compile time, with
 `static_assert(14 + 148 + 2 <= 250)` for ESP-NOW. A cap picked by hand at 200
 would reserve 52 bytes of attack surface for messages that do not exist.
+
+**P7-C4 added four types and it did NOT move that number**, which is worth
+saying because this document used to claim the opposite (see §7 item 18, now
+corrected). `TRADE_OFFER` is 4 + 48 = **52** bytes, comfortably under the 148
+`TEAM_SUBMIT` already costs. The version bump was mandatory for a different
+reason: the **type space was closed** at 1..12 and `proto_decode()` refuses
+anything else with `PE_TYPE`, so there was no way to add a message without one.
+
+| type | name | len | payload |
+|---|---|---|---|
+| 13 | `TRADE_OFFER` | 52 | 4 reserved bytes, then the 48 B wire Pebble **kept raw** — the caller runs `pbw_decode()` straight into the instance it means to fill, exactly as `TEAM_SUBMIT`'s records are |
+| 14 | `TRADE_READY` | 4 | `verdict` (a `VReject`), `policy` (a `TradeReject`), `offer_crc_echo`. **Two refusal bytes and not one**, because they are two enums: the record was refused by the one validator, or it is a legal Pebble this device will not take. The one type in the protocol with no reserved payload byte |
+| 15 | `TRADE_CONFIRM` | 4 | `accept`, 1 reserved, `pair_crc` |
+| 16 | `TRADE_COMMIT` | 4 | 2 reserved, `pair_crc` |
+
+There is **no `offer_crc` field**: the 48 B record already carries its own CRC at
+`PBW_OFF_CRC`, so `trade_rec_crc()` reads the offer's identity out of the record
+rather than transmitting a second copy that could disagree with it.
+`trade_pair_crc()` is one CRC over **both** records in the canonical order (the
+initiator's first) — deliberately **order-dependent**, because a symmetric
+identity could not tell "A gives X for Y" from "A gives Y for X", which is
+exactly what a CONFIRM replayed onto a reversed pair would exploit.
+
+**Two reserved bytes became fields in the same bump.** `SESSION_REQUEST.rules`
+(payload byte 7) now carries the `SessionOp` — a battle or a trade — and
+`SESSION_ACCEPT.op_echo` (payload byte 8) carries the responder's answer. The
+codec does **not** range-check either, for the reason it does not range-check
+`TEAM_VALIDATION.bad_index`: no memory-safety consequence here, and the session
+FSM is the layer that knows which operations this build speaks. An unknown one
+is refused by name one layer up (`SD_OP`).
 
 **Why the CRC is last.** `crc16_ccitt(p, n)` is one-shot with no continuation
 seed. A header-embedded CRC splits the covered span into two runs and would need
@@ -203,7 +233,7 @@ and the lockstep rests on an object both sides built the same way.
 ## 3. The state table
 
 **States:** `SS_IDLE, SS_HELLO, SS_CAPS, SS_SESSION, SS_TEAM, SS_VERIFY,
-SS_BATTLE, SS_ENDING, SS_CLOSED`. One terminal state; *why* is
+SS_BATTLE, SS_ENDING, SS_TRADE, SS_CLOSED`. One terminal state; *why* is
 `SessionEnd.reason` ∈ `SE_DONE, SE_LOST, SE_DESYNC, SE_REJECTED, SE_PROTOCOL,
 SE_INCOMPATIBLE, SE_LOCAL_CANCEL`.
 
@@ -302,12 +332,36 @@ SESSION_REQUEST, the responder waits → SS_SESSION. *a named word differs*:
 GOODBYE, `SE_INCOMPATIBLE(word)`. *words equal, basis differs*:
 `SE_PROTOCOL(SD_BASIS_SKEW)`.
 
-**SS_SESSION** — *responder rx SESSION_REQUEST, band acceptable*: SESSION_ACCEPT
-**and immediately, unprompted, TEAM_SUBMIT** → SS_TEAM. *band unacceptable*:
+**SS_SESSION** — *responder rx SESSION_REQUEST, operation and band acceptable*:
+SESSION_ACCEPT **and immediately, unprompted, the operation's first frame** —
+TEAM_SUBMIT → SS_TEAM for a battle, TRADE_OFFER → SS_TRADE for a trade.
+*operation differs*: SESSION_ACCEPT(`op_echo` = OURS), GOODBYE,
+`SE_REJECTED(SD_OP)` — **checked BEFORE the band**, because a level band is a
+rule about a battle and refusing "1..30 is outside my band" to a device that came
+to trade answers the wrong question. *band unacceptable (a battle only)*:
 SESSION_ACCEPT(verdict), GOODBYE, `SE_REJECTED(SD_BAND)`. *initiator rx
-SESSION_ACCEPT(0)*: TEAM_SUBMIT → SS_TEAM. *initiator rx SESSION_REQUEST*:
-dropped and counted — both-initiator glare is forbidden by the device-id rule, so
-it is a modified or reflected peer, not a race.
+SESSION_ACCEPT(0) with a matching `op_echo`*: the operation's first frame →
+SS_TEAM or SS_TRADE. *`op_echo` differs*: `SE_REJECTED(SD_OP)`. *initiator rx
+SESSION_REQUEST*: dropped and counted — both-initiator glare is forbidden by the
+device-id rule, so it is a modified or reflected peer, not a race.
+
+**SS_TRADE** (P7-C4, `networking/trade_link.cpp`) — *rx TRADE_OFFER, first one*:
+`pbw_decode()` (which IS `validate_pebble()`), then the game layer's POLICY hook;
+on OK journal `W2` and send TRADE_READY(OK, OK); on either refusal send
+TRADE_READY carrying it and `SE_REJECTED`. *rx TRADE_OFFER, same bytes*: a
+re-answer — send TRADE_READY again, advance nothing, leash 16. *rx TRADE_OFFER,
+different bytes*: `SE_PROTOCOL(SD_TEAM_CHANGED)` — the consent a player is about
+to give names one specific pair. *rx TRADE_READY echoing our record*: record both
+verdicts; a non-OK VReject is `SE_REJECTED(verdict)` and a non-zero TradeReject is
+`SE_REJECTED(SD_TRADE_REFUSED)`; otherwise, **if both halves are now in, ask the
+player**. *the player presses A*: send TRADE_CONFIRM. *rx TRADE_CONFIRM for this
+pair, with our own confirm already given*: run the journal's `W3→B1→B2→B3→W4`,
+send TRADE_COMMIT. *rx TRADE_COMMIT*: it IMPLIES its sender's confirm, so apply if
+our player has agreed and `SE_PROTOCOL(SD_TRADE_REFUSED)` if they have not — a
+COMMIT can only follow a CONFIRM. *both applied and both COMMITs seen*: `SE_DONE`.
+*a local write did not land*: `SE_PROTOCOL(SD_TRADE_STORE)` — a LOCAL fault, named
+as one rather than blamed on the peer, and the journal is what finishes it at the
+next boot. *ladder expires*: `SE_LOST`, and the journal rolls back.
 
 **SS_TEAM** — *rx TEAM_SUBMIT, first*: `pbw_decode` × count → `validate_team` →
 `validate_level_band` → `validate_battle_ready` → **the cross-team id check** →
@@ -687,11 +741,17 @@ sees.
     48 B with nine spare bytes and a nickname needs thirteen, so reversing any of
     it needs a separate message, not a wider record.
 18. **The protocol is not forward compatible and does not pretend to be.** Any
-    type outside 1..12, any version other than 1, any length other than its
-    type's exact length and any non-zero reserved byte is refused. There is no
-    downgrade path. P7's trade messages will exceed `PROTO_PAYLOAD_MAX 148` and
-    the answer must be a **version bump**, not quietly raising the cap toward 234
-    where it breaks ESP-NOW irreversibly.
+    type outside 1..16, any version other than `PROTO_VERSION`, any length other
+    than its type's exact length and any non-zero reserved byte is refused.
+    There is no downgrade path.
+
+    **THIS ITEM USED TO CARRY A FALSE PREDICTION AND P7-C4 MEASURED IT.** It
+    said "P7's trade messages will exceed `PROTO_PAYLOAD_MAX 148` and the answer
+    must be a version bump". A `TRADE_OFFER` is 52 bytes; the cap did not move
+    and never needed to. The bump was mandatory anyway — the **type space** was
+    closed at 1..12 — so the conclusion survived and the reason for it did not.
+    Keeping the wrong reason would have taught the next reader to watch the
+    wrong number.
 19. **Nothing is confidential.** Teams cross in clear. A passive listener in P7
     learns the whole roster, both device ids and the session id. Not addressed
     here and not addressable at this layer.
@@ -740,3 +800,97 @@ confirmed reports `won == 0`, writes no Box and touches no ledger. The screen pr
 line for it (`UI_LKB_BROKEN`, "Enlace interrumpido") rather than "has perdido", because a
 divergence and a lost radio are not defeats and printing them as one is the same mistake as
 `BO_ABORT` printing as "Empate".
+
+---
+
+## 9. What P7-C4 added TO this protocol, and the two defects the measurement found
+
+**The wire moved this time.** `PROTOCOL_VERSION` went 1 → 2, four types were
+appended (13..16), and two reserved bytes became fields. §1 has the table; this
+section is the design and the evidence.
+
+### 23. A trade is five wire steps and three journal phases, and the two counts differ on purpose
+
+```
+  OFFER      both sides put their 48 B record on the wire, UNPROMPTED and before
+             either has seen the other's - so no player can choose what to give
+             after seeing what is on offer
+  validate   each side decodes the other's through pbw_decode(), which IS
+             validate_pebble(), and then applies the POLICY its game layer owns
+  READY      each side reports its two verdicts: a VReject and a TradeReject
+  CONFIRM    each player presses A on their own device
+  COMMIT     "I have applied it" - and it IMPLIES its sender's CONFIRM
+```
+
+`persistence/save_schema.h`'s `PendingTrade.phase` encodes **three** non-idle
+phases and not five, because only three of the steps change what BOOT has to do:
+nothing is at risk until our offer is out (`TRADE_SENT`), then until theirs is
+journalled (`TRADE_RECEIVED`), then the exchange is decided (`TRADE_COMMIT`).
+The plan's "fault injection at each of the 5 phases" is about the wire steps; the
+journal's three are the ones a reboot can tell apart, and `tests/test_trade.cpp`
+sweeps **every flash write** rather than either count.
+
+### 24. COMMIT subsumes CONFIRM, and what that does and does not buy
+
+A device applies when it holds **both** confirms. If A's CONFIRM is lost, B never
+applies — so B reads A's COMMIT as "A confirmed AND A applied" and applies on it.
+Losing the exchange now needs a CONFIRM *and* a COMMIT to be lost together for a
+whole nine-rung ladder rather than one frame.
+
+**It does not make the exchange atomic across the pair and nothing can.** Two
+parties over a lossy link with no third party cannot: the last message of any
+handshake is unacknowledged, and whichever side owns the commit decision at that
+moment can commit while the other does not. §7 (LIMITS) already says where that
+asymmetry falls for battle rewards; `game/trade.h` says where it falls here, and
+`tests/test_trade.cpp` **measures the residual** instead of asserting it away:
+
+| arm | trials | completed on both | on neither | SPLIT |
+|---|---|---|---|---|
+| clean | 200 | 200 | 0 | **0** |
+| 10 % drop | 200 | 200 | 0 | **0** |
+| 10 % drop + dup + reorder | 200 | 200 | 0 | **0** |
+| 30 % drop, 20 % reorder | 200 | 195 | 5 | **0** |
+
+Zero split trials in 800 is a measurement over this loopback and this fault
+model, **not** a proof: the model is a uniform independent per-frame drop, which
+is not what a 2.4 GHz room does, and §5's sentence about what a green fault run
+is evidence for applies here word for word.
+
+### 25. Two defects the lossy arm found, both invisible on a clean link
+
+Neither would have been caught by a table that ran one arm, and neither is a
+typo. They are the same shape as the R4 hole in §3: **an endpoint deciding from
+the arrival that happened to be last instead of from its own state.**
+
+1. **A READY that arrived before its own OFFER stranded the pair.** The two
+   frames are re-sent on the same ladder rung, so a single drop is enough and no
+   reordering is needed. `maybe_ask_player()` was called only from the READY
+   handler, so an endpoint that received them in that order sat in `TLP_REVIEW`
+   with both halves in hand and waited out its whole ladder. **74 of 200 trials
+   at 10 % drop, 183 of 200 at 30 %.** It is now called from both handlers, and
+   `a_ready_that_arrives_before_its_own_offer_still_reaches_the_player` kills
+   exactly one OFFER to pin it.
+
+2. **The ladder's regeneration of `SESSION_REQUEST` dropped the new operation
+   byte.** The ladder rebuilds a frame *from state* rather than replaying stored
+   bytes (§4), so a field added to a message is **two edits, not one** — the
+   sender and the regeneration — and a field missed in the second place fails
+   only on a link that loses the first copy. The retransmitted request said
+   `rules = 0` (a battle) while its sender was trading, so the responder refused
+   `SD_OP` and the initiator read the refusal's `SESSION_ACCEPT` as an agreement.
+   **34 of 200 at 10 % drop, 0 of 200 clean.** Pinned by
+   `the_retransmitted_session_request_still_says_which_operation_it_is`, which
+   kills exactly one `SESSION_REQUEST` so the retransmission is the first the
+   responder ever sees.
+
+### 26. The operation is negotiated in the handshake, at the last cheap moment
+
+`SESSION_REQUEST.rules` carries the `SessionOp` and `SESSION_ACCEPT.op_echo`
+answers it. A mismatch is `SE_REJECTED(SD_OP)` on **both** sides before a Pebble
+is on the wire. It is checked **before the level band**, because a band is a rule
+about a battle and refusing "1..30 is outside my band" to a device that came to
+trade would answer the wrong question.
+
+A device runs **one operation per session** and there is no mode switch inside a
+live one: the consent the player gave on the LINK card was consent to *this*
+operation.

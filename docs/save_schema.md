@@ -163,6 +163,47 @@ so a rebooting player reaches the honest daily ceiling sooner but never higher).
 resolved at the next boot, so a power cut can neither duplicate nor vaporise a
 Pebble.
 
+**IT HAS A READER SINCE P7-C4, AND UNTIL THEN IT DID NOT.** `save_load_all()`
+loaded the record into `gs.trade` and `grep -rn 'gs.trade' app/ ui/ game/`
+returned nothing: the journal was bytes nobody used. `app_setup()` now calls
+`boot_trade()` between the load and the pet binding, and `game/trade.h` owns
+what each phase means:
+
+| phase found at boot | what happens |
+|---|---|
+| absent, CRC bad, or `TRADE_IDLE` | nothing — `single_load()` fails and `gs.trade` stays at its defaults |
+| `TRADE_SENT` | **roll back**: clear the journal. No Box byte was ever written |
+| `TRADE_RECEIVED` | **roll back**: ditto. The peer's record was journalled, never filed |
+| `TRADE_COMMIT` | **roll forward, idempotently**: two independent presence tests, each a no-op when already done |
+
+**`in_wire` carries the id the incoming Pebble will have LOCALLY, not the id its
+sender gave it.** The local id is minted with `box_mint_id()` *before* the COMMIT
+record is written, patched into the record at `PBW_OFF_ID` and the record's own
+CRC resealed. Minting it afterwards would produce a *different* id on a replayed
+COMMIT — `next_id_counter` moves — and the resolver could not tell "already
+done" from "not yet started". `reserved[2]` cannot hold a `uint32_t`, which is
+why the id goes inside the record rather than beside it.
+
+**`commit_all()` writes this key, and it did not before P7-C4.** It rewrites a
+whole state that flash does not hold — after a migration and after the SAVE
+ERROR screen's "Recuperar" — and it wrote five of the six blobs. RAM said IDLE
+and flash still held the old record, so the next boot resolved a trade against a
+Box restored from a checkpoint that predates it. It writes a sealed IDLE record
+rather than erasing the key, because an absent key and a rotted key look
+identical to `single_load()` and what the resolver needs to know is "there is
+nothing pending", which only a record can say.
+
+**`save_checkpoint_all()` does NOT checkpoint it, deliberately.** The checkpoint
+is a snapshot of a *consistent* Box and the write order takes one immediately
+after the journal is cleared; a mid-trade checkpoint would be a second, stale
+source of truth for one transaction.
+
+**THE ONE RESIDUAL, written down rather than implied:** a `tr` record that is
+written cleanly and then ROTS fails `blob_ok`, so `single_load()` leaves
+`gs.trade` at IDLE and a half-applied Box would never be finished. The blob is
+single-key by design (no `seq`, no second copy to choose between), so pairing it
+is not a free change; the window is milliseconds wide.
+
 ## 4. Key table
 
 Every key is ASCII and ≤ 15 characters (`NVS_KEY_NAME_MAX_SIZE` is 16 with the

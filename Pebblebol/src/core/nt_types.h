@@ -303,6 +303,13 @@ static_assert(sizeof(Genome) == 16, "Genome must be exactly 16 bytes");
 #define GENE_NEUTRAL    8
 #define GENESIS_GENE_MIN 4
 #define GENESIS_GENE_MAX 12
+// luck is a 3-bit gene (0..7), so the same proportional band applies to it.
+// DEFINED HERE AND NOT IN game/genome.cpp SINCE P7-C5: game/breeding.cpp clamps
+// a bred child back into exactly the band genome_genesis() rolls in, and two
+// copies of that band in two files is the disagreement this project keeps
+// finding. genome.cpp reads these; it no longer owns them.
+#define GENESIS_LUCK_MIN 2
+#define GENESIS_LUCK_MAX 6
 
 // Temperament classes
 enum Temperament : uint8_t {

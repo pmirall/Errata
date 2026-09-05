@@ -129,7 +129,13 @@ TEST(every_way_a_beacon_can_be_wrong_has_its_own_named_code)
     { "empty datagram",         -1, 0,     0u, DE_LEN },
     { "first magic byte",        0, 'X',  24u, DE_MAGIC },
     { "second magic byte",       1, 'X',  24u, DE_MAGIC },
-    { "a future protocol",       2, 2u,   24u, DE_VERSION },
+    // DERIVED FROM THE MACRO AND NOT A LITERAL. It was `2` until P7-C4 bumped
+    // PROTOCOL_VERSION to 2, at which point this case wrote the CURRENT version
+    // into the byte, changed nothing, and asserted DE_VERSION against a beacon
+    // that was still perfectly good - a case that had quietly stopped testing
+    // its own rule.
+    { "a future protocol",       2, (uint8_t)((uint8_t)PROTOCOL_VERSION + 1u),
+                                       24u, DE_VERSION },
     { "an unknown kind",         3, 9u,   24u, DE_KIND },
     { "a flipped id byte",       4, 0x02, 24u, DE_CRC },   // the CRC sees it first
     { "a flipped name byte",    10, 'X',  24u, DE_CRC },

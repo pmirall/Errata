@@ -742,6 +742,21 @@ enum StrId : uint16_t {
   STR_LK_HELP,
   STR_BT_WAIT_PEER,
 
+  // P7-C4. THE BOOT RESOLVER'S TWO ANSWERS. A trade that was interrupted by a
+  // power cut is finished or undone before the player sees anything, and these
+  // are how the device says which - the alternative is a Pebble silently
+  // appearing or silently going.
+  STR_TR_RESOLVED,
+  STR_TR_ROLLED_BACK,
+  // The two offer rules a player can act on. A refusal that says only "no" is
+  // a refusal the player cannot answer.
+  STR_LK_TR_ACTIVE,
+  STR_LK_TR_QUARANTINED,
+  // The third answer the boot resolver can give, and the one nobody wants:
+  // the outgoing Pebble had already left and the incoming record will not
+  // decode. Saying "cancelado" there would be a lie.
+  STR_TR_LOST,
+
   STR_COUNT
 };
 
@@ -1370,6 +1385,11 @@ inline constexpr const char* const ES[] = {
   , /* STR_LK_RADIO_ERR */         "Radio no disponible"
   , /* STR_LK_HELP */              "Acerca otro Pebblebol y pulsad A en los dos."
   , /* STR_BT_WAIT_PEER */         "Esperando al rival"
+  , /* STR_TR_RESOLVED */          "Intercambio completado"
+  , /* STR_TR_ROLLED_BACK */       "Intercambio cancelado"
+  , /* STR_LK_TR_ACTIVE */         "Guarda ese Pebble primero"
+  , /* STR_LK_TR_QUARANTINED */    "Ese Pebble no es válido"
+  , /* STR_TR_LOST */              "Intercambio incompleto"
 };
 
 // -----------------------------------------------------------------------------

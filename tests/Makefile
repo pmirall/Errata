@@ -177,6 +177,7 @@ $(BIN)/test_protocol:   $(OBJ)/protocol.o $(OBJ)/validate.o $(OBJ)/pebble.o \
 # along for nothing else than the shared fixture builder the validator test
 # already uses.
 $(BIN)/test_session:    $(OBJ)/session.o $(OBJ)/battle_link.o \
+                        $(OBJ)/trade_link.o \
                         $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
                         $(OBJ)/validate.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
                         $(OBJ)/pebble.o $(OBJ)/evolution.o $(OBJ)/xp.o \
@@ -286,9 +287,43 @@ $(BIN)/test_discovery:  $(OBJ)/discovery.o $(OBJ)/activity.o $(OBJ)/crc16.o
 # session.cpp" is a thing this binary demonstrates rather than a sentence in a
 # header. That is why the session's whole object set is here.
 $(BIN)/test_link_transport: $(OBJ)/rxring.o $(OBJ)/session.o $(OBJ)/battle_link.o \
+                        $(OBJ)/trade_link.o \
                         $(OBJ)/protocol.o $(OBJ)/validate.o $(OBJ)/battle.o \
                         $(OBJ)/battle_ai.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
+# P7-C5: BREEDING. The REAL game/genome.cpp (breeding is a thin policy over it),
+# the REAL game/box.cpp (the child is filed by the tree's one constructor) and
+# the REAL game/validate.cpp (it is run on the child before the slot is kept).
+# species.o is the accessor layer species_base_of_family() lives in, and it is
+# also the translation unit that instantiates every generated table's guards.
+# NO networking object: game/breeding.cpp is pure and the shared seed arrives as
+# a uint32_t, which is the whole reason the determinism case can run two
+# "devices" in one process.
+$(BIN)/test_breeding:   $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/validate.o \
+                        $(OBJ)/species.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
+# P7-C4: THE ATOMIC TRADE. The whole binary is REAL SHIPPING CODE and one fake:
+# game/trade.cpp drives the journal, persistence/save_manager.cpp performs the
+# writes, tests/fakes/kv_mem.cpp is the store that can be killed at write k, and
+# game/box.cpp is the Box the invariant is asserted on. The networking half -
+# session.o, trade_link.o, protocol.o and the loopback - is here because the
+# five WIRE steps and the three JOURNAL phases are one property, and the only
+# way to see the pair invariant is to run both endpoints over a real link.
+#
+# migration.o comes with save_manager.o as it always does; validate.o drags the
+# pair it always drags (evolution.o + xp.o call each other); species.o is the
+# accessor layer AND the translation unit that instantiates every generated
+# table's compile-time guards.
+$(BIN)/test_trade:      $(OBJ)/trade.o $(OBJ)/box.o $(OBJ)/save_manager.o \
+                        $(OBJ)/migration.o $(OBJ)/kv_mem.o \
+                        $(OBJ)/trade_link.o $(OBJ)/session.o \
+                        $(OBJ)/battle_link.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
+                        $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
+                        $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
 
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 # The minigame contract and the PURE logic of every game. No draw objects and
@@ -333,6 +368,7 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/screen_time.o $(OBJ)/screen_view.o \
                $(OBJ)/screen_link.o $(OBJ)/screen_diag.o \
                $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/battle_link.o \
+               $(OBJ)/trade_link.o $(OBJ)/trade.o \
                $(OBJ)/protocol.o $(OBJ)/link_fake.o \
                $(OBJ)/screen_evolution.o $(OBJ)/screen_creator.o \
                $(OBJ)/screen_network.o $(OBJ)/screen_encounter.o \
@@ -421,6 +457,7 @@ $(BIN)/test_screens:    $(SCREEN_OBJS) $(MG_FRAME_OBJS)
 $(BIN)/test_link_screen: $(OBJ)/screen_link.o $(OBJ)/screen_battle.o \
                         $(OBJ)/battle_renderer.o $(OBJ)/xbm_mirror.o \
                         $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/battle_link.o \
+                        $(OBJ)/trade_link.o $(OBJ)/trade.o \
                         $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
                         $(OBJ)/validate.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
                         $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/pebble.o \

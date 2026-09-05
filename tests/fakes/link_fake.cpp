@@ -7,7 +7,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "game/box.h"
+#include "game/trade.h"
 #include "networking/discovery.h"
+#include "networking/protocol.h"
+#include "networking/trade_link.h"
 #include "networking/transport.h"
 #include "ui/screen_link.h"
 #include "ui/ui.h"
@@ -37,6 +41,8 @@ static const Transport* g_tp = nullptr;
 static uint32_t g_nonce = 0x1234ABCDu;
 static char     g_name[NAME_MAX_LEN + 1] = "BOLOTA";
 
+void lf_trade_reset(void);
+
 void lf_reset(void) {
   memset(g_q, 0, sizeof g_q);
   g_head = g_count = 0;
@@ -49,6 +55,7 @@ void lf_reset(void) {
   g_tp = nullptr;
   g_nonce = 0x1234ABCDu;
   snprintf(g_name, sizeof g_name, "BOLOTA");
+  lf_trade_reset();
 }
 
 void lf_set_start_ok(bool ok)   { g_start_ok = ok; }
@@ -181,3 +188,82 @@ uint32_t ui_link_battle_move_ms_left(uint32_t now_ms) {
   return link_battle_move_ms_left(now_ms);
 }
 void     ui_link_battle_done(void)            { link_battle_done(); }
+
+// -----------------------------------------------------------------------------
+//  THE TRADE'S SEAMS. See link_fake.h for exactly what is fake here (the flash,
+//  and only the flash).
+// -----------------------------------------------------------------------------
+static PendingTrade g_journal;
+static uint16_t     g_quarantine = 0;
+static int          g_commits    = 0;
+static int          g_aborts     = 0;
+
+static bool lf_store_journal(void* ctx, const PendingTrade& t)
+{
+  (void)ctx; g_journal = t; return true;
+}
+static bool lf_store_slot(void* ctx, uint8_t slot) { (void)ctx; (void)slot; return true; }
+static bool lf_store_box(void* ctx)                { (void)ctx; return true; }
+static void lf_store_ckpt(void* ctx)               { (void)ctx; }
+
+static bool lf_journal_sent(void* ctx, uint32_t out_id, uint32_t peer_id)
+{
+  (void)ctx;
+  trade_journal_sent(g_journal, out_id, peer_id);
+  return true;
+}
+static uint8_t lf_judge(void* ctx, const uint8_t rec[48])
+{
+  (void)ctx;
+  PebbleInstance in;
+  if (pbw_decode(rec, in) != VR_OK) return (uint8_t)TDR_PEER_INVALID;
+  const PebbleInstance* mine = box_peek(link_trade_slot());
+  if (mine == nullptr) return (uint8_t)TDR_NO_SLOT;
+  return (uint8_t)trade_accept_check(*mine, in, 0xA0A0A0A0u, link_trade_peer_id());
+}
+static bool lf_journal_received(void* ctx, const uint8_t rec[48])
+{
+  (void)ctx;
+  trade_journal_received(g_journal, rec);
+  return true;
+}
+static bool lf_commit(void* ctx)
+{
+  (void)ctx;
+  TradeStore st;
+  st.write_journal = &lf_store_journal;
+  st.write_slot    = &lf_store_slot;
+  st.write_box     = &lf_store_box;
+  st.checkpoint    = &lf_store_ckpt;
+  st.ctx           = nullptr;
+  PendingTrade t = g_journal;
+  const TradeReject r = trade_execute(t, trade_wire_codec(), st, 1700000000u);
+  g_journal = t;
+  if (r == TDR_OK) ++g_commits;
+  return r == TDR_OK;
+}
+static void lf_abort(void* ctx)
+{
+  (void)ctx; ++g_aborts; trade_journal_idle(g_journal);
+}
+
+static const TradeHooks g_trade_hooks = {
+  &lf_journal_sent, &lf_judge, &lf_journal_received, &lf_commit, &lf_abort, nullptr
+};
+
+const TradeHooks* ui_trade_hooks(void)  { return &g_trade_hooks; }
+uint16_t ui_trade_quarantine(void)      { return g_quarantine; }
+
+void lf_trade_reset(void)
+{
+  trade_journal_idle(g_journal);
+  g_quarantine = 0;
+  g_commits = 0;
+  g_aborts  = 0;
+}
+
+void     lf_set_quarantine(uint16_t m)  { g_quarantine = m; }
+uint8_t  lf_trade_phase(void)           { return g_journal.phase; }
+int      lf_trade_commits(void)         { return g_commits; }
+int      lf_trade_aborts(void)          { return g_aborts; }
+uint32_t lf_trade_out_id(void)          { return g_journal.out_id; }

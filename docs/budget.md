@@ -351,3 +351,83 @@ IMAGE for the first time. Every one of them existed at P7-C1 and none of them wa
 from `setup()`, so `--gc-sections` dropped the lot; P7-C2 is the commit that gives them a
 caller. The same will NOT happen again for P7-C4 and P7-C5 — `trade_link.cpp` and
 `breed_link.cpp` add their own frames to a codec that is now already linked.
+
+
+---
+
+## 6. Phase 7, chunks 4 and 5 — the atomic trade and breeding (measured 2026-09-05)
+
+All seven matrix variants, P7-C3 -> P7-C5:
+
+| Variant | flash before | flash after | Δ flash | globals before | globals after | Δ globals |
+|---|---|---|---|---|---|---|
+| baseline | 1,985,080 | 1,993,954 | +8,874 | 80,340 | 80,484 | +144 |
+| no-ble | 1,272,472 | 1,281,332 | +8,860 | 56,844 | 56,988 | +144 |
+| no-web | 1,927,092 | 1,935,958 | +8,866 | 78,292 | 78,436 | +144 |
+| no-god | 1,972,716 | 1,981,584 | +8,868 | 80,180 | 80,324 | +144 |
+| sh1106 | 1,985,080 | 1,993,954 | +8,874 | 80,340 | 80,484 | +144 |
+| all-off | 569,632 | 578,508 | +8,876 | 26,236 | 26,380 | +144 |
+| **release** | **1,260,236** | **1,269,108** | **+8,872** | **56,668** | **56,812** | **+144** |
+
+### Where the globals went
+
+There is **one new object of any size in the whole chunk**, and it is caller-owned
+for the reason everything else on this screen is:
+
+`riscv32-esp-elf-nm -S` over the RELEASE `.elf`, and the four symbols below are
+**the whole of the +144**:
+
+| symbol | bytes | what it is |
+|---|---|---|
+| `ui/screen_link.cpp`'s `s_tl` | **140** (0x8c) | the caller-owned `TradeLink`: two 48 B wire records, the five hooks + ctx (24 B), the pair and offer CRCs, and twelve state bytes |
+| `s_trade_slot` | 1 | which Box slot is on the wire |
+| `app/app.cpp`'s `g_trade_toast` | 2 | the boot resolver's answer, queued for the first HOME frame |
+| `game/trade.cpp`'s `s_last_reject` | 1 | a diagnostic; nothing branches on it |
+| **total** | **144** | and the measured image delta is 144 |
+
+**`ui/ui.cpp`'s `TradeHooks` table is `static const`**, so it is `.rodata` and
+costs flash rather than RAM — and `networking/trade_link.cpp` holds no file-scope
+mutable at all, which `tools/check.sh` gates by filename exactly as it does for
+`session.cpp` and `battle_link.cpp`.
+
+**THERE IS NO SECOND JOURNAL AND NO SECOND BOX.** `game/trade.cpp` drives the
+write order through a `TradeStore` of four function pointers and mutates the ONE
+`GameState` `persistence/game_state.cpp` owns; the 64 B `PendingTrade` has lived
+inside `GameState` since P2-C9 and is not new RAM.
+
+### Where the flash went, and why it is a tenth of P7-C2's
+
+P7-C2 cost 26 KB because the session, the codec, the peer table and the wire half
+of the validator entered the image for the first time — every one of them existed
+at P7-C1 and none was reachable from `setup()`, so `--gc-sections` had dropped the
+lot. That is exactly what P7-C2's budget section predicted would NOT happen again,
+and it did not: `game/trade.cpp`, `networking/trade_link.cpp` and
+`game/breeding.cpp` add their own frames to a codec that was already linked.
+
+**`game/breeding.cpp` IS NOT IN THE RELEASE IMAGE, AND THAT WAS MEASURED RATHER
+THAN ASSUMED.** `riscv32-esp-elf-nm -S` over the release `.elf` finds no
+`breed_check`, no `breed_compute`, no `breed_commit` and no `genome_breed`:
+nothing reachable from `setup()` calls any of them — `breed_link.cpp` is not
+built and the LINK card's CRIAR row answers "Aún no está listo" — so
+`--gc-sections` dropped the whole module. **So the +8,872 above is the TRADE's,
+end to end, and breeding costs the shipping artefact nothing because the shipping
+artefact cannot breed.** That is the fact behind the plan's sentence rather than
+an inference from it, and it is the number to watch when `breed_link.cpp` lands:
+the module is 196 lines of pure integer code and it will appear then, not before.
+
+**This is the phase-6 defect's shape, caught with a `nm` instead of a bug
+report.** P6 found that the SHIPPING build never advanced game time, for four
+phases, because a default lived inside a dev-only function; the discipline that
+came out of it is to ask what the RELEASE artefact does, not what the build in
+front of you compiles. `game/trade.cpp` IS in the image — `trade_journal_sent`,
+`trade_journal_live`, `trade_wire_codec`, `save_trade_journal`, the app's four
+store shims and `s_tl` are all there — because `app_setup()` calls the boot
+resolver and `ui/screen_link.cpp` opens trade sessions. Breeding is not, and the
+plan says so in the one place a reader will look.
+
+### What it leaves
+
+`release` is **1,269,108 / 56,812** = **79.3 % of `GATE_RELEASE_FLASH_MAX`** and
+**87.4 % of `GATE_RELEASE_GLOBALS_MAX`** — **8,188 B of globals free** for
+`breed_link.cpp`, phase 8's creator and phases 9-10, with `ble_social.cpp`'s
+23,504 B still available to reclaim the day two boards have linked.
