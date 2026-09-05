@@ -530,4 +530,27 @@ if [ -d "$SKETCH/src" ]; then
   [ "$n" -eq 0 ] || fail "a PIN_ macro is defined outside core/config.h ($n) - while D1 and D8 are open the pin map has exactly one home (spec section 68 r3)"
 fi
 
+# --- P6-C2: ONE PLACE PAYS THE ACTIVITY SCORE -----------------------------
+# game/activity.h's whole anti-farm argument rests on the score being NOTED in
+# several places and PAID in exactly one: the notes are capped, day-bucketed and
+# deduplicated inside the pure module, and app_pay_activity() is where the
+# result reaches app_award_xp(XP_SRC_CARRY) and the active Pebble's happiness.
+# A screen that drained the gain itself would pay a reward outside the XP funnel
+# - the funnel is what puts the ledger decrease on flash - and would do it with
+# no place left to look for it. That is the same failure mode the navigation
+# gate above exists for, so it gets the same shape of gate.
+#
+# NARROW ON PURPOSE, exactly like the PIN_ gate: it counts CALL SITES of
+# act_take_gain() and says nothing about who calls act_note_*(), which is meant
+# to be several files. One call site, and it is the one in app/app.cpp.
+if [ -f "$SKETCH/src/game/activity.h" ]; then
+  n=$( { grep -rnE '\bact_take_gain[[:space:]]*\(' "$SKETCH/src" \
+          --include='*.cpp' --include='*.h' || true; } \
+        | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true; } \
+        | { grep -v 'game/activity\.h' || true; } \
+        | { grep -v 'game/activity\.cpp' || true; } \
+        | { grep -v 'app/app\.cpp' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "act_take_gain() is called outside app/app.cpp ($n) - the activity reward is paid in exactly one place (game/activity.h)"
+fi
+
 echo "GATE OK"

@@ -48,6 +48,11 @@ static uint32_t encounter_seed(const EncounterInput& in)
   h = fnv_u8(h, (uint8_t)in.rssi);      // two's complement, both ends the same
   h = fnv_u8(h, in.active_level);
   h = fnv_u8(h, in.progress);
+  // rare_bonus_pm is DELIBERATELY ABSENT from the seed. See encounters.h: it
+  // must improve the answer, not reshuffle it, and folding it in here would
+  // also make one network's encounter change inside its own six-hour bucket
+  // whenever the player's activity score moved. It is consumed by its own
+  // stage, below, exactly once.
   return h;
 }
 
@@ -75,7 +80,8 @@ enum EncStage : uint8_t {
   ENC_STAGE_SPECIES = 0x02,
   ENC_STAGE_LEVEL   = 0x03,
   ENC_STAGE_ITEM    = 0x04,
-  ENC_STAGE_EVENT   = 0x05
+  ENC_STAGE_EVENT   = 0x05,
+  ENC_STAGE_RARE    = 0x06     // P6-C2, and it obeys the same rule as the rest
 };
 
 static uint32_t stage_draw(uint32_t seed, uint8_t tag)
@@ -139,6 +145,35 @@ static uint8_t special_pick_event(uint8_t category, uint32_t roll)
   return 0u;
 }
 
+// -----------------------------------------------------------------------------
+//  THE RARE-BONUS PROMOTION. Same category, same outcome, next rarity band up.
+//
+//  TOTAL BY CONSTRUCTION: the walk visits every row once, only ever accepts a
+//  WILD row of the SAME category whose rarity_min is strictly greater, and
+//  returns the row it was given when there is none. So the answer is never null,
+//  never a different category and never a different outcome - which is what
+//  makes a_wild_species_always_matches_its_rows_category_mask_and_rarity_band
+//  hold under any bonus without that case needing to know this function exists.
+//
+//  "SMALLEST rarity_min strictly above" and not "the rarest row in the
+//  category": a promotion is one step, so a full activity day moves common ->
+//  uncommon -> rare through repeated rolls rather than jumping the whole ladder
+//  in one, and the shipped table's duplicate top-band rows (PUBLIC, BUSINESS,
+//  OPEN and HIDDEN each carry two rows at rarity 2) are already the identity.
+// -----------------------------------------------------------------------------
+static const EncounterRow* rarer_wild_row(const EncounterRow* row)
+{
+  const EncounterRow* best = nullptr;
+  for (uint8_t i = 0; i < ENCOUNTER_ROW_COUNT; ++i) {
+    const EncounterRow& r = ENCOUNTER_TABLE[i];
+    if (r.category != row->category) continue;
+    if (r.outcome  != (uint8_t)ENC_OUT_WILD) continue;
+    if (r.rarity_min <= row->rarity_min) continue;
+    if (best == nullptr || r.rarity_min < best->rarity_min) best = &r;
+  }
+  return (best != nullptr) ? best : row;
+}
+
 // clamp(active +/- ENCOUNTER_LEVEL_SPREAD, 1..XP_LEVEL_MAX).
 //
 // THE CLAMP IS AT BOTH ENDS AND THE SPREAD IS SYMMETRIC, which is what keeps
@@ -172,6 +207,18 @@ bool encounter_roll(const EncounterInput& in, EncounterResult& out)
   const uint32_t seed = encounter_seed(in);
   const EncounterRow* row = pick_row(in.category, stage_draw(seed, ENC_STAGE_OUTCOME));
   if (row == nullptr) return true;              // NOTHING, and the table is wrong
+
+  // THE ACTIVITY BONUS (P6-C2). Its own stage, its own seed, consumed after the
+  // outcome is decided and only for a WILD row - so it can never turn a NOTHING
+  // into a creature, and the outcome split is the same at every permille. The
+  // clamp is here rather than at the caller because a pure function must not
+  // trust its input: a screen that passed 60000 gets ENC_RARE_BONUS_MAX_PM.
+  if (row->outcome == (uint8_t)ENC_OUT_WILD && in.rare_bonus_pm != 0u) {
+    const uint32_t pm = (in.rare_bonus_pm > (uint16_t)ENC_RARE_BONUS_MAX_PM)
+                            ? (uint32_t)ENC_RARE_BONUS_MAX_PM
+                            : (uint32_t)in.rare_bonus_pm;
+    if ((stage_draw(seed, ENC_STAGE_RARE) % 1000u) < pm) row = rarer_wild_row(row);
+  }
 
   out.outcome = row->outcome;
   switch ((EncounterOutcome)row->outcome) {

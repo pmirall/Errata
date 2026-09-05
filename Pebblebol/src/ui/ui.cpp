@@ -47,6 +47,7 @@
 #include "../hardware/input.h"
 #include "../minigames/manager.h"
 #include "../minigames/registry.h"
+#include "../game/activity.h"    // act_take_dirty(): the other half of "cd"
 #include "../game/cooldowns.h"   // cd_take_dirty(): the exploration commit
 #include "../game/sim.h"
 #include "../game/genome.h"
@@ -463,7 +464,15 @@ static bool do_action(ActionId a) {
     // about once every 2.4 h and could never spend an hourly budget by itself;
     // the two toggles are excluded because they care for nothing. The hourly
     // ceiling inside app_award_xp() is what makes a spammable action harmless.
-    if (act_earns_xp(a)) (void)app_award_xp(xp_care_action_amount(), XP_SRC_CARE);
+    if (act_earns_xp(a)) {
+      (void)app_award_xp(xp_care_action_amount(), XP_SRC_CARE);
+      // AND THE SAME ACTION IS THE ACTIVITY SCORE'S "interactions" TERM (spec
+      // section 25). The same act_earns_xp() gate, so the two toggles that care
+      // for nothing score nothing here either, and the same argument for why a
+      // spammable action is harmless: the reward is capped by ACT_CAP_INTERACT
+      // per day on top of the hourly ceiling that already bounds the XP.
+      app_note_interaction();
+    }
     const SimView* p = pet();
     if (p) gs_save_active(true);
   } else {
@@ -1858,7 +1867,14 @@ void ui_explore_commit(void)
   // table too, by promoting rows armed while the clock was CAL_UNSET, and a
   // caller that only saved after arming would drop thirty-two promoted rows on
   // the next power cut (game/cooldowns.h).
-  if (cd_take_dirty()) (void)save_cooldowns(gs.cds);
+  // BOTH HALVES OF THE "cd" BLOB, and NEITHER call may be skipped by a
+  // short-circuit: cd_take_dirty() is take-and-clear, so `a() || b()` would
+  // leave b's flag standing whenever a fired. P6-C2 put the activity day and
+  // its score in the same blob's reserved bytes, so a scan that credited a new
+  // network dirties it through act_take_dirty() even when no cooldown moved.
+  const bool cd_dirty  = cd_take_dirty();
+  const bool act_dirty = act_take_dirty();
+  if (cd_dirty || act_dirty) (void)save_cooldowns(gs.cds);
   (void)save_inventory(gs.inv);
   if (pet()) gs_save_active(true);
 }

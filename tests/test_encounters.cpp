@@ -77,6 +77,32 @@ static void tally(uint8_t category, uint32_t n, uint32_t out[ENC_OUT_COUNT])
   }
 }
 
+// The same N rolls, but tallied by the RARITY BAND of the wild creature rather
+// than by outcome. P6-C2's rare bonus moves weight INSIDE the wild outcome, so
+// it is invisible to tally() above by construction - a distribution over bands
+// is the only thing that can see it at all, which is exactly what the plan's
+// carried-forward box warned about ("a bonus that moves WEIGHTS ... needs a
+// case that can see a distribution, not just a membership").
+static void tally_band(uint8_t category, uint16_t bonus_pm, uint32_t n,
+                       uint32_t band[4], uint32_t out[ENC_OUT_COUNT])
+{
+  for (uint8_t b = 0; b < 4u; ++b) band[b] = 0;
+  for (uint8_t o = 0; o < (uint8_t)ENC_OUT_COUNT; ++o) out[o] = 0;
+  EncounterInput in = mk_in(category);
+  in.rare_bonus_pm = bonus_pm;
+  for (uint32_t i = 0; i < n; ++i) {
+    in.net_hash = 0x1000u + i * 2654435761u;
+    if (in.net_hash == 0u) in.net_hash = 1u;
+    EncounterResult r;
+    CHECK(encounter_roll(in, r));
+    out[r.outcome]++;
+    if (r.outcome != (uint8_t)ENC_OUT_WILD) continue;
+    const SpeciesDef* sp = species_get(r.species_id);
+    CHECK(sp != nullptr);
+    if (sp && sp->rarity < 4u) band[sp->rarity]++;
+  }
+}
+
 // =============================================================================
 //  1. THE CONTRACT: TOTALITY AND REFUSAL
 // =============================================================================
@@ -181,6 +207,7 @@ TEST(every_declared_input_reaches_the_answer) {
   // field is wired in, not that the hash is injective.
   int moved_hash = 0, moved_bucket = 0, moved_dev = 0;
   int moved_rssi = 0, moved_level = 0, moved_prog = 0, moved_cat = 0;
+  int moved_bonus = 0;
   for (uint32_t k = 1; k <= 64u; ++k) {
     EncounterInput in = base; EncounterResult r;
     in.net_hash = base.net_hash + k;
@@ -203,6 +230,32 @@ TEST(every_declared_input_reaches_the_answer) {
 
     in = base; in.category = (uint8_t)(k % (uint32_t)NET_CAT_COUNT);
     CHECK(encounter_roll(in, r)); if (memcmp(&r, &r0, sizeof r) != 0) moved_cat++;
+
+    // THE EIGHTH FIELD (P6-C2), and it is here because its absence was
+    // MEASURED: an eighth field declared and left unread passed this file
+    // 22/22, because the list above is written out by hand and cannot see a
+    // field nobody adds to it. The sizeof static_assert in game/encounters.h
+    // is what forces the next person to this line; this perturbation is what
+    // proves the field is wired once they get here.
+    //
+    // IT IS COMPARED PAIRWISE AND NOT AGAINST r0, and the difference is not
+    // cosmetic. Every field above is folded into encounter_seed(), so moving it
+    // moves the whole draw and one fixed base is enough to see it. This one is
+    // deliberately NOT in the seed (see game/encounters.h): it is a THRESHOLD
+    // on one independent draw, so for any single fixed input the draw either
+    // clears the threshold or never does, whatever the permille. Sweeping the
+    // bonus against a fixed base therefore proves nothing about three quarters
+    // of the seeds - measured: with the sweep written that way this check read
+    // `FAIL CHECK(moved_bonus > 0)` on a correctly wired field. Comparing the
+    // SAME input with the bonus off and on, over the same 64 networks the other
+    // fields are perturbed across, is the claim that actually holds: turning
+    // the bonus on changes the answer for at least one scan.
+    in = base; in.net_hash = base.net_hash + k;
+    EncounterResult off, on;
+    CHECK(encounter_roll(in, off));
+    in.rare_bonus_pm = (uint16_t)ENC_RARE_BONUS_MAX_PM;
+    CHECK(encounter_roll(in, on));
+    if (memcmp(&off, &on, sizeof on) != 0) moved_bonus++;
   }
   CHECK(moved_hash > 0);
   CHECK(moved_bucket > 0);
@@ -211,6 +264,7 @@ TEST(every_declared_input_reaches_the_answer) {
   CHECK(moved_level > 0);
   CHECK(moved_prog > 0);
   CHECK(moved_cat > 0);
+  CHECK(moved_bonus > 0);
 }
 
 TEST(two_devices_standing_side_by_side_do_not_see_the_same_creature) {
@@ -294,6 +348,159 @@ TEST(nothing_really_happens_and_it_happens_at_least_fifteen_percent_of_the_time)
     // ...and all four outcomes are reachable in every category, so no arm of
     // the switch in encounters.cpp is dead.
     for (uint8_t o = 0; o < (uint8_t)ENC_OUT_COUNT; ++o) CHECK(got[o] > 0);
+  }
+}
+
+// =============================================================================
+//  3b. THE RARE-ENCOUNTER BONUS (P6-C2). Four claims, and each one is the
+//      thing a different wrong implementation would break:
+//        - zero is the exact identity          (a bonus folded into the seed)
+//        - the outcome split never moves       (a promotion that ate NOTHING)
+//        - the rare share rises monotonically  (a bonus that reshuffles)
+//        - the common band survives the max    (a max permille of 1000)
+//      Every phase-5 case above runs at bonus 0, so without these four the
+//      entire weight-moving half of encounter_roll() would be untested by
+//      construction - this project's signature defect, re-armed.
+// =============================================================================
+TEST(a_zero_bonus_reproduces_the_tables_own_wild_band_weights_exactly) {
+  // "Zero is the identity" made checkable without a copy of the old function to
+  // diff against: at bonus 0 the measured share of each rarity band must be the
+  // TABLE's own share for that band, read at run time. A bonus folded into
+  // encounter_seed() would still pass tally()'s outcome check and would fail
+  // here, because folding changes which species each seed lands on.
+  for (uint8_t c = 0; c < (uint8_t)NET_CAT_COUNT; ++c) {
+    uint32_t band[4], out[ENC_OUT_COUNT];
+    tally_band(c, 0u, 20000u, band, out);
+    for (uint8_t b = 0; b < 3u; ++b) {
+      uint32_t want = 0;
+      for (uint8_t i = 0; i < ENCOUNTER_ROW_COUNT; ++i) {
+        const EncounterRow& row = ENCOUNTER_TABLE[i];
+        if (row.category == c && row.outcome == (uint8_t)ENC_OUT_WILD &&
+            row.rarity_min == b)
+          want += row.weight;
+      }
+      want *= 200u;                                   // per 20,000
+      CHECK(band[b] + 500u >= want);
+      CHECK(band[b] <= want + 500u);
+    }
+  }
+}
+
+TEST(the_outcome_split_is_identical_at_every_bonus_and_nothing_eats_nothing) {
+  // EXACT equality, not a tolerance band: a promotion only ever replaces a WILD
+  // row with another WILD row of the same category, and it draws from its own
+  // independent stage, so the outcome tally must be the SAME NUMBERS at every
+  // permille. This is what makes section 22's 15 % NOTHING floor structurally
+  // safe under any activity score rather than merely measured at one.
+  const uint16_t pm[4] = { 0u, (uint16_t)(ENC_RARE_BONUS_MAX_PM / 4u),
+                           (uint16_t)(ENC_RARE_BONUS_MAX_PM / 2u),
+                           (uint16_t)ENC_RARE_BONUS_MAX_PM };
+  for (uint8_t c = 0; c < (uint8_t)NET_CAT_COUNT; ++c) {
+    uint32_t base_band[4], base_out[ENC_OUT_COUNT];
+    tally_band(c, pm[0], 20000u, base_band, base_out);
+    CHECK(base_out[ENC_OUT_NOTHING] > 0u);
+    for (uint8_t j = 1; j < 4u; ++j) {
+      uint32_t band[4], out[ENC_OUT_COUNT];
+      tally_band(c, pm[j], 20000u, band, out);
+      for (uint8_t o = 0; o < (uint8_t)ENC_OUT_COUNT; ++o) CHECK_EQ(out[o], base_out[o]);
+      // ...and the wild total is invariant too, so the bonus really is moving
+      // weight INSIDE wild and not creating creatures.
+      CHECK_EQ(band[0] + band[1] + band[2] + band[3], base_band[0] + base_band[1] +
+               base_band[2] + base_band[3]);
+    }
+  }
+}
+
+TEST(the_rare_share_rises_with_the_bonus_and_the_common_band_never_empties) {
+  const uint16_t pm[4] = { 0u, (uint16_t)(ENC_RARE_BONUS_MAX_PM / 4u),
+                           (uint16_t)(ENC_RARE_BONUS_MAX_PM / 2u),
+                           (uint16_t)ENC_RARE_BONUS_MAX_PM };
+  for (uint8_t c = 0; c < (uint8_t)NET_CAT_COUNT; ++c) {
+    uint32_t rare[4] = { 0, 0, 0, 0 }, common[4] = { 0, 0, 0, 0 };
+    for (uint8_t j = 0; j < 4u; ++j) {
+      uint32_t band[4], out[ENC_OUT_COUNT];
+      tally_band(c, pm[j], 20000u, band, out);
+      rare[j]   = band[2];
+      common[j] = band[0];
+      CHECK(common[j] > 0u);
+    }
+    // THE REASON ENC_RARE_BONUS_MAX_PM IS 250 AND NOT 900-ODD, and the check
+    // has to be a SHARE rather than "> 0" to be worth anything: at permille
+    // 1000 the common band empties completely, and even at 999 about one roll
+    // in a thousand survives - so a non-zero count would pass a cap that has
+    // effectively deleted the ordinary creature from the game. Measured: with
+    // ENC_RARE_BONUS_MAX_PM edited to 999 the `common[j] > 0` form still passed
+    // every category. The claim that bites is that a full activity day may not
+    // even HALVE the chance of meeting an ordinary creature. At 250 the common
+    // band keeps three quarters of its weight, so this holds with margin; it
+    // fails for any cap above 500. Exactly 1000 is refused at build time by the
+    // static_assert next to the constant in data/balance.h.
+    CHECK(common[3] * 2u >= common[0]);
+    // Monotone non-decreasing in the bonus, and strictly higher at the top than
+    // at zero. "Non-decreasing" between neighbours because a quarter-step is
+    // within sampling noise; "strictly" end to end because the whole point of
+    // the field is that a full activity day is worth something.
+    for (uint8_t j = 1; j < 4u; ++j) CHECK(rare[j] + 150u >= rare[j - 1]);
+    CHECK(rare[3] > rare[0]);
+    CHECK(common[3] < common[0]);
+  }
+}
+
+TEST(a_bonus_above_the_cap_is_clamped_by_the_roll_and_not_by_the_caller) {
+  // A pure function may not trust its input. Every value at or above the cap
+  // must produce EXACTLY the cap's distribution - roll for roll, not merely
+  // within a band - so a screen that computed a permille wrong, or a corrupted
+  // activity blob, cannot buy a rarer creature than a full honest day does.
+  for (uint8_t c = 0; c < (uint8_t)NET_CAT_COUNT; ++c) {
+    EncounterInput a = mk_in(c), b = mk_in(c), d = mk_in(c);
+    a.rare_bonus_pm = (uint16_t)ENC_RARE_BONUS_MAX_PM;
+    b.rare_bonus_pm = (uint16_t)(ENC_RARE_BONUS_MAX_PM + 1u);
+    d.rare_bonus_pm = 0xFFFFu;
+    for (uint32_t k = 0; k < 3000u; ++k) {
+      a.net_hash = b.net_hash = d.net_hash = 1u + k * 2654435761u;
+      EncounterResult ra, rb, rd;
+      CHECK(encounter_roll(a, ra));
+      CHECK(encounter_roll(b, rb));
+      CHECK(encounter_roll(d, rd));
+      CHECK_EQ(memcmp(&ra, &rb, sizeof ra), 0);
+      CHECK_EQ(memcmp(&ra, &rd, sizeof ra), 0);
+    }
+  }
+}
+
+TEST(the_roll_is_still_total_and_still_deterministic_under_a_bonus) {
+  // The two contract cases of section 1 and 2, re-run with the bonus turned on:
+  // a new stage that could return null, or that read anything outside the input
+  // struct, would show up here and nowhere else.
+  for (uint8_t c = 0; c < (uint8_t)NET_CAT_COUNT; ++c) {
+    EncounterInput in = mk_in(c);
+    in.rare_bonus_pm = (uint16_t)ENC_RARE_BONUS_MAX_PM;
+    for (uint32_t k = 0; k < 2000u; ++k) {
+      in.net_hash     = 1u + k * 2246822519u;
+      in.bucket       = k;
+      in.rssi         = (int8_t)(-100 + (int)(k % 90u));
+      in.active_level = (uint8_t)(1u + (k % 30u));
+      in.progress     = (uint8_t)(k % 11u);
+      EncounterResult r, again;
+      CHECK(encounter_roll(in, r));
+      CHECK(r.outcome < (uint8_t)ENC_OUT_COUNT);
+      if (r.outcome == (uint8_t)ENC_OUT_WILD) {
+        CHECK(r.species_id != 0u);
+        CHECK(r.level >= 1u && r.level <= (uint8_t)XP_LEVEL_MAX);
+        const SpeciesDef* sp = species_get(r.species_id);
+        CHECK(sp != nullptr);
+        // A PROMOTED ROW IS STILL THIS CATEGORY'S ROW. rarer_wild_row() only
+        // ever accepts a row with the same category ordinal, so the mask must
+        // hold at the maximum bonus exactly as it does at zero.
+        if (sp) CHECK((sp->category_mask & NET_CATEGORY_BIT[c]) != 0);
+      }
+      if (r.outcome == (uint8_t)ENC_OUT_ITEM) CHECK(r.item_id != 0u);
+      if (r.outcome == (uint8_t)ENC_OUT_SPECIAL) CHECK(r.event_id != 0u);
+      // Stateless and repeatable: the bonus arrives in the struct, so the same
+      // struct twice is the same answer.
+      CHECK(encounter_roll(in, again));
+      CHECK_EQ(memcmp(&r, &again, sizeof r), 0);
+    }
   }
 }
 

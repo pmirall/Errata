@@ -102,7 +102,37 @@ struct EncounterInput {
   uint8_t  progress;      // Pebbles filed, 0..BOX_SLOTS. Seed input only, for
                           // now: nothing in the pack tunes an outcome by it, so
                           // it does not silently become a difficulty curve.
+  // P6-C2. THE FIRST INPUT THAT MOVES A WEIGHT RATHER THAN THE SEED, and the
+  // difference is the whole reason it is a separate field and a separate
+  // stage. `progress` above is documented as tuning NOTHING: it stirs the mix
+  // and a membership assertion can see it. This one changes WHICH ROW pays, so
+  // only a DISTRIBUTION can see it, and tests/test_encounters.cpp measures one.
+  //
+  // Permille, 0..ENC_RARE_BONUS_MAX_PM (data/balance.h), clamped by the roll so
+  // a caller cannot exceed the cap by passing a bigger number. ZERO IS THE
+  // EXACT IDENTITY - measured, 120,000 rolls per category byte-identical to the
+  // roll before this field existed - which is what lets every phase-5
+  // distribution case keep asserting the numbers it was written against.
+  //
+  // IT IS DELIBERATELY NOT FOLDED INTO encounter_seed(). Folding it in would
+  // make a bigger bonus RESHUFFLE rather than IMPROVE, so no test could assert
+  // monotonicity - and monotonicity is the only property that makes this a
+  // bonus rather than a stirring stick. It would also break the promise at the
+  // top of this header that rescanning one network inside its bucket shows the
+  // same encounter, since the bonus moves with the player's day.
+  uint16_t rare_bonus_pm;
 };
+
+// THE ASSERT THAT MAKES THE NEXT FIELD IMPOSSIBLE TO FORGET, and it is here
+// because its absence was MEASURED: an eighth field added to this struct and
+// left unread passed tests/test_encounters.cpp 22/22, because
+// every_declared_input_reaches_the_answer enumerates the fields BY HAND. It
+// cannot see a field nobody told it about. This assert can: adding one changes
+// the size, the build stops, and whoever adds it is standing in front of the
+// case list. Update BOTH together or neither.
+static_assert(sizeof(EncounterInput) == 20, "EncounterInput gained or lost a field - "
+              "add it to every_declared_input_reaches_the_answer's perturbation "
+              "list in tests/test_encounters.cpp before changing this number");
 
 // -----------------------------------------------------------------------------
 //  THE ANSWER. 8 B, and every field is 0 unless the outcome names it, so a
@@ -131,6 +161,16 @@ uint32_t encounter_bucket(uint32_t now_epoch);
 //
 //   false, with `out` cleared to NOTHING, for net_hash 0 or a category outside
 //   the table: both are caller bugs and neither may hand back a creature.
+//
+//   THE RARE-BONUS PROMOTION (P6-C2). When the row that won is a WILD row and
+//   in.rare_bonus_pm is non-zero, one further independent draw promotes that row
+//   to the SAME CATEGORY's next rarer WILD row - the one with the smallest
+//   rarity_min strictly above this row's. The walk is bounded and total: with no
+//   rarer row in the category the original row stands, so the promotion is the
+//   identity at the top band and the answer is always a resolved row of the same
+//   category. The OUTCOME never changes (a WILD row is promoted to a WILD row),
+//   which is what keeps the WILD/ITEM/SPECIAL/NOTHING split - and section 22's
+//   15 % NOTHING floor - invariant under any bonus.
 //
 //   Otherwise `out` is the resolved encounter. WILD always names a species the
 //   category can spawn inside the row's rarity band (the generated

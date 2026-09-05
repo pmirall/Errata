@@ -129,7 +129,7 @@ why this enumeration was worth measuring instead of restating.
 | item | flash | globals |
 |---|---|---|
 | ~~P5 scanner, encounters, capture, items~~ **SPENT: +12,282 / +504** | ~~15-25 K~~ | ~~1.0-2.0 K~~ |
-| P6 activity score, power states | 8-12 K | 0.3-0.8 K |
+| P6 activity score, power states — **P6-C2 SPENT: +1,940 flash / +72 globals** (baseline 1,936,964/73,316 -> 1,938,904/73,388, measured either side of the commit; release 1,214,794/49,748 = 75.9 % and 76.5 % of the caps `build_matrix.sh` enforces). The 72 B of globals is `game/activity.cpp`'s per-boot half and nothing else: the ten-entry network set 40, the four-entry peer set 16, six counters, a seconds remainder, the pending gain and the dirty flag. The PERSISTED half costs 0 - it is four bytes that were already `CooldownTable.reserved_a[4]`. | 8-12 K | 0.3-0.8 K |
 | P7 ESP-NOW transport, link/trade/breeding | 25-35 K | 1.5-3.0 K |
 | P8 PIN, creator routes, mobile page + sprite editor (PROGMEM) | 30-45 K | 1.5-3.0 K |
 | P9 roster 36→60, sprite atlas, corruption | 15-20 K | 0.2-0.5 K |

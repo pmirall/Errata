@@ -243,6 +243,14 @@ $(BIN)/test_inventory:  $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/xp.o \
 $(BIN)/test_audio:      $(OBJ)/audio.o
 $(BIN)/test_motion:     $(OBJ)/motion_null.o
 
+# P6-C2: THE DAILY ACTIVITY SCORE. activity.cpp is pure and takes its clock as a
+# struct, exactly as cooldowns.cpp does, so the uncalibrated path, a clock rolled
+# backwards and a device power-cycled thirty times are all driven directly with
+# no device and no save manager. ONE OBJECT AND NO OTHERS is the point of this
+# line: the score reaches no content table, no RNG and no persistence code, so
+# if it ever needs a second object something has leaked into the pure half.
+$(BIN)/test_activity:   $(OBJ)/activity.o
+
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 # The minigame contract and the PURE logic of every game. No draw objects and
 # no ui/: if this link line ever needs one, a game has leaked drawing into its
@@ -288,7 +296,8 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/screen_evolution.o $(OBJ)/screen_creator.o \
                $(OBJ)/screen_network.o $(OBJ)/screen_encounter.o \
                $(OBJ)/wifi_scanner.o $(OBJ)/net_classify.o \
-               $(OBJ)/cooldowns.o $(OBJ)/encounters.o $(OBJ)/capture.o \
+               $(OBJ)/cooldowns.o $(OBJ)/activity.o \
+               $(OBJ)/encounters.o $(OBJ)/capture.o \
                $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/species.o \
                $(OBJ)/validate.o $(OBJ)/evolution.o $(OBJ)/xp.o \
                $(OBJ)/dialog.o $(OBJ)/qr.o $(OBJ)/box.o \
@@ -299,6 +308,13 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/xbm_mirror.o \
                $(OBJ)/battle.o $(OBJ)/battle_ai.o $(OBJ)/pebble.o
 
+# P6-C2 added activity.o: ui/screen_network.cpp hands the WHOLE scan array to
+# the daily score before it walks the cooldowns, and reads the rare-encounter
+# permille back out of it for EncounterInput. activity.cpp is pure and takes its
+# clock as a struct, so the screen binaries link the REAL score with no clock
+# bound but the one the screen assembles from ui_explore_clock() - which is how
+# tests/test_screens.cpp can drive an uncalibrated scan at all.
+#
 # P6-C1 added audio.o: ui/screen_battle.cpp arms one cue per battle beat, and
 # hardware/audio.cpp is a pure translation unit (its LEDC half is behind
 # `#if defined(ARDUINO)`), so the screen binaries link the REAL engine with no

@@ -329,6 +329,47 @@ static_assert(INV_CRC_BYTES == sizeof(Inventory) - 2, "Inventory CRC span drifte
 //    the u32 rows on an odd 4-byte boundary. The same six reserved bytes are
 //    kept, split 4 before the rows and 2 after, so the rows stay naturally
 //    aligned and the blob is still exactly 272 B.
+//
+//    THE ACTIVITY DAY BUCKET (P6-C2, spec section 25). The four bytes that were
+//    reserved_a[4] are now act_day + act_score, carved out exactly the way
+//    PebbleInstance.corrupt_until_epoch was carved out of reserved[12] at
+//    P5-C3, and with the same argument: an old blob reads 0 in both, and 0 is
+//    exactly "no activity day has been opened yet", which is the correct state
+//    for a save written before this commit. NO SCHEMA BUMP, and the reason is
+//    written down rather than assumed - see the four points below and
+//    docs/save_schema.md section 5.
+//
+//    WHY HERE AND NOT IN Inventory, WHICH THE PLAN'S BULLET ASKED FOR:
+//    Inventory is 32 B with ZERO padding and ZERO reserved bytes (measured,
+//    not merely asserted: 2+1+1+4+4+4+14+2 = 32), so the day bucket has
+//    literally nowhere to land in it. Growing it is a SAVE_SCHEMA_VERSION bump,
+//    and a bump is not a row in migrate_run()'s step table: pair_load() sorts
+//    any non-equal version into `bad` and load_all_inner() returns LOAD_CORRUPT
+//    before the migration branch is ever reached, so every v2 save on every
+//    device - box, cfg, inv, cd, cs and tr alike, five of which did not change -
+//    would need a version-tolerant reader written first. That is the right
+//    price for a real widening (INVENTORY_SLOTS 7 -> 12, say). It is the wrong
+//    price for four bytes that are already reserved.
+//
+//    WHY NOT DERIVE THE DAY FROM Inventory.ledger_epoch, the plan's option (a):
+//    ledger_epoch is re-stamped every time XP is SPENT (app.cpp's XP funnel),
+//    so ledger_epoch / 86400 is "the day of the last XP spend", not "the day
+//    these counters belong to". Two different facts, and deriving one from the
+//    other would give one fact two owners - the same reason EncounterInput does
+//    not carry the cooldown state.
+//
+//    WHY THIS BLOB AND NOT ConfigV2.reserved[152]: the day bucket is
+//    EXPLORATION state and it changes on the same events the rows below do, so
+//    it rides the cd_take_dirty() cadence that already exists instead of
+//    dirtying a 256 B config blob once a minute. ConfigV2's 152 B stays the
+//    tree's one large reserve.
+//
+//    WHAT IS AND IS NOT IN THESE FOUR BYTES. act_score is the whole persisted
+//    half: it is the day's TOTAL, already capped per term at the moment each
+//    increment was made, and it is what every reward is computed from. The four
+//    per-term counters and the distinct-network set are per-boot RAM in
+//    game/activity.cpp - see that header for what a power cycle can and cannot
+//    buy with them, stated rather than implied.
 // -----------------------------------------------------------------------------
 #define CD_MAGIC                0x4443u   // bytes 'C','D'
 #define CD_CRC_BYTES            270
@@ -344,7 +385,8 @@ struct CooldownTable {
   uint8_t     version;                   //   2  SAVE_SCHEMA_VERSION
   uint8_t     n;                         //   3  rows in use, <= COOLDOWN_SLOTS
   uint32_t    seq;                       //   4  pair sequence number
-  uint8_t     reserved_a[4];             //   8  must be 0
+  uint16_t    act_day;                   //   8  activity day index, 0 = none yet
+  uint16_t    act_score;                 //  10  that day's score, <= ACT_SCORE_MAX
   CooldownRow rows[COOLDOWN_SLOTS];      //  12
   uint8_t     reserved_b[2];             // 268  must be 0
   uint16_t    crc16;                     // 270  over bytes 0..269
@@ -352,6 +394,10 @@ struct CooldownTable {
 
 static_assert(sizeof(CooldownTable) == 272, "CooldownTable layout drifted");
 static_assert(offsetof(CooldownTable, seq)   ==   4, "CooldownTable.seq moved");
+static_assert(offsetof(CooldownTable, act_day)   ==  8,
+              "CooldownTable.act_day moved - it was carved out of reserved_a[4] "
+              "and every byte after it must stay where it was");
+static_assert(offsetof(CooldownTable, act_score) == 10, "CooldownTable.act_score moved");
 static_assert(offsetof(CooldownTable, rows)  ==  12, "CooldownTable.rows moved");
 static_assert(offsetof(CooldownTable, crc16) == 270, "CooldownTable.crc16 moved");
 static_assert(CD_CRC_BYTES == sizeof(CooldownTable) - 2, "CooldownTable CRC span drifted");

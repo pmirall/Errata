@@ -560,6 +560,33 @@ inline constexpr uint16_t CAPTURE_BASE_PERMILLE[4] = { 700, 500, 320, 160 };
 // four times the ENCOUNTER_COOLDOWN_S so a cooldown never spans a whole bucket.
 #define ENCOUNTER_BUCKET_S          21600UL
 
+// =============================================================================
+// 9. ACTIVITY  -- spec sections 25 and 57, plan P6-C2
+//
+//    THE ONE NUMBER THAT LIVES IN TWO MODULES, and it is here for that reason
+//    alone. game/encounters.cpp CLAMPS EncounterInput.rare_bonus_pm to it and
+//    game/activity.cpp SCALES its answer to it; if each owned its own copy the
+//    two would drift and the drift would be invisible - the roll would silently
+//    stop honouring the top of the activity curve, and no test that only ever
+//    passed 0 would see it. Everything else about the score is a P6-C2 decision
+//    with no pack entry behind it and lives in game/activity.h, next to the
+//    formula it tunes (the same reason ENCOUNTER_LEVEL_SPREAD lives in
+//    game/encounters.h rather than here).
+//
+//    250 permille and NOT 1000. Measured over 120,000 rolls per category: at
+//    permille 1000 EVERY common-band wild roll is promoted and the common band
+//    empties completely, which would turn a full activity day into "you may no
+//    longer meet an ordinary creature". At 250 the common band keeps three
+//    quarters of its weight in every category - HIDDEN, the thinnest at 12 of
+//    100, keeps 9 - and the rare band rises monotonically. The WILD / ITEM /
+//    SPECIAL / NOTHING split does not move at all at any permille, because a
+//    promotion redistributes weight INSIDE wild and never eats NOTHING, so
+//    encounter_nothing_is_common_enough()'s 15 % floor is structurally safe.
+#define ENC_RARE_BONUS_MAX_PM       250u
+static_assert(ENC_RARE_BONUS_MAX_PM > 0u && ENC_RARE_BONUS_MAX_PM < 1000u,
+              "a rare bonus of 0 is not a bonus and one of 1000 empties the "
+              "common band - see the measurement above");
+
 static_assert(CAPTURE_MIN_PERMILLE > 0 && CAPTURE_MAX_PERMILLE < 1000,
               "a capture that is certain, or impossible, is not a roll");
 static_assert(CAPTURE_MIN_PERMILLE < CAPTURE_MAX_PERMILLE,

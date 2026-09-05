@@ -23,6 +23,7 @@
 #include "../core/strings_es.h"
 #include "../game/genome.h"
 #include "../core/rng.h"
+#include "../game/activity.h"    // the daily activity score (P6-C2)
 #include "../game/cooldowns.h"   // cd_begin() from setup (P5-C2/C3)
 #include "../game/sim.h"
 #include "../persistence/game_state.h"
@@ -233,6 +234,74 @@ bool app_award_xp(uint16_t amount, XpSource src)
     (void)gs_save_active(true);
   }
   return leveled;
+}
+
+// =============================================================================
+//  THE ACTIVITY SEAM (P6-C2, spec sections 25 and 57)
+//
+//  game/activity.cpp is pure and clock-free: it takes the wall clock and the
+//  calibration state as an argument, exactly as game/cooldowns.cpp does, so
+//  this file is where the two are read. app_act_clock() is the only place they
+//  are assembled, so no caller can pass one without the other - and CAL_UNSET
+//  is what makes the whole score zero.
+// =============================================================================
+ActClock app_act_clock(void)
+{
+  ActClock c;
+  c.now_epoch = gt_now();
+  c.cal       = (uint8_t)gt_cal_state();
+  return c;
+}
+
+// -----------------------------------------------------------------------------
+//  PAYING WHAT THE SCORE EARNED. Drained once per logic tick and NOWHERE else:
+//  the screens and the care path only ever NOTE activity, so no screen can pay
+//  XP or happiness on its own and there is exactly one place to look for either.
+//
+//  THE XP GOES THROUGH app_award_xp(XP_SRC_CARRY), which is the metered bucket,
+//  which is the last of game/activity.h's five anti-farm layers: even a bug in
+//  every rule above it leaves the award rate-limited by a budget a reboot
+//  cannot refill (and that re-seeds to ZERO on an untrusted clock).
+//
+//  THE HAPPINESS IS APPLIED THE WAY game/inventory.cpp's care items apply
+//  theirs - clamped at PB_CARE_MILLI_MAX, never above, on the ACTIVE Pebble
+//  only. A creature in the Box is not being carried.
+// -----------------------------------------------------------------------------
+void app_pay_activity(void)
+{
+  // The persisted half of the score changed: it rides the "cd" pair, so this is
+  // the same save cd_take_dirty() asks for.
+  //
+  // save_cooldowns() has no wear filter of its own - it is a straight
+  // pair_write() - so the WRITE COUNT is whatever act_take_dirty() says, and
+  // the caps are what bound it: 240 carried minutes + 20 interactions + 10
+  // networks is AT MOST 270 writes a day, after which every further note
+  // returns 0 before it can dirty anything. That is a fifth of the 1,440 the
+  // "t" last-seen key already costs, and it is the reason the counters are
+  // capped BEFORE the flag is set rather than after.
+  //
+  // The take-and-clear runs even in a read-only session, deliberately: the flag
+  // must not survive to ask for a write later, and a read-only session is
+  // exactly the one that may not write. gs_readonly() is checked second for
+  // that reason and the short-circuit is the wrong way round on purpose.
+  if (act_take_dirty() && !gs_readonly()) (void)save_cooldowns(gs_state().cds);
+
+  const ActGain g = act_take_gain();
+  if (g.xp != 0u) (void)app_award_xp(g.xp, XP_SRC_CARRY);
+  if (g.happy_milli != 0u) {
+    const uint8_t act = box_active();
+    PebbleInstance* p = (act < (uint8_t)BOX_SLOTS) ? box_slot(act) : nullptr;
+    if (p != nullptr && p->care[CARE_HAPPINESS] < (int32_t)PB_CARE_MILLI_MAX) {
+      int32_t v = p->care[CARE_HAPPINESS] + (int32_t)g.happy_milli;
+      if (v > (int32_t)PB_CARE_MILLI_MAX) v = (int32_t)PB_CARE_MILLI_MAX;
+      p->care[CARE_HAPPINESS] = v;
+    }
+  }
+}
+
+void app_note_interaction(void)
+{
+  (void)act_note_interaction(gs_state().cds, app_act_clock());
 }
 
 // =============================================================================
@@ -569,6 +638,12 @@ void app_setup(void)
   // dirty flag. Without it the fallback would carry whatever the .bss happened
   // to hold, and cd_take_dirty() could report a save nobody made.
   cd_begin();
+  // THE PER-BOOT HALF OF THE ACTIVITY SCORE (P6-C2), and it is the same
+  // sentence as the line above for the same reason: the day and the day's
+  // total come off flash inside gs.cds, and this clears ONLY the term
+  // counters, the two distinct sets and the dirty flag. game/activity.h says
+  // plainly what a power cycle therefore still buys and what it cannot.
+  act_begin();
   god_begin();
 
   ui_bind_recover(&app_recover_save);
@@ -642,7 +717,13 @@ static void logic_tick(void)
   if (!sim_is_asleep()) {
     const uint16_t due = xp_carry_due(step);
     if (due != 0u) (void)app_award_xp(due, XP_SRC_CARRY);
+    // THE ACTIVITY SCORE'S TIME TERM (P6-C2, spec section 25). The same
+    // condition as the drip above - awake, switched on, being carried - and
+    // deliberately the same XP bucket underneath, because the two measure the
+    // same thing. game/activity.h writes down what that costs.
+    (void)act_note_carried(gs_state().cds, step, app_act_clock());
   }
+  app_pay_activity();
 
   const uint32_t ev = sim_take_events();
   ui_note_events(ev);

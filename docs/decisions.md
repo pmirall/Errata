@@ -1074,3 +1074,133 @@ The other three (`ui/ceremony.cpp`'s four phase edges, `ui/ui.cpp`'s level-up an
 refusal) live in device translation units that no host binary compiles, so they are checked
 by the compiler and by reading, and by nothing else. **Nothing has been heard.**
 
+
+---
+
+## D-P6C2 — where the activity day lives, and what pays for it (recorded 2026-09-05, P6-C2)
+
+Four of phase 6's six carried-forward debts are in this one chunk, and each of them names a
+byte count or an assert that blocks the obvious approach. What follows is the decision on
+each, and the residual each decision leaves.
+
+### 1. The day bucket is in `cd`, not in `inv`, and there is no schema bump
+
+`CooldownTable.reserved_a[4]` became `act_day` (u16, the UTC day index) + `act_score`
+(u16, that day's total, already capped per term). The blob is still 272 B, `rows` is still
+at offset 12, and two new `offsetof` asserts pin the new fields — the same carve
+`PebbleInstance.corrupt_until_epoch` got out of `reserved[12]` at P5-C3, on the same
+argument: **an old blob reads 0 in both, day index 0 is 1970 and can never be a real day,
+so 0 is unambiguously "no day opened yet"** — which is the correct state for every save
+written before this commit. Nothing in the load path or `game/validate.cpp` checks a
+reserved byte for zero, so the four bytes also round-trip untouched through an *older*
+firmware.
+
+The plan's bullet asked for `inv`, and `Inventory` is 32 B with **zero** padding and zero
+reserved bytes, so there is no byte in it. Its three named alternatives:
+
+- **(a) derive the day from `Inventory.ledger_epoch` — rejected, and not on cost.**
+  `ledger_epoch` is re-stamped every time XP is *spent*, so `ledger_epoch / 86400` is "the
+  day of the last XP spend", not "the day these counters belong to". Deriving one from the
+  other gives one fact two owners, which is the objection `encounters.h` already makes to
+  folding cooldown state into `EncounterInput`.
+- **(b) grow `Inventory` behind a `SAVE_SCHEMA_VERSION` bump — rejected on a measured
+  price, and the price is not "a migration plus a fixture".** A bump is not a row in
+  `migrate_run()`'s step table: that table is reachable only from the legacy-`save`-key
+  branch, and `pair_load()` sorts any non-equal version into `st.bad` so
+  `load_all_inner()` returns `LOAD_CORRUPT` **before** the migration branch is reached. The
+  phase-6 survey drove it: a healthy v2 save with its version byte aged to 1 and correct
+  CRCs loads `LOAD_CORRUPT`, and `save_restore_checkpoint()` — the SAVE ERROR screen's
+  "Recuperar" — returns 0. A real bump needs a version-tolerant pair reader written first
+  and invalidates `box`, `cfg`, `cd`, `cs` and `tr` as collateral. Keep it for a real
+  widening (`INVENTORY_SLOTS` 7→12).
+- **(c) a new `ac0`/`ac1` pair — correct, and not needed for four bytes.** Version-
+  transparent in both directions, at the cost of a `BlobOps` row, four call sites, 6 NVS
+  entries and ~2× `sizeof` in globals (`GameState` is instantiated twice). Reach for it when
+  the activity state outgrows four bytes.
+
+**What is deliberately NOT persisted:** the four per-term counters, the distinct-network set
+and the distinct-peer set are per-boot `.bss`. So a power cycle *does* clear the per-term
+caps — and it buys nothing, because `act_score` is capped at `ACT_SCORE_MAX`, which is
+exactly the sum of the four capped terms, i.e. exactly what an honest day reaches. **A
+rebooting player gets to the ceiling sooner and never higher, and never twice in a day.**
+That is the same shape of trade `game/cooldowns.h` took for the uncalibrated table:
+a catastrophic farm exchanged for a linear one. Closing it costs
+`CooldownTable.reserved_b[2]` and a write every minute, and nothing measured says it is
+worth that yet.
+
+### 2. No fifth metered XP slot — activity pays through `XP_SRC_CARRY`
+
+`XP_LEDGER_SLOTS` is 4 and `xp.h` asserts the metered sources are exactly the first four
+enumerators. A fifth makes `Inventory.xp_ledger` 5 B (moving `offsetof(items)` and failing
+that struct's own assert) or keeps 32 B by taking `INVENTORY_SLOTS` 7→6, which silently
+deletes the seventh item stack out of every save. `XP_SRC_CARRY` is *already* the
+daily-windowed bucket and its declared meaning is "time carried awake", which is the
+activity score's largest term.
+
+**The cost, stated rather than glossed: activity XP and the passive carry drip now compete
+for one `XP_CAP_CARRY` budget, so a heavy-walking day crowds out the drip.** They measure
+the same thing, which is the argument for it; a day that earns 48 XP from carrying earns
+none from networks, which is the price. A full activity day is 44 XP against that 48, so
+the meter is close enough to bind on a heavy day and not so tight that an ordinary one is
+thrown away.
+
+### 3. The distinct-network set is exact, and the cap is why it can be
+
+Ten `uint32_t` plus a count, 44 B of globals: **no false positives and no false
+negatives.** A set never needs more entries than its term's cap, because past
+`ACT_CAP_NETS` no further network can score. The phase-6 survey measured the alternatives
+over 2,000 simulated days × 6 scans per access point, driven with real
+`net_hash_from_bssid()` values: exact 41 B / 0 errors, a folded-u16 set 22 B / 3
+under-counts, a 128-bit k=2 bitset 16 B / 43, a 256-bit one 32 B / 16. Every approximate
+form errs in one direction only — a new network reading as already-seen, i.e.
+under-counting — which is structural and is the safe direction, and is still an error. 25 B
+was not worth buying one.
+
+**The one inexactness that remains is upstream and is not claimed away:** `net_hash` is a
+32-bit salted digest of a BSSID, so two access points can in principle collide and be
+credited once between them, costing exactly one point in the player's disfavour.
+
+### 4. The rare bonus is a declared input with its own stage — and the test that guards
+that list could not see it
+
+`EncounterInput` gained `uint16_t rare_bonus_pm` and `encounter_roll()` consumes it through
+`ENC_STAGE_RARE`, one independent draw, after `pick_row()` and only for a WILD row: one step
+up the rarity ladder within the same category. The outcome never changes, so the
+WILD/ITEM/SPECIAL/NOTHING split is **invariant at every permille** and §22's 15 % NOTHING
+floor is structurally safe rather than merely measured.
+
+**`every_declared_input_reaches_the_answer` does not do what its name says.** It enumerates
+the seven fields by hand and reads no `sizeof`; the phase-6 survey added an eighth declared
+field, left it unread, and `test_encounters` printed **22/22**. The fix is a
+`static_assert(sizeof(EncounterInput) == 20)` beside the struct: adding a field now stops
+the build in front of the case list. The assert is the mechanism; the perturbation is the
+proof.
+
+**And that perturbation had to be paired, which is a finding about this kind of field.**
+Every other input is folded into `encounter_seed()`, so sweeping it against one fixed base
+moves the whole draw. This one is deliberately *not* in the seed (folding it in would make
+a bigger bonus reshuffle rather than improve, so nothing could assert monotonicity), which
+makes it a threshold on one independent draw — and for any single fixed input that draw
+either clears the threshold or never does. Written as a sweep,
+`CHECK(moved_bonus > 0)` **failed on a correctly wired field.** The case compares the same
+input with the bonus off and on, across the same 64 networks the other fields use.
+
+`ENC_RARE_BONUS_MAX_PM` is **250**, in `data/balance.h` because two modules read it (the
+roll clamps to it, the score scales to it). At 1000 every common-band roll is promoted and
+the common band empties completely. The obvious guard — "the common band is non-empty" — is
+worthless: edited to 999 permille, about one roll in a thousand survives and the check
+still passed in every category. The case asserts the **share** instead (a full activity day
+may not even halve the chance of meeting an ordinary creature), which fails for any cap
+above 500.
+
+### What P6-C2 did NOT measure, stated as unmeasured
+
+- **Nothing has run on a board.** The score, its persistence and its three rewards are host
+  tests over pure modules; the wiring in `app/app.cpp`, `ui/ui.cpp` and
+  `ui/screen_network.cpp` is checked by the compiler, by `tests/test_screens.cpp` (which
+  links the real `activity.o`), and by reading.
+- **The `peers met` term has no caller.** It is implemented, capped, deduplicated and tested,
+  and P7-C1 is what will call it. Until then it contributes 0 to every real score.
+- **No NVS wear measurement.** The activity half of the `cd` blob rides `cd_take_dirty()`'s
+  existing cadence plus one flush per logic tick when the score actually moved; how many
+  writes that is over a real day of walking is not known.

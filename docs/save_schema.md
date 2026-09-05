@@ -119,9 +119,36 @@ below is computed from).
 
 ### CooldownTable — 272 B, keys `cd0`/`cd1` (pair)
 
-`magic 0x4443` · `version` · `n` · `seq` · `reserved_a[4]` · `rows[32]`
+`magic 0x4443` · `version` · `n` · `seq` · `act_day` · `act_score` · `rows[32]`
 (`{net_hash, until_epoch}`) · `reserved_b[2]` · `crc16`. `net_hash` is the
 abstract identity from the scanner: no SSID or BSSID ever reaches flash.
+
+**`act_day` + `act_score` were `reserved_a[4]` until P6-C2**, and they are the
+whole persisted half of the daily activity score (spec §25): the UTC day index
+the counters belong to, and that day's total, already capped per term. **No
+schema bump**, on the same argument `PebbleInstance.corrupt_until_epoch` was
+carved out of `reserved[12]` at P5-C3: an old blob reads 0 in both, day index 0
+is 1970 and can never be a real day, so 0 is unambiguously *no day opened yet* —
+which is the correct state for every save written before the commit. Nothing in
+the load path or `game/validate.cpp` checks a reserved byte for zero, and a
+`save_cooldowns()` write is the caller's struct verbatim, so the four bytes also
+round-trip untouched through an **older** firmware.
+
+Why not `Inventory`, which the plan's bullet asked for: it is 32 B with zero
+padding and zero reserved bytes, so growing it is a `SAVE_SCHEMA_VERSION` bump —
+and a bump is not "add a row to `migrate_run()`". `pair_load()` sorts any
+non-equal version into `bad` and `load_all_inner()` returns `LOAD_CORRUPT`
+before the migration branch is reached, so a bump needs a version-tolerant pair
+reader written first and invalidates `box`, `cfg`, `cd`, `cs` and `tr` as
+collateral (five blob types that did not change), plus the `ck_*` checkpoint the
+SAVE ERROR screen's *Recuperar* offers. That is the right price for a real
+widening (`INVENTORY_SLOTS` 7→12); it is the wrong price for four bytes that
+were already reserved.
+
+The four per-term counters and the distinct-network set are **not** here: they
+are per-boot RAM in `game/activity.cpp`, and that header states exactly what a
+power cycle therefore buys (the per-term caps reset; the day's total does not,
+so a rebooting player reaches the honest daily ceiling sooner but never higher).
 
 ### CustomSpeciesRec — 192 B, keys `cs0`..`cs9` (single)
 

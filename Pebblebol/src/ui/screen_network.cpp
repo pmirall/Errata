@@ -9,6 +9,7 @@
 
 #include "../core/strings_es.h"
 #include "../data/sprites.h"
+#include "../game/activity.h"
 #include "../game/box.h"
 #include "../game/cooldowns.h"
 #include "../game/encounters.h"
@@ -70,6 +71,47 @@ static void hand_off(uint32_t now_epoch, uint32_t now_ms, uint8_t cal)
   clk.cal       = cal;
 
   s_seen = s_job.count;
+
+  // -------------------------------------------------------------------------
+  //  THE ACTIVITY SCORE GETS THE WHOLE SCAN, AND IT GETS IT FIRST (P6-C2).
+  //
+  //  Both halves of that sentence are the fix for a trap this function walks
+  //  straight into. THE WHOLE ARRAY, because network diversity is about what
+  //  was SEEN, not about what was explorable - a street whose access points are
+  //  all still on cooldown is the same street, and counting only the explorable
+  //  ones would make the score fall to zero exactly where the player has been
+  //  walking most. FIRST, because the loop below RETURNS on the first network
+  //  it can explore and returns again on the three empty paths after it, so
+  //  anything asked for inside it sees one network out of a dozen or none at
+  //  all.
+  //
+  //  It cannot be cd_arm()'s call count either, which is the cheap version and
+  //  is a farm: one access point re-arms every two hours, so counting arms
+  //  counts one router twelve times a day. game/activity.cpp holds a per-DAY
+  //  set of the credited net_hash values instead, so the same street scanned
+  //  thirty times scores once.
+  // -------------------------------------------------------------------------
+  //  THE SAVE IS NOT OWED HERE. act_note_networks() dirties the same "cd" blob
+  //  cd_arm() does, and ui_explore_commit() below flushes both - but it is only
+  //  reached when a network really was explored, and a street entirely on
+  //  cooldown still scored. app.cpp's per-tick app_pay_activity() is what picks
+  //  that case up, which is why act_take_dirty() has two callers and not one.
+  ActClock aclk;
+  aclk.now_epoch = now_epoch;
+  aclk.cal       = cal;
+  {
+    uint32_t hashes[WIFI_SCAN_MAX_RESULTS];
+    uint8_t  n = 0;
+    for (uint8_t i = 0; i < s_job.count && i < (uint8_t)WIFI_SCAN_MAX_RESULTS; ++i)
+      hashes[n++] = s_job.res[i].net_hash;
+    (void)act_note_networks(ui_cooldowns(), hashes, n, aclk);
+  }
+
+  // What the day's activity is worth to the roll below, in permille. Zero on an
+  // uncalibrated clock, because act_score_today() is zero there - which is the
+  // whole score's CAL_UNSET rule arriving at the one place a player can feel it.
+  const uint16_t bonus_pm = act_rare_bonus_pm(act_score_today(ui_cooldowns(), aclk));
+
   for (uint8_t i = 0; i < s_job.count; ++i) {
     const ScanResult& r = s_job.res[i];
     if (r.net_hash == 0u) continue;               // never explorable, by design
@@ -85,6 +127,11 @@ static void hand_off(uint32_t now_epoch, uint32_t now_ms, uint8_t cal)
     in.rssi         = r.rssi;
     in.active_level = active_level();
     in.progress     = box_count();
+    // THE GROWTH REWARD (spec section 25, "rare event chance"). A declared
+    // field of EncounterInput, clamped by the roll itself, so the roll stays
+    // total, stateless and clock-free: the bonus is a number this screen
+    // computed, not a global the roll reaches for.
+    in.rare_bonus_pm = bonus_pm;
 
     EncounterResult enc;
     if (!encounter_roll(in, enc)) continue;

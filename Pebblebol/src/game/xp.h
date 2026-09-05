@@ -46,7 +46,19 @@
 enum XpSource : uint8_t {
   XP_SRC_CARE = 0,      // a care action landed              (metered, hourly)
   XP_SRC_MINIGAME,      // a minigame finished               (metered, hourly)
-  XP_SRC_CARRY,         // time carried awake                (metered, daily)
+  // P6-C2 WIDENED WHAT THIS ONE MEANS AND DID NOT ADD A FIFTH. The daily
+  // activity score of game/activity.h pays through here: its largest term IS
+  // "time carried awake", XP_CAP_CARRY / XP_WIN_CARRY_S is already the daily
+  // window, and a fifth METERED source is not an enum edit - it makes
+  // Inventory.xp_ledger 5 B, which moves offsetof(items) and fails that
+  // struct's own assert, or keeps 32 B by deleting the seventh item stack out
+  // of every save. THE COST, said rather than glossed: activity XP and the
+  // passive carry drip now share ONE XP_CAP_CARRY budget, so a heavy-walking
+  // day crowds out the drip. They measure the same thing, which is the argument
+  // for it; a day that earns 48 XP from carrying earns none from networks,
+  // which is the price.
+  XP_SRC_CARRY,         // time carried awake, and the activity score
+                        //                                    (metered, daily)
   XP_SRC_BATTLE,        // a practice-battle win             (metered, hourly)
   XP_SRC_CAPTURE,       // P5 capture                        (unmetered)
   XP_SRC_ITEM,          // P6 XP candy                       (unmetered)
