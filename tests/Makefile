@@ -113,7 +113,11 @@ $(BIN)/test_box:        $(OBJ)/box.o
 # evolution.o comes with it because the two call each other: xp_add() asks
 # evolution_level_ready() whether to raise EVO_STATE_PENDING, and
 # evolution_apply() calls back into xp_hp_rescale() so there is ONE rescale.
-$(BIN)/test_xp:         $(OBJ)/xp.o $(OBJ)/evolution.o
+# activity.o joins them in P6-C4. The activity farm is a CROSS-MODULE property -
+# the day is game/activity.cpp's and the budget that bounds what a day is worth
+# is game/xp.cpp's - and neither file's own test binary could see it, which is
+# exactly why it shipped. This is the binary where the two meet.
+$(BIN)/test_xp:         $(OBJ)/xp.o $(OBJ)/evolution.o $(OBJ)/activity.o
 # The other half of that pair. Both objects, for the same reason.
 $(BIN)/test_evolution:  $(OBJ)/evolution.o $(OBJ)/xp.o
 # The generated content tables (P4-C1). species.o is the accessor layer AND the

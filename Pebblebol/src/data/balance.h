@@ -259,10 +259,12 @@ static_assert(xp_table_total() < 65535u,
 // THE SAVE-COMPAT CONSEQUENCE, stated rather than discovered: the byte was
 // persisted as 0 while the slot was unmetered, and 0 now means "empty bucket",
 // so a device upgrading across this commit earns no battle XP until the bucket
-// refills. xp_ledger_restore() credits the elapsed real time first, so a device
-// that was off for an hour comes back full and one that was saved a moment ago
-// waits 72 s for its first point. No save is invalidated and no byte changes
-// meaning for any other slot.
+// refills. CORRECTED AT P6-C4: it refills out of xp_ledger_tick(), i.e. seconds
+// the device is switched ON, and not out of a wall-clock gap - xp_ledger_restore()
+// stopped crediting elapsed time, because both of its epochs are typed on the
+// time screen. So a device that was off for an hour comes back exactly where it
+// was and takes 72 s of running for its first point. No save is invalidated and
+// no byte changes meaning for any other slot.
 #define XP_CAP_BATTLE           50          // per hour  (2 wins)
 #define XP_WIN_BATTLE_S         3600UL
 

@@ -1262,6 +1262,19 @@ static void clamp_care(void)
 void sim_bind(PebbleInstance& pebble)
 {
   g.pb = &pebble;
+  // THE STEP SIZE HAS A DEFAULT HERE, AND THIS IS THE ONLY PLACE IT GETS ONE.
+  // g.scale is a zero-initialised static and sim_step_seconds() returns it raw;
+  // app.cpp's logic_tick() multiplies it by the seconds owed. Until P6-C4 the
+  // ONLY writer was sim_set_time_scale(), whose only two callers are both inside
+  // dev/godmode.cpp's `#if GOD_MODE_ENABLED` half - so on the RELEASE artefact
+  // (GOD_MODE_ENABLED=0) the scale stayed 0, every tick was sim_tick(0), and the
+  // whole simulation - care decay, ageing, the XP carry drip, the activity
+  // carried minute - stood still for as long as the device was switched on.
+  // A default that lives inside a dev feature is not a default. It lives here,
+  // where the module goes live, and god mode is now an OVERRIDE rather than the
+  // thing that starts the clock. Set only when unset, so binding a second Pebble
+  // does not cancel an acceleration the player is watching.
+  if (g.scale == 0u) g.scale = 1u;
   sim_env_defaults(g.env);
   g.uptime_s = 0;
   reset_pebble_state(0);        // PH3 #4: a reload re-earns its ledgers

@@ -76,6 +76,13 @@ static_assert(ACT_SCORE_MAX % ACT_XP_STEP_POINTS == 0u,
               "the XP step does not divide a full activity day");
 static_assert(ACT_SCORE_MAX % ACT_HAPPY_STEP_POINTS == 0u,
               "the happiness step does not divide a full activity day");
+// act_happy_for_granted_xp() leans on this: every multiple of the happiness step
+// is a multiple of the XP step, so happiness can never be owed by a bank() the
+// XP threshold count did not also see. Break it and a happiness payment could
+// arrive with granted_xp == 0 behind it and be silently dropped.
+static_assert(ACT_HAPPY_STEP_POINTS % ACT_XP_STEP_POINTS == 0u,
+              "the happiness step is not a multiple of the XP step - the "
+              "happiness would no longer be metered by the XP ledger");
 
 void act_begin(void)
 {
@@ -269,6 +276,15 @@ uint16_t act_rare_bonus_pm(uint16_t score)
   if (score >= (uint16_t)ACT_SCORE_MAX) return (uint16_t)ENC_RARE_BONUS_MAX_PM;
   return (uint16_t)(((uint32_t)score * (uint32_t)ENC_RARE_BONUS_MAX_PM) /
                     (uint32_t)ACT_SCORE_MAX);
+}
+
+// The happiness half of the reward, scaled to the XP the ledger actually paid.
+// See activity.h: this is the only rate limit the happiness has.
+uint16_t act_happy_for_granted_xp(const ActGain& g, uint16_t granted_xp)
+{
+  if (g.happy_milli == 0u || granted_xp == 0u || g.xp == 0u) return 0u;
+  if (granted_xp >= g.xp) return g.happy_milli;
+  return (uint16_t)(((uint32_t)g.happy_milli * (uint32_t)granted_xp) / (uint32_t)g.xp);
 }
 
 ActGain act_take_gain(void)

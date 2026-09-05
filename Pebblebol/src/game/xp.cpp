@@ -222,26 +222,57 @@ void xp_ledger_snapshot(uint8_t out[XP_LEDGER_SLOTS])
   }
 }
 
+// -----------------------------------------------------------------------------
+//  THE ELAPSED REFILL IS GONE, AND ITS ABSENCE IS THE ANTI-FARM RULE (P6-C4).
+//
+//  This used to be  left = min(cap, saved + elapsed / refill_step), with
+//  elapsed = now_epoch - saved_epoch clamped to one window. Both epochs are
+//  WALL CLOCK, and on this device the wall clock is something the player TYPES:
+//  the time screen calls gt_set_epoch(..., CAL_USER) with any value it likes,
+//  and the jumped epoch is persisted, so the next boot's "elapsed" is whatever
+//  the player decided it was. One window of elapsed refills the whole bucket.
+//
+//  MEASURED, before the change: 100 rounds of (set the clock forward one day,
+//  reboot, run ONE Wi-Fi scan of the SAME ten access points) spent 990 metered
+//  XP in ZERO real seconds. An honest player at full tilt earns 37.8 XP per REAL
+//  day. Neither half does it alone - 100 reboots with the clock left where it
+//  was spend 0, and 100 clock jumps without a reboot spend 0 - so the exploit is
+//  exactly this line meeting a reboot.
+//
+//  There is no way to tell a typed day from a day the device spent switched off,
+//  because it was switched off and cannot have watched either. So the refill is
+//  not repaired, it is REMOVED: a restore hands back the budget that was true at
+//  the last save and not one point more, which is what game/xp.h and
+//  app/app.cpp both already said this call did. xp_ledger_tick() then refills it
+//  from seconds the device actually watched pass, and those are the only
+//  seconds anyone can prove.
+//
+//  WHAT THE HONEST PLAYER LOSES, said plainly rather than buried: time the
+//  device spends switched OFF no longer refills the budget. A player who drained
+//  the day's carry cap, switched the device off overnight and switched it on
+//  again used to get the whole cap back; now they get back what they had, and it
+//  refills at cap/window while the device is on. The meter therefore means "XP
+//  per day of device-ON time" rather than "per day of wall time". That is a
+//  smaller budget, it is in the player's disfavour in every case, and it is the
+//  only direction that cannot be typed.
+// -----------------------------------------------------------------------------
 uint8_t xp_ledger_restore(const uint8_t* pts, uint8_t n,
                           uint32_t saved_epoch, uint32_t now_epoch)
 {
+  // Both epochs still have to be real dates. They no longer buy anything, but
+  // they are what says the blob was written by a device that knew what time it
+  // was - and without that, the safe seed is ZERO rather than the snapshot.
   const uint8_t trust = (pts != 0 && n != 0 &&
                          saved_epoch >= (uint32_t)NT_EPOCH_SANE_MIN &&
                          now_epoch   >= (uint32_t)NT_EPOCH_SANE_MIN) ? 1u : 0u;
-
-  uint32_t elapsed = 0u;
-  if (trust && now_epoch > saved_epoch) elapsed = now_epoch - saved_epoch;
 
   for (uint8_t i = 0; i < (uint8_t)XP_LEDGER_SLOTS; ++i) {
     const uint32_t step = refill_step_s(i);
     g_led.rem_s[i] = 0u;
     if (step == 0u || !trust) { g_led.left[i] = 0u; continue; }
 
-    uint32_t el = (elapsed > METER[i].window_s) ? METER[i].window_s : elapsed;
-    uint32_t v  = (i < n) ? (uint32_t)pts[i] : 0u;
+    uint32_t v = (i < n) ? (uint32_t)pts[i] : 0u;
     if (v > (uint32_t)METER[i].cap) v = METER[i].cap;   // an edited blob cannot exceed the cap
-    v += el / step;                                     // truncating: under-reports, never over
-    if (v > (uint32_t)METER[i].cap) v = METER[i].cap;
     g_led.left[i] = (uint16_t)v;
   }
   g_led.carry_s = 0u;

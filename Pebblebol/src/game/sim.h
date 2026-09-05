@@ -143,6 +143,11 @@ bool     sim_apply_action(ActionId action, ActionResult& out);
 
 // Simulated seconds per logic tick: 1 normally, the god-mode time scale
 // otherwise. The ONLY time source game logic is allowed to read.
+//
+// THE 1 IS SET BY sim_bind(), NOT BY GOD MODE. sim_set_time_scale() below is an
+// override; it is called only from dev/godmode.cpp, which is compiled out of the
+// release artefact, so a default that depended on it was a default the shipping
+// build never got - and a step of 0 stops the whole simulation. See sim_bind().
 uint32_t sim_step_seconds(void);
 
 // 0..100 displayed mood score.
@@ -162,7 +167,10 @@ int32_t  sim_stat_milli(StatId id);
 void     sim_seed(uint32_t seed);            // reseeds RNG_CARE (wrapper on rng_seed)
 void     sim_set_env(const SimEnv& env);     // once per logic tick
 const SimEnv& sim_env(void);
-void     sim_set_time_scale(uint32_t scale); // god mode: 1/6/60/360/3600
+// God mode's acceleration: 1/6/60/360/3600. An OVERRIDE of sim_bind()'s 1, and
+// never the thing that sets it - dev/godmode.cpp is compiled out of `release`.
+// A scale of 0 is clamped to 1: a step of zero is not a speed, it is a stop.
+void     sim_set_time_scale(uint32_t scale);
 
 // -----------------------------------------------------------------------------
 // 5. LIFE CYCLE

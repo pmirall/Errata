@@ -102,9 +102,11 @@ bool gs_load_gain(uint8_t pts[GS_GAIN_SLOTS], uint32_t& epoch);
 // SaveSchema v2 already reserved Inventory.xp_ledger[4] and Inventory.ledger_epoch
 // for it, so it rides the inventory pair. It is NOT bound to a provider the way
 // the gain ledger is, because it must be written at a different moment: the
-// instant XP is SPENT, and only then. A refill costs no write - xp_ledger_restore()
-// reconstructs it from the elapsed time - so a save is owed only when the budget
-// went DOWN, which is the half a reboot could otherwise undo.
+// instant XP is SPENT, and only then. A refill costs no write - xp_ledger_tick()
+// puts the points back out of seconds the device watched pass - so a save is owed
+// only when the budget went DOWN, which is the half a reboot could otherwise
+// undo. (Before P6-C4 the refill came from xp_ledger_restore() and a wall-clock
+// gap, which a player refills by typing a date; see game/xp.cpp.)
 // gs_load_xp_ledger() returns false when nothing trustworthy was ever stored.
 // -----------------------------------------------------------------------------
 bool gs_load_xp_ledger(uint8_t pts[XP_LEDGER_SLOTS], uint32_t& epoch);

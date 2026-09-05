@@ -129,7 +129,7 @@ why this enumeration was worth measuring instead of restating.
 | item | flash | globals |
 |---|---|---|
 | ~~P5 scanner, encounters, capture, items~~ **SPENT: +12,282 / +504** | ~~15-25 K~~ | ~~1.0-2.0 K~~ |
-| P6 activity score, power states — **P6-C3 SPENT: +9,698 flash / +192 globals** (baseline 1,938,904/73,388 -> 1,948,602/73,580, measured either side of the commit; release 1,214,794/49,748 -> 1,224,010/49,924 = 76.5 % and 76.8 % of the caps `build_matrix.sh` enforces). **MOST OF THE GLOBALS ARE NOT OURS, and that is the finding worth recording:** this is the first firmware in the tree to call `esp_light_sleep_start()`, and `riscv32-esp-elf-nm` over the two ELFs shows the new DRAM objects are ESP-IDF's own sleep state - `esp_sleep`'s `s_config` at 80 B, plus `s_dslp_cb`, `s_lightsleep_cnt`, `s_cpu_retention`, `s_cache_suspend_cnt`, `s_suspended_uarts_bmap` and `s_stopped_tgwdt_bmap` at 4-12 B each. Pebblebol's own share is **~44 B**: the DIAG loop counters 16, `hardware/power.cpp`'s five words of ladder state 17, and app.cpp's three-word idle clock 9. `hardware/power.h` and its four hooks are `const` and cost flash, not globals. **The 9.6 K of flash is the price of linking the sleep driver, not of the ladder**, which is ~500 lines of integer comparisons. **The phase so far, P6-C1 through P6-C3, is +20,666 flash / +400 globals on the `0.5.0-explore` baseline of 1,927,936/73,180 - already past the 8-12 K flash line, and about half the globals line.** Named: P6-C1 +9,028/+136 (the tone engine and the motion stub), P6-C2 +1,940/+72 (the activity score), P6-C3 +9,698/+192 (this row). Earlier in the phase: **P6-C2 SPENT: +1,940 flash / +72 globals** (baseline 1,936,964/73,316 -> 1,938,904/73,388, measured either side of the commit; release 1,214,794/49,748 = 75.9 % and 76.5 % of the caps `build_matrix.sh` enforces). The 72 B of globals is `game/activity.cpp`'s per-boot half and nothing else: the ten-entry network set 40, the four-entry peer set 16, six counters, a seconds remainder, the pending gain and the dirty flag. The PERSISTED half costs 0 - it is four bytes that were already `CooldownTable.reserved_a[4]`. | 8-12 K | 0.3-0.8 K |
+| ~~P6 activity score, power states~~ **PHASE 6 CLOSED AT `v0.6.0-activity`: +20,866 flash / +400 globals** (baseline 1,927,936/73,180 -> 1,948,802/73,580; release 1,203,808/49,508 -> **1,224,210/49,924** = 76.5 % and 76.8 % of the caps `build_matrix.sh` enforces). **THE FLASH LINE WAS OVERRUN BY 74 % AND THE SCARCE LINE WAS NOT**, and the reason is worth keeping: about 17 K of the 20.9 K is two ESP-IDF drivers arriving in the tree for the FIRST time - LEDC with the first PWM output (~7.5 K, P6-C1) and `esp_sleep` with the first `esp_light_sleep_start()` (~9.6 K, P6-C3). Both are paid once and reused: a later LED effect and a deep-sleep rung link no new driver. Pebblebol's own phase-6 code is roughly 3.8 K. Per commit: P6-C1 +9,028/+136 (tone engine + motion capability), P6-C2 +1,940/+72 (activity score; its PERSISTED half costs 0 - four bytes that were already `CooldownTable.reserved_a[4]`), P6-C3 +9,698/+192 (power ladder + sleep-correct clock; ~148 B of the 192 is ESP-IDF's own sleep state, ~44 B is Pebblebol's), P6-C4 +200/+0 (the exit's three fixes, one gate, documents). **375,790 B of release flash and 15,076 B of release globals remain** against an 80-115 K / 3.7-8.0 K forecast for P7-P10. | ~~8-12 K~~ | ~~0.3-0.8 K~~ |
 | P7 ESP-NOW transport, link/trade/breeding | 25-35 K | 1.5-3.0 K |
 | P8 PIN, creator routes, mobile page + sprite editor (PROGMEM) | 30-45 K | 1.5-3.0 K |
 | P9 roster 36→60, sprite atlas, corruption | 15-20 K | 0.2-0.5 K |
@@ -144,6 +144,16 @@ why this enumeration was worth measuring instead of restating.
 | BLE deleted | ~1,333,000 (56 %) | ~57,200 (64 %) | 32 KB of globals |
 
 **It fits either way on flash. On globals it fits comfortably only if BLE goes.**
+
+**RE-SCORED AT THE PHASE-6 TAG (P6-C4), because this table still carries its phase-4-era
+ending state and phase 6 overran its flash line.** Release today is **1,224,210 / 49,924**.
+Adding the P7-P10 forecast of 80-115 K flash and 3.7-8.0 K globals gives an ending state of
+**1,304,210-1,339,210 flash** and **53,624-57,924 globals** — against the projected
+~1,333,000 / ~57,200 in the "BLE deleted" row. So flash lands inside the projection and the
+top of the globals band now lands roughly **0.7 KB past it**, still at **~89 % of the 65,000
+cap**. The conclusion the table was drawn to support is unchanged, and BLE is already off in
+`release`. One line, not a rewrite: the projection was drawn before phase 6 linked two
+ESP-IDF drivers, and it survived that.
 
 ## 4. Three things to change, in order of value
 

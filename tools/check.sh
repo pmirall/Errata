@@ -602,4 +602,30 @@ if [ -f "$SKETCH/src/ui/ui.cpp" ]; then
   [ "$n" -eq 1 ] || fail "ui_explore_clock() does not hand out gt_mono32() - see hardware/gametime.h on which clock decides a game outcome"
 fi
 
+# --- P6-C4: THE MONOTONIC CLOCK ITSELF, NOT JUST ITS CALLER ---------------
+# The gate above polices ui_explore_clock(), the CALLER. The line it depends on
+# had nothing on it at all: gt_mono_ms()'s ARDUINO branch is the whole of P6-C3's
+# "a monotonic source that survives sleep", and reverting it to millis() - the
+# exact regression that chunk was written to prevent - is invisible to the host
+# suite, because no host binary compiles that branch. Measured: the revert was
+# planted and `make -C tests check` still reported ALL PASS.
+#
+# So the branch is pinned here. esp_rtc_get_time_us() is the RTC slow-clock
+# counter and runs through a light sleep AND a deep sleep; millis() is
+# esp_timer, i.e. uptime, and restarts at a deep-sleep wake. The HOST branch is
+# deliberately left alone - it reads gt_host_millis32(), which is the test's own
+# injected clock and has nothing to do with Arduino's millis().
+if [ -f "$SKETCH/src/hardware/gametime.cpp" ]; then
+  body=$(sed -n '/^static uint64_t gt_mono_ms/,/^}/p' "$SKETCH/src/hardware/gametime.cpp")
+  if [ -z "$body" ]; then
+    fail "gt_mono_ms() not found in gametime.cpp - the gate that keeps the monotonic clock sleep-proof has lost its subject"
+  fi
+  dev=$(printf '%s\n' "$body" | sed -n '/#if defined(ARDUINO)/,/#else/p' \
+        | { grep -vE '^[[:space:]]*//' || true; })
+  n=$( { printf '%s\n' "$dev" | grep -nE 'esp_rtc_get_time_us[[:space:]]*\(' || true; } | wc -l )
+  [ "$n" -ge 1 ] || fail "gt_mono_ms() does not read esp_rtc_get_time_us() on the device - the monotonic clock every cooldown deadline is measured against must survive a sleep (hardware/gametime.h)"
+  n=$( { printf '%s\n' "$dev" | grep -nE '(^|[^_[:alnum:]])millis[[:space:]]*\(' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "gt_mono_ms()'s device branch reads millis() ($n) - millis() is UPTIME and restarts at a deep-sleep wake; the uncalibrated cooldown table would freeze (game/cooldowns.h)"
+fi
+
 echo "GATE OK"

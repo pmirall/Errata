@@ -236,9 +236,13 @@ static bool gain_source(uint8_t pts[GS_GAIN_SLOTS], uint32_t& epoch)
 //  not be able to refill it), the UI is told through the event word it already
 //  drains, and the new level is committed rather than left in RAM.
 //
-//  Only the ledger DECREASE is persisted. A refill needs no blob: it is
-//  reconstructed from the elapsed time by xp_ledger_restore(), which is the
-//  same composition the hourly gain budget uses above.
+//  Only the ledger DECREASE is persisted, and since P6-C4 that is the whole of
+//  what a reboot gets back. A refill needs no blob because it needs no wall
+//  clock: xp_ledger_tick() puts the points back out of seconds the device
+//  watched pass, and xp_ledger_restore() adds nothing at all. It used to add
+//  (now_epoch - saved_epoch) / refill_step, which is the composition the hourly
+//  gain budget above STILL uses - and which a player refills by typing a date on
+//  the time screen. game/xp.cpp carries the measurement.
 // =============================================================================
 bool app_award_xp(uint16_t amount, XpSource src)
 {
@@ -290,13 +294,18 @@ ActClock app_act_clock(void)
 //  XP or happiness on its own and there is exactly one place to look for either.
 //
 //  THE XP GOES THROUGH app_award_xp(XP_SRC_CARRY), which is the metered bucket,
-//  which is the last of game/activity.h's five anti-farm layers: even a bug in
-//  every rule above it leaves the award rate-limited by a budget a reboot
-//  cannot refill (and that re-seeds to ZERO on an untrusted clock).
+//  which is the last of game/activity.h's anti-farm layers: even a bug in every
+//  rule above it leaves the award rate-limited by a budget that only seconds the
+//  device WATCHED PASS can refill. That sentence was false until P6-C4 - the
+//  budget was also refilled by (now_epoch - saved_epoch) at every boot, and both
+//  of those are a wall clock the player types on the time screen - which is why
+//  game/xp.cpp's restore no longer ages anything forward.
 //
 //  THE HAPPINESS IS APPLIED THE WAY game/inventory.cpp's care items apply
 //  theirs - clamped at PB_CARE_MILLI_MAX, never above, on the ACTIVE Pebble
-//  only. A creature in the Box is not being carried.
+//  only. A creature in the Box is not being carried. What it is NOT is a second,
+//  unmetered reward: it is scaled to the XP the ledger actually paid for, so the
+//  one budget covers both halves. See act_happy_for_granted_xp().
 // -----------------------------------------------------------------------------
 void app_pay_activity(void)
 {
@@ -318,12 +327,28 @@ void app_pay_activity(void)
   if (act_take_dirty() && !gs_readonly()) (void)save_cooldowns(gs_state().cds);
 
   const ActGain g = act_take_gain();
-  if (g.xp != 0u) (void)app_award_xp(g.xp, XP_SRC_CARRY);
-  if (g.happy_milli != 0u) {
+
+  // ONE BUDGET, BOTH HALVES OF THE REWARD. The award is what spends the meter,
+  // so what it spent is read off the meter either side of it rather than
+  // guessed: xp_add() takes min(owed, left) and nothing else can move the bucket
+  // in between. A Pebble at XP_LEVEL_MAX is the one case where this pays less
+  // than the score earned - xp_add() returns at the top of the curve before it
+  // would spend anything, so granted is 0 and the happiness stops with the XP.
+  // That is a loss, not a hole, and it is written down in game/activity.h.
+  uint16_t granted = 0u;
+  if (g.xp != 0u) {
+    const uint16_t before = xp_daily_left(xp_ledger(), XP_SRC_CARRY);
+    (void)app_award_xp(g.xp, XP_SRC_CARRY);
+    const uint16_t after  = xp_daily_left(xp_ledger(), XP_SRC_CARRY);
+    granted = (before > after) ? (uint16_t)(before - after) : 0u;
+  }
+
+  const uint16_t happy = act_happy_for_granted_xp(g, granted);
+  if (happy != 0u) {
     const uint8_t act = box_active();
     PebbleInstance* p = (act < (uint8_t)BOX_SLOTS) ? box_slot(act) : nullptr;
     if (p != nullptr && p->care[CARE_HAPPINESS] < (int32_t)PB_CARE_MILLI_MAX) {
-      int32_t v = p->care[CARE_HAPPINESS] + (int32_t)g.happy_milli;
+      int32_t v = p->care[CARE_HAPPINESS] + (int32_t)happy;
       if (v > (int32_t)PB_CARE_MILLI_MAX) v = (int32_t)PB_CARE_MILLI_MAX;
       p->care[CARE_HAPPINESS] = v;
     }
@@ -466,17 +491,26 @@ static void boot_box(void)
       (void)sim_gain_restore(gpts, GS_GAIN_SLOTS, gepoch,
                              sim_pebble()->last_updated_epoch);
     }
-    // The XP ledger is the same composition ONE TERM SHORT. Both restores age
-    // the saved budget forward to last_updated_epoch, but only the care gain
-    // gets a second term: boot_absence()'s catch-up calls gain_refill() over
-    // [last_seen, now], and nothing anywhere calls an xp_ledger equivalent. So
-    // the XP budget is reconstructed as of THE LAST SAVE and the offline gap
-    // never refills it. That is deliberate and it is the safe direction - it
-    // under-reports, so it cannot be farmed - but it is not the same interval,
-    // and a reader who assumes it is will look for a refill that is not there.
-    // Without a trustworthy snapshot it stays at the zero xp_ledger_reset(0)
-    // seeded: unkind for an hour, but the only direction that cannot be farmed
-    // by power-cycling the device after spending the budget.
+    // THE XP LEDGER IS NOT THE SAME COMPOSITION AT ALL, SINCE P6-C4. It ages
+    // nothing forward: the restore hands back exactly the bytes of the last
+    // snapshot, and every point past that has to be refilled by
+    // xp_ledger_tick() out of seconds this device watched pass. The two epochs
+    // below still travel, because they are what says the blob came from a device
+    // that knew the date, but they no longer buy a single point.
+    //
+    // They used to. left = min(cap, saved + (now - saved)/step) reads a wall
+    // clock at both ends, the wall clock is typed on the time screen, and one
+    // day of "elapsed" refills a whole bucket - so (clock +1 day, reboot, one
+    // scan) x100 spent 990 metered XP in zero real seconds. game/xp.cpp carries
+    // the measurement and what the honest player loses for closing it.
+    //
+    // THE CARE GAIN LEDGER ABOVE STILL HAS THAT SHAPE and is therefore still
+    // refillable the same way; it bounds hourly stat gains rather than XP, its
+    // clamp is one HOUR rather than one window, and closing it is a phase-7 item
+    // written into the plan rather than something this chunk measured.
+    // Without a trustworthy snapshot the XP budget stays at the zero
+    // xp_ledger_reset(0) seeded: unkind for an hour, but the only direction that
+    // cannot be farmed by power-cycling the device after spending the budget.
     uint8_t  xpts[XP_LEDGER_SLOTS];
     uint32_t xepoch = 0;
     if (gs_load_xp_ledger(xpts, xepoch)) {

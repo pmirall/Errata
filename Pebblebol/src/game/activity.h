@@ -44,6 +44,17 @@
 //      game/cooldowns.h's "a rollback never shortens a cooldown" applied to a
 //      counter that, unlike a deadline, does not get it for free.
 //
+//      AND THE FORWARD DIRECTION IS NOT DEFENDED HERE, WHICH IS THE HONEST WAY
+//      TO SAY IT (P6-C4). A clock moved FORWARD by a day opens a new day and
+//      resets act_score, exactly as a device that spent that day switched off
+//      would. Nothing in this module can tell those apart - it has one clock,
+//      the player types it on the time screen, and a device that was off did not
+//      watch anything either - so a day CAN be manufactured, as often as the
+//      player is willing to type. What that day is WORTH is bounded somewhere
+//      else, by layer 5, and layer 5 had to be repaired in P6-C4 before that
+//      sentence was true. Measured before the repair: 100 manufactured days paid
+//      990 metered XP and 125,000 care milli-points in zero real seconds.
+//
 //   3. THE DAY'S TOTAL IS PERSISTED, IN CooldownTable.act_score. This is the
 //      layer that survives a power cycle. Everything a reward is computed from
 //      is that one number, and it is capped at ACT_SCORE_MAX - which is exactly
@@ -57,11 +68,27 @@
 //      count one access point twelve times a day, which is a farm wearing a
 //      diversity score's name.
 //
-//   5. THE XP LEDGER UNDERNEATH ALL OF IT. Activity XP is paid through
-//      XP_SRC_CARRY, which is metered (XP_CAP_CARRY per XP_WIN_CARRY_S) and
-//      whose budget a reboot cannot refill (xp_ledger_restore()). Even if every
-//      rule above had a bug, the XP is still rate-limited by a bucket that
-//      re-seeds to ZERO on an untrusted clock. See "THE FIFTH SLOT" below.
+//   5. THE XP LEDGER UNDERNEATH ALL OF IT, AND IT CARRIES BOTH REWARDS. Activity
+//      XP is paid through XP_SRC_CARRY, which is metered (XP_CAP_CARRY per
+//      XP_WIN_CARRY_S). A restore hands back the budget that was true at the
+//      last save and adds nothing, so the ONLY thing that refills the bucket is
+//      xp_ledger_tick() over seconds the device watched pass - and those are the
+//      only seconds a player cannot type. The happiness has no meter of its own
+//      and borrows this one: app.cpp pays it in proportion to the XP the ledger
+//      actually granted (act_happy_for_granted_xp), so a manufactured day pays
+//      happiness only while there is metered XP left to spend on it.
+//
+//      THIS IS THE SENTENCE THE WHOLE ARGUMENT LEANS ON, so here is its exact
+//      scope. It bounds the REWARD, not the score: a manufactured day still
+//      resets act_score and still hands the next encounter roll a fresh rare
+//      bonus (act_rare_bonus_pm), because that bonus is a permille on one draw
+//      and costs no budget. It is also only as strong as XP_CAP_CARRY: over a
+//      long enough run the ceiling is XP_CAP_CARRY per XP_WIN_CARRY_S of
+//      DEVICE-ON time, whatever the clock says, and never the 44 a manufactured
+//      day asks for. Until P6-C4 it was false outright - xp_ledger_restore()
+//      re-aged the budget from the same typed wall clock - and the four cheat
+//      cases in tests/test_activity.cpp could not see it, because the module
+//      that leaked is not this one.
 //
 // -----------------------------------------------------------------------------
 //  WHAT A POWER CYCLE STILL BUYS, SAID PLAINLY
@@ -81,6 +108,18 @@
 //  reached the tedious way). Persisting the four counters as well would close
 //  it, and it would cost the two bytes of CooldownTable.reserved_b plus a write
 //  every minute; it is not worth that until something is measured that says so.
+//
+//  A POWER CYCLE IS NOT THE INTERESTING ATTACK, AND SAYING SO HERE IS THE POINT
+//  OF THE P6-C4 EDIT. The interesting one is the TIME SCREEN: a day typed
+//  forward resets act_score outright, which a reboot cannot do, and it needs no
+//  reboot at all. The reward for it is bounded by layer 5 and by nothing in this
+//  file. The residual is stated in full at layer 5.
+//
+//  ONE MORE RESIDUAL, IN THE PLAYER'S DISFAVOUR: a Pebble at XP_LEVEL_MAX earns
+//  no activity happiness, because xp_add() returns at the top of the curve
+//  before it spends the meter, and the happiness is scaled by what the meter
+//  spent. It is a loss and not a hole - the safe direction - and it is the one
+//  case where the two halves of the reward do not agree.
 //
 //  The XP half of the reward does not even have that residual: XP is owed for
 //  crossing ACT_XP_STEP_POINTS thresholds of the day's CUMULATIVE, PERSISTED
@@ -284,6 +323,27 @@ uint16_t act_rare_bonus_pm(uint16_t score);
 // Drains the rewards owed since the last call and zeroes them. The app pays
 // them through app_award_xp(XP_SRC_CARRY) and the happiness path.
 ActGain act_take_gain(void);
+
+// -----------------------------------------------------------------------------
+// act_happy_for_granted_xp(g, granted_xp) -> the happiness `g` is still worth
+// once the XP ledger has said how much of g.xp it would actually pay for.
+//
+// THE HAPPINESS HAS NO METER OF ITS OWN, AND THIS IS HOW IT BORROWS ONE (P6-C4).
+// The XP half of the reward is rate-limited by XP_SRC_CARRY; the happiness half
+// was not limited by anything, and it did not even need a reboot to farm -
+// MEASURED: 100 forward clock jumps inside ONE session, no power cycle at all,
+// paid 125,000 care milli-points against a bar (PB_CARE_MILLI_MAX) of 100,000.
+// A day cannot be made honest, but it can be made worthless: both halves of the
+// reward now come out of the same budget, so a manufactured day pays happiness
+// only while the metered XP it would have paid is still there to be spent.
+//
+// Pure, integer and truncating (it under-pays, never over). granted_xp at or
+// above g.xp returns the whole of g.happy_milli; a granted_xp of 0 returns 0.
+// g.xp == 0 returns 0 as well, and that costs nothing: ACT_HAPPY_STEP_POINTS is
+// a multiple of ACT_XP_STEP_POINTS, so every happiness threshold the score
+// crosses is also an XP threshold and no happiness can be owed without XP.
+// -----------------------------------------------------------------------------
+uint16_t act_happy_for_granted_xp(const ActGain& g, uint16_t granted_xp);
 
 // True once after any call that CHANGED the persisted half of `t` (act_day or
 // act_score), then false until the next one - cd_take_dirty()'s contract, and

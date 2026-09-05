@@ -549,3 +549,135 @@ TEST(the_network_set_is_exact_and_saturating_over_a_long_walk) {
   const uint32_t brand_new = 0xFEEDFACEu;
   CHECK_EQ(act_note_networks(t, &brand_new, 1u, clk(EP0)), 0u);
 }
+
+
+// =============================================================================
+//  8. THE DIRECTION THE CLOCK CAN BE MOVED THAT ACTUALLY PAYS  (P6-C4)
+//
+//  This file shipped with four named cheat cases - an uncalibrated clock, a
+//  clock rolled BACKWARDS, a power cycle, and a rescan - and none for a clock
+//  moved FORWARD, which is the only direction that resets act_score and the only
+//  one worth typing. Worse, a_new_day_resets_the_score_and_every_counter blessed
+//  the reset mechanism without bounding how often a day can be created, so the
+//  suite certified the farm's engine as correct.
+//
+//  These two cases say what is true, in both directions, and neither of them
+//  claims this module stops the farm - it cannot, and pretending otherwise is
+//  how the hole survived. A typed day and a day the device spent switched off
+//  are the same evidence: one clock, moved forward, by nobody who was watching.
+//  What a manufactured day is WORTH is bounded in game/xp.cpp, and the cases
+//  that measure THAT are in tests/test_xp.cpp, which is the only binary that
+//  links both modules.
+// =============================================================================
+TEST(a_forward_clock_set_opens_one_day_at_a_time_and_never_more_than_one_budget) {
+  CooldownTable t;
+  fresh(t);
+
+  // A hundred days typed onto the clock, one at a time, each one earning the
+  // best score the module will give it. Every one of them is capped at
+  // ACT_SCORE_MAX, the day index tracks the clock exactly, and no day is ever
+  // opened twice.
+  uint32_t days_opened = 0;
+  for (uint32_t d = 0; d < 100u; ++d) {
+    const uint32_t ep = EP0 + d * (uint32_t)ACT_DAY_S;
+    const uint16_t before_day = t.act_day;
+    power_cycle();                                   // maximally generous: reboot too
+    (void)act_note_interaction(t, clk(ep));
+    if (t.act_day != before_day) days_opened++;
+
+    // Drive the day as hard as it can be driven, with all-new inputs.
+    for (uint32_t k = 0; k < 500u; ++k) {
+      (void)act_note_carried(t, 60u, clk(ep));
+      (void)act_note_interaction(t, clk(ep));
+      const uint32_t h = (d * 1000u + k) * 2654435761u + 1u;
+      (void)act_note_networks(t, &h, 1u, clk(ep));
+      (void)act_note_peer(t, h ^ 0x5A5A5A5Au, clk(ep));
+    }
+    CHECK_EQ(act_score_today(t, clk(ep)), (uint16_t)ACT_SCORE_MAX);
+    CHECK_EQ(t.act_day, act_day_index(ep));
+  }
+  CHECK_EQ(days_opened, 100u);       // one open per day index, never two
+
+  // AND SEVERAL JUMPS INSIDE ONE DAY OPEN NOTHING. A player who types the same
+  // date twice, or an hour forward, gets no second budget: the day index is the
+  // unit, not the edit.
+  const uint32_t last = EP0 + 99u * (uint32_t)ACT_DAY_S;
+  const uint16_t day_before = t.act_day;
+  for (uint32_t h = 1; h < 24u; ++h) {
+    (void)act_note_interaction(t, clk(last + h * 3600u));
+    CHECK_EQ(t.act_day, day_before);
+    CHECK_EQ(act_score_today(t, clk(last + h * 3600u)), (uint16_t)ACT_SCORE_MAX);
+  }
+
+  // A JUMP OF TWENTY-SEVEN YEARS IS STILL ONE DAY. It is a bigger number, not a
+  // bigger budget - the score is the day's, and there is only ever one day open.
+  // (10,000 days is as far as this can go and stay a date: EP0 plus a century of
+  // seconds wraps u32 back to 1989, which clock_ok() then refuses outright.)
+  const uint32_t far = EP0 + 10000u * (uint32_t)ACT_DAY_S;
+  power_cycle();
+  (void)act_note_interaction(t, clk(far));
+  CHECK_EQ(t.act_day, act_day_index(far));
+  CHECK_EQ(act_score_today(t, clk(far)), (uint16_t)ACT_PTS_INTERACT);
+}
+
+TEST(the_happiness_half_of_the_reward_is_scaled_by_the_xp_the_ledger_granted) {
+  // act_happy_for_granted_xp() is the whole of the happiness rate limit: the
+  // reward has no meter of its own and borrows XP_SRC_CARRY's. Until P6-C4 it
+  // had none at all, and 100 typed days paid 125,000 care milli-points into a
+  // bar that holds 100,000 - with no reboot and no real time.
+  ActGain g;
+  g.points = 100u; g.xp = 10u; g.happy_milli = 1250u;
+
+  CHECK_EQ(act_happy_for_granted_xp(g, 0u), 0u);           // nothing granted, nothing paid
+  CHECK_EQ(act_happy_for_granted_xp(g, 10u), 1250u);       // paid in full
+  CHECK_EQ(act_happy_for_granted_xp(g, 99u), 1250u);       // and never more than in full
+  CHECK_EQ(act_happy_for_granted_xp(g, 5u), 625u);         // half of it
+  CHECK_EQ(act_happy_for_granted_xp(g, 1u), 125u);
+
+  // Monotone in the XP granted, and never above the owed amount, over the whole
+  // range - so a partial grant can never pay more than a complete one.
+  uint16_t prev = 0u;
+  for (uint16_t granted = 0; granted <= 40u; ++granted) {
+    const uint16_t h = act_happy_for_granted_xp(g, granted);
+    CHECK(h >= prev);
+    CHECK(h <= g.happy_milli);
+    prev = h;
+  }
+
+  // A gain with no XP behind it pays no happiness. That case cannot arise from
+  // the score - ACT_HAPPY_STEP_POINTS is a multiple of ACT_XP_STEP_POINTS, so
+  // every happiness threshold is an XP threshold - and the next block measures
+  // that rather than trusting the static_assert.
+  ActGain none; none.points = 20u; none.xp = 0u; none.happy_milli = 250u;
+  CHECK_EQ(act_happy_for_granted_xp(none, 7u), 0u);
+
+  // EVERY DRAIN THAT OWES HAPPINESS ALSO OWES XP, driven over a whole day at
+  // every step size a real caller can produce (a carried minute is 1 point, an
+  // interaction 2, a network 10, a peer 15).
+  static const uint16_t kSteps[] = { (uint16_t)ACT_PTS_CARRY, (uint16_t)ACT_PTS_INTERACT,
+                                     (uint16_t)ACT_PTS_NET,   (uint16_t)ACT_PTS_PEER };
+  static const uint16_t kCaps[]  = { (uint16_t)ACT_CAP_CARRY_MIN, (uint16_t)ACT_CAP_INTERACT,
+                                     (uint16_t)ACT_CAP_NETS,      (uint16_t)ACT_CAP_PEERS };
+  for (uint8_t si = 0; si < 4u; ++si) {
+    CooldownTable t;
+    fresh(t);
+    uint32_t total = 0;
+    for (uint32_t k = 0; k < 600u; ++k) {
+      const uint32_t h = (uint32_t)si * 100000u + k + 1u;
+      switch (si) {
+        case 0: (void)act_note_carried(t, 60u, clk(EP0)); break;
+        case 1: (void)act_note_interaction(t, clk(EP0)); break;
+        case 2: (void)act_note_networks(t, &h, 1u, clk(EP0)); break;
+        default: (void)act_note_peer(t, h, clk(EP0)); break;
+      }
+      const ActGain gg = act_take_gain();
+      if (gg.happy_milli != 0u) CHECK(gg.xp != 0u);
+      CHECK_EQ(act_happy_for_granted_xp(gg, gg.xp), gg.happy_milli);
+      total = (uint32_t)(total + gg.points);
+    }
+    // AND THE PASS REALLY DROVE THAT TERM TO ITS CAP, so a switch arm that
+    // silently scored nothing could not sit here looking like a clean run.
+    CHECK_EQ(total, (uint32_t)kCaps[si] * (uint32_t)kSteps[si]);
+    CHECK_EQ(act_score_today(t, clk(EP0)), (uint16_t)total);
+  }
+}

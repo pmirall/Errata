@@ -180,13 +180,22 @@ void xp_ledger_snapshot(uint8_t out[XP_LEDGER_SLOTS]);
 
 // Re-seeds the ledger from a snapshot taken at saved_epoch, as of now_epoch:
 //
-//     left = min(cap, saved + elapsed / refill_step)
+//     left = min(cap, saved)
 //
-// integer throughout, with elapsed clamped to one window before the divide (a
-// window refills the whole cap, so anything longer is the same answer). Returns
-// 1 when the snapshot was used; it returns 0 - and seeds ZERO, never the cap -
-// when there is no snapshot or when either epoch is below NT_EPOCH_SANE_MIN,
-// i.e. when the elapsed time cannot be trusted to be wall-clock time.
+// A RESTORE ADDS NOTHING. It hands back exactly the budget that was true at the
+// last save, and every point beyond that has to be refilled by xp_ledger_tick()
+// out of seconds the device watched pass. Until P6-C4 it also aged the snapshot
+// forward by (now_epoch - saved_epoch) / refill_step, and that term was an
+// unbounded farm: both epochs are wall clock, the wall clock is typed on the
+// time screen, and a day of "elapsed" refills a whole bucket - so 100 rounds of
+// (clock +1 day, reboot, one Wi-Fi scan) spent 990 metered XP in zero real
+// seconds against an honest 37.8 per real day. game/xp.cpp carries the
+// measurement and what the honest player loses with it.
+//
+// Returns 1 when the snapshot was used; it returns 0 - and seeds ZERO, never the
+// cap - when there is no snapshot or when either epoch is below
+// NT_EPOCH_SANE_MIN, i.e. when the blob cannot be shown to come from a device
+// that knew the date.
 uint8_t xp_ledger_restore(const uint8_t* pts, uint8_t n,
                           uint32_t saved_epoch, uint32_t now_epoch);
 

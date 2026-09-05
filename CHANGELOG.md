@@ -8,6 +8,134 @@ Versions are tagged at phase boundaries of `PEBBLEBOL_IMPLEMENTATION_PLAN.md`; t
 tag for a phase is cut only when its gate (`tools/check.sh`) and its variant matrix
 (`tools/build_matrix.sh`) are both green.
 
+## [0.6.0-activity] — Unreleased
+
+Phase 6 is about the three things the device does when nobody is pressing a button: it
+scores the day you carried it, it makes a noise, and it goes to sleep. The activity score
+(§25) is four capped terms — carried minutes ×1, care interactions ×2, distinct new
+`net_hash` ×10, peers met ×15, 440 points for a full day — computed by a pure module that
+takes the wall clock as an argument and pays XP, happiness and a rare-encounter permille.
+The tone engine is spec §19's seven words as `{Hz, ms}` step lists in flash, driven one step
+per service call behind a recording seam, so 21 host cases assert the emitted notes with no
+piezo attached. And the power ladder is ACTIVE → DIM → IDLE → SLEEP with a pure decision
+half and four hooks, whose deepest rung is a **light** sleep — not because light is better,
+but because `PIN_BTN_L` is GPIO10 and the ESP32-C3 can only wake from deep sleep on
+GPIO0..GPIO5, so a deep sleep on this pin map would leave the left button physically unable
+to wake the device. That is decision D1's deferral showing up as a product fact, and
+`docs/decisions.md` now carries the table.
+
+**The exit found three defects and fixed them before cutting the tag, and the first is the
+one worth reading twice.**
+
+- **THE SHIPPING BUILD NEVER ADVANCED GAME TIME.** `logic_tick()` moves the world by
+  `sim_step_seconds() * owed`, and `sim_step_seconds()` returned a zero-initialised static
+  whose only writer, `sim_set_time_scale()`, is called from two lines that both live inside
+  `dev/godmode.cpp`'s `#if GOD_MODE_ENABLED` half. The `release` variant — the artefact
+  `config.h` itself calls "the one that actually gets flashed" — is `GOD_MODE_ENABLED=0`, so
+  the scale stayed **0**: every tick was `sim_tick(0)`, and care decay, ageing,
+  poop/sickness, the XP carry drip and the activity carried minute were dead for as long as
+  the device was switched on. `gs_touch_lastseen()` still ran, so the next boot's absence was
+  ~0 as well — the pet decayed **only for the hours the device spent powered OFF**.
+  Pre-existing since the phase-2 stub, and P6-C3 rewrote that exact line and rested the sleep
+  ladder on it. **The suite could not see it:** every case in `test_care.cpp` calls
+  `sim_tick(n)` with its own `n`, so the number the firmware multiplies by was never on the
+  line — planting `sim_step_seconds() { return 0; }` left it at ALL PASS 41/41. The default
+  is `sim_bind()`'s now, god mode is documented as an override, and
+  `care_a_freshly_bound_sim_advances_one_real_second_per_tick` fails with six checks without
+  it.
+- **A TYPED CLOCK PLUS A REBOOT WAS AN UNBOUNDED XP AND HAPPINESS FARM.**
+  `xp_ledger_restore()` aged the saved anti-farm budget forward by
+  `(now_epoch − saved_epoch) / refill_step`. Both epochs are wall clock; the wall clock is
+  typed by the player on the TIME screen. **Measured: 100 rounds of (clock +1 day, reboot,
+  one Wi-Fi scan of the SAME ten access points) spent 990 metered XP and 125,000 care
+  milli-points in ZERO real seconds** — against 37.8 XP for an honest day at full tilt and a
+  happiness bar that only holds 100,000. Neither half does it alone (100 reboots with the
+  clock still: 0; 100 clock jumps with no reboot: 0 metered XP) and **neither module's own
+  test binary contained both modules**, which is how `tests/test_activity.cpp` came to hold
+  four named cheat cases — uncalibrated, insane, rolled backwards, power-cycled — and miss
+  the one direction that pays. The aging term is gone; the happiness, which had no meter at
+  all and needed no reboot to farm, is now scaled by the XP the ledger actually granted;
+  `activity.o` is linked into `test_xp` and three named cross-module cases hold it. **After:
+  the same 100 rounds, started from a FULL bucket, spend exactly `XP_CAP_CARRY` (48) and then
+  nothing, ever.** What the honest player pays for that is stated rather than buried: time
+  the device spends switched OFF no longer refills the XP budget, so the meter means "per day
+  of device-ON time" — smaller, one-directional, and the only direction that cannot be typed.
+  The sentence in `0.4.0-battle` below about a device that "was off for an hour comes back
+  full" is superseded by this, and `data/balance.h` says so at the constant.
+- **P6-C3's ONE LOAD-BEARING LINE HAD NO GUARD.** `gt_mono_ms()`'s device branch
+  (`esp_rtc_get_time_us()`) is the whole of "a monotonic source that survives sleep";
+  reverting it to `millis()` is invisible to the host suite, because no host binary compiles
+  that branch, and `tools/check.sh` gated the CALLER while nothing gated the line. It has its
+  own gate now, mutation-proven both ways.
+
+Measured at the exit, each figure re-derived by running the command rather than copied
+forward:
+
+- **Firmware:** baseline **1,948,802 B of flash and 73,580 B of static RAM**, up
+  **+20,866 / +400** on `0.5.0-explore`. All seven `build_matrix.sh` variants at 0 project
+  warnings; the release build (`GOD_MODE_ENABLED=0 FEATURE_BLE=0`, decision D2) is
+  **1,224,210 / 49,924** — **76.5 %** of `GATE_RELEASE_FLASH_MAX` and **76.8 %** of
+  `GATE_RELEASE_GLOBALS_MAX`, and **38.9 %** of the 3,145,728 B `app0` slot.
+- **The phase is 174 % of the top of its own flash line and comfortably inside the scarce
+  one.** `docs/budget.md` allows P6 8–12 KB of flash and 0.3–0.8 KB of globals; actual
+  **+20,866 flash** and **+400 globals**. Most of the overrun is not Pebblebol's code: two
+  ESP-IDF drivers arrive in the tree for the first time — LEDC with the first PWM output
+  (~7.5 KB, P6-C1) and `esp_sleep` with the first `esp_light_sleep_start()` (~9.6 KB,
+  P6-C3) — and both are paid once and reused. It is immaterial against the cap that matters:
+  **375,790 B of release flash remain** against an 80–115 KB forecast for P7–P10.
+- **Per commit**, each delta the difference of two adjacent commits' own recorded
+  `flash=`/`globals=` lines, and the four sum to the phase:
+
+  | commit | chunk | flash | globals | after (baseline) |
+  |---|---|---|---|---|
+  | `72263f9` | P6-C1 tone engine + motion capability | **+9,028** | **+136** | 1,936,964 / 73,316 |
+  | `e46416f` | P6-C2 activity score + rewards | **+1,940** | **+72** | 1,938,904 / 73,388 |
+  | `e8701ea` | P6-C3 power ladder + sleep-correct clock | **+9,698** | **+192** | 1,948,602 / 73,580 |
+  | this commit | P6-C4 exit (three fixes, one gate, documents) | **+200** | **0** | 1,948,802 / 73,580 |
+  | | **phase 6** | **+20,866** | **+400** | |
+
+- **Where the 400 B of globals went, and most of it is not ours.** P6-C1's 136 B is 22 B of
+  tone-engine state and 114 B of LEDC driver statics and HAL assert strings; P6-C2's 72 B is
+  `game/activity.cpp`'s entire per-boot half (the ten-entry network set 40, the four-entry
+  peer set 16, six counters, a seconds remainder, the pending gain, the dirty flag) and its
+  PERSISTED half costs **0**, because `act_day` and `act_score` are four bytes that were
+  already `CooldownTable.reserved_a[4]`; P6-C3's 192 B is ~148 B of ESP-IDF sleep state
+  against ~44 B of ladder, DIAG counters and idle clock. **No schema bump, no migration, no
+  fixture** — the activity day was carved out of reserved bytes exactly as
+  `corrupt_until_epoch` was at P5-C3, and the blob is still 272 B with every row where it was.
+- **Host suite:** 37 → **41 binaries, 708 → 787 tests, 1,802,703 → 3,658,841 checks.** Four
+  new binaries (`test_audio`, `test_motion`, `test_activity`, `test_power`) and six existing
+  ones changed. Screen goldens unchanged at **60**; `CONTENT_VERSION` unchanged at
+  **0x02B5** — phase 6 added no content, and `ENC_RARE_BONUS_MAX_PM` lives in
+  `data/balance.h` because two modules read it, not because the pack grew.
+- **`tools/check.sh` gained five gates this phase**, each proven to bite by planting the
+  thing it forbids: no `#define PIN_` outside `core/config.h` (while D1 and D8 are open the
+  pin map has one home); `act_take_gain()` may be called only in `app/app.cpp` (the activity
+  reward is paid in exactly one place); `hardware/power.*` may not name the radio API (the
+  ladder releases the radio by NAVIGATING, so the owning screen's `leave()` hook cancels
+  through `wifi_scan_cancel()`); `ui_explore_clock()` must hand out `gt_mono32()` and not
+  `millis()`; and `gt_mono_ms()`'s device branch must read `esp_rtc_get_time_us()` and must
+  not read `millis()`.
+
+**Two decisions are still open and phase 6 did not close either.** **D1** (pin map) stays
+deferred: `PB_PINS_CONFIRMED` is not defined anywhere, the five `#define`s are byte-for-byte
+what the repository carried, and the consequence this phase paid for it is a light sleep
+instead of a deep one — worth ~2.7 days of ~26 on D11's own battery model, against D11's own
+unmeasured 100× spread, which swings the same answer from 26 days to 9. **D8** (piezo GPIO)
+stays open: `PIN_PIEZO 3` is a proposal, the tone engine names the macro and never a number,
+and the owner should know before soldering that GPIO3 is one of the six pads that could wake
+this chip from deep sleep.
+
+**Nothing in this phase has run on hardware, and that is a larger caveat here than in any
+earlier one.** No piezo has been soldered and no tone has been heard. No board has slept, so
+whether `esp_light_sleep_start()` really returns on a `GPIO_INTR_LOW_LEVEL` from GPIO10 and
+GPIO2 with the buttons' internal pull-ups is unverified, and every current figure in the
+tree is arithmetic on D11's published points or a vendor number. §67's `Device sleeps
+correctly` is held open for exactly that reason, in the same words `Wi-Fi shuts down after
+use` has been held open since phase 5: a device sleeping is an observation, not a property.
+`Time-based calculations work across reboot` and `Timed systems work after sleep` are ticked,
+on the host standard every other ticked box uses.
+
 ## [0.5.0-explore] — Unreleased
 
 Phase 5 gives the pet a world outside itself, and the first thing it did was take a
@@ -1461,6 +1589,7 @@ The plan cuts tags from Phase 2 onward, so Phase 1 has no `v0.1.0` tag; it is co
 - Repository archaeology: audit of the inherited sketch, the ten-phase implementation
   plan, the decisions log, and a CI skeleton.
 
+[0.6.0-activity]: https://github.com/pmirall/Pebblebol/commit/e8701ea
 [0.5.0-explore]: https://github.com/pmirall/Pebblebol/commit/6ec3355
 [0.4.0-battle]: https://github.com/pmirall/Pebblebol/commit/250f73e
 [0.3.0-pet]: https://github.com/pmirall/Pebblebol/commit/e2004e7

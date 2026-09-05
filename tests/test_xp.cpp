@@ -16,6 +16,7 @@
 
 #include "data/species_table.h"
 #include "game/xp.h"
+#include "game/activity.h"          // P6-C4: the farm lives between the two
 
 #define SANE_EPOCH  1700000000u   // >= NT_EPOCH_SANE_MIN
 
@@ -252,6 +253,13 @@ TEST(a_minigame_pays_permille_times_eight_over_a_thousand) {
 // =============================================================================
 //  THE PERSISTENCE ROUND TRIP
 // =============================================================================
+// NARROWED IN P6-C4, and the second assertion is what changed. It used to be
+// CHECK_NEAR(live, back, 1) - "a restore lands within a point of the live
+// budget" - which was true only because the restore AGED the snapshot forward by
+// the wall-clock gap. That term is gone (game/xp.cpp says why), so the restore
+// now lands on the snapshot itself and the gap is refilled by xp_ledger_tick()
+// instead. The property the case was written for survives verbatim and is the
+// one the file's banner promises: a round trip never invents a point.
 TEST(a_round_trip_under_reports_the_budget_and_never_over_reports_it) {
   const uint32_t step = (uint32_t)XP_WIN_CARE_S / (uint32_t)XP_CAP_CARE;
 
@@ -262,6 +270,7 @@ TEST(a_round_trip_under_reports_the_budget_and_never_over_reports_it) {
     xp_ledger_tick(step / 2u);            // half a point of fraction on the books
     uint8_t snap[XP_LEDGER_SLOTS];
     xp_ledger_snapshot(snap);
+    const uint16_t at_save = xp_daily_left(xp_ledger(), XP_SRC_CARE);
 
     xp_ledger_tick(elapsed);
     const uint16_t live = xp_daily_left(xp_ledger(), XP_SRC_CARE);
@@ -271,7 +280,7 @@ TEST(a_round_trip_under_reports_the_budget_and_never_over_reports_it) {
     const uint16_t back = xp_daily_left(xp_ledger(), XP_SRC_CARE);
 
     CHECK(back <= live);                  // never invents a point
-    CHECK_NEAR(live, back, 1);            // and loses at most the dropped fraction
+    CHECK_EQ(back, at_save);              // exactly the budget that was saved
   }
 }
 
@@ -280,6 +289,8 @@ TEST(a_restore_cannot_exceed_the_cap_however_long_the_gap) {
   xp_ledger_reset(1);
   xp_ledger_snapshot(snap);
 
+  // A FULL snapshot restores full, and a gap of over a year adds nothing to it -
+  // there is nothing left to add, and since P6-C4 there is no adding at all.
   CHECK_EQ(xp_ledger_restore(snap, (uint8_t)XP_LEDGER_SLOTS,
                              SANE_EPOCH, SANE_EPOCH + 400u * 86400u), 1);
   CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_CARE), XP_CAP_CARE);
@@ -293,6 +304,14 @@ TEST(a_restore_cannot_exceed_the_cap_however_long_the_gap) {
   CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_MINIGAME), XP_CAP_MINIGAME);
 }
 
+// THE OLD BODY OF THIS CASE WAS A SENTENCE WIDER THAN ITS TREE, and the
+// narrowing is recorded because it is the reason the farm shipped. It claimed
+// "a reboot cannot refill a spent budget" and then exercised exactly two clocks:
+// one advanced by a SINGLE refill step (which it asserted refilled by one point,
+// i.e. it tested that a reboot DOES refill) and one run backwards. The one clock
+// it never tried was a forward jump of a whole window, which is the only one
+// that refills the bucket to its cap - and which a player can type on the time
+// screen in about fifteen seconds. That case is now the second half of this one.
 TEST(a_reboot_cannot_refill_a_spent_budget) {
   xp_ledger_reset(1);
   PebbleInstance p;
@@ -310,7 +329,20 @@ TEST(a_reboot_cannot_refill_a_spent_budget) {
   xp_ledger_reset(0);                                   // the boot seed
   CHECK_EQ(xp_ledger_restore(snap, (uint8_t)XP_LEDGER_SLOTS,
                              SANE_EPOCH, SANE_EPOCH + step), 1);
-  CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_CARE), 1);  // one step, one point
+  CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_CARE), 0);  // spent is spent
+
+  // THE CASE THAT WAS MISSING. A whole window of wall clock - what the time
+  // screen hands over in one edit - and the budget is still exactly what was
+  // saved. Every metered bucket, not just the one that was drained, because the
+  // restore walks all four.
+  for (uint32_t gap = 0; gap <= 4u * (uint32_t)XP_WIN_CARE_S; gap += 997u) {
+    xp_ledger_reset(0);
+    CHECK_EQ(xp_ledger_restore(snap, (uint8_t)XP_LEDGER_SLOTS,
+                               SANE_EPOCH, SANE_EPOCH + gap), 1);
+    for (uint8_t i = 0; i < (uint8_t)XP_LEDGER_SLOTS; ++i) {
+      CHECK_EQ(xp_daily_left(xp_ledger(), (XpSource)i), snap[i]);
+    }
+  }
 
   // An untrustworthy clock at either end seeds ZERO - never the cap, which
   // would be the exploit a never-calibrated device could power-cycle for.
@@ -323,6 +355,22 @@ TEST(a_reboot_cannot_refill_a_spent_budget) {
   CHECK_EQ(xp_ledger_restore(snap, (uint8_t)XP_LEDGER_SLOTS,
                              SANE_EPOCH + 86400u, SANE_EPOCH), 1);
   CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_CARE), 0);
+
+  // And the honest half of the same rule, so the narrowing above cannot be read
+  // as "a restore always returns zero": a bucket that was HALF full comes back
+  // half full, from any clock, and is then refilled by real ticked seconds.
+  xp_ledger_reset(1);
+  for (uint16_t i = 0; i < (uint16_t)(XP_CAP_CARE / 2u); ++i) {
+    (void)xp_add(p, 1, XP_SRC_CARE, nullptr);
+  }
+  const uint16_t half = xp_daily_left(xp_ledger(), XP_SRC_CARE);
+  xp_ledger_snapshot(snap);
+  xp_ledger_reset(0);
+  CHECK_EQ(xp_ledger_restore(snap, (uint8_t)XP_LEDGER_SLOTS,
+                             SANE_EPOCH, SANE_EPOCH + 30u * 86400u), 1);
+  CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_CARE), half);
+  xp_ledger_tick(step * 3u);
+  CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_CARE), (uint16_t)(half + 3u));
 }
 
 // REPLACED, NOT DELETED, and the old name said why it had to be:
@@ -360,18 +408,212 @@ TEST(the_battle_bucket_bounds_an_afternoon_of_fighting) {
   CHECK_EQ(p.xp, xp_after_two);                        // and the third did not
   CHECK_EQ(p.level, lv_after_two);
 
-  // The empty bucket reaches flash as a zero byte, and an hour of real time
-  // brings it all the way back - the same continuous refill every other metered
-  // source gets, so a reboot cannot shortcut it.
+  // The empty bucket reaches flash as a zero byte, and a window of real TICKED
+  // time brings it all the way back - the same continuous refill every other
+  // metered source gets.
+  //
+  // REWRITTEN IN P6-C4, and the old body is worth naming because it asserted the
+  // exploit. It drove that refill through xp_ledger_restore(SANE_EPOCH,
+  // SANE_EPOCH + XP_WIN_BATTLE_S) and said in its own comment "so a reboot
+  // cannot shortcut it" - but a restore taking a wall-clock gap IS the shortcut,
+  // and the gap is typed on the time screen. The refill that a reboot cannot
+  // shortcut is xp_ledger_tick()'s, because it is fed seconds the device watched
+  // pass. Same property, driven through the mechanism that actually has it.
   uint8_t snap[XP_LEDGER_SLOTS];
   xp_ledger_snapshot(snap);
   CHECK_EQ(snap[XP_SRC_BATTLE], 0);
   CHECK_EQ(xp_ledger_restore(snap, (uint8_t)XP_LEDGER_SLOTS,
                              SANE_EPOCH, SANE_EPOCH + (uint32_t)XP_WIN_BATTLE_S), 1);
+  CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_BATTLE), 0);   // the gap buys nothing
+  xp_ledger_tick((uint32_t)XP_WIN_BATTLE_S);
   CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_BATTLE), (uint16_t)XP_CAP_BATTLE);
 
-  // Half a window buys half a bucket and not one point more.
-  CHECK_EQ(xp_ledger_restore(snap, (uint8_t)XP_LEDGER_SLOTS,
-                             SANE_EPOCH, SANE_EPOCH + (uint32_t)(XP_WIN_BATTLE_S / 2u)), 1);
+  // Half a window of ticked time buys half a bucket and not one point more.
+  xp_ledger_reset(0);
+  xp_ledger_tick((uint32_t)(XP_WIN_BATTLE_S / 2u));
   CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_BATTLE), (uint16_t)(XP_CAP_BATTLE / 2u));
+}
+
+
+// =============================================================================
+//  P6-C4: THE ACTIVITY FARM, WHICH NEITHER MODULE'S OWN TEST BINARY COULD SEE
+//
+//  game/activity.h names five anti-farm layers and says of the last one that
+//  "even a bug in every rule above it leaves the award rate-limited by a budget
+//  a reboot cannot refill". That sentence was FALSE, and it was the sentence the
+//  whole argument leaned on. xp_ledger_restore() aged the saved budget forward
+//  by (now_epoch - saved_epoch) / refill_step, both epochs are wall clock, and
+//  the wall clock is typed by the player on the time screen. So:
+//
+//     100 x (set the clock forward one day, reboot, run ONE Wi-Fi scan of THE
+//     SAME ten access points)  ->  990 metered XP and 125,000 care milli-points,
+//     in ZERO real seconds. An honest player at full tilt earns 37.8 XP a day
+//     and the happiness bar only holds 100,000.
+//
+//  Neither half does it alone (both controls are below), and neither file's own
+//  test binary contained both modules, which is why test_activity.cpp can hold
+//  four named cheat cases and still miss this one.
+//
+//  These cases drive the real activity.o and the real xp.o through the payment
+//  app.cpp performs, so they fail if EITHER module's guard is removed.
+// =============================================================================
+#define FARM_EPOCH  1767225600u                 // 2026-01-01T00:00:00Z, a day boundary
+
+static ActClock farm_clk(uint32_t epoch) {
+  ActClock c; c.now_epoch = epoch; c.cal = (uint8_t)CAL_USER; return c;
+}
+
+// Everything that survives a power cycle, and nothing that does not.
+struct FarmFlash {
+  CooldownTable  cds;
+  uint8_t        xpts[XP_LEDGER_SLOTS];
+  uint32_t       xepoch;
+  PebbleInstance pet;
+};
+
+// One boot, exactly as app.cpp's setup() reaches these two modules: the per-boot
+// half of the score is cleared, the ledger is seeded EMPTY and then re-seeded
+// from the snapshot on flash.
+static void farm_boot(FarmFlash& f, uint32_t now) {
+  act_begin();
+  xp_ledger_reset(0);
+  (void)xp_ledger_restore(f.xpts, (uint8_t)XP_LEDGER_SLOTS, f.xepoch, now);
+}
+
+// app_pay_activity(), minus the NVS write and the Box lookup. Returns the XP the
+// LEDGER actually paid for - which is what the happiness is scaled by, so a
+// drained bucket stops both halves of the reward together.
+static uint32_t farm_pay(FarmFlash& f, uint32_t now, uint32_t& happy_out) {
+  const ActGain g = act_take_gain();
+  uint16_t granted = 0u;
+  if (g.xp != 0u) {
+    const uint16_t before = xp_daily_left(xp_ledger(), XP_SRC_CARRY);
+    (void)xp_add(f.pet, g.xp, XP_SRC_CARRY, nullptr);
+    const uint16_t after  = xp_daily_left(xp_ledger(), XP_SRC_CARRY);
+    granted = (uint16_t)(before - after);
+    xp_ledger_snapshot(f.xpts);
+    f.xepoch = now;
+  }
+  happy_out += act_happy_for_granted_xp(g, granted);
+  return granted;
+}
+
+// The same ten access points, every time. Diversity is not what is being tested.
+static void farm_scan(FarmFlash& f, uint32_t now) {
+  uint32_t h[ACT_CAP_NETS];
+  for (uint8_t i = 0; i < (uint8_t)ACT_CAP_NETS; ++i) h[i] = 0xA0000001u + (uint32_t)i * 0x1111u;
+  (void)act_note_networks(f.cds, h, (uint8_t)ACT_CAP_NETS, farm_clk(now));
+}
+
+static void farm_fresh(FarmFlash& f, uint8_t full_bucket) {
+  memset(&f, 0, sizeof f);
+  make_pebble(f.pet, 1);
+  act_begin();
+  xp_ledger_reset(full_bucket);
+  xp_ledger_snapshot(f.xpts);
+  f.xepoch = FARM_EPOCH;
+}
+
+TEST(a_typed_day_plus_a_reboot_cannot_refill_a_spent_activity_budget) {
+  // THE CHEAT, given the most generous start it can have: a FULL carry bucket.
+  // Every round types one more day onto the clock, power-cycles, and scans the
+  // same street. The bucket is spent once and never comes back, because nothing
+  // refills it but seconds the device watched pass - and no seconds pass here.
+  FarmFlash f;
+  farm_fresh(f, 1);
+  uint32_t now = FARM_EPOCH, spent = 0, happy = 0;
+  for (int i = 0; i < 100; ++i) {
+    now += (uint32_t)ACT_DAY_S;            // the time screen
+    farm_boot(f, now);                     // the power cycle
+    farm_scan(f, now);
+    spent += farm_pay(f, now, happy);
+  }
+  CHECK_EQ(spent, (uint32_t)XP_CAP_CARRY);              // exactly one bucket, ever
+  CHECK(happy <= (uint32_t)PB_CARE_MILLI_MAX / 10u);    // and a tenth of the bar
+
+  // The bucket the cheat drained is the one an honest day would have used, so
+  // there is no second bucket hiding behind a second Pebble either.
+  CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_CARRY), 0);
+
+  // A hundred more rounds pay NOTHING, which is the shape that matters: the
+  // exploit is not merely small, it does not scale with how long it is run.
+  const uint32_t before = spent;
+  for (int i = 0; i < 100; ++i) {
+    now += (uint32_t)ACT_DAY_S;
+    farm_boot(f, now);
+    farm_scan(f, now);
+    spent += farm_pay(f, now, happy);
+  }
+  CHECK_EQ(spent, before);
+}
+
+TEST(a_typed_day_without_a_reboot_cannot_pay_a_second_time_either) {
+  // THE HALF THAT NEEDS NO POWER CYCLE AT ALL, and the half that was worse: the
+  // happiness had no meter of its own, so 100 typed days inside ONE session paid
+  // 125,000 care milli-points against a bar that holds 100,000 - an empty
+  // Pebble to a full one, with no care action and no real time. It is now scaled
+  // by the metered XP behind it, so it stops when the bucket does.
+  FarmFlash f;
+  farm_fresh(f, 1);
+  uint32_t now = FARM_EPOCH, spent = 0, happy = 0;
+  for (int i = 0; i < 100; ++i) {
+    now += (uint32_t)ACT_DAY_S;
+    farm_scan(f, now);
+    spent += farm_pay(f, now, happy);
+  }
+  CHECK_EQ(spent, (uint32_t)XP_CAP_CARRY);
+  CHECK(happy < (uint32_t)PB_CARE_MILLI_MAX);          // cannot fill the bar
+  CHECK(happy <= (uint32_t)PB_CARE_MILLI_MAX / 10u);
+}
+
+TEST(an_honest_day_still_pays_what_it_always_paid) {
+  // THE CONTROL THAT STOPS THE FIX FROM BEING "PAY NOBODY". One real day, lived
+  // one minute at a time, with the ledger refilled by the seconds that actually
+  // passed: four hours of carrying, twenty care actions and ten new networks -
+  // which is every term the firmware can reach today, and pays 38 XP and 4,750
+  // milli of happiness. The fourth term is added at the end, where the case says
+  // what it is doing, to reach game/activity.h's advertised 44 and 5,500.
+  FarmFlash f;
+  farm_fresh(f, 1);
+  uint32_t now = FARM_EPOCH, spent = 0, happy = 0;
+  // Four hours of carrying is ACT_CAP_CARRY_MIN minutes, i.e. the whole of that
+  // term - and it stays inside ONE day, which matters: a loop that ran the clock
+  // through midnight would roll the day and reset the score under itself.
+  for (uint32_t s = 0; s < (uint32_t)ACT_CAP_CARRY_MIN * 60u; s += 60u) {
+    xp_ledger_tick(60u);
+    now += 60u;
+    (void)act_note_carried(f.cds, 60u, farm_clk(now));
+    spent += farm_pay(f, now, happy);
+  }
+  for (int i = 0; i < (int)ACT_CAP_INTERACT; ++i) {
+    (void)act_note_interaction(f.cds, farm_clk(now));
+    spent += farm_pay(f, now, happy);
+  }
+  farm_scan(f, now);
+  spent += farm_pay(f, now, happy);
+
+  // THE BEST DAY THIS FIRMWARE CAN ACTUALLY HAVE is three terms, not four:
+  // act_note_peer() has no caller until P7-C1 exists to discover peers, so the
+  // 60 points of the peers term are unreachable on the device today. Saying 440
+  // here would be a sentence wider than the tree.
+  const uint16_t reachable = (uint16_t)(ACT_SCORE_MAX - ACT_CAP_PEERS * ACT_PTS_PEER);
+  CHECK_EQ(act_score_today(f.cds, farm_clk(now)), reachable);                 // 380
+  CHECK_EQ(spent, (uint32_t)(reachable / ACT_XP_STEP_POINTS));                // 38
+  CHECK_EQ(happy, (uint32_t)(reachable / ACT_HAPPY_STEP_POINTS) *
+                  (uint32_t)ACT_HAPPY_STEP_MILLI);                            // 4750
+
+  // With the fourth term - the day P7-C1 makes possible - it is the full
+  // ACT_SCORE_MAX and exactly the reward game/activity.h advertises.
+  for (uint32_t k = 1; k <= (uint32_t)ACT_CAP_PEERS; ++k) {
+    (void)act_note_peer(f.cds, 0x5EED0000u + k, farm_clk(now));
+    spent += farm_pay(f, now, happy);
+  }
+  CHECK_EQ(act_score_today(f.cds, farm_clk(now)), (uint16_t)ACT_SCORE_MAX);
+  CHECK_EQ(spent, (uint32_t)(ACT_SCORE_MAX / ACT_XP_STEP_POINTS));            // 44
+  CHECK_EQ(happy, (uint32_t)(ACT_SCORE_MAX / ACT_HAPPY_STEP_POINTS) *
+                  (uint32_t)ACT_HAPPY_STEP_MILLI);                            // 5500
+
+  // And the honest day beats a hundred typed ones, which is the whole point of
+  // the ordering: cheating is now strictly worse than playing.
+  CHECK(spent > (uint32_t)XP_CAP_CARRY - (uint32_t)XP_CAP_CARRY / 4u);
 }

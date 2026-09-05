@@ -89,6 +89,37 @@ phase re-derives them:
   not populated, so a NORMAL/LOW/CRITICAL reading would be a made-up number on a floating
   pin. The power ladder needs no battery input to work — it runs on idle time — so nothing
   was invented to fill the gap.
+- **WHAT THE DEFERRAL COST PHASE 6, IN ONE PLACE (recorded at the phase-6 exit, P6-C4).**
+  Nothing else in the tree states it as a product fact, so it is stated here:
+
+  | | GPIO | wakes from LIGHT sleep | wakes from DEEP sleep |
+  |---|---|---|---|
+  | `PIN_BTN_L` (left / DOWN) | 10 | **yes** | **NO — outside the C3's GPIO0..5 wake domain** |
+  | `PIN_BTN_R` (right / A) | 2 | **yes** | yes, but 2 is a strapping pin and every deep wake is a reset |
+
+  So the deepest rung phase 6 could build is a **light sleep**, and that is a direct,
+  product-visible consequence of the deferral rather than a tuning choice. What it costs is
+  ~2.7 days of ~26 on D11's own model (the arithmetic is three bullets up) and roughly
+  **9.6 KB of flash** for ESP-IDF's `esp_sleep` machinery, which a deep-sleep rung would
+  have spent anyway. What it BUYS is that both buttons work: the alternative on this map is
+  a device the left button cannot wake. **Nothing has run on hardware**, so the wake itself
+  — that `esp_light_sleep_start()` really returns on a `GPIO_INTR_LOW_LEVEL` from GPIO10
+  and GPIO2 with the buttons' internal pull-ups — is still a bench item.
+
+- **D8 (piezo GPIO) IS STILL OPEN AFTER PHASE 6, and `PIN_PIEZO 3` is a PROPOSAL.** P6-C1
+  shipped the tone engine against the macro, so the pin is a one-line change; `PIN_PIEZO`
+  is defined once, in `core/config.h`, and `tools/check.sh` fails any `#define PIN_` that
+  appears anywhere else. `PB_PINS_CONFIRMED` is still not defined anywhere in the tree, so
+  the guard `static_assert`s stay dormant. **No tone has ever been heard.**
+
+  One thing for the owner to hear before the soldering iron comes out, because it couples
+  D8 to the table above: **GPIO3 is one of the six pads that can wake this chip from deep
+  sleep**, and the proposal spends it on an output. If the piezo moved to a pad outside
+  GPIO0..5 and a future D1 put the *left* button inside it, a two-button deep sleep would
+  become possible for the first time. That is the owner's call and P6-C4 did not make it —
+  it is recorded so the pin map and the sleep design are decided together rather than
+  twice.
+
 - **Reversal cost stays one commit:** the five `#define`s sit in a single
   `// DECISION D1 PENDING` block in `src/core/config.h`.
 
@@ -1246,3 +1277,213 @@ above 500.
 - **No NVS wear measurement.** The activity half of the `cd` blob rides `cd_take_dirty()`'s
   existing cadence plus one flush per logic tick when the score actually moved; how many
   writes that is over a real day of walking is not known.
+
+
+## Phase-6 exit (P6-C4, 2026-09-05)
+
+**Variant matrix.** `tools/build_matrix.sh` compiles all seven feature variants with
+`--warnings all` and fails on any warning pointing into the sketch. Result at the
+`v0.6.0-activity` tag, every variant at **0 project warnings**:
+
+| Variant | Overrides | Flash (B) | Static RAM (B) | Δ flash vs 0.5.0-explore | Δ RAM vs 0.5.0-explore |
+|---|---|---|---|---|---|
+| baseline | — | 1,948,802 | 73,580 | +20,866 | +400 |
+| no-ble | `FEATURE_BLE=0` | 1,236,440 | 50,084 | +20,866 | +408 |
+| no-web | `FEATURE_WEB=0` | 1,320,114 | 52,620 | +20,854 | +384 |
+| no-god | `GOD_MODE_ENABLED=0` | 1,936,436 | 73,404 | +20,390 | +392 |
+| sh1106 | `DISPLAY_IS_SH1106=1` | 1,948,802 | 73,580 | +20,866 | +400 |
+| all-off | every `FEATURE_*`=0 + `GOD_MODE_ENABLED=0` | 547,274 | 25,324 | +20,450 | +412 |
+| **release** | `GOD_MODE_ENABLED=0 FEATURE_BLE=0` (D2) | **1,224,210** | **49,924** | +20,402 | +416 |
+
+The baseline sits at **81.2 % of `GATE_FLASH_MAX`** (451,198 B free) and **81.8 % of
+`GATE_GLOBALS_MAX`** (16,420 B free); the release build — the one that ships — is at
+**76.5 % of `GATE_RELEASE_FLASH_MAX`** and **76.8 % of `GATE_RELEASE_GLOBALS_MAX`**, and
+**38.9 %** of the 3,145,728 B `app0` slot.
+
+**Where the phase-6 cost landed.** Per commit, each delta the difference of two adjacent
+commits' own recorded `flash=`/`globals=` lines; `git log --oneline v0.5.0-explore..HEAD` is
+exactly four commits and the four sum to the table above:
+
+| commit | chunk | flash | globals | after |
+|---|---|---|---|---|
+| `72263f9` | P6-C1 tone engine + motion capability | **+9,028** | **+136** | 1,936,964 / 73,316 |
+| `e46416f` | P6-C2 activity score + three rewards | **+1,940** | **+72** | 1,938,904 / 73,388 |
+| `e8701ea` | P6-C3 power ladder + sleep-correct clock | **+9,698** | **+192** | 1,948,602 / 73,580 |
+| this commit | P6-C4 exit (three fixes, one gate, documents) | **+200** | **0** | 1,948,802 / 73,580 |
+| | **phase 6** | **+20,866** | **+400** | |
+
+**The phase overran its own flash line by 74 % and came in inside the scarce one.**
+`docs/budget.md`'s P6 row reads **8–12 KB of flash and 0.3–0.8 KB of globals**. Actual:
+**+20,866 flash**, i.e. 174 % of the top of the line, and **+400 globals**, half the low end.
+The overrun is almost entirely two ESP-IDF drivers arriving in the tree for the first time —
+LEDC with the first PWM output (~7.5 KB, P6-C1) and `esp_sleep` with the first
+`esp_light_sleep_start()` (~9.6 KB, P6-C3). Both are paid once and reused: a later LED
+effect and a deep-sleep rung link no new driver. Pebblebol's own phase-6 code is roughly
+3.8 KB. **It is immaterial against the cap that matters** — 375,790 B of release flash remain
+against an 80–115 KB forecast for P7–P10 — and it is the scarce axis that stayed healthy.
+
+**The globals, attributed.** P6-C1 136 B: 22 B of tone-engine state, 50 B of LEDC driver
+statics, 24 B of one HAL `__func__` assert string, the rest `.data` alignment and further
+IRAM-resident assert strings named by diffing the two images' `.dram0.data`. P6-C2 72 B:
+`game/activity.cpp`'s per-boot half and nothing else (the ten-entry network set 40, the
+four-entry peer set 16, six counters, a seconds remainder, the pending gain, the dirty flag)
+— **the persisted half costs 0**, because `act_day` and `act_score` are four bytes that were
+already `CooldownTable.reserved_a[4]`. P6-C3 192 B: ~148 B of ESP-IDF's own sleep state
+(`esp_sleep`'s `s_config` 80 B plus six smaller objects) against ~44 B of Pebblebol —
+DIAG loop counters 16, the ladder's state 17, `app.cpp`'s idle clock 9. P6-C4 0 B.
+
+### Three defects were fixed before the tag was cut
+
+Listed worst first. Each is here because a **named** test or a gate now fails without the
+fix, and each mutation below was run.
+
+**1. The release artefact never advanced game time.** `app.cpp`'s `logic_tick()` moves the
+world by `sim_step_seconds() * owed`. `sim_step_seconds()` returns `CareCtx::scale`, a
+zero-initialised static whose only writer is `sim_set_time_scale()`, whose only two callers
+are `dev/godmode.cpp:322` and `:595` — **both inside `#if GOD_MODE_ENABLED`** — and whose
+`#else` stub `god_begin()` does not call it. `release` is `GOD_MODE_ENABLED=0`. So on the
+build that ships, the scale stayed 0, every tick was `sim_tick(0)`, and care decay, ageing,
+poop/sickness, the XP carry drip and the activity carried minute were dead while the device
+ran; `gs_touch_lastseen()` still ran, so the next boot's absence was ~0 too and the pet
+decayed **only for time the device spent powered OFF**. Pre-existing since the phase-2 stub,
+but P6-C3 rewrote that exact line and rested the whole sleep ladder on it.
+
+*Nothing in the suite could see it*, and that is the finding rather than an aside: every
+case in `test_care.cpp` calls `sim_tick(n)` with its own `n`, so the number the firmware
+multiplies by was never on the line. **Measured: planting
+`uint32_t sim_step_seconds(void){ return 0; }` left the whole suite at ALL PASS 41/41.**
+Fix: `sim_bind()` sets the default (`if (g.scale == 0u) g.scale = 1u;`) — a default that
+lives inside a dev feature is not a default — and `sim.h` documents god mode as an override.
+Guard: `care_a_freshly_bound_sim_advances_one_real_second_per_tick`, whose first assertion is
+the value a release boot gets and whose second drives `app.cpp`'s own expression over a
+half-hour sleep. **Mutation: removing the default fails it with 6 checks** (`0 != 1`, then
+five care bars that never moved), 27/28.
+
+**2. A typed clock plus a reboot was an unbounded activity farm.** `xp_ledger_restore()`
+aged the saved anti-farm budget forward by `(now_epoch − saved_epoch) / refill_step`, clamped
+to one window. Both epochs are wall clock; the wall clock is typed by the player on the TIME
+screen; one window of "elapsed" refills a whole bucket.
+
+**Measured, before:** 100 rounds of (clock +1 day, reboot, one Wi-Fi scan of the SAME ten
+access points) spent **990 metered XP and 125,000 care milli-points in ZERO real seconds**,
+against **37.8 XP for an honest day at full tilt** and a happiness bar (`PB_CARE_MILLI_MAX`)
+that holds 100,000. The controls show each layer holds alone: 100 reboots with the clock left
+where it was spent 0; 100 clock jumps with no reboot spent 0 metered XP — **but 125,000
+milli of happiness, because the happiness half had no meter at all and needed no reboot.**
+
+**This defeated the sentence `game/activity.h`'s whole five-layer argument leans on** —
+"even a bug in every rule above it leaves the award rate-limited by a budget a reboot cannot
+refill" — and **neither module's own test binary contained both modules**, which is how
+`tests/test_activity.cpp` came to hold four named cheat cases (uncalibrated, insane, rolled
+BACKWARDS, power-cycled) and miss the one direction of clock movement that pays.
+
+Fix, in three parts. (a) The aging term is **removed**, not repaired: a typed day and a day
+the device spent switched off are the same evidence, so there is nothing to repair. A restore
+now hands back exactly the budget that was true at the last save, and `xp_ledger_tick()`
+refills it out of seconds the device watched pass — which are the only seconds nobody can
+type. (b) The happiness is scaled by the XP the ledger actually granted
+(`act_happy_for_granted_xp`, pure and host-tested), so one budget covers both halves of the
+reward. (c) The false sentences in `game/activity.h`, `game/xp.h`, `app/app.cpp`,
+`data/balance.h` and `persistence/game_state.h` are corrected to what the code does.
+
+**Measured, after:** the same 100 rounds, given a FULL bucket to start with, spend **exactly
+`XP_CAP_CARRY` (48) and then nothing, for ever**; 100 more rounds add zero. The honest day is
+unchanged at 37.8 XP.
+
+**What the honest player pays for it, said plainly and not buried:** time the device spends
+switched OFF no longer refills the XP budget. The meter now means "XP per day of device-**ON**
+time" rather than per day of wall time. It is a smaller budget, it moves only in the player's
+disfavour, and it is the only direction that cannot be typed. `game/xp.cpp` carries that
+paragraph next to the code.
+
+Guards: `activity.o` is linked into `test_xp` — the farm is cross-module, and the Makefile
+says why — plus `a_typed_day_plus_a_reboot_cannot_refill_a_spent_activity_budget`,
+`a_typed_day_without_a_reboot_cannot_pay_a_second_time_either` and
+`an_honest_day_still_pays_what_it_always_paid`. Mutations: **restoring the aging term fails
+four named cases** (`a_round_trip_under_reports_the_budget_and_never_over_reports_it` 463
+checks, `a_reboot_cannot_refill_a_spent_budget` 17,
+`the_battle_bucket_bounds_an_afternoon_of_fighting` 1,
+`a_typed_day_plus_a_reboot_cannot_refill_a_spent_activity_budget` 4), 15/19;
+**making `act_happy_for_granted_xp()` return the owed amount unscaled fails the two typed-day
+cases**, 17/19. On the pure side, relaxing `open_day()`'s day comparison fails
+`a_forward_clock_set_opens_one_day_at_a_time_and_never_more_than_one_budget` among 13 others.
+
+**Two existing cases were NARROWED rather than deleted, and both narrowings are recorded in
+their own bodies**, because the old wording is the reason the hole survived:
+`a_round_trip_under_reports_the_budget_and_never_over_reports_it`'s
+`CHECK_NEAR(live, back, 1)` became `CHECK_EQ(back, at_save)`; and
+`the_battle_bucket_bounds_an_afternoon_of_fighting` drove its own "so a reboot cannot
+shortcut it" claim **through the very call that was the shortcut**, and now drives it through
+`xp_ledger_tick()`. `a_reboot_cannot_refill_a_spent_budget` kept its name and gained the case
+it never had: a forward jump of a whole window, swept to four windows in 997 s steps, across
+all four metered buckets.
+
+**3. P6-C3's one load-bearing line had no guard at all.** `gt_mono_ms()`'s `ARDUINO` branch
+(`esp_rtc_get_time_us() / 1000ULL`) is the whole of the chunk's "monotonic source that
+survives sleep" and the whole of the uncalibrated-cooldown debt's discharge. Reverting it to
+`millis()` — the exact regression the chunk was written to prevent — is invisible to the
+entire host suite, because no host binary compiles that branch, and `tools/check.sh` gated
+`ui_explore_clock()`, the CALLER, while nothing gated the line itself. The code was correct;
+the guard was missing, which is this project's named recurring defect wearing a different
+costume. A second gate now pins the device branch: it must name `esp_rtc_get_time_us()` and
+must not name `millis()`. **Mutations, both halves: swapping the source → `GATE FAIL:
+gt_mono_ms() does not read esp_rtc_get_time_us() on the device`; adding a `millis()` call
+beside the correct source → `GATE FAIL: gt_mono_ms()'s device branch reads millis() (1)`.**
+The stronger form — compiling that branch on the host against two fake headers so the CHOICE
+OF CLOCK is executed rather than grepped — is written into the P7-C6 box, not claimed here.
+
+### Sentences narrowed at this exit
+
+- `PEBBLEBOL_IMPLEMENTATION_PLAN.md`'s P6-C2 box listed five anti-farm layers and ended
+  "…and `XP_SRC_CARRY`'s meter underneath everything, **which a reboot cannot refill** and
+  which `xp_ledger_restore()` re-seeds to ZERO on an untrusted clock". The last clause was
+  false and it was the clause the list leaned on. Corrected in place, with the measurement.
+- `game/activity.h`'s layer 2 claimed the day "only ever moves forward" as an anti-farm
+  property. It moves forward *for free*, which is the farm's engine. The header now says so
+  outright, says the module cannot tell a typed day from a day spent switched off, and points
+  at the layer that actually bounds one.
+- `tests/test_care.cpp`'s `care_a_thirty_minute_sleep_charges_thirty_minutes_of_care` claimed
+  a property of the SLEEP PATH and never touched it — no `sim_step_seconds()`, no `owed`, no
+  scheduler — so it passed on a build whose step size was zero. Renamed to
+  `care_thirty_minutes_of_care_is_the_same_however_a_sleep_slices_it`, which is what it
+  guards and is worth having.
+- §67's `Device sleeps correctly` is held **open**, in the same words `Wi-Fi shuts down after
+  use` has been held open since phase 5: the ladder is built and host-driven, but a CPU
+  stopping is an observation and nothing has been observed. `Timed systems work after sleep`
+  and `Time-based calculations work across reboot` are ticked, on the host standard every
+  other ticked box uses.
+
+### What phase 6 did NOT measure, stated as unmeasured
+
+- **Nothing in this phase has run on hardware, and it is a larger caveat here than in any
+  earlier phase, because two of the three chunks are about hardware.** No piezo has been
+  soldered and no tone has been heard: every audio figure is a host measurement or a reading
+  of the installed core's source. No board has slept: whether `esp_light_sleep_start()` really
+  returns on a `GPIO_INTR_LOW_LEVEL` from GPIO10 and GPIO2 with the buttons' internal
+  pull-ups is unverified, and the deepest two rungs are dead if it does not.
+- **No current has been measured.** ~5 µA deep sleep is this repo's own citation; the
+  ~130 µA light-sleep figure is a vendor number that appears nowhere in this repo and is the
+  weakest input to D1's battery arithmetic. The boost module nobody has measured (D11) swings
+  the same answer by 10× more than deep-versus-light does.
+- **The audio wiring is covered by exactly one host test of four sites.** `ui/ceremony.cpp`'s
+  four cues and `ui/ui.cpp`'s two are device translation units no host binary compiles; only
+  `screen_battle.cpp`'s hit/faint pair is driven by a test.
+- **The DIAG ENERGIA page's IDLE loop rate has never been read.** The ≤ 10/s acceptance
+  figure is what a 1 s slice structurally produces, not a reading.
+- **The `peers met` term still has no caller**, and will not until P7-C1. It is worth 60 of
+  the 440 points a full day can reach, so the best day this firmware can actually have is 380
+  points / 38 XP / 4,750 milli — which `tests/test_xp.cpp` asserts as such rather than
+  claiming 440.
+- **`sim_gain_restore()` still has the hole `xp_ledger_restore()` just lost.** Measured with a
+  throwaway probe against this tree's own `sim.o`: 100 rounds of (clock +1 h, reboot) from a
+  fully SPENT ledger manufacture **4,000 whole happiness gain points against a cap of 40 an
+  hour**; the same restore with no gap manufactures 0. It is a different currency — permission
+  to raise a stat by a care action, and the actions have their own cooldowns — so it was left
+  alone rather than swept into this chunk's blast radius. It is written into the P7-C6 box
+  with that number.
+- **A Pebble at `XP_LEVEL_MAX` now earns no activity happiness**, because `xp_add()` returns
+  at the top of the curve before it spends the meter and the happiness is scaled by what the
+  meter spent. A loss, not a hole — the safe direction — recorded in `game/activity.h` with
+  its one-line remedy, and carried to P7-C6 rather than decided at an exit.
+- **No NVS wear measurement.** The activity half of the `cd` blob is bounded BY THE CAPS at at
+  most 270 writes a day; it has not been observed on hardware.

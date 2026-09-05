@@ -1063,7 +1063,16 @@ TEST(care_a_fortnight_of_neglect_only_pins_the_stats_the_player_owns) {
 // -----------------------------------------------------------------------------
 static GameState g_sleep_state;
 
-TEST(care_a_thirty_minute_sleep_charges_thirty_minutes_of_care) {
+// NARROWED IN P6-C4, and the old name is kept here because the narrowing is the
+// finding: this case was called care_a_thirty_minute_sleep_charges_thirty_minutes
+// _of_care, which claimed a property of the SLEEP PATH. It never touched that
+// path - it calls sim_tick(n) with its own n and never sim_step_seconds(), never
+// logic_tick()'s `owed`, never the millisecond scheduler - so it passed happily
+// on a build whose step size was zero and whose sleep therefore charged nothing
+// (see care_a_freshly_bound_sim_advances_one_real_second_per_tick, below). What
+// it really guards is worth having under its own name: the care INTEGRATOR is
+// chunk-invariant, so slicing a gap cannot change what the gap costs.
+TEST(care_thirty_minutes_of_care_is_the_same_however_a_sleep_slices_it) {
   // WHAT THE LADDER ACTUALLY DOES, and it is why this case is about sim_tick()
   // and not about sim_catch_up_ex(): a light sleep is not a reboot, so the loop
   // comes back and settles up through the ordinary 1 Hz tick with the whole
@@ -1235,4 +1244,69 @@ TEST(care_a_stored_pebble_recovers_across_a_sleep_exactly_as_it_does_across_a_bo
   for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) { p->care[i] = 0; p->care_rem[i] = 0; }
   box_recover(stored, 0u);
   for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) CHECK_EQ(p->care[i], 0);
+}
+
+// -----------------------------------------------------------------------------
+//  P6-C4: THE STEP SIZE THE SHIPPING BUILD ACTUALLY USES
+//
+//  app.cpp's logic_tick() does not tick the world by a constant. It ticks it by
+//  `sim_step_seconds() * owed`, and sim_step_seconds() returns a static that,
+//  until P6-C4, was written by exactly one function - sim_set_time_scale() -
+//  whose only two callers live inside dev/godmode.cpp's `#if GOD_MODE_ENABLED`
+//  half. The RELEASE artefact is built with GOD_MODE_ENABLED=0, so on the build
+//  that actually gets flashed the scale stayed at its zero-initialised value and
+//  the whole simulation stood still: sim_tick(0) every second, no care decay, no
+//  ageing, no XP carry drip, no activity minute, for as long as the device was
+//  switched on.
+//
+//  NOTHING IN THIS SUITE COULD SEE IT, and that is the lesson rather than an
+//  aside: every other case in this file calls sim_tick(n) with its own n, so the
+//  one number the firmware actually multiplies by was never on the line. The
+//  proof is a measurement - `uint32_t sim_step_seconds(void){ return 0; }` was
+//  planted in game/sim.cpp and the whole suite still reported ALL PASS 41/41.
+// -----------------------------------------------------------------------------
+TEST(care_a_freshly_bound_sim_advances_one_real_second_per_tick) {
+  // THE FIRST ASSERTION IS THE WHOLE CASE, and it has to stay the first thing
+  // this binary asks about the scale: no case above calls sim_set_time_scale(),
+  // so what sim_step_seconds() answers here is the value a release boot gets.
+  care_pet_at(g_care, 10);
+  CHECK_EQ(sim_step_seconds(), 1u);
+
+  // And the value is not just non-zero, it is ONE REAL SECOND: app.cpp's own
+  // expression over a half-hour sleep must land on the same bytes as the half
+  // hour this file already pins one second at a time.
+  static int32_t by_the_second[PB_CARE_COUNT];
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+    g_care.care_rem[i] = 0;
+  }
+  for (uint16_t s = 0; s < 1800u; ++s) sim_tick(1);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) by_the_second[i] = g_care.care[i];
+
+  care_pet_at(g_care, 10);
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+    g_care.care_rem[i] = 0;
+  }
+  const uint32_t owed = (uint32_t)PWR_SLEEP_SLICE_MS / 1000u;   // one sleep slice
+  bool moved = false;
+  for (uint32_t t = 0; t < 1800u; t += owed) {
+    sim_tick(sim_step_seconds() * owed);                        // app.cpp, verbatim
+  }
+  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+    CHECK_EQ(g_care.care[i], by_the_second[i]);
+    if (g_care.care[i] != (int32_t)PB_CARE_MILLI_MAX / 2) moved = true;
+  }
+  CHECK(moved);                                   // the half hour was CHARGED
+
+  // God mode is an OVERRIDE of that 1, and a zero is not a speed: it is a stop,
+  // so the setter clamps it. Binding another Pebble must not cancel an
+  // acceleration the player is watching either - the default is set only when
+  // the scale is still unset.
+  sim_set_time_scale(60u);
+  CHECK_EQ(sim_step_seconds(), 60u);
+  care_pet_at(g_care, 10);
+  CHECK_EQ(sim_step_seconds(), 60u);
+  sim_set_time_scale(0u);
+  CHECK_EQ(sim_step_seconds(), 1u);
 }
