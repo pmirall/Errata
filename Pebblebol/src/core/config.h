@@ -177,6 +177,30 @@ static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
 #define FPS_LOW_ENERGY_PCT      15
 #define RENDER_WEB_BUSY_MS      10000UL      // drop to FPS_LOW this long after a web hit
 #define FRAME_BUDGET_US         50000UL      // 20 fps; sendBuffer is ~24 ms of it
+// How far a frame that blew the budget pushes the next deadline out, capped, so
+// the renderer cannot run the loop at 100 % duty cycle. It was a bare 250 in
+// ui/render.cpp until P10-C2 moved the arithmetic to core/perf.cpp, where a
+// host binary can drive it - it had shipped since 8aff64f with no test at all.
+#define FRAME_BACKOFF_MAX_MS    250UL
+
+// --- spec section 46's two time budgets, and what they are NOT --------------
+// PERF_PASS_BUDGET_US is section 46's "loop() iteration <= 100 ms". The figure
+// core/perf.cpp records against it is the WORK of a pass, measured from the top
+// of app_loop() to just BEFORE stage 7's yield: pwr_yield() naps deliberately
+// for up to PWR_SLEEP_SLICE_MS, so a counter that spanned it would read
+// 8,000,000 us on a healthy sleeping board and the budget would mean nothing.
+// The placement is load-bearing and tools/check.sh gates it.
+//
+// NEITHER OF THESE IS CHECKED BY ANY HOST TEST OR BY tools/check.sh, and that
+// is deliberate rather than unfinished: no host binary compiles ui/render.cpp
+// or app/app.cpp, micros() does not exist here, and the ~24 ms sendBuffer()
+// that dominates a frame is a property of a 400 kHz bus and a panel that are
+// both absent. They are read on a board - docs/bench.md steps A1 and A2.
+#define PERF_PASS_BUDGET_US     100000UL
+// A span wider than this is longer than one micros() wrap can explain, so it is
+// a bad stamp pair rather than a slow frame: core/perf.cpp discards it and
+// COUNTS the discard, because a silently dropped sample is the phase-7 defect.
+#define PERF_SANE_MAX_US        10000000UL
 
 // =============================================================================
 // 5. INPUT / GESTURES

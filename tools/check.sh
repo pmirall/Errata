@@ -1386,4 +1386,137 @@ if [ -f "$SKETCH/src/dev/godmode.cpp" ]; then
   [ "${n:-0}" -ge 1 ] || fail "god_note_load() has NO caller in src/app ($n) - the boot LoadResult would be dropped again and spec 49's Last error field would report LOAD_OK for ever (dev/godmode.h)"
 fi
 
+# --- P10-C2: THE PERFORMANCE INSTRUMENT, FIVE GATES -------------------------
+#
+# WHAT NONE OF THESE DOES, SAID FIRST, BECAUSE IT IS THE POINT OF THE CHUNK.
+# NOT ONE OF THEM ASSERTS A MICROSECOND, AND NONE MAY. Spec section 46's five
+# thresholds - frame <= FRAME_BUDGET_US, loop() <= PERF_PASS_BUDGET_US, a
+# per-frame heap delta of 0, input-to-render latency <= 2 frames, and a 24 h
+# soak with a flat heap line - are all UNMEASURABLE in this repository, and
+# structurally rather than temporarily: micros(), I2C and U8g2 do not exist on
+# the host, ui/render.cpp and app/app.cpp are compiled by ZERO host binaries,
+# the ~24 ms of sendBuffer() that dominates a frame is a property of a 400 kHz
+# bus and a panel that are both absent, and the worst loop() pass is a network
+# peer's TCP behaviour through WebServer::handleClient(), which is never linked
+# here. A green "frame <= 50 ms" line printed by this script would be a verdict
+# about a firmware nobody flashes - the phase-6 and phase-7 defect exactly.
+#
+# So the five thresholds go to docs/bench.md, on a board, with a variant named
+# for each, and these gates check the only things a grep honestly can: that the
+# instrument is PURE, that it is WIRED, and that the one edit which would turn
+# it into a lie without breaking anything is refused.
+if [ -f "$SKETCH/src/core/perf.cpp" ]; then
+  # 1. core/perf.{h,cpp} STAY HOST-LINKABLE. The same red line ui/corrupt_fx.cpp,
+  #    ui/petfx_core.cpp and dev/diag_core.cpp carry, for the same measured
+  #    reason: the arithmetic is the half that can be wrong here, and it is only
+  #    testable while it is on this side of the Arduino wall.
+  for f in perf.h perf.cpp; do
+    n=$( { grep -nE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*(Arduino\.h|u8g2|U8g2|render\.h|gfx\.h)' \
+            "$SKETCH/src/core/$f" || true; } | wc -l )
+    [ "$n" -eq 0 ] || fail "core/$f includes a renderer or device header ($n) - it exists to be host-linkable (core/perf.h)"
+  done
+
+  if command -v cpp >/dev/null 2>&1; then
+    strip_comments4() { cpp -fpreprocessed -dD -E -P - 2>/dev/null; }
+  else
+    echo "check.sh: NOTE - cpp not found, the perf gates fall back to line-comment stripping only"
+    strip_comments4() { sed 's://.*::'; }
+  fi
+
+  # 2. THE THREE STAMP SITES STILL EXIST. Delete any one and the instrument goes
+  #    dark IN SILENCE: render.cpp, ui.cpp and app.cpp are compiled by no host
+  #    binary, so tests/test_perf.cpp would go on passing over arithmetic nobody
+  #    feeds. Same form as the cor_service() and god_note_load() gates -
+  #    comments stripped by the preprocessor first, a call with an ARGUMENT
+  #    required - so a mention in prose or a declaration cannot stand in for one.
+  n=$( { cat "$SKETCH/src/ui/render.cpp" 2>/dev/null || true; } | strip_comments4 \
+        | { grep -cE '\bperf_note_frame[[:space:]]*\([^)]' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "perf_note_frame() has NO caller in ui/render.cpp ($n) - the frame instrument would record nothing and no host test can see that (core/perf.h)"
+  n=$( { cat "$SKETCH"/src/app/*.cpp 2>/dev/null || true; } | strip_comments4 \
+        | { grep -cE '\bperf_note_pass[[:space:]]*\([^)]' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "perf_note_pass() has NO caller in src/app ($n) - the loop() instrument would record nothing (core/perf.h)"
+  n=$( { cat "$SKETCH"/src/app/*.cpp 2>/dev/null || true; } | strip_comments4 \
+        | { grep -cE '\bperf_set_screen[[:space:]]*\([^)]' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "perf_set_screen() has NO caller in src/app ($n) - every frame and every pass would be billed to screen 0 (core/perf.h)"
+
+  # 3. THE ONE EDIT THAT WOULD TURN THE INSTRUMENT INTO A LIE WITHOUT BREAKING
+  #    ANYTHING. app_loop()'s stage 7 yield is a DELIBERATE nap of up to
+  #    PWR_SLEEP_SLICE_MS (8,000 ms). perf_note_pass() measures the WORK of a
+  #    pass and must therefore be stamped BEFORE it; moved after, the worst pass
+  #    reads 8,000,000 us on a healthy sleeping board, spec section 46's 100 ms
+  #    budget stops meaning anything, and every gate in this file and every case
+  #    in tests/test_perf.cpp stays green. That is the silent-lie shape this
+  #    project has hit in nine consecutive phases, so it is a line-number
+  #    comparison rather than a comment.
+  app_src="$SKETCH/src/app/app.cpp"
+  if [ -f "$app_src" ]; then
+    ln_note=$( { grep -nE '^[^/]*\bperf_note_pass[[:space:]]*\(' "$app_src" || true; } | head -1 | cut -d: -f1 )
+    ln_yield=$( { grep -nE '^[^/]*\bpwr_yield[[:space:]]*\(' "$app_src" || true; } | head -1 | cut -d: -f1 )
+    [ -n "$ln_note" ]  || fail "check.sh: no perf_note_pass( call found in app/app.cpp - the yield-order gate cannot see what it guards"
+    [ -n "$ln_yield" ] || fail "check.sh: no pwr_yield( call found in app/app.cpp - the yield-order gate cannot see what it guards"
+    [ "$ln_note" -lt "$ln_yield" ] || fail "perf_note_pass() is at app.cpp:$ln_note, BELOW pwr_yield() at :$ln_yield - the worst loop() pass would then read PWR_SLEEP_SLICE_MS by construction and stop meaning work (core/config.h, PERF_PASS_BUDGET_US)"
+  fi
+
+  # 4. NO HOST BINARY MAY ASSERT A TIME. tests/test_perf.cpp exists to drive
+  #    arithmetic over stamps it invented; the day somebody writes
+  #    CHECK(perf_frame_worst_us() < FRAME_BUDGET_US) over those stamps,
+  #    tools/check.sh starts printing a frame verdict about a device it has
+  #    never seen. That is the theatre this whole design refuses, so it is
+  #    refused mechanically and not by a comment.
+  #    `.*` AND NOT `[^\n]*`: grep's ERE does not read \n inside a bracket
+  #    expression, so `[^\n]` means "not a backslash and not the letter n" - and
+  #    the very line this gate exists to catch,
+  #    `CHECK(perf_frame_worst_us() < (uint32_t)FRAME_BUDGET_US)`, contains an
+  #    `n` in `uint32_t` and slipped straight through. Found by planting it.
+  n=$( { grep -nE '(CHECK|CHECK_EQ).*(FRAME_BUDGET_US|PERF_PASS_BUDGET_US)' \
+          "$ROOT/tests"/test_*.cpp 2>/dev/null || true; } \
+        | { grep -v 'perf_overrun_backoff_ms\|perf_note_frame\|perf_note_pass\|perf_frame_overruns\|perf_pass_overruns' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "a host test asserts something against FRAME_BUDGET_US / PERF_PASS_BUDGET_US outside the overrun-boundary cases ($n) - no host binary can measure a frame or a pass; spec section 46's thresholds are docs/bench.md's"
+fi
+
+# --- P10-C2: THE FOUR STATES SPEC 47 IS EXEMPTED FOR STAY UNREACHABLE -------
+# tests/test_statemachine.cpp's kExits table answers "how does this state end"
+# for all 27 rows, and FOUR of them are answered "it is never resident": BOOT
+# and LOAD_SAVE are drawn one frame at a time by ui_boot_screen() with gs_load()
+# running synchronously underneath and no loop at all, and CONFIRM / ALERT are
+# ui/dialog.cpp's overlays which never become sm_current(). A host binary can
+# assert that sm_begin() does not land on one; it CANNOT see app/app.cpp or
+# ui/ui.cpp, so the other half of the exemption - that nothing navigates there -
+# is this gate. The moment one becomes reachable the exemption is a lie and the
+# state needs a real exit, so the build stops here instead.
+if [ -f "$ROOT/tests/test_statemachine.cpp" ]; then
+  if command -v cpp >/dev/null 2>&1; then
+    strip_comments5() { cpp -fpreprocessed -dD -E -P - 2>/dev/null; }
+  else
+    strip_comments5() { sed 's://.*::'; }
+  fi
+  nav_src=$( { cat "$SKETCH"/src/ui/*.cpp "$SKETCH"/src/app/*.cpp 2>/dev/null || true; } | strip_comments5 )
+  for scr in SCR_BOOT SCR_LOAD_SAVE SCR_CONFIRM SCR_ALERT; do
+    n=$( printf '%s\n' "$nav_src" \
+          | { grep -cE "\b(ui_goto|ui_push|sm_goto|sm_push|sm_replace_root|nav_push|nav_goto)[[:space:]]*\([[:space:]]*$scr\b" || true; } )
+    [ "${n:-0}" -eq 0 ] || fail "$scr is navigated to from src/ui or src/app ($n) - tests/test_statemachine.cpp's kExits table exempts it as never-resident, so it now needs a real timeout and a user-visible exit (spec section 47)"
+  done
+fi
+
+# --- P10-C2: THE SOUND SETTING REACHES THE PIEZO THROUGH ONE PREDICATE ------
+# core/nt_types.h's cfg_sound_muted() exists because app/app.cpp is compiled by
+# NO host binary: with the expression written inline in app_audio_muted(), every
+# link of "the sound setting persists" was tested and the JOIN was tested
+# nowhere, and a test that re-stated the expression would have asserted a copy.
+# tests/test_sound.cpp drives the real function through the real save_manager;
+# this is the half that says the artefact still calls it. Same form as the
+# cor_service() gate: comments stripped, an argument required.
+if [ -f "$SKETCH/src/hardware/audio.cpp" ]; then
+  if command -v cpp >/dev/null 2>&1; then
+    strip_comments6() { cpp -fpreprocessed -dD -E -P - 2>/dev/null; }
+  else
+    strip_comments6() { sed 's://.*::'; }
+  fi
+  app_txt=$( { cat "$SKETCH"/src/app/*.cpp 2>/dev/null || true; } | strip_comments6 )
+  n=$( printf '%s\n' "$app_txt" | { grep -cE '\bcfg_sound_muted[[:space:]]*\([^)]' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "cfg_sound_muted() has NO caller in src/app ($n) - the persisted CF_MUTE would stop reaching the piezo and no host test could see it (core/nt_types.h, tests/test_sound.cpp)"
+  n=$( printf '%s\n' "$app_txt" | { grep -cE '\baudio_bind[[:space:]]*\([^)]' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "audio_bind() has NO caller in src/app ($n) - the tone engine would run with no sink and no mute hook (hardware/audio.h)"
+fi
+
 echo "GATE OK"

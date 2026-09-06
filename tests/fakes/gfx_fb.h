@@ -40,6 +40,18 @@ bool fb_write_pbm(const char* path);
 // Pixels that differ from the golden, or -1 when the file cannot be read.
 int  fb_diff_pbm(const char* path);
 
+// THE WORK COUNTERS (P10-C2). fb_ops() is one per leaf primitive - pixel,
+// hline, vline, rect, fill, xbm, dither and one per GLYPH - so gfx_invert_rect,
+// which delegates to gfx_fill, is charged once and the widgets in
+// ui/gfx_widgets.cpp decompose into the primitives they really call.
+// fb_pixels() is one per pixel actually written INSIDE the panel.
+//
+// THEY ARE A WORK REGRESSION DETECTOR AND NOT A TIME MEASUREMENT, and the
+// difference is written out at length in gfx_fb.cpp above the counters. Do not
+// attach a millisecond to either of them.
+uint32_t fb_ops(void);
+uint32_t fb_pixels(void);
+
 // The buffer as text on stdout, for a failing test to be readable.
 void fb_dump(void);
 

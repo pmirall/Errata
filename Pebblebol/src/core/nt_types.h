@@ -432,6 +432,28 @@ static_assert(offsetof(Config, crc16)     == 254, "Config.crc16 moved");
 #define CONFIG_CRC_BYTES 254
 
 // -----------------------------------------------------------------------------
+//  THE SOUND SETTING, AS ONE PREDICATE (P10-C2, spec section 64).
+//
+//  hardware/audio.h asks the firmware exactly one question - "is sound off?" -
+//  through a bound hook, and app/app.cpp's app_audio_muted() is what answers
+//  it. That body used to be the expression itself, in a file NO HOST BINARY
+//  COMPILES. Every link of the chain around it was tested (the toggle in
+//  tests/test_screens.cpp, Config <-> ConfigV2 in tests/test_game_state.cpp,
+//  the blob round trip in tests/test_persistence.cpp, the mute rule in
+//  tests/test_audio.cpp) and the JOIN between the persisted bit and the piezo
+//  was tested nowhere, because the join lived in app.cpp. A test that re-wrote
+//  the expression in its own fixture would have asserted a COPY.
+//
+//  So it is one inline function in the pure layer, app.cpp calls it,
+//  tests/test_sound.cpp drives it with a Config that came back off the real
+//  save_manager, and tools/check.sh gates the call site - the same three-part
+//  shape the cor_service() and god_note_load() gates use, for the same reason.
+// -----------------------------------------------------------------------------
+static inline bool cfg_sound_muted(const Config& c) {
+  return (c.flags & CF_MUTE) != 0u;
+}
+
+// -----------------------------------------------------------------------------
 // 6. RTC RETENTION - RTC_NOINIT_ATTR, survives soft reset, lost on power loss.
 //    The crash-vs-power-loss discriminator.
 // -----------------------------------------------------------------------------

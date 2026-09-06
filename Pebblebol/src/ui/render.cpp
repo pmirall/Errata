@@ -9,6 +9,11 @@
 #include <stdio.h>
 #include <string.h>
 
+// P10-C2. The frame scheduler's arithmetic and the frame-time record live in a
+// PURE module, because this file is compiled by no host binary and every rule
+// left inside it is a rule no test in this repository can execute.
+#include "../core/perf.h"
+
 // -----------------------------------------------------------------------------
 // THE display object. BRIEF risk #2 - the single most dangerous line in the
 // project. Argument order is (rotation, reset, clock = SCL, data = SDA);
@@ -506,8 +511,7 @@ bool rd_begin_frame(void) {
   // Advance the deadline by exactly one period so the cadence does not drift,
   // but resynchronise after a long stall instead of firing a burst of catch-up
   // frames (a 2000-step offline catch-up can eat several seconds).
-  s_next_frame_ms += period;
-  if ((int32_t)(now - s_next_frame_ms) > (int32_t)period) s_next_frame_ms = now + period;
+  s_next_frame_ms = perf_advance_deadline(now, s_next_frame_ms, period);
 
   s_in_frame      = true;
   s_frame_start_us = micros();
@@ -531,15 +535,28 @@ void rd_end_frame(void) {
     s_u8g2.sendBuffer();
   }
 
-  s_last_frame_us = micros() - s_frame_start_us;
+  const uint32_t frame_end_us = micros();
+  s_last_frame_us = frame_end_us - s_frame_start_us;
+
+  // P10-C2. s_last_frame_us was overwritten and forgotten twenty times a
+  // second, and rd_frame_time_us() - its only export - had no caller anywhere
+  // in the tree. It is KEPT now: core/perf.cpp holds the per-screen maximum and
+  // the all-time worst, and the console's GD_SYS_PERF page prints the live
+  // value through rd_frame_time_us() beside them, which is the reader that
+  // export never had.
+  //
+  // perf is handed the two STAMPS rather than the span, so the micros() wrap is
+  // its problem and not this file's. The quantity is unchanged and it is the
+  // right one: clearBuffer -> the whole screen -> fx_apply() -> the full
+  // sendBuffer(), which is the ~24 ms of I2C the comment above attributes to
+  // the panel.
+  perf_note_frame(s_frame_start_us, frame_end_us);
 
   // Overrun guard: if this frame blew the budget, push the next deadline out by
-  // the overrun so the scheduler cannot run the loop at 100 % duty cycle.
-  if (s_last_frame_us > FRAME_BUDGET_US) {
-    uint32_t over_ms = (s_last_frame_us - FRAME_BUDGET_US) / 1000u;
-    if (over_ms > 250u) over_ms = 250u;
-    s_next_frame_ms += over_ms;
-  }
+  // the overrun so the scheduler cannot run the loop at 100 % duty cycle. The
+  // arithmetic moved to core/perf.cpp at P10-C2 so a host binary could drive
+  // it; the behaviour is identical, down to the strictly-greater boundary.
+  s_next_frame_ms += perf_overrun_backoff_ms(s_last_frame_us);
 }
 
 uint32_t rd_frame_time_us(void) { return s_last_frame_us; }

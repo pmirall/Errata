@@ -387,6 +387,7 @@ enum StrId : uint16_t {
   STR_GOD_STORE,
   STR_GOD_POWER,
   STR_GOD_INFO,
+  STR_GOD_PERF,
 
   // --- 34b. feedback lines -------------------------------- <= 25 ch @ 5x8 --
   STR_GOD_PASTE,
@@ -423,6 +424,7 @@ enum StrId : uint16_t {
   STR_SAVE_ERR_B,
   STR_SAVE_NO_BACKUP,
   STR_SAVE_UPDATE_FW,
+  STR_SAVE_ERR_EXIT,
   STR_SAVE_RECOVERED,
   STR_SAVE_FROM_BACKUP,
   STR_SAVE_UPDATED,
@@ -1136,6 +1138,7 @@ inline constexpr const char* const ES[] = {
   /* STR_GOD_STORE */             "GUARDADO",
   /* STR_GOD_POWER */             "ENERGIA",
   /* STR_GOD_INFO */              "SISTEMA",
+  /* STR_GOD_PERF */              "RENDIMIENTO",
 
   /* --- 34b. god mode: feedback lines --- */
   /* STR_GOD_PASTE */             "Pega 32 hex y ENTER.",
@@ -1169,6 +1172,7 @@ inline constexpr const char* const ES[] = {
   /* STR_SAVE_ERR_B */            "B: Reset de fábrica",
   /* STR_SAVE_NO_BACKUP */        "No hay copia que recuperar.",
   /* STR_SAVE_UPDATE_FW */        "Actualiza el firmware.",
+  /* STR_SAVE_ERR_EXIT */         "A+B largo: salir",
   /* STR_SAVE_RECOVERED */        "Partida reparada.",
   /* STR_SAVE_FROM_BACKUP */      "Recuperada de la copia.",
   /* STR_SAVE_UPDATED */          "Partida actualizada.",

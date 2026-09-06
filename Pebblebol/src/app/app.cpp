@@ -20,6 +20,7 @@
 
 #include "../core/config.h"
 #include "../core/nt_types.h"
+#include "../core/perf.h"        // P10-C2: the frame / pass instrument
 #include "../core/strings_es.h"
 #include "../game/genome.h"
 #include "../core/rng.h"
@@ -157,7 +158,14 @@ static bool app_retry_display(void)
 // time instead of the engine holding a copy, because a copy is a second place
 // the flag lives and ui/screen_settings.cpp and ui/screen_home.cpp both toggle
 // the original.
-static bool app_audio_muted(void) { return (g_cfg.flags & CF_MUTE) != 0u; }
+// THE PREDICATE ITSELF IS NOT HERE ANY MORE (P10-C2). It is
+// cfg_sound_muted() in core/nt_types.h, because this file is compiled by no
+// host binary: a test that re-wrote `(flags & CF_MUTE) != 0` in its own fixture
+// would be asserting a COPY of the one line that decides whether a persisted
+// setting reaches the piezo, which is exactly how the phase-6 defect survived
+// four phases. tests/test_sound.cpp drives THIS function's body through the
+// real save_manager, and tools/check.sh gates that src/app still calls it.
+static bool app_audio_muted(void) { return cfg_sound_muted(g_cfg); }
 
 static void app_led(bool on)
 {
@@ -1079,6 +1087,15 @@ static void logic_tick(uint32_t owed)
 void app_loop(void)
 {
   const uint32_t ms = millis();
+  // P10-C2. Stage 0 of the pass, paired with perf_note_pass() just above the
+  // yield at stage 7. WHAT IS MEASURED IS THE WORK OF A PASS, NOT ITS PERIOD:
+  // pwr_yield() naps deliberately for up to PWR_SLEEP_SLICE_MS, so a stamp
+  // taken after it would read 8,000,000 us on a healthy sleeping board and
+  // spec section 46's 100 ms budget would mean nothing at all. tools/check.sh
+  // gates the ORDER of the two lines, because moving one below the yield is a
+  // plausible-looking edit that leaves every test green and the instrument a
+  // lie - which is the shape of defect this project has hit nine times.
+  const uint32_t pass_t0_us = micros();
 
   // --- 0. the power ladder's bookkeeping ------------------------------------
   pwr_note_loop(ms);              // DIAG's loop rate, counted against the rung
@@ -1136,6 +1153,12 @@ void app_loop(void)
   (void)pwr_service(pin);
 
   // --- 5. render ------------------------------------------------------------
+  // WHICH SCREEN THE NEXT FRAME AND THIS PASS BELONG TO (P10-C2). ui_screen()
+  // and not sm_current(): a frame drawn with a modal up really is a different
+  // composition and really does cost what it costs, so it is billed to
+  // SCR_CONFIRM / SCR_ALERT rather than laundered into the screen underneath.
+  perf_set_screen((uint8_t)ui_screen());
+
   // pwr_fps() CLAMPS what the screen asked for. It has to be applied here and
   // not set once by the ladder, because this line runs every pass and would
   // otherwise put the screen's rate straight back.
@@ -1157,6 +1180,12 @@ void app_loop(void)
   // and so did the ble_scan_service() call that stood on the line below.
   net_service();
   web_service();
+
+  // THE PASS IS OVER (P10-C2). Everything below this line is a deliberate nap
+  // or a millisecond of politeness, and neither of those is WORK - see
+  // pass_t0_us at the top of this function and PERF_PASS_BUDGET_US in
+  // core/config.h. tools/check.sh gates that this line stays above the yield.
+  perf_note_pass(pass_t0_us, micros());
 
   // --- 7. yield -------------------------------------------------------------
   // AUDIT RISK 16: the loop must not run at 100 % duty cycle. Two rungs of one

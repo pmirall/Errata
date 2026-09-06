@@ -62,7 +62,8 @@ check: all
 # unreachable,return) does compile and run clean, and is one flag away here if
 # a later phase wants it in the gate.
 ASAN_BIN   := bin_asan
-ASAN_SET   := test_creator_api test_creator_gate test_validate test_persistence
+ASAN_SET   := test_creator_api test_creator_gate test_validate test_persistence \
+              test_soak
 ASAN_CXX   := -std=c++17 -Wall -Wextra -Werror -O1 -g -fno-omit-frame-pointer \
               -fsanitize=address -MMD -MP
 
@@ -611,7 +612,7 @@ MG_FRAME_OBJS := $(OBJ)/minigame.o \
                  $(OBJ)/buffer_logic.o       $(OBJ)/buffer_draw.o \
                  $(OBJ)/delete_logic.o       $(OBJ)/delete_draw.o
 
-$(BIN)/test_screens:    $(SCREEN_OBJS) $(MG_FRAME_OBJS)
+$(BIN)/test_screens:    $(SCREEN_OBJS) $(MG_FRAME_OBJS) $(OBJ)/alloc_count.o
 
 # P7-C2/C3: THE LINK SCREEN, ITS CONSENT GATE AND THE BATTLE OVER THE LINK.
 #
@@ -655,6 +656,55 @@ $(BIN)/test_battle_screen: $(OBJ)/screen_battle.o $(OBJ)/battle_renderer.o \
                         $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/xp.o \
                         $(OBJ)/evolution.o $(OBJ)/species.o \
                         $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o
+
+# P10-C2: THE PERFORMANCE INSTRUMENT'S ARITHMETIC. ONE OBJECT AND NO OTHERS,
+# and that is the whole design of core/perf.cpp: the span, the wrap, the
+# saturation, the discard, the overrun boundary and the render scheduler's
+# deadline are decided above every device call, exactly as hardware/power.cpp's
+# pwr_tick_budget() was extracted at P6-C3. If this link line ever needs a
+# second object something device-shaped has leaked below the seam.
+#
+# NO CASE IN test_perf.cpp MEASURES TIME AND NONE MAY: micros() does not exist
+# here, ui/render.cpp and app/app.cpp are compiled by no host binary, and the
+# ~24 ms sendBuffer() that dominates a frame is a property of an absent bus.
+# Spec section 46's five thresholds are answered in docs/bench.md, on a board.
+$(BIN)/test_perf:       $(OBJ)/perf.o
+
+# P10-C2: THE SOAK THAT CAN BE RUN WITHOUT A BOARD. One simulated day of the
+# real loop - sim, Box, cooldowns, the corruption deadline and the real
+# save_manager writing into a fake NVS every simulated minute - with a global
+# operator new counter armed for the whole run. It is in the ASAN set as well,
+# because a counter says "nothing was allocated" and LSAN says "nothing that was
+# allocated was lost", and the second is the half a counter cannot see.
+#
+# IT IS NOT SPEC SECTION 46's 24 h SOAK AND MUST NEVER BE QUOTED AS ONE: it
+# links none of the four subsystems that allocate on the device (Wi-Fi,
+# WebServer, U8g2, ESP-NOW). test_soak.cpp's banner says so; docs/bench.md
+# step A5 is the real one.
+$(BIN)/test_soak:       $(OBJ)/alloc_count.o $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o \
+                        $(OBJ)/corruption.o $(OBJ)/cooldowns.o \
+                        $(OBJ)/save_manager.o \
+                        $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/boot_host.o \
+                        $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/species.o $(OBJ)/species_custom.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
+# P10-C2: "THE SOUND SETTING PERSISTS", END TO END. A DELIBERATELY WIDE LINK
+# LINE, and the width IS the test: the claim joins hardware/audio.cpp to
+# persistence/save_manager.cpp through persistence/game_state.cpp, and the join
+# itself lives in app/app.cpp, which no host binary compiles. Every link was
+# already covered on its own and the join was covered nowhere. Nothing here is
+# a fake except the NVS partition and the piezo.
+#
+# NOTE WHY THIS IS NOT IN tests/test_audio.cpp: that binary's link line says in
+# its own comment that a second object there means something device-shaped has
+# leaked below the AudioSink seam, and it is right. The persistence chain is a
+# different claim and gets its own binary.
+$(BIN)/test_sound:      $(OBJ)/audio.o $(OBJ)/game_state.o $(OBJ)/save_manager.o \
+                        $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/boot_host.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o $(OBJ)/validate.o \
+                        $(OBJ)/pebble.o $(OBJ)/evolution.o $(OBJ)/xp.o \
+                        $(OBJ)/genome.o $(OBJ)/species_custom.o
 
 # The navigation machine and the section 7 router, over the REAL table.
 $(BIN)/test_statemachine: $(SCREEN_OBJS) $(OBJ)/state_machine.o \

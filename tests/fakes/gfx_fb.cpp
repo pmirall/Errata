@@ -35,11 +35,45 @@ static void oob(const char* what, int x, int y, int w, int h) {
 uint32_t    fb_oob(void)       { return s_oob; }
 const char* fb_oob_first(void) { return s_oob_msg; }
 
+// =============================================================================
+//  THE WORK COUNTERS (P10-C2)
+//
+//  READ THE LIMIT BEFORE READING THE NUMBER. THESE ARE NOT A FRAME TIME AND
+//  MAY NOT BE TURNED INTO ONE. On the device gfx_fill() writes into a RAM
+//  buffer and the frame's dominant cost is a FIXED ~24 ms of I2C in
+//  sendBuffer(), charged once however much was drawn (ui/render.cpp says so at
+//  the top of rd_end_frame()). So pixels-touched is a proxy for the SMALL half
+//  of a frame; a "frame <= 50 ms" gate built on it would be measuring the
+//  minor term and calling it performance, which is precisely the shape of
+//  defect this repository keeps finding.
+//
+//  WHAT THEY ARE FOR: a COMPOSITING RUNAWAY detector. A screen that fills the
+//  same region under three other layers, or loops over all sixty species in a
+//  render hook, blows the pixel count while the golden may not move at all -
+//  and a golden cannot report "identical picture, three times the work".
+//
+//  AND ONE MORE LIMIT, which is the load-bearing one. ui/petfx.cpp, ui/actfx.cpp
+//  and ui/ceremony.cpp include render.h and are compiled by NO host binary, so
+//  HOME's number here is a count of a composition that does not ship:
+//  home_render() draws the pet through s_body, which is home_body() (ui.cpp) on
+//  the device and NULL here, so the wandering automaton, the action films and
+//  the emotes are all absent. BATTLE, BOX, MENU and the list screens are pure
+//  gfx.h and host-linked, so their numbers are honest. tests/test_screens.cpp
+//  says which is which where it asserts the ceiling.
+// -----------------------------------------------------------------------------
+static uint32_t s_ops = 0;
+static uint32_t s_px  = 0;
+
+uint32_t fb_ops(void)    { return s_ops; }
+uint32_t fb_pixels(void) { return s_px; }
+
 void fb_reset(void) {
   memset(s_fb, 0, sizeof(s_fb));
   s_color      = GFX_DRAW;
   s_oob        = 0;
   s_oob_msg[0] = '\0';
+  s_ops        = 0;
+  s_px         = 0;
 }
 
 int fb_get(int x, int y) {
@@ -52,6 +86,7 @@ int fb_get(int x, int y) {
 // interesting unit, not "480 pixels off the edge".
 static void put(int x, int y) {
   if (x < 0 || y < 0 || x >= FB_W || y >= FB_H) return;
+  ++s_px;
   if      (s_color == GFX_ERASE) s_fb[y][x] = 0;
   else if (s_color == GFX_XOR)   s_fb[y][x] = (uint8_t)(s_fb[y][x] ? 0 : 1);
   else                           s_fb[y][x] = 1;
@@ -67,24 +102,28 @@ static bool inside(int x, int y, int w, int h) {
 void gfx_color(uint8_t c) { s_color = c; }
 
 void gfx_pixel(int16_t x, int16_t y) {
+  ++s_ops;
   if (!inside(x, y, 1, 1)) oob("pixel", x, y, 1, 1);
   put(x, y);
 }
 
 void gfx_hline(int16_t x, int16_t y, int16_t w) {
   if (w <= 0) return;
+  ++s_ops;
   if (!inside(x, y, w, 1)) oob("hline", x, y, w, 1);
   for (int16_t i = 0; i < w; i++) put(x + i, y);
 }
 
 void gfx_vline(int16_t x, int16_t y, int16_t h) {
   if (h <= 0) return;
+  ++s_ops;
   if (!inside(x, y, 1, h)) oob("vline", x, y, 1, h);
   for (int16_t i = 0; i < h; i++) put(x, y + i);
 }
 
 void gfx_rect(int16_t x, int16_t y, int16_t w, int16_t h) {
   if (w <= 0 || h <= 0) return;
+  ++s_ops;
   if (!inside(x, y, w, h)) oob("rect", x, y, w, h);
   for (int16_t i = 0; i < w; i++) { put(x + i, y); put(x + i, y + h - 1); }
   for (int16_t i = 0; i < h; i++) { put(x, y + i); put(x + w - 1, y + i); }
@@ -92,6 +131,7 @@ void gfx_rect(int16_t x, int16_t y, int16_t w, int16_t h) {
 
 void gfx_fill(int16_t x, int16_t y, int16_t w, int16_t h) {
   if (w <= 0 || h <= 0) return;
+  ++s_ops;
   if (!inside(x, y, w, h)) oob("fill", x, y, w, h);
   for (int16_t r = 0; r < h; r++)
     for (int16_t c = 0; c < w; c++) put(x + c, y + r);
@@ -99,6 +139,7 @@ void gfx_fill(int16_t x, int16_t y, int16_t w, int16_t h) {
 
 void gfx_xbm(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t* bits) {
   if (bits == nullptr || w <= 0 || h <= 0) return;
+  ++s_ops;
   if (!inside(x, y, w, h)) oob("xbm", x, y, w, h);
   const int stride = (w + 7) / 8;
   for (int16_t r = 0; r < h; r++) {
@@ -111,6 +152,7 @@ void gfx_xbm(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t* bits) {
 
 void gfx_dither_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t level) {
   if (level == 0 || w <= 0 || h <= 0) return;
+  ++s_ops;
   if (!inside(x, y, w, h)) oob("dither", x, y, w, h);
   for (int16_t r = 0; r < h; r++) {
     for (int16_t c = 0; c < w; c++) {
@@ -164,6 +206,7 @@ uint16_t gfx_text_w(GfxFont f, const char* s) {
 // One glyph: the baseline row always, plus the rows the codepoint's bits pick
 // out. Deterministic, string-sensitive, and never wider than the advance.
 static void glyph(GfxFont f, int16_t x, int16_t y, uint32_t cp) {
+  ++s_ops;
   const int adv = gfx_font_adv(f);
   const int asc = gfx_font_asc(f);
   const int w   = adv - 1;

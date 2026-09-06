@@ -114,9 +114,31 @@ static const WifiScanDriver& sm_null_driver(void) {
   };
   return d;
 }
+
+// P10-C2. A RADIO THAT STARTS AND NEVER ANSWERS - the only shape in which
+// WIFI_SCAN_TIMEOUT_MS can be reached at all. The driver above refuses to start
+// and the job goes straight to WSCAN_FAILED, which exercises the FAILED arm and
+// not the timeout arm; spec section 47's radio question is about the scan that
+// is still in flight when the user has given up on it. g_scan_stops counts the
+// stop() calls, because "Wi-Fi shuts down after use" is the other half of the
+// same sentence and a timeout that leaked the radio would satisfy a navigation
+// check while leaving the antenna on.
+static int g_scan_stops = 0;
+static const WifiScanDriver& sm_stalled_driver(void) {
+  static const WifiScanDriver d = {
+    [](void) -> bool { return true; },
+    [](void) -> int16_t { return WSCAN_POLL_RUNNING; },
+    [](ScanResult*, uint8_t) -> uint8_t { return 0; },
+    [](void) { ++g_scan_stops; }
+  };
+  return d;
+}
+static bool g_scan_stalled = false;
 static CooldownTable g_sm_cds;
 static Inventory     g_sm_inv;
-const WifiScanDriver& ui_scan_driver(void) { return sm_null_driver(); }
+const WifiScanDriver& ui_scan_driver(void) {
+  return g_scan_stalled ? sm_stalled_driver() : sm_null_driver();
+}
 void ui_explore_clock(uint32_t* e, uint32_t* ms, uint8_t* cal) {
   if (e)   *e   = 1700000000u;
   if (ms)  *ms  = host_ms();
@@ -173,6 +195,18 @@ bool ui_set_clock(uint16_t, uint8_t, uint8_t, uint8_t, uint8_t)      { return tr
 void ui_nav_reset(void)        { dialog_close(); gfx_list_reset(); }
 void ui_nav_arrived(uint8_t)   { g_frames++; }
 
+// The three ERROR seams, RECORDED (P10-C2). ui/screen_error.cpp reaches the
+// checkpoint restore, the panel retry and the wipe modal through bound
+// pointers, and an exit that is "the user answered the question" is only
+// visible to an assertion if something on this side counts the answer.
+static int  g_recover_calls = 0;
+static bool g_recover_ok    = false;
+static int  g_retry_calls   = 0;
+static bool g_retry_ok      = false;
+static bool sm_recover(void) { ++g_recover_calls; return g_recover_ok; }
+static bool sm_retry(void)   { ++g_retry_calls;   return g_retry_ok; }
+static void sm_led(bool)     { }
+
 static void reset_all(void) {
   host_reset();
   host_set_ms(100000u);
@@ -198,6 +232,12 @@ static void reset_all(void) {
   evo_bind_ceremony(nullptr);
   ui_bind_view(nullptr);
   err_set_kind(ERRK_NONE);
+  g_recover_calls = 0; g_recover_ok = false;
+  g_retry_calls   = 0; g_retry_ok   = false;
+  g_scan_stops    = 0; g_scan_stalled = false;
+  ui_bind_recover(&sm_recover);
+  ui_bind_display_retry(&sm_retry);
+  ui_bind_led(&sm_led);
   sm_begin();
 }
 
@@ -559,6 +599,373 @@ TEST(display_failure_parks_the_save_question) {
   ui_note_display_failure();
   CHECK(err_kind() == ERRK_DISPLAY);
   CHECK(sm_current() == SCR_ERROR);
+}
+
+// =============================================================================
+//  6. SPEC SECTION 47 - EVERY STATE AND EVERY RADIO WAIT HAS A WAY OUT
+//      (P10-C2, plan bullet 1: "listed in test_statemachine")
+//
+//  THE CLAIM THIS REPLACES WAS ASSERTED AND NOT CHECKED. autoreturn_follows_
+//  sticky above already walks all SCR_COUNT rows and proves `sticky != timed
+//  out`, which says the SEVENTEEN non-sticky rows carry the 20 s ceiling and
+//  says NOTHING WHATEVER about the ten sticky ones - and the sticky rows are
+//  precisely the rows that can hang. Two of them had a driven bound (CREATOR,
+//  BATTLE) and the rest had a comment.
+//
+//  WHAT THE SWEEP FOUND. SCR_ERROR with s_kind == ERRK_SAVE_NEWER had NO WAY
+//  OUT AT ALL. The row is SF_STICKY | SF_LOCK_INPUT, so app/input_router.cpp
+//  returns false at its first line and invariant 2's LONG_BOTH escape never
+//  runs; err_input() had no LONG_BOTH case of its own (ui/screen_time.cpp, the
+//  same flag pair, has always had one); and both taps were deliberate refusals
+//  that only toast, because a save from a newer firmware is GOOD data no button
+//  here may overwrite. The refusal is right and is untouched. What was missing
+//  was an exit, and it is reachable: insert a card written by a newer build and
+//  app.cpp's ui_note_load(LOAD_FOREIGN_NEWER) parks the device there for ever,
+//  under an affordance strip advertising two actions that do nothing.
+//
+//  THE TABLE IS THE TEST. Every row names HOW the state ends and the sweep
+//  DRIVES it - it does not read a flag and believe a comment. A ScreenId with
+//  no row fails the coverage check below, so a screen added in P10-C3 or
+//  P10-C4 cannot arrive without an answer to this question.
+// =============================================================================
+enum ExitKind : uint8_t {
+  XK_AUTORETURN = 0,   // invariant 3's 20 s ceiling, driven
+  XK_TIMEOUT,          // the screen's OWN named ceiling, in its update hook
+  XK_GESTURE,          // one gesture through the REAL router leaves the screen
+  XK_ANSWER,           // one gesture answers the question through a bound seam
+  XK_ROOT,             // HOME: where every exit above goes
+  XK_NOT_RESIDENT      // never sm_current(); see the four reasons below
+};
+
+struct ExitRow {
+  uint8_t     scr;
+  uint8_t     err;        // ERRK_* on SCR_ERROR, ERRK_NONE elsewhere
+  uint8_t     kind;
+  uint8_t     g;          // Gesture, for XK_GESTURE / XK_ANSWER
+  uint32_t    bound_ms;   // for XK_TIMEOUT
+  const char* label;      // what a failure prints
+  const char* bound;      // what the ceiling is CALLED, in the tree
+};
+
+// Preconditions a row needs before it can be driven. Kept out of the table so
+// the table stays readable as a list of answers.
+static void arm_row(const ExitRow& r) {
+  switch (r.scr) {
+    case SCR_NETWORK:
+      // A scan that started and will never answer: the only state in which
+      // WIFI_SCAN_TIMEOUT_MS is reachable at all.
+      g_scan_stalled = true;
+      break;
+    case SCR_CREATOR:
+      g_creator_ap = 0;      // the access point never came up
+      g_creator_idle = 0;
+      break;
+    case SCR_ERROR:
+      err_set_kind(r.err);
+      g_retry_ok = (r.err == ERRK_DISPLAY);   // the panel comes back on retry
+      break;
+    default: break;
+  }
+}
+
+static const ExitRow kExits[] = {
+  // --- the boot pipeline: drawn, never navigated to ------------------------
+  // ui.cpp's ui_boot_screen() renders ONE frame of each and returns; gs_load()
+  // then runs synchronously with no loop underneath it, so neither is ever
+  // sm_current() and neither has a wait the state machine owns. The wait is the
+  // NVS read, bounded by the flash and not by a timer. tools/check.sh gates the
+  // exemption: a navigation call to either fails the build, so this row cannot
+  // quietly become a lie the way an unchecked comment would.
+  { SCR_BOOT,      ERRK_NONE, XK_NOT_RESIDENT, GST_NONE, 0, "BOOT",      "no wait: one frame, then gs_load()" },
+  { SCR_LOAD_SAVE, ERRK_NONE, XK_NOT_RESIDENT, GST_NONE, 0, "LOAD_SAVE", "no wait: bounded by the NVS read" },
+
+  // --- the root ------------------------------------------------------------
+  { SCR_HOME,      ERRK_NONE, XK_ROOT, GST_NONE, 0, "HOME", "the destination of every other exit" },
+
+  // --- the ordinary screens: invariant 3 ------------------------------------
+  { SCR_MENU,      ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "MENU",      "UI_AUTORETURN_MS" },
+  { SCR_CARE,      ERRK_NONE, XK_AUTORETURN, GST_NONE,  0, "CARE",      "UI_AUTORETURN_MS" },
+  { SCR_PLAY,      ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "PLAY",      "UI_AUTORETURN_MS" },
+  { SCR_BOX,       ERRK_NONE, XK_AUTORETURN, GST_NONE,  0, "BOX",       "UI_AUTORETURN_MS" },
+  { SCR_STATUS,    ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "STATUS",    "UI_AUTORETURN_MS" },
+  { SCR_STATUS_B,  ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "STATUS_B",  "UI_AUTORETURN_MS" },
+  { SCR_SETTINGS,  ERRK_NONE, XK_AUTORETURN, GST_NONE,  0, "SETTINGS",  "UI_AUTORETURN_MS" },
+  { SCR_ENCOUNTER, ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "ENCOUNTER", "UI_AUTORETURN_MS" },
+  { SCR_CAPTURE,   ERRK_NONE, XK_AUTORETURN, GST_NONE,  0, "CAPTURE",   "UI_AUTORETURN_MS" },
+  // The four section 6 states that ship as ui/screen_soon.cpp placeholders.
+  // None is SF_STICKY, so invariant 3 covers them - which is worth DRIVING
+  // rather than assuming, because a placeholder given a flag by mistake would
+  // be a screen with no implementation and no way off it.
+  { SCR_TRADE,       ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "TRADE",       "UI_AUTORETURN_MS" },
+  { SCR_BREED,       ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "BREED",       "UI_AUTORETURN_MS" },
+  { SCR_ITEM_REWARD, ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "ITEM_REWARD", "UI_AUTORETURN_MS" },
+  { SCR_SLEEP,       ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "SLEEP",       "UI_AUTORETURN_MS" },
+
+  // --- THE RADIO WAITS (spec section 47's own subject) ---------------------
+  // NETWORK: a scan in flight, driven to its own ceiling with a radio that
+  // starts and never answers. The 20 s auto-return also applies to this row,
+  // but the scan's 12 s bites first and it is the one that releases the radio.
+  { SCR_NETWORK,   ERRK_NONE, XK_TIMEOUT, GST_NONE, (uint32_t)WIFI_SCAN_TIMEOUT_MS,
+    "NETWORK (scan in flight)", "WIFI_SCAN_TIMEOUT_MS" },
+  // LINK: browsing for a peer. Three ceilings stand over this screen and the
+  // TIGHTEST is the one that fires - invariant 3's 20 s, ahead of
+  // LINK_JOB_TIMEOUT_MS (90 s) and ahead of the session ladder's
+  // PROTO_RETX_MAX x PROTO_RETX_MS. The row drives the one that actually ends
+  // the wait; the other two are the backstops named beside it.
+  { SCR_LINK,      ERRK_NONE, XK_AUTORETURN, GST_NONE, 0,
+    "LINK (browsing)", "UI_AUTORETURN_MS, then LINK_JOB_TIMEOUT_MS" },
+  // CREATOR: SF_STICKY since P8-C2, so invariant 3 is deliberately OFF here
+  // (joining an access point takes longer than twenty seconds) and the screen
+  // owns two ceilings of its own instead. This row drives the first; the D7
+  // idle grace period has its own case above.
+  { SCR_CREATOR,   ERRK_NONE, XK_TIMEOUT, GST_NONE, (uint32_t)CREATOR_AP_WAIT_MS,
+    "CREATOR (access point never came up)", "CREATOR_AP_WAIT_MS, then ConfigV2.creator_idle_s" },
+
+  // --- the sticky rows, whose exit is a gesture the ROUTER still delivers ---
+  // SF_STICKY | SF_OWNS_BACK takes B away from the router and leaves invariant
+  // 2 in place, so LONG_BOTH is a real, universal exit on all four.
+  { SCR_GAME,      ERRK_NONE, XK_GESTURE, GST_LONG_BOTH, 0, "GAME",      "invariant 2, plus MGR_* phase clocks" },
+  { SCR_BATTLE,    ERRK_NONE, XK_GESTURE, GST_LONG_BOTH, 0, "BATTLE",    "invariant 2, plus the session retransmit ladder" },
+  { SCR_EVOLUTION, ERRK_NONE, XK_GESTURE, GST_LONG_BOTH, 0, "EVOLUTION", "invariant 2 (an egg has no timer by design)" },
+
+  // --- the SF_LOCK_INPUT rows, where the router is OFF ----------------------
+  // Each of these must answer the escape ITSELF. That is the property the
+  // sweep below states in its own right, and the property ERRK_SAVE_NEWER
+  // failed until P10-C2.
+  { SCR_TIME,      ERRK_NONE, XK_GESTURE, GST_LONG_BOTH, 0, "TIME",      "handled by hand in time_input()" },
+  { SCR_DIAG,      ERRK_NONE, XK_GESTURE, GST_TAP_R,     0, "DIAG",      "diag_input()/diag_update() go home once the console is off" },
+  { SCR_ERROR, ERRK_SAVE_NEWER,  XK_GESTURE, GST_LONG_BOTH, 0,
+    "ERROR/SAVE_NEWER",  "handled by hand in err_input() since P10-C2" },
+  { SCR_ERROR, ERRK_SAVE_CORRUPT, XK_GESTURE, GST_LONG_BOTH, 0,
+    "ERROR/SAVE_CORRUPT", "handled by hand in err_input() since P10-C2" },
+  // ERRK_DISPLAY is deliberately NOT given the LONG_BOTH escape and this is
+  // the one exemption in the table. The panel is what failed: there is nothing
+  // to walk to and no way to read it, so its exit is A - the retry - and its
+  // signal is the blinking LED. Driven as an ANSWER rather than waved through.
+  { SCR_ERROR, ERRK_DISPLAY,     XK_ANSWER,  GST_TAP_L, 0,
+    "ERROR/DISPLAY",     "A retries the panel (ui_bind_display_retry)" },
+
+  // --- the two overlays ----------------------------------------------------
+  // ui/dialog.cpp owns them and they never become sm_current(); their rows
+  // exist so the table has no hole (ui/screen_soon.h). Their own waits - a
+  // confirm and an alert have no timeout, deliberately, because a question
+  // must not answer itself - are driven in the case below this one.
+  { SCR_CONFIRM,   ERRK_NONE, XK_NOT_RESIDENT, GST_NONE, 0, "CONFIRM", "ui/dialog.cpp owns it" },
+  { SCR_ALERT,     ERRK_NONE, XK_NOT_RESIDENT, GST_NONE, 0, "ALERT",   "ui/dialog.cpp owns it" },
+};
+
+// Drive one row and say, in words, what failed.
+static bool exit_row_holds(const ExitRow& r) {
+  reset_all();
+  arm_row(r);
+
+  switch (r.kind) {
+    case XK_ROOT:
+      // HOME is not exempt from the question: it is the ANSWER to it, and that
+      // is only true while every other exit really lands here.
+      if (sm_current() != SCR_HOME) return false;
+      sm_push(SCR_MENU); sm_push(SCR_BOX);
+      sm_home();
+      return sm_current() == SCR_HOME;
+
+    case XK_NOT_RESIDENT:
+      // sm_begin() must not land on one, and nothing in the firmware may
+      // navigate to one - the second half is tools/check.sh's, because a host
+      // binary cannot see app/app.cpp or ui/ui.cpp.
+      return sm_current() != (ScreenId)r.scr;
+
+    case XK_AUTORETURN: {
+      sm_push((ScreenId)r.scr);
+      if (sm_current() != (ScreenId)r.scr) return false;
+      host_advance_ms((uint32_t)UI_AUTORETURN_MS + 1u);
+      (void)sm_service(host_ms());
+      return sm_current() == SCR_HOME;
+    }
+
+    case XK_TIMEOUT: {
+      sm_push((ScreenId)r.scr);
+      if (sm_current() != (ScreenId)r.scr) return false;
+      // INVARIANT 3 IS HELD OFF FOR THE WHOLE OF THIS ROW, so the only thing
+      // that can end the wait is the ceiling the row NAMES. Without it a
+      // NETWORK row whose WIFI_SCAN_TIMEOUT_MS was broken would pass on the
+      // 20 s auto-return standing over the same screen - naming a bound
+      // instead of checking it, which is this project's recurring defect in
+      // the shape a test usually takes.
+      sm_block_autoreturn(true);
+      // In slices, because an update hook that only fires on the exact
+      // millisecond would pass a single jump and fail on a device.
+      const uint32_t slice = r.bound_ms / 8u + 1u;
+      uint32_t waited = 0;
+      for (uint8_t i = 0; i < 24u && sm_current() == (ScreenId)r.scr; ++i) {
+        host_advance_ms(slice);
+        waited += slice;
+        (void)sm_service(host_ms());
+      }
+      sm_block_autoreturn(false);   // released on every path out of this arm
+      if (sm_current() == (ScreenId)r.scr) return false;
+      // AND IT WAS THIS ROW'S OWN CEILING THAT FIRED, not some other one that
+      // happens to stand over the same screen.
+      if (waited > r.bound_ms + slice) return false;
+      // AND THE RADIO IS BACK OFF. A timeout that navigated away with the
+      // antenna still up would satisfy every navigation check in this file and
+      // leave spec section 40 broken.
+      //
+      // MEASURED LIMIT, REPORTED RATHER THAN DRESSED UP: breaking the timeout
+      // arm's release ALONE does not fail this check, because
+      // wifi_scan_cancel() carries a backstop that releases anyway and
+      // network_leave() calls it on every route off the screen. Both had to be
+      // removed before it fired. That is the scanner being right rather than
+      // this check being weak - but it means the check catches a DOUBLE
+      // failure, not a single one, and saying so is worth more than implying
+      // otherwise.
+      if (r.scr == SCR_NETWORK  && g_scan_stops < 1)        return false;
+      if (r.scr == SCR_CREATOR  && g_creator_radio_last != 0) return false;
+      return true;
+    }
+
+    case XK_GESTURE: {
+      sm_push((ScreenId)r.scr);
+      if (sm_current() != (ScreenId)r.scr) return false;
+      (void)router_handle((Gesture)r.g);
+      return sm_current() != (ScreenId)r.scr;
+    }
+
+    case XK_ANSWER: {
+      sm_push((ScreenId)r.scr);
+      if (sm_current() != (ScreenId)r.scr) return false;
+      const int before = g_retry_calls + g_recover_calls + g_wipe;
+      (void)router_handle((Gesture)r.g);
+      // Either the answer moved the device, or it reached the seam that
+      // resolves the question. Both are exits; a toast is not.
+      return sm_current() != (ScreenId)r.scr ||
+             (g_retry_calls + g_recover_calls + g_wipe) > before;
+    }
+  }
+  return false;
+}
+
+TEST(every_state_and_every_radio_wait_has_a_way_out) {
+  for (size_t i = 0; i < sizeof kExits / sizeof kExits[0]; ++i) {
+    const ExitRow& r = kExits[i];
+    if (!exit_row_holds(r))
+      fprintf(stderr, "  %s: NO EXIT - the row claims %s and it did not fire\n",
+              r.label, r.bound);
+    CHECK(exit_row_holds(r));
+  }
+}
+
+// THE ANTI-VACUITY CLAUSE. A table of answers proves nothing about a state it
+// forgot, and "every state" is exactly the claim being made. A ScreenId with no
+// row fails here by name, so a screen added in a later chunk arrives with an
+// exit or does not arrive.
+TEST(the_exit_table_covers_every_screen_id) {
+  bool seen[SCR_COUNT];
+  for (uint8_t i = 0; i < (uint8_t)SCR_COUNT; ++i) seen[i] = false;
+  for (size_t i = 0; i < sizeof kExits / sizeof kExits[0]; ++i) {
+    CHECK(kExits[i].scr < (uint8_t)SCR_COUNT);
+    seen[kExits[i].scr] = true;
+  }
+  for (uint8_t i = 0; i < (uint8_t)SCR_COUNT; ++i) {
+    if (!seen[i]) fprintf(stderr, "  %s: no row in kExits - spec section 47 is "
+                                  "unanswered for this state\n", kName[i]);
+    CHECK(seen[i]);
+  }
+  // And ERROR is covered for EVERY kind it can hold, not just for the one a
+  // reader happened to think of. ERRK_SAVE_NEWER was the kind nobody thought
+  // of: three kinds, three rows, and ERRK_NONE never puts the screen up.
+  // ui/screen_error.h's enum has no _COUNT, so the three are named here and
+  // the assertion below is what fails if a fourth is added without a row.
+  const uint8_t kinds[3] = { ERRK_SAVE_CORRUPT, ERRK_SAVE_NEWER, ERRK_DISPLAY };
+  for (uint8_t k = 0; k < 3u; ++k) {
+    bool found = false;
+    for (size_t i = 0; i < sizeof kExits / sizeof kExits[0]; ++i)
+      if (kExits[i].scr == (uint8_t)SCR_ERROR && kExits[i].err == kinds[k]) found = true;
+    if (!found) fprintf(stderr, "  ERROR kind %u has no row in kExits - a state "
+                                "the device can reach with no answer to spec 47\n",
+                        (unsigned)kinds[k]);
+    CHECK(found);
+  }
+  uint8_t err_rows = 0;
+  for (size_t i = 0; i < sizeof kExits / sizeof kExits[0]; ++i)
+    if (kExits[i].scr == (uint8_t)SCR_ERROR) ++err_rows;
+  CHECK_EQ((int)err_rows, 3);
+}
+
+// THE SHARP HALF, AND THE ONE THE MUTATION RUN IS ABOUT. SF_LOCK_INPUT turns
+// app/input_router.cpp OFF at its first line, so invariant 2's universal HOME
+// escape does not exist on these rows - which means the sweep above could pass
+// for a lock-input row only if the SCREEN answered the gesture itself. This
+// case states that: the router really is off, and the row's exit is not the
+// router's. Without it, deleting err_input()'s LONG_BOTH case could in
+// principle be masked by an escape that was never there.
+TEST(the_router_is_off_on_every_lock_input_row_so_each_answers_the_escape_itself) {
+  uint8_t locked = 0;
+  for (uint8_t i = 0; i < (uint8_t)SCR_COUNT; ++i) {
+    if ((SCREENS[i].flags & SF_LOCK_INPUT) == 0u) continue;
+    ++locked;
+
+    // 1. the router is genuinely off on this row.
+    reset_all();
+    sm_push((ScreenId)i);
+    if (router_global(GST_LONG_BOTH) || router_global(GST_TAP_R))
+      fprintf(stderr, "  %s: SF_LOCK_INPUT but the router consumed a gesture\n",
+              kName[i]);
+    CHECK(!router_global(GST_LONG_BOTH));
+    CHECK(!router_global(GST_TAP_R));
+    CHECK(sm_current() == (ScreenId)i);
+
+    // 2. and every row in the exit table for it answers WITHOUT the router.
+    bool found = false;
+    for (size_t k = 0; k < sizeof kExits / sizeof kExits[0]; ++k) {
+      if (kExits[k].scr != i) continue;
+      found = true;
+      const uint8_t kk = kExits[k].kind;
+      if (kk == XK_AUTORETURN)
+        fprintf(stderr, "  %s: SF_LOCK_INPUT rows are all SF_STICKY too, so the "
+                        "auto-return cannot be this row's exit\n", kExits[k].label);
+      CHECK(kk != XK_AUTORETURN);
+      CHECK(kk == XK_GESTURE || kk == XK_ANSWER || kk == XK_NOT_RESIDENT);
+    }
+    CHECK(found);
+
+    // 3. every SF_LOCK_INPUT row is SF_STICKY as well, which is what makes (2)
+    //    a real constraint: with both off, the row would have no ceiling at all.
+    CHECK((SCREENS[i].flags & SF_STICKY) != 0u);
+  }
+  // BOOT, LOAD_SAVE, TIME, ERROR, DIAG. A sixth appearing without a row in
+  // kExits fails the coverage case above; this pins the count so the set cannot
+  // shrink either.
+  CHECK_EQ((int)locked, 5);
+}
+
+// THE OFF-TABLE WAITS. ui/dialog.cpp's modals float over a screen and freeze
+// its auto-return (sm_block_autoreturn), so while one is open NOTHING times
+// out - which is right for a question and is exactly why the question must
+// always be answerable. MODAL_HELP is the one that expires on its own.
+TEST(a_modal_freezes_the_screen_under_it_and_is_always_answerable) {
+  reset_all();
+  sm_push(SCR_MENU);
+  dialog_open_confirm(CFM_WIPE1, STR_SOON_BODY);
+  sm_block_autoreturn(true);
+  host_advance_ms((uint32_t)UI_AUTORETURN_MS * 4u);
+  CHECK(!sm_service(host_ms()));            // the screen underneath is frozen
+  CHECK(dialog_modal() == MODAL_CONFIRM);
+
+  // ...and B answers it. The cursor defaults to NO (invariant 5), so the
+  // answer that costs nothing is the one a button lands on.
+  CHECK(dialog_input(GST_TAP_R));
+  sm_block_autoreturn(false);
+  CHECK(dialog_modal() == MODAL_NONE);
+
+  // The help overlay is the one wait that ends itself, and it must, because it
+  // is raised by GST_BOTH on screens whose owner may have put the device down.
+  reset_all();
+  sm_push(SCR_MENU);
+  dialog_open_help(STR_SOON_BODY);
+  CHECK(dialog_modal() == MODAL_HELP);
+  host_advance_ms((uint32_t)UI_MODAL_HELP_MS + 1u);
+  (void)dialog_service(host_ms(), true);
+  CHECK(dialog_modal() == MODAL_NONE);
 }
 
 // =============================================================================

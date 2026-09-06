@@ -36,6 +36,7 @@
 #include "../persistence/game_state.h"
 #include "../persistence/save_manager.h"
 #include "../ui/screen_network.h"    // network_screen_seen/fresh/phase
+#include "../core/perf.h"              // P10-C2: the frame / pass instrument
 
 // =============================================================================
 //  0. HEAP TREND (plan P2-C12)
@@ -58,6 +59,42 @@ static void heap_trend_begin(void)
   // the t=0 sample instead of leaving the trend without an origin.
   s_heap_last_ms = (uint32_t)millis() - (uint32_t)GOD_HEAP_PERIOD_MS;
   Serial.printf("DIAG#,heap,uptime_s,free_b,min_free_b\r\n");
+  Serial.printf("DIAG#,perf,uptime_s,scr,frames,frame_max_us,frame_worst_us,"
+                "frame_worst_scr,frame_over,frame_sat,passes,pass_worst_us,"
+                "pass_worst_scr,pass_over,discards\r\n");
+}
+
+// P10-C2. THE PERFORMANCE RECEIPT, AND IT IS A SEPARATE LINE ON PURPOSE.
+// `DIAG,heap,` is the 24 h soak's own format and has been stable since P2-C12;
+// appending columns to it would break any parser somebody already has for a
+// capture, and this line has a different lifetime anyway (the soak wants one
+// number an hour, a screen walk wants a row per screen). The two share the
+// GOD_HEAP_PERIOD_MS tick because they are read together.
+//
+// THIS IS THE ONLY PLACE ANY OF SPEC SECTION 46'S TIME NUMBERS REACHES A HUMAN
+// ON A RELEASE BOARD. dev/godmode.cpp's console cannot be opened when
+// GOD_MODE_ENABLED is 0 - god_active() is a hardcoded `false`, so
+// ui/screen_diag.cpp's update hook sends SCR_DIAG straight home - so a bench
+// step that reads a console page is a bench step against the dev build, which
+// is the phase-6/phase-7 shape. This block is above the guard for that reason,
+// exactly as the heap line beside it is.
+static void perf_trend_service(uint32_t now_ms)
+{
+  const uint8_t scr = perf_screen();
+  Serial.printf("DIAG,perf,%lu,%u,%lu,%u,%lu,%u,%u,%u,%lu,%lu,%u,%u,%u\r\n",
+                (unsigned long)(now_ms / 1000UL),
+                (unsigned)scr,
+                (unsigned long)perf_frames(),
+                (unsigned)perf_frame_max_us(scr),
+                (unsigned long)perf_frame_worst_us(),
+                (unsigned)perf_frame_worst_screen(),
+                (unsigned)perf_frame_overruns(),
+                (unsigned)perf_frame_saturated(),
+                (unsigned long)perf_passes(),
+                (unsigned long)perf_pass_worst_us(),
+                (unsigned)perf_pass_worst_screen(),
+                (unsigned)perf_pass_overruns(),
+                (unsigned)perf_discards());
 }
 
 static void heap_trend_service(void)
@@ -69,6 +106,7 @@ static void heap_trend_service(void)
                 (unsigned long)(now / 1000UL),
                 (unsigned long)ESP.getFreeHeap(),
                 (unsigned long)ESP.getMinFreeHeap());
+  perf_trend_service(now);
 }
 
 // =============================================================================
@@ -457,7 +495,12 @@ static const GodGene GD_GENES[GOD_GENE_COUNT] = {
 // serial line, because a bench operator with two boards and no laptop is the
 // person this console is for.
 #define GD_SYS_INFO     6
-#define GD_SYS_PAGES    7
+// P10-C2: spec section 46's frame and loop() numbers. BASELINE ONLY, and that
+// is the point of the DIAG,perf serial line beside it - this page does not
+// exist in the artefact that ships, because the console it lives in cannot be
+// opened there at all.
+#define GD_SYS_PERF     7
+#define GD_SYS_PAGES    8
 
 // =============================================================================
 //  4. MODULE STATE
@@ -1734,6 +1777,41 @@ static void draw_sys(void)
                (unsigned)f.pebbles, (unsigned)f.box_cap,
                (unsigned)PROTOCOL_VERSION);
       rd_text_fit(2, 51, OLED_W - 4, RD_FONT_TINY, b);
+      break;
+    }
+    case GD_SYS_PERF: {
+      // P10-C2. THE FOUR NUMBERS SPEC SECTION 46 ASKS FOR THAT A DEVICE CAN
+      // ACTUALLY PRODUCE, and not one of them is checked by any host test or by
+      // tools/check.sh: no host binary compiles ui/render.cpp or app/app.cpp,
+      // micros() does not exist there, and the ~24 ms sendBuffer() that
+      // dominates a frame is a property of a bus and a panel that are absent.
+      // The acceptance procedure is docs/bench.md, steps A1 and A2.
+      draw_title(S(STR_GOD_PERF));
+      const uint8_t scr = perf_screen();
+      // This screen: the live frame through rd_frame_time_us() - which had no
+      // reader anywhere in the tree until this line - and the maximum this
+      // screen has ever reached, which is the figure the bench walk reads.
+      snprintf(b, sizeof(b), "f now %lu max %u%s",
+               (unsigned long)rd_frame_time_us(),
+               (unsigned)perf_frame_max_us(scr),
+               perf_frame_saturated() ? "!" : "");
+      rd_text(2, 27, RD_FONT_TINY, b);
+      snprintf(b, sizeof(b), "f worst %lu s%u over %u",
+               (unsigned long)perf_frame_worst_us(),
+               (unsigned)perf_frame_worst_screen(),
+               (unsigned)perf_frame_overruns());
+      rd_text(2, 35, RD_FONT_TINY, b);
+      // The pass is the WORK of one app_loop(), stamped above stage 7's yield.
+      // A deliberate nap is not a slow pass and is not counted here.
+      snprintf(b, sizeof(b), "p worst %lu s%u over %u",
+               (unsigned long)perf_pass_worst_us(),
+               (unsigned)perf_pass_worst_screen(),
+               (unsigned)perf_pass_overruns());
+      rd_text(2, 43, RD_FONT_TINY, b);
+      snprintf(b, sizeof(b), "n %lu/%lu drop %u",
+               (unsigned long)perf_frames(), (unsigned long)perf_passes(),
+               (unsigned)perf_discards());
+      rd_text(2, 51, RD_FONT_TINY, b);
       break;
     }
     default:

@@ -13,6 +13,15 @@
 //  global HOME / BACK grammar are both off here. Walking away from an
 //  unanswered save question would leave the user playing a placeholder pet
 //  that can never be written.
+//
+//  WHICH IS WHY err_input() HANDLES GST_LONG_BOTH ITSELF (P10-C2). Turning the
+//  router off turns off spec section 7's invariant 2 as well, and for
+//  ERRK_SAVE_NEWER - where both taps are refusals by design - that left the
+//  screen with no route off it at all, on a device whose save is perfectly
+//  good. Spec section 47's first sentence is "the device must never get stuck
+//  permanently"; ui/screen_time.cpp already handles the same gesture by hand
+//  for the same reason. tests/test_statemachine.cpp enumerates every state and
+//  every kind against that rule now, so this cannot silently come back.
 // =============================================================================
 #include "screen_error.h"
 
@@ -99,12 +108,23 @@ void err_render(void) {
     // the collection the newer firmware wrote (spec 48, 60). The fix is a
     // firmware update, not a wipe and not a rollback.
     gfx_text(GF_BODY, 2, 42, S(STR_SAVE_UPDATE_FW));
+    // ...AND THE WAY OFF THE SCREEN, WHICH WAS MISSING (P10-C2, spec 47).
+    // This is the one line that turned a refusal into a dead end: both taps
+    // only toast, this row is SF_LOCK_INPUT so app/input_router.cpp returns
+    // false before the LONG_BOTH escape, and err_input() had no LONG_BOTH case
+    // - so the device was parked here for ever with a strip advertising two
+    // actions that did nothing.
+    gfx_text(GF_BODY, 2, 52, S(STR_SAVE_ERR_EXIT));
   } else {
     gfx_text(GF_BODY, 2, 42, S(STR_SAVE_ERR_A));
     gfx_text(GF_BODY, 2, 52, S(STR_SAVE_ERR_B));
   }
 
-  gfx_affordance(S(STR_AF_OK), display ? nullptr : S(STR_AF_SEL));
+  // THE STRIP MAY NOT ADVERTISE A BUTTON THAT DOES NOTHING. On ERRK_SAVE_NEWER
+  // both taps are refusals, so both sides are blank and the exit is the body
+  // line above; on ERRK_DISPLAY only A retries; ERRK_SAVE_CORRUPT keeps both.
+  if (s_kind == ERRK_SAVE_NEWER) gfx_affordance(nullptr, nullptr);
+  else gfx_affordance(S(STR_AF_OK), display ? nullptr : S(STR_AF_SEL));
 }
 
 // "Recuperar": restore the nvs2 checkpoint, through the entry point, because
@@ -144,6 +164,33 @@ void err_input(Gesture g) {
       s_kind = ERRK_NONE;
       ui_goto(SCR_HOME);
     }
+    return;
+  }
+
+  // -------------------------------------------------------------------------
+  //  THE EXIT (P10-C2, spec section 47: "the device must never get stuck
+  //  permanently"). BY HAND, because this row is SF_LOCK_INPUT and
+  //  app/input_router.cpp therefore returns false before its LONG_BOTH branch -
+  //  exactly as ui/screen_time.cpp handles the same two gestures by hand for
+  //  the same reason. Until P10-C2 this case did not exist, and an
+  //  ERRK_SAVE_NEWER save had NO route off this screen at all: both taps only
+  //  toast, the auto-return is off (SF_STICKY) and the router is off.
+  //
+  //  IT IS SAFE, AND NOT BECAUSE THIS FUNCTION IS CAREFUL. gs_load() sets the
+  //  session read-only for LOAD_CORRUPT and LOAD_FOREIGN_NEWER
+  //  (persistence/game_state.cpp), and every gs_save_*() returns false while it
+  //  is - so leaving the question unanswered cannot write anything, whatever
+  //  the user then does. The refusal this screen exists for is preserved: what
+  //  is added is a way out of it, not a way past it.
+  //
+  //  ERRK_DISPLAY is deliberately NOT given this exit. The panel is what
+  //  failed, so there is nothing to walk to and no way to read it; its exit is
+  //  A, the retry, and its signal is the blinking LED. Written down rather than
+  //  left as an omission - tests/test_statemachine.cpp lists it that way.
+  // -------------------------------------------------------------------------
+  if (g == GST_LONG_BOTH) {
+    s_kind = ERRK_NONE;
+    ui_goto(SCR_HOME);
     return;
   }
 

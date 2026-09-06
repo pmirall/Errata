@@ -28,6 +28,7 @@
 #include "core/strings_es.h"
 #include "data/sprites.h"      // POSE_IDLE, for the body fixture
 #include "data/balance.h"      // XP_TABLE: what a level costs, for the HOME bar
+#include "fakes/alloc_count.h"
 #include "fakes/gfx_fb.h"
 #include "game/box.h"
 #include "minigames/games/games.h"
@@ -440,11 +441,61 @@ static bool fake_retry(void)   { return g_display_ok; }
 static void fake_led(bool on)  { g_led_on = on; g_led_calls++; }
 
 // =============================================================================
+//  THE TWO WORK GATES ON A SCREEN RENDER (P10-C2, spec section 46)
+//
+//  (a) ZERO ALLOCATIONS. This is the only honest HOST half of section 46's
+//  "per-frame heap delta 0 on HOME/BATTLE/GAME", and it is worth being precise
+//  about which half. The device figure is ESP.getFreeHeap() sampled either side
+//  of a frame and it has no host equivalent; what a host CAN say is that
+//  rendering a screen performs no allocation at all, which is the property that
+//  makes the device figure zero in the first place. It is EXACT - the answer is
+//  0, not "small" - it cannot drift with content, and nobody had ever asserted
+//  it. tests/fakes/alloc_count.h carries what the counter does and does not see;
+//  docs/bench.md step A3 is where the real allocator is watched.
+//
+//  (b) A COMPOSITING CEILING on the work counters in tests/fakes/gfx_fb.cpp.
+//  MEASURED over all 65 snapshots at this commit: the worst is creator_portal
+//  at 5,933 pixels and 212 leaf primitives, and the median is far below both.
+//  The ceiling is three whole panels (24,576 px) and 600 primitives - loose
+//  enough that a legitimate redesign or P10-C4's twelve-character-name fixtures
+//  will not trip it, tight enough that a screen drawing itself three times over
+//  will.
+//
+//  IT HAS BEEN SEEN TO FIRE, which is the only reason it is here rather than
+//  being a comment. Eight whole-panel gfx_invert_rect() calls inserted at the
+//  top of menu_render() are an IDENTITY - the golden does not move by one byte,
+//  every pixel comparison still passes - and this ceiling fails snapshot_menu
+//  and snapshot_menu_countdown by name at 68,335 pixels. That is the class of
+//  regression a pixel golden structurally cannot report.
+//
+//  AND IT IS WORK, NOT TIME, AND MUST NEVER BECOME A FRAME BUDGET. The frame's
+//  dominant cost is a fixed ~24 ms of I2C that no host number contains, HOME's
+//  composition here is not the one that ships (ui/petfx.cpp is host-invisible,
+//  so s_body is null and the wandering automaton is absent), and ui_draw()
+//  composites a toast, the affordance echo, the transition and the god marker
+//  on top of everything measured here. See the banner in tests/fakes/gfx_fb.cpp.
+// =============================================================================
+#define SNAP_MAX_PIXELS  ((uint32_t)(FB_W * FB_H * 3))
+#define SNAP_MAX_OPS     ((uint32_t)600)
+
+// A counter that reads 0 because it is switched off is indistinguishable from
+// one that reads 0 because the code is clean, and every snapshot below depends
+// on knowing which. Found by the mutation run on tests/test_soak.cpp's twin of
+// this counter: disarming it left every case green and measuring nothing.
+TEST(the_allocation_counter_is_live) {
+  const uint32_t before = alloc_count();
+  alloc_count_probe();
+  CHECK_EQ(alloc_count() - before, 1u);
+}
+
+// =============================================================================
 //  Snapshot helper
 // =============================================================================
 static void snapshot_fn(void (*render)(void), const char* name) {
   fb_reset();
+  const uint32_t allocs_before = alloc_count();
   render();
+  const uint32_t allocs = alloc_count() - allocs_before;
 
   // (a) nothing may draw off the panel.
   if (fb_oob() != 0) {
@@ -452,6 +503,24 @@ static void snapshot_fn(void (*render)(void), const char* name) {
             name, (unsigned)fb_oob(), fb_oob_first());
   }
   CHECK_EQ(fb_oob(), 0u);
+
+  // (a2) and nothing may allocate. A screen render is a pure function of the
+  // model into a fixed buffer; the day one is not, the device's per-frame heap
+  // delta stops being zero and this is the line that says so first.
+  if (allocs != 0u)
+    fprintf(stderr, "  %s: %u allocation(s) during render - spec 46 wants a "
+                    "per-frame heap delta of 0\n", name, (unsigned)allocs);
+  CHECK_EQ(allocs, 0u);
+
+  // (a3) and it may not composite itself into the ground. Work, not time.
+  if (fb_pixels() > SNAP_MAX_PIXELS || fb_ops() > SNAP_MAX_OPS)
+    fprintf(stderr, "  %s: %u pixels / %u primitives - over the compositing "
+                    "ceiling (%u / %u). This is a WORK ceiling, not a frame "
+                    "budget: see tests/fakes/gfx_fb.cpp\n",
+            name, (unsigned)fb_pixels(), (unsigned)fb_ops(),
+            (unsigned)SNAP_MAX_PIXELS, (unsigned)SNAP_MAX_OPS);
+  CHECK(fb_pixels() <= SNAP_MAX_PIXELS);
+  CHECK(fb_ops() <= SNAP_MAX_OPS);
 
   char path[512];
   snprintf(path, sizeof path, "%s/golden/screens/%s.pbm", NT_TESTS_DIR, name);
