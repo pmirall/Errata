@@ -497,6 +497,52 @@ constexpr uint8_t sprite_form_of(uint8_t art_key, Stage stage) {
 // future save format widened, or from a species row a newer build wrote, and an
 // unclamped add would index straight past PB_SPRITE_SETS into whatever follows
 // it. Out of range falls back to the first body, never past the end.
+//
+// =============================================================================
+//  THE THREE POSE BRANCHES BELOW WERE DECIDED AT P10-C3, NOT LEFT. Read this
+//  before changing one of them; each is a different answer for a different
+//  reason, and "they are all shared" stopped being true.
+//
+//  POSE_SLEEP - STILL RETURNS THE SHARED BODY HERE, AND ALMOST NOTHING USES IT.
+//  Sleep is DERIVED at draw time since P10-C3: ui/petfx_core.cpp's
+//  pf_build_sleep() takes the species' own idle frame, shuts its eyes with the
+//  blink's own pf_build_lids(), merges its two topmost ink rows and splays its
+//  bottom four, and BOTH of HOME's body paths call it - ui/screen_home.cpp's
+//  still one and ui/petfx.cpp's animated one. So a sleeping Pebble keeps its
+//  silhouette, which on HOME is the only thing distinguishing it from anyone
+//  else's, and the change is measured: 13 px on the quietest body in the roster
+//  (ESTATIC) against a floor of 10, asserted over all 120 (species, frame) pairs
+//  in tests/test_sprite_pipeline.cpp.
+//    WHY THE BRANCH SURVIVES ANYWAY: pf_build_sleep() refuses a blank frame or
+//  one wider than the cache geometry, and this is what the caller falls back
+//  to. No body in today's atlas takes that path - the sweep says so by name -
+//  and the 144 B stays because it is the safety net under a derivation, in
+//  exactly the spirit of the clamp two lines down. Deleting it would also mean
+//  regenerating the atlas and moving PB_SPRITE_BODY_FIRST, which is a re-plan
+//  for 144 B.
+//
+//  POSE_SICK - GENUINELY SHARED, AND THAT IS THE DECISION RATHER THAN THE
+//  LEFTOVER. Every cheap derivation is already spoken for or already known bad:
+//  the squash is the SLEEP pose and also the landing and the yawn; an erase
+//  dither is gene_pattern, and ui/petfx.cpp's PF_PAT_LEVEL banner records that
+//  anything at or above level 3 combs a body into a venetian blind; a one-row
+//  shear on the upper half is a new shape rule applied to sixty drawings by
+//  five hands, and NO INSTRUMENT IN THIS REPOSITORY CAN TELL "slumped" FROM
+//  "broken" - only a person can, one body at a time. So SICK keeps the generic
+//  body, and the identity loss is real and is being accepted rather than
+//  denied. THE OWNER STEP, priced: author twenty family sick bodies (one per
+//  family, 20 x 144 = 2,880 B), raise PB_SPRITE_DATA_BYTES_MAX in
+//  tools/gen_sprites.py AND SPRITE_DATA_BYTES_MAX above, and review them with
+//  `./bin/sprite_dump text NAME`. The atlas has 1,024 B free, so twenty sets do
+//  NOT fit and this is a re-plan of both caps, said out loud.
+//
+//  POSE_EAT - NOT A GAP, AND THE TREE ALREADY PROVED IT. It falls through to
+//  the species body on purpose and the FILM carries the pose: ui/actfx.cpp
+//  lunges the whole silhouette at the bowl, dips it on the bite and parks the
+//  bowl against the body's measured ink wall. tests/test_screens.cpp pins
+//  eat_diff == 0 on HOME with the comment "so 'we dropped it' cannot decay into
+//  'we forgot it'". P10-C3 looked at it again and changed nothing.
+// =============================================================================
 constexpr uint8_t sprite_set_id(uint8_t stage, uint8_t form, uint8_t pose) {
   if (stage == (uint8_t)STAGE_EGG) return (uint8_t)PBSPR_EGG_IDLE;
   if (pose  == (uint8_t)POSE_SLEEP) return (uint8_t)PBSPR_SLEEP;

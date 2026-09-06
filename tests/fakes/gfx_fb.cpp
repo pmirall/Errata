@@ -137,30 +137,81 @@ void gfx_fill(int16_t x, int16_t y, int16_t w, int16_t h) {
     for (int16_t c = 0; c < w; c++) put(x + c, y + r);
 }
 
-void gfx_xbm(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t* bits) {
+// =============================================================================
+//  THE TWO BLITS, AND WHY THIS FILE USED TO BE WRONG ABOUT THE FIRST ONE
+//
+//  Until P10-C3 there was one gfx_xbm() here and it drew ONLY the 1-bits, while
+//  the device's drawXBM under render.cpp:368's setBitmapMode(0) paints the
+//  WHOLE w*h box - the 0-bits in the inverse of the draw colour. So the two
+//  backends disagreed about every blit in the firmware and no test in the tree
+//  could see it, because every call site at that commit happened to draw onto
+//  blank ground (where the inverse writes 0 over 0) or, in ui/dialog.cpp:130, in
+//  GFX_ERASE onto a solid slab (where the inverse writes 1 over 1). All 65
+//  goldens were correct BY LUCK OF COMPOSITION.
+//
+//  P10-C3 is the chunk that would have ended that luck silently: every film it
+//  adds draws a sprite on top of the body, the floor or a filled panel, and the
+//  first one to do so would have had the device erase a w*h hole that the
+//  golden did not show. So the fake tells the truth now and the seam is
+//  explicit. tests/test_screens.cpp drives both by name over prior ink.
+//
+//  THE INVERSE OF GFX_XOR IS GFX_XOR. No call site draws an opaque XBM in XOR
+//  mode - it is not a picture anybody wants - and u8g2's own behaviour there is
+//  undefined enough that guessing it here would be inventing a device fact.
+//  Stated rather than silently folded into `else`.
+// =============================================================================
+static uint8_t inverse_of(uint8_t c) {
+  if (c == GFX_DRAW)  return GFX_ERASE;
+  if (c == GFX_ERASE) return GFX_DRAW;
+  return GFX_XOR;
+}
+
+static void blit(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t* bits,
+                 bool opaque, const char* what) {
   if (bits == nullptr || w <= 0 || h <= 0) return;
   ++s_ops;
-  if (!inside(x, y, w, h)) oob("xbm", x, y, w, h);
+  if (!inside(x, y, w, h)) oob(what, x, y, w, h);
+  const uint8_t keep = s_color;
+  const uint8_t inv  = inverse_of(keep);
   const int stride = (w + 7) / 8;
   for (int16_t r = 0; r < h; r++) {
     for (int16_t c = 0; c < w; c++) {
       const uint8_t byte = bits[r * stride + (c >> 3)];
-      if (byte & (uint8_t)(1u << (c & 7))) put(x + c, y + r);
+      if (byte & (uint8_t)(1u << (c & 7))) { s_color = keep; put(x + c, y + r); }
+      else if (opaque)                     { s_color = inv;  put(x + c, y + r); }
+    }
+  }
+  s_color = keep;
+}
+
+void gfx_xbm(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t* bits) {
+  blit(x, y, w, h, bits, true, "xbm");
+}
+
+void gfx_xbm_t(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t* bits) {
+  blit(x, y, w, h, bits, false, "xbm_t");
+}
+
+void gfx_dither_rect_phase(int16_t x, int16_t y, int16_t w, int16_t h,
+                           uint8_t level, uint8_t phase) {
+  if (level == 0 || w <= 0 || h <= 0) return;
+  ++s_ops;
+  if (!inside(x, y, w, h)) oob("dither", x, y, w, h);
+  // Same masking render.cpp does, and for the same reason: a genome nibble is
+  // passed in raw, so only the low 4 bits are meaningful.
+  const int dx = (int)(phase & 3u);
+  const int dy = (int)((phase >> 2) & 3u);
+  for (int16_t r = 0; r < h; r++) {
+    for (int16_t c = 0; c < w; c++) {
+      const int px = x + c, py = y + r;
+      if (px < 0 || py < 0) continue;
+      if (FB_BAYER[(((py + dy) & 3) * 4) + ((px + dx) & 3)] < level) put(px, py);
     }
   }
 }
 
 void gfx_dither_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t level) {
-  if (level == 0 || w <= 0 || h <= 0) return;
-  ++s_ops;
-  if (!inside(x, y, w, h)) oob("dither", x, y, w, h);
-  for (int16_t r = 0; r < h; r++) {
-    for (int16_t c = 0; c < w; c++) {
-      const int px = x + c, py = y + r;
-      if (px < 0 || py < 0) continue;
-      if (FB_BAYER[((py & 3) * 4) + (px & 3)] < level) put(px, py);
-    }
-  }
+  gfx_dither_rect_phase(x, y, w, h, level, 0u);
 }
 
 void gfx_invert_rect(int16_t x, int16_t y, int16_t w, int16_t h) {

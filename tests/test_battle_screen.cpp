@@ -816,13 +816,13 @@ TEST(the_two_combatants_face_each_other) {
   // two different pictures. Drawn into the real framebuffer, at the real
   // positions, and compared column by column.
   fb_reset();
-  br_draw_body(0, 0, 3u, 0, false, false, false);
+  br_draw_body(0, 0, 3u, 0, false, false, false, false);
   static uint8_t plain[BR_BODY_H][BR_BODY_W];
   for (int y = 0; y < BR_BODY_H; ++y)
     for (int x = 0; x < BR_BODY_W; ++x) plain[y][x] = (uint8_t)fb_get(x, y);
 
   fb_reset();
-  br_draw_body(0, 0, 3u, 0, true, false, false);
+  br_draw_body(0, 0, 3u, 0, true, false, false, false);
   int same = 0, mirrored = 0;
   for (int y = 0; y < BR_BODY_H; ++y)
     for (int x = 0; x < BR_BODY_W; ++x) {

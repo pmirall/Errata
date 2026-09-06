@@ -15,7 +15,17 @@
 # Frame 1 is a breath: the dome rises one row and the mouth opens one pixel each
 # way.  14 px of change, which is the quietest idle in the atlas, and correct -
 # a sleeping animal that twitches is not asleep.
-
+#
+# P10-C3: THIS BODY IS NOW A FALLBACK AND ALMOST NOTHING DRAWS IT. A sleeping
+# Pebble is composited at draw time from its OWN species body -
+# ui/petfx_core.cpp's pf_build_sleep(), called from both of HOME's body paths
+# (ui/screen_home.cpp's still one and ui/petfx.cpp's animated one) - so the
+# roster keeps its silhouettes asleep instead of all sixty sharing this lump.
+# What is left here is the safety net: pf_build_sleep() refuses a blank frame or
+# one wider than the 24x24 cache, and this is what the caller falls back to. No
+# body in today's atlas takes that path and
+# tests/test_sprite_pipeline.cpp says so over all 120 (species, frame) pairs.
+# Look at the derived pose with `./bin/sprite_dump sleep NAME`.
 name: SLEEP
 size: 24x24
 frames: 2

@@ -727,3 +727,221 @@ TEST(a_frame_index_past_the_end_wraps_instead_of_reading_past_the_array) {
     }
   }
 }
+
+// =============================================================================
+//  THE DERIVED SLEEPING BODY (P10-C3)
+//
+//  Phase 9 left a named gap: all sixty species shared ONE sleeping body, and
+//  SLEEP is the pose a player looks at longest. P10-C3 derives it instead of
+//  authoring forty new sets, and these are the checks that make "derived" mean
+//  something other than "hoped".
+//
+//  THE FOUR PROPERTIES, and what each one catches:
+//    (a) CONTAINMENT - the sleeping body lives inside its own idle ink box,
+//        grown one column each side and one row down from the top. This is the
+//        "not a mangled body" bound, in the same shape tests/test_corruption.cpp
+//        asserts for the glitch: on the PIXELS, not on the arguments.
+//    (b) A FLOOR - every body must change at least PF_SLEEP_MIN_DIFF pixels.
+//        This is what the blink test deliberately does NOT have, and the reason
+//        is written there: 2 px is fine for a 90 ms blink and is not fine for a
+//        pose held for hours.
+//    (c) A CEILING - and it is not the same kind of number. A derivation that
+//        rewrote half the creature would be a different creature, so the
+//        surviving ink must stay close to the original's.
+//    (d) THE HEIGHT ACTUALLY DROPS. The squash is the shape-independent half of
+//        the pose, so it must fire on every body, including the seven the atlas
+//        marks as non-blinking on one frame.
+// =============================================================================
+TEST(every_species_derives_a_sleeping_body_that_is_still_that_species) {
+  uint16_t worst_diff = 0xFFFFu;
+  const char* worst_name = "?";
+  int bodies = 0, no_band = 0, eyes_proved = 0, eyes_in_the_splay = 0;
+
+  for (int i = (int)PB_SPRITE_BODY_FIRST; i < (int)PB_SPRITE_SET_COUNT; ++i) {
+    const SpriteSet& s = PB_SPRITE_SETS[i];
+    const uint8_t stride = pf_stride(s.w);
+    const uint16_t fbytes = (uint16_t)stride * s.h;
+    for (int f = 0; f < (int)s.frames; ++f) {
+      const uint8_t* src = s.bits + (uint32_t)fbytes * (uint32_t)f;
+      const SpriteEyeBand e = sprite_eyes((uint8_t)i, (uint8_t)f);
+      if (e.y1 < e.y0) ++no_band;
+
+      uint8_t out[PF_FRAME_BYTES];
+      const uint16_t diff = pf_build_sleep(src, s.w, s.h, e.y0, e.y1, e.x0, e.x1, out);
+      ++bodies;
+
+      // (b) THE FLOOR. A body that sleeps by changing nothing a player can see
+      // is the defect this whole decision turns on, so it fails BY NAME.
+      if (diff < (uint16_t)PF_SLEEP_MIN_DIFF)
+        nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+      CHECK(diff >= (uint16_t)PF_SLEEP_MIN_DIFF);
+      if (diff < worst_diff) { worst_diff = diff; worst_name = PB_SPRITE_NAMES[i]; }
+
+      uint8_t t, b, l, r;
+      CHECK_EQ(pf_scan_ink(src, s.w, s.h, &t, &b, &l, &r), 1u);
+      uint8_t st, sb, sl, sr;
+      CHECK_EQ(pf_scan_ink(out, s.w, s.h, &st, &sb, &sl, &sr), 1u);
+
+      // (a) CONTAINMENT, pixel by pixel.
+      for (uint8_t y = 0; y < s.h; ++y) {
+        const uint8_t* row = out + (uint16_t)y * stride;
+        for (uint8_t x = 0; x < s.w; ++x) {
+          if (!pf_get(row, x)) continue;
+          const bool inside = (y >= (uint8_t)(t + 1u)) && (y <= b) &&
+                              (x + 1u >= (uint16_t)l) &&
+                              ((uint16_t)x <= (uint16_t)r + 1u);
+          if (!inside) {
+            fprintf(stderr, "  %s frame %d: sleeping pixel (%u,%u) outside the "
+                            "idle ink box [%u..%u]x[%u..%u] grown by one\n",
+                    PB_SPRITE_NAMES[i], f, (unsigned)x, (unsigned)y,
+                    (unsigned)l, (unsigned)r, (unsigned)t, (unsigned)b);
+            nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+          }
+          CHECK(inside);
+        }
+      }
+
+      // (d) THE HEIGHT DROPS BY EXACTLY ONE ROW, on every body, blinker or not.
+      CHECK_EQ((int)st, (int)t + 1);
+      CHECK_EQ((int)sb, (int)b);
+
+      // (e) AND THE EYES ACTUALLY SHUT, measured where the squash cannot pay
+      //     for it.
+      //
+      // THIS CHECK EXISTS BECAUSE THE MUTATION RUN FOUND IT MISSING. Deleting
+      // the whole eye-shutting step from pf_build_sleep() left every other
+      // check green: the squash alone clears the floor on all 120 frames, the
+      // containment box does not care, and the height still drops. So the
+      // semantic half of the pose - the half that says ASLEEP rather than
+      // merely SETTLED - was unguarded.
+      //
+      // AND ITS FIRST FORM WAS WRONG, which is worth writing down. It asked
+      // whether the band's rows changed at all, and failed on ERROX, whose band
+      // is a single row at y 22 on a body whose ink ends at 23 - inside the
+      // splay. The eyes DO shut there (`.####.....#####.` becomes
+      // `.####+++++#####.`) but nothing at that row can tell the eye fill from
+      // the dilation. So the measurement moved: it runs the SHIPPED
+      // pf_build_lids() and requires every pixel of its fill to be lit in the
+      // sleeping frame - but only on rows the squash provably cannot touch,
+      // which is above the splay and below the merge. Frames whose whole band
+      // lies inside those zones are counted and reported instead of guessed at.
+      if (e.y1 >= e.y0) {
+        uint8_t fill[PF_STRIP_BYTES], cut[PF_STRIP_BYTES];
+        const uint8_t bh = pf_build_lids(src, s.w, s.h, e.y0, e.y1, e.x0, e.x1,
+                                         fill, cut);
+        if (bh == 0u) nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+        int provable = 0;
+        for (uint8_t rr = 0; rr < bh; ++rr) {
+          const uint8_t y = (uint8_t)(e.y0 + rr);
+          if (y >= s.h) break;
+          if (y < (uint8_t)(t + 2u)) continue;                 // the merge zone
+          if (y + PF_SLEEP_SPREAD > b) continue;               // the splay zone
+          const uint8_t* fr = fill + (uint16_t)rr * stride;
+          const uint8_t* cr = cut  + (uint16_t)rr * stride;
+          const uint8_t* orow = out + (uint16_t)y * stride;
+          for (uint8_t x = 0; x < s.w; ++x) {
+            if (!pf_get(fr, x) || pf_get(cr, x)) continue;     // cut by the lash
+            ++provable;
+            if (!pf_get(orow, x)) {
+              fprintf(stderr, "  %s frame %d: eye pixel (%u,%u) is OPEN in the "
+                              "sleeping body - the pose settled but the eyes "
+                              "never shut\n",
+                      PB_SPRITE_NAMES[i], f, (unsigned)x, (unsigned)y);
+              nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+            }
+          }
+        }
+        if (provable > 0) ++eyes_proved; else ++eyes_in_the_splay;
+      }
+
+      // (c) STILL THAT SPECIES. Count the ink either way: the squash removes a
+      // row and the spread adds up to two columns, so the sleeping body is
+      // near the idle one and not a rewrite of it.
+      int ink = 0, slp = 0;
+      for (uint8_t y = 0; y < s.h; ++y) {
+        const uint8_t* a = src + (uint16_t)y * stride;
+        const uint8_t* c = out + (uint16_t)y * stride;
+        for (uint8_t x = 0; x < s.w; ++x) { ink += pf_get(a, x); slp += pf_get(c, x); }
+      }
+      CHECK(ink > 0);
+      if (slp * 100 < ink * 80 || slp * 100 > ink * 160) {
+        fprintf(stderr, "  %s frame %d: %d px asleep against %d awake\n",
+                PB_SPRITE_NAMES[i], f, slp, ink);
+        nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+      }
+    }
+  }
+
+  CHECK_EQ(bodies, 120);          // 60 species, two frames each
+  CHECK_EQ(no_band, 7);           // the seven the atlas marks as non-blinkers
+  printf("  sleep: %d bodies, smallest change %u px on %s (floor %d); eyes "
+         "proved shut on %d frames, %d bands lie inside the splay\n",
+         bodies, (unsigned)worst_diff, worst_name, (int)PF_SLEEP_MIN_DIFF,
+         eyes_proved, eyes_in_the_splay);
+  // ANTI-VACUITY on (e): "no eye was left open" must not be able to pass
+  // because no eye was ever looked at. The overwhelming majority of blinkable
+  // frames must have a band the squash provably cannot reach.
+  CHECK(eyes_proved > 100);
+  CHECK(eyes_in_the_splay < 10);
+  // The floor is MEASURED, so it must actually sit under the roster. A floor
+  // above the worst body would fail above; a floor so far below it that no
+  // conceivable art could trip it would be decoration, and this is the line
+  // that says which.
+  CHECK(worst_diff >= (uint16_t)PF_SLEEP_MIN_DIFF);
+}
+
+// THE CONTROL, and it is the same argument the blink's over-fill control makes.
+// Every check above would also pass if pf_build_sleep() did nothing detectable,
+// so hand it inputs it MUST refuse or MUST fail the floor on, and require it to
+// say so.
+TEST(the_sleep_floor_would_see_a_pose_that_changed_nothing) {
+  uint8_t out[PF_FRAME_BYTES];
+  uint8_t blank[PF_FRAME_BYTES];
+  memset(blank, 0, sizeof blank);
+
+  // A blank frame has no pose to derive and must REFUSE rather than return a
+  // buffer of zeros that the caller would happily draw.
+  CHECK_EQ(pf_build_sleep(blank, 24, 24, 0, 0, 0, 23, out), 0u);
+
+  // A frame larger than the cache geometry is refused, not truncated.
+  CHECK_EQ(pf_build_sleep(PB_SPRITE_SETS[PB_SPRITE_BODY_FIRST].bits,
+                          (uint8_t)(PF_MAX_W + 1), 24, 0, 0, 0, 23, out), 0u);
+
+  // A body that is a single lit pixel has no second ink row to merge and no
+  // bottom rows above its own top to spread, so the derivation changes NOTHING
+  // and must say so rather than handing back a frame the caller would draw.
+  uint8_t dot[PF_FRAME_BYTES];
+  memset(dot, 0, sizeof dot);
+  pf_set(dot + (uint16_t)12 * pf_stride(24), 12);
+  CHECK_EQ(pf_build_sleep(dot, 24, 24, 0, 0, 0, 23, out), 0u);
+
+  // AND THE ONE THAT PINS THE FLOOR FROM BELOW.
+  //
+  // THE MUTATION RUN FOUND THIS MISSING TOO. Lowering PF_SLEEP_MIN_DIFF from 10
+  // to 3 - which is exactly the "do not lower it to make a build pass" failure
+  // the constant's own comment warns about - left every case green, because the
+  // only other statement about the floor is that the roster CLEARS it, and a
+  // lower floor is easier to clear. So a threshold that could only ever be too
+  // HIGH was being called measured.
+  //
+  // This is a QUIET BODY: a one-pixel-wide vertical bar. It is the least a real
+  // silhouette can give the derivation - one row merged away at the top and two
+  // columns gained on each of the bottom PF_SLEEP_SPREAD rows - and it must land
+  // UNDER the floor, because a Pebble that slept by changing this little would
+  // not read as asleep at 1x. Together with the roster sweep's
+  // `worst_diff >= PF_SLEEP_MIN_DIFF`, the floor is now pinned into a band from
+  // both sides: it cannot be raised past the quietest real body (13 px on
+  // ESTATIC) and it cannot be lowered past this.
+  uint8_t bar[PF_FRAME_BYTES];
+  memset(bar, 0, sizeof bar);
+  for (uint8_t y = 5; y <= 20u; ++y) pf_set(bar + (uint16_t)y * pf_stride(24), 12);
+  const uint16_t d = pf_build_sleep(bar, 24, 24, 0, 0, 0, 23, out);
+  CHECK(d > 0u);
+  if (d >= (uint16_t)PF_SLEEP_MIN_DIFF) {
+    fprintf(stderr, "  a one-pixel-wide bar changes %u px and the floor is %d - "
+                    "the floor is too low to reject anything\n",
+            (unsigned)d, (int)PF_SLEEP_MIN_DIFF);
+    nt_fail_at(__FILE__, __LINE__, "the sleep floor accepts a bare bar");
+  }
+  CHECK(d < (uint16_t)PF_SLEEP_MIN_DIFF);
+}

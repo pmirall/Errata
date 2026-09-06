@@ -200,6 +200,18 @@ $(BIN)/test_content:    $(OBJ)/species.o $(OBJ)/evolution.o $(OBJ)/xp.o
 # no test in this repository can execute. pf_build_lids() is what composites the
 # BLINK frame - a picture that is in neither authored frame of the atlas - and
 # it was drawing over the body on four species while every byte check passed.
+# P10-C3: petfx_core.o JOINS THE SCREEN LINK LINE. ui/screen_home.cpp derives
+# the sleeping body with pf_build_sleep() on the STILL body path - the one a
+# golden can see - because HOME has two body paths and the animated one lives in
+# ui/petfx.cpp, which no host binary compiles. Deriving in only that file would
+# have made the device show a species while every snapshot kept showing the
+# authored blob, with the suite green throughout: the phase-9 blink defect with
+# the sign flipped.
+# P10-C3: ui/anim_ease.cpp is the motion maths lifted out of ui/actfx.cpp - five
+# functions that seven shipped films have run on since P6-C3 and that no host
+# binary had ever compiled, because actfx.cpp includes render.h.
+$(BIN)/test_anim: $(OBJ)/anim_ease.o
+
 $(BIN)/test_sprite_pipeline: $(OBJ)/petfx_core.o
 # Derived stats. genome.o drags crc16.o and rng.o, exactly as test_genome does.
 $(BIN)/test_stats:      $(OBJ)/pebble.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
@@ -551,11 +563,13 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/species.o \
                $(OBJ)/validate.o $(OBJ)/evolution.o $(OBJ)/xp.o \
                $(OBJ)/dialog.o $(OBJ)/qr.o $(OBJ)/box.o \
+               $(OBJ)/anim_ease.o \
+               $(OBJ)/anim_ease.o \
                $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o \
                $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
                $(OBJ)/audio.o \
                $(OBJ)/screen_battle.o $(OBJ)/battle_renderer.o \
-               $(OBJ)/xbm_mirror.o \
+               $(OBJ)/xbm_mirror.o $(OBJ)/petfx_core.o $(OBJ)/corrupt_fx.o \
                $(OBJ)/battle.o $(OBJ)/battle_ai.o $(OBJ)/pebble.o
 
 # P7-C2 added the peer link's four: ui/screen_link.cpp owns a REAL LinkJob and a

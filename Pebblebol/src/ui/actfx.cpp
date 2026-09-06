@@ -61,6 +61,8 @@
 // =============================================================================
 #include "actfx.h"
 
+#include "anim_ease.h"
+
 #include "../data/sprites.h"
 #include "render.h"
 #include "petfx.h"
@@ -216,11 +218,12 @@ static int16_t  s_park_x   = 0;
 //  3. THE ONE PIXEL WRITER, AND THE BLITTER ON TOP OF IT
 // =============================================================================
 
-// Ordered 4x4 Bayer, used only to crumble the two-row frontier of a dissolve so
-// it reads as something evaporating and not as a window blind coming down.
-static const uint8_t AF_BAYER[16] = {
-  0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5
-};
+// THE BAYER MATRIX AND THE FIVE EASING FUNCTIONS MOVED TO ui/anim_ease.cpp AT
+// P10-C3, unchanged. They were `static` here, in a translation unit that
+// includes render.h and therefore Arduino.h, so no host binary had ever
+// compiled one of them; ui/screen_encounter.cpp's two new films need the same
+// arithmetic, and a second copy of a parabola is how two films come to
+// disagree about where a beat ends. See the banner in ui/anim_ease.h.
 
 // Clipped to the STAGE and the sprite band. Sets, never clears. Everything in
 // this file that is not a poop replica goes through here.
@@ -239,7 +242,11 @@ static inline void af_px_panel(int16_t x, int16_t y) {
   rd_u8g2().drawPixel((u8g2_uint_t)x, (u8g2_uint_t)y);
 }
 
-enum : uint8_t { AF_DIS_NONE = 0, AF_DIS_UP, AF_DIS_DOWN };
+// The three dissolve directions are ui/anim_ease.h's now; the old spellings
+// stay as aliases so the seven films below read exactly as they did.
+#define AF_DIS_NONE  AE_DIS_NONE
+#define AF_DIS_UP    AE_DIS_UP
+#define AF_DIS_DOWN  AE_DIS_DOWN
 
 // Transparent, clipped, row-windowed, optionally dissolving XBM blit.
 //   row0..row1  which sprite rows to draw at all; clamped to the art. This is
@@ -255,33 +262,20 @@ static void af_blit(int16_t x, int16_t y, const SpriteRef& r,
   if (row1 >= r.h) row1 = (uint8_t)(r.h - 1u);
   if (row0 > row1) return;
 
-  // The front is where the dissolve has got to, in sprite rows. It deliberately
-  // travels three rows past each end, so pct = 0 and pct = 100 mean exactly
-  // "all of it" and "none of it" whatever the height happens to be.
-  const int16_t span  = (int16_t)((int16_t)r.h + 3);
-  const int16_t front = (dis == AF_DIS_UP)
-                          ? (int16_t)((int16_t)r.h - (int16_t)((span * (int16_t)pct) / 100))
-                          : (int16_t)((int16_t)((span * (int16_t)pct) / 100) - 3);
+  // The front is where the dissolve has got to, in sprite rows. See
+  // ae_dissolve_front(): it deliberately travels three rows past each end, so
+  // pct = 0 and pct = 100 mean exactly "all of it" and "none of it" whatever
+  // the height happens to be.
+  const int16_t front = ae_dissolve_front(dis, r.h, pct);
 
   const uint8_t stride = (uint8_t)((r.w + 7u) >> 3);
   for (uint8_t rr = row0; rr <= row1; ++rr) {
-    uint8_t edge = 0;
-    if (dis == AF_DIS_UP) {
-      if ((int16_t)rr >= front)     continue;               // already gone
-      if ((int16_t)rr >= front - 2) edge = 1;               // crumbling
-    } else if (dis == AF_DIS_DOWN) {
-      if ((int16_t)rr <  front)     continue;
-      if ((int16_t)rr <  front + 2) edge = 1;
-    }
     const uint8_t* row = r.bits + (uint16_t)rr * (uint16_t)stride;
     for (uint8_t cc = 0; cc < r.w; ++cc) {
       if (((row[cc >> 3] >> (cc & 7u)) & 1u) == 0u) continue;
       const int16_t sx = (int16_t)(x + (int16_t)cc);
       const int16_t sy = (int16_t)(y + (int16_t)rr);
-      // The Bayer test is on ABSOLUTE screen coordinates on purpose: a prop
-      // that is also sliding would otherwise re-roll its own crumble every
-      // frame and shimmer instead of dissolving.
-      if (edge && AF_BAYER[(((uint8_t)sy & 3u) << 2) | ((uint8_t)sx & 3u)] >= 8u) continue;
+      if (ae_dissolve_skip(dis, rr, front, sx, sy)) continue;
       if (panel) af_px_panel(sx, sy);
       else       af_px(sx, sy);
     }
@@ -293,41 +287,22 @@ static void af_blit(int16_t x, int16_t y, const SpriteRef& r,
 // =============================================================================
 static inline uint32_t af_t(void) { return (uint32_t)(s_now - s_t0); }
 
-// Integer parabola, 4*a*t*(len-t)/len^2, peaking at `amp`. Returned NEGATIVE
-// because up is -y: every hop, bounce and yawn in the file uses this.
-static int16_t af_hop(uint32_t t, uint32_t len, uint8_t amp) {
-  if (len == 0u) return 0;
-  if (t > len)   t = len;
-  const uint32_t v = (4u * (uint32_t)amp * t * (len - t)) / (len * len);
-  return (int16_t)-(int16_t)v;
+// THE FOUR EASING FUNCTIONS ARE ui/anim_ease.cpp's SINCE P10-C3 - lifted byte
+// for byte, not rewritten. These four names are kept as one-line forwards so
+// the seven films below are unchanged and so `git log -L` on any of them still
+// lands on the arithmetic. Every one of them is now driven by
+// tests/test_anim.cpp; none of them had ever been executed by a host binary.
+static inline int16_t af_hop(uint32_t t, uint32_t len, uint8_t amp) {
+  return ae_hop(t, len, amp);
 }
-
-// OUT, HOLD, BACK: the shape of one bite. af_hop()'s parabola spends most of
-// its length near zero, and at 20 fps a bite is only six or seven frames long,
-// so a parabola gives a bite that never quite arrives - it is sampled on the way
-// out and on the way back and rarely at the extreme. This reaches full extension
-// in the first 35 % of the beat, HOLDS it for the middle 30 % (one or two whole
-// frames with the animal's head in the bowl) and comes back over the last 35 %.
-// Always 0 at ph = 0 and at ph >= len, so bites cannot accumulate drift.
-static int16_t af_lunge(uint32_t ph, uint32_t len, uint8_t amp) {
-  if (len == 0u || ph >= len) return 0;
-  const uint32_t out  = (len * 35u) / 100u;
-  const uint32_t back = (len * 65u) / 100u;
-  if (out == 0u || back <= out || len <= back) return (int16_t)amp;
-  if (ph < out)  return (int16_t)(((uint32_t)amp * ph) / out);
-  if (ph < back) return (int16_t)amp;
-  return (int16_t)(((uint32_t)amp * (len - ph)) / (len - back));
+static inline int16_t af_lunge(uint32_t ph, uint32_t len, uint8_t amp) {
+  return ae_lunge(ph, len, amp);
 }
-
-static int16_t af_lerp(uint32_t t, uint32_t len, int16_t a, int16_t b) {
-  if (len == 0u || t >= len) return b;
-  return (int16_t)(a + (int16_t)(((int32_t)(b - a) * (int32_t)t) / (int32_t)len));
+static inline int16_t af_lerp(uint32_t t, uint32_t len, int16_t a, int16_t b) {
+  return ae_lerp(t, len, a, b);
 }
-
-static uint8_t af_pct(uint32_t t, uint32_t t0, uint32_t t1) {
-  if (t1 <= t0 || t <= t0) return 0u;
-  if (t >= t1)             return 100u;
-  return (uint8_t)(((t - t0) * 100u) / (t1 - t0));
+static inline uint8_t af_pct(uint32_t t, uint32_t t0, uint32_t t1) {
+  return ae_pct(t, t0, t1);
 }
 
 

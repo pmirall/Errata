@@ -49,6 +49,10 @@
 #include "ui/screen_menu.h"
 #include "ui/screen_network.h"
 #include "networking/wifi_scanner.h"
+#include "game/capture.h"     // CaptureOutcome, for the capture film
+#include "ui/corrupt_fx.h"    // the glitch gate and its rows, for the HOME painter
+#include "ui/petfx_core.h"    // pf_scan_ink(): the body's own ink box
+#include "ui/pet_art.h"
 #include "game/cooldowns.h"
 #include "game/genome.h"
 #include "game/inventory.h"
@@ -489,6 +493,122 @@ TEST(the_allocation_counter_is_live) {
 }
 
 // =============================================================================
+//  THE DRAWING SEAM'S TWO BLITS (P10-C3)
+//
+//  THIS IS THE TEST THAT WOULD HAVE CAUGHT A LATENT DIVERGENCE OF FIVE PHASES.
+//  ui/gfx_u8g2.cpp's gfx_xbm() forwards to drawXBM with the panel in
+//  setBitmapMode(0) (ui/render.cpp:368), which paints the ENTIRE w*h box - the
+//  1-bits in the draw colour and the 0-bits in the INVERSE. tests/fakes/gfx_fb.
+//  cpp drew only the 1-bits. So the two backends disagreed about every blit in
+//  the firmware and nothing in the tree could see it.
+//
+//  IT WAS UNOBSERVED BY LUCK OF COMPOSITION, not by design: every one of the
+//  thirteen call sites drew onto blank ground, or (ui/dialog.cpp:130) in
+//  GFX_ERASE onto a solid slab where the inverse writes 1 over 1. Correcting
+//  the fake moved ZERO of the sixty-five goldens, which is the receipt for that
+//  claim - and P10-C3 is the chunk that would have ended the luck, because its
+//  item film drives an icon straight across its own label.
+//
+//  Both behaviours are asserted here BY NAME, in both draw colours, so neither
+//  backend can drift back.
+// =============================================================================
+TEST(an_opaque_blit_paints_its_whole_box_and_a_transparent_one_only_its_ink) {
+  // A sprite with a hole: 8x8, all set except the middle 4x4.
+  uint8_t spr[8];
+  for (int y = 0; y < 8; ++y) spr[y] = 0xFFu;
+  for (int y = 2; y < 6; ++y) spr[y] = (uint8_t)(0xFFu & ~0x3Cu);   // clear x 2..5
+
+  // Ground: a solid 12x12 slab the blit lands in the middle of.
+  fb_reset();
+  gfx_fill(10, 10, 12, 12);
+  gfx_xbm_t(12, 12, 8, 8, spr);
+  // TRANSPARENT: the hole is still slab, so the whole 12x12 is lit.
+  int lit = 0;
+  for (int y = 10; y < 22; ++y) for (int x = 10; x < 22; ++x) lit += fb_get(x, y);
+  CHECK_EQ(lit, 144);
+
+  fb_reset();
+  gfx_fill(10, 10, 12, 12);
+  gfx_xbm(12, 12, 8, 8, spr);
+  // OPAQUE: the hole is punched THROUGH the slab - sixteen pixels of it.
+  lit = 0;
+  for (int y = 10; y < 22; ++y) for (int x = 10; x < 22; ++x) lit += fb_get(x, y);
+  CHECK_EQ(lit, 144 - 16);
+  for (int y = 14; y < 18; ++y)
+    for (int x = 14; x < 18; ++x) CHECK_EQ(fb_get(x, y), 0);
+
+  // AND IN GFX_ERASE, where the inverse runs the other way: the 1-bits clear
+  // and the 0-bits DRAW. This is the arm ui/dialog.cpp:130 uses, and the arm
+  // that made the old fake look correct on a solid slab.
+  fb_reset();
+  gfx_fill(10, 10, 12, 12);
+  gfx_color(GFX_ERASE);
+  gfx_xbm(12, 12, 8, 8, spr);
+  gfx_color(GFX_DRAW);
+  lit = 0;
+  for (int y = 10; y < 22; ++y) for (int x = 10; x < 22; ++x) lit += fb_get(x, y);
+  // The 48 set bits cleared; the 16 hole bits drew over slab that was already
+  // lit, so they change nothing. 144 - 48.
+  CHECK_EQ(lit, 144 - 48);
+
+  // The transparent blit in GFX_ERASE clears only the ink and leaves the hole.
+  fb_reset();
+  gfx_fill(10, 10, 12, 12);
+  gfx_color(GFX_ERASE);
+  gfx_xbm_t(12, 12, 8, 8, spr);
+  gfx_color(GFX_DRAW);
+  lit = 0;
+  for (int y = 10; y < 22; ++y) for (int x = 10; x < 22; ++x) lit += fb_get(x, y);
+  CHECK_EQ(lit, 144 - 48);
+  for (int y = 14; y < 18; ++y)
+    for (int x = 14; x < 18; ++x) CHECK_EQ(fb_get(x, y), 1);
+
+  // The colour is STICKY and both blits must hand it back untouched, which is
+  // the contract gfx_color() states and the one a blit that flipped a mode
+  // internally is most likely to break.
+  fb_reset();
+  gfx_color(GFX_ERASE);
+  gfx_xbm_t(0, 0, 8, 8, spr);
+  gfx_fill(40, 40, 4, 4);            // still ERASE: draws nothing on blank
+  CHECK_EQ(fb_get(41, 41), 0);
+  gfx_color(GFX_DRAW);
+}
+
+// The phase-shifted dither, which ui/corrupt_fx.cpp's rows carry and which no
+// host backend implemented until P10-C3. Two different phases of the same
+// rectangle must be two different pictures, or the glitch's shimmer is a
+// constant.
+TEST(the_dither_phase_actually_slides_the_matrix) {
+  static uint8_t at_zero[FB_H][FB_W];
+  fb_reset();
+  gfx_dither_rect_phase(8, 8, 16, 16, GFX_D50, 0u);
+  for (int y = 0; y < FB_H; ++y)
+    for (int x = 0; x < FB_W; ++x) at_zero[y][x] = (uint8_t)fb_get(x, y);
+  // gfx_dither_rect() IS phase 0 - the two must be the same picture, or every
+  // screen drawn before P10-C3 has quietly moved.
+  fb_reset();
+  gfx_dither_rect(8, 8, 16, 16, GFX_D50);
+  int same = 0;
+  for (int y = 0; y < FB_H; ++y)
+    for (int x = 0; x < FB_W; ++x) same += (fb_get(x, y) == at_zero[y][x]) ? 1 : 0;
+  CHECK_EQ(same, FB_H * FB_W);
+
+  // ...and phase 1 is a DIFFERENT picture with the same amount of ink.
+  fb_reset();
+  gfx_dither_rect_phase(8, 8, 16, 16, GFX_D50, 1u);
+  int diff = 0, ink = 0, ink0 = 0;
+  for (int y = 0; y < FB_H; ++y)
+    for (int x = 0; x < FB_W; ++x) {
+      const int v = fb_get(x, y);
+      ink += v; ink0 += at_zero[y][x];
+      if (v != (int)at_zero[y][x]) ++diff;
+    }
+  CHECK(diff > 0);
+  CHECK_EQ(ink, ink0);
+  CHECK_EQ(ink, 16 * 16 / 2);        // D50 over a 16x16 is exactly half
+}
+
+// =============================================================================
 //  Snapshot helper
 // =============================================================================
 static void snapshot_fn(void (*render)(void), const char* name) {
@@ -880,6 +1000,102 @@ TEST(snapshot_home_sleeping) {
   snapshot(SCR_HOME, "home_sleeping");
 }
 
+// THE CORRUPTION GLITCH, WHICH HAD NEVER APPEARED IN A GOLDEN.
+//
+// ui/corrupt_fx.cpp shipped at P9-C5 with nineteen host tests on its geometry
+// and its PAINTER in ui/petfx.cpp, a translation unit no binary here compiles -
+// so "the glitch is contained" was asserted on five numbers and never on a
+// picture. ui/screen_home.cpp paints the same rows on the still body path now.
+//
+// THE CLOCK IS THE FIXTURE. cfx_glitch_on() lights roughly one 60 ms slot in
+// eight and is a pure hash of (slot, seed), so the test walks slots until one
+// is lit rather than pinning a magic millisecond - which would silently stop
+// meaning anything the day the hash changed.
+TEST(snapshot_home_corrupted) {
+  seams2_reset();
+  fixture_starter();
+  g_view.corrupted = 1u;
+  const uint32_t seed = g_view.genome.lineage_id;
+  int slots = 0;
+  while (!cfx_glitch_on(g_now, seed) && slots < 200) { g_now += CFX_GLITCH_SLOT_MS; ++slots; }
+  // A golden of an UNLIT slot would be a golden of home_starter with a corrupted
+  // flag nobody drew - which is exactly the hole this snapshot exists to close.
+  CHECK(cfx_glitch_on(g_now, seed) != 0u);
+  CHECK(slots < 200);
+  snapshot(SCR_HOME, "home_corrupted");
+}
+
+// ...and the pixels it moved are inside the body, which is the property
+// tests/test_corruption.cpp asserts about cfx_rows()' five numbers and could
+// not assert about a painter. Driven over every lit slot of a whole minute.
+TEST(the_glitch_only_ever_moves_pixels_inside_the_body_it_is_drawn_over) {
+  seams2_reset();
+  fixture_starter();
+  const uint32_t seed = g_view.genome.lineage_id;
+  const uint32_t t0 = g_now;
+
+  // THE BOUND IS PER FRAME AND THE FIRST DRAFT OF THIS TEST WAS NOT - it
+  // measured frame 0's ink box and applied it to both, and the sweep failed on
+  // slot 7 at row 39 because HOME's two-frame idle bob makes frame 1 a pixel
+  // taller. The test was wrong and the painter was right; a union of the two
+  // boxes would also have passed and would have been a looser statement than
+  // the one worth making, so each frame is bounded by its own ink.
+  static uint8_t clean[2][FB_H][FB_W];
+  int bx0[2], by0[2], bx1[2], by1[2];
+  for (int f = 0; f < 2; ++f) {
+    g_now = t0 + (uint32_t)f * UI_ANIM_FRAME_MS;
+    CHECK_EQ((int)((g_now / UI_ANIM_FRAME_MS) & 1u), f);
+    g_view.corrupted = 0u;
+    fb_reset();
+    home_render();
+    for (int y = 0; y < FB_H; ++y)
+      for (int x = 0; x < FB_W; ++x) clean[f][y][x] = (uint8_t)fb_get(x, y);
+    const SpriteRef r = sprite_lookup_pose(g_view.stage,
+                          sprite_form_of(pet_art_key(g_view.species_id, 0u),
+                                         (Stage)g_view.stage),
+                          g_view.pose, (uint8_t)f);
+    uint8_t t, b, l, rr;
+    CHECK_EQ(pf_scan_ink(r.bits, r.w, r.h, &t, &b, &l, &rr), 1u);
+    const int ox = (int)sprite_center_x(r.w);
+    const int oy = (int)HOME_FLOOR_Y - (int)r.h;
+    bx0[f] = ox + l; bx1[f] = ox + rr; by0[f] = oy + t; by1[f] = oy + b;
+  }
+
+  g_view.corrupted = 1u;
+  int lit = 0, moved = 0;
+  for (uint32_t k = 0; k < 1000u; ++k) {
+    g_now = t0 + k * CFX_GLITCH_SLOT_MS;
+    const int f = (int)((g_now / UI_ANIM_FRAME_MS) & 1u);
+    const bool on = (cfx_glitch_on(g_now, seed) != 0u);
+    fb_reset();
+    home_render();
+    CHECK_EQ(fb_oob(), 0u);
+    int diff = 0;
+    for (int y = 0; y < FB_H; ++y) {
+      for (int x = 0; x < FB_W; ++x) {
+        if ((uint8_t)fb_get(x, y) == clean[f][y][x]) continue;
+        ++diff; ++moved;
+        if (x < bx0[f] || x > bx1[f] || y < by0[f] || y > by1[f]) {
+          fprintf(stderr, "  GLITCH slot %u frame %d: pixel (%d,%d) outside the "
+                          "body ink box [%d..%d]x[%d..%d]\n", (unsigned)k, f, x, y,
+                  bx0[f], bx1[f], by0[f], by1[f]);
+          CHECK(false);
+        }
+      }
+    }
+    // An UNLIT slot must draw nothing at all: the glitch is a stutter, and one
+    // that never stopped would be a coat pattern.
+    if (on) ++lit; else CHECK_EQ(diff, 0);
+  }
+  // Roughly one slot in eight, and neither zero nor all of them: without this
+  // "no pixel moved outside the body" would pass on a painter that drew nothing.
+  CHECK(lit > 60);
+  CHECK(lit < 250);
+  CHECK(moved > 200);
+  g_now = 100000u;
+  g_view.corrupted = 0u;
+}
+
 TEST(snapshot_home_sick) {
   seams2_reset();
   fixture_starter();
@@ -1162,7 +1378,7 @@ TEST(every_species_draws_on_the_battle_field_without_clipping) {
     for (uint8_t frame = 0; frame < 2u; ++frame) {
       // The player: upright, at the player's slot.
       fb_reset();
-      br_draw_body(BR_YOU_BODY_X, BR_YOU_BODY_Y, key, frame, false, false, false);
+      br_draw_body(BR_YOU_BODY_X, BR_YOU_BODY_Y, key, frame, false, false, false, false);
       if (fb_oob() != 0)
         fprintf(stderr, "  BATTLE you species %u frame %u: %u OOB, first %s\n",
                 (unsigned)id, (unsigned)frame, (unsigned)fb_oob(), fb_oob_first());
@@ -1173,17 +1389,26 @@ TEST(every_species_draws_on_the_battle_field_without_clipping) {
           ink_you += fb_get(x, y) ? 1 : 0;
       CHECK(ink_you > 0);
 
-      // The foe: mirrored, at the foe's slot, and in the two states the field
-      // can put a body in.
-      for (int k = 0; k < 3; ++k) {
-        fb_reset();
-        br_draw_body(BR_FOE_BODY_X, BR_FOE_BODY_Y, key, frame, true,
-                     k == 1, k == 2);
-        if (fb_oob() != 0)
-          fprintf(stderr, "  BATTLE foe species %u frame %u k %d: %u OOB, first %s\n",
-                  (unsigned)id, (unsigned)frame, k,
-                  (unsigned)fb_oob(), fb_oob_first());
-        CHECK_EQ(fb_oob(), 0u);
+      // The foe: mirrored, at the foe's slot, and in the three states the field
+      // can put a body in. k == 3 IS THE GUARD (P10-C3) AND IT IS THE ONE THAT
+      // NEEDED THIS SWEEP: the fainted dissolve and the struck inversion are
+      // both confined to the body's own 24x24 box, so no art can push them off
+      // the panel, while the ward is the first thing this renderer has ever
+      // drawn OUTSIDE that box - three columns and a pair of bracket arms
+      // hanging off whichever side the creature faces. Both facings are driven
+      // below; the foe's barrier is the one that reaches toward x = 0.
+      for (int k = 0; k < 4; ++k) {
+        for (int face = 0; face < 2; ++face) {
+          const int16_t bx = face ? (int16_t)BR_FOE_BODY_X : (int16_t)BR_YOU_BODY_X;
+          const int16_t by = face ? (int16_t)BR_FOE_BODY_Y : (int16_t)BR_YOU_BODY_Y;
+          fb_reset();
+          br_draw_body(bx, by, key, frame, face != 0, k == 1, k == 2, k == 3);
+          if (fb_oob() != 0)
+            fprintf(stderr, "  BATTLE species %u frame %u k %d face %d: %u OOB, first %s\n",
+                    (unsigned)id, (unsigned)frame, k, face,
+                    (unsigned)fb_oob(), fb_oob_first());
+          CHECK_EQ(fb_oob(), 0u);
+        }
       }
 
       // MIRRORED IS A DIFFERENT PICTURE. A mirror that quietly became a copy
@@ -1191,11 +1416,11 @@ TEST(every_species_draws_on_the_battle_field_without_clipping) {
       // would notice - the OOB count is the same and the ink count is the same.
       static uint8_t upright[FB_H][FB_W];
       fb_reset();
-      br_draw_body(BR_YOU_BODY_X, BR_YOU_BODY_Y, key, frame, false, false, false);
+      br_draw_body(BR_YOU_BODY_X, BR_YOU_BODY_Y, key, frame, false, false, false, false);
       for (int y = 0; y < FB_H; ++y)
         for (int x = 0; x < FB_W; ++x) upright[y][x] = (uint8_t)fb_get(x, y);
       fb_reset();
-      br_draw_body(BR_YOU_BODY_X, BR_YOU_BODY_Y, key, frame, true, false, false);
+      br_draw_body(BR_YOU_BODY_X, BR_YOU_BODY_Y, key, frame, true, false, false, false);
       int mirror_diff = 0;
       for (int y = 0; y < FB_H; ++y)
         for (int x = 0; x < FB_W; ++x)
@@ -2649,6 +2874,132 @@ TEST(snapshot_battle_hit) {
   battle_leave();
 }
 
+// A PROTECT: the ward standing in front of the defender.
+//
+// WHY THIS FIXTURE IS NOT box_fixture(3). Species 1's learnset holds no
+// ATK_CAT_PROTECT move at all, so no practice battle between two of them can
+// ever reach an RLE_PROTECT beat - a sweep of four hundred seeds against the
+// shared fixture found none, which is exactly why the effect went five phases
+// without a picture. Species 2 knows Sandbox (attack id 31, ATK_EFF_PROTECT_HALF)
+// at learnset index 2, so the player can ASK for the beat rather than waiting
+// for the AI to hand it over, and the resulting golden is of a protect the test
+// caused on purpose.
+static void protect_fixture(void) {
+  memset(&g_gs, 0, sizeof g_gs);
+  box_bind(g_gs);
+  Genome gen;
+  memset(&gen, 0, sizeof gen);
+  gen.magic_ver  = GENOME_MAGIC_VER;
+  gen.lineage_id = 0x0BADF00Du;
+  gen.g0 = 0x1234u; gen.g1 = 0x5678u; gen.g2 = 0x9ABCu;
+  gen.generation = 3;
+  for (uint8_t i = 0; i < 3u; ++i) {
+    const uint8_t slot = box_new_pebble(2u, (uint8_t)(6u + i), ORIGIN_STARTER,
+                                        gen, 0xC0FFEEu + i, 1000u);
+    CHECK(slot != BOX_SLOT_NONE);
+  }
+  CHECK(box_set_active(0));
+  box_enter();
+}
+
+// Play to the first RLE_PROTECT beat, choosing Sandbox (learnset row 2) every
+// round. False when the battle ended first.
+static bool battle_to_protect(void) {
+  for (int g = 0; g < 4000; ++g) {
+    const uint8_t m = battle_screen_mode();
+    if (m == (uint8_t)BTM_RESULT) return false;
+    if (m == (uint8_t)BTM_RESOLVE) {
+      if (battle_screen_event() == (uint8_t)RLE_PROTECT) return true;
+      battle_input(GST_TAP_L);
+      continue;
+    }
+    if (m == (uint8_t)BTM_MENU) {
+      for (int t = 0; t < 2; ++t) battle_input(GST_TAP_L);
+    }
+    battle_input(GST_HOLD_R);
+  }
+  return false;
+}
+
+TEST(snapshot_battle_protect) {
+  seams2_reset();
+  protect_fixture();
+  battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E00u);
+  battle_enter();
+  battle_pick_team((uint8_t)BATTLE_TEAM_MAX);
+  battle_input(GST_HOLD_R);
+  CHECK(battle_to_protect());
+  CHECK_EQ(battle_screen_event(), (uint8_t)RLE_PROTECT);
+
+  // THE WARD IS ON THE CREATURE THAT ASKED FOR IT, and this is the check that
+  // an inverted comparison in fill_art() fails. The player is the one who chose
+  // Sandbox, so the barrier must stand in front of battle_screen_side() and in
+  // front of nobody else. Asserting only "exactly one is guarded" would pass
+  // with the ward drawn on the wrong creature in every protect in the game.
+  const uint8_t me = battle_screen_side();
+  CHECK_EQ(battle_screen_guard(me), 1u);
+  CHECK_EQ(battle_screen_guard((uint8_t)(me ^ 1u)), 0u);
+
+  // AND NEITHER PANEL EFFECT FIRED. A protect is the beat where nothing landed;
+  // borrowing rd_shake or rd_flash would tell the player the opposite.
+  const int shakes_before = g_shakes, flashes_before = g_flashes;
+  snapshot(SCR_BATTLE, "battle_protect");
+  CHECK_EQ(g_shakes, shakes_before);
+  CHECK_EQ(g_flashes, flashes_before);
+  battle_leave();
+}
+
+// The transcript, beat by beat, from the first to the last: a ward on exactly
+// one combatant at every RLE_PROTECT and on NEITHER at every other beat.
+//
+// This is the anti-vacuity half of the golden above. A single snapshot says
+// what one frame looks like; what makes the effect correct is that it is a
+// BEAT and not a status - protect_left keeps burning for two more rounds after
+// the arm, and a barrier that stayed up while the player chose their next move
+// would be a claim about a round that has not been played.
+TEST(the_ward_marks_one_combatant_on_protect_beats_and_nobody_on_the_others) {
+  seams2_reset();
+  protect_fixture();
+  battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E00u);
+  battle_enter();
+  battle_pick_team((uint8_t)BATTLE_TEAM_MAX);
+  battle_input(GST_HOLD_R);
+
+  int protects = 0, beats = 0, menus = 0;
+  for (int g = 0; g < 4000; ++g) {
+    const uint8_t m = battle_screen_mode();
+    if (m == (uint8_t)BTM_RESULT) break;
+    if (m == (uint8_t)BTM_RESOLVE) {
+      const int warded = (int)battle_screen_guard(0) + (int)battle_screen_guard(1);
+      const bool is_protect = (battle_screen_event() == (uint8_t)RLE_PROTECT);
+      if (warded != (is_protect ? 1 : 0)) {
+        fprintf(stderr, "  BATTLE beat %d: event %u has %d warded combatant(s), "
+                        "expected %d\n", beats, (unsigned)battle_screen_event(),
+                warded, is_protect ? 1 : 0);
+      }
+      CHECK_EQ(warded, is_protect ? 1 : 0);
+      if (is_protect) ++protects;
+      ++beats;
+      battle_input(GST_TAP_L);
+      continue;
+    }
+    if (m == (uint8_t)BTM_MENU) {
+      // The ward is OFF while the player is choosing, however much protect_left
+      // is still in the bank.
+      CHECK_EQ(battle_screen_guard(0), 0u);
+      CHECK_EQ(battle_screen_guard(1), 0u);
+      ++menus;
+      for (int t = 0; t < 2; ++t) battle_input(GST_TAP_L);
+    }
+    battle_input(GST_HOLD_R);
+  }
+  // "No beat was warded" must not be able to pass as "every beat was right".
+  CHECK(protects > 0);
+  CHECK(beats > protects);
+  CHECK(menus > 0);
+  battle_leave();
+}
+
 // A FAINT: the fallen body dissolved at 3/4 rather than deleted, so the
 // silhouette is still readable while the line says who it was.
 TEST(snapshot_battle_faint) {
@@ -2910,6 +3261,300 @@ TEST(the_encounter_transient_draws_all_four_outcomes_and_only_wild_can_be_steere
   CHECK_EQ(g_xp_src, 0xFF);
   CHECK_EQ(g_toast, (uint16_t)STR_ENC_NO_CLOCK);
   g_cal = (uint8_t)CAL_USER;
+}
+
+// =============================================================================
+//  THE TWO FILMS (P10-C3)
+//
+//  Spec section 22's item pickup and section 23's successful capture had no
+//  picture at all before this chunk. They are written in ui/screen_encounter.cpp
+//  - a PURE, host-linked translation unit - and not in ui/actfx.cpp, which
+//  includes render.h and is compiled by no binary here, so unlike actfx's seven
+//  these two can be snapshotted, bounded and interrupted under test.
+// =============================================================================
+
+// A caught wild Pebble. The roll and the device seed are the two numbers
+// game/capture.cpp mixes, and these two produce CAP_CAUGHT on the first throw;
+// the Box is empty, so nothing can refuse the file.
+static void caught_fixture(void) {
+  seams2_reset();
+  explore_reset();
+  memset(&g_gs, 0, sizeof g_gs);
+  box_bind(g_gs);
+  EncounterResult r;
+  memset(&r, 0, sizeof r);
+  r.outcome = (uint8_t)ENC_OUT_WILD; r.species_id = 1; r.level = 1;
+  encounter_arm(r, (uint8_t)NET_CAT_HOME);
+  inv_add(g_inv, 5u, 3u);
+  g_roll = 0x1000u;
+  g_dev  = 0xABCD0000u;
+  capture_enter();
+}
+
+static void item_fixture(uint8_t item_id) {
+  seams2_reset();
+  explore_reset();
+  EncounterResult r;
+  memset(&r, 0, sizeof r);
+  r.outcome = (uint8_t)ENC_OUT_ITEM; r.item_id = item_id;
+  encounter_arm(r, (uint8_t)NET_CAT_HOME);
+  encounter_enter();
+}
+
+// THE DROP, MID-CLIMB. The icon is crossing its own label here, which is the
+// frame that made the gfx_xbm()/gfx_xbm_t() divergence worth finding first: the
+// device's opaque blit would have punched a 12x12 hole through the name.
+TEST(snapshot_encounter_item_film) {
+  item_fixture(1u);                                   // Bit Dulce - XP_CANDY
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_ITEM_RISE);
+  // 450 ms: near the top of the climb, still crossing the label, and with the
+  // spark at three quarters of its reach. A film golden taken early enough that
+  // nothing has happened yet is a golden of the resting screen with an icon on
+  // it, which is what the second snapshot below is for.
+  g_now += 450u;
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_ITEM_RISE);
+  snapshot(SCR_ENCOUNTER, "encounter_item_film");
+  encounter_leave();
+}
+
+// And the same screen once the film has run out: the words alone, which is
+// what the player is left looking at. The pair is the point - a golden of a
+// film with no golden of its resting state cannot say what the film added.
+TEST(snapshot_encounter_item_settled) {
+  item_fixture(1u);
+  g_now += 4000u;                                     // long past the end
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
+  snapshot(SCR_ENCOUNTER, "encounter_item");
+  encounter_leave();
+}
+
+// THE CATCH, MID-DISSOLVE: the creature coming apart upward between four
+// brackets that have already closed.
+TEST(snapshot_capture_caught_pull) {
+  caught_fixture();
+  capture_input((Gesture)GST_HOLD_L);                 // throw
+  CHECK_EQ(capture_screen_outcome(), (uint8_t)CAP_CAUGHT);
+  // capture_input() cancels any film in flight before it acts - that is the
+  // skip contract - so the throw's own film is armed AFTER the cancel and is
+  // live here. Asserting it rather than assuming it: an ordering slip would
+  // leave every successful capture with no film at all and every golden below
+  // would still be a valid picture of the screen.
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_CAP_CLAMP);
+  g_now += 600u;
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_CAP_PULL);
+  snapshot(SCR_CAPTURE, "capture_caught_pull");
+  capture_leave();
+}
+
+// And the seal, which is the beat the film ends on: something arriving rather
+// than something gone.
+TEST(snapshot_capture_caught_seal) {
+  caught_fixture();
+  capture_input((Gesture)GST_HOLD_L);
+  g_now += 900u;
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_CAP_SEAL);
+  snapshot(SCR_CAPTURE, "capture_caught_seal");
+  capture_leave();
+}
+
+// -----------------------------------------------------------------------------
+//  THE INTERRUPTION CONTRACT (ui/actfx.h:88-93), DRIVEN.
+//
+//  actfx states this guarantee for its seven films and NOTHING IN THIS
+//  REPOSITORY ASSERTS IT, because ui/actfx.cpp is compiled by no host binary.
+//  These two films are the first whose bound can actually be checked, so it is.
+// -----------------------------------------------------------------------------
+
+// THE CLOCK ENDS IT, WITH NO CANCEL ANYWHERE. Not one input is delivered and
+// not one leave hook is called: the film simply runs out. If enc_film_phase()
+// ever grows a latch instead of being a pure function of (now - t0), this is
+// the case that fails.
+TEST(a_film_ends_by_the_clock_alone_even_though_nothing_cancels_it) {
+  item_fixture(1u);
+  CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
+  g_now += 979u;                                   // one millisecond short
+  CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
+  g_now += 1u;                                     // and exactly at the end
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
+  g_now += 100000u;
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
+
+  caught_fixture();
+  capture_input((Gesture)GST_HOLD_L);
+  CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
+  g_now += 1079u;
+  CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
+  g_now += 1u;
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
+  capture_leave();
+}
+
+// ANY GESTURE SKIPS IT, and the words arrive on the same frame. A player who
+// has pressed something has stopped watching.
+TEST(any_gesture_skips_a_film_and_the_screen_answers_at_once) {
+  static const Gesture kAll[] = { GST_TAP_L, GST_TAP_R, GST_HOLD_L, GST_HOLD_R,
+                                  GST_BOTH, GST_LONG_BOTH };
+  for (unsigned i = 0; i < sizeof(kAll) / sizeof(kAll[0]); ++i) {
+    item_fixture(1u);
+    CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
+    encounter_input(kAll[i]);
+    CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
+    encounter_leave();
+  }
+  // And leaving the screen ends it too, which is the third of the three
+  // independent bounds - on BOTH screens. Covering only ENCOUNTER here is what
+  // the mutation run found: deleting enc_film_cancel() from capture_leave()
+  // left every test green and slipped under the call-site gate, which counts
+  // and cannot see which function a call is in.
+  item_fixture(1u);
+  CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
+  encounter_leave();
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
+
+  caught_fixture();
+  capture_input((Gesture)GST_HOLD_L);
+  CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
+  capture_leave();
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
+
+  // ...and CAPTURE's every gesture skips it too. A film that only the ENCOUNTER
+  // screen could interrupt would leave the player watching a creature dissolve
+  // with both buttons dead.
+  for (unsigned i = 0; i < sizeof(kAll) / sizeof(kAll[0]); ++i) {
+    caught_fixture();
+    capture_input((Gesture)GST_HOLD_L);
+    CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
+    capture_input(kAll[i]);
+    CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
+    capture_leave();
+  }
+}
+
+// THE millis() WRAP. A film armed 40 ms before the wrap must measure 40 ms
+// after it and not 4,294,967,256 - which would end it instantly and, worse,
+// would end it instantly only once every 49.7 days.
+TEST(a_film_armed_before_the_millis_wrap_measures_forward_and_not_backward) {
+  // The fixture resets the clock, so the arm has to happen AFTER it is moved.
+  seams2_reset();
+  explore_reset();
+  EncounterResult r;
+  memset(&r, 0, sizeof r);
+  r.outcome = (uint8_t)ENC_OUT_ITEM; r.item_id = 1u;
+  encounter_arm(r, (uint8_t)NET_CAT_HOME);
+  g_now = 0xFFFFFFC0u;                    // 64 ms before the wrap
+  encounter_enter();                      // arms the film at that instant
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_ITEM_RISE);
+  g_now += 64u;                           // the wrap itself
+  CHECK_EQ(g_now, 0u);
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_ITEM_RISE);
+  g_now += 500u;                          // 564 ms in: past the climb
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_ITEM_SETTLE);
+  g_now += 500u;                          // 1064 ms in: over
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
+  encounter_leave();
+  g_now = 100000u;
+}
+
+// -----------------------------------------------------------------------------
+//  THE TWO BOUNDS ON THE PIXELS, both driven every 10 ms of both films.
+//
+//  (a) CONTAINMENT. Every pixel a film changes lies inside the content band.
+//      The header and the affordance strip are drawn by other modules on every
+//      frame, so a film reaching either would be scribbling on furniture - and
+//      it is the kind of defect that shows up as a flicker on hardware and as
+//      nothing at all in a single golden. This is the same shape
+//      tests/test_corruption.cpp asserts for the glitch rows: the check is on
+//      the PIXELS A PAINTER ACTUALLY TOUCHED, not on the five numbers it was
+//      handed.
+//
+//  (b) THE OVERLAY NEVER ERASES. The item film crosses its own label. Every
+//      pixel that is lit with the film cancelled must still be lit with the
+//      film running: the icon may ADD ink and may never take it away. That is
+//      exactly what gfx_xbm_t() buys and exactly what gfx_xbm() would break -
+//      and until P10-C3 the host fake drew both the same way, so this test
+//      could not have failed however wrong the call was.
+// -----------------------------------------------------------------------------
+static uint8_t g_base_fb[FB_H][FB_W];
+
+static void capture_base(void (*render)(void)) {
+  fb_reset();
+  render();
+  for (int y = 0; y < FB_H; ++y)
+    for (int x = 0; x < FB_W; ++x) g_base_fb[y][x] = (uint8_t)fb_get(x, y);
+}
+
+TEST(every_frame_of_both_films_stays_inside_the_content_band) {
+  int frames = 0, moved = 0;
+
+  // ITEM. The baseline is the same screen with the film already over.
+  item_fixture(1u);
+  const uint32_t t0_item = g_now;
+  g_now = t0_item + 5000u;                       // film over
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
+  capture_base(encounter_render);
+  for (uint32_t t = 0; t < 980u; t += 10u) {
+    g_now = t0_item + t;
+    fb_reset();
+    encounter_render();
+    CHECK_EQ(fb_oob(), 0u);
+    ++frames;
+    for (int y = 0; y < FB_H; ++y) {
+      for (int x = 0; x < FB_W; ++x) {
+        const uint8_t now = (uint8_t)fb_get(x, y);
+        if (now == g_base_fb[y][x]) continue;
+        ++moved;
+        if (y < (int)UI_CONTENT_Y || y > (int)UI_CONTENT_BOTTOM) {
+          fprintf(stderr, "  ITEM film t=%u: pixel (%d,%d) changed OUTSIDE the "
+                          "content band %d..%d\n", (unsigned)t, x, y,
+                  (int)UI_CONTENT_Y, (int)UI_CONTENT_BOTTOM);
+          CHECK(false);
+        }
+        // (b): the overlay may add ink and may never take it away.
+        if (g_base_fb[y][x] == 1u && now == 0u) {
+          fprintf(stderr, "  ITEM film t=%u: pixel (%d,%d) was ERASED - the "
+                          "overlay must not punch a hole in its own label\n",
+                  (unsigned)t, x, y);
+          CHECK(false);
+        }
+      }
+    }
+  }
+  encounter_leave();
+
+  // CAPTURE. Its film REPLACES the outcome line rather than overlaying it, so
+  // only the containment half applies; the baseline is the resolved screen.
+  caught_fixture();
+  capture_input((Gesture)GST_HOLD_L);
+  const uint32_t t0_cap = g_now;
+  g_now = t0_cap + 5000u;
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
+  capture_base(capture_render);
+  for (uint32_t t = 0; t < 1080u; t += 10u) {
+    g_now = t0_cap + t;
+    fb_reset();
+    capture_render();
+    CHECK_EQ(fb_oob(), 0u);
+    ++frames;
+    for (int y = 0; y < FB_H; ++y) {
+      for (int x = 0; x < FB_W; ++x) {
+        if ((uint8_t)fb_get(x, y) == g_base_fb[y][x]) continue;
+        ++moved;
+        if (y < (int)UI_CONTENT_Y || y > (int)UI_CONTENT_BOTTOM) {
+          fprintf(stderr, "  CAPTURE film t=%u: pixel (%d,%d) changed OUTSIDE "
+                          "the content band %d..%d\n", (unsigned)t, x, y,
+                  (int)UI_CONTENT_Y, (int)UI_CONTENT_BOTTOM);
+          CHECK(false);
+        }
+      }
+    }
+  }
+  capture_leave();
+
+  // ANTI-VACUITY. "Nothing moved outside the band" must not be able to pass
+  // because nothing moved at all.
+  CHECK_EQ(frames, 98 + 108);
+  CHECK(moved > 1000);
+  g_now = 100000u;
 }
 
 TEST(the_exploration_screens_render_without_drawing_off_the_panel) {

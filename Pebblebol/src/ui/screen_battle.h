@@ -239,4 +239,9 @@ uint8_t  battle_screen_lead_stage_left(uint8_t stat);
 // would put the round's final numbers under its opening event.
 uint16_t battle_screen_hp_shown(uint8_t side);
 
+// P10-C3: 1 while the transcript is on the RLE_PROTECT beat that named `side`.
+// The RENDERER's own answer, out of the same fill_art() br_draw_field() is
+// handed - not a re-derivation. 0 outside BTM_RESOLVE.
+uint8_t  battle_screen_guard(uint8_t side);
+
 #endif  // PB_SCREEN_BATTLE_H

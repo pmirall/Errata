@@ -125,4 +125,88 @@ uint8_t pf_build_lids(const uint8_t* bits, uint8_t w, uint8_t h,
                       uint8_t y0, uint8_t y1, uint8_t x0, uint8_t x1,
                       uint8_t* fill, uint8_t* lid);
 
+// =============================================================================
+//  pf_build_sleep - THE SLEEPING BODY, DERIVED (P10-C3).
+//
+//  THE PROBLEM PHASE 9 NAMED AND LEFT OPEN. data/sprites.h's sprite_set_id()
+//  answered POSE_SLEEP with ONE generic body for all sixty species, and SLEEP
+//  is not a film - pet_pose_of() returns it from PF_ASLEEP, it persists for
+//  hours, and it is drawn on HOME where the creature's silhouette is the ONLY
+//  thing distinguishing one player's Pebble from another's. So the pose a
+//  player stares at longest was the pose where every Pebble looked the same.
+//
+//  WHY IT IS DERIVED AND NOT DRAWN. Twenty families x two poses is 5,760 B of
+//  art, which fits the flash budget easily and does NOT fit either declared
+//  art cap (PB_SPRITE_DATA_BYTES_MAX has 1,024 B of headroom, exactly seven
+//  sets) - so it is a re-plan of both caps plus forty hand-drawn 24x24 bodies
+//  that a person has to look at one at a time. What is NOT expensive is this:
+//  every piece of the derivation already ships, is already host-linked and is
+//  already mutation-tested. A sleeping species is its own body with its eyes
+//  shut and its weight settled, and pf_build_lids() has closed eyes over the
+//  shipped atlas since P9-C6.
+//
+//  WHAT IT DOES, in the order it does it:
+//    1. THE EYES SHUT. pf_build_lids() over the same band the blink uses, its
+//       fill ORed in and its lash line cut out. Not a second rule: literally
+//       the function the blink calls, so a body that blinks correctly sleeps
+//       correctly and a body the generator marked "does not blink" (y1 < y0)
+//       simply keeps its eyes open and relies on step 2.
+//    2. THE WEIGHT SETTLES. The two topmost rows of ink are merged into one, so
+//       the creature is a pixel shorter without losing its outline - a squash,
+//       not a chop - and the bottom PF_SLEEP_SPREAD rows are dilated one column
+//       each way, so it splays where it meets the floor. ONE column and not
+//       two: ui/petfx.cpp's petfx_pose_ink_x() grows its answer by exactly one
+//       column in each direction to cover the walk's dilation copy, and a pose
+//       two columns wider than that would put a prop a pixel inside a body.
+//
+//  STEP 2 IS THE ONE THAT CARRIES IT, and that is deliberate.
+//  tests/test_sprite_pipeline.cpp already records that LEKRON's blink changes
+//  2 px of a 303 px body and is invisible at 1x. Two pixels is fine for a 90 ms
+//  blink and is NOT fine for a pose held for hours: a sleeping body identical
+//  to its idle body except for two pixels reads as broken plumbing, which is
+//  worse than a generic blob that at least reads as a sleeping lump. The squash
+//  is shape-independent, so it fires on every body whatever its face is like.
+//
+//  THE FLOOR IS THE FALSIFIABLE PART. The return value is the number of pixels
+//  that DIFFER from the source, and tests/test_sprite_pipeline.cpp requires
+//  every one of the sixty bodies, on both frames, to clear PF_SLEEP_MIN_DIFF.
+//  A body that cannot is not a body this derivation may be used on, and the
+//  owner step is to author a sleep set for it - which is what the seven sets of
+//  atlas headroom are for. THE BLINK TEST DELIBERATELY HAS NO SUCH FLOOR and
+//  says so; this one has, because the failure mode is different.
+//
+//  `out` must be at least pf_stride(w) * h bytes. Returns 0 - and leaves `out`
+//  untouched - for a blank frame or a frame larger than the cache geometry, in
+//  which case the caller falls back to the authored PBSPR_SLEEP body.
+//
+//  CONTAINMENT, which is what makes "not a mangled body" checkable: every lit
+//  pixel of `out` lies inside the source's own ink box grown by one column on
+//  each side and shrunk by one row at the top. Nothing is added below, nothing
+//  is added above, and the body cannot grow past its own sprite box.
+// =============================================================================
+#define PF_SLEEP_SPREAD    4     // bottom rows that dilate sideways
+
+// MEASURED OVER THE SHIPPED ATLAS AT P10-C3, NOT CHOSEN, and the measurement
+// changed the code rather than the other way round. The first settle spread
+// only PF_SLEEP_SPREAD = 2 rows and the sweep failed on ESTATIC at 7 px - an
+// aerial whose base is already fifteen pixels wide, so a one-row dilation had
+// almost nothing to add. Widening the settle to four rows took it to 13 and
+// took LEKRON - the body tests/test_sprite_pipeline.cpp names as the one whose
+// BLINK changes 2 px and is invisible at 1x - to 20 and 24. Both were looked at
+// with `./bin/sprite_dump sleep ESTATIC` and `... LEKRON` before the number
+// below was written down.
+//
+// So: the roster's smallest change is 13 px, the floor is 10, and a body that
+// falls under it FAILS THE SUITE BY NAME rather than shipping as a Pebble that
+// sleeps by changing nothing a player can see. Re-measure it if the art
+// changes; do NOT lower it to make a build pass. If a future body genuinely
+// cannot clear it, the owner step is to author a sleep set for it - the atlas
+// has 1,024 B of headroom, which is exactly seven sets, and that budget exists
+// for these exceptions.
+#define PF_SLEEP_MIN_DIFF  10
+
+uint16_t pf_build_sleep(const uint8_t* bits, uint8_t w, uint8_t h,
+                        uint8_t y0, uint8_t y1, uint8_t x0, uint8_t x1,
+                        uint8_t* out);
+
 #endif // PB_UI_PETFX_CORE_H

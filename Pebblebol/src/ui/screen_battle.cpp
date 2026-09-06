@@ -503,6 +503,12 @@ static void enter_beat(uint16_t i) {
   // edge and for the same reason: a beat is entered exactly once.
   if (k == RLE_HIT)   { ui_shake(1u, 120u); audio_play(SFX_BUZZ); }
   if (k == RLE_FAINT) { ui_flash(140u);     audio_play(SFX_FALL); }
+  // A PROTECT GETS A CUE AND NO PANEL EFFECT (P10-C3). rd_shake and rd_flash
+  // both say "something landed on you"; a ward is the beat where nothing did,
+  // so borrowing either would tell the player the opposite of what happened.
+  // The picture is br_draw_field()'s barrier and the sound is the short rising
+  // pair, which is this firmware's "something arrived" everywhere else.
+  if (k == RLE_PROTECT) { audio_play(SFX_CHIRP); }
 }
 
 static void advance_playback(void) {
@@ -978,10 +984,19 @@ static void fill_art(BattleCombatantArt& out, uint8_t side, bool at_beat) {
 
   // The impact frame. Only the combatant the CURRENT beat is about, and only
   // for the two events that are a blow landing.
+  //
+  // AND THE GUARD (P10-C3), on the same rule and from the same beat. RLE_PROTECT
+  // carries the PROTECTING side and its active slot (game/battle.cpp:647 and
+  // :865 - the arm and the tick-down), so unlike RLE_HIT this one matches
+  // `e->side == side` rather than differing from it. Getting that backwards
+  // would draw the ward in front of the wrong creature on every protect in the
+  // game, which is why the sweep in tests/test_battle_screen.cpp checks WHICH
+  // combatant is marked and not merely that one of them is.
   if (at_beat && s_ev_live && s_ev < s_log.count) {
     const BattleEvent* e = battle_log_at(s_log, s_ev);
     if (e && e->kind == RLE_HIT && e->side != side) out.struck = 1u;
     if (e && e->kind == RLE_DOT && e->side == side && e->slot == slot) out.struck = 1u;
+    if (e && e->kind == RLE_PROTECT && e->side == side && e->slot == slot) out.guard = 1u;
   }
 }
 
@@ -1329,4 +1344,18 @@ uint16_t battle_screen_hp_shown(uint8_t side) {
   const uint8_t slot = s_st.side[side].active;
   return (s_mode == BTM_RESOLVE) ? hp_at_beat(side, slot)
                                  : s_st.side[side].team[slot].hp_cur;
+}
+
+// WHICH COMBATANT IS WARDED THIS BEAT. It runs the REAL fill_art() rather than
+// re-deriving the rule, which is the whole point: a second copy of "which side
+// does RLE_PROTECT name" is exactly how a test comes to agree with itself and
+// disagree with the panel. Answers 0 outside the transcript, because the ward
+// is a beat and not a status - protect_left may still be burning while the
+// player is choosing a move, and drawing a barrier over the MENU would be a
+// claim about a round that has not been played.
+uint8_t battle_screen_guard(uint8_t side) {
+  if (side > 1u || s_mode != (uint8_t)BTM_RESOLVE) return 0u;
+  BattleCombatantArt a;
+  fill_art(a, side, true);
+  return a.guard;
 }

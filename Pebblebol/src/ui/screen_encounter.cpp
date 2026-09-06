@@ -15,6 +15,7 @@
 #include "../game/inventory.h"
 #include "../game/species.h"
 #include "../game/xp.h"
+#include "anim_ease.h"      // the film maths, lifted out of ui/actfx.cpp at P10-C3
 #include "gfx.h"
 #include "pet_art.h"          // pet_species_name(): the roster's own Spanish name
 #include "screen.h"
@@ -39,6 +40,288 @@ uint8_t encounter_screen_cursor(void)  { return s_cursor; }
 uint8_t capture_screen_mode(void)      { return s_mode; }
 uint8_t capture_screen_outcome(void)   { return s_out; }
 uint8_t capture_screen_item(void)      { return s_item; }
+
+// =============================================================================
+//  THE TWO FILMS. See screen_encounter.h for why they live here and what the
+//  interruption contract is.
+//
+//  CUMULATIVE MILLISECOND BOUNDARIES, NOT DURATIONS - ui/actfx.cpp's convention
+//  and for its reason: the draw code asks "where am I now", and a table of
+//  durations makes every such question a running sum that one edit puts out of
+//  step with the next.
+// =============================================================================
+#define ENC_ITEM_RISE_MS    520u    // the climb ends
+#define ENC_ITEM_END_MS     980u    // the whole item film ends
+#define ENC_CAP_CLAMP_MS    420u    // the brackets have closed
+#define ENC_CAP_PULL_MS     760u    // the body has gone
+#define ENC_CAP_END_MS     1080u    // the whole capture film ends
+
+// GEOMETRY. Everything either film draws is inside this box, which is the
+// content band and nothing else: the header owns rows 0..UI_HDR_H-1 and the
+// affordance strip owns UI_AFFORD_Y.., and a film that reached either would be
+// writing in furniture another module redraws every frame.
+#define ENC_STAGE_Y0   ((int16_t)UI_CONTENT_Y)
+#define ENC_STAGE_Y1   ((int16_t)UI_CONTENT_BOTTOM)
+
+#define ENC_ICON_W      12
+#define ENC_ICON_X     ((int16_t)((OLED_W - ENC_ICON_W) / 2))
+#define ENC_ICON_TOP    26          // where the drop finishes
+#define ENC_ICON_BOT    43          // where it starts, down on the name line
+
+#define ENC_BODY_W      24
+#define ENC_BODY_X     ((int16_t)((OLED_W - ENC_BODY_W) / 2))
+#define ENC_BODY_Y      22          // rows 22..45
+#define ENC_CLAMP_FAR    8          // how far out the brackets start
+#define ENC_CLAMP_NEAR   2          // where they stop
+#define ENC_CLAMP_ARM    5          // each bracket arm's length
+
+static_assert(ENC_ICON_TOP >= (int)UI_CONTENT_Y, "the drop starts in the header");
+static_assert(ENC_ICON_BOT + ENC_ICON_W - 1 <= (int)UI_CONTENT_BOTTOM,
+              "the drop starts under the affordance strip");
+static_assert(ENC_BODY_Y + ENC_BODY_W - 1 <= (int)UI_CONTENT_BOTTOM,
+              "the captured body would stand on the affordance strip");
+// THE BRACKETS ARE CHECKED AT THEIR WIDEST, NOT AT THEIR NEAREST, and that is
+// the whole value of these five lines. enc_px() clips, so a bracket that opened
+// past the band would simply lose its bottom arm on the first frames of every
+// capture and the golden would show a film that starts half-drawn - a defect
+// that looks like art. The vertical reach is the binding one: the body's box
+// ends at row ENC_BODY_Y + ENC_BODY_W - 1 and the affordance strip starts three
+// rows later.
+static_assert(ENC_BODY_Y - 1 - ENC_CLAMP_FAR >= (int)UI_CONTENT_Y,
+              "a bracket would open into the header");
+static_assert(ENC_BODY_Y + ENC_BODY_W + ENC_CLAMP_FAR <= (int)UI_CONTENT_BOTTOM,
+              "a bracket would open under the affordance strip");
+static_assert(ENC_BODY_X - 1 - ENC_CLAMP_FAR >= 0,
+              "a bracket would open off the left of the panel");
+static_assert(ENC_BODY_X + ENC_BODY_W + ENC_CLAMP_FAR < (int)OLED_W,
+              "a bracket would open off the right of the panel");
+static_assert(ENC_CLAMP_NEAR < ENC_CLAMP_FAR, "the brackets close the wrong way");
+
+// WHICH FILM AND WHEN IT STARTED. Two bytes and a word; there is no service()
+// hook and no per-frame state, because enc_film_phase() is a pure function of
+// (ui_now_ms() - s_film_t0) and cannot be left running by a call somebody
+// forgot to make.
+enum : uint8_t { ENC_F_NONE = 0, ENC_F_ITEM, ENC_F_CAP };
+static uint8_t  s_film    = ENC_F_NONE;
+static uint32_t s_film_t0 = 0;
+
+// UNSIGNED SUBTRACTION, so a film armed 40 ms before the millis() wrap measures
+// 40 ms after it and not 4,294,967,256. The same rule ui/actfx.cpp's af_t()
+// states; tests/test_screens.cpp drives a film across the wrap.
+static uint32_t enc_film_t(void) { return (uint32_t)(ui_now_ms() - s_film_t0); }
+
+static uint32_t enc_film_len(void) {
+  if (s_film == ENC_F_ITEM) return ENC_ITEM_END_MS;
+  if (s_film == ENC_F_CAP)  return ENC_CAP_END_MS;
+  return 0u;
+}
+
+static void enc_film_begin(uint8_t which) {
+  s_film    = which;
+  s_film_t0 = ui_now_ms();
+}
+
+void enc_film_cancel(void) { s_film = ENC_F_NONE; }
+
+uint8_t enc_film_phase(void) {
+  if (s_film == ENC_F_NONE) return (uint8_t)ENC_FILM_NONE;
+  const uint32_t t = enc_film_t();
+  if (t >= enc_film_len()) return (uint8_t)ENC_FILM_NONE;   // THE CLOCK ENDS IT
+  if (s_film == ENC_F_ITEM)
+    return (uint8_t)((t < ENC_ITEM_RISE_MS) ? ENC_FILM_ITEM_RISE
+                                            : ENC_FILM_ITEM_SETTLE);
+  if (t < ENC_CAP_CLAMP_MS) return (uint8_t)ENC_FILM_CAP_CLAMP;
+  if (t < ENC_CAP_PULL_MS)  return (uint8_t)ENC_FILM_CAP_PULL;
+  return (uint8_t)ENC_FILM_CAP_SEAL;
+}
+
+// -----------------------------------------------------------------------------
+//  THE ONE PIXEL WRITER, ui/actfx.cpp's rule in this screen's coordinates: sets,
+//  never clears, and clipped to the content band. Everything below that is not
+//  a whole-sprite blit goes through here, so no film can write in the header or
+//  under the affordance strip however wrong its arithmetic gets.
+// -----------------------------------------------------------------------------
+static void enc_px(int16_t x, int16_t y) {
+  if (x < 0 || x >= (int16_t)OLED_W)          return;
+  if (y < ENC_STAGE_Y0 || y > ENC_STAGE_Y1)   return;
+  gfx_pixel(x, y);
+}
+
+static void enc_hline(int16_t x, int16_t y, int16_t w) {
+  for (int16_t i = 0; i < w; ++i) enc_px((int16_t)(x + i), y);
+}
+
+static void enc_vline(int16_t x, int16_t y, int16_t h) {
+  for (int16_t i = 0; i < h; ++i) enc_px(x, (int16_t)(y + i));
+}
+
+// A dissolving sprite, transparent and clipped, drawn one pixel at a time.
+// This is the plan's "reuse the actfx pixel writer" read correctly: the MATHS
+// is shared (ae_dissolve_*), the WRITER is this screen's, because actfx's
+// clips to petfx's stage - furniture that does not exist here.
+static void enc_blit(int16_t x, int16_t y, const SpriteRef& r,
+                     uint8_t dir, uint8_t pct) {
+  if (!r.bits || r.w == 0u || r.h == 0u) return;
+  const int16_t front  = ae_dissolve_front(dir, r.h, pct);
+  const uint8_t stride = (uint8_t)((r.w + 7u) >> 3);
+  for (uint8_t rr = 0; rr < r.h; ++rr) {
+    const uint8_t* row = r.bits + (uint16_t)rr * (uint16_t)stride;
+    for (uint8_t cc = 0; cc < r.w; ++cc) {
+      if (((row[cc >> 3] >> (cc & 7u)) & 1u) == 0u) continue;
+      const int16_t sx = (int16_t)(x + (int16_t)cc);
+      const int16_t sy = (int16_t)(y + (int16_t)rr);
+      if (ae_dissolve_skip(dir, rr, front, sx, sy)) continue;
+      enc_px(sx, sy);
+    }
+  }
+}
+
+// Four short rays around a point - the spark. `reach` is how far out they go.
+static void enc_sparks(int16_t cx, int16_t cy, int16_t reach) {
+  if (reach <= 0) return;
+  for (int16_t i = 1; i <= reach; ++i) {
+    enc_px((int16_t)(cx - i), cy);
+    enc_px((int16_t)(cx + i), cy);
+    enc_px(cx, (int16_t)(cy - i));
+    enc_px(cx, (int16_t)(cy + i));
+  }
+}
+
+// One corner bracket, `d` pixels out from the body box. `sx`/`sy` are -1 or +1.
+static void enc_bracket(int16_t d, int8_t sx, int8_t sy) {
+  const int16_t x = (sx < 0) ? (int16_t)(ENC_BODY_X - 1 - d)
+                             : (int16_t)(ENC_BODY_X + ENC_BODY_W + d);
+  const int16_t y = (sy < 0) ? (int16_t)(ENC_BODY_Y - 1 - d)
+                             : (int16_t)(ENC_BODY_Y + ENC_BODY_W + d);
+  enc_hline((sx < 0) ? x : (int16_t)(x - ENC_CLAMP_ARM + 1), y, ENC_CLAMP_ARM);
+  enc_vline(x, (sy < 0) ? y : (int16_t)(y - ENC_CLAMP_ARM + 1), ENC_CLAMP_ARM);
+}
+
+// THE ITEM HAS NO ICON OF ITS OWN AND THAT IS A CONTENT FACT, NOT AN OVERSIGHT:
+// ItemDef is 8 B with a static_assert on its size (data/items_table.h) and
+// carries no art field, so there are ten items and no ten drawings. The CLASS
+// is what the player is being told - a sweet, a trap, a repair, a battle chip,
+// a key - and the icon atlas already has one of each. An item that ever wants
+// its own picture needs an ItemDef field and ITEM_COUNT drawings, which is a
+// content decision and not this chunk's.
+static uint8_t enc_item_icon(uint8_t item_id) {
+  const ItemDef* it = item_get(item_id);
+  if (it == nullptr) return (uint8_t)ICO_GEAR;
+  switch ((ItemKlass)it->klass) {
+    case ITEM_KLASS_XP_CANDY:   return (uint8_t)ICO_SNACK;
+    case ITEM_KLASS_CAPTURE:    return (uint8_t)ICO_BALL;
+    case ITEM_KLASS_CARE:       return (uint8_t)ICO_MED;
+    case ITEM_KLASS_EVOLUTION:  return (uint8_t)ICO_DNA;
+    default:                    return (uint8_t)ICO_GEAR;   // BATTLE_MOD
+  }
+}
+
+// -----------------------------------------------------------------------------
+//  THE ITEM PICKUP FILM. The drop climbs out of its own name line, arcs, and
+//  hangs sparking above it.
+//
+//  IT DRAWS THE ICON THROUGH gfx_xbm_t() AND THAT IS LOAD-BEARING. The icon
+//  crosses the item's name on the way up. The OPAQUE blit - which is what
+//  gfx_xbm() is and what the device has always done - would punch a 12x12 hole
+//  through the label on every frame of the climb. Until P10-C3 the host fake
+//  drew both transparently, so this defect would have shipped with a green
+//  golden that showed the picture the panel does not draw. See ui/gfx.h.
+// -----------------------------------------------------------------------------
+static void draw_item_film(void) {
+  const uint32_t t = enc_film_t();
+  const SpriteRef r = sprite_icon(enc_item_icon(s_enc.item_id));
+
+  // The climb: a straight lerp with a parabola laid over it, so it leaves fast
+  // and arrives slowly instead of sliding at one speed.
+  int16_t y = ae_lerp(t, ENC_ITEM_RISE_MS, (int16_t)ENC_ICON_BOT, (int16_t)ENC_ICON_TOP);
+  y = (int16_t)(y + ae_hop(t, ENC_ITEM_RISE_MS, 4));
+  if (t >= ENC_ITEM_RISE_MS) {
+    // The hang: a one-pixel bob so the drop is alive rather than parked.
+    y = (int16_t)((int16_t)ENC_ICON_TOP +
+                  ae_hop((uint32_t)(t - ENC_ITEM_RISE_MS),
+                         (uint32_t)(ENC_ITEM_END_MS - ENC_ITEM_RISE_MS), 2));
+  }
+  gfx_xbm_t(ENC_ICON_X, y, r.w, r.h, r.bits);
+
+  // The spark, only over the second half, growing and then shrinking with the
+  // same lunge shape a bite uses - out, hold, back.
+  const uint8_t pct = ae_pct(t, ENC_ITEM_RISE_MS / 2u, ENC_ITEM_END_MS);
+  const int16_t reach = ae_lunge(pct, 100u, 5u);
+  enc_sparks((int16_t)(ENC_ICON_X + ENC_ICON_W / 2),
+             (int16_t)(y + ENC_ICON_W / 2 - 8), reach);
+}
+
+// -----------------------------------------------------------------------------
+//  THE CAPTURE SUCCESS FILM. Four brackets close on the wild creature, the
+//  creature dissolves upward between them, and the brackets collapse onto a
+//  sealed marker.
+//
+//  THE DISSOLVE IS ui/actfx.cpp's, not a second one: ae_dissolve_front() and
+//  ae_dissolve_skip() are the two lines af_blit() open-coded, moved into
+//  ui/anim_ease.cpp at this chunk so both films and all seven of actfx's share
+//  one frontier. A creature that is being caught FADES BY LOSING PIXELS - it is
+//  never overprinted and never erased, because this panel is 1-bit and a
+//  colour-0 overprint would take the floor with it.
+// -----------------------------------------------------------------------------
+static void draw_capture_film(uint8_t frame) {
+  const uint32_t t = enc_film_t();
+  const uint8_t  phase = enc_film_phase();
+
+  // Where the brackets are, in pixels out from the body box.
+  int16_t d = ENC_CLAMP_NEAR;
+  if (phase == (uint8_t)ENC_FILM_CAP_CLAMP)
+    d = ae_lerp(t, ENC_CAP_CLAMP_MS, (int16_t)ENC_CLAMP_FAR, (int16_t)ENC_CLAMP_NEAR);
+
+  if (phase != (uint8_t)ENC_FILM_CAP_SEAL) {
+    // The creature, solid while the brackets close and dissolving while they
+    // hold. STAGE_BABY and POSE_IDLE for the same reason ui/battle_renderer.cpp
+    // passes them: a wild Pebble on this screen has no stage of its own to show
+    // and every body in the atlas is 24x24 since P9-C3.
+    const uint8_t key  = pet_art_key(s_enc.species_id, 0u);
+    const uint8_t set  = sprite_set_id((uint8_t)STAGE_BABY,
+                                       sprite_form_of(key, STAGE_BABY),
+                                       (uint8_t)POSE_IDLE);
+    const SpriteRef r  = sprite_frame(set, frame);
+    const uint8_t pct  = (phase == (uint8_t)ENC_FILM_CAP_PULL)
+                           ? ae_pct(t, ENC_CAP_CLAMP_MS, ENC_CAP_PULL_MS) : 0u;
+    // DOWNWARD, AND THE FIRST DRAFT HAD IT THE OTHER WAY. AE_DIS_UP eats a
+    // sprite from its bottom row upwards, and every body in the atlas is drawn
+    // standing on the bottom of its 24x24 box with an empty margin above it -
+    // so an upward dissolve took the whole creature away in the first fifth of
+    // the beat and left three hundred milliseconds of four brackets around
+    // nothing. It was recorded, looked at, and changed. Eating downward takes
+    // the head first and leaves the silhouette readable for most of the pull,
+    // which is the same argument ui/battle_renderer.cpp makes for dissolving a
+    // fainted body rather than deleting it.
+    enc_blit(ENC_BODY_X, (int16_t)ENC_BODY_Y, r,
+             (uint8_t)(pct ? AE_DIS_DOWN : AE_DIS_NONE), pct);
+  }
+
+  enc_bracket(d, -1, -1);
+  enc_bracket(d, +1, -1);
+  enc_bracket(d, -1, +1);
+  enc_bracket(d, +1, +1);
+
+  if (phase == (uint8_t)ENC_FILM_CAP_SEAL) {
+    // The seal: a marker at the centre with a ring pulsing out of it, so the
+    // beat ends on something arriving rather than on something gone.
+    const int16_t cx = (int16_t)(ENC_BODY_X + ENC_BODY_W / 2);
+    const int16_t cy = (int16_t)(ENC_BODY_Y + ENC_BODY_W / 2);
+    const uint8_t pct = ae_pct(t, ENC_CAP_PULL_MS, ENC_CAP_END_MS);
+    const int16_t rad = ae_lerp(pct, 100u, 1, 9);
+    enc_hline((int16_t)(cx - rad), (int16_t)(cy - rad), (int16_t)(rad * 2 + 1));
+    enc_hline((int16_t)(cx - rad), (int16_t)(cy + rad), (int16_t)(rad * 2 + 1));
+    enc_vline((int16_t)(cx - rad), (int16_t)(cy - rad), (int16_t)(rad * 2 + 1));
+    enc_vline((int16_t)(cx + rad), (int16_t)(cy - rad), (int16_t)(rad * 2 + 1));
+    enc_sparks(cx, cy, 3);
+  }
+}
+
+// The two-frame idle phase, the same one HOME and the battle field breathe on.
+static uint8_t enc_body_frame(void) {
+  return (uint8_t)((ui_now_ms() / UI_ANIM_FRAME_MS) & 1u);
+}
+
 
 void encounter_arm(const EncounterResult& r, uint8_t category)
 {
@@ -91,6 +374,10 @@ void encounter_enter(void)
     if (added == 0u) ui_toast(STR_ENC_BAG_FULL);
     ui_explore_commit();
     s_applied = 1u;
+    // THE FILM IS ARMED ONLY ON A DROP THAT LANDED. A full bag already raises a
+    // toast and adds nothing; playing the pickup over it would be the screen
+    // celebrating a reward the player did not get.
+    if (added != 0u) enc_film_begin(ENC_F_ITEM);
     return;
   }
 
@@ -113,10 +400,16 @@ void encounter_enter(void)
   }
 }
 
-void encounter_leave(void) { s_cursor = 0; }
+void encounter_leave(void) { s_cursor = 0; enc_film_cancel(); }
 
 void encounter_input(Gesture g)
 {
+  // ANY GESTURE SKIPS THE FILM. A player who has pressed something has stopped
+  // watching, and a screen that made them sit through an animation before it
+  // would answer is exactly the "no time-critical menus" rule of spec section
+  // 65 read backwards. The cancel is a courtesy, not the bound: see the
+  // contract in screen_encounter.h.
+  enc_film_cancel();
   if (g == (Gesture)GST_BOTH) { ui_help(STR_ENC_HELP); return; }
   if (s_enc.outcome != (uint8_t)ENC_OUT_WILD) return;   // nothing to steer
   if (g == (Gesture)GST_TAP_L) {
@@ -161,6 +454,10 @@ void encounter_render(void)
       const ItemDef* it = item_get(s_enc.item_id);
       gfx_text_center(GF_NARR, 24, S(STR_ENC_ITEM));
       gfx_text_center(GF_BODY, 38, it ? S(it->name_idx) : "?");
+      // THE FILM IS AN OVERLAY AND IT GOES LAST. The words are what the player
+      // needs and the picture is what makes the moment; drawing the icon first
+      // would put the label on top of it.
+      if (enc_film_phase() != (uint8_t)ENC_FILM_NONE) draw_item_film();
       gfx_affordance(nullptr, S(STR_AF_BACK));
       break;
     }
@@ -192,12 +489,13 @@ void encounter_render(void)
 // -----------------------------------------------------------------------------
 void capture_enter(void)
 {
+  enc_film_cancel();
   s_mode = (uint8_t)CSM_READY;
   s_out  = (uint8_t)CAP_ESCAPED;
   s_item = best_capture_item();
 }
 
-void capture_leave(void) { s_mode = (uint8_t)CSM_READY; }
+void capture_leave(void) { s_mode = (uint8_t)CSM_READY; enc_film_cancel(); }
 
 static void throw_once(void)
 {
@@ -223,12 +521,16 @@ static void throw_once(void)
     (void)inv_remove(ui_inventory(), s_item, 1u);
     s_item = best_capture_item();
   }
-  if (caught) ui_award_xp(XP_CAPTURE, (uint8_t)XP_SRC_CAPTURE);
+  if (caught) {
+    ui_award_xp(XP_CAPTURE, (uint8_t)XP_SRC_CAPTURE);
+    enc_film_begin(ENC_F_CAP);             // only a catch gets the film
+  }
   ui_explore_commit();
 }
 
 void capture_input(Gesture g)
 {
+  enc_film_cancel();                       // see encounter_input()
   if (g == (Gesture)GST_BOTH) { ui_help(STR_ENC_HELP); return; }
   if (g == (Gesture)GST_TAP_R) { ui_back(); return; }
 
@@ -247,6 +549,22 @@ void capture_input(Gesture g)
 void capture_render(void)
 {
   gfx_header(S(STR_CAP_TITLE), nullptr);
+
+  // THE CAPTURE FILM OWNS THE WHOLE CONTENT BAND, and that is arithmetic rather
+  // than taste. The band is rows 11..55; a 24 px body plus a bracket that opens
+  // ENC_CLAMP_FAR pixels clear of it on both sides needs 24 + 2*(1 + FAR) rows,
+  // which at FAR = 8 is 42 of the 45 there are. The first draft kept the
+  // species line at baseline 21 and the brackets drew straight through it -
+  // recorded, looked at, and changed. The name is on screen for the whole
+  // encounter before the throw and comes back with the result line one second
+  // later; what it is not is legible under a bracket.
+  if (enc_film_phase() != (uint8_t)ENC_FILM_NONE) {
+    draw_capture_film(enc_body_frame());
+    gfx_affordance(nullptr, S(STR_AF_BACK));
+    gfx_countdown(ui_idle_ms());
+    return;
+  }
+
   char row[ENC_ROW_CAP];
   wild_row(row, sizeof row);
   gfx_text_center(GF_BODY, 21, row);

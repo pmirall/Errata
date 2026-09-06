@@ -28,6 +28,7 @@
 //    ./bin/sprite_dump sheet OUT.pbm        contact sheet, frame 0 of every set
 //    ./bin/sprite_dump sheet OUT.pbm 1      contact sheet, frame 1
 //    ./bin/sprite_dump blink [NAME]         frame 0 | THE BLINK | frame 1
+//    ./bin/sprite_dump sleep [NAME]         frame 0 | THE SLEEPING BODY | diff
 //
 //  THE BLINK MODE IS NEW AT P9-C6 AND IT IS THE REASON THIS TOOL EXISTS,
 //  RESTATED. The frame a player sees while a pet blinks is in NEITHER authored
@@ -170,6 +171,55 @@ static void print_text(const Entry& e)
 //  blink ADDS and '-' one it takes away, so what the blink does is legible
 //  without diffing two pictures by eye.
 // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+//  THE DERIVED SLEEPING BODY (P10-C3), for the same reason the blink mode
+//  exists: it is composited at draw time and lives in NEITHER authored frame.
+//  All sixty species shared one authored sleeping blob until this chunk; the
+//  derivation keeps the silhouette and settles it. '+' is a pixel sleep ADDS,
+//  '-' one it takes away, and the count at the end of each line is what
+//  pf_build_sleep() returns - the number the floor in
+//  tests/test_sprite_pipeline.cpp is measured against.
+//
+//  NOTHING HERE ASSERTS. It answers the one question no assertion in this
+//  repository can: does this look like that creature, asleep?
+// -----------------------------------------------------------------------------
+static void print_sleep(const Entry& e)
+{
+  const SpriteSet& s = *e.set;
+  printf("== %s[%d] %s  sleep\n", e.atlas, e.index, e.name);
+  for (int f = 0; f < (int)s.frames; ++f) {
+    const SpriteEyeBand b = sprite_eyes((uint8_t)e.index, (uint8_t)f);
+    const int stride = ((int)s.w + 7) >> 3;
+    const uint8_t* bits = s.bits + (long)stride * s.h * f;
+    uint8_t out[PF_FRAME_BYTES];
+    const unsigned diff = pf_build_sleep(bits, s.w, s.h, b.y0, b.y1, b.x0, b.x1, out);
+    int ink = 0, slp = 0;
+    for (int y = 0; y < (int)s.h; ++y)
+      for (int x = 0; x < (int)s.w; ++x) {
+        ink += pixel_at(s, f, x, y);
+        slp += (out[y * stride + (x >> 3)] >> (x & 7)) & 1;
+      }
+    printf("   frame %d: %s, awake %d px, asleep %d px, changed %u px%s\n",
+           f, (b.y1 < b.y0) ? "no eye band - the squash carries it alone"
+                            : "eyes shut plus the squash",
+           ink, slp, diff, diff < (unsigned)PF_SLEEP_MIN_DIFF ? "  << UNDER THE FLOOR" : "");
+    printf("      frame %d                 ASLEEP\n", f);
+    for (int y = 0; y < (int)s.h; ++y) {
+      printf("      ");
+      for (int x = 0; x < (int)s.w; ++x) putchar(pixel_at(s, f, x, y) ? '#' : '.');
+      printf("   ");
+      for (int x = 0; x < (int)s.w; ++x) {
+        const int was = pixel_at(s, f, x, y);
+        const int now = (out[y * stride + (x >> 3)] >> (x & 7)) & 1;
+        if (now && !was)      putchar('+');
+        else if (!now && was) putchar('-');
+        else                  putchar(now ? '#' : '.');
+      }
+      putchar('\n');
+    }
+  }
+}
+
 static void print_blink(const Entry& e)
 {
   const SpriteSet& s = *e.set;
@@ -322,6 +372,17 @@ int main(int argc, char** argv)
     return 0;
   }
 
+  if (strcmp(cmd, "sleep") == 0) {
+    int hits = 0;
+    for (int i = 0; i < g_n; ++i)
+      if (argc < 3 || name_eq(argv[2], g_all[i].name)) { print_sleep(g_all[i]); ++hits; }
+    if (!hits) {
+      fprintf(stderr, "sprite_dump: no set named %s (try `list`)\n", argv[2]);
+      return 2;
+    }
+    return 0;
+  }
+
   if (strcmp(cmd, "sheet") == 0) {
     if (argc < 3) { fprintf(stderr, "sprite_dump: sheet needs an output path\n"); return 2; }
     const int frame = argc > 3 ? atoi(argv[3]) : 0;
@@ -331,6 +392,7 @@ int main(int argc, char** argv)
   fprintf(stderr,
           "usage: sprite_dump list\n"
           "       sprite_dump blink [NAME]\n"
+          "       sprite_dump sleep [NAME]\n"
           "       sprite_dump text [NAME|INDEX]\n"
           "       sprite_dump sheet OUT.pbm [FRAME]\n");
   return 2;

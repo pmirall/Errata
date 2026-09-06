@@ -241,6 +241,16 @@ inline constexpr uint8_t pb_spr_egg_crack[] = {
 // Frame 1 is a breath: the dome rises one row and the mouth opens one pixel each
 // way.  14 px of change, which is the quietest idle in the atlas, and correct -
 // a sleeping animal that twitches is not asleep.
+// P10-C3: THIS BODY IS NOW A FALLBACK AND ALMOST NOTHING DRAWS IT. A sleeping
+// Pebble is composited at draw time from its OWN species body -
+// ui/petfx_core.cpp's pf_build_sleep(), called from both of HOME's body paths
+// (ui/screen_home.cpp's still one and ui/petfx.cpp's animated one) - so the
+// roster keeps its silhouettes asleep instead of all sixty sharing this lump.
+// What is left here is the safety net: pf_build_sleep() refuses a blank frame or
+// one wider than the 24x24 cache, and this is what the caller falls back to. No
+// body in today's atlas takes that path and
+// tests/test_sprite_pipeline.cpp says so over all 120 (species, frame) pairs.
+// Look at the derived pose with `./bin/sprite_dump sleep NAME`.
 inline constexpr uint8_t pb_spr_sleep[] = {
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0xFF,
@@ -268,6 +278,23 @@ inline constexpr uint8_t pb_spr_sleep[] = {
 // advice on the body this chunk drew is the least it can do.
 // Frame 1 half-closes the eyes (a squint, never a shut eye - at a 50 % duty
 // cycle a fully shut eye reads as flicker) and drifts each speck one pixel.
+// P10-C3 LOOKED AT THIS AGAIN AND KEPT IT SHARED, DELIBERATELY. Its sister pose
+// went the other way: SLEEP is DERIVED from each species' own body now
+// (ui/petfx_core.cpp's pf_build_sleep - eyes shut with the blink's own routine,
+// the top two ink rows merged, the bottom four splayed), so a sleeping Pebble
+// keeps its silhouette. SICK cannot follow it, and the reason is that every
+// cheap derivation is already taken or already known bad:
+// * the squash IS the sleep pose, and also the landing and the yawn;
+// * an erase dither IS gene_pattern, and ui/petfx.cpp's PF_PAT_LEVEL banner
+// records that level 3 and above combs a body into a venetian blind;
+// * a one-row shear on the upper half is a new shape rule applied to sixty
+// drawings by five hands, and nothing in this repository can tell "slumped"
+// from "broken" - that judgement needs a person and one body at a time.
+// So this drawing stays, and the identity loss is accepted rather than denied.
+// THE OWNER STEP, priced: twenty family sick bodies (20 x 144 = 2,880 B), which
+// does NOT fit the 1,024 B the atlas has free - it is a re-plan of
+// PB_DATA_BYTES_MAX here and SPRITE_DATA_BYTES_MAX in data/sprites.h, plus a
+// contact sheet somebody looks at.
 inline constexpr uint8_t pb_spr_sick[] = {
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x00,
   0x80, 0x01, 0x00, 0x60, 0x00, 0x00, 0x1F, 0x00, 0xC0, 0x7F, 0x00, 0xE0, 0xFF, 0x00, 0xF0, 0xFF,

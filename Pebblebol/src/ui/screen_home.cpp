@@ -20,6 +20,8 @@
 #include "../game/genome.h"          // gene_species(): the art key's fallback
 #include "gfx.h"
 #include "pet_art.h"                 // pet_art_key(): species -> body
+#include "corrupt_fx.h"              // cfx_rows(): where the glitch may draw
+#include "petfx_core.h"              // pf_build_sleep(): the derived sleeping body
 #include "screen.h"
 #include "screen_view.h"
 #include "ui.h"
@@ -92,6 +94,73 @@ static void draw_meters(const PebbleView& v) {
 //  with the two-frame idle bob - so a headless build, and every golden
 //  snapshot, shows the Pebble where the device shows it.
 // -----------------------------------------------------------------------------
+// THE DERIVED SLEEPING FRAME, cached. 74 B of file scope rather than 74 B of
+// stack per render: the derivation is ~1,200 byte operations over a 24x24
+// frame, it only changes when the set or the frame does, and "no per-frame
+// heap" is a claim about this whole screen (ui/battle_renderer.cpp's mirror
+// scratch is the same argument). The key is (set, frame) + 1, so 0 means empty
+// and a memset of this file's statics cannot look like a valid cache.
+static uint8_t  s_sleep_bits[PF_FRAME_BYTES];
+static uint16_t s_sleep_key = 0;
+
+// Fill the cache for (set, frame) and answer 1 when there is a derived body to
+// draw. 0 means fall back to the authored PBSPR_SLEEP blob - a blank frame or a
+// set wider than the cache geometry, neither of which today's atlas contains.
+static uint8_t sleep_frame_of(uint8_t set, uint8_t frame) {
+  const uint16_t key = (uint16_t)(((uint16_t)set << 1) | (frame & 1u)) + 1u;
+  if (key == s_sleep_key) return 1u;
+  const SpriteSet   s = sprite_set(set);
+  const SpriteRef   r = sprite_frame(set, frame);
+  const SpriteEyeBand b = sprite_eyes(set, (uint8_t)(frame < s.frames ? frame : 0u));
+  if (pf_build_sleep(r.bits, r.w, r.h, b.y0, b.y1, b.x0, b.x1, s_sleep_bits) == 0u) {
+    s_sleep_key = 0;
+    return 0u;
+  }
+  s_sleep_key = key;
+  return 1u;
+}
+
+// -----------------------------------------------------------------------------
+//  THE CORRUPTION GLITCH, PAINTED (P10-C3).
+//
+//  ui/corrupt_fx.cpp has owned WHERE the glitch may draw since P9-C5 - the row
+//  count, each row's origin, width, Bayer level and phase, all clamped into the
+//  caller's rectangle, with tests/test_corruption.cpp asserting the containment
+//  on the pixels. What it has never had is a PICTURE: the only painter was in
+//  ui/petfx.cpp, which includes render.h and is compiled by no host binary, so
+//  a corrupted creature had never appeared in a golden and `./bin/corrupt_view`
+//  was the only way to look at one.
+//
+//  This is the second painter, on the still body path, and it is deliberately
+//  the SAME three lines: the ink box the body just drew, cfx_glitch_on() as the
+//  gate, cfx_rows() as the geometry, and gfx_dither_rect_phase() at GFX_XOR -
+//  which is exactly what render.h calls the shimmer and what petfx.cpp asks for.
+//  Nothing here has an opinion about the Bayer matrix or about when to fire.
+//
+//  THE RECTANGLE IS THE INK BOX AND NOT THE SPRITE BOX, for the reason
+//  corrupt_fx.h gives: a sprite box reaches down over the floor line, and noise
+//  on the floor is noise on furniture.
+// -----------------------------------------------------------------------------
+static void draw_glitch(int16_t x, int16_t y, const uint8_t* bits,
+                        uint8_t w, uint8_t h, uint32_t seed) {
+  const uint32_t now = ui_now_ms();
+  if (!cfx_glitch_on(now, seed)) return;
+  uint8_t t, b, l, r;
+  if (!pf_scan_ink(bits, w, h, &t, &b, &l, &r)) return;
+
+  CfxRect box;
+  box.x0 = (int16_t)(x + l); box.y0 = (int16_t)(y + t);
+  box.x1 = (int16_t)(x + r); box.y1 = (int16_t)(y + b);
+  CfxRow rows[CFX_ROWS_MAX];
+  const uint8_t n = cfx_rows(box, now, seed, rows);
+  if (n == 0u) return;
+  gfx_color(GFX_XOR);
+  for (uint8_t i = 0; i < n; ++i)
+    gfx_dither_rect_phase(rows[i].x, rows[i].y, (int16_t)rows[i].w, 1,
+                          rows[i].level, rows[i].phase);
+  gfx_color(GFX_DRAW);
+}
+
 static void draw_static_body(const PebbleView& v, uint8_t frame) {
   gfx_dither_rect(0, HOME_FLOOR_Y, OLED_W, 1, GFX_D50);
 
@@ -103,11 +172,35 @@ static void draw_static_body(const PebbleView& v, uint8_t frame) {
   // statement about the body the device draws and not about a second rule.
   const uint8_t key  = pet_art_key(v.species_id, gene_species(v.genome));
   const uint8_t form = sprite_form_of(key, (Stage)v.stage);
+
+  // SLEEP IS DERIVED FROM THE SPECIES BODY SINCE P10-C3, and it is derived on
+  // BOTH body paths. Phase 9 left all sixty species sharing one authored
+  // sleeping blob; ui/petfx_core.h says why deriving it beat drawing forty new
+  // sets. THE REASON IT IS HERE AND NOT ONLY IN ui/petfx.cpp IS THE WHOLE
+  // LESSON OF THE PHASE-9 BLINK: HOME has two body paths, the animated one in
+  // that device-only file and this still one, and this is the ONE a host binary
+  // and a golden can see. Deriving in only the animated path would make the
+  // device show a species while every snapshot in the suite kept showing the
+  // blob - and the suite would stay green. tools/check.sh gates both call
+  // sites.
+  if (v.stage != (uint8_t)STAGE_EGG && v.pose == (uint8_t)POSE_SLEEP) {
+    const uint8_t set = sprite_set_id(v.stage, form, (uint8_t)POSE_IDLE);
+    const SpriteSet s = sprite_set(set);
+    if (sleep_frame_of(set, frame)) {
+      const int16_t x = (int16_t)sprite_center_x(s.w);
+      const int16_t y = (int16_t)(HOME_FLOOR_Y - s.h);
+      gfx_xbm(x, y, s.w, s.h, s_sleep_bits);
+      if (v.corrupted) draw_glitch(x, y, s_sleep_bits, s.w, s.h, v.genome.lineage_id);
+      return;
+    }
+  }
+
   const SpriteRef r  = sprite_lookup_pose(v.stage, form, v.pose, frame);
   if (!r.bits || r.w == 0 || r.h == 0) return;
   const int16_t x = (int16_t)sprite_center_x(r.w);
   const int16_t y = (int16_t)(HOME_FLOOR_Y - r.h);
   gfx_xbm(x, y, r.w, r.h, r.bits);
+  if (v.corrupted) draw_glitch(x, y, r.bits, r.w, r.h, v.genome.lineage_id);
 }
 
 // -----------------------------------------------------------------------------

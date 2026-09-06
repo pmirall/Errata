@@ -324,6 +324,10 @@ static uint8_t  s_qry_form    = 0;
 // --- sprite cache: mirrored body + ink bounds + eyelid strips, per frame ---
 static uint8_t  s_cache_set   = 0xFF;
 static uint8_t  s_cache_mir   = 0xFF;
+// P10-C3: the third component of the cache key. A derived SLEEP frame and the
+// idle frame it is derived FROM have the same set id, so without this a pet
+// that fell asleep would keep whichever of the two the cache happened to hold.
+static uint8_t  s_cache_slp   = 0xFF;
 static uint8_t  s_cache_w     = 0;
 static uint8_t  s_cache_h     = 0;
 static uint8_t  s_cache_bits[2][PF_FRAME_BYTES];
@@ -461,49 +465,114 @@ static uint16_t pf_stretch(uint16_t ms) {
 //  Rebuilt only when the set or the orientation changes - a few times a
 //  minute, ~600 byte operations. Never in the steady-state frame path.
 // =============================================================================
-static void pf_cache_sync(uint8_t set_id, uint8_t mirrored) {
-  if (set_id == s_cache_set && mirrored == s_cache_mir) return;
+// `sleeping` asks for the DERIVED sleeping body rather than the frame as
+// authored: the species' own silhouette with its eyes shut and its weight
+// settled (ui/petfx_core.h). It is the third component of the cache key because
+// the derived frame and the frame it comes from share a set id.
+//
+// THE FALLBACK IS DECIDED ONCE FOR THE WHOLE SET AND NOT PER FRAME. A set whose
+// frame 0 cannot be derived - a blank frame, or one wider than the cache - uses
+// the authored PBSPR_SLEEP body for BOTH frames; deciding per frame would flip
+// between a species and a generic blob every UI_ANIM_FRAME_MS. No body in
+// today's atlas takes this path, and tests/test_sprite_pipeline.cpp is what
+// says so over all sixty.
+static void pf_cache_sync(uint8_t set_id, uint8_t mirrored, uint8_t sleeping) {
+  if (set_id == s_cache_set && mirrored == s_cache_mir && sleeping == s_cache_slp)
+    return;
 
-  const SpriteSet s = sprite_set(set_id);
-  const uint8_t   stride = pf_stride(s.w);
-  const uint16_t  fbytes = (uint16_t)stride * s.h;
+  // The band, in the orientation the cache holds. Shared by the derivation and
+  // by the lids, so the two cannot disagree about where the eyes are.
+  auto band_of = [&](uint8_t id, uint8_t frame, uint8_t w) {
+    SpriteEyeBand b = sprite_eyes(id, frame);
+    if (mirrored && b.y1 >= b.y0) {
+      const uint8_t nx0 = (uint8_t)(w - 1u - b.x1);
+      const uint8_t nx1 = (uint8_t)(w - 1u - b.x0);
+      b.x0 = nx0; b.x1 = nx1;
+    }
+    return b;
+  };
 
+  // THE KEY IS WHAT WAS ASKED FOR, not what ended up in the buffers: a set that
+  // cannot be derived falls back to the authored blob below, and recording the
+  // blob's id here would re-run the whole failed derivation on every frame.
   s_cache_set = set_id;
   s_cache_mir = mirrored;
-  s_cache_w   = s.w;
-  s_cache_h   = s.h;
+  s_cache_slp = sleeping;
 
-  for (uint8_t f = 0; f < 2; f++) {
-    const uint8_t  src_f = (uint8_t)((f < s.frames) ? f : 0u);
-    const uint8_t* src   = s.bits + (uint32_t)fbytes * src_f;
-    uint8_t*       dst   = s_cache_bits[f];
+  // TWO PASSES AT MOST, and the second only ever runs for a set the derivation
+  // refuses - a blank frame, or one wider than the cache. No body in today's
+  // atlas takes it and tests/test_sprite_pipeline.cpp says so over all sixty.
+  //
+  // THE FALLBACK IS DECIDED FOR THE WHOLE SET AND NOT PER FRAME: flipping
+  // between a species and a generic blob every UI_ANIM_FRAME_MS would be worse
+  // than either. So a refusal on ANY frame restarts the whole pass on
+  // PBSPR_SLEEP.
+  //
+  // THERE IS EXACTLY ONE pf_build_sleep() CALL IN THIS FILE AND THAT IS
+  // DELIBERATE. The first draft probed frame 0 before the loop and derived
+  // inside it, which is two call sites - and tools/check.sh's gate, which can
+  // only ask whether the function is CALLED here, was satisfied by the probe
+  // while the derivation that actually draws had been deleted. The mutation run
+  // found that: the device stopped deriving, the whole suite stayed green and
+  // the gate said GATE OK. One call site makes the gate exact.
+  uint8_t use_id = set_id;
+  uint8_t derive = sleeping;
+  for (uint8_t pass = 0; pass < 2u; ++pass) {
+    const SpriteSet s = sprite_set(use_id);
+    const uint8_t   stride = pf_stride(s.w);
+    const uint16_t  fbytes = (uint16_t)stride * s.h;
+    s_cache_w = s.w;
+    s_cache_h = s.h;
 
-    if (mirrored) xbm_mirror_frame(src, dst, s.w, s.h);
-    else          memcpy(dst, src, fbytes);
+    uint8_t refused = 0;
+    for (uint8_t f = 0; f < 2; f++) {
+      const uint8_t  src_f = (uint8_t)((f < s.frames) ? f : 0u);
+      const uint8_t* src   = s.bits + (uint32_t)fbytes * src_f;
+      uint8_t*       dst   = s_cache_bits[f];
 
-    if (!pf_scan_ink(dst, s.w, s.h, &s_ink_t[f], &s_ink_b[f], &s_ink_l[f], &s_ink_r[f])) {
-      s_ink_t[f] = 0; s_ink_b[f] = (uint8_t)(s.h - 1u);
-      s_ink_l[f] = 0; s_ink_r[f] = (uint8_t)(s.w - 1u);
-    }
+      if (mirrored) xbm_mirror_frame(src, dst, s.w, s.h);
+      else          memcpy(dst, src, fbytes);
 
-    s_lid_h[f] = 0;
-    s_lid_y[f] = 0;
-    // The band comes out of the atlas beside the pixels. `y1 < y0` is the
-    // generator's way of saying THIS BODY DOES NOT BLINK - a body with no
-    // enclosed hole in its upper face - and pf_build_lids() already answers 0
-    // for it, so there is no extra branch here.
-    {
-      const SpriteEyeBand b = sprite_eyes(set_id, src_f);
-      uint8_t x0 = b.x0, x1 = b.x1;
-      if (mirrored) {                       // the window mirrors with the art
-        const uint8_t nx0 = (uint8_t)(s.w - 1u - b.x1);
-        const uint8_t nx1 = (uint8_t)(s.w - 1u - b.x0);
-        x0 = nx0; x1 = nx1;
+      const SpriteEyeBand b = band_of(use_id, src_f, s.w);
+
+      if (derive) {
+        // THE SAME pf_build_sleep() ui/screen_home.cpp's still body path calls,
+        // over the same atlas, with the same band. Two derivations would be two
+        // sleeping bodies and only one of them would ever appear in a golden.
+        uint8_t tmp[PF_FRAME_BYTES];
+        if (s.w > PF_MAX_W || s.h > PF_MAX_H ||
+            pf_build_sleep(dst, s.w, s.h, b.y0, b.y1, b.x0, b.x1, tmp) == 0u) {
+          refused = 1;
+          break;
+        }
+        memcpy(dst, tmp, fbytes);
       }
-      s_lid_y[f] = b.y0;
-      s_lid_h[f] = pf_build_lids(dst, s.w, s.h, b.y0, b.y1, x0, x1,
-                                 s_lid_fill[f], s_lid_cut[f]);
+
+      if (!pf_scan_ink(dst, s.w, s.h, &s_ink_t[f], &s_ink_b[f], &s_ink_l[f], &s_ink_r[f])) {
+        s_ink_t[f] = 0; s_ink_b[f] = (uint8_t)(s.h - 1u);
+        s_ink_l[f] = 0; s_ink_r[f] = (uint8_t)(s.w - 1u);
+      }
+
+      s_lid_h[f] = 0;
+      s_lid_y[f] = 0;
+      // The band comes out of the atlas beside the pixels. `y1 < y0` is the
+      // generator's way of saying THIS BODY DOES NOT BLINK - a body with no
+      // enclosed hole in its upper face - and pf_build_lids() already answers 0
+      // for it, so there is no extra branch here.
+      //
+      // A SLEEPING BODY BUILDS NO LIDS AT ALL: its eyes are already shut in the
+      // cached frame, and petfx_draw_body()'s `no_eyes` suppresses the blink on
+      // PF_ASLEEP anyway. Building them would be work with two ways to be wrong
+      // and no way to be seen.
+      if (!derive) {
+        s_lid_y[f] = b.y0;
+        s_lid_h[f] = pf_build_lids(dst, s.w, s.h, b.y0, b.y1, b.x0, b.x1,
+                                   s_lid_fill[f], s_lid_cut[f]);
+      }
     }
+    if (!refused) return;
+    use_id = (uint8_t)PBSPR_SLEEP;
+    derive = 0;
   }
 }
 
@@ -699,6 +768,7 @@ void petfx_begin(void) {
   s_began      = 1;
   s_cache_set  = 0xFF;
   s_cache_mir  = 0xFF;
+  s_cache_slp  = 0xFF;
   s_state      = PF_STAND;
   s_state_len  = 900;
   s_x_q4       = (int32_t)((OLED_W - 32) / 2) * 16;
@@ -752,6 +822,7 @@ void petfx_reset(const PetView& p) {
   s_last_input  = s_now;
   s_cache_set   = 0xFF;          // the body probably changed too
   s_cache_mir   = 0xFF;
+  s_cache_slp   = 0xFF;
   pf_enter(PF_STAND, 700);
   pf_schedule_blink();
 }
@@ -958,6 +1029,7 @@ void petfx_draw_body(const PetView& p, uint8_t pose, uint8_t frame, int16_t dy,
   const uint8_t pinned  = (uint8_t)(no_face || s_freeze);
 
   uint8_t set_id;
+  uint8_t sleeping = 0;
   if (p.stage == STAGE_EGG) {
     // Same rule ui.cpp uses, kept in sync deliberately: the egg starts
     // cracking a minute before it hatches.
@@ -973,13 +1045,21 @@ void petfx_draw_body(const PetView& p, uint8_t pose, uint8_t frame, int16_t dy,
     s_qry_stage   = p.stage;
     s_qry_form    = p.form;
     s_qry_ok      = 1;
-    set_id = sprite_set_id(s_qry_stage, s_qry_form, pose);
+    // SLEEP IS DERIVED FROM THE SPECIES BODY SINCE P10-C3 (ui/petfx_core.h), so
+    // the set asked for is the IDLE one and pf_cache_sync() composites the pose.
+    // ui/screen_home.cpp's still body path does exactly the same thing, and
+    // tools/check.sh gates both call sites: deriving on only one of HOME's two
+    // body paths is how the device and every golden in the suite come to show
+    // two different creatures with the build green.
+    sleeping = (uint8_t)((pose == (uint8_t)POSE_SLEEP) ? 1u : 0u);
+    set_id = sprite_set_id(s_qry_stage, s_qry_form,
+                           sleeping ? (uint8_t)POSE_IDLE : pose);
   }
   if (p.stage == STAGE_EGG) s_qry_ok = 0;   // an egg has no poses to ask about
 
   // no_face, not pinned: a frozen pet keeps whatever way it is facing.
   const uint8_t mirrored = (uint8_t)((!no_face && s_facing > 0) ? 1u : 0u);
-  pf_cache_sync(set_id, mirrored);
+  pf_cache_sync(set_id, mirrored, sleeping);
 
   const uint8_t w      = s_cache_w;
   const uint8_t h      = s_cache_h;
@@ -1358,6 +1438,17 @@ void petfx_pose_ink_x(uint8_t pose, int16_t* x0, int16_t* x1) {
     // x-1 or x+1 depending on the facing and on whether the stage edge flipped
     // it, and the clear box covers whichever it was; guessing which costs a
     // column of gap if it is wrong and a hole in the prop if it is not.
+    //
+    // AND IT IS WHY THE DERIVED SLEEP NEEDED NO CHANGE HERE (P10-C3). This
+    // function is asked about a pose by name and answers from the AUTHORED set
+    // - for POSE_SLEEP that is still the PBSPR_SLEEP blob, not the composited
+    // body. The derived sleeping body is the IDLE body splayed by exactly one
+    // column on each side (ui/petfx_core.h: PF_SLEEP_SPREAD dilates by one, and
+    // one is chosen to match this line), and callers take the maximum over the
+    // poses a stage can reach, POSE_IDLE included. So the span this returns
+    // already contains the sleeping body's. Widen PF_SLEEP_SPREAD's dilation to
+    // two columns and that stops being true, which is the reason it is written
+    // down in both files rather than in neither.
     lo = (int16_t)(lo - 1);
     hi = (int16_t)(hi + 1);
   }

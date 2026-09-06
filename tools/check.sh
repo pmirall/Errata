@@ -1270,8 +1270,13 @@ fi
 # that CLAIMED it was host-testable, no host binary ever compiled it, and the
 # blink it composites was drawing over four species' bodies while every byte
 # check in the tree passed. It is the guarded file now, so it stays linkable.
+# P10-C3 adds ui/anim_ease.{h,cpp} - the parabola, the lunge, the lerp, the
+# window and the dissolve frontier that SEVEN SHIPPED FILMS have run on since
+# P6-C3 and that no host binary had ever compiled, because they were `static`
+# inside ui/actfx.cpp. The first run of tests/test_anim.cpp found a documented
+# invariant that was false and a uint32_t overflow; both are in the commit.
 if [ -f "$SKETCH/src/ui/corrupt_fx.cpp" ]; then
-  for f in corrupt_fx.h corrupt_fx.cpp petfx_core.h petfx_core.cpp; do
+  for f in corrupt_fx.h corrupt_fx.cpp petfx_core.h petfx_core.cpp anim_ease.h anim_ease.cpp; do
     n=$( { grep -nE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*(Arduino\.h|u8g2|U8g2|render\.h|gfx\.h|petfx\.h|pet_view\.h)' \
             "$SKETCH/src/ui/$f" || true; } | wc -l )
     [ "$n" -eq 0 ] || fail "ui/$f includes a renderer or device header ($n) - it exists to be host-linkable (ui/corrupt_fx.h, ui/petfx_core.h)"
@@ -1517,6 +1522,100 @@ if [ -f "$SKETCH/src/hardware/audio.cpp" ]; then
   [ "${n:-0}" -ge 1 ] || fail "cfg_sound_muted() has NO caller in src/app ($n) - the persisted CF_MUTE would stop reaching the piezo and no host test could see it (core/nt_types.h, tests/test_sound.cpp)"
   n=$( printf '%s\n' "$app_txt" | { grep -cE '\baudio_bind[[:space:]]*\([^)]' || true; } )
   [ "${n:-0}" -ge 1 ] || fail "audio_bind() has NO caller in src/app ($n) - the tone engine would run with no sink and no mute hook (hardware/audio.h)"
+fi
+
+# --- P10-C3: THE ANIMATION PASS, SIX GATES ----------------------------------
+#
+# THE ONE THAT MATTERS MOST IS (2). Everything else here is presence; that one
+# is the shape of the phase-9 defect, which cost four species a visible body on
+# HOME because a rule lived where no host binary could execute it.
+if [ -f "$SKETCH/src/ui/anim_ease.cpp" ]; then
+  if command -v cpp >/dev/null 2>&1; then
+    strip_comments7() { cpp -fpreprocessed -dD -E -P - 2>/dev/null; }
+  else
+    strip_comments7() { sed 's://.*::'; }
+  fi
+
+  # 1. ONE COPY OF THE MOTION MATHS. ui/actfx.cpp's af_hop/af_lunge/af_lerp/
+  #    af_pct are one-line forwards into ui/anim_ease.cpp now. If somebody
+  #    re-opens one of them the firmware still builds, the suite still passes,
+  #    and the seven films silently stop being the thing tests/test_anim.cpp
+  #    drives - so the arithmetic is required to be a forward and nothing else.
+  af_txt=$( strip_comments7 < "$SKETCH/src/ui/actfx.cpp" )
+  for fn in ae_hop ae_lunge ae_lerp ae_pct; do
+    n=$( printf '%s\n' "$af_txt" | { grep -cE "\\b${fn}[[:space:]]*\\(" || true; } )
+    [ "${n:-0}" -ge 1 ] || fail "ui/actfx.cpp no longer calls ${fn}() ($n) - the motion maths would be a second copy again and tests/test_anim.cpp would be driving code no film runs (ui/anim_ease.h)"
+  done
+  # ...and the Bayer table it used to own must not come back beside the one in
+  # ui/anim_ease.cpp: two dither matrices is how two effects come to shimmer
+  # against each other.
+  n=$( printf '%s\n' "$af_txt" | { grep -cE '\bAF_BAYER\b' || true; } )
+  [ "${n:-0}" -eq 0 ] || fail "ui/actfx.cpp has its own Bayer matrix again ($n) - ui/anim_ease.cpp owns the only one (ae_bayer)"
+
+  # 2. THE DERIVED SLEEPING BODY IS DERIVED ON BOTH OF HOME'S BODY PATHS.
+  #
+  #    HOME draws its creature two ways: ui/petfx.cpp's animated automaton on
+  #    the device, and ui/screen_home.cpp's still draw_static_body() - which is
+  #    the ONLY one a host binary compiles and the only one any golden shows.
+  #    Deriving the pose in just one of them leaves the device showing a species
+  #    while every snapshot in the suite shows the authored blob, WITH THE BUILD
+  #    AND THE WHOLE SUITE GREEN. That is exactly the phase-9 blink defect, and
+  #    the only thing that can see it from outside is this.
+  for f in petfx.cpp screen_home.cpp; do
+    n=$( strip_comments7 < "$SKETCH/src/ui/$f" | { grep -cE '\bpf_build_sleep[[:space:]]*\([^)]' || true; } )
+    [ "${n:-0}" -ge 1 ] || fail "ui/$f does not call pf_build_sleep() ($n) - HOME has TWO body paths and deriving the sleeping pose on only one shows the device a species and every golden a blob, with the suite green (ui/petfx_core.h)"
+  done
+
+  # 3. THE GLITCH IS PAINTED WHERE A GOLDEN CAN SEE IT. Same argument. P9-C5
+  #    shipped cfx_rows() with nineteen host tests on its geometry and its only
+  #    painter in ui/petfx.cpp, so no snapshot in this repository had ever drawn
+  #    a corrupted creature. ui/screen_home.cpp is the second painter.
+  n=$( strip_comments7 < "$SKETCH/src/ui/screen_home.cpp" | { grep -cE '\bcfx_rows[[:space:]]*\([^)]' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "ui/screen_home.cpp does not call cfx_rows() ($n) - the corruption glitch would again be painted only in ui/petfx.cpp, which no host binary compiles and no golden covers (ui/corrupt_fx.h)"
+
+  # 4. BOTH BLITS EXIST IN BOTH BACKENDS. The device's gfx_xbm() is OPAQUE
+  #    (setBitmapMode(0), ui/render.cpp:368) and the host fake drew only the
+  #    1-bits until P10-C3, so the two disagreed about every blit in the
+  #    firmware for five phases and nothing could see it. A backend that loses
+  #    gfx_xbm_t() would send every film back through the opaque one and start
+  #    punching holes in whatever it crosses.
+  for f in "$SKETCH/src/ui/gfx_u8g2.cpp" "$ROOT/tests/fakes/gfx_fb.cpp"; do
+    n=$( strip_comments7 < "$f" | { grep -cE '\bgfx_xbm_t[[:space:]]*\(' || true; } )
+    [ "${n:-0}" -ge 1 ] || fail "$(basename "$f") does not implement gfx_xbm_t() ($n) - the transparent blit is half of the drawing seam and a film without it erases what it crosses (ui/gfx.h)"
+    n=$( strip_comments7 < "$f" | { grep -cE '\bgfx_dither_rect_phase[[:space:]]*\(' || true; } )
+    [ "${n:-0}" -ge 1 ] || fail "$(basename "$f") does not implement gfx_dither_rect_phase() ($n) - ui/corrupt_fx.cpp's rows carry a phase and a backend that ignores it draws a constant instead of a shimmer (ui/gfx.h)"
+  done
+  # And the DEVICE side must actually flip the bitmap mode: forwarding
+  # gfx_xbm_t() to a plain drawXBM under render.cpp's setBitmapMode(0) would
+  # compile, link, ship, and be opaque.
+  n=$( strip_comments7 < "$SKETCH/src/ui/gfx_u8g2.cpp" | { grep -cE 'setBitmapMode[[:space:]]*\([[:space:]]*1' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "ui/gfx_u8g2.cpp never sets setBitmapMode(1) ($n) - gfx_xbm_t() would be opaque on the panel and transparent in every golden (ui/gfx.h)"
+
+  # 5. THE TWO NEW FILMS ARE BOUNDED BY THE CLOCK AND NOT BY A CANCEL.
+  #    ui/actfx.h:88-93's contract, and this is the first time it is checkable:
+  #    enc_film_phase() must be reached from the render hooks, and the screen
+  #    must still cancel on input and on leave. A film whose only bound was a
+  #    cancel is a screen nailed to an animation until power-cycle.
+  enc_txt=$( strip_comments7 < "$SKETCH/src/ui/screen_encounter.cpp" )
+  n=$( printf '%s\n' "$enc_txt" | { grep -cE '\benc_film_phase[[:space:]]*\(' || true; } )
+  [ "${n:-0}" -ge 3 ] || fail "ui/screen_encounter.cpp reaches enc_film_phase() only $n time(s) - both render hooks and the phase query need it, or a film draws with nothing deciding whether it is over (ui/screen_encounter.h)"
+  #    THE COUNT IS FIVE AND IT IS EXACT: encounter_input, capture_input,
+  #    encounter_leave, capture_leave and capture_enter. It was written >= 4 and
+  #    the mutation run walked straight through it - deleting the cancel from
+  #    capture_leave() left four and passed. A count gate cannot see WHICH
+  #    function a call sits in, so the real cover is
+  #    any_gesture_skips_a_film_and_the_screen_answers_at_once, which drives all
+  #    six gestures on both screens and both leave hooks; this is the backstop
+  #    that says the call sites still exist at all.
+  n=$( printf '%s\n' "$enc_txt" | { grep -cE '\benc_film_cancel[[:space:]]*\(' || true; } )
+  [ "${n:-0}" -ge 5 ] || fail "ui/screen_encounter.cpp calls enc_film_cancel() only $n time(s), not the 5 it needs - both input hooks, both leave hooks and capture_enter must skip a film in flight (ui/screen_encounter.h)"
+
+  # 6. NO HOST TEST MAY ASSERT THE SLEEP FLOOR AGAINST A LITERAL. The floor is
+  #    PF_SLEEP_MIN_DIFF and it is measured; a test that hard-coded 10 would
+  #    keep passing when somebody moved the constant to make a build green,
+  #    which is the one failure mode a measured threshold has.
+  n=$( { grep -rn 'PF_SLEEP_MIN_DIFF' "$ROOT/tests/test_sprite_pipeline.cpp" || true; } | wc -l )
+  [ "${n:-0}" -ge 3 ] || fail "tests/test_sprite_pipeline.cpp names PF_SLEEP_MIN_DIFF only $n time(s) - the sleep floor must be asserted through the constant, not against a literal (ui/petfx_core.h)"
 fi
 
 echo "GATE OK"

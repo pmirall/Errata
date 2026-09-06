@@ -121,8 +121,36 @@ void gfx_vline(int16_t x, int16_t y, int16_t h);
 void gfx_rect(int16_t x, int16_t y, int16_t w, int16_t h);   // 1 px outline
 void gfx_fill(int16_t x, int16_t y, int16_t w, int16_t h);   // solid box
 
-// XBM bitmap, LSB-first rows padded to whole bytes (the sprites.h layout).
+// -----------------------------------------------------------------------------
+//  XBM bitmap, LSB-first rows padded to whole bytes (the sprites.h layout).
+//
+//  THERE ARE TWO OF THESE AND THE DIFFERENCE IS NOT COSMETIC. It was found at
+//  P10-C3, before a single new film was written, and it had been latent since
+//  the seam was cut at P2-C11:
+//
+//    gfx_xbm()   OPAQUE.  Every pixel of the w*h box is written: the 1-bits in
+//                the current draw colour and the 0-BITS IN THE INVERSE. A blit
+//                over existing ink ERASES a w*h hole and then draws into it.
+//                This is what the device has always done - ui/render.cpp:368
+//                puts the panel in setBitmapMode(0) and hands it back that way
+//                after every exception (ui/ui.cpp:790, ui/petfx.cpp:1306) - and
+//                it is what ui/screen_menu.cpp:70 already knew and said.
+//    gfx_xbm_t() TRANSPARENT. Only the 1-bits are written; the 0-bits leave
+//                whatever was underneath alone. setBitmapMode(1) on the device.
+//
+//  THE HOST FAKE IMPLEMENTED THE TRANSPARENT RULE FOR BOTH UNTIL P10-C3, so
+//  the two backends disagreed and nothing in the tree could see it. It was
+//  unobserved only by luck of composition: every one of the thirteen call
+//  sites at that commit drew either onto blank ground, or (ui/dialog.cpp:130)
+//  in GFX_ERASE onto a solid slab where the inverse colour is 1 and the slab
+//  was already 1. THIS CHUNK ENDS THAT LUCK - every film it adds draws a
+//  sprite ON TOP OF the body, the floor or a filled panel - so the seam is
+//  explicit now and tests/test_screens.cpp asserts both behaviours by name.
+//  Pick deliberately: a badge on empty background is fine either way, a sprite
+//  over ink is not.
+// -----------------------------------------------------------------------------
 void gfx_xbm(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t* bits);
+void gfx_xbm_t(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t* bits);
 
 // =============================================================================
 //  TEXT. UTF-8 in, advance width out (0 when nothing was drawn).
@@ -146,6 +174,18 @@ uint8_t  gfx_text_wrap(GfxFont f, int16_t x, int16_t y, int16_t w,
 
 // n/16 of the pixels, 4x4 ordered Bayer, honouring the current draw colour.
 void gfx_dither_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t level);
+
+// The same, with the matrix SLID: the low 2 bits of `phase` shift the column
+// and the next 2 the row, exactly as render.h's rd_dither_rect_phase() defines
+// it. gfx_dither_rect() is gfx_dither_rect_phase(..., 0).
+//
+// IT IS HERE BECAUSE ui/corrupt_fx.cpp's CfxRow CARRIES A PHASE and, until
+// P10-C3, the only painter that honoured it was ui/petfx.cpp - a translation
+// unit no host binary compiles. So the corruption glitch had geometry the suite
+// could drive and a PICTURE nothing had ever drawn. ui/screen_home.cpp paints
+// the same rows on the still body path now, which is the path the goldens see.
+void gfx_dither_rect_phase(int16_t x, int16_t y, int16_t w, int16_t h,
+                           uint8_t level, uint8_t phase);
 
 // XOR a rectangle (list highlight, tactile echo).
 void gfx_invert_rect(int16_t x, int16_t y, int16_t w, int16_t h);

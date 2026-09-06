@@ -70,6 +70,25 @@
 #define BR_MSG_BASE      54          // the transcript line's text baseline
 #define BR_SHADOW_H       2          // the contact shadow under each body
 
+// -----------------------------------------------------------------------------
+//  THE GUARD (P10-C3). RLE_PROTECT was a beat with a MESSAGE AND NO PICTURE:
+//  spec section 14's third combat effect was the only one of the three that had
+//  never been drawn. A hit inverts the struck body and a faint dissolves it, so
+//  the guard needs a third idiom that cannot be confused with either - and it
+//  must not be an overprint on the body at all, because the body is exactly
+//  what a protect leaves untouched.
+//
+//  So it stands IN FRONT of the defender: a 3 px hatched barrier on the side it
+//  is facing, hard-edged on the outside where the blow would arrive and hazy
+//  against the creature, with a one-pixel bracket top and bottom so it reads as
+//  a ward and not as scenery. The FACING is the same bit that mirrors the
+//  sprite, so the barrier is always between the two combatants and never behind
+//  one of them.
+// -----------------------------------------------------------------------------
+#define BR_GUARD_W        3          // the barrier's width
+#define BR_GUARD_GAP      2          // background columns between it and the body
+#define BR_GUARD_CAP      3          // the bracket arms, toward the body
+
 // One 24x24 XBM frame. The mirror scratch is exactly this and no more.
 #define BR_BODY_BYTES    (((BR_BODY_W + 7) / 8) * BR_BODY_H)
 
@@ -95,6 +114,7 @@ struct BattleCombatantArt {
   uint8_t     team;      // team size, the pip track's length
   uint8_t     fainted;   // 1 = draw the body dissolved rather than solid
   uint8_t     struck;    // 1 = overprint the body this frame (the impact)
+  uint8_t     guard;     // 1 = this combatant is protecting: draw the barrier
 };
 
 // The whole field: both bodies, both panels, both pip tracks, and `message`
@@ -106,7 +126,7 @@ void br_draw_field(const BattleCombatantArt& foe, const BattleCombatantArt& you,
 // assert the flip without going through a whole field.
 // `face_left` mirrors the frame through ui/xbm_mirror.h.
 void br_draw_body(int16_t x, int16_t y, uint8_t art_key, uint8_t frame,
-                  bool face_left, bool fainted, bool struck);
+                  bool face_left, bool fainted, bool struck, bool guard);
 
 // The atlas set id `art_key` resolves to at BATTLE size. Exposed for the tests:
 // asserting that two species draw two different bodies needs the id, not the

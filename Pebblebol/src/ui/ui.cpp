@@ -2310,6 +2310,10 @@ static const PebbleView* ui_fill_view(void) {
   if (pb) {
     s_view.species_id = pb->species_id;
     s_view.level      = pb->level;
+    // §55, for the STILL body path's glitch painter (P10-C3). The animated path
+    // reads the same bit off PetView.corrupted in ui/pet_view.cpp; this is the
+    // one a golden can see.
+    s_view.corrupted  = (uint8_t)((pb->status & PBS_CORRUPTED) != 0u);
     s_view.xp         = pb->xp;
     s_view.hp_cur     = pb->hp_cur;
     const SpeciesDef* sp = species_get(pb->species_id);

@@ -37,6 +37,22 @@ static_assert(BR_YOU_BODY_X + BR_BODY_W <= BR_YOU_PANEL_X,
               "the player's body would run into the player's panel");
 static_assert(BR_YOU_PANEL_X + BR_PANEL_W <= OLED_W, "the player's panel runs off the panel");
 
+// THE GUARD BARRIER'S OWN KEEP-OUT, both combatants, both directions. The foe's
+// barrier stands to the LEFT of the foe and the player's to the RIGHT of the
+// player, so each one runs at its own side's opposite plate; asserting only one
+// of them would leave the other free to slide under a name.
+static_assert(BR_FOE_BODY_X - BR_GUARD_GAP - BR_GUARD_W >= BR_FOE_PANEL_X + BR_PANEL_W,
+              "the foe's guard barrier would run into the foe's name plate");
+static_assert(BR_YOU_BODY_X + BR_BODY_W + BR_GUARD_GAP + BR_GUARD_W <= BR_YOU_PANEL_X,
+              "the player's guard barrier would run into the player's name plate");
+static_assert(BR_FOE_BODY_X - BR_GUARD_GAP - BR_GUARD_W - BR_GUARD_CAP >= 0,
+              "the foe's guard bracket would run off the left of the panel");
+// The barrier is exactly as tall as the body, so the band checks the bodies
+// already pass cover it - but the BRACKET ARMS reach sideways at those two
+// rows, and on the foe they reach into the columns the transcript never uses.
+static_assert(BR_FOE_BODY_Y + BR_BODY_H - 1 <= UI_CONTENT_BOTTOM,
+              "the foe's guard barrier would run under the affordance strip");
+
 uint8_t br_body_set_id(uint8_t art_key) {
   // THE COMBAT BODY IS NOW THE SAME BODY HOME DRAWS (P9-C3). It used to fold
   // the art key into the eight authored BABY designs with `% 8`, because the
@@ -54,8 +70,30 @@ uint8_t br_body_set_id(uint8_t art_key) {
                        (uint8_t)POSE_IDLE);
 }
 
+// THE GUARD BARRIER. Drawn BEFORE the body so the bracket arms pass behind the
+// creature rather than over it: a ward the defender is standing inside reads as
+// protection, one painted on top of its face reads as damage - which is the
+// hit's idiom and the one thing this effect must not borrow.
+//
+// The geometry is asserted, not trusted: both combatants' barriers are checked
+// against the panel and against the other side's name plate at compile time
+// below, because a barrier is the first thing this file has ever drawn OUTSIDE
+// a body box and the two bodies sit at different x on purpose.
+static void draw_guard(int16_t x, int16_t y, int16_t w, int16_t h, bool face_left) {
+  // In FRONT of the defender: the foe faces left, so its front is its left side.
+  const int16_t bx = face_left ? (int16_t)(x - BR_GUARD_GAP - BR_GUARD_W)
+                               : (int16_t)(x + w + BR_GUARD_GAP);
+  gfx_dither_rect(bx, y, BR_GUARD_W, h, GFX_D50);
+  // The hard face, on the side a blow would arrive from.
+  gfx_vline(face_left ? bx : (int16_t)(bx + BR_GUARD_W - 1), y, h);
+  // Two bracket arms, reaching back toward the creature.
+  const int16_t ax = face_left ? (int16_t)(bx + BR_GUARD_W) : (int16_t)(bx - BR_GUARD_CAP);
+  gfx_hline(ax, y, BR_GUARD_CAP);
+  gfx_hline(ax, (int16_t)(y + h - 1), BR_GUARD_CAP);
+}
+
 void br_draw_body(int16_t x, int16_t y, uint8_t art_key, uint8_t frame,
-                  bool face_left, bool fainted, bool struck) {
+                  bool face_left, bool fainted, bool struck, bool guard) {
   const SpriteRef r = sprite_frame(br_body_set_id(art_key), frame);
   if (r.bits == nullptr || r.w != BR_BODY_W || r.h != BR_BODY_H) return;
 
@@ -64,6 +102,11 @@ void br_draw_body(int16_t x, int16_t y, uint8_t art_key, uint8_t frame,
     xbm_mirror_frame(r.bits, s_mirror, r.w, r.h);
     bits = s_mirror;
   }
+  if (guard) draw_guard(x, y, r.w, r.h, face_left);
+
+  // OPAQUE, and that is the right blit here: the body is the first thing drawn
+  // in its own box, so erasing its own background costs nothing and keeps the
+  // silhouette clean against the barrier drawn a moment ago two pixels away.
   gfx_xbm(x, y, r.w, r.h, bits);
 
   // A fainted body DISSOLVES rather than disappearing: erasing three quarters
@@ -118,9 +161,9 @@ void br_draw_field(const BattleCombatantArt& foe, const BattleCombatantArt& you,
   // The foe faces LEFT (mirrored) and the player faces RIGHT, so the two look
   // at each other whatever the art was drawn facing.
   br_draw_body(BR_FOE_BODY_X, BR_FOE_BODY_Y, foe.art_key, frame,
-               true, foe.fainted != 0u, foe.struck != 0u);
+               true, foe.fainted != 0u, foe.struck != 0u, foe.guard != 0u);
   br_draw_body(BR_YOU_BODY_X, BR_YOU_BODY_Y, you.art_key, frame,
-               false, you.fainted != 0u, you.struck != 0u);
+               false, you.fainted != 0u, you.struck != 0u, you.guard != 0u);
 
   draw_panel(BR_FOE_PANEL_X, BR_FOE_PANEL_Y, foe);
   draw_panel(BR_YOU_PANEL_X, BR_YOU_PANEL_Y, you);

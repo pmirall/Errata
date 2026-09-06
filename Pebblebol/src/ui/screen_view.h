@@ -64,6 +64,18 @@ struct PebbleView {
   // 24 bytes, matching GT_ELAPSED_BUF.
   char     age_txt[24];
 
+  // §55's status, as a bit rather than as a PBS_ mask: a pure screen may not
+  // reach game/corruption.h's PebbleInstance, and the ONE thing HOME does with
+  // it is decide whether to XOR ui/corrupt_fx.cpp's glitch rows over the body.
+  //
+  // IT IS HERE BECAUSE THE STILL BODY PATH IS THE ONE A GOLDEN CAN SEE (P10-C3).
+  // The glitch shipped at P9-C5 with its geometry in a pure, host-tested module
+  // and its PAINTING in ui/petfx.cpp - a translation unit no host binary
+  // compiles - so no snapshot in this repository had ever drawn a corrupted
+  // creature. ui/screen_home.cpp paints the same rows now, and home_corrupted
+  // is the golden.
+  uint8_t  corrupted;               // 1 = PBS_CORRUPTED is set on the Pebble
+
   uint8_t  present;                 // 0 = there is no active Pebble at all
 };
 
