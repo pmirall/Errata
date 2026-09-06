@@ -2411,3 +2411,172 @@ Latin-1 CHARACTERS, not UTF-8 bytes: twelve n-tildes are 24 bytes and a legal na
 
 A leading or trailing space is **refused, not trimmed**. Trimming is mending, and this validator
 takes its record `const` so it could not mend if it wanted to.
+
+---
+
+## P8-C4 — the page, the sprite editor, and what a headless browser can and cannot tick (recorded 2026-09-06)
+
+### 1. THE PAGE IS COMMITTED SOURCE AND THE HEADER IS GENERATED — AND THE GENERATOR HAS NO MINIFIER
+
+`web/creator/{index.html,app.js,sprite_editor.js}` is what gets reviewed;
+`Pebblebol/src/data/index_html.h` is what gets compiled, and `tools/gen_index_html.py --check`
+in `tools/check.sh` fails the gate on any byte between them. That is the same shape as
+`gen_content.py --check` and it exists for the same reason: **a 42 KB C string literal is not a
+diff anybody reads.**
+
+The transform is deliberately dumb — whole-line comments out, leading and trailing whitespace
+out, blank lines out, **and nothing else**. No identifier renaming, no whitespace collapsing
+inside a line, no newline removal. **A generator whose output depends on an npm package's
+version is a generator whose `--check` fails on somebody else's machine**, which turns a gate
+into a nuisance and then into a `--no-verify`. Keeping the newlines costs about 1.5 KB and buys
+three things: the served page is greppable with `curl`, a JavaScript error's line number means
+something, and joining lines is the one edit that can silently change what JavaScript means
+(automatic semicolon insertion).
+
+**MEASURED: 42,245 B of `WEB_HTML_MAX` 49,152 — 6,907 B free, 85.9 % used.** The generator
+prints that line every run. `docs/budget.md` §11 prices the gzip lever if it ever binds.
+
+### 2. PRINTABLE ASCII, ENFORCED — AND IT IS NOT `strings_es.h`'s RULE
+
+The generator refuses any byte outside 0x20..0x7E (plus newline). Spanish accents are HTML
+entities in the markup and `\uXXXX` escapes in the JavaScript.
+
+**THE REASON IS TRANSPORT, NOT FONTS, and confusing the two is exactly the mistake this
+paragraph exists to prevent.** `core/strings_es.h`'s Latin-1 rule is about what the DEVICE's
+`_tf` fonts can draw and it does **not** apply to a phone browser. This rule is about the bytes
+travelling through a C++ raw string literal in a generated header, compiled by a toolchain whose
+source charset nobody here controls, and served as `text/html; charset=utf-8`: `&aacute;` cannot
+become mojibake on the phone, and a raw 0xE1 can, silently. ASCII also makes the byte count and
+the character count the same number, which is what makes the `WEB_HTML_MAX` margin unambiguous.
+
+### 3. THE ATTACK AND TYPE NAMES ARE SERVED, NOT COPIED — AND THAT COST 427 B OF FLASH
+
+The ATTACKS screen has to draw 34 attacks. A screen listing "ataque 17" is not a screen anybody
+can use, so the names had to come from somewhere, and the two candidates were **34 Spanish
+strings typed into `web/creator/app.js`** or **the schema document the device already serves**.
+
+The copy loses: it is a second source of truth that no gate can see drift in, which is the whole
+thing `data/creator_schema_json.h` exists to prevent (plan T4). So `tools/gen_content.py` gained
+`json_ascii_string()` and the document gained `"tn"` (four type names) and `"an"` (34 attack
+names, in the attack table's order so `an[k]` pairs with `atk[k]` positionally).
+
+- **The names are emitted as `\uXXXX` escapes**, which keeps the served document printable ASCII
+  while carrying `Ráfaga` and `Infección`. `JSON.parse` hands the browser the real characters.
+  The DEVICE never reads this half of the document at all, so no Latin-1 question arises on its
+  side.
+- **The escaping is written out rather than delegated to `json.dumps(ensure_ascii=True)`,**
+  because this generator's contract is byte-identical output on any machine and the standard
+  library's choice of escape for a given character is its own business, not this file's.
+- **`CONTENT_VERSION` did not move** (still `0x02B5`): it is a hash of `tools/content/*.json`,
+  and this is an emitter change, not a content change. No golden moved.
+- **`tests/test_creator_api.cpp::the_served_schema_names_every_attack_the_page_can_offer`** reads
+  the document's text and compares every name against `ES[ATTACKS_TABLE[i].name_idx]`
+  **by codepoint, in both directions of an encoding change** — `strings_es.h` holds UTF-8 bytes,
+  the document holds JSON escapes, and comparing them as byte strings would fail on every
+  accented name while both are perfectly correct.
+- **Cost: 427 B of `.rodata`, zero globals.** `CREATOR_SCHEMA_JSON` went 745 → 1,172 B.
+
+### 4. WHAT THE PAGE ENFORCES IS A COURTESY. THE DEVICE RE-VALIDATES. IT IS WRITTEN AT THE TOP OF `app.js` IN THOSE WORDS
+
+Every rule the page mirrors — the stat band, the four-move rule, the power cap, the attack
+budget, the character set, the sprite geometry — is enforced again by `validate_custom_species()`
+over the bytes that actually arrived, with no knowledge that the page exists. **A page that looks
+authoritative is exactly how a client-side check becomes a control by accident:** somebody reads
+the greyed-out button, believes the rule is held there, and the next device-side guard gets
+written as "the page already checks that".
+
+Three things hold the posture rather than merely asserting it:
+
+- **The SIGUIENTE gate is named as an affordance in the code** — "you have not filled this in
+  yet", not a permission — and every rule it names is also in `localProblems()` and on the
+  device. A rule that lived only in `stepReady()` would be a rule nobody enforces, because the
+  device never sees that button and `curl` never presses it.
+- **The VALIDATE screen shows the DEVICE's verdict as the answer** and the local review as an
+  advisory list beneath it, with the sentence "no es un permiso" on the page itself.
+- **`tools/page_test.mjs` section 10 builds a document the page's own UI would never offer** (the
+  four most expensive legal moves), posts it, and asserts the device refuses it **by name** as
+  `VR_CS_ATTACK_BUDGET`. The posture is a test, not a comment.
+
+### 5. THE PAGE IS DELIBERATELY STRICTER THAN THE DEVICE IN EXACTLY ONE PLACE
+
+`creator_name_char_ok()` accepts `"` and `\` (both printable ASCII). The page refuses them,
+because `networking/creator_parse.cpp`'s string reader has **no escapes at all**, so a name
+carrying either would be refused as `CP_SYNTAX` with no field named — a worse answer than "that
+character is not allowed". **Narrower is the safe direction; wider would be a lie**, and
+`body()` throws rather than sending one if that guard is ever removed.
+
+### 6. `BODY / COSMETICS` IS THE STATS SCREEN, AND THE COSMETIC HALF IS THE NEXT ONE
+
+Spec §33 names the fourth screen `BODY / COSMETICS`. A `CustomSpeciesRec` has no cosmetic field
+other than the sprite, so there is nothing to put on a separate cosmetics screen: the build is
+the four base stats and the cosmetics are the 24×24 grid on SPRITE. Recorded rather than left
+for somebody to read as a missing screen.
+
+### 7. THE XBM BIT ORDER IS THE HALF THAT CANNOT BE "NEARLY RIGHT", SO IT IS TESTED END TO END
+
+`CustomSpeciesRec.sprite` is a 24×24 XBM frame: 3 bytes per row, **the LOW bit of each byte is
+the LEFTMOST pixel**. That is u8g2's `drawXBM` layout and `ui/xbm_mirror.h`'s `xbm_stride()`.
+Getting it backwards produces a sprite that decodes, validates, stores and renders as a
+horizontal mirror of every group of eight pixels — **a defect that looks like art until somebody
+draws a letter.**
+
+Nothing in JavaScript can see that, and nothing in a host test can either. So
+`tools/page_test.mjs` paints 14 known cells in a real browser through real pointer events, pipes
+the body the page POSTs into `tests/bin/creator_decode` — which links **the real
+`networking/creator_parse.cpp` and the real `game/validate.cpp`** — and compares the decoded
+bytes against a mirror-image derivation written independently in the harness. The cells straddle
+all three bytes of a row, include column 0 and column 23, and are asymmetric left-to-right, so a
+bit-order error, a byte-order error and a stray flip are three different failures.
+
+### 8. THE BUDGET BAR IS THE DEVICE'S INTEGER ARITHMETIC — AND THE OBVIOUS TEST FOR THAT CANNOT FAIL
+
+`app.js`'s `pct()` is `creator_power_pct()`'s expression character for character.
+
+**AND REPLACING IT WITH `balance.json`'s FLOAT SENTENCE SURVIVED THE FIRST MUTATION SWEEP.** The
+single-input check compared the bar and the device on the one Pebble the harness had drawn, and
+the two forms agree there — they agree **everywhere**: exhaustive enumeration over S = 4..40 and
+A = 0..400, all 14,837 pairs, found **zero** disagreements. The float sentence is an **equivalent
+mutant in JavaScript**, stated here rather than hidden.
+
+So the check was replaced with one that has real power: `creator_decode --pct` answers all 14,837
+pairs from `game/validate.cpp` and the browser answers the same 14,837 from `window.PB.pct`, and
+the harness compares them. That sweep kills a wrong constant (pricing against the stage-2 budget
+225 splits at S=4 A=6), a lost rounding term (splits at S=4 A=2) and a missing saturation (splits
+at S=4 A=339) — which is what a copied budget actually looks like.
+
+The integer form stays for two reasons that are not "the answers differ": a reader diffing
+`app.js` against `validate.cpp` sees one expression rather than two, and the equivalence is a
+property of T=22, B=185 and IEEE-754 doubles — **any of the three could change, and the budgets
+live in `balance.json`.**
+
+### 9. THE TOUCH TARGETS, AND THE ONE THAT CANNOT MEET THE RULE
+
+Every button, tab and input on the page is at least 44 CSS px tall (`--tap`), the canvas sets
+`touch-action: none` so a thumb paints instead of scrolling, pointer capture keeps a stroke alive
+when the thumb leaves the canvas, and Bresenham between samples stops a fast drag leaving a line
+of holes.
+
+**THE GRID CELLS CANNOT MEET IT AND SAYING SO IS THE POINT.** 24 cells across a 390 px phone is
+roughly 16 CSS px per cell, and the only way to make a cell 44 px is to have fewer of them — the
+geometry is `CustomSpeciesRec`'s, so that is not on offer. The mitigations are the ones that fit:
+the grid takes the full width available, the cell under the thumb is reported live as `x , y`
+(a thumb hides what it touches), and DESHACER is a first-class tool rather than a menu item.
+**Whether that is enough for a thumb is a phone question and nobody in this build has held one.**
+
+### 10. WHAT A HEADLESS BROWSER TICKS, AND WHAT IT DOES NOT
+
+`tools/page_test.mjs` runs in `tools/check.sh` (about 3 s) and asserts 51 things. It drives **the
+shipped bytes** (extracted from `index_html.h`, not from `web/creator/`), answers with **the
+shipped schema** (extracted from `creator_schema_json.h`), and is judged by **the shipped
+decoder**.
+
+**IT DOES NOT TICK §67's "Mobile editor works" OR "Sprite editor works", AND MUST NOT BE QUOTED
+AS IF IT DID.** Those are bench items. A desktop Chromium at a 390×844 viewport is not a thumb on
+glass: it has a mouse with one exact pixel of contact, no palm, no glove, no sunlight, no
+one-handed reach, and no on-screen keyboard eating half the viewport. The exact owner steps are
+in the plan box and in §67.
+
+The fake device in the harness is a fake, and the file says how: **no PIN lockout, no rate
+limiter, no body cap, no idle timer and no flash.** Each of those is driven by a host binary
+(`tests/test_creator_gate.cpp`, `tests/test_creator_api.cpp`) or is still unobserved, and a green
+browser run says nothing about any of them.

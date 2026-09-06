@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#12140f">
+<title>Pebblebol &mdash; Creador</title>
+<!--
+  =========================================================================
+  PEBBLEBOL CREATOR - THE PAGE SHELL (P8-C4, spec sections 33 and 37).
+  =========================================================================
+  ONE DOCUMENT. tools/gen_index_html.py inlines app.js and sprite_editor.js
+  into the two empty <script> tags at the bottom and writes the result to
+  src/data/index_html.h, which webui.cpp serves at GET / with the four-arg
+  send_P. There is no second asset and no request for one: spec section 38
+  says "serve only required assets", and a page that fetches a stylesheet is
+  a page with a second route.
+
+  PRINTABLE ASCII ONLY, AND THE GENERATOR FAILS THE BUILD OTHERWISE. Every
+  Spanish accent below is an HTML entity. The reason is not the device's
+  Latin-1 font rule - that rule is core/strings_es.h's and it does NOT apply
+  to a phone browser - it is that this file's bytes travel through a C++ raw
+  string literal in a generated header, compiled by a toolchain whose source
+  charset nobody here controls. &aacute; cannot become mojibake; a raw 0xE1
+  can, silently, on the phone. ASCII also makes the byte count and the
+  character count the same number, which is what makes the WEB_HTML_MAX
+  margin unambiguous.
+
+  NO <pre> AND NO MULTI-LINE TEMPLATE LITERAL, both checked by the
+  generator: it strips leading indentation line by line, which is safe
+  everywhere except inside text whose whitespace is significant.
+-->
+<style>
+/* ---- tokens ------------------------------------------------------------ */
+:root{
+  --bg:#12140f; --panel:#1b1e18; --panel2:#242820; --line:#333930;
+  --ink:#e8eae2; --dim:#98a18f; --acc:#7fd45a; --acc2:#5aa63c;
+  --warn:#e0a33a; --bad:#e0584a; --tap:44px;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{
+  font:16px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-text-size-adjust:100%;
+  overscroll-behavior-y:contain;
+  padding-bottom:calc(64px + env(safe-area-inset-bottom));
+}
+h2{font-size:1.05rem;letter-spacing:.06em;margin:0 0 .2rem}
+p{margin:.35rem 0;color:var(--dim);font-size:.9rem}
+b{color:var(--ink)}
+/* ---- header ------------------------------------------------------------ */
+#hdr{
+  position:sticky;top:0;z-index:5;background:var(--bg);
+  border-bottom:1px solid var(--line);
+  padding:calc(6px + env(safe-area-inset-top)) 12px 8px;
+}
+#hdr-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+#hdr-title{font-weight:700;letter-spacing:.14em;font-size:.8rem;color:var(--acc)}
+#hdr-dev{font-size:.75rem;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#steps{display:flex;gap:4px;list-style:none;margin:8px 0 0;padding:0}
+#steps li{
+  flex:1;height:4px;border-radius:2px;background:var(--panel2);
+}
+#steps li.done{background:var(--acc2)}
+#steps li.now{background:var(--acc)}
+#steps-name{font-size:.72rem;letter-spacing:.12em;color:var(--dim);margin-top:6px}
+/* ---- the section 36 budget bar ---------------------------------------- */
+#budget{margin-top:8px}
+#budget-row{display:flex;justify-content:space-between;font-size:.72rem;letter-spacing:.12em}
+#budget-pct{font-variant-numeric:tabular-nums;font-weight:700}
+#budget-bar{height:10px;border:1px solid var(--line);border-radius:2px;margin-top:4px;overflow:hidden;background:var(--panel)}
+#budget-fill{display:block;height:100%;width:0;background:var(--acc);transition:width .12s linear}
+#budget.over #budget-fill{background:var(--bad)}
+#budget.over #budget-pct{color:var(--bad)}
+#budget-sub{font-size:.72rem;color:var(--dim);margin-top:3px;font-variant-numeric:tabular-nums}
+/* ---- screens ----------------------------------------------------------- */
+main{padding:14px 12px 4px;max-width:34rem;margin:0 auto}
+.scr[hidden]{display:none}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin:10px 0}
+.row{display:flex;align-items:center;gap:10px}
+.row+.row{margin-top:8px}
+.grow{flex:1;min-width:0}
+.mono{font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.hint{font-size:.78rem;color:var(--dim)}
+.bad{color:var(--bad)} .ok{color:var(--acc)} .warn{color:var(--warn)}
+/* ---- controls: every tappable control is at least 44 px tall ----------- */
+button,input,select{font:inherit;color:inherit}
+button{
+  min-height:var(--tap);padding:0 14px;border-radius:8px;
+  background:var(--panel2);border:1px solid var(--line);
+  letter-spacing:.06em;cursor:pointer;touch-action:manipulation;
+}
+button:disabled{opacity:.4;cursor:default}
+button.pri{background:var(--acc2);border-color:var(--acc);color:#0c1208;font-weight:700}
+button.sel{background:var(--acc2);border-color:var(--acc);color:#0c1208}
+button.sq{min-width:var(--tap);padding:0}
+input[type=text],input[type=tel]{
+  min-height:var(--tap);width:100%;padding:0 10px;border-radius:8px;
+  background:var(--panel2);border:1px solid var(--line);
+}
+input[type=range]{width:100%;height:var(--tap);accent-color:var(--acc)}
+.tools{display:flex;flex-wrap:wrap;gap:6px}
+.tools button{flex:1 1 auto;min-width:64px;font-size:.8rem}
+/* ---- the pixel grid ---------------------------------------------------- */
+#pad{
+  width:100%;aspect-ratio:1;display:block;margin:0 auto;
+  background:#000;border:1px solid var(--line);border-radius:4px;
+  touch-action:none;               /* the thumb paints, it never scrolls */
+  image-rendering:pixelated;
+}
+#padinfo{display:flex;justify-content:space-between;font-size:.75rem;color:var(--dim);margin-top:4px}
+.prevbox{display:flex;gap:14px;align-items:flex-end;justify-content:center;margin-top:10px}
+.prevbox figure{margin:0;text-align:center}
+.prevbox figcaption{font-size:.7rem;color:var(--dim);letter-spacing:.1em;margin-top:4px}
+canvas.prev{background:#000;border:1px solid var(--line);image-rendering:pixelated;display:block}
+/* ---- attack list ------------------------------------------------------- */
+#atklist{display:flex;flex-direction:column;gap:6px;max-height:52vh;overflow:auto;-webkit-overflow-scrolling:touch}
+.atk{
+  display:flex;align-items:center;gap:8px;min-height:var(--tap);
+  padding:6px 10px;border-radius:8px;background:var(--panel2);
+  border:1px solid var(--line);text-align:left;width:100%;
+}
+.atk.sel{background:var(--acc2);border-color:var(--acc);color:#0c1208}
+.atk .an{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem}
+.atk .am{font-size:.72rem;opacity:.85;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* ---- stat rows --------------------------------------------------------- */
+.stat{margin-bottom:6px}
+.stat .lab{display:flex;justify-content:space-between;font-size:.8rem;letter-spacing:.08em}
+.stat .val{font-variant-numeric:tabular-nums;font-weight:700}
+/* ---- nav + toast ------------------------------------------------------- */
+#nav{
+  position:fixed;left:0;right:0;bottom:0;z-index:6;display:flex;gap:8px;
+  padding:8px 12px calc(8px + env(safe-area-inset-bottom));
+  background:var(--bg);border-top:1px solid var(--line);
+}
+#nav button{flex:1}
+#toast{
+  position:fixed;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom));
+  z-index:7;background:var(--panel2);border:1px solid var(--line);
+  border-radius:8px;padding:10px 12px;font-size:.85rem;box-shadow:0 6px 20px #0008;
+}
+#toast.bad{border-color:var(--bad)}
+#toast.ok{border-color:var(--acc)}
+#verdict{font-size:.9rem}
+#verdict .code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem;color:var(--dim)}
+.kv{display:flex;justify-content:space-between;font-size:.85rem;padding:3px 0;border-bottom:1px solid var(--line)}
+.kv:last-child{border-bottom:0}
+.kv span:last-child{font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+
+<header id="hdr">
+  <div id="hdr-top">
+    <span id="hdr-title">PEBBLEBOL &middot; CREADOR</span>
+    <span id="hdr-dev"></span>
+  </div>
+  <ol id="steps"></ol>
+  <div id="steps-name">CONEXI&Oacute;N</div>
+  <div id="budget" hidden>
+    <div id="budget-row"><span>PRESUPUESTO</span><span id="budget-pct">0 %</span></div>
+    <div id="budget-bar"><i id="budget-fill"></i></div>
+    <div id="budget-sub"></div>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- 1. CONNECT ---------------------------------------------------------- -->
+<section class="scr" id="sc-connect">
+  <h2>CONEXI&Oacute;N</h2>
+  <p>Introduce el PIN que aparece en la pantalla del dispositivo.
+     Sin el PIN correcto puedes ver la conexi&oacute;n pero no modificar nada.</p>
+  <div class="card">
+    <div class="row">
+      <input id="pin" type="tel" inputmode="numeric" autocomplete="off"
+             maxlength="4" placeholder="PIN" aria-label="PIN">
+      <button id="btn-pin" class="pri" type="button">ENTRAR</button>
+    </div>
+    <div id="pin-msg" class="hint" style="margin-top:8px"></div>
+  </div>
+  <div class="card" id="devbox" hidden>
+    <div class="kv"><span>Dispositivo</span><span id="d-name">&mdash;</span></div>
+    <div class="kv"><span>Firmware</span><span id="d-fw">&mdash;</span></div>
+    <div class="kv"><span>Huecos en la caja</span><span id="d-box">&mdash;</span></div>
+    <div class="kv"><span>Huecos de especie</span><span id="d-cs">&mdash;</span></div>
+    <div class="kv"><span>Reloj</span><span id="d-clock">&mdash;</span></div>
+    <div class="row" style="margin-top:10px">
+      <button id="btn-clock" type="button" class="grow">SINCRONIZAR RELOJ</button>
+    </div>
+    <p class="hint">El dispositivo decide si acepta la hora del tel&eacute;fono.</p>
+  </div>
+</section>
+
+<!-- 2. INFO ------------------------------------------------------------- -->
+<section class="scr" id="sc-info" hidden>
+  <h2>NOMBRE</h2>
+  <p>Como se llamar&aacute; la especie. Lo dibuja la pantalla del dispositivo,
+     as&iacute; que el juego de caracteres es el que esa pantalla sabe pintar.</p>
+  <div class="card">
+    <input id="name" type="text" autocomplete="off" spellcheck="false"
+           placeholder="Bicho" aria-label="Nombre de la especie">
+    <div class="row" style="margin-top:8px">
+      <span id="name-count" class="hint mono grow">0 / 12</span>
+      <span id="name-msg" class="hint"></span>
+    </div>
+  </div>
+</section>
+
+<!-- 3. TYPE ------------------------------------------------------------- -->
+<section class="scr" id="sc-type" hidden>
+  <h2>TIPO</h2>
+  <p>El tipo decide qu&eacute; ataques puede aprender: los suyos y los
+     neutrales. Cambiarlo m&aacute;s tarde vac&iacute;a los ataques elegidos.</p>
+  <div class="card" id="typebox"></div>
+</section>
+
+<!-- 4. BODY / COSMETICS ------------------------------------------------- -->
+<section class="scr" id="sc-body" hidden>
+  <h2>CUERPO</h2>
+  <p>Reparte los puntos entre las cuatro estad&iacute;sticas. El total tiene
+     que caer dentro de la banda que marca el dispositivo.</p>
+  <div class="card" id="statbox"></div>
+  <div class="card">
+    <div class="kv"><span>Total</span><span id="stat-total" class="mono">0</span></div>
+    <div class="kv"><span>Banda permitida</span><span id="stat-band" class="mono">&mdash;</span></div>
+    <div id="stat-msg" class="hint" style="margin-top:6px"></div>
+  </div>
+</section>
+
+<!-- 5. SPRITE ----------------------------------------------------------- -->
+<section class="scr" id="sc-sprite" hidden>
+  <h2>SPRITE</h2>
+  <canvas id="pad" width="24" height="24" role="img"
+          aria-label="Rejilla de 24 por 24 pixeles"></canvas>
+  <div id="padinfo"><span id="pad-xy" class="mono">&mdash;</span><span id="pad-on" class="mono"></span></div>
+  <div class="card">
+    <div class="row" style="margin-bottom:8px">
+      <button id="f0" class="sq sel" type="button">1</button>
+      <button id="f1" class="sq" type="button">2</button>
+      <button id="fcopy" class="grow" type="button">COPIAR 1 &rarr; 2</button>
+    </div>
+    <div class="tools">
+      <button id="t-draw" class="sel" type="button">PINTAR</button>
+      <button id="t-erase" type="button">BORRAR</button>
+      <button id="t-fill" type="button">RELLENO</button>
+      <button id="t-undo" type="button">DESHACER</button>
+      <button id="t-fliph" type="button">ESPEJO H</button>
+      <button id="t-flipv" type="button">ESPEJO V</button>
+      <button id="t-clear" type="button">LIMPIAR</button>
+    </div>
+    <p class="hint">Un pixel encendido se dibuja en blanco sobre negro.
+       La paleta es el formato: un bit por pixel, sin color y sin
+       transparencia.</p>
+  </div>
+  <div class="prevbox">
+    <figure><canvas id="p1" class="prev" width="24" height="24"></canvas>
+      <figcaption>1x</figcaption></figure>
+    <figure><canvas id="p2" class="prev" width="48" height="48"></canvas>
+      <figcaption>2x</figcaption></figure>
+  </div>
+</section>
+
+<!-- 6. ATTACKS ---------------------------------------------------------- -->
+<section class="scr" id="sc-attacks" hidden>
+  <h2>ATAQUES</h2>
+  <p>Cuatro ataques distintos, del tipo de la especie o neutrales, y al menos
+     uno que haga da&ntilde;o.</p>
+  <div class="row" style="margin-bottom:8px">
+    <span id="atk-count" class="hint mono grow">0 / 4</span>
+    <span id="atk-cost" class="hint mono"></span>
+  </div>
+  <div id="atklist"></div>
+  <div id="atk-msg" class="hint" style="margin-top:8px"></div>
+</section>
+
+<!-- 7. VALIDATE --------------------------------------------------------- -->
+<section class="scr" id="sc-validate" hidden>
+  <h2>VALIDAR</h2>
+  <p>Lo que ves arriba lo calcula esta p&aacute;gina. Lo que decide es el
+     dispositivo: pulsa y te contesta &eacute;l.</p>
+  <div class="card">
+    <button id="btn-validate" class="pri" type="button" style="width:100%">
+      PREGUNTAR AL DISPOSITIVO</button>
+    <div id="verdict" style="margin-top:10px">&mdash;</div>
+  </div>
+  <div class="card" id="localbox">
+    <div class="kv"><span>Revisi&oacute;n local</span><span id="local-sum">&mdash;</span></div>
+    <div id="local-list" class="hint" style="margin-top:6px"></div>
+    <p class="hint">La revisi&oacute;n local es una cortes&iacute;a para no
+      hacerte perder el rato. No es un permiso: el dispositivo vuelve a
+      comprobarlo todo sobre los bytes que le llegan.</p>
+  </div>
+</section>
+
+<!-- 8. PREVIEW ---------------------------------------------------------- -->
+<section class="scr" id="sc-preview" hidden>
+  <h2>VISTA PREVIA</h2>
+  <div class="prevbox">
+    <figure><canvas id="q1" class="prev" width="24" height="24"></canvas>
+      <figcaption>1x</figcaption></figure>
+    <figure><canvas id="q2" class="prev" width="48" height="48"></canvas>
+      <figcaption>2x</figcaption></figure>
+  </div>
+  <div class="card" id="sumbox"></div>
+  <p class="hint">La animaci&oacute;n alterna los dos fotogramas, que es lo que
+     hace el dispositivo con cualquier Pebble.</p>
+</section>
+
+<!-- 9. UPLOAD ----------------------------------------------------------- -->
+<section class="scr" id="sc-upload" hidden>
+  <h2>ENVIAR</h2>
+  <p>El dispositivo elige el hueco y te dice cu&aacute;l ha usado. Si algo
+     falla no escribe nada.</p>
+  <div class="card">
+    <button id="btn-upload" class="pri" type="button" style="width:100%">
+      CREAR EL PEBBLE</button>
+    <div id="upload-msg" style="margin-top:10px">&mdash;</div>
+  </div>
+  <div class="card" id="donebox" hidden>
+    <div class="kv"><span>Hueco en la caja</span><span id="u-slot">&mdash;</span></div>
+    <div class="kv"><span>Hueco de especie</span><span id="u-cs">&mdash;</span></div>
+    <div class="kv"><span>Id de especie</span><span id="u-species">&mdash;</span></div>
+    <div class="kv"><span>Id del Pebble</span><span id="u-id">&mdash;</span></div>
+    <div class="kv"><span>Presupuesto</span><span id="u-pct">&mdash;</span></div>
+    <p class="hint">El dispositivo dibuja el cuerpo del atlas hasta que el
+      renderizador lea los sprites de creador (fase 9). El dibujo ya est&aacute;
+      guardado.</p>
+  </div>
+</section>
+
+</main>
+
+<nav id="nav">
+  <button id="btn-back" type="button">ATR&Aacute;S</button>
+  <button id="btn-next" class="pri" type="button">SIGUIENTE</button>
+</nav>
+
+<div id="toast" hidden role="status" aria-live="polite"></div>
+
+<script id="js-sprite"></script>
+<script id="js-app"></script>
+</body>
+</html>

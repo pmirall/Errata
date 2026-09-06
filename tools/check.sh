@@ -80,6 +80,108 @@ else
 "nothing can check them against it"
 fi
 
+# --- THE PAGE GATE (P8-C4) -------------------------------------------------
+# src/data/index_html.h is GENERATED from web/creator/*, exactly the way
+# src/data/*_table.h is generated from tools/content/*.json, and for the same
+# reason: a 42 KB C string literal is not a diff anybody reads, so the SOURCE is
+# what gets reviewed and the header has to be provably what that source
+# produces. `--check` regenerates it in memory and hard-fails on any byte of
+# drift, so a hand-edited header AND a page edit that was never regenerated both
+# fail here instead of shipping.
+#
+# WHAT IT DOES NOT PROVE, SAID PLAINLY: nothing about whether the page WORKS. It
+# cannot open a browser, run the sprite editor, or see that app.js reads a
+# /api/schema field the device does not emit. The size half is the
+# static_assert the generator emits (WEB_HTML_MAX); the ROUTE half is the gate
+# immediately below; the BEHAVIOUR half is tools/page_test.mjs, and where that
+# does not run it is not tested at all.
+#
+# Skipped with a WORD if python3 is missing, and a HARD FAIL if web/creator is
+# gone - the same distinction the content gate above draws, for the same
+# reason: a committed deliverable that has vanished means the gate's input was
+# deleted, not that the phase has not landed.
+if [ -f "$ROOT/tools/gen_index_html.py" ]; then
+  if [ -d "$ROOT/web/creator" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+      python3 "$ROOT/tools/gen_index_html.py" --check >/dev/null \
+        || fail "src/data/index_html.h and web/creator/ have drifted apart "\
+"(run: python3 tools/gen_index_html.py)"
+    else
+      echo "check.sh: python3 not found, SKIPPING the page gate" >&2
+    fi
+  else
+    fail "web/creator is missing - src/data/index_html.h is generated from it "\
+"and nothing else can check them against each other"
+  fi
+fi
+
+# --- P8-C4: THE PAGE CALLS NO ROUTE THE DEVICE DOES NOT SERVE --------------
+# The half `gen_index_html.py --check` structurally cannot see. It proves the
+# header matches the source; it has no idea what the source ASKS FOR. A page
+# that fetches /api/pebbles gets a 404 the user reads as "the creator is
+# broken", and the byte-diff is green the whole time.
+#
+# NARROW ON PURPOSE: every '/api/...' literal in the page source must appear as
+# a quoted registration under src/networking. It cannot see a path built by
+# concatenation - so the page does not build one, and that is a rule this gate
+# is the reason for.
+if [ -d "$ROOT/web/creator" ] && [ -d "$SKETCH/src/networking" ]; then
+  missing=0
+  for r in $( { grep -rhoE "'/api/[a-z]+'" "$ROOT/web/creator" || true; } \
+                | tr -d "'" | sort -u ); do
+    if ! grep -rqF "\"$r\"" "$SKETCH/src/networking"; then
+      echo "GATE FAIL: the creator page calls $r and no route under src/networking registers it" >&2
+      missing=$((missing + 1))
+    fi
+  done
+  [ "$missing" -eq 0 ] || fail "$missing page route(s) the device does not serve"
+
+  # AND THE PAGE FETCHES NOTHING OFF-DEVICE. Spec section 33: "works offline
+  # after connection", section 38: "serve only required assets". One document,
+  # no CDN, no font, no analytics - and an absolute URL in the page is the one
+  # way that stops being true without anything else changing.
+  n=$( { grep -rnoE "(https?:)?//[a-z0-9.-]+\.[a-z]{2,}" "$ROOT/web/creator" \
+          --include='*.js' --include='*.html' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "the creator page names an off-device host ($n) - it must work offline after connection (spec section 33)"
+fi
+
+# --- P8-C4: THE PAGE IS DRIVEN IN A REAL BROWSER ---------------------------
+# The only check in this file that can see whether the creator page WORKS. It
+# extracts the blob src/data/index_html.h serves, answers it with the document
+# src/data/creator_schema_json.h serves, drives it through a headless Chromium
+# with real pointer events, and pipes the body it POSTs into a host binary that
+# links THE REAL networking/creator_parse.cpp and game/validate.cpp. That last
+# hop is the only place the two ends of the XBM sentence can be compared: the
+# page writes the bits, the device reads them, and nothing else in this tree
+# sees both.
+#
+# IT IS NOT A PHONE, AND THIS GATE MUST NOT BE QUOTED AS IF IT WERE. Spec
+# section 67's "Mobile editor works" and "Sprite editor works" are BENCH items;
+# a desktop Chromium at a phone-shaped viewport is not a thumb on glass and
+# neither box is ticked by a green run here.
+#
+# THE THREE-WAY EXIT IS THE POINT: 0 pass, 1 a real failure (hard fail), 2 "I
+# cannot run at all" - no node, no playwright, no browser - which SKIPS WITH A
+# PRINTED WORD, the same convention the content gate uses for a missing
+# python3. About 3 s when it runs.
+if [ -f "$ROOT/tools/page_test.mjs" ] && [ $DO_TESTS -eq 1 ]; then
+  if command -v node >/dev/null 2>&1; then
+    make -C "$ROOT/tests" pagetool >/dev/null \
+      || fail "tests/bin/creator_decode (the page harness's device end) did not build"
+    set +e
+    out="$(node "$ROOT/tools/page_test.mjs" 2>&1)"
+    rc=$?
+    set -e
+    case "$rc" in
+      0) echo "$out" | tail -1 ;;
+      2) echo "check.sh: no headless browser available, SKIPPING the page browser test" >&2 ;;
+      *) echo "$out" >&2; fail "the creator page failed in a real browser (tools/page_test.mjs)" ;;
+    esac
+  else
+    echo "check.sh: node not found, SKIPPING the page browser test" >&2
+  fi
+fi
+
 # --- P4-C2/C3 FOLLOW-UP: THE FIRMWARE'S TUNING MATCHES THE CONTENT PACK'S ---
 # NUMBERS THAT LIVE IN TWO PLACES AND NOTHING COMPARED. Every one of
 # them is in tools/content/balance.json - which feeds CONTENT_VERSION, and which

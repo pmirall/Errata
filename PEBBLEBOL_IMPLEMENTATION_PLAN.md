@@ -1039,9 +1039,92 @@ is rediscovered. Five items; the first two are the ones that can stop phase 8 de
 - [x] **`tools/check.sh` gained the tripwire this chunk needs**: every non-GET route under `src/networking` must name the shared raw hook, `UriAny` must still exist, and `onNotFound()` must not come back. All three are mutation-tested (a 3-arg `on()` and a restored `onNotFound()` each fail the gate by name), because a POST route registered with the 3-arg overload is not a smaller version of the same route - it is an unbounded heap allocation any client can ask for, and it would look identical in review.
 - Acceptance: §67 "PIN required", "Device-side validation works" - **both left unticked above.**
 
-**P8-C4 Mobile page + sprite editor** — L
-- [ ] `web/creator/index.html` + `app.js` + `sprite_editor.js` (vanilla JS, offline after load, screens of §33: CONNECT → INFO → TYPE → BODY → SPRITE → ATTACKS → VALIDATE → PREVIEW → UPLOAD) + `tools/gen_index_html.py` → `src/data/index_html.h` (cap `WEB_HTML_MAX` 48 KB, config.h:574); sprite editor 24x24 x 2 frames (T13) with draw/erase/fill/undo/clear/flip/preview 1x/2x, exported as XBM rows; budget bar "PRESUPUESTO 82 %" computed from `/api/schema` costs; PIN modal; client-side validation mirrors the schema but the device re-validates (§35).
-- Acceptance: §67 "Mobile editor works", "Sprite editor works".
+**P8-C4 Mobile page + sprite editor** — L — **LANDED 2026-09-06**
+- [x] `web/creator/index.html` + `app.js` + `sprite_editor.js` (vanilla JS, no framework, no CDN,
+  offline after load, the nine §33 screens: CONNECT → NOMBRE → TIPO → CUERPO → SPRITE → ATAQUES →
+  VALIDAR → VISTA PREVIA → ENVIAR) + `tools/gen_index_html.py` → `src/data/index_html.h` with
+  `--check` in the gate; sprite editor 24x24 x 2 frames (T13) with draw/erase/fill/undo/clear/
+  flip H and V/copy 1→2/preview 1x and 2x, exported as XBM rows; budget bar "PRESUPUESTO 82 %"
+  computed from `/api/schema` costs; client-side validation mirrors the schema and the device
+  re-validates (§35).
+- **MEASURED: page 42,245 B of `WEB_HTML_MAX` 49,152 — 6,907 B free, 85.9 % used.
+  `release` 1,284,746 / 59,396 → 1,326,404 / 59,396: +41,658 flash, ZERO globals, and ZERO of
+  either on `no-web` and `all-off`.** `docs/budget.md` §11 has the symbols and the section
+  cross-check that make the globals figure a measurement rather than a hope.
+
+**WHAT SHIPPED THAT THE BOX DID NOT ASK FOR, AND WHY.**
+
+1. **THE ATTACK AND TYPE NAMES ARE SERVED FROM `/api/schema`, NOT COPIED INTO THE PAGE
+   (+427 B of `.rodata`).** The ATTACKS screen draws 34 attacks; a screen listing "ataque 17" is
+   not usable, so the names had to come from somewhere, and 34 Spanish strings typed into
+   `app.js` would be exactly the second source of truth `creator_schema_json.h` exists to
+   prevent (T4). `gen_content.py` gained `json_ascii_string()` and the document gained `"tn"`
+   and `"an"`, emitted as `\uXXXX` escapes so it stays printable ASCII.
+   **`CONTENT_VERSION` is unchanged at `0x02B5`** — it hashes the JSON and this is an emitter
+   change — so no golden moved. `tests/test_creator_api.cpp` compares every served name against
+   `ES[ATTACKS_TABLE[i].name_idx]` **by codepoint**, because one side is UTF-8 and the other is
+   JSON escapes and a byte comparison would fail on every accented name while both are right.
+
+2. **THE GENERATOR TIES `CREATOR_API_VERSION` INTO THE PAGE.** `app.js` carries
+   `0 /*@CREATOR_API_VERSION@*/`, the generator substitutes `core/version.h`'s value and emits
+   `static_assert(INDEX_HTML_API_VERSION == CREATOR_API_VERSION)`. Bumping the version without
+   regenerating stops the firmware compiling instead of shipping a page that tells the phone the
+   wrong number; deleting the placeholder fails the generator by name.
+
+3. **`tools/page_test.mjs` + `tests/tools/creator_decode.cpp`, AND THEY ARE THE POINT OF THE
+   CHUNK'S TESTING.** Nothing in JavaScript and nothing in a host test can see whether the page's
+   XBM bit order is the device's. The harness drives THE SHIPPED BLOB (extracted from
+   `index_html.h`) in a headless Chromium with real pointer events, answers it with THE SHIPPED
+   SCHEMA (extracted from `creator_schema_json.h`), and pipes the body the page POSTs into a
+   binary linking THE REAL `creator_parse.cpp` AND `validate.cpp`. 51 assertions, ~3 s, wired
+   into `tools/check.sh` with the three-way exit the content gate's convention asks for
+   (0 pass / 1 hard fail / 2 skip with a printed word).
+
+4. **TWO NEW GREP GATES.** Every `/api/...` the page calls must be registered under
+   `src/networking` — the half a byte-diff structurally cannot see, and a page fetching
+   `/api/pebbles` reads to the user as "the creator is broken" while `--check` stays green — and
+   the page may not name an off-device host (§33 "works offline after connection").
+
+5. **THE SIGUIENTE BUTTON GATES ON "AT LEAST ONE DAMAGING MOVE" TOO.** The browser test found the
+   page would let a user walk to VALIDAR with four support moves and be refused
+   `VR_CS_NO_DAMAGING_MOVE`. The gate is named in the code as an affordance — "you have not
+   filled this in yet" — never a permission, and every rule it names is also in
+   `localProblems()` and on the device.
+
+6. **`BODY / COSMETICS` IS THE STATS SCREEN.** `CustomSpeciesRec` has no cosmetic field other
+   than the sprite, so the build is the four base stats and the cosmetics are the next screen.
+   Recorded so it is not read as a missing screen.
+
+7. **THE PAGE IS STRICTER THAN THE DEVICE IN EXACTLY ONE PLACE:** it refuses `"` and `\` in a
+   name, which `creator_name_char_ok()` accepts, because the device's string reader has no
+   escapes and either would come back as `CP_SYNTAX` with no field named. Narrower is the safe
+   direction.
+
+**THE MUTATION THAT SURVIVED, STATED RATHER THAN HIDDEN.** Replacing the budget bar's integer
+arithmetic with `balance.json`'s FLOAT sentence left the first sweep GREEN. The two forms agree
+on all 14,837 (S, A) pairs in range — it is an **equivalent mutant in JavaScript**. The check was
+replaced with an exhaustive sweep comparing `window.PB.pct` against `game/validate.cpp`'s
+`creator_power_pct()` over every pair, which kills a wrong constant, a lost rounding term and a
+missing saturation. The integer form stays because a reader diffing the two files should see one
+expression, and because the equivalence is a property of T=22, B=185 and IEEE-754 doubles.
+
+**ACCEPTANCE — §67 "Mobile editor works" AND "Sprite editor works" ARE NOT TICKED, AND A GREEN
+BROWSER RUN IS NOT EVIDENCE FOR EITHER.** Both are BENCH items. A desktop Chromium at a 390x844
+viewport has a mouse with one exact pixel of contact, no palm, no glove, no sunlight, no
+one-handed reach and no on-screen keyboard eating half the viewport.
+- [ ] §67 **"Mobile editor works"** — NOT OBSERVED. **OWNER:** flash a board, open CREATOR, join
+  `PEBBLEBOL-XXXX` from a phone, open `http://192.168.4.1/`, type the PIN shown on the device,
+  and walk all nine screens one-handed. Confirm the bottom bar is reachable with a thumb, the
+  on-screen keyboard does not hide the name field, and the page still works after the phone
+  locks and unlocks.
+- [ ] §67 **"Sprite editor works"** — NOT OBSERVED. **OWNER:** on the same phone, draw a
+  recognisable shape on both frames, use RELLENO, ESPEJO H and DESHACER, and check that a cell
+  can be hit reliably with a thumb (the cells are ~16 CSS px at 390 px wide; every BUTTON is
+  44 px, the cells cannot be). Then upload and confirm the Pebble appears in the Box.
+- [ ] **THE PAGE ON A REAL SOCKET** — NOT OBSERVED. No HTTP request has been made in this
+  environment; the harness's server is node, not `WebServer`. **OWNER:**
+  `curl http://192.168.4.1/ | wc -c` (expect 42,245), `curl -H 'X-Pin: NNNN'
+  http://192.168.4.1/api/state`, and confirm the page loads over the AP in under two seconds.
 
 **P8-C5 QR screen, smoke script, exit** — S
 - [ ] CREATOR screen "ESCANÉAME / [QR] / PIN: NNNN" (§34); QR payload alternates `WIFI:S:<ssid>;T:WPA;P:<pass>;;` and `http://192.168.4.1/` (existing alternation ui.cpp:2357-2441 minus `?k=`); `qr.cpp` untouched.
@@ -1239,8 +1322,8 @@ each of which is a sentence about two devices rather than about one function.
 - [ ] QR connection works. — P8-C5
 - [ ] Wi-Fi activates only when necessary. — P2-C6 (OFF by default), P8-C2
 - [ ] Inactivity timeout works. — P8-C2
-- [ ] Mobile editor works. — P8-C4
-- [ ] Sprite editor works. — P8-C4
+- [ ] Mobile editor works. — P8-C4. *P8-C4 has LANDED and this box is deliberately NOT ticked, which is the phase-7 rule applied to the first box it fits since: a bench item is the one kind this rule cannot close. The page exists, is committed source, is generated into the firmware under a gate, and is driven end to end in a headless Chromium at a 390x844 viewport by `tools/page_test.mjs` (51 assertions, in `tools/check.sh`) — and none of that is a thumb on glass. A desktop browser has one exact pixel of contact, no palm, no glove, no sunlight, no one-handed reach and no on-screen keyboard eating half the viewport. The owner step is in the P8-C4 box.*
+- [ ] Sprite editor works. — P8-C4. *Same, and with one specific thing to look at: at 24 cells across a 390 px phone a grid cell is about 16 CSS px, where every BUTTON on the page is 44. The geometry is `CustomSpeciesRec`'s and cannot change, so the mitigations are full-width grid, a live `x , y` readout of the cell under the thumb, and DESHACER as a first-class tool. Whether that is enough is the question this box is about, and it is a phone question. What HAS been observed on the host: the exported XBM decodes, through the real `creator_parse.cpp` and the real `validate.cpp`, to exactly the cells the harness painted — bit order, byte order and both frames.*
 - [ ] Device-side validation works. — P8-C3
 
 ### Power

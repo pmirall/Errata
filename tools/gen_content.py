@@ -437,6 +437,32 @@ def die(msg):
 # =============================================================================
 TYPE_ORD = {"SIGNAL": 0, "CORRUPT": 1, "SYSTEM": 2, "NEUTRAL": 3}
 
+
+def json_ascii_string(text):
+    """One JSON string literal, printable ASCII, escapes and all.
+
+    json.dumps(ensure_ascii=True) would do this, but its output for a character
+    is an implementation detail of the standard library rather than something
+    this generator states - and this generator's whole contract is that two runs
+    over the same JSON produce byte-identical headers on any machine. So the
+    escaping is written out: the two characters JSON requires escaped, the
+    control range, and \\uXXXX for everything above ASCII.
+    """
+    out = ['"']
+    for ch in text:
+        o = ord(ch)
+        if ch == '"' or ch == '\\':
+            out.append('\\' + ch)
+        elif o < 0x20 or o > 0x7E:
+            if o > 0xFFFF:
+                die("a content name needs a surrogate pair, which this "
+                    "emitter deliberately does not write: %r" % text)
+            out.append('\\u%04x' % o)
+        else:
+            out.append(ch)
+    out.append('"')
+    return "".join(out)
+
 # THE CREATOR API VERSION IS DEFINED IN Pebblebol/src/core/version.h AND COPIED
 # HERE, not carried in tools/content/balance.json, and the reason is mechanical
 # rather than aesthetic: CONTENT_VERSION is a HASH OF THE JSON, so a key added
@@ -2094,6 +2120,28 @@ def emit_creator_schema_json(c):
                               a["accuracy"], a["budget_cost"])
         for a in c.attacks)
 
+    # THE NAMES, ADDED IN P8-C4 BECAUSE THE PAGE HAS TO DRAW THEM AND THE
+    # ALTERNATIVE WAS A COPY. An ATTACKS screen listing "ataque 17" is not a
+    # screen anybody can use, and 34 Spanish names typed into web/creator/app.js
+    # would be a second source of truth that no gate can see drift in - which is
+    # the whole thing data/creator_schema_json.h exists to prevent.
+    #
+    # Emitted as \uXXXX escapes, which is what keeps the served document
+    # PRINTABLE ASCII (the guard below) while carrying Ráfaga and Infección.
+    # JSON.parse gives the browser the real characters; the DEVICE never reads
+    # this half at all, so no Latin-1 question arises on its side.
+    #
+    # The order is the attack table's, so an["k"] pairs with atk[k] positionally
+    # and the page needs no id lookup to label a row.
+    names = ",".join(json_ascii_string(a["name"]) for a in c.attacks)
+
+    # The type names, for the same reason and at 46 B. TYPE_ORD's own order, so
+    # index == the type ordinal the rows above carry, and NEUTRAL is last at
+    # index 3 == TYPE_COUNT - which is exactly the relation the device's
+    # validator relies on (a SPECIES is < TYPE_COUNT, an ATTACK may be NEUTRAL).
+    tnames = ",".join(json_ascii_string(t) for t, _ in
+                      sorted(TYPE_ORD.items(), key=lambda kv: kv[1]))
+
     doc = (
         '{"v":%d,"types":3,'
         '"stat":{"min":%d,"max":%d,"lo":%d,"hi":%d},'
@@ -2101,8 +2149,10 @@ def emit_creator_schema_json(c):
         '"sprite":{"w":24,"h":24,"f":2,"bytes":72},'
         '"name":{"max":%d},'
         '"id":{"min":200,"max":209,"slots":10},'
-        '"atk":[%s]}'
-    ) % (api, smin, smax, slo, shi, abud, pcap, nmax, rows)
+        '"tn":[%s],'
+        '"atk":[%s],'
+        '"an":[%s]}'
+    ) % (api, smin, smax, slo, shi, abud, pcap, nmax, tnames, rows, names)
 
     for ch in doc:
         if ord(ch) > 126 or ord(ch) < 32:
@@ -2139,6 +2189,22 @@ def emit_creator_schema_json(c):
         "The attack rows are POSITIONAL - [id, type, power, accuracy, cost] -",
         "and not objects, which is the difference between this size and about",
         "twice it. The page reads a[4] for the spec section 36 cost.",
+        "",
+        "THE NAMES ARE HERE FOR THE SAME REASON THE NUMBERS ARE (P8-C4). The",
+        "page has to draw 34 attacks, and 34 Spanish strings typed into",
+        "web/creator/app.js would be a second source of truth no gate can see",
+        "drift in. \"an\" is one name per attack row IN THE TABLE'S ORDER, so",
+        "an[k] pairs with atk[k] positionally and the page needs no lookup;",
+        "\"tn\" is the type names, indexed by the type ordinal, with NEUTRAL",
+        "last at index TYPE_COUNT - the relation the page's pool filter and",
+        "game/validate.cpp both rely on.",
+        "",
+        "The names are \\uXXXX ESCAPES, which is what keeps this document",
+        "printable ASCII while carrying Rafaga and Infeccion. JSON.parse hands",
+        "the browser the real characters. THE DEVICE NEVER READS THIS HALF, so",
+        "core/strings_es.h's Latin-1 question does not arise on its side, and",
+        "tests/test_creator_api.cpp compares the two BY CODEPOINT because one",
+        "side is UTF-8 bytes and the other is escapes.",
         "",
         "IT IS .rodata AND COSTS ZERO GLOBALS.",
     ])]

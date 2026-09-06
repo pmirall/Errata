@@ -68,6 +68,43 @@ tag for a phase is cut only when its gate (`tools/check.sh`) and its variant mat
   `evo_rule = SPECIES_EVO_NONE`, `spawn_weight = 0` and `compat_group = 0`, which answers §35's
   evolution and breeding inputs structurally instead of with a check.
 
+- **The creator page and the sprite editor (P8-C4, spec §33 and §37).** `web/creator/` is
+  committed source — one HTML shell, `app.js` and `sprite_editor.js`, vanilla JS, no framework,
+  no CDN, offline after load — and `tools/gen_index_html.py` inlines it into
+  `src/data/index_html.h` as ONE document served on ONE route. **42,245 B of `WEB_HTML_MAX`
+  49,152 (6,907 B free, 85.9 % used); +41,658 B of flash and ZERO globals on `release`, and
+  zero of either on `no-web` and `all-off`.** The nine §33 screens are CONNECT, NOMBRE, TIPO,
+  CUERPO, SPRITE, ATAQUES, VALIDAR, VISTA PREVIA and ENVIAR.
+- **The sprite editor: 24×24, two frames, one bit per pixel.** Draw, erase, flood fill, undo
+  (32 deep), clear, mirror H and V, copy frame 1 → 2, and live previews at 1× and 2×, exported
+  as XBM rows — 3 bytes per row, **the low bit of each byte the leftmost pixel**, which is
+  `drawXBM`'s layout and `ui/xbm_mirror.h`'s. Spec §37's palette, transparency and dimension
+  normalisation are the FORMAT rather than checks: 1 bpp at a fixed 24×24 is all three, decided
+  before the user draws, which is also why it accepts no image upload.
+- **`tools/gen_index_html.py`, with `--check`.** Regenerates the header in memory and hard-fails
+  on any byte of drift, so a hand-edited header and a page edit that was never regenerated both
+  fail the gate exactly as `gen_content.py --check` makes them. **No minifier and no npm
+  dependency:** whole-line comments and indentation out, nothing else — a generator whose output
+  depends on a package version is a generator whose `--check` fails on somebody else's machine.
+  It also substitutes `CREATOR_API_VERSION` into the page from `core/version.h` and emits a
+  `static_assert` tying the two, so a page cached from an older device says so instead of being
+  refused by number.
+- **Attack and type NAMES in `GET /api/schema`.** `"an"` (34 names, positional with `"atk"`) and
+  `"tn"` (SIGNAL, CORRUPT, SYSTEM, NEUTRAL), emitted as `\uXXXX` escapes so the served document
+  stays printable ASCII. **427 B of `.rodata`, zero globals, and `CONTENT_VERSION` unchanged at
+  `0x02B5`** — it hashes the JSON, and this is an emitter change. The alternative was 34 Spanish
+  strings typed into the page, which is the second source of truth this document exists to
+  prevent.
+- **`tools/page_test.mjs` — the page driven in a real headless browser, in the gate.** It loads
+  the blob `index_html.h` serves, answers it with the document `creator_schema_json.h` serves,
+  draws with real pointer events, and pipes the body the page POSTs into `tests/bin/creator_decode`,
+  which links **the real `creator_parse.cpp` and the real `validate.cpp`**. 51 assertions, ~3 s,
+  skipped with a printed word where there is no browser. **It does NOT tick §67's "Mobile editor
+  works" or "Sprite editor works" — those are bench items and a desktop Chromium is not a thumb.**
+- **Two new gates in `tools/check.sh`:** every `/api/...` the page calls must be a route
+  registered under `src/networking` (the half a byte-diff structurally cannot see), and the page
+  may not name an off-device host (§33 "works offline after connection").
+
 ### Fixed
 
 - **The CREATOR screen was timed out from under the user after 20 seconds.** `SCR_CREATOR` had

@@ -53,6 +53,7 @@
 #include <string.h>
 
 #include "core/rng.h"
+#include "core/strings_es.h"
 #include "data/attacks_table.h"
 #include "data/creator_schema.h"
 #include "data/creator_schema_json.h"
@@ -910,6 +911,128 @@ TEST(the_served_schema_document_carries_the_compiled_numbers) {
 
   CHECK_EQ((int)CREATOR_SCHEMA_JSON_LEN, (int)strlen(CREATOR_SCHEMA_JSON));
   CHECK(CREATOR_SCHEMA_JSON_LEN < (size_t)WEB_HTML_MAX);
+}
+
+// -----------------------------------------------------------------------------
+//  THE NAMES THE PAGE DRAWS (P8-C4).
+//
+//  The ATTACKS screen lists 34 attacks by name, and the only alternative to
+//  serving them was 34 Spanish strings typed into web/creator/app.js - a second
+//  source of truth no gate can see drift in, which is the whole thing this
+//  document exists to prevent. So they are served, and this is the case that
+//  checks the two ends against each other.
+//
+//  THE COMPARISON IS BY CODEPOINT, IN BOTH DIRECTIONS OF AN ENCODING CHANGE.
+//  core/strings_es.h holds "R\u00e1faga" as UTF-8 bytes; the served document
+//  holds it as the JSON escape \u00e1, because the document must stay printable
+//  ASCII. Comparing the two as byte strings would fail on every accented name
+//  while both are perfectly correct, so each side is decoded to codepoints and
+//  those are what is compared.
+// -----------------------------------------------------------------------------
+
+// One UTF-8 sequence out of a C string. Returns the codepoint and advances.
+// Bounded by the NUL; the input is a compiled literal, not a network buffer.
+static uint32_t utf8_next(const char*& p)
+{
+  const uint8_t b = (uint8_t)*p++;
+  if (b < 0x80u) return b;
+  if ((b & 0xE0u) == 0xC0u) {
+    const uint8_t b2 = (uint8_t)*p++;
+    return (uint32_t)((b & 0x1Fu) << 6) | (uint32_t)(b2 & 0x3Fu);
+  }
+  if ((b & 0xF0u) == 0xE0u) {
+    const uint8_t b2 = (uint8_t)*p++, b3 = (uint8_t)*p++;
+    return (uint32_t)((b & 0x0Fu) << 12) | (uint32_t)((b2 & 0x3Fu) << 6) |
+           (uint32_t)(b3 & 0x3Fu);
+  }
+  return 0xFFFDu;
+}
+
+// The nth JSON string of the array that starts at `key`, decoded to codepoints.
+// Deliberately a small hand reader rather than a JSON parser: a parser here
+// would be a second implementation of the thing under test.
+static bool json_array_string(const char* key, int index, uint32_t* out,
+                              int cap, int& out_len)
+{
+  const char* p = strstr(CREATOR_SCHEMA_JSON, key);
+  out_len = 0;
+  if (!p) return false;
+  p += strlen(key);
+  for (int k = 0; k < index; ++k) {
+    p = strchr(p, ',');                 // one comma between entries
+    if (!p) return false;
+    ++p;
+  }
+  while (*p && *p != '"') {
+    if (*p == ']') return false;
+    ++p;
+  }
+  if (*p != '"') return false;
+  ++p;
+  while (*p && *p != '"') {
+    if (out_len >= cap) return false;
+    if (p[0] == '\\' && p[1] == 'u') {
+      unsigned v = 0u;
+      if (sscanf(p + 2, "%4x", &v) != 1) return false;
+      out[out_len++] = (uint32_t)v;
+      p += 6;
+    } else {
+      out[out_len++] = (uint32_t)(uint8_t)*p++;
+    }
+  }
+  return *p == '"';
+}
+
+TEST(the_served_schema_names_every_attack_the_page_can_offer) {
+  // ONE NAME PER ROW, IN THE TABLE'S ORDER. The page pairs an[k] with atk[k]
+  // positionally rather than by id, so a shifted array would label every attack
+  // with its neighbour's name and nothing else in the tree would notice.
+  for (uint8_t i = 0; i < ATTACK_COUNT; ++i) {
+    uint32_t served[64];
+    int n = 0;
+    if (!json_array_string("\"an\":[", (int)i, served, 64, n)) {
+      fprintf(stderr, "    no served name at index %d\n", (int)i);
+      CHECK(false);
+      continue;
+    }
+    const char* want = ES[ATTACKS_TABLE[i].name_idx];
+    const char* w = want;
+    int k = 0;
+    bool same = true;
+    while (*w) {
+      const uint32_t cp = utf8_next(w);
+      if (k >= n || served[k] != cp) { same = false; break; }
+      ++k;
+    }
+    if (same && k != n) same = false;
+    if (!same)
+      fprintf(stderr, "    attack %d: served name is not %s\n",
+              (int)ATTACKS_TABLE[i].id, want);
+    CHECK(same);
+  }
+
+  // And no thirty-fifth name for an attack that does not exist.
+  uint32_t extra[64];
+  int n = 0;
+  CHECK(!json_array_string("\"an\":[", (int)ATTACK_COUNT, extra, 64, n));
+
+  // THE TYPE NAMES, whose INDEX is the type ordinal the rows carry. NEUTRAL is
+  // last at index TYPE_COUNT, which is the relation the page's own pool filter
+  // reads (`a[1] === M.type || a[1] === S.types`) and the relation
+  // game/validate.cpp relies on when it refuses a SPECIES of type >= TYPE_COUNT
+  // while accepting an ATTACK of type TYPE_NEUTRAL.
+  static const char* const TN[] = { "SIGNAL", "CORRUPT", "SYSTEM", "NEUTRAL" };
+  for (int i = 0; i < 4; ++i) {
+    uint32_t got[16];
+    int m = 0;
+    CHECK(json_array_string("\"tn\":[", i, got, 16, m));
+    CHECK_EQ(m, (int)strlen(TN[i]));
+    bool same = (m == (int)strlen(TN[i]));
+    for (int k = 0; same && k < m; ++k) same = (got[k] == (uint32_t)TN[i][k]);
+    CHECK(same);
+  }
+  CHECK_EQ((int)TYPE_NEUTRAL, 3);
+  CHECK_EQ((int)TYPE_COUNT, 3);
 }
 
 // =============================================================================

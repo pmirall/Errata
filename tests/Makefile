@@ -570,6 +570,26 @@ $(BIN)/test_pet_view:   $(OBJ)/pet_view.o $(OBJ)/sim.o $(OBJ)/daylight.o \
 $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
 
+# --- the browser harness's device end (P8-C4) -------------------------------
+# tools/page_test.mjs drives the SHIPPED creator page in a headless browser and
+# captures the body it POSTs. Nothing in JavaScript can say whether those bytes
+# mean what the device thinks they mean - in particular whether the page's XBM
+# bit order is the device's - so the harness pipes them through THE REAL
+# creator_parse.cpp and THE REAL validate.cpp, which is all this binary is.
+#
+# NOT part of `check`: it reads a document from outside the tree, which is what
+# tests/tools/ means. `make -C tests pagetool` builds it; tools/check.sh builds
+# it only when it is about to run the browser.
+.PHONY: pagetool
+pagetool: $(BIN)/creator_decode
+
+$(BIN)/creator_decode: tools/creator_decode.cpp $(OBJ)/creator_parse.o \
+                        $(OBJ)/creator_gate.o $(OBJ)/validate.o $(OBJ)/species_custom.o \
+                        $(OBJ)/species.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o \
+                        $(OBJ)/rng.o | $(BIN)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
+
 # --- goldens ----------------------------------------------------------------
 golden: $(BIN)/test_care_golden $(BIN)/test_battle_golden
 	./$(BIN)/test_care_golden --record

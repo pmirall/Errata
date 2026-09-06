@@ -677,3 +677,86 @@ atlas — all `inline constexpr`, all flash — but P9-C5's corruption effects a
 diagnostics are RAM. The one row to watch next is no longer `CS_BODY_MAX`: it is spent. It is
 whether P10-C1's `dev/diagnostics.cpp` needs a buffer, and the honest advice is to check this
 table before it writes one.
+
+---
+
+## 11. Phase 8, chunk 4 — the mobile page and the sprite editor (measured 2026-09-06)
+
+**+41,658 flash / +0 globals on `release`; the same +41,658 / +0 on `baseline`; ZERO of either
+on `no-web` and `all-off`.** Every figure names its variant. `tools/build_matrix.sh` produced all
+six at this commit, and the release `.elf` the symbols below come from was built separately with
+`--variant release --define GOD_MODE_ENABLED=0` and its size line read back **before** any symbol
+was — the §8 rule, applied.
+
+| build | after P8-C3 | after P8-C4 | delta | against its cap |
+|---|---|---|---|---|
+| `baseline` | 1,297,118 / 59,572 | 1,338,776 / 59,572 | **+41,658 / +0** | 55.8 % / 66.2 % |
+| `release`  | 1,284,746 / 59,396 | **1,326,404 / 59,396** | **+41,658 / +0** | **82.9 % / 91.4 %** |
+| `no-web`   | 1,224,890 / 55,172 | 1,224,890 / 55,172 | **+0 / +0** | — |
+| `all-off`  | 580,588 / 26,612 | 580,588 / 26,612 | **+0 / +0** | — |
+
+### The 41,658 bytes, by name — and they are all flash
+
+`riscv32-esp-elf-nm -S -td` over the **release** `.elf`:
+
+```
+1007713068 00042248 d _ZL10INDEX_HTML            <- the creator page
+1007711080 00001172 d _ZL19CREATOR_SCHEMA_JSON   <- was 745 B: +427 for the names
+```
+
+Both addresses are inside `.flash.rodata` (`objdump -h` puts that section at `0x3c0f0120`, length
+`0x32cf4`), which is the whole claim in one line: the `d` class is initialised data, and on this
+target initialised data whose address is in the rodata segment is **memory-mapped flash, not
+RAM**. `INDEX_HTML` is 42,248 B for a 42,245 B page — the blob, its NUL and 2 B of alignment.
+
+The old placeholder page was 1,016 B in the same section, so the page's own delta is
+42,248 − 1,016 = **41,232**, plus **427** for the attack and type names added to the schema
+document, giving **41,659** — one byte from the 41,658 the compiler reported, which is alignment.
+
+**THE GLOBALS LINE DID NOT MOVE, AND THE SECTION CROSS-CHECK IS WHY THAT IS A MEASUREMENT AND
+NOT A HOPE.** On the same `.elf`: `.dram0.data` `0x3a24` = 14,884 and `.dram0.bss` `0xade0` =
+44,512, summing to exactly the 59,396 the compiler printed — and **both are byte-identical to
+§10's**. Not "about the same": the same numbers. Nothing in this chunk allocates: the page is a
+string literal, the schema names are a string literal, and the only new code in `src/` is the
+two extra JSON keys inside a blob that was already there.
+
+**`no-web` AND `all-off` PAID NOTHING AT ALL,** which is the number to quote when somebody asks
+what the creator page costs a radio-less build. `data/index_html.h` is included by exactly one
+translation unit (`networking/webui.cpp`) and `data/creator_schema_json.h` by exactly one
+(`networking/creator_server.cpp`); both are inside `#if FEATURE_WEB`, so with the feature off
+neither literal is ever referenced and `--gc-sections` drops it. Contrast §10, where the +248 on
+those variants was real because `game/species_custom.cpp` sits on the load path every variant
+links.
+
+### What it leaves
+
+`release` globals are at **59,396 of 65,000 — 5,604 B free, unchanged from §10.** Phase 8's
+running total on the globals line is still **2,592 B** against §3's 1.5–3.0 KB forecast for the
+whole phase, and P8-C5 (a QR payload and a screen) has no reason to move it either. **The number
+phase 9 inherits is 5,604 B.**
+
+`release` flash is at **82.9 % with 273,596 B free**, where §10 left 315,254. This chunk spent
+**41,658 B — 13.2 % of the flash headroom it started with — and it is the largest single flash
+allocation any chunk has made.** That is the trade the phase-8 preamble named: the page is
+`.rodata`, flash is the line with 273 KB on it, and globals is the line with 5.6 KB.
+
+### The page against its own cap, and the lever if it ever binds
+
+**42,245 B of `WEB_HTML_MAX` 49,152 — 6,907 B free, 85.9 % used.** `tools/gen_index_html.py`
+prints that line on every run and `tools/check.sh` fails the gate if the header and the source
+have drifted, so the margin is a number somebody reads rather than a compiler error at 49,155 B.
+
+**IT DOES NOT GROW WITH THE ROSTER, AND THAT IS THE POINT OF SERVING THE SCHEMA.** Every number
+and every attack name the page draws comes from `GET /api/schema` at load time, so phase 9's
+60-species roster grows `CREATOR_SCHEMA_JSON` (flash, ~1.2 KB today) and leaves the page blob
+exactly where it is. What would move it is a new SCREEN.
+
+**THE LEVER, PRICED SO NOBODY HAS TO GUESS AT IT LATER.** `send_P` serves a pre-compressed blob
+with a `Content-Encoding: gzip` header — the core's own `serveStatic` does exactly that at
+`WebServer.cpp:690` — and this project's previous phone page compressed 47,181 B to 17,947 B
+(38.0 %). At that ratio the 48 KB cap becomes about 126 KB of page source. The cost is that the
+blob stops being a string literal (gzip contains NULs and every byte value, so the generator must
+emit a byte array), that `Accept-Encoding` has to join `collectHeaders()` with a plain fallback
+for the captive-portal probe, and that `curl http://192.168.4.1/` stops being readable.
+**Take it when the raw number actually crosses; do NOT raise `WEB_HTML_MAX` as the first move,
+because the cap is the only thing that makes the overrun visible.**
