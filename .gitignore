@@ -1,6 +1,7 @@
 # build outputs
 build/
 tests/bin/
+tests/bin_asan/
 *.o
 *.bin
 *.elf

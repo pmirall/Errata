@@ -311,6 +311,23 @@ DOC="{\"v\":$API_VERSION,\"name\":\"SMOKE\",\"type\":0,\"base\":[6,5,5,5],\
 \"moves\":[1,6,32,34],\"sprite\":[\"$FRAME0\",\"$FRAME1\"]}"
 printf '%s' "$DOC" > "$TMP/doc.json"
 
+# THE WRONG PIN, derived once and used by every probe below that needs one.
+# (It used to be derived inside phase 3; the body-PIN documents need it too.)
+WRONG="$(printf '%04d' $(( (10#$PIN + 1111) % 10000 )))"
+
+# TWO MORE DOCUMENTS, IDENTICAL TO $DOC BUT FOR ONE FIELD: they carry the PIN
+# in the BODY instead of in a header. Spec section 38 allows both, and until
+# this script ran, NOTHING IN THE TREE HAD EVER EXECUTED THE BODY HALF -
+# creator_server.cpp's pin_after_body() had no caller that any host test, the
+# browser harness or this script reached, because the page sends X-Pin on every
+# request and every other unauthenticated POST here is refused by the BODY
+# layer (413/411/415) before the PIN is consulted. Spliced off $DOC rather than
+# retyped so a refusal cannot be about a second difference.
+DOC_BODYPIN_BAD="{\"v\":$API_VERSION,\"pin\":\"$WRONG\",${DOC#*,}"
+DOC_BODYPIN_OK="{\"v\":$API_VERSION,\"pin\":\"$PIN\",${DOC#*,}"
+printf '%s' "$DOC_BODYPIN_BAD" > "$TMP/doc_bodypin_bad.json"
+printf '%s' "$DOC_BODYPIN_OK"  > "$TMP/doc_bodypin_ok.json"
+
 cat <<HDR
 
 =============================================================================
@@ -432,6 +449,35 @@ else
   req POST /api/validate - --data-binary "@$TMP/big.bin" -H 'Content-Type: application/json'
   expect 413 "a $((CS_BODY_MAX + 64)) B body is answered 413, over the $CS_BODY_MAX B cap"
   expect_num max "$CS_BODY_MAX" "the 413 names the cap this tree compiled"
+
+  # THE SAME BODY TO AN UNMATCHED PATH, AND THIS IS THE ONLY PROBE THAT CAN
+  # TELL A REGISTERED CATCH-ALL FROM A MISSING HANDLER.
+  #
+  # The GET in phase 1 proves an unknown path is ANSWERED; it says nothing
+  # about which code answered it, because the core answers an unmatched GET
+  # 404 all by itself. The difference only shows on a POST WITH A BODY:
+  #
+  #   catch-all registered HTTP_ANY with cs_body_hook  -> canRaw() true, the
+  #     body is decided by creator_body.cpp before a byte is buffered -> 413
+  #   catch-all missing, or narrowed to HTTP_GET       -> _currentHandler is
+  #     null (Parsing.cpp:182), the raw path is skipped, the WHOLE declared
+  #     body goes through readBytesWithTimeout()'s malloc growth loop, and the
+  #     core then answers 404 - the audit's section 12 hole, wide open, with a
+  #     status code that looks fine
+  #
+  # SO A 404 HERE IS A FAILURE, AND IT IS THE FAILURE THAT MATTERS. The gate in
+  # tools/check.sh holds the source half; nothing but a socket holds this half.
+  # /api/pebbles is the script's designated unmatched path (it is excluded from
+  # the route-set comparison by name for exactly this reason).
+  req POST /api/pebbles - --data-binary "@$TMP/big.bin" -H 'Content-Type: application/json'
+  if [ "$STATUS" = "413" ]; then
+    ok "an oversize POST to an UNMATCHED path is answered 413 by the registered catch-all - the body was bounded before it was read"
+  else
+    bad "an oversize POST to an unmatched path answered HTTP $STATUS $(body_head) -- expected 413. A 404 here means no handler matched, the body walked readBytesWithTimeout()'s unbounded growth loop, and the catch-all is gone or is no longer HTTP_ANY"
+  fi
+
+  req GET /api/schema -
+  expect 200 "and the device is still answering after it - an unmatched POST did not exhaust the heap"
 fi
 
 # Over the DRAIN limit the socket is closed instead: there is nothing left to
@@ -500,11 +546,75 @@ if [ "$(json_str err)" = "pin" ]; then ok "with the same answer a wrong one gets
 else bad "a malformed PIN answered \"$(json_str err)\", expected \"pin\""; fi
 req GET /api/state "$PIN"; expect 200 "the counter is cleared again"
 
+# =============================================================================
+#  THE PIN ON THE ROUTES THAT WRITE, WHICH IS THE HALF NOTHING COVERED.
+#
+#  ADDED AT THE PHASE-8 EXIT, and the reason is worth stating in the file: every
+#  PIN probe above drives GET /api/state, and every unauthenticated POST
+#  anywhere else in this script carries a DELIBERATELY BROKEN body (413, 411,
+#  415) that creator_server.cpp answers BEFORE it consults the PIN. So until
+#  these probes existed, no check in the repository - host binary, browser
+#  harness or bench script - ever sent an unauthenticated POST with a VALID
+#  body, and section 67's "PIN required" box pointed at an instrument that
+#  would have reported all green against a firmware where POST /api/pebble
+#  needed no PIN at all. Measured at the exit: making pin_after_body() return
+#  true unconditionally built clean (release 1,326,274 / 59,396, 0 warnings),
+#  passed ALL PASS 49/49 and passed every networking gate in tools/check.sh.
+#
+#  networking/creator_server.cpp is never compiled by tests/Makefile - there is
+#  no socket in any host binary - so THIS IS THE ONLY INSTRUMENT THESE FOUR
+#  ASSERTIONS HAVE ANYWHERE.
+#
+#  Each refusal below is a counted failure (web_pin_ok() reads an absent header
+#  as the empty string and hands it to the same cg_verify()), so each is
+#  followed by an authorised request that clears the counter - the same
+#  discipline the lockout run below depends on.
+
+# (a) THE WRITE ROUTE, UNAUTHENTICATED, WITH A DOCUMENT THE DEVICE WOULD OTHERWISE
+#     ACCEPT. The status is half the assertion; the other half is that the Box
+#     did not move. json_num reads the FIRST "used" in the response, which is
+#     box.used - the "cs" object follows it.
+req GET /api/state "$PIN"
+BOX_BEFORE="$(json_num used)"
+req POST /api/pebble - --data-binary "@$TMP/doc.json" -H 'Content-Type: application/json'
+expect 403 "POST /api/pebble with a VALID document and no X-Pin is refused"
+if [ "$(json_str err)" = "pin" ]; then ok "and it is refused for the PIN, not for the document"
+else bad "the unauthenticated write answered \"$(json_str err)\", expected \"pin\""; fi
+req GET /api/state "$PIN"
+if [ "$(json_num used)" = "$BOX_BEFORE" ]; then
+  ok "and NOTHING was written - the Box still holds $BOX_BEFORE Pebble(s)"
+else
+  bad "the Box moved from $BOX_BEFORE to $(json_num used) on a request that was refused 403 -- the refusal came after the write"
+fi
+
+# (b) THE CLOCK ROUTE WITH A WRONG HEADER. POST /api/time is the route an
+#     attacker most wants: networking/creator_gate.h is written on the
+#     assumption that this value is hostile, and the PIN is what stands there.
+req POST /api/time "$WRONG" --data-binary "@$TMP/time.json" -H 'Content-Type: application/json'
+expect 403 "POST /api/time with a WRONG X-Pin is refused - the clock is not settable by anyone in radio range"
+if [ "$(json_str err)" = "pin" ]; then ok "and for the PIN"
+else bad "the clock route answered \"$(json_str err)\", expected \"pin\""; fi
+req GET /api/state "$PIN"; expect 200 "the counter is cleared again"
+
+# (c) THE BODY-CARRIED PIN, REFUSED. No X-Pin header at all, so the document's
+#     own "pin" field is what pin_after_body() gates on - the ONE path in
+#     creator_server.cpp that nothing else in this tree has ever executed.
+req POST /api/validate - --data-binary "@$TMP/doc_bodypin_bad.json" -H 'Content-Type: application/json'
+expect 403 "a WRONG PIN carried in the body is refused, exactly as a wrong header is"
+if [ "$(json_str err)" = "pin" ]; then ok "and by the same gate, with the same answer"
+else bad "the body-carried wrong PIN answered \"$(json_str err)\", expected \"pin\""; fi
+req GET /api/state "$PIN"; expect 200 "the counter is cleared again"
+
+# (d) AND ACCEPTED, which is the half that stops (c) passing against a firmware
+#     that simply refuses every body PIN. A one-sided assertion here would be
+#     this project's recurring defect written into its own bench script.
+req POST /api/validate - --data-binary "@$TMP/doc_bodypin_ok.json" -H 'Content-Type: application/json'
+expect 200 "and the CORRECT PIN carried in the body is accepted - the body half of spec section 38's gate really works, in both directions"
+
 # THE LOCKOUT RUN. Exactly CREATOR_PIN_FAIL_MAX consecutive wrong PINs, each
 # answered "pin"; the LAST of them arms the lockout, and it is the attempt AFTER
 # it that is refused as locked. Getting "locked" early would mean the counter
 # was not where this script thought it was.
-WRONG="$(printf '%04d' $(( (10#$PIN + 1111) % 10000 )))"
 i=0
 while [ "$i" -lt "$PIN_FAIL_MAX" ]; do
   i=$((i + 1))

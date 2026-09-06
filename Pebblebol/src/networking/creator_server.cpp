@@ -279,6 +279,55 @@ static void h_schema(void)
   cs_body_done();
 }
 
+// THE WIDEST RESPONSE IN THIS FILE, AND NOW A COMPILE-TIME BOUND RATHER THAN A
+// SENTENCE. This file's banner says "every body is built into a fixed char
+// buffer whose worst case is provable at compile time"; until the phase-8 exit
+// no such proof existed - core/config.h carried a prose estimate ("about 160
+// characters") and nothing checked it. The bound matters because it moves with
+// something a later phase WILL touch: FW_VERSION is a literal in
+// core/version.h, and phase 9's tag and phase 10's both grow it. The failure
+// mode is not a crash: snprintf truncates, the page's JSON.parse() refuses the
+// fragment, and the bench reports "the creator does not work".
+//
+// THE ARITHMETIC IS AN OVER-ESTIMATE ON PURPOSE, so it needs no duplicate of
+// the fixed text (which would be a second source of truth that drifts). Every
+// conversion in this format is at least two characters ("%u", "%s", "%lu"), so
+//     worst case  <=  strlen(fmt) + SUM over conversions of (widest - 2) + NUL
+// and each `widest` below is the field's own bound, not a guess:
+//   v        CREATOR_API_VERSION as unsigned .......  5 (any uint16)
+//   fw       FW_VERSION ............................  sizeof - 1
+//   content  CONTENT_VERSION as unsigned ...........  5 (uint16)
+//   name     json_copy_name() into char[NAME_MAX_LEN+1]  NAME_MAX_LEN
+//   box/cs   four uint8 counts .....................  3 each
+//   body     CS_BODY_MAX as unsigned ...............  5 (uint16)
+//   cal      gt_cal_state() ........................  5 (over-bounded)
+//   epoch    uint32 decimal ........................ 10
+//   ro       0 or 1 ................................  3 (over-bounded)
+static const char CS_STATE_FMT[] =
+  "{\"v\":%u,\"fw\":\"%s\",\"content\":%u,\"name\":\"%s\","
+  "\"box\":{\"used\":%u,\"free\":%u},"
+  "\"cs\":{\"used\":%u,\"free\":%u},"
+  "\"body\":%u,\"cal\":%u,\"epoch\":%lu,\"ro\":%u}";
+
+static constexpr size_t CS_STATE_WORST =
+    (sizeof(CS_STATE_FMT) - 1u)          // the format, specifiers included
+  + (5u - 2u)                            // v
+  + ((sizeof(FW_VERSION) - 1u) - 2u)     // fw
+  + (5u - 2u)                            // content
+  + ((size_t)NAME_MAX_LEN - 2u)          // name
+  + 4u * (3u - 2u)                       // box.used/free, cs.used/free
+  + (5u - 2u)                            // body
+  + (5u - 2u)                            // cal
+  + (10u - 3u)                           // epoch, "%lu" is three characters
+  + (3u - 2u)                            // ro
+  + 1u;                                  // the NUL snprintf always writes
+
+static_assert(CS_STATE_WORST <= (size_t)CS_OUT_BUF,
+              "GET /api/state can no longer fit CS_OUT_BUF - a longer "
+              "FW_VERSION or a wider field would be TRUNCATED, and a truncated "
+              "JSON body is refused by the page with no error the device can "
+              "see. Raise CS_OUT_BUF or shorten the response; do not ship it.");
+
 // ---- GET /api/state ---------------------------------------------------------
 //
 //  PIN-GATED: free slots and the device name are this device's, not the
@@ -296,11 +345,7 @@ static void h_state(void)
   const uint8_t box_cap  = box_capacity();
   const uint8_t cs_used  = csp_count();
 
-  snprintf(s_out, sizeof(s_out),
-           "{\"v\":%u,\"fw\":\"%s\",\"content\":%u,\"name\":\"%s\","
-           "\"box\":{\"used\":%u,\"free\":%u},"
-           "\"cs\":{\"used\":%u,\"free\":%u},"
-           "\"body\":%u,\"cal\":%u,\"epoch\":%lu,\"ro\":%u}",
+  snprintf(s_out, sizeof(s_out), CS_STATE_FMT,
            (unsigned)CREATOR_API_VERSION, FW_VERSION, (unsigned)CONTENT_VERSION,
            name,
            (unsigned)box_used, (unsigned)(box_cap - box_used),

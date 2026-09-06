@@ -25,15 +25,56 @@ CPPFLAGS := -DNT_HOST -I$(SRC_ROOT) -I. -DNT_TESTS_DIR=\"$(CURDIR)\"
 
 TESTS := $(patsubst %.cpp,$(BIN)/%,$(sort $(wildcard test_*.cpp)))
 
-.PHONY: all check clean golden screens fixtures
+.PHONY: all check clean golden screens fixtures asan
 all: $(TESTS)
 
 check: all
 	@set -e; for t in $(TESTS); do echo "== $$t"; ./$$t $(ARGS); done; \
 	echo "ALL PASS $(words $(TESTS))/$(words $(TESTS))"
 
+# --- THE SANITISER RUN (added at the phase-8 exit) --------------------------
+# THREE TEST NAMES IN test_creator_api.cpp CLAIM A PROPERTY NO PLAIN BUILD CAN
+# CHECK: every_truncation_of_a_valid_document_errors_and_never_over_reads,
+# byte_flip_fuzz_over_a_valid_document_never_produces_a_bad_record and
+# random_bodies_error_and_never_crash. The harness is BUILT for it - HeapBody
+# mallocs every fuzz body at exactly its own length, so a one-byte over-read is
+# a heap overflow rather than a read into the rest of a static array - but
+# nothing ever compiled with a sanitiser, so the instrument that makes those
+# names true was never run.
+#
+# MEASURED AT THE EXIT. `cp_skip_ws()`'s `while (c.i < c.n)` changed to `<=` -
+# a one-byte over-read on every whitespace skip, in the reader whose whole
+# design is "length-bounded, never NUL-bounded" - printed ALL PASS 49/49 on the
+# plain build and, under this target, AddressSanitizer: heap-buffer-overflow at
+# creator_parse.cpp:62 in cp_skip_ws. That is the difference this target is.
+#
+# THE SET IS THE OUTSIDE-INPUT PATH, not the whole suite: the four binaries
+# that read bytes this device did not write (an HTTP body, a PIN, a stored cs
+# record) plus the validator they all end in. Whole-suite ASAN takes minutes
+# and buys nothing the gate needs on every commit.
+#
+# -fsanitize=undefined IS DELIBERATELY ABSENT AND THE REASON IS PRE-EXISTING:
+# UBSan instruments the null check at data/evolution_table.h:112, which makes
+# evo_rules_are_well_formed()'s pointer comparison non-constant and fails a
+# static_assert in a GENERATED header. Verified against an unmodified
+# species_table.h, so it is not phase 8's. A UBSan subset
+# (signed-integer-overflow,shift,bounds,alignment,integer-divide-by-zero,
+# unreachable,return) does compile and run clean, and is one flag away here if
+# a later phase wants it in the gate.
+ASAN_BIN   := bin_asan
+ASAN_SET   := test_creator_api test_creator_gate test_validate test_persistence
+ASAN_CXX   := -std=c++17 -Wall -Wextra -Werror -O1 -g -fno-omit-frame-pointer \
+              -fsanitize=address -MMD -MP
+
+asan:
+	@$(MAKE) --no-print-directory CXXFLAGS="$(ASAN_CXX)" BIN=$(ASAN_BIN) \
+	  $(addprefix $(ASAN_BIN)/,$(ASAN_SET))
+	@set -e; for t in $(ASAN_SET); do echo "== $(ASAN_BIN)/$$t"; \
+	  ASAN_OPTIONS=detect_leaks=1:abort_on_error=0 ./$(ASAN_BIN)/$$t >/dev/null; done; \
+	echo "ASAN OK $(words $(ASAN_SET))/$(words $(ASAN_SET))"
+
 clean:
-	rm -rf $(BIN)
+	rm -rf $(BIN) $(ASAN_BIN)
 
 $(BIN) $(OBJ):
 	mkdir -p $@

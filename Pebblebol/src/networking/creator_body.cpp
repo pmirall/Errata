@@ -96,6 +96,14 @@ void cb_abort(CreatorBody& b)
   b.len   = 0u;
 }
 
+// `b.seen == b.declared` IS REDUNDANT BY CONSTRUCTION TODAY AND IS KEPT ANYWAY.
+// While state is CB_COLLECT, cb_write() advances `seen` and `len` together, so
+// len == seen holds and `len == declared` already implies it; a mutation sweep
+// at the phase-8 exit deleted the clause and test_creator_api stayed at 32/32,
+// which is an EQUIVALENT MUTANT and not a missing test. It is kept because it
+// is a bound against a core that hands over MORE bytes than it declared - the
+// case creator_body.h is explicitly written for - and named here so the next
+// sweep does not file it as a coverage gap.
 bool cb_ready(const CreatorBody& b)
 {
   return b.state == (uint8_t)CB_COLLECT && b.len > 0u &&

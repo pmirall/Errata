@@ -4,7 +4,7 @@
 |---|---|
 | Title | Pebblebol implementation plan (spec §69 second deliverable; task checklist for §52 Phases 1-10) |
 | Date | 2026-09-02 |
-| Status | Plan complete. Phase 1 (archaeology + housekeeping) and **Phases 2-7** done — tags `v0.2.0-core`, `v0.3.0-pet`, `v0.4.0-battle`, `v0.5.0-explore`, `v0.6.0-activity`, **`v0.7.0-social`**; Phases 8-10 open. *(This row said "Phases 3-10 open" through four phase exits; corrected at the phase-6 exit, P6-C4, and advanced at the phase-7 exit, P7-C6.)* The two **P2-C0** boxes (first flash, on-device measurements) stay open by construction: D1 is deferred and no board exists, so the on-device half of the Phase-2 exit criteria is unverified — **and nothing in phases 3-7 has run on hardware either**, which is why §67's `Device boots reliably`, `Wi-Fi scanning works`, `Device sleeps correctly` and now `Local multiplayer works` are all still open. **PHASE 7 LEAVES TWO BENCH ITEMS AND THEY GATE THE LARGEST CLEANUP IN THE TREE:** ESP-NOW is implemented and has never run, so BLE — 712,618 B of flash and 23,496 B of globals — is still here, waiting on two boards seeing each other's beacon in LINK. |
+| Status | Plan complete. Phase 1 (archaeology + housekeeping) and **Phases 2-7** done — tags `v0.2.0-core`, `v0.3.0-pet`, `v0.4.0-battle`, `v0.5.0-explore`, `v0.6.0-activity`, **`v0.7.0-social`**. **PHASE 8 IS BUILT AND CLOSED AT P8-C6 AND IS DELIBERATELY NOT TAGGED:** the gate is green (49 host binaries + ASAN 4/4 + 51 browser assertions), the matrix is green on six variants at 0 warnings, `release` is 1,326,400 / 59,396 — and **all seven §67 creator boxes are open on the bench**, because a socket, a radio, a phone camera and a thumb on glass are none of them things this environment has. A phase-exit tag is a claim about acceptance, and nobody has checked this one. Phases 9-10 open. *(This row said "Phases 3-10 open" through four phase exits; corrected at the phase-6 exit, P6-C4, advanced at the phase-7 exit, P7-C6, and again at the phase-8 exit, P8-C6.)* The two **P2-C0** boxes (first flash, on-device measurements) stay open by construction: D1 is deferred and no board exists, so the on-device half of the Phase-2 exit criteria is unverified — **and nothing in phases 3-8 has run on hardware either**, which is why §67's `Device boots reliably`, `Wi-Fi scanning works`, `Device sleeps correctly`, `Local multiplayer works` and the seven Creator boxes are all still open. **PHASE 7 LEAVES TWO BENCH ITEMS AND THEY GATE THE LARGEST CLEANUP IN THE TREE:** ESP-NOW is implemented and has never run — and P8-C0 deleted BLE anyway, on the owner's explicit bet, so the two-board beacon test is now the test that decides whether that deletion needs reverting rather than the test that authorises it. |
 | Source commit | `b53cfe4` ("first commit", the only commit; `docs/` and the audit are untracked) |
 | Inputs | Audit: `/home/user/Pebblebol/PEBBLEBOL_IMPLEMENTATION_AUDIT.md` (669 lines). Spec: `/home/user/Pebblebol/docs/PEBBLEBOL_PRODUCT_SYSTEM_SPEC.md` (2,708 lines; §5 architecture, §6 states, §52 phases, §67 done, §68 rules, §69 audit items). Three plan drafts (buildable / reuse / spec-purist) and two judge verdicts, merged here. |
 | Firmware | `/home/user/Pebblebol/sketch_aug30b/` — "Nottamagochi" `FW_VERSION "1.0.0"`, 26,703 lines in 16 `.cpp` + 1 `.ino` + 21 `.h` |
@@ -14,7 +14,7 @@
 | Hardware baseline | `docs/PEBBLEBOL_HARDWARE_AND_BATTERY_SPEC.md` (V1: ESP32-C3 SuperMini + 0.96" OLED + 2 buttons + **passive piezo** + **2xAAA**). Reconciled in `docs/hardware_reconciliation.md`: the piezo makes `hardware/audio.h` a real implementation instead of a null stub, and the 2xAAA supply raises decisions D9/D10. Radios-off, OLED-off, timestamp-driven state and checkpoint saves were already the plan's direction. |
 | Language rule | Code, comments, docs in English. User-facing UI strings may stay Spanish (`strings_es.h`). |
 | Effort key | S = hours, M = 1-3 days, L = > 3 days (one engineer). |
-| Task count | 139 checkbox tasks in §3 (2 done, 137 open; per phase: P1 8, P2 54, P3 13, P4 12, P5 11, P6 8, P7 11, P8 7, P9 7, P10 8). Every `- [ ]` / `- [x]` line in §3 is one task; §2 is an ordered surgery list executed by Phase-2 commits and §5 is spec §67 copied as done-criteria — neither adds tasks. |
+| Task count | 139 checkbox tasks in §3 as first written (2 done, 137 open; per phase: P1 8, P2 54, P3 13, P4 12, P5 11, P6 8, P7 11, P8 7, P9 7, P10 8); the phase boxes have since been rewritten in place with what shipped, so the per-phase counts below are no longer the original ones. Every `- [ ]` / `- [x]` line in §3 is one task; §2 is an ordered surgery list executed by Phase-2 commits and §5 is spec §67 copied as done-criteria — neither adds tasks. |
 
 Conventions used throughout:
 
@@ -1207,6 +1207,210 @@ inside `$(...)` that exited the subshell and let a missing macro print an error 
   still open on the bench, so cutting it would date a claim nobody has checked.
 - Commit message: `phase-8: creator — persisted PIN, AP-only Wi-Fi with idle shutdown, §38 routes with raw-body cap and shared validator, committed page source with 24x24 sprite editor, secret-free QR`
 
+**P8-C6 Phase-8 exit** — S — **LANDED 2026-09-06.** Gate green (**ALL PASS 49/49** host binaries,
+**ASAN OK 4/4**, **PAGE TEST OK 51/51**), MATRIX OK on six variants, **−30 flash / +0 globals** on
+`release`. Nothing pushed, nothing tagged.
+
+Three review lenses ran over the phase — hostile input, the release artefact, the tests and gates
+— and returned **five findings at MAJOR**. Every one was reproduced before it was touched, and
+four of the five are this project's own recurring defect: a check that cannot fail, or a sentence
+wider than the tree.
+
+- [x] **FIXED: the catch-all gate could not fail, and it guarded the phase's headline security
+  claim.** `tools/check.sh` held it with `grep -rn 'UriAny' | wc -l >= 2` — a count of a TYPE
+  NAME, and the struct definition alone contributes three occurrences. **Reproduced both ways:**
+  with the registration deleted, and with `HTTP_ANY` narrowed to `HTTP_GET` on that one line,
+  `SKETCH=<mutant> tools/check.sh --no-build --no-tests` printed **GATE OK** and the release build
+  was clean at 0 warnings — putting every unmatched POST back on `readBytesWithTimeout()`'s malloc
+  growth loop, the audit §12 hole `creator_server.h` names as closed. The gate now matches the
+  registration itself and requires exactly one; both mutants fail it by name. `creator_smoke.sh`
+  phase 2 carries the half a grep cannot: **an oversize POST to an UNMATCHED path must be answered
+  413**, because a firmware with no catch-all reads the whole body and then answers 404.
+- [x] **FIXED: the PIN gate on the routes that WRITE had no instrument anywhere.**
+  `creator_server.cpp` is never compiled by `tests/Makefile`, so `creator_smoke.sh` is §67 "PIN
+  required"'s only instrument — **and it drove all seven of its PIN cases through
+  `GET /api/state`.** Its only unauthenticated POSTs carried deliberately broken bodies, which the
+  BODY layer answers (413/411/415) before the PIN is consulted. So nothing in the repository had
+  ever sent an unauthenticated POST with a **valid** body, and `pin_after_body()` — the
+  body-carried PIN — was executed by nothing at all. **Reproduced:** `pin_after_body()` replaced by
+  `return true;` builds clean (`release` 1,326,274 / 59,396, 0 warnings), runs ALL PASS 49/49 and
+  passes every networking gate, on a firmware where omitting `X-Pin` creates a Pebble and sets the
+  clock. Four probes added (unauthenticated write with the Box count asserted unmoved, a wrong
+  header on the clock route, a wrong body PIN, **and the correct body PIN accepted** — the last
+  because a one-sided assertion passes against a firmware that refuses every body PIN), plus three
+  mutation-tested gates so the coverage cannot vanish again.
+- [x] **FIXED: three "never over-reads" test names had no instrument either.** The harness mallocs
+  every fuzz body at exactly its own length **so that** a one-byte over-read is a heap error, and
+  nothing had ever compiled with a sanitiser. **Reproduced:** `cp_skip_ws()`'s `while (c.i < c.n)`
+  changed to `<=` printed **ALL PASS 49/49** and, under ASan, `heap-buffer-overflow at
+  creator_parse.cpp:62`. `make -C tests asan` is now a gate stage — four binaries, ~9 s from cold,
+  green on the unmodified tree, **skipped with a printed word** where there is no `libasan`.
+  `-fsanitize=undefined` stays out for the pre-existing reason `evolution_table.h:112` gives.
+- [x] **FIXED: the required-key mask was asserted only in aggregate, and two of the six keys have
+  no other guard.** **Reproduced:** with `CPK_TYPE` and `CPK_SPRITE` dropped, `make -C tests check`
+  printed ALL PASS 49/49 and `{"v":1,"name":"Bicho","base":[6,5,5,5],"moves":[1,6,32,34]}` through
+  `tests/bin/creator_decode` answered **`cp=CP_OK vr=VR_OK type=0`** with both sprite frames all
+  zero — a type-defaulted, entirely blank creature accepted by `POST /api/pebble`. A zeroed `type`
+  is `TYPE_SIGNAL`, a legal value, and the validator never inspects the sprite bytes.
+  `every_required_key_is_required_on_its_own` excises each key on its own, requires
+  `CP_MISSING_KEY`, **then puts the pair back and requires `CP_OK`** — the round trip is what makes
+  the refusal attributable. All six mutation-tested one at a time.
+- [x] **FIXED: `docs/budget.md` reconciled phase 8 against the forecast it passed and not the one
+  it missed.** §3 forecast 30-45 K flash; phase 8 spent **+57,274** on `release`, 27 % over, and
+  §§9-12 each quoted the globals line and named neither. The P8 row is struck with SPENT figures on
+  both axes, the overrun has its one address (42,404 B of documents; Pebblebol's own phase-8 code
+  and strings are 14,870 B), and the ending projection is re-scored — **it was already past on
+  globals**, since the phase-6 re-scoring expected 53,624-57,924 at the end of phase 10 and the
+  artefact is at 59,396 today.
+- [x] **FOUR RESIDUALS RECORDED RATHER THAN PATCHED**, on the rule that at a phase exit a
+  behaviour change which weakens a tested property is worse than a written trade. (1) The core
+  reads the request line and every header into heap-growing Strings with **no length bound** and a
+  per-byte timeout that resets on every byte, so a trickling client blocks `handleClient()` — and
+  **the loop task WDT is not armed**, so the device hangs rather than resets. `creator_server.h`'s
+  NOT-TRUSTED table read as comprehensive and now names it; `app/app.h`'s "5 s Task WDT" sentence
+  is corrected. (2) The lockout is **deniable both ways**: an absent `X-Pin` is a counted failure,
+  so five unauthenticated requests a minute keep the OWNER out, across a reboot, and the idle
+  teardown becomes the attacker's tool — `creator_gate.h` now argues that side too, with both
+  candidate mitigations named and why neither is better. (3) `web_portal_open()`'s "persisted
+  BEFORE it is shown" does not hold in a read-only session; qualified in place. (4) The page's
+  empty-sprite check is the **one** page rule with no device twin — a blank creature is legal,
+  §35 asks for dimensions, data size and palette — so the three banners claiming otherwise were
+  narrowed, and every other rule in `localProblems()` and `stepReady()` was checked one by one
+  against a named `VR_CS_*` twin.
+- [x] **A compile-time bound where there was a prose estimate.** `creator_server.h` claimed every
+  response body has "a worst case provable at compile time" and no such proof existed.
+  `CS_STATE_WORST` is derived from `sizeof` the format plus each field's own bound and
+  `static_assert`ed against `CS_OUT_BUF`; it matters because it moves with `FW_VERSION`, which
+  phase 9's tag and phase 10's both grow, and the failure mode is a truncated JSON body the page
+  refuses with nothing the device can see. Mutation-tested: `CS_OUT_BUF 160` stops the build by
+  name.
+- [x] **THE ARTEFACT WAS ASKED WHAT THE SOCKET COULD NOT BE.** `nm` and `objdump -d` over the
+  release `.elf` built at this commit: all seven handlers, `cs_body_hook`, `cs_register` and
+  `UriAny` are present; `read_and_judge` calls `pin_before_body()` → `cp_parse_species` →
+  **`web_pin_present()` → `web_pin_ok_u16()`** → `validate_custom_species` in that order, so **the
+  body-PIN half is in the shipping image** — what it has never been is executed; `h_pebble` reaches
+  `csp_install` → `box_new_pebble` → `validate_pebble` → `save_custom_species` with `csp_forget`
+  and `pebble_clear` on every failure arm; and `cg_idle_seconds()`'s 300 s default and both clamps
+  are in `cg_open()`'s inlined code (`li a5,300`, the 3600 clamp, the fail-count clamp) — the
+  phase-6 "a default that lives only in a dev-only arm" check, run and clear.
+- [x] **Measured, naming the variant every time:** `baseline` 1,338,802 / 59,572 →
+  **1,338,772 / 59,572**; `release` 1,326,430 / 59,396 → **1,326,400 / 59,396**; `no-web` and
+  `all-off` unmoved. **−30 flash / +0 globals**, attributed against a rebuilt `8b6a9bf` release
+  `.elf`: `.flash.text` −18 and `.eh_frame` −12 (which is `ALLOC, LOAD` on this target), and
+  −18 − 12 = −30 is exactly what the compiler printed. `nm` names the whole of it as
+  `_ZL6h_rootv` 216 → 198 — a function that GAINED a call and got smaller, because both its exits
+  now end in the same one and the compiler tail-merged them. `nm` also reports a new 138 B symbol
+  `_ZL12CS_STATE_FMT` **and `.flash.rodata` did not move by a byte**: the literal was already
+  there anonymously and naming it for `sizeof` gave the same bytes a name. `docs/budget.md` §13.
+
+- [ ] **NOT OBSERVED — §67 "PIN required", "Device-side validation works", "Wi-Fi activates only
+  when necessary", "Inactivity timeout works".** Still four boxes and still one command.
+  **OWNER: join the board's AP and run `tools/creator_smoke.sh --variant release --pin NNNN`.**
+  It is longer than it was: phase 2 now proves the catch-all answers an oversize POST **413** and
+  not 404, and phase 3 now drives the PIN on the routes that write, including the body-carried PIN
+  in **both** directions. About eight minutes. Run it against the RELEASE build.
+- [ ] **NOT OBSERVED — §67 "QR connection works"**, unchanged from P8-C5, and it also settles
+  P8-C2's open question of whether a 62 px version-2 symbol scans at arm's length at all.
+- [ ] **NOT OBSERVED — §67 "Mobile editor works" and "Sprite editor works"**, unchanged from
+  P8-C4. There is no phone here and a headless Chromium is not a thumb.
+- [ ] **NEW BENCH ITEM THIS EXIT FOUND: the pre-handler read.** Nothing bounds the request line or
+  the headers, and no watchdog is armed. **OWNER, after the smoke run: open a raw TCP socket to
+  port 80 with the CREATOR screen up, send `GET / HTTP/1.1\r\n` and then one header byte every
+  four seconds. Watch the panel.** If the display and the 1 Hz tick stop advancing, the stall is
+  real and the decision is whether to arm the loop WDT (which interacts with `power.cpp`'s light
+  sleep) or shorten the client read timeout. If they keep advancing, the analysis is wrong and
+  `creator_server.h`'s residual should say so.
+- [ ] **NEW BENCH ITEM: the lockout's availability side.** **OWNER, optionally: from a second
+  device on the AP, send five requests with no `X-Pin` every minute while trying to use the page
+  from the phone.** The expected result is that the page cannot get in and the portal dies at
+  `creator_idle_s`. That is the documented trade, and the point of running it is to see how bad it
+  feels rather than to discover it.
+- [ ] **STILL OWED FROM PHASE 7 and untouched here, as instructed:** §67 "Local multiplayer works",
+  and the two-board ESP-NOW beacon test — which remains the test that decides whether P8-C0's BLE
+  deletion needs reverting.
+- Acceptance: gate green (49 host binaries + ASAN 4/4 + page test 51/51), matrix green on six
+  variants, **seven §67 creator boxes left unticked with a written owner condition on each.**
+  **NOT TAGGED:** `v0.8.0-creator` is a claim about a phase whose acceptance nobody has checked.
+- Commit message: `phase-8: creator — persisted PIN, AP-only Wi-Fi with idle shutdown, §38 routes with raw-body cap and shared validator, committed page source with 24x24 sprite editor, secret-free QR`
+
+### PHASE 9 HANDOVER — what it inherits, what will bite it, measured versus assumed
+
+**WHAT IS MEASURED.** On the artefact the caps police — `release`, `GOD_MODE_ENABLED=0`, built at
+this commit, size line read before any symbol (`docs/budget.md` §8's rule):
+
+* **globals 59,396 of `GATE_RELEASE_GLOBALS_MAX` 65,000 — 91.38 % used, 5,604 B FREE.**
+* **flash 1,326,400 of `GATE_RELEASE_FLASH_MAX` 1,600,000 — 82.90 % used, 273,600 B FREE.**
+* `baseline` is 1,338,772 / 59,572 and is **not** that artefact. Quoting it as headroom is the
+  mistake `docs/budget.md` §8 exists to record.
+* `SPRITE_DATA_BYTES` is **10,623 B**, of which **9,448 is the 38 legacy Nottamagochi body sets**
+  P9-C3 deletes and 1,175 is everything else.
+* `INDEX_HTML` is **42,245 B of `WEB_HTML_MAX` 49,152 — 6,907 B free, 85.9 % used.**
+* `CREATOR_SCHEMA_JSON` is **1,172 B** of `.rodata` for 34 attacks and 4 type names.
+* The gate is **49 host binaries + 4 under ASan + 51 browser assertions**, and `make -C tests check`
+  is 7.7 s, the ASan stage ~9 s from cold, the browser test ~3 s.
+
+**WHAT WILL BITE PHASE 9, IN ORDER.**
+
+1. **THE SPRITE WINDOW IS THE ONLY PLACE PHASE 9 CAN OVERRUN A HARD `static_assert`.** 60 species
+   x 2 frames x 72 B = **8,640 B**; end state 1,175 + 8,640 = **9,815 B**; **peak with the legacy
+   sets still alive 19,263 B**, against `sprites.h`'s **24,576 B transition allowance** — 5,313 B
+   of margin. The natural order (new art in, check it on the real screens, then delete the old)
+   IS the peak, so the allowance is there to be used. **P9-C3 must bring it back down** once the
+   legacy sets are gone: an allowance left standing after the thing it allowed for is a budget
+   that stopped meaning anything, and `sprites.h` says so at the assert. On flash the peak is
+   +8,640 B against 273,600 free — **3.2 % of the headroom, not a constraint.**
+2. **GLOBALS, NOT FLASH, IS THE SCARCE LINE, AND IT IS SCARCER THAN THE TABLE SAYS.** §3 forecast
+   0.2-0.5 K for phase 9 and 0.5-1.5 K for phase 10; at the top of both bands phase 10 ends at
+   **61,396 of 65,000 (94.5 %)**. There is no room for a buffer nobody budgeted. `CS_BODY_MAX` is
+   the model of what not to repeat casually: 2,060 B, 36.8 % of what is left, and it was
+   deliberate and priced. If bytes are ever needed back, that constant is the lever —
+   `CS_BODY_MAX 1024` is still ~2.7x the largest legitimate upload, it is one `#define`, and
+   `creator_smoke.sh` reads it out of `config.h` so the bench follows without an edit.
+3. **`CONTENT_VERSION` IS A HASH OF `balance.json` AND IT IS STAMPED INTO EVERY `BattleState`.**
+   P8-C3 measured this: adding two keys moved it `0x02B5 → 0xBB4B` and turned
+   `tests/test_battle_golden` red on 40 lines of recorded state hashes **with no battle behaviour
+   changed at all**. Phase 9 changes that file on purpose and will regenerate those goldens — which
+   is correct, and it means the goldens stop being evidence for that commit. Regenerate them in a
+   commit that does nothing else, and read the diff.
+4. **THE ONE VALIDATOR NOW HAS A CREATOR CALL SITE, AND IT IS TYPE-COUNT SENSITIVE.**
+   `validate_custom_species()` checks moves against `TYPE_NEUTRAL == 3` and `TYPE_COUNT == 3`, and
+   `tests/test_creator_api.cpp` asserts both by number because the page's pool filter and
+   `validate.cpp` both rely on the relation. A fourth type in phase 9 moves the served schema, the
+   page, the creator validator and that assertion together. It will fail loudly, which is the
+   design.
+5. **A CUSTOM SPECIES OCCUPIES `species_id` 200+, AND A CUSTOM PEBBLE DOES NOT TRAVEL.**
+   `protocol.cpp` refuses `species > 199` as `VR_WIRE_CUSTOM_UNRESOLVED`. Growing the roster to 60
+   does not approach 200, so the split is safe — but `csp_species_id()` and the resolver are on the
+   load path of **every** variant, `all-off` included, so a change there is not a web-feature
+   change.
+6. **THE CREATOR SPRITE IS STORED, CRC-COVERED, DRAWN BY THE PAGE AND STILL NOT DRAWN BY THE
+   DEVICE.** `species_custom.cpp` projects `sprite_id = 0`, so a creator Pebble renders as the
+   first atlas body. P8-C3 assigned it to P8-C4/P9-C3; P8-C4 did the page half. **The device half
+   is P9-C3's**, it is a `SpriteRef` resolved out of the `csp` registry through `petfx` and
+   `pet_art`, and the page tells the user so on the UPLOAD screen rather than letting them find
+   out.
+7. **A `cs` SLOT IS STILL ONLY FREED BY AN ACTION THAT DOES NOT EXIST.** `csp_forget()` has no
+   shipping caller and nothing reference-counts a record against the Pebbles pointing at it; a
+   power cut between the `cs` write and the Pebble write leaves one orphaned slot (bounded, and the
+   other order would leave a quarantined Pebble instead). **The rule for whoever builds the
+   release action:** free a slot only on an explicit CREATOR-screen action, and only when no Pebble
+   in the Box carries that `custom_sprite`.
+
+**WHAT IS ASSUMED AND NOT MEASURED — say so before quoting any of it.**
+
+* **Everything about a socket.** No HTTP request has been made in this environment; the transport
+  half of the creator (`webui.cpp`, `creator_server.cpp`) is compiled by no host binary and is held
+  by four greps and a bench script nobody has run. Phase 9 touches the served schema, so it touches
+  this: **regenerating `creator_schema_json.h` changes bytes only a board can prove are served.**
+* **Everything about a radio, a phone camera, a thumb on glass and a power cut on real flash.**
+  Seven §67 creator boxes, two phase-7 boxes and the two P2-C0 boxes are all open for that reason.
+* **The gzip lever for the page** (§11: 47,181 → 17,947 B on this project's previous phone page)
+  is a measurement from a DIFFERENT page and is a plan, not a result. Do not raise `WEB_HTML_MAX`
+  as the first move — the cap is the only thing that makes the overrun visible.
+* **The `-fsanitize=undefined` subset** that "compiles and runs clean" is not in the gate, so it is
+  a claim about the day it was run. Full UBSan cannot compile this tree at all, and that is
+  `evolution_table.h:112`'s, not phase 8's.
+
 ### Phase 9 — Content — size L — goal: 60+ Pebbles, attacks, items, evolution families, encounter tables; corruption mechanic
 
 **P9-C1 Content pipeline complete** — M
@@ -1342,6 +1546,20 @@ below on that rule — and `Device sleeps correctly` is deliberately NOT, for th
 `Wi-Fi shuts down after use` is held open: a device sleeping is an observation, and nothing
 has been observed.
 
+**UPDATED AT THE PHASE-8 EXIT (P8-C6), AND NOT ONE CREATOR BOX IS TICKED.** All seven are
+bench items — a socket, a radio, a phone camera, a thumb on glass — and this section's rule
+cannot close a bench item. That is the whole of the phase-8 change to this list, and it is
+deliberate: phase 8 shipped the creator, its gate is green over 49 host binaries plus four under
+AddressSanitizer plus 51 browser assertions, its release build is clean at 0 warnings on six
+variants, and **none of that is a person holding a phone in front of a device.** What DID change
+is the instrument: `tools/creator_smoke.sh` is one command for four of the seven, and the exit
+widened it, because two of its assertions could not have failed. It now proves the catch-all
+answers an oversize POST **413 rather than 404** (the only way to see a catch-all narrowed to
+`HTTP_GET` on a real socket) and it now drives the PIN on the routes that WRITE, including the
+body-carried PIN in both directions — a path **nothing in this tree had ever executed**. Two new
+bench items came out of the exit and are listed in the P8-C6 box: the unbounded pre-handler read
+with no watchdog armed, and the lockout's availability side. The phase-8 exit tag is NOT cut.
+
 **Updated at the phase-7 exit (P7-C6).** `Invalid peers cannot inject illegal data` is ticked
 below: both commits on its line have landed and the claim is a property of the tree, with its
 LIMIT stated on the line rather than glossed. **`Local multiplayer works` is deliberately NOT
@@ -1393,13 +1611,13 @@ each of which is a sentence about two devices rather than about one function.
 - [ ] Generated Pebbles remain balanced. — P7-C5 (10k-pair ceiling test). *Held open with the box above and for the same reason - there is no bred Pebble in the product yet. The measurement exists: 10,000 random pairs stay inside the genesis gene band, and 200 dynasties x 40 generations of UNCLAMPED breeding leave it 8,655 times against the clamped arm's 0. The battle half of the ceiling is structural and the test that asserts it says so rather than claiming credit.*
 
 ### Creator
-- [ ] PIN required. — P8-C1, P8-C3, P8-C5. *The rules are pure and swept case by case in `tests/test_creator_gate.cpp`, the persisted half in `tests/test_game_state.cpp` against the real `save_manager` — but **no HTTP request has been made in this environment**, and "PIN required" is a sentence about a socket. Since P8-C5 the owner step is one command instead of a curl list: `tools/creator_smoke.sh --variant release --pin NNNN`, whose phase 3 drives the five failures, the sixth refused as locked, the lockout refusing the CORRECT PIN as well, and the counter cleared afterwards so the device is not left armed.*
-- [ ] QR connection works. — P8-C5. *The screen is §34's, the payload is §39's and both are held on the host: `tests/test_qr.cpp` validates the encoder module-by-module against the Python `qrcode` reference, `creator_payload_carries_no_pin_for_any_pin` proves the encoded bytes are identical at all 9,999 PINs, and `creator_portal.pbm` pins the drawn symbol at the real 128x64. **None of that is a phone reading a 62 px symbol,** which is the whole of what this box asks. Owner step in the P8-C5 box.*
-- [ ] Wi-Fi activates only when necessary. — P2-C6 (OFF by default), P8-C2, P8-C5. *Unchanged: the radio is screen-owned, taken in `creator_enter()` and released through the ONE teardown however the screen is left, and the host suite drives all three exits — but **no radio has been switched on in this environment.** `tools/creator_smoke.sh`'s phase 4 is the instrument; its last check is that the portal is gone, and the operator confirms the screen has left CREATOR with it.*
-- [ ] Inactivity timeout works. — P8-C2, P8-C5. *`tools/creator_smoke.sh --variant release --pin NNNN` phase 4 polls the ONE ungated route every 15 s for the whole budget and asserts BOTH halves — still serving at `creator_idle_s − 60`, gone by `creator_idle_s + 60` — which is also the strongest available form of `creator_gate.h`'s claim that unauthenticated traffic cannot hold the access point up. Nothing has run it.*
-- [ ] Mobile editor works. — P8-C4. *P8-C4 has LANDED and this box is deliberately NOT ticked, which is the phase-7 rule applied to the first box it fits since: a bench item is the one kind this rule cannot close. The page exists, is committed source, is generated into the firmware under a gate, and is driven end to end in a headless Chromium at a 390x844 viewport by `tools/page_test.mjs` (51 assertions, in `tools/check.sh`) — and none of that is a thumb on glass. A desktop browser has one exact pixel of contact, no palm, no glove, no sunlight, no one-handed reach and no on-screen keyboard eating half the viewport. The owner step is in the P8-C4 box.*
-- [ ] Sprite editor works. — P8-C4. *Same, and with one specific thing to look at: at 24 cells across a 390 px phone a grid cell is about 16 CSS px, where every BUTTON on the page is 44. The geometry is `CustomSpeciesRec`'s and cannot change, so the mitigations are full-width grid, a live `x , y` readout of the cell under the thumb, and DESHACER as a first-class tool. Whether that is enough is the question this box is about, and it is a phone question. What HAS been observed on the host: the exported XBM decodes, through the real `creator_parse.cpp` and the real `validate.cpp`, to exactly the cells the harness painted — bit order, byte order and both frames.*
-- [ ] Device-side validation works. — P8-C3, P8-C5. *One validator, 27 named codes, driven over the whole pipeline by `tests/test_creator_api.cpp` and end-to-end from a real browser by `tools/page_test.mjs` — and **nothing has sent it a byte over a socket.** `tools/creator_smoke.sh` phases 1 and 2 are the bench half: the document the page would send accepted through `POST /api/validate` and `POST /api/pebble`, a body over `CS_BODY_MAX` answered 413 with the cap in it, and one over `CS_BODY_DRAIN_MAX` answered with a closed socket.*
+- [ ] PIN required. — P8-C1, P8-C3, P8-C5, **P8-C6**. *The rules are pure and swept case by case in `tests/test_creator_gate.cpp`, the persisted half in `tests/test_game_state.cpp` against the real `save_manager` — but **no HTTP request has been made in this environment**, and "PIN required" is a sentence about a socket. The owner step is one command: `tools/creator_smoke.sh --variant release --pin NNNN`, whose phase 3 drives the five failures, the sixth refused as locked, the lockout refusing the CORRECT PIN as well, and the counter cleared afterwards so the device is not left armed.* **AND UNTIL P8-C6 THAT PHASE COULD NOT HAVE FAILED ON THE HALF THAT MATTERS MOST**: every one of its PIN cases drove `GET /api/state`, and its only unauthenticated POSTs carried broken bodies the BODY layer refuses before the PIN is read — so nothing in the repository had ever sent an unauthenticated POST with a valid body, and `pin_after_body()` was executed by nothing. Measured: `pin_after_body()` replaced by `return true;` built clean, ran ALL PASS 49/49 and passed every gate, on a firmware where omitting `X-Pin` creates a Pebble. Phase 3 now sends an unauthenticated `POST /api/pebble` (403, **and the Box count must not move**), a wrong header on `POST /api/time`, a wrong body PIN, and the correct body PIN **accepted**. Disassembly of the release `.elf` confirms both halves of the gate are in the shipping image; what they have never been is executed.*
+- [ ] QR connection works. — P8-C5. *Unchanged at the phase-8 exit. The screen is §34's, the payload is §39's and both are held on the host: `tests/test_qr.cpp` validates the encoder module-by-module against the Python `qrcode` reference, `creator_payload_carries_no_pin_for_any_pin` proves the encoded bytes are identical at all 9,999 PINs, and `creator_portal.pbm` pins the drawn symbol at the real 128x64. **None of that is a phone reading a 62 px symbol,** which is the whole of what this box asks. Owner step in the P8-C5 box.*
+- [ ] Wi-Fi activates only when necessary. — P2-C6 (OFF by default), P8-C2, P8-C5. *Unchanged at the phase-8 exit: the radio is screen-owned, taken in `creator_enter()` and released through the ONE teardown however the screen is left, and the host suite drives all three exits — but **no radio has been switched on in this environment.** `tools/creator_smoke.sh`'s phase 4 is the instrument; its last check is that the portal is gone, and the operator confirms the screen has left CREATOR with it.*
+- [ ] Inactivity timeout works. — P8-C2, P8-C5. *Unchanged at the phase-8 exit, and D7's 300 s is confirmed present in the release image by disassembly (`li a5,300` inside the inlined `cg_idle_seconds()`, with both clamps) — which rules out the phase-6 failure class and rules out nothing else. `tools/creator_smoke.sh --variant release --pin NNNN` phase 4 polls the ONE ungated route every 15 s for the whole budget and asserts BOTH halves — still serving at `creator_idle_s − 60`, gone by `creator_idle_s + 60` — which is also the strongest available form of `creator_gate.h`'s claim that unauthenticated traffic cannot hold the access point up. Nothing has run it.*
+- [ ] Mobile editor works. — P8-C4. *Unchanged at the phase-8 exit. P8-C4 has LANDED and this box is deliberately NOT ticked, which is the phase-7 rule applied to the first box it fits since: a bench item is the one kind this rule cannot close. The page exists, is committed source, is generated into the firmware under a gate, and is driven end to end in a headless Chromium at a 390x844 viewport by `tools/page_test.mjs` (51 assertions, in `tools/check.sh`) — and none of that is a thumb on glass. A desktop browser has one exact pixel of contact, no palm, no glove, no sunlight, no one-handed reach and no on-screen keyboard eating half the viewport. The owner step is in the P8-C4 box.*
+- [ ] Sprite editor works. — P8-C4. *Unchanged at the phase-8 exit. Same, and with one specific thing to look at: at 24 cells across a 390 px phone a grid cell is about 16 CSS px, where every BUTTON on the page is 44. The geometry is `CustomSpeciesRec`'s and cannot change, so the mitigations are full-width grid, a live `x , y` readout of the cell under the thumb, and DESHACER as a first-class tool. Whether that is enough is the question this box is about, and it is a phone question. What HAS been observed on the host: the exported XBM decodes, through the real `creator_parse.cpp` and the real `validate.cpp`, to exactly the cells the harness painted — bit order, byte order and both frames.*
+- [ ] Device-side validation works. — P8-C3, P8-C5, **P8-C6**. *One validator, 27 named codes, driven over the whole pipeline by `tests/test_creator_api.cpp` — now also under **AddressSanitizer on every commit**, which is the instrument the reader's three "never over-reads" case names had never had — and end-to-end from a real browser by `tools/page_test.mjs`. **Nothing has sent it a byte over a socket**, and `creator_server.cpp` is compiled by no host binary, so the transport half is held by four greps and a bench script nobody has run. `tools/creator_smoke.sh` phases 1 and 2 are the bench half, now including an oversize POST to an UNMATCHED path that must answer 413 rather than 404. Two exit findings bear on this box directly: the required-key mask was asserted only in aggregate, and with `CPK_TYPE` and `CPK_SPRITE` dropped a **type-defaulted, entirely blank creature parsed `CP_OK` and validated `VR_OK`** with the suite green — fixed by `every_required_key_is_required_on_its_own`; and `cp_skip_ws()` given a one-byte over-read printed ALL PASS 49/49 on the plain build and `heap-buffer-overflow` under ASan. Both are the reason this box's host half is stronger than it was, and neither makes it a socket.*
 
 ### Power
 - [ ] Wi-Fi shuts down after use. — P5-C1, P8-C2. *Held open with "Wi-Fi scanning works" and for the same reason: the release-once-per-run property has six host cases over all four exit paths (done, failed, timed out, cancelled) plus a `net_service()` backstop for a job nobody is pumping, and `wifi_down()` frees the driver's result array — but a radio switching off is an observation, not a property, and nothing has been observed.*

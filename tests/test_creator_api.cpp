@@ -7,7 +7,7 @@
 //  WHERE THIS FIXTURE DIFFERS FROM app_setup()'s OWN WIRING, STATED HERE
 //  BECAUSE A FIXTURE THAT DIFFERS SILENTLY IS TESTING A FIRMWARE NOBODY FLASHES
 //  =========================================================================
-//  THREE DIFFERENCES, and each names what covers the other half:
+//  FOUR DIFFERENCES, and each names what covers the other half:
 //
 //   1. THERE IS NO SOCKET AND NO WebServer. tests/Makefile compiles no device
 //      module: networking/creator_server.cpp includes Arduino.h and WebServer.h.
@@ -30,6 +30,17 @@
 //      nothing and hold no state between requests. tests/test_creator_gate.cpp
 //      drives the PIN's clocks and tests/test_game_state.cpp drives the store.
 //
+//   4. THE END-TO-END CASE COPIES THE NAME ITS OWN WAY (added at the phase-8
+//      exit; the list above said THREE and there were four). h_pebble() does
+//      `memcpy(p->nickname, rec.name, CS_NAME_CAP)` - a fixed 13 bytes, under
+//      a static_assert that the two fields are the same size - and the case
+//      below does memset+memcpy of strlen(rec.name). The results are identical
+//      for every name validate_custom_species() accepts, because it refuses an
+//      unterminated one by name (VR_CS_BAD_NAME), so this is equivalent TODAY
+//      and stops being equivalent the moment either field size or the NUL rule
+//      moves. It is written here rather than left to a reader diffing the two
+//      functions, because this banner is what a reader trusts instead.
+//
 //  WHAT IS REAL HERE: game/validate.cpp, game/species_custom.cpp and
 //  game/box.cpp are the shipping objects, so the end-to-end case files a REAL
 //  Pebble through the tree's ONE constructor and runs the tree's ONE validator
@@ -40,12 +51,18 @@
 //  =========================================================================
 //  and freed straight after, so a read one byte past the end is a heap overflow
 //  a sanitiser can see rather than a read into the rest of a static array that
-//  nothing would ever notice. Run it with
-//      make -C tests clean
-//      make -C tests bin/test_creator_api CXXFLAGS='-std=c++17 -Wall -Wextra
-//        -Werror -O1 -g -fsanitize=address,undefined'      (all on one line)
-//  which is exactly what was done for this chunk; the Makefile takes CXXFLAGS
-//  with ?= so no edit is needed.
+//  nothing would ever notice. SINCE THE PHASE-8 EXIT THAT IS NOT A MANUAL RUN
+//  ANY MORE: `make -C tests asan` builds this binary and three others with
+//  -fsanitize=address and runs them, and tools/check.sh runs it on every
+//  commit. It had to become a gate stage because it was the ONLY instrument
+//  the three "never over-reads" case names below have, and it was never run:
+//  a one-byte over-read planted in cp_skip_ws() printed ALL PASS 49/49 on the
+//  plain build and heap-buffer-overflow under the sanitiser.
+//
+//  -fsanitize=undefined is NOT in that target and the reason is pre-existing:
+//  it makes evolution_table.h:112's null check non-constant and fails a
+//  static_assert in a generated header. tests/Makefile records the subset that
+//  does work.
 // =============================================================================
 #include "nt_test.h"
 
@@ -442,6 +459,113 @@ TEST(a_body_that_is_not_a_document_is_refused_by_name) {
   CHECK_EQ((int)parse_str("{\"v\":1", c, pin), (int)CP_SYNTAX);
   CHECK_EQ((int)parse_str("{1:2}", c, pin), (int)CP_SYNTAX);
   CHECK_EQ((int)parse_str("{\"v\":1}", c, pin), (int)CP_MISSING_KEY);
+}
+
+// -----------------------------------------------------------------------------
+//  EVERY REQUIRED KEY, ONE AT A TIME.
+//
+//  ADDED AT THE PHASE-8 EXIT, AND THE CASE ABOVE IS WHY. It drives
+//  CP_MISSING_KEY with "{}" and "{\"v\":1}" - documents missing EVERY key, or
+//  all but one - so the `required` mask was only ever asserted IN AGGREGATE.
+//  Whichever single key was dropped from it, CPK_V or CPK_NAME still fired and
+//  the case stayed green. MEASURED: with CPK_TYPE and CPK_SPRITE both removed
+//  from creator_parse.cpp's mask, `make -C tests check` printed ALL PASS 49/49,
+//  and
+//    printf '{"v":1,"name":"Bicho","base":[6,5,5,5],"moves":[1,6,32,34]}'
+//      piped into tests/bin/creator_decode
+//  answered cp=CP_OK vr=VR_OK type=0 with both sprite frames all zero: a
+//  type-defaulted, entirely blank creature accepted by POST /api/pebble.
+//
+//  TWO OF THE SIX HAVE NO DOWNSTREAM GUARD AT ALL, which is what makes the mask
+//  load-bearing rather than belt-and-braces: a zeroed `type` is 0 = TYPE_SIGNAL,
+//  a legal value, and game/validate.cpp's validate_custom_species() never
+//  inspects the sprite bytes (spec section 35 asks for dimensions, data size and
+//  palette - all structural here, since the record's sprite is a fixed array).
+//  The mask is the only thing standing there.
+//
+//  THE SURGERY IS CHECKED BEFORE IT IS TRUSTED. A helper that produced garbage
+//  would give CP_MISSING_KEY for the wrong reason and this case would pass
+//  while proving nothing - so for every key the removed pair is put BACK at the
+//  front of the reduced document and the result must parse CP_OK again. That
+//  round trip is what makes the refusal attributable to the missing key.
+// -----------------------------------------------------------------------------
+
+// Removes the top-level "key": <value> pair from `src`. Depth- and
+// string-aware, so removing "sprite" does not stop at a comma inside its array.
+// Writes the reduced document to `out` and the removed pair (without its
+// separator) to `pair`. Returns false if the key is not top-level in `src`.
+static bool body_without(char* out, size_t out_cap, char* pair, size_t pair_cap,
+                         const char* src, const char* key)
+{
+  char needle[32];
+  snprintf(needle, sizeof needle, "\"%s\":", key);
+  const char* at = strstr(src, needle);
+  if (at == nullptr) return false;
+
+  const size_t start = (size_t)(at - src);          // the key's opening quote
+  size_t i = start + strlen(needle);
+  int    depth = 0;
+  bool   in_str = false;
+  for (; src[i] != '\0'; ++i) {
+    const char ch = src[i];
+    if (in_str) { if (ch == '"') in_str = false; continue; }
+    if (ch == '"') { in_str = true; continue; }
+    if (ch == '[' || ch == '{') { depth++; continue; }
+    if (ch == ']' || ch == '}') {
+      if (depth == 0) break;                        // the document's own '}'
+      depth--; continue;
+    }
+    if (ch == ',' && depth == 0) break;
+  }
+  if (src[i] == '\0') return false;
+
+  const size_t end = i;                             // ',' or the closing '}'
+  if (end - start >= pair_cap) return false;
+  memcpy(pair, src + start, end - start);
+  pair[end - start] = '\0';
+
+  // Drop the separator with the pair: the comma AFTER it when there is one, and
+  // otherwise the comma BEFORE it (the pair was last in the object).
+  size_t cut_from = start, cut_to = end;
+  if (src[end] == ',') cut_to = end + 1;
+  else                 cut_from = (start > 0 && src[start - 1] == ',') ? start - 1 : start;
+
+  const size_t len = strlen(src);
+  if (cut_from + (len - cut_to) + 1 > out_cap) return false;
+  memcpy(out, src, cut_from);
+  memcpy(out + cut_from, src + cut_to, len - cut_to);
+  out[cut_from + (len - cut_to)] = '\0';
+  return true;
+}
+
+TEST(every_required_key_is_required_on_its_own) {
+  static const char* const KEYS[] = { "v", "name", "type", "base", "moves", "sprite" };
+
+  CustomSpeciesRec c;
+  uint16_t pin = 0;
+  char reduced[2048], pair[512], restored[2048];
+
+  for (size_t k = 0; k < sizeof KEYS / sizeof KEYS[0]; ++k) {
+    CHECK(body_without(reduced, sizeof reduced, pair, sizeof pair,
+                       VALID_BODY, KEYS[k]));
+    // The surgery removed something, and something that names this key.
+    CHECK(strlen(reduced) < strlen(VALID_BODY));
+    CHECK(strstr(pair, KEYS[k]) != nullptr);
+    CHECK(strstr(reduced, pair) == nullptr);
+
+    // 1. WITHOUT IT: refused, by name.
+    CHECK_EQ((int)parse_str(reduced, c, pin), (int)CP_MISSING_KEY);
+
+    // 2. WITH IT BACK: accepted. This is what proves (1) is about the missing
+    //    key and not about a document the helper mangled.
+    const size_t np = strlen(pair), nr = strlen(reduced);
+    CHECK(2u + np + nr <= sizeof restored);      // "{" + pair + "," + reduced+1
+    restored[0] = '{';
+    memcpy(restored + 1, pair, np);
+    restored[1 + np] = ',';
+    memcpy(restored + 2 + np, reduced + 1, nr);  // nr - 1 bytes plus the NUL
+    CHECK_EQ((int)parse_str(restored, c, pin), (int)CP_OK);
+  }
 }
 
 TEST(trailing_bytes_after_the_document_are_refused_rather_than_ignored) {

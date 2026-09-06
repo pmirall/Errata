@@ -150,7 +150,15 @@ const uint8_t* cb_data(const CreatorBody& b);
 uint16_t       cb_len(const CreatorBody& b);
 CbState        cb_state(const CreatorBody& b);
 
-// The English name of a state, for the event log and the host tests.
+// The English name of a state.
+//
+// NO FIRMWARE CALLER, AND THAT IS DELIBERATE RATHER THAN AN OVERSIGHT: it is
+// absent from the release AND the baseline .elf (--gc-sections drops it),
+// because creator_server.cpp maps CbState to a status code with its own switch
+// and never prints a name. It exists for tests/test_creator_api.cpp and, more
+// usefully, for the static_assert beside CB_NAMES in the .cpp - which is what
+// actually stops a CbState being added without a name, and which DOES run in
+// every build. Named here so a reader does not go looking for the call site.
 const char* cb_state_name(CbState s);
 
 // -----------------------------------------------------------------------------

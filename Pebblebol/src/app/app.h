@@ -17,7 +17,18 @@
 void app_setup(void);
 
 // Pumps input, the 1 Hz logic tick, presentation timing, the frame and the
-// radio. Non-blocking; one iteration stays well below the 5 s Task WDT.
+// radio. Non-blocking; one iteration stays well below 5 s.
+//
+// THE TASK WATCHDOG IS NOT ARMED, AND THIS LINE USED TO IMPLY IT WAS. The
+// sentence read "well below the 5 s Task WDT", which reads as a backstop. The
+// pinned core sets `loopTaskWDTEnabled = false` (cores/esp32/main.cpp:103) and
+// nothing in this tree calls enableLoopWDT(), so a loop iteration that DID
+// block has nothing watching it: readBytes() calls delay(2), which feeds the
+// idle task, so the device hangs rather than resetting. The known way to reach
+// that is the Arduino core's own pre-handler read - see the residual recorded
+// in networking/creator_server.h. Arming the WDT is a real option and a real
+// decision (power.cpp light-sleeps with the radio up), and it belongs to a
+// phase that can bench a reset, not to a header comment.
 void app_loop(void);
 
 // THE ONE DOOR FOR EXPERIENCE. Awards `amount` XP from `src` to the active

@@ -136,6 +136,36 @@ tag for a phase is cut only when its gate (`tools/check.sh`) and its variant mat
   a loopback host — a green run against a mock is the fixture-that-is-not-the-firmware defect this
   project has hit three times.
 
+- **The sanitiser is a gate stage (P8-C6).** `make -C tests asan` builds `test_creator_api`,
+  `test_creator_gate`, `test_validate` and `test_persistence` with `-fsanitize=address` and runs
+  them; `tools/check.sh` runs it on every commit, ~9 s from cold, **skipped with a printed word**
+  where the toolchain has no `libasan`. It is the only instrument three case names in
+  `test_creator_api.cpp` have ever had: `test_creator_api.cpp` mallocs every fuzz body at exactly
+  its own length **so that** a one-byte over-read is a heap error, and nothing had ever compiled
+  with a sanitiser. Measured — `cp_skip_ws()`'s `while (c.i < c.n)` changed to `<=` printed
+  **ALL PASS 49/49** on the plain build and `heap-buffer-overflow at creator_parse.cpp:62` here.
+- **`every_required_key_is_required_on_its_own` (P8-C6).** Each of the six required keys is
+  excised from the valid document on its own and must give `CP_MISSING_KEY`, and then put back
+  and give `CP_OK` — the round trip is what makes the refusal attributable to the missing key
+  rather than to a mangled document. All six mutation-tested one at a time.
+- **The PIN gate on the routes that WRITE now has probes (P8-C6).** `tools/creator_smoke.sh`
+  phase 3 sends `POST /api/pebble` with a valid document and no `X-Pin` (403, and the Box count
+  must not move), `POST /api/time` with a wrong header, a wrong PIN carried in the **body**, and
+  the correct PIN carried in the body **accepted** — the last because a one-sided assertion
+  passes against a firmware that refuses every body PIN. Phase 2 gained the only probe that can
+  see a catch-all narrowed to `HTTP_GET` on a real socket: an oversize POST to an **unmatched**
+  path must be answered 413, not read whole and then 404'd.
+- **A compile-time bound on `GET /api/state` (P8-C6).** `creator_server.h` said every response
+  body "has a worst case provable at compile time" and no such proof existed — `config.h` carried
+  a prose estimate. `CS_STATE_WORST` is now derived from `sizeof` the format plus each field's own
+  bound and `static_assert`ed against `CS_OUT_BUF`. It matters because it moves with `FW_VERSION`,
+  which phase 9's tag and phase 10's both grow, and the failure mode is a silently truncated JSON
+  body the page refuses. Mutation-tested: the build stops by name.
+- **Four more gates in `tools/check.sh` (P8-C6):** the catch-all must be registered exactly once
+  as `.on(UriAny(), HTTP_ANY, ...)`, and the bench script must keep its unauthenticated POST to
+  the write route, its body-carried-PIN probe and its oversize POST to an unmatched path. Each
+  was mutation-tested.
+
 ### Fixed
 
 - **A test named `creator_payload_carries_no_pin` did not read the payload (P8-C5).** It asserted
@@ -185,6 +215,33 @@ tag for a phase is cut only when its gate (`tools/check.sh`) and its variant mat
   and the reason the first round-trip test failed. Removed; the concern it named is answered by
   never restoring the lockout *deadline*, only the armed state.
 
+- **The catch-all gate could not fail, and it guarded the phase's headline security claim
+  (P8-C6).** `tools/check.sh` held it with `grep -rn 'UriAny' | wc -l` >= 2 — a count of a TYPE
+  NAME. The struct definition alone contributes three occurrences, so deleting the registration
+  left 3 and the gate passed; narrowing `HTTP_ANY` to `HTTP_GET` on that one line also passed,
+  built clean at 0 warnings, and puts every unmatched POST back on `readBytesWithTimeout()`'s
+  malloc growth loop. Both reproduced (`GATE OK` in each case) before the gate was rewritten to
+  match the registration itself.
+- **The required-key mask was asserted only in aggregate (P8-C6).** The `CP_MISSING_KEY` case
+  drove `{}` and `{"v":1}`, so whichever single key was dropped from `creator_parse.cpp`'s mask,
+  `CPK_V` or `CPK_NAME` still fired. With `CPK_TYPE` and `CPK_SPRITE` both removed the suite
+  printed **ALL PASS 49/49**, and a document with neither key parsed `CP_OK` and validated
+  `VR_OK` — **a type-defaulted, entirely blank creature accepted by `POST /api/pebble`**. Neither
+  key has a downstream guard: a zeroed `type` is `TYPE_SIGNAL`, and the validator never inspects
+  the sprite bytes. The mask is the only thing standing there, and now it is tested key by key.
+- **`h_root`'s throttled exit was the one server exit without `cs_body_done()` (P8-C6)**, against
+  an invariant `creator_server.h` states as holding on EVERY handler. Nothing reachable today
+  inherits a stale accumulator through it; "unreachable" is a claim about today's exits. The fix
+  made the function 18 B SMALLER — both exits now end in the same call and the compiler
+  tail-merged them.
+- **`docs/budget.md` reconciled phase 8 against the forecast it passed and not the one it missed
+  (P8-C6).** §3 forecast 30-45 K flash; phase 8 spent **+57,274** on `release`, 27 % past the top
+  of the band, and §§9-12 each quoted the 1.5-3.0 KB globals line while naming neither. The P8 row
+  is now struck with SPENT figures on both axes the way the P5 and P6 rows are, the overrun has
+  its one address written down, and the ending projection is re-scored — the globals projection
+  was already past, since the phase-6 re-scoring expected 53,624-57,924 at the end of phase 10 and
+  the artefact is at **59,396 today**.
+
 ### Changed
 
 - **The PIN left the QR payload (spec §39).** `net_url()` emits `http://<ip>/` and lost the
@@ -209,6 +266,27 @@ tag for a phase is cut only when its gate (`tools/check.sh`) and its variant mat
 - **`CS_SPRITE_W` / `CS_SPRITE_H`** name the 24x24 geometry that had lived only in a comment,
   with a `static_assert` tying them to `CS_SPRITE_BYTES`. §35's "sprite dimensions" now has a
   source the served schema can quote.
+
+- **Four residuals are recorded rather than patched (P8-C6),** on the rule that at a phase exit a
+  behaviour change which weakens a tested property is worse than a written trade.
+  `creator_server.h`'s NOT-TRUSTED table read as comprehensive and was not: **the request line,
+  every header and the URL are read by the pinned core before any handler runs, into heap-growing
+  Strings with no length bound and a per-byte timeout that resets on every byte** — so a trickling
+  client blocks `handleClient()`, and there is no rescue because the loop task WDT is off in this
+  core and this tree never arms it (`app/app.h`'s "5 s Task WDT" sentence is corrected to say so).
+  `creator_gate.h` now argues the lockout from the **availability** side too: an absent `X-Pin` is
+  a counted failure, so five unauthenticated requests a minute keep the OWNER out, across a
+  reboot, and the idle teardown becomes the attacker's tool — with the two obvious mitigations
+  named and why neither is better. `webui.cpp`'s "persisted BEFORE it is shown" is qualified for
+  the read-only session, where it is not. And `web/creator/app.js` and `creator_server.h` now name
+  the **one** page rule with no device twin — the empty-sprite check — and state the direction:
+  the page is narrower there, never wider. A blank creature is legal; §35 asks for sprite
+  dimensions, data size and palette, all three structural here.
+- **`cb_state_name()` and `cb_ready()`'s `seen == declared` clause are documented as what they are
+  (P8-C6):** the first has no firmware caller and is absent from both the release and the baseline
+  image (`--gc-sections`), existing for the tests and for the `static_assert` beside `CB_NAMES`;
+  the second is an equivalent mutant today by construction and is kept as a bound against a core
+  that over-delivers. Both named so the next sweep does not file them as gaps.
 
 ### Removed
 

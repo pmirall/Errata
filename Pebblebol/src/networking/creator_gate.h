@@ -86,6 +86,38 @@
 //  authorisation gate against the person standing next to you; that is what
 //  this is.
 //
+//  AND THE LOCKOUT IS DENIABLE BOTH WAYS, WHICH THIS HEADER ONLY EVER ARGUED
+//  FROM THE GUESSING SIDE (written down at the phase-8 exit, after two
+//  independent reviews found it separately). There is ONE global CreatorGate,
+//  and an absent X-Pin is a counted failure - webui.cpp's web_pin_ok() reads
+//  the missing header as the empty string and hands it to this same cg_verify()
+//  - so a client that knows nothing about the PIN can arm the lockout with
+//  CREATOR_PIN_FAIL_MAX requests carrying no PIN claim at all. Two consequences,
+//  both accepted rather than fixed:
+//
+//    * THE OWNER IS LOCKED OUT TOO, and can be kept out. Only CG_OK moves
+//      last_seen_ms, so while the gate is locked the page's 60 s keep-alive
+//      never returns 200 and the idle timer keeps running: five requests a
+//      minute from anyone in radio range end every creator session at
+//      creator_idle_s and make the next one unusable. The idle teardown is
+//      the attacker's tool there, not the owner's protection.
+//    * IT SURVIVES A REBOOT AND A SCREEN RE-ENTRY, because the ARMED EDGE is
+//      persisted: cg_open() restores fail_count at CREATOR_PIN_FAIL_MAX (not
+//      lock_armed), so the attacker's next junk request re-arms instantly,
+//      ahead of an owner still typing four digits.
+//
+//  WHY IT IS ACCEPTED. The attacker must be inside Wi-Fi range of a device
+//  whose screen is showing the PIN, the cost falls entirely on availability of
+//  a feature that is only up while somebody is standing at the device, and it
+//  clears completely the moment the attacker stops and one uncontested correct
+//  PIN lands. The obvious mitigation - counting an attempt only when the
+//  request ASSERTS a PIN - hands an unauthenticated client a free way to hold
+//  the portal's failure counter at zero, and the other one - letting a CORRECT
+//  PIN refresh last_seen_ms while locked - weakens a property two host tests
+//  pin down by name (a_locked_gate_refuses_even_the_correct_pin,
+//  a_locked_client_cannot_hold_the_portal_open). Neither trade is obviously
+//  better than this one, so the choice is recorded instead of quietly swapped.
+//
 //  EVERYTHING THAT ARRIVES OVER HTTP IS HOSTILE UNTIL IT IS VALIDATED HERE.
 //  The page's own PIN box is a courtesy to the user and never a control: the
 //  device has no way to tell a request from the page apart from a request from

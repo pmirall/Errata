@@ -9,7 +9,22 @@
 //  power cap, the attack budget, the character set, the sprite geometry - is
 //  enforced AGAIN on the device by game/validate.cpp's
 //  validate_custom_species(), over the bytes that actually arrived, with no
-//  knowledge that this page exists. The device cannot tell a request from this
+//  knowledge that this page exists.
+//
+//  WITH EXACTLY ONE EXCEPTION, NAMED SO THIS PARAGRAPH STAYS TRUE (phase-8
+//  exit). SE.anyEmpty() - "Algun fotograma del sprite esta vacio" - has no
+//  device twin: game/validate.cpp never inspects the sprite BYTES, and should
+//  not, because spec section 35 asks for sprite dimensions, data size and
+//  palette, all three of which are structural here (the record's sprite is a
+//  fixed array and creator_parse.cpp refuses anything that is not exactly it).
+//  A blank creature is LEGAL. That rule is this page being kind, its code
+//  column in localProblems() is '-' because there is no device code to name,
+//  and the direction is the safe one: the page is NARROWER than the device
+//  there, never wider - as it is on the two name characters the paragraph below
+//  covers. Anything WIDER than the device would be a rule nobody enforces.
+//  Checked one by one at the exit: every other rule in localProblems() and in
+//  stepReady() has a named VR_CS_* twin, the leading/trailing space rule
+//  included. The device cannot tell a request from this
 //  page apart from a request from curl, so it assumes curl
 //  (networking/creator_server.h says so at length).
 //
@@ -343,9 +358,11 @@
   // IS THIS SCREEN FINISHED? It gates the SIGUIENTE button and nothing else.
   // Read the banner before adding to it: this is a "you have not filled this in
   // yet" affordance, not a permission. Every rule it names is also in
-  // localProblems() and is enforced again on the device; a rule that lived ONLY
-  // here would be a rule nobody enforces, because the device never sees this
-  // button and curl never presses it.
+  // localProblems(), and every rule in localProblems() is enforced again on the
+  // device EXCEPT the empty-frame check, which the banner at the top of this
+  // file names as the one page-only rule and explains. A rule that lived only
+  // here AND was wider than the device would be a rule nobody enforces, because
+  // the device never sees this button and curl never presses it.
   function stepReady(i) {
     if (i === 0) return linked;
     if (i === 1) return nameProblem() === null;

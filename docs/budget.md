@@ -148,7 +148,7 @@ why this enumeration was worth measuring instead of restating.
 | ~~P5 scanner, encounters, capture, items~~ **SPENT: +12,282 / +504** | ~~15-25 K~~ | ~~1.0-2.0 K~~ |
 | ~~P6 activity score, power states~~ **PHASE 6 CLOSED AT `v0.6.0-activity`: +20,866 flash / +400 globals** (baseline 1,927,936/73,180 -> 1,948,802/73,580; release 1,203,808/49,508 -> **1,224,210/49,924** = 76.5 % and 76.8 % of the caps `build_matrix.sh` enforces). **THE FLASH LINE WAS OVERRUN BY 74 % AND THE SCARCE LINE WAS NOT**, and the reason is worth keeping: about 17 K of the 20.9 K is two ESP-IDF drivers arriving in the tree for the FIRST time - LEDC with the first PWM output (~7.5 K, P6-C1) and `esp_sleep` with the first `esp_light_sleep_start()` (~9.6 K, P6-C3). Both are paid once and reused: a later LED effect and a deep-sleep rung link no new driver. Pebblebol's own phase-6 code is roughly 3.8 K. Per commit: P6-C1 +9,028/+136 (tone engine + motion capability), P6-C2 +1,940/+72 (activity score; its PERSISTED half costs 0 - four bytes that were already `CooldownTable.reserved_a[4]`), P6-C3 +9,698/+192 (power ladder + sleep-correct clock; ~148 B of the 192 is ESP-IDF's own sleep state, ~44 B is Pebblebol's), P6-C4 +200/+0 (the exit's three fixes, one gate, documents). **375,790 B of release flash and 15,076 B of release globals remain** against an 80-115 K / 3.7-8.0 K forecast for P7-P10. | ~~8-12 K~~ | ~~0.3-0.8 K~~ |
 | P7 ESP-NOW transport, link/trade/breeding | 25-35 K | 1.5-3.0 K |
-| P8 PIN, creator routes, mobile page + sprite editor (PROGMEM) | 30-45 K | 1.5-3.0 K |
+| ~~P8 PIN, creator routes, mobile page + sprite editor (PROGMEM)~~ **PHASE 8 CLOSED: +57,274 flash / +2,592 globals** on `release` (1,269,126 / 56,804 at `34aab11` -> **1,326,400 / 59,396** = 82.90 % and 91.38 % of the caps `build_matrix.sh` enforces). **THE FLASH LINE WAS OVERRUN BY 27 % AND THE SCARCE LINE WAS NOT**, and §§9-12 quoted the forecast they passed while saying nothing about the one they missed - which is the selective reading §8 was written to stop, repeated in the sections that cite §8. The overrun has ONE address: `data/index_html.h` grew from a 1,016 B placeholder to the 42,248 B committed creator page, +41,232 B of `.rodata`, and the served schema document is another 1,172 - so 42,404 of the 57,274 is DOCUMENTS, priced in §11 with the gzip lever (47,181 -> 17,947 B on this project's previous phone page) already costed if a later phase needs it back. Pebblebol's own phase-8 code and strings are **14,870 B**, inside half the forecast band on their own. Per commit, `release`: P8-C1/C2 +2,574/+16, P8-C3 +13,046/+2,576 (2,060 of the globals is `CS_BODY_MAX`), P8-C4 +41,658/+0 (all `.rodata`), P8-C5 +26/+0, P8-C6 -30/+0. **273,600 B of release flash and 5,604 B of release globals remain** against a 25-35 K / 0.7-2.0 K forecast for P9-P10. | ~~30-45 K~~ | ~~1.5-3.0 K~~ |
 | P9 roster 36→60, sprite atlas, corruption | 15-20 K | 0.2-0.5 K |
 | P10 diagnostics, animation, polish | 10-15 K | 0.5-1.5 K |
 | **total** | **105-150 K** | **5-11 K** |
@@ -161,6 +161,19 @@ why this enumeration was worth measuring instead of restating.
 | BLE deleted | ~1,333,000 (56 %) | ~57,200 (64 %) | 32 KB of globals |
 
 **It fits either way on flash. On globals it fits comfortably only if BLE goes.**
+
+**RE-SCORED AGAIN AT THE PHASE-8 EXIT (P8-C6), because the phase-6 re-scoring below is now
+past on the axis it said was tight.** `release` today is **1,326,400 / 59,396**. Adding §3's
+P9-P10 forecast (25-35 K flash, 0.7-2.0 K globals) gives an ending state of
+**1,351,400-1,361,400 flash** (84.5-85.1 % of the cap, 238,600-248,600 B spare) and
+**60,096-61,396 globals** — **92.5-94.5 % of the 65,000 cap, leaving 3,604-4,904 B.** The
+phase-6 re-scoring below projected 53,624-57,924 globals; the artefact passed the TOP of that
+band during phase 8 and is 1,472 B past it today. The conclusion the original table was drawn
+to support still holds — it fits, and it fits because BLE went — but it fits with about 4 KB of
+margin rather than 7, so **phase 9 and phase 10 are the first two phases in this project with
+no room to be wrong by a buffer.** The row to watch is not a repeat of `CS_BODY_MAX`: that one
+is spent and is now 36.8 % of what is left. It is any NEW buffer, and §10's instruction stands
+— check this table before writing one.
 
 **RE-SCORED AT THE PHASE-6 TAG (P6-C4), because this table still carries its phase-4-era
 ending state and phase 6 overran its flash line.** Release today is **1,224,210 / 49,924**.
@@ -839,3 +852,138 @@ commit, which is the pair of numbers §8 warns against confusing). It is now 1,3
 so chunks 1 through 5 cost **+57,304 flash and +2,592 globals**. The globals figure is the running
 total §11 quotes and it is inside §3's 1.5–3.0 KB forecast for the whole phase; 41,658 of the
 57,304 flash bytes are the page blob, which §11 prices and gives the gzip lever for.
+
+---
+
+## 13. Phase 8, chunk 6 — the exit (measured 2026-09-06)
+
+**−30 flash / +0 globals on `release`, and the same −30 / +0 on `baseline`, `no-god` and
+`sh1106`; `no-web` and `all-off` did not move at all.** Every figure names its variant.
+`tools/build_matrix.sh` produced all six at this commit; the release `.elf` the sections and
+symbols below come from was built separately with `--variant release --define
+GOD_MODE_ENABLED=0` into its own build path, and **its size line was read back before any
+section or symbol was** — §8's rule, applied.
+
+| build | after P8-C5 | after P8-C6 (this commit) | delta | against its cap |
+|---|---|---|---|---|
+| `baseline` | 1,338,802 / 59,572 | 1,338,772 / 59,572 | **−30 / +0** | 55.8 % / 66.2 % |
+| `release`  | 1,326,430 / 59,396 | **1,326,400 / 59,396** | **−30 / +0** | **82.90 % / 91.38 %** |
+| `no-god`   | 1,326,430 / 59,396 | 1,326,400 / 59,396 | **−30 / +0** | — |
+| `sh1106`   | 1,338,802 / 59,572 | 1,338,772 / 59,572 | **−30 / +0** | — |
+| `no-web`   | 1,224,916 / 55,172 | 1,224,916 / 55,172 | **+0 / +0** | — |
+| `all-off`  | 580,614 / 26,612 | 580,614 / 26,612 | **+0 / +0** | — |
+
+### The −30 bytes, by section, against a rebuilt base
+
+Thirty bytes is too small for `nm` alone, so `8b6a9bf`'s **release** `.elf` was rebuilt from a
+worktree with the identical command line and the two compared with `objdump -h`. Only **two
+loadable sections moved**:
+
+```
+                     8b6a9bf (P8-C5)   this commit    delta
+  .flash.text          0x000ea9ba       0x000ea9a8     −18   code
+  .eh_frame            0x00012098       0x0001208c     −12   CONTENTS, ALLOC, LOAD
+  .flash.rodata        0x00032cfc       0x00032cfc      +0
+  .dram0.data          0x00003a24       0x00003a24      +0   initialised globals
+  .dram0.bss           0x0000ade0       0x0000ade0      +0   zeroed globals
+  .iram0.text          0x00010aec       0x00010aec      +0
+```
+
+**−18 − 12 = −30, exactly the figure the compiler printed** — two independent measurements
+agreeing. `.eh_frame` is easy to skip and is `ALLOC, LOAD` on this target, so it is part of
+the flashed image; the other five sections that moved (`.debug_*`, and they moved by −202 net)
+are not.
+
+`nm -S -td` names the whole of it in one symbol: **`_ZL6h_rootv` 216 → 198 B**. That function
+GAINED a `cs_body_done()` call at its throttled exit and got 18 bytes SMALLER, because both of
+its exits now end in the same call and the compiler tail-merged them; the `.eh_frame` −12 is
+that function's unwind record following its new shape. A fix that is smaller than the bug is
+worth one line, because it is not the usual direction.
+
+**ONE SYMBOL APPEARS THAT IS NOT AN ALLOCATION, AND SAYING SO IS THE POINT.** `nm` reports
+`_ZL12CS_STATE_FMT` at **138 B of `d`** where the base build has no such symbol — and
+`.flash.rodata` did not move by a single byte. The format string for `GET /api/state` was
+already in `.rodata` as an anonymous literal; hoisting it into a named `static const char[]`
+so `sizeof` could be taken for the new `static_assert` gave the same bytes a name.
+`strings` finds the identical 138-byte literal (137 characters plus its NUL) exactly once in
+BOTH `.elf`s. A `nm` diff read on its own would have reported "+138 B" for a commit that
+allocated nothing, which is the kind of number this document exists to not print.
+
+### Where phase 8's globals went, symbol by symbol — the whole phase, on `release`
+
+`riscv32-esp-elf-nm -S -td` over this commit's release `.elf`. Every one of these is `b`
+(zeroed) except the resolver, and none of them existed at `34aab11`:
+
+| symbol | bytes | what holds them | chunk |
+|---|---|---|---|
+| `_ZL6s_body` | **2,060** | the raw-body accumulator: `CS_BODY_MAX` 2,048 + its 12 B of state | P8-C3 |
+| `_ZL5s_out` | 256 | `creator_server.cpp`'s response scratch (`CS_OUT_BUF`) | P8-C3 |
+| `_ZL6s_rows` | 240 | the ten projected `SpeciesDef` rows of the custom registry | P8-C3 |
+| `_ZL6s_gate` | 16 | the one `CreatorGate` in `webui.cpp` — the whole PIN feature's RAM | P8-C1 |
+| `_ZL5s_srv` | 4 | `creator_server.cpp`'s `WebServer*` | P8-C3 |
+| `SPECIES_CUSTOM_RESOLVER` | 4 | the bound custom-species resolver | P8-C3 |
+| `_ZL6s_mask` | 2 | the registry's occupancy mask | P8-C3 |
+| **symbols** | **2,582** | | |
+| link alignment | 10 | | |
+| **measured image delta** | **2,592** | 56,804 → 59,396 | |
+
+**The section cross-check is what makes that a measurement rather than a list.** On this
+commit's release `.elf`, `.dram0.data` 0x3a24 = 14,884 plus `.dram0.bss` 0xade0 = 44,512 is
+**exactly the 59,396 the compiler printed**, and both halves are byte-identical to §12's, §11's
+and §10's. Nothing has allocated on this line since P8-C3.
+
+**`_ZL6s_body` IS 79.5 % OF THE PHASE'S GLOBALS AND IT IS ONE CONSTANT.** The phase-8 preamble
+called `CS_BODY_MAX` the one allocation big enough to matter on its own and put it at 24 % of
+the headroom that existed before it was spent; measured against what is left **it is 36.8 %**.
+It is spent, so it is not phase 9's row to watch — but it is the row to reach for if a later
+phase needs bytes back: `CS_BODY_MAX 1024` is still about 2.7x the largest legitimate upload,
+it is one `#define`, and `tools/creator_smoke.sh` reads the value out of `config.h` so the
+bench script follows it without an edit.
+
+### Where phase 8's flash went
+
+| item | bytes | section | measured in |
+|---|---|---|---|
+| `_ZL10INDEX_HTML` — the creator page | **42,248** | `.flash.rodata` | §11 |
+| `_ZL19CREATOR_SCHEMA_JSON` — the served schema | 1,172 | `.flash.rodata` | §10, §11 |
+| less the 1,016 B `INDEX_HTML` **placeholder** that already existed at `34aab11` | −1,016 | `.flash.rodata` | §11 |
+| everything else — the gate, the cap, the reader, the validator rules, the registry, the seven handlers, the §34 screen, the strings | **14,870** | `.flash.text` + `.rodata` | §§9-13 |
+| **phase 8 total, `release`** | **+57,274** | | 1,269,126 → 1,326,400 |
+
+Both blob addresses are inside `.flash.rodata` (`objdump -h` puts that section at
+`0x3c0f0120`), which is the whole claim in one line: on this target initialised data whose
+address is in the rodata segment is memory-mapped **FLASH, not RAM**.
+
+### What it leaves, and it is the number phases 9 and 10 inherit
+
+**`release` globals: 59,396 of `GATE_RELEASE_GLOBALS_MAX` 65,000 — 91.38 % used, 5,604 B FREE.**
+
+**`release` flash: 1,326,400 of `GATE_RELEASE_FLASH_MAX` 1,600,000 — 82.90 % used, 273,600 B
+FREE.**
+
+`baseline` is 1,338,772 / 59,572 and is **not** the artefact those caps police; it is quoted
+here only so the pair cannot be confused, which is the mistake §8 records.
+
+Against §3's P9-P10 forecast of 25-35 K flash and 0.7-2.0 K globals, the ending state is
+**1,351,400-1,361,400 flash (84.5-85.1 %)** and **60,096-61,396 globals (92.5-94.5 %)**, i.e.
+**3,604-4,904 B of globals still free at the end of phase 10.** It fits. It fits with about
+4 KB of margin, where the phase-6 re-scoring in §3 expected about 7, and §3 now says so.
+
+**WHAT WILL ACTUALLY BITE PHASE 9, MEASURED RATHER THAN GUESSED.** Phase 9 is the roster to 60
+species, the sprite swap and the corruption mechanic, and its budget line is **flash, not
+globals** — which is the comfortable one here.
+
+* `SPRITE_DATA_BYTES` is **10,623 B today**, of which 9,448 B is the 38 legacy Nottamagochi
+  body sets P9-C3 deletes. 60 species at 144 B each is 8,640 B, so the **end state is 9,815 B**
+  and the **peak, with both alive at once, is 19,263 B** — inside `sprites.h`'s 24,576 B
+  transition allowance with 5,313 B of margin, and §4.3 carries the same arithmetic. The peak
+  costs about **+8,640 B of flash against 273,600 free**: 3.2 % of the headroom.
+* `CREATOR_SCHEMA_JSON` grows with the ROSTER, not with the page. It is 1,172 B for 34 attacks
+  today; a wider attack table moves it and moves `.flash.rodata`, not globals.
+* `INDEX_HTML` does **not** grow with the roster — that is what serving the schema bought —
+  and it is at **42,245 B of `WEB_HTML_MAX` 49,152, 85.9 % used with 6,907 B free**. What moves
+  it is a new SCREEN. §11 prices the gzip lever if it ever binds; do not raise `WEB_HTML_MAX`
+  as the first move, because the cap is the only thing that makes the overrun visible.
+* On the globals line phase 9 forecasts 0.2-0.5 K. The registry that phase 8 left
+  (`_ZL6s_rows`, 240 B for ten `SpeciesDef` rows) is sized by `CREATOR_SPECIES_SLOTS` and not
+  by the roster, so growing the roster to 60 does not move it.

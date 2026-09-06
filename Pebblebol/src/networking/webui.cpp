@@ -199,7 +199,14 @@ void web_send_throttled(void)
 //  open defect and this is the one line it asked for.
 static void h_root(void)
 {
-  if (!web_rate_take(WEB_COST_READ)) { web_send_throttled(); return; }
+  // cs_body_done() ON EVERY EXIT, THROTTLED ONE INCLUDED. creator_server.h
+  // states the invariant as "EVERY handler calls it, GET handlers included";
+  // this exit was the one place in the server that returned without it. Nothing
+  // reachable today inherits a stale accumulator through it - cs_body_hook()
+  // resets on the multipart path itself and every body-carrying handler resets
+  // on every exit - but "unreachable" here is a claim about today's exits, not
+  // about the code, and the invariant is cheaper to hold than to reason about.
+  if (!web_rate_take(WEB_COST_READ)) { web_send_throttled(); cs_body_done(); return; }
   web_note_request();
   s_srv.sendHeader(F("Cache-Control"), F("no-cache"));
   // FOUR-arg send_P. The 3-arg form strlen_P()s the blob (WebServer.cpp:619).
@@ -398,6 +405,17 @@ void web_portal_open(void)
     fails = 0u;
     // Persisted BEFORE it is shown. A PIN on the user's phone that the device
     // has forgotten is worse than no PIN at all.
+    //
+    // WITH ONE REACHABLE EXCEPTION, stated because the sentence above was
+    // wider than the code until the phase-8 exit: in a READ-ONLY session
+    // (gs_readonly(), a save the user was told not to touch)
+    // gs_creator_store() refuses and writes nothing - tests/test_game_state.cpp
+    // pins that by name - and the PIN is still minted, still shown and still
+    // gates this boot's portal, but is a different PIN after a reboot. That is
+    // acceptable rather than merely tolerated: in a read-only session
+    // POST /api/pebble answers 503 "ro" anyway, so the only thing the PIN can
+    // authorise is reading state, and refusing to mint would leave the user
+    // staring at "----" with no way to explain it.
     (void)gs_creator_store(pin, 0u, 0u);
   }
 

@@ -32,6 +32,37 @@
 //                                     which is why no deadline in this feature
 //                                     is measured in wall time
 //
+//  NOT BOUNDED BY THIS FILE, AND SAID PLAINLY BECAUSE THE TABLE ABOVE READS AS
+//  COMPREHENSIVE AND IS NOT (recorded at the phase-8 exit):
+//
+//    the REQUEST LINE, every HEADER LINE and the URL are read by the pinned
+//    Arduino core BEFORE any handler here runs - Parsing.cpp:78,149,247,
+//    `client.readStringUntil('\r')` into heap-growing Strings with NO length
+//    bound. The only limit is a PER-BYTE 5 s timeout, and Stream::timedRead
+//    resets its deadline on every byte received, so a client trickling one
+//    byte every four seconds grows a String without limit and, worse, blocks
+//    inside handleClient() - which app_loop() calls, so the renderer, the 1 Hz
+//    tick, input and the creator's own idle teardown all stop with it. There
+//    is no watchdog rescue: the loop task WDT is off in this core by default
+//    and this tree never arms it (see app/app.h). It is core-inherent,
+//    pre-existing, unauthenticated, and bounded only by the attacker choosing
+//    to stop or the owner power-cycling. THE BODY CAP DOES NOT COVER THIS -
+//    CS_BODY_MAX is a bound on the BODY, and saying otherwise is the sentence
+//    wider than the tree that this project keeps writing. The window exists
+//    only while the CREATOR screen is open and the attacker is in radio range.
+//    The available mitigations - a shorter client read timeout, or arming the
+//    loop WDT so a stall is a bounded reset - are a decision for a phase that
+//    can bench a reset, not a comment.
+//
+//    AVAILABILITY OF THE GATE ITSELF. networking/creator_gate.h's lockout is
+//    one global CreatorGate and an absent X-Pin counts as a failure, so five
+//    unauthenticated requests a minute from anyone in radio range keep the
+//    OWNER refused for the whole lock window while the idle timer keeps
+//    running - i.e. the idle teardown becomes the attacker's tool rather than
+//    the owner's protection. It is a deliberate trade (see that header's WHAT
+//    THIS GATE IS NOT), not an oversight, and it is written here so the trade
+//    is read rather than rediscovered.
+//
 //  TRUSTED, and only these:
 //
 //    the CONTENT TABLES               data/*.h are compiled in, and the
@@ -57,6 +88,19 @@
 //  enforced again here, by game/validate.h, on the bytes that actually arrived.
 //  The page's version exists so a user is not refused after five minutes of
 //  drawing - that is worth building, and it is worth nothing as a defence.
+//
+//  WITH EXACTLY ONE EXCEPTION, NAMED HERE SO THE SENTENCE ABOVE STAYS TRUE.
+//  web/creator/app.js refuses an EMPTY sprite frame ("Algun fotograma del
+//  sprite esta vacio") and gates its own SIGUIENTE button on it, and this
+//  device accepts one: game/validate.cpp never inspects the sprite BYTES, and
+//  it should not, because spec section 35 asks for sprite DIMENSIONS, DATA SIZE
+//  and PALETTE - all three structural here, since CustomSpeciesRec.sprite is a
+//  fixed array and networking/creator_parse.cpp refuses anything that is not
+//  exactly it. A blank creature is legal; it is just not one anybody wants to
+//  have drawn by accident. So that check is the page being KIND, and it is the
+//  one page rule with no device twin. The direction matters: the page is
+//  NARROWER than the device there, never wider, and a page rule that were
+//  wider would be a rule nobody enforces.
 //
 //  The one thing the page and the device must AGREE on is the numbers, and
 //  that is what GET /api/schema is for: data/creator_schema_json.h is generated

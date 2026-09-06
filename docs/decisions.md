@@ -2736,3 +2736,204 @@ defect, written into the file whose subject is gates that cannot fail).
 **The stub was never committed, is not in `tools/check.sh`, and none of that is evidence about a
 device.** It proves the script runs. Whether the firmware behaves is a bench question and the
 boxes stay open.
+
+---
+
+## P8-C6 — the exit: five findings, what was fixed, and what is written down instead (recorded 2026-09-06)
+
+Three review lenses ran over the phase — hostile input, the release artefact, and the tests
+and gates — and returned five findings at MAJOR. **Every one was reproduced before it was
+touched**, and the reproductions are recorded here because four of the five are the same
+defect this project keeps writing: a check that cannot fail, or a sentence wider than the
+tree.
+
+### 1. THE CATCH-ALL GATE COULD NOT FAIL, AND IT GUARDED THE PHASE'S HEADLINE SECURITY CLAIM
+
+`tools/check.sh` held "the catch-all route still exists" with
+
+```sh
+n=$( grep -rn 'UriAny' "$SKETCH/src/networking" | wc -l ); [ "$n" -ge 2 ]
+```
+
+which is a count of a **type name**, not a check on a call. `struct UriAny`, the `UriAny()`
+constructor and `new UriAny()` inside `clone()` contribute three occurrences on their own.
+
+**REPRODUCED, BOTH FORMS.** With the registration line deleted outright, and again with
+`HTTP_ANY` narrowed to `HTTP_GET` on that one line, `SKETCH=<mutant> tools/check.sh --no-build
+--no-tests` printed **GATE OK** — the old gate counted 3 and 4 occurrences respectively, both
+of which satisfy `>= 2`. The `HTTP_GET` form is the dangerous one because it also **builds
+clean: `BUILD OK variant=release flash=1326398 globals=59396 warnings=0`.** It keeps `notfound`
+used so no `-Wunused` fires, and the sibling raw-hook gate only reads lines naming a non-GET
+method. Either edit puts every unmatched POST back on `readBytesWithTimeout()`'s malloc growth
+loop — the audit's §12 hole, which `creator_server.h` names as closed — with the whole gate
+green and the artefact two bytes smaller than the real one.
+
+**FIXED IN TWO PLACES, BECAUSE NEITHER HALF IS SUFFICIENT ALONE.** The gate now matches the
+registration itself and requires **exactly one**
+(`\.on\(\s*UriAny\(\)\s*,\s*HTTP_ANY\s*,`); both mutants now fail it by name. And
+`tools/creator_smoke.sh` phase 2 gained the only probe that can tell the two apart on a real
+socket: **an oversize POST to an UNMATCHED path must be answered 413**, because a firmware
+with no catch-all reads the whole declared body and *then* answers 404 — a status code that
+looks fine.
+
+### 2. THE PIN GATE ON THE ROUTES THAT WRITE HAD NO INSTRUMENT ANYWHERE
+
+`networking/creator_server.cpp` is never compiled by `tests/Makefile` — there is no socket in
+any host binary — so `tools/creator_smoke.sh` is the only thing that can exercise it, and
+§67's `PIN required` box points at exactly that. **It drove all seven of its PIN cases through
+`GET /api/state`.** Its only unauthenticated POSTs carried deliberately broken bodies, which
+`cs_body_answered()` refuses (413/411/415) *before* the PIN is consulted. So nothing in the
+repository had ever sent an unauthenticated POST with a **valid** body, and `pin_after_body()`
+— the body-carried PIN, the half P8-C3 exists to wire — was executed by nothing at all: not by
+a host test, not by the browser harness, and not by the page, which sends `X-Pin` on every
+request.
+
+**REPRODUCED.** `pin_after_body()` replaced by `return true;` builds clean (`release`
+1,326,274 / 59,396, 0 warnings), runs **ALL PASS 49/49**, and passes every networking gate. A
+client that simply omits `X-Pin` then creates a Pebble and sets the device clock, unauthorised,
+with the gate green.
+
+**FIXED: four probes and three gates.** The script now sends (a) `POST /api/pebble` with a
+valid document and no `X-Pin`, asserting 403 `err=pin` **and that the Box count did not move**,
+(b) `POST /api/time` with a wrong header, (c) a wrong PIN carried in the BODY, and (d) the
+**correct** PIN carried in the body, accepted — because (c) on its own passes against a
+firmware that refuses every body PIN, which would be this project's recurring defect written
+into its own bench script. `tools/check.sh` gained three greps so the coverage cannot silently
+vanish again; each was mutation-tested.
+
+**WHAT IS STILL NOT COVERED, STATED PLAINLY:** none of that has run. The transport half of
+this feature has no host coverage and cannot have any without a socket. What CAN be said from
+the artefact was checked by disassembly instead — see 5 below.
+
+### 3. THE THREE "NEVER OVER-READS" TESTS HAD NO INSTRUMENT EITHER
+
+`networking/creator_parse.h`'s whole design is "length-bounded, never NUL-bounded",
+`tests/test_creator_api.cpp` mallocs every fuzz body at exactly its own length **so that** a
+one-byte over-read is a heap error rather than a read into the rest of a static array, and
+three case names say "never over-reads". Nothing in `tools/check.sh` or `tests/Makefile` ever
+compiled with a sanitiser.
+
+**REPRODUCED.** `cp_skip_ws()`'s `while (c.i < c.n)` changed to `<=` — an over-read on every
+whitespace skip, in the first code in this product that reads bytes from outside the device —
+printed **ALL PASS 49/49** on the plain build, and under ASan
+**`heap-buffer-overflow at creator_parse.cpp:62 in cp_skip_ws`**.
+
+**FIXED: `make -C tests asan` is a gate stage.** Four binaries (the outside-input path and the
+validator it ends in), about 9 s from cold, run on every commit. It is green on the unmodified
+tree. It **skips with a printed word** if the toolchain has no `libasan`, the same distinction
+the content and page gates draw, because a silent skip is a green run that checked nothing.
+`-fsanitize=undefined` stays out and the reason is pre-existing and recorded in the Makefile:
+it makes `evolution_table.h:112`'s null check non-constant and fails a `static_assert` in a
+generated header.
+
+### 4. THE REQUIRED-KEY MASK WAS ASSERTED ONLY IN AGGREGATE — AND TWO KEYS HAVE NO OTHER GUARD
+
+`a_body_that_is_not_a_document_is_refused_by_name` drove `CP_MISSING_KEY` with `{}` and
+`{"v":1}` — documents missing every key, or all but one — so whichever single key was removed
+from `creator_parse.cpp`'s `required` mask, `CPK_V` or `CPK_NAME` still fired.
+
+**REPRODUCED.** With `CPK_TYPE` and `CPK_SPRITE` both dropped, `make -C tests check` printed
+**ALL PASS 49/49**, and
+`{"v":1,"name":"Bicho","base":[6,5,5,5],"moves":[1,6,32,34]}` through `tests/bin/creator_decode`
+answered **`cp=CP_OK vr=VR_OK type=0`** with both sprite frames all zero: a type-defaulted,
+entirely blank creature accepted by `POST /api/pebble`. Neither key has a downstream guard — a
+zeroed `type` is `TYPE_SIGNAL`, a legal value, and `validate_custom_species()` never inspects
+the sprite bytes.
+
+**FIXED: `every_required_key_is_required_on_its_own`.** For each of the six keys the pair is
+excised from `VALID_BODY` and the result must be `CP_MISSING_KEY` — **and then the removed pair
+is put back and the result must parse `CP_OK`**, which is what makes the refusal attributable
+to the missing key rather than to a document the helper mangled. All six keys were
+mutation-tested one at a time; each drop now fails the case by name.
+
+### 5. THE FLASH FORECAST WAS OVERRUN BY 27 % AND EVERY PHASE-8 SECTION QUOTED THE OTHER AXIS
+
+`docs/budget.md` §3 forecast **30-45 K flash and 1.5-3.0 K globals** for phase 8. Measured on
+the release artefact, phase 8 spent **+57,274 flash** and +2,592 globals. §9 said "against §3's
+1.5-3.0 KB forecast"; §10 said "inside the forecast, at the top of it"; §§11 and 12 repeated
+it. **Not one of them named the flash line** — in a set of sections whose own §8 exists to stop
+exactly that selective reading.
+
+**FIXED IN §3 AND §13**, the way the P5 and P6 rows were: the P8 row is struck with SPENT
+figures on **both** axes, the overrun is named with its one address (42,404 B of the 57,274 is
+the page blob plus the served schema; Pebblebol's own phase-8 code and strings are 14,870 B),
+and the ending projection is re-scored on both axes. The globals projection was already past:
+the phase-6 re-scoring expected 53,624-57,924 at the end of phase 10 and the artefact is at
+59,396 **today**.
+
+### 6. WHAT WAS RECORDED RATHER THAN CHANGED, AND WHY EACH
+
+Four findings below MAJOR were real and were answered with a sentence rather than a patch. The
+rule applied to all four: **at a phase exit, a behaviour change that weakens a tested property
+is worse than a written trade.**
+
+* **THE PRE-HANDLER READ IS UNBOUNDED, AND THE WATCHDOG IS NOT ARMED.** The pinned Arduino core
+  reads the request line and every header with `client.readStringUntil('\r')` into heap-growing
+  Strings with no length bound (`Parsing.cpp:78,149,247`), and `Stream::timedRead` resets its
+  5 s deadline on **every byte received** — so a client trickling one byte every four seconds
+  grows a String without limit and blocks inside `handleClient()`, which `app_loop()` calls.
+  There is no rescue: the pinned core sets `loopTaskWDTEnabled = false` and this tree never
+  calls `enableLoopWDT()`, and `readBytes()` calls `delay(2)`, which feeds the idle task — so
+  the device **hangs rather than resets**. `CS_BODY_MAX` does not cover this; it is a bound on
+  the BODY. It is core-inherent, pre-existing, unauthenticated, and live only while the CREATOR
+  screen is open and the attacker is in radio range. Recorded in `creator_server.h`'s
+  NOT-TRUSTED table as an explicit residual — the table read as comprehensive and was not — and
+  `app/app.h`'s "one iteration stays well below the 5 s Task WDT" is corrected, because it
+  described a backstop that is not armed. Arming the WDT is a real option and a real decision
+  (`power.cpp` light-sleeps with the radio up); it belongs to a phase that can bench a reset.
+* **THE LOCKOUT IS DENIABLE BOTH WAYS.** There is one global `CreatorGate` and an absent
+  `X-Pin` is a counted failure, so five unauthenticated requests a minute from anyone in radio
+  range keep the **owner** refused for the whole window while the idle timer keeps running —
+  the teardown becomes the attacker's tool rather than the owner's protection — and it survives
+  a reboot, because the armed edge is persisted. Two lenses found this independently.
+  `creator_gate.h`'s WHAT THIS GATE IS NOT now argues it from the availability side as well as
+  the guessing side. It is **not** fixed, and the alternatives are named there: counting only
+  requests that ASSERT a PIN hands an unauthenticated client a free way to hold the counter at
+  zero, and letting a correct PIN refresh `last_seen_ms` while locked weakens a property two
+  host tests pin down by name.
+* **ONE PAGE RULE HAS NO DEVICE TWIN, AND THREE BANNERS SAID OTHERWISE.** `SE.anyEmpty()` — an
+  empty sprite frame — gates the page's SIGUIENTE button and the device accepts a blank sprite.
+  The right answer is NOT a new `VR_CS_*` code: spec §35 asks for sprite dimensions, data size
+  and palette, all three structural here, and a blank creature is legal — it is just not one
+  anybody wants drawn by accident. So the banners were narrowed instead, in `app.js` and in
+  `creator_server.h`, and the direction is stated: the page is **narrower** than the device
+  there, never wider, and every other rule in `localProblems()` and `stepReady()` was checked
+  one by one against a named `VR_CS_*` twin, the leading/trailing-space rule included.
+* **A COMMENT CLAIMED A GUARANTEE IT DOES NOT HOLD ON ONE PATH.** `web_portal_open()` says the
+  PIN is "persisted BEFORE it is shown", and in a read-only session `gs_creator_store()`
+  refuses and writes nothing while the PIN is still minted and shown. Qualified in place rather
+  than changed: in a read-only session `POST /api/pebble` answers 503 anyway, so the only thing
+  that PIN can authorise is reading state, and refusing to mint would leave the user staring at
+  `----` with nothing to explain it.
+
+### 7. WHAT THE ARTEFACT WAS ASKED, SINCE THE SOCKET COULD NOT BE
+
+The one class of failure that CAN be ruled out without hardware is the phase-6 one — code that
+is in the tree and not in the shipping image. `riscv32-esp-elf-nm` and `objdump -d` over the
+**release** `.elf` built at this commit:
+
+* all seven handlers, `cs_body_hook`, `cs_register`, `UriAny` and its vtable are present;
+* `read_and_judge` calls, in this order: `pin_before_body()` → `cs_body_data/len` →
+  `cp_parse_species` → **`web_pin_present()` → `web_pin_ok_u16()`** → `creator_cost_of` →
+  `validate_custom_species`. **The body-PIN half is in the artefact**, inlined but complete —
+  what it has never been is executed;
+* `h_pebble` reaches `gs_readonly` → `box_count`/`csp_free_slot`/`box_capacity` →
+  `custom_species_seal` → `csp_install` → `box_new_pebble` → `validate_pebble` →
+  `save_custom_species`, with `csp_forget` and `pebble_clear` on every failure arm.
+
+`cg_idle_seconds()` is absent as a symbol because it is inlined into `cg_open()`; the constants
+are in the image (`li a5,300` for `CREATOR_IDLE_S_DEFAULT`, the 3600 clamp, the fail-count
+clamp), which is the phase-6 "a default that lives only in a dev-only arm" check, run and clear.
+`cb_state_name()` is genuinely absent — it has no firmware caller, `--gc-sections` drops it, and
+`creator_body.h` now says so rather than leaving a reader hunting for the call site.
+
+### 8. D7's OUTCOME, RESTATED AT THE EXIT
+
+**300 s, unchanged, and still not observed.** `cg_idle_expired()` measures it on `gt_mono32()`;
+it is reset **only** by a request that passed the PIN gate; a persisted `0` resolves to the
+default rather than to an instant shutdown and a value above `CREATOR_IDLE_S_MAX` is clamped —
+all three swept in `tests/test_creator_gate.cpp`, and all three verified present in the release
+image by disassembly at the exit. **The SETTINGS editor is still not built**, so nothing in the
+product writes `creator_idle_s` and the value in force is the default on every device. Whether
+300 s is the right number is a question about a person waiting at a device, and no person has
+waited at one: `tools/creator_smoke.sh` phase 4 is the instrument and it has never run.

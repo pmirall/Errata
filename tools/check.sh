@@ -41,6 +41,34 @@ fi
 
 if [ $DO_TESTS -eq 1 ]; then
   make -C "$ROOT/tests" check || fail "host tests"
+
+  # --- THE SANITISER RUN (P8 exit) ------------------------------------------
+  # THE ONE PROPERTY THE PLAIN SUITE STRUCTURALLY CANNOT CHECK, on the first
+  # code in this product that reads bytes from outside the device.
+  # networking/creator_parse.h's whole design is "length-bounded, never
+  # NUL-bounded", three test names in tests/test_creator_api.cpp say "never
+  # over-reads", and the harness mallocs every fuzz body at exactly its own
+  # length SO THAT a one-byte over-read is a heap error - and until this line
+  # existed nothing ever compiled with a sanitiser, so none of those three
+  # could fail on the property they name.
+  #
+  # MEASURED: cp_skip_ws()'s `while (c.i < c.n)` changed to `<=` printed
+  # ALL PASS 49/49 on the plain build and, here, AddressSanitizer:
+  # heap-buffer-overflow at creator_parse.cpp:62. About 9 s from cold over four
+  # binaries (tests/Makefile's ASAN_SET: the outside-input path and the
+  # validator it ends in), so it runs on every commit rather than being an
+  # opt-in nobody opts in to.
+  #
+  # SKIPPED WITH A WORD, never silently, if the toolchain has no libasan -
+  # the same distinction the content and page gates draw. A gate that decides
+  # it cannot run must SAY so, because a silent skip is a green run that
+  # checked nothing.
+  if printf 'int main(void){return 0;}\n' \
+       | ${CXX:-g++} -fsanitize=address -x c++ - -o /dev/null >/dev/null 2>&1; then
+    make -C "$ROOT/tests" asan || fail "the sanitiser run reported an error - read the AddressSanitizer report above; it is a real over-read, not a flaky test"
+  else
+    echo "check.sh: no -fsanitize=address support in ${CXX:-g++}, SKIPPING the sanitiser run" >&2
+  fi
 fi
 
 # --- THE CONTENT GATE (P4-C1) ---------------------------------------------
@@ -234,6 +262,31 @@ if [ -f "$ROOT/tools/creator_smoke.sh" ]; then
     fi
     grep -q 'req GET / ' "$ROOT/tools/creator_smoke.sh" \
       || fail "tools/creator_smoke.sh never fetches GET / - the page route is one of the seven"
+
+    # 2b. AND THE COVERAGE THE ROUTE SET CANNOT SEE (added at the phase-8 exit).
+    #     Equal route sets prove every route is TOUCHED. They proved nothing
+    #     about whether the PIN gate on the routes that WRITE was ever exercised
+    #     - and it was not. Every PIN probe drove GET /api/state, and every
+    #     unauthenticated POST carried a deliberately broken body that
+    #     creator_body.cpp answers (413/411/415) BEFORE the PIN is consulted. So
+    #     no check anywhere in this repository sent an unauthenticated POST with
+    #     a VALID body, and creator_server.cpp is never compiled by
+    #     tests/Makefile, which left pin_after_body() with no executor at all.
+    #
+    #     MEASURED: pin_after_body() replaced by `return true;` built clean
+    #     (release 1,326,274 / 59,396, 0 warnings), ran ALL PASS 49/49, and
+    #     passed every networking gate above - a firmware where omitting X-Pin
+    #     creates a Pebble and sets the clock, with the whole gate green.
+    #
+    #     These three lines are narrow on purpose: they check that the probes
+    #     EXIST, not what they assert. The script itself is the only thing that
+    #     can check the latter, and only on a board.
+    grep -q 'req POST /api/pebble - --data-binary' "$ROOT/tools/creator_smoke.sh" \
+      || fail "tools/creator_smoke.sh never sends an unauthenticated POST with a VALID body to the route that WRITES - the PIN gate on POST /api/pebble would have no instrument anywhere (§67 'PIN required' points at this script)"
+    grep -q 'doc_bodypin' "$ROOT/tools/creator_smoke.sh" \
+      || fail "tools/creator_smoke.sh no longer probes the BODY-carried PIN - creator_server.cpp's pin_after_body() is then executed by nothing in this tree"
+    grep -q 'req POST /api/pebbles - --data-binary' "$ROOT/tools/creator_smoke.sh" \
+      || fail "tools/creator_smoke.sh no longer POSTs an oversize body to an UNMATCHED path - a catch-all narrowed to HTTP_GET would look identical on every other probe"
   fi
 
   n=$( { grep -nE '127\.0\.0\.1|localhost|::1' "$ROOT/tools/creator_smoke.sh" || true; } | wc -l )
@@ -607,13 +660,36 @@ if [ -d "$SKETCH/src/networking" ]; then
         | { grep -v 'cs_body_hook' || true; } | wc -l )
   [ "$n" -eq 0 ] || fail "a non-GET route is registered without the raw body hook ($n) - the 4-arg on() overload is what keeps a hostile Content-Length off the heap (audit section 12)"
 
-  # AND THE CATCH-ALL MUST EXIST. Registering raw handlers protects only the
-  # URIs that have them: Parsing.cpp:182 requires _currentHandler non-null and
-  # onNotFound() is NOT a handler, so without a registered catch-all every
-  # unmatched POST still walks the growth loop. This gate is the reason
-  # onNotFound() was deleted rather than kept "just in case".
-  n=$( { grep -rn 'UriAny' "$SKETCH/src/networking" || true; } | wc -l )
-  [ "$n" -ge 2 ] || fail "the catch-all route is gone: POST /anything-else would walk readBytesWithTimeout()'s unbounded growth loop again"
+  # AND THE CATCH-ALL MUST EXIST, AND IT MUST STILL BE HTTP_ANY. Registering
+  # raw handlers protects only the URIs that have them: Parsing.cpp:182
+  # requires _currentHandler non-null and onNotFound() is NOT a handler, so
+  # without a registered catch-all every unmatched POST still walks the growth
+  # loop. This gate is the reason onNotFound() was deleted rather than kept
+  # "just in case".
+  #
+  # THIS GATE COULD NOT FAIL UNTIL THE PHASE-8 EXIT, AND IT IS WORTH RECORDING
+  # HOW. It used to be `grep -rn 'UriAny' | wc -l` >= 2 - a count of a TYPE
+  # NAME, not a check on a call. The struct definition alone contributes three
+  # occurrences (`struct UriAny`, the `UriAny()` ctor, `new UriAny()` in
+  # clone()), so DELETING the registration line entirely left 3 and the gate
+  # passed. Measured at the exit, both forms: with the registration deleted,
+  # and with HTTP_ANY narrowed to HTTP_GET on that one line (which keeps
+  # `notfound` used so no -Wunused fires, and is not matched by the raw-hook
+  # gate above because that one only reads lines naming a non-GET method),
+  # `SKETCH=<mutant> tools/check.sh --no-build --no-tests` printed GATE OK and
+  # the release build was clean at 0 warnings. An unmatched POST would have
+  # been back on the malloc growth loop with every gate green.
+  #
+  # So the gate now matches THE REGISTRATION ITSELF and requires exactly one:
+  # a second would mean two catch-alls, and zero means the hole is open again.
+  # tools/creator_smoke.sh phase 2 carries the other half - the bench probe
+  # that an oversize POST to an UNMATCHED path is answered 413 rather than
+  # read whole and then 404'd, which is the only way to tell the two apart on
+  # a real socket.
+  n=$( { grep -rnE '\.on\([[:space:]]*UriAny\(\)[[:space:]]*,[[:space:]]*HTTP_ANY[[:space:]]*,' \
+          "$SKETCH/src/networking" || true; } \
+        | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true; } | wc -l )
+  [ "$n" -eq 1 ] || fail "the catch-all is not registered exactly once as .on(UriAny(), HTTP_ANY, ...) (found $n) - POST /anything-else would walk readBytesWithTimeout()'s unbounded growth loop again"
   n=$( { grep -rn 'onNotFound' "$SKETCH/src/networking" || true; } \
         | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true; } | wc -l )
   [ "$n" -eq 0 ] || fail "onNotFound() is registered again ($n) - it is consulted AFTER the body has been parsed, so it cannot bound one; the catch-all handler is what does"
