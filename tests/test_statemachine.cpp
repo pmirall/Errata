@@ -54,6 +54,7 @@
 #include "ui/screen_settings.h"
 #include "ui/screen_soon.h"
 #include "ui/screen_status.h"
+#include "ui/screen_setup.h"
 #include "ui/screen_time.h"
 #include "ui/screen_view.h"
 #include "ui/ui.h"
@@ -81,6 +82,7 @@ void ui_goto(ScreenId s)          { sm_goto(s); }
 void ui_push(ScreenId s)          { sm_push(s); }
 void ui_back(void)                { sm_back(); }
 void ui_home(void)                { sm_home(); }
+void ui_replace_root(ScreenId s)  { sm_replace_root(s); }
 void ui_confirm_wipe(void)        { g_wipe++; }
 void ui_note_recovered(void)      { }
 void ui_note_input(void)          { sm_note_input(); }
@@ -90,6 +92,8 @@ uint32_t ui_now_ms(void)          { return host_ms(); }
 uint32_t ui_idle_ms(void)         { return sm_idle_ms(); }
 Config*  ui_cfg(void)             { return &g_cfg; }
 void ui_cfg_changed(void)         { }
+void ui_setup_persist(void)       { }
+bool ui_set_starter(uint8_t)      { return true; }
 void ui_apply_brightness(uint8_t) { }
 bool ui_do_action(uint8_t)        { return true; }
 bool ui_act_and_show(uint8_t)     { return true; }
@@ -247,6 +251,7 @@ static void reset_all(void) {
 static const char* kName[SCR_COUNT] = {
   "BOOT", "LOAD_SAVE", "HOME", "MENU", "CARE", "PLAY", "GAME", "BOX",
   "STATUS", "STATUS_B", "NETWORK", "LINK", "CREATOR", "SETTINGS", "TIME",
+  "SETUP_NAME", "SETUP_STARTER",
   "CONFIRM", "ALERT", "ENCOUNTER", "CAPTURE", "BATTLE", "TRADE", "BREED",
   "EVOLUTION", "ITEM_REWARD", "ERROR", "SLEEP", "DIAG"
 };
@@ -288,6 +293,7 @@ TEST(every_row_is_the_screen_its_position_claims) {
     boot_render, load_save_render, home_render, menu_render, care_render,
     play_render, ui_game_render, box_render, status_a_render, status_b_render,
     network_render, link_render, creator_render, settings_render, time_render,
+    setup_name_render, setup_pick_render,
     soon_generic, soon_generic, encounter_render, capture_render, battle_render,
     soon_trade, soon_breed, evo_render, soon_item_reward, err_render,
     soon_sleep, diag_render
@@ -733,6 +739,16 @@ static const ExitRow kExits[] = {
   // sweep below states in its own right, and the property ERRK_SAVE_NEWER
   // failed until P10-C2.
   { SCR_TIME,      ERRK_NONE, XK_GESTURE, GST_LONG_BOTH, 0, "TIME",      "handled by hand in time_input()" },
+  // THE TWO FIRST-BOOT ROWS (P10-C4). They carry TIME's flags for TIME's
+  // reasons, so they inherit TIME's obligation exactly: SF_LOCK_INPUT means the
+  // router never runs, so each answers invariant 2 in its own input hook - and
+  // on a setup screen that gesture also has to END THE FLOW, or the next boot
+  // asks the same question again. Both halves are asserted in test_screens.cpp;
+  // this row is the navigation half.
+  { SCR_SETUP_NAME,    ERRK_NONE, XK_GESTURE, GST_LONG_BOTH, 0, "SETUP_NAME",
+    "handled by hand in setup_name_input(), which also ends the flow" },
+  { SCR_SETUP_STARTER, ERRK_NONE, XK_GESTURE, GST_LONG_BOTH, 0, "SETUP_STARTER",
+    "handled by hand in setup_pick_input(), which also ends the flow" },
   { SCR_DIAG,      ERRK_NONE, XK_GESTURE, GST_TAP_R,     0, "DIAG",      "diag_input()/diag_update() go home once the console is off" },
   { SCR_ERROR, ERRK_SAVE_NEWER,  XK_GESTURE, GST_LONG_BOTH, 0,
     "ERROR/SAVE_NEWER",  "handled by hand in err_input() since P10-C2" },
@@ -932,10 +948,12 @@ TEST(the_router_is_off_on_every_lock_input_row_so_each_answers_the_escape_itself
     //    a real constraint: with both off, the row would have no ceiling at all.
     CHECK((SCREENS[i].flags & SF_STICKY) != 0u);
   }
-  // BOOT, LOAD_SAVE, TIME, ERROR, DIAG. A sixth appearing without a row in
-  // kExits fails the coverage case above; this pins the count so the set cannot
-  // shrink either.
-  CHECK_EQ((int)locked, 5);
+  // BOOT, LOAD_SAVE, TIME, SETUP_NAME, SETUP_STARTER, ERROR, DIAG. 5 -> 7 at
+  // P10-C4: the two first-boot screens carry SF_LOCK_INPUT for TIME's reason
+  // (B means "change the thing under the cursor" there and BACK everywhere
+  // else). One appearing without a row in kExits fails the coverage case above;
+  // this pins the count so the set cannot shrink either.
+  CHECK_EQ((int)locked, 7);
 }
 
 // THE OFF-TABLE WAITS. ui/dialog.cpp's modals float over a screen and freeze

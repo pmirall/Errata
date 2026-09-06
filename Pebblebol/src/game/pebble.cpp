@@ -7,6 +7,7 @@
 
 #include <string.h>
 
+#include "../core/utf8.h"   // u8_fit(): the ONE codepoint rule in the firmware
 #include "xp.h"    // xp_hp_max(): the ONE hp_max rule in the firmware
 
 // 0..15 -> 0..2. v*3/16 splits the range 0-5 / 6-10 / 11-15. The multiply
@@ -85,20 +86,14 @@ static uint16_t str_len(const char* s)
   return n;
 }
 
-// How many bytes of `s` fit in `room` without splitting a UTF-8 sequence. A
-// continuation byte is 10xxxxxx; a cut is legal only where the next byte is NOT
-// one. The repertoire is Latin-1 through UTF-8 (core/strings_es.h), so the only
-// sequences here are 1 and 2 bytes long - but the rule is written for any
-// length, because a rule that assumes two is a rule that breaks on the day
-// somebody adds a third.
-static uint16_t utf8_fit(const char* s, uint16_t room)
-{
-  if (!s) return 0u;
-  uint16_t n = 0;
-  while (n < room && s[n] != '\0') ++n;
-  while (n > 0u && ((uint8_t)s[n] & 0xC0u) == 0x80u) --n;   // back off a split
-  return n;
-}
+// utf8_fit() LEFT THIS FILE AT P10-C4 and is core/utf8.cpp's u8_fit(). It is
+// the same answer on every input this joiner has ever been handed - the
+// syllable tables are well-formed - and a stricter one where it is not: what
+// was here backed off CONTINUATION bytes after a blind cut, which leaves a lone
+// LEAD byte standing when the cut landed just after one. u8_fit() walks forward
+// over whole sequences instead, so its result is a well-formed prefix by
+// construction. Three copies of this rule disagreed until that move; core/utf8.h
+// records what the disagreement cost.
 
 uint8_t pebble_name_join(const char* a, const char* b, char* out, uint16_t cap)
 {
@@ -109,7 +104,7 @@ uint8_t pebble_name_join(const char* a, const char* b, char* out, uint16_t cap)
   const uint16_t budget = (uint16_t)(cap - 1u);
 
   const uint16_t la = str_len(a);
-  const uint16_t na = utf8_fit(a, budget);
+  const uint16_t na = u8_fit(a, budget);
   for (uint16_t i = 0; i < na; ++i) out[w++] = a[i];
   out[w] = '\0';
 
@@ -121,7 +116,7 @@ uint8_t pebble_name_join(const char* a, const char* b, char* out, uint16_t cap)
   // a different word is a bug that looks like content.
   if (na < la) return (uint8_t)w;
 
-  const uint16_t nb = utf8_fit(b, (uint16_t)(budget - w));
+  const uint16_t nb = u8_fit(b, (uint16_t)(budget - w));
   for (uint16_t i = 0; i < nb; ++i) out[w++] = b[i];
   out[w] = '\0';
   // SATURATING, not truncating. The widest name in the repertoire is 8 bytes so

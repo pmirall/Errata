@@ -48,6 +48,7 @@
 #include "game/xp.h"
 #include "persistence/save_schema.h"
 #include "ui/pet_art.h"
+#include "core/utf8.h"
 #include "ui/pet_view.h"
 
 // The identity is the Pebble's own, not the genome's: two Pebbles of the SAME
@@ -101,6 +102,30 @@ TEST(attach_is_a_no_op_without_a_slot) {
   CHECK_EQ(v.level, (uint8_t)12);
   CHECK_EQ(v.corrupted, (uint8_t)1);
   CHECK(strcmp(v.name, "ROCA") == 0);
+
+  // A NICKNAME IS STORED AS RAW LATIN-1 AND DRAWN AS UTF-8, and this attach is
+  // the one crossing between the two (core/utf8.h). Before P10-C4 it was an
+  // snprintf("%s") that copied the byte straight through, so a Pebble called
+  // "Ninon" with an n-tilde handed drawUTF8() a lone 0xF1 - which on the device
+  // opens a four-byte decoder state and swallows the character after it, and on
+  // the host walked past the end of the buffer.
+  //
+  // The WIDEST case is the one that matters: twelve accented characters are
+  // twelve stored bytes and TWENTY-FOUR drawn ones, so a name buffer sized in
+  // stored bytes cut such a name in half.
+  static const char kL1[] = "\xD1\xC1\xC9\xCD\xD3\xDA\xDC\xD1\xC1\xC9\xCD\xD3";
+  memcpy(p.nickname, kL1, sizeof kL1);
+  CHECK_EQ((int)strlen(p.nickname), 12);
+  pet_view_attach(v, &p);
+  CHECK_EQ((int)strlen(v.name), 24);              // every character survived
+  CHECK(u8_well_formed(v.name));
+  CHECK_EQ((int)u8_count(v.name), 12);
+  // and it is the SAME twelve characters, in order.
+  for (uint8_t i = 0; i < 12u; ++i) {
+    const uint32_t cp = (uint32_t)(((uint8_t)v.name[i * 2] & 0x1Fu) << 6) |
+                        (uint32_t)((uint8_t)v.name[i * 2 + 1] & 0x3Fu);
+    CHECK_EQ((int)cp, (int)(uint8_t)kL1[i]);
+  }
 }
 
 // =============================================================================

@@ -813,6 +813,24 @@ enum StrId : uint16_t {
   // decode. Saying "cancelado" there would be a lie.
   STR_TR_LOST,
 
+  // --- P10-C4. FIRST BOOT ------------------------- <= 25 chars @ 5x8 -------
+  //     The three questions a fresh device asks, in app/onboarding.h's order.
+  //     STR_SU_HELLO is drawn ON the naming screen rather than raised as a
+  //     toast, because a greeting that covers the only line telling the player
+  //     how to save is worse than no greeting - which is exactly what the boot
+  //     toast did over the TIME screen before this chunk.
+  //     STR_SU_DONE is 30 characters and therefore 150 px: it is the toast
+  //     that PROVES the banner wraps, and it was chosen that way on purpose.
+  STR_SU_HELLO,
+  STR_SU_NAME_TITLE,
+  STR_SU_NAME_HINT,
+  STR_SU_PICK_TITLE,
+  STR_SU_PICK_HINT,
+  STR_SU_SKIP,
+  STR_SU_DONE,
+  STR_AF_CHAR,
+  STR_AF_OTHER,
+
   STR_COUNT
 };
 
@@ -941,7 +959,14 @@ inline constexpr const char* const ES[] = {
 
   /* --- 16. welcome back --- */
   /* STR_ABS_AWAY */              "¿Dónde estabas? {t}.",
-  /* STR_ABS_UNKNOWN */           "No sé cuánto tiempo ha pasado. Sé que fue mucho. Y sé que fuiste tú.",
+  // SHORTENED AT P10-C4, AND THE SWEEP IS WHY. At 68 characters this needed
+  // FOUR wrapped lines and ui/ui.cpp's draw_absence_banner() draws three into a
+  // 28 px card, so "Y sé que fuiste tú." - the whole point of the line - was
+  // silently dropped on the device and had been since the card was written.
+  // Nothing could see it: the card is in a translation unit no host binary
+  // compiles, and no test had ever measured a string against the box it is
+  // drawn in. It fits three lines now with the sting intact.
+  /* STR_ABS_UNKNOWN */           "No sé cuánto tiempo pasó. Sé que fue mucho. Y que fuiste tú.",
 
   /* --- 18. egg --- */
   /* STR_EGG_TITLE */             "HUEVO",
@@ -1502,6 +1527,16 @@ inline constexpr const char* const ES[] = {
   , /* STR_LK_TR_ACTIVE */         "Guarda ese Pebble primero"
   , /* STR_LK_TR_QUARANTINED */    "Ese Pebble no es válido"
   , /* STR_TR_LOST */              "Intercambio incompleto"
+  // --- P10-C4. FIRST BOOT ---------------------------------------------------
+  , /* STR_SU_HELLO */             "Hola. Empecemos."
+  , /* STR_SU_NAME_TITLE */        "PONLE NOMBRE"
+  , /* STR_SU_NAME_HINT */         "Mantén IZQ: aceptar"
+  , /* STR_SU_PICK_TITLE */        "ELIGE PEBBLE"
+  , /* STR_SU_PICK_HINT */         "Mantén IZQ: elegir"
+  , /* STR_SU_SKIP */              "A+B: saltar"
+  , /* STR_SU_DONE */              "Listo. Encantado de conocerte."
+  , /* STR_AF_CHAR */              "LETRA"
+  , /* STR_AF_OTHER */             "OTRO"
 };
 
 // -----------------------------------------------------------------------------

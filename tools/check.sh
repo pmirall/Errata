@@ -1618,4 +1618,168 @@ if [ -f "$SKETCH/src/ui/anim_ease.cpp" ]; then
   [ "${n:-0}" -ge 3 ] || fail "tests/test_sprite_pipeline.cpp names PF_SLEEP_MIN_DIFF only $n time(s) - the sleep floor must be asserted through the constant, not against a literal (ui/petfx_core.h)"
 fi
 
+# =============================================================================
+#  P10-C4 - ONBOARDING, ACCESSIBILITY AND THE SECTION 63 AUDIT
+# =============================================================================
+if [ -f "$SKETCH/src/core/utf8.h" ]; then
+  if printf '' | cpp -fpreprocessed -dD -E -P - >/dev/null 2>&1; then
+    strip_comments10() { cpp -fpreprocessed -dD -E -P - 2>/dev/null; }
+  else
+    strip_comments10() { sed 's://.*::'; }
+  fi
+
+  # ---------------------------------------------------------------------------
+  # 1. THE PLAN'S OWN rd_u8g2() GATE, WHICH HAD NEVER RUN.
+  #
+  # PEBBLEBOL_IMPLEMENTATION_PLAN.md:72 has carried
+  #     grep -c "rd_u8g2()" src/app src/minigames src/game == 0   (P10-C4)
+  # since phase 2, and three separate things were wrong with it:
+  #
+  #   (a) it was in the PLAN and not in this file, so it had never run once;
+  #   (b) as written it is a grep ERROR, not a check - no -r, so grep says
+  #       "Is a directory" three times and exits 2, and under `set -euo
+  #       pipefail` that kills the run BEFORE "GATE OK" is printed. The same
+  #       failure shape the P5-C1 comment at the top of this file records;
+  #   (c) with -r it passes VACUOUSLY on two of the three directories. src/game
+  #       cannot call rd_u8g2() because the gate above already forbids
+  #       #include of render.h there - it would not compile - and
+  #       minigames/games/*_draw.cpp include ui/gfx.h and nothing lower. Only
+  #       src/app has real bite: app/app.cpp includes ../ui/render.h, so it
+  #       COULD call rd_u8g2() and does not.
+  #
+  # SO THE GATE IS THE ONE THE PLAN MEANT AND NOT THE ONE IT WROTE: rd_u8g2()
+  # is the single U8G2 instance and it may be reached only from ui/. The scope
+  # gains src/dev, which is where the actual leak is - dev/godmode.cpp calls it
+  # five times - and that file is EXEMPTED BY NAME with the reason written
+  # down, in the PURE_NET / IMPURE_NET idiom this file already uses: all five
+  # sit inside `#if GOD_MODE_ENABLED`, so they are not in the release artefact
+  # at all. A textual grep cannot see that, which is exactly the phase-8 defect
+  # shape ("a gate that counts a token instead of asking what the release
+  # artefact does"), so the exemption is a decision recorded here rather than a
+  # silence.
+  UI_ONLY_EXEMPT="godmode.cpp"
+  for d in app minigames game dev networking persistence hardware core data; do
+    [ -d "$SKETCH/src/$d" ] || continue
+    while IFS= read -r f; do
+      case " $UI_ONLY_EXEMPT " in *" $(basename "$f") "*) continue ;; esac
+      # `|| true` on the WHOLE pipeline, not just on grep: under `pipefail` a
+      # cpp that chokes on a file fails the assignment and `set -e` kills the
+      # run silently before "GATE OK". Two generated headers under src/data
+      # carry a '#' inside a comment, which -fpreprocessed reads as a bad
+      # directive - found by this gate exiting 1 with nothing printed.
+      n=$( { strip_comments10 < "$f" | grep -cE '\brd_u8g2[[:space:]]*\(' ; } || true )
+      [ "${n:-0}" -eq 0 ] || fail "src/$d/$(basename "$f") calls rd_u8g2() ($n) - the ONE U8G2 instance belongs to ui/ and nothing else may reach past the drawing seam for it (ui/gfx.h). If a layer needs to draw, it draws through gfx.h."
+    done <<EOF
+$(find "$SKETCH/src/$d" -name '*.cpp' -o -name '*.h' 2>/dev/null)
+EOF
+  done
+  # And the exemption is checked rather than assumed: godmode.cpp's calls must
+  # STILL be inside the guard. If somebody moves one above `#if
+  # GOD_MODE_ENABLED` the release build starts linking U8G2 through a dev file
+  # and this gate would otherwise say nothing.
+  gm="$SKETCH/src/dev/godmode.cpp"
+  if [ -f "$gm" ]; then
+    before=$( awk '/^#if GOD_MODE_ENABLED/{exit} {print}' "$gm" \
+              | { grep -cE '\brd_u8g2[[:space:]]*\(' || true; } )
+    [ "${before:-0}" -eq 0 ] || fail "dev/godmode.cpp calls rd_u8g2() ($before time(s)) ABOVE its #if GOD_MODE_ENABLED guard - the exemption in this gate is that those calls are compiled out of the release artefact, and that is no longer true"
+  fi
+
+  # ---------------------------------------------------------------------------
+  # 2. THE CODEPOINT RULE IS ONE RULE. core/utf8.cpp exists because
+  #    ui/render.cpp, tests/fakes/gfx_fb.cpp and game/pebble.cpp each carried a
+  #    private copy and the three disagreed - one of them by four bytes past a
+  #    terminator, which AddressSanitizer reported as a heap over-read. A file
+  #    that re-opens its own copy puts the divergence straight back, and
+  #    nothing else in the tree could see it.
+  for f in "$SKETCH/src/ui/render.cpp" "$ROOT/tests/fakes/gfx_fb.cpp" \
+           "$SKETCH/src/game/pebble.cpp"; do
+    n=$( strip_comments10 < "$f" | { grep -cE '\bu8_(len|fit|count|cat|cat_n|cat_latin1|from_latin1|well_formed)[[:space:]]*\(' || true; } )
+    [ "${n:-0}" -ge 1 ] || fail "$(basename "$f") no longer calls core/utf8.h ($n) - it carried its own copy of the codepoint rule until P10-C4 and the three copies disagreed (core/utf8.h)"
+    n=$( strip_comments10 < "$f" | { grep -cE '(0xE0|0xF0|0xF8)[^\n]*(0xC0|0xE0|0xF0)' || true; } )
+    [ "${n:-0}" -eq 0 ] || fail "$(basename "$f") has re-opened its own UTF-8 lead-byte table ($n line(s)) - there is exactly one, in core/utf8.cpp (core/utf8.h)"
+  done
+  # core/utf8.cpp stays on the Arduino-free red line: it is linked into every
+  # host binary AND into the firmware, the same standing core/perf.cpp,
+  # ui/petfx_core.cpp and dev/diag_core.cpp have.
+  for f in utf8.h utf8.cpp; do
+    n=$( { grep -cE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"](Arduino\.h|U8g2lib\.h)' "$SKETCH/src/core/$f" || true; } )
+    [ "${n:-0}" -eq 0 ] || fail "core/$f includes an Arduino header - it is the one codepoint rule and it must stay host-linkable (core/utf8.h)"
+  done
+
+  # ---------------------------------------------------------------------------
+  # 3. THE TOAST AND THE HELP STRIP ARE ONE BANNER, drawn by ui/gfx_widgets.cpp
+  #    - the translation unit BOTH backends link. Before P10-C4 they were two
+  #    unbounded centred lines in two files, one of which (ui/ui.cpp) includes
+  #    Arduino.h, so no golden in this repository had ever drawn a toast; six of
+  #    the twenty-five help strings and four of the fifty toast strings are
+  #    wider than the panel. A caller that goes back to drawing its own line
+  #    goes back to being unmeasurable.
+  n=$( strip_comments10 < "$SKETCH/src/ui/dialog.cpp" | { grep -cE '\bgfx_banner[[:space:]]*\(' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "ui/dialog.cpp does not call gfx_banner() ($n) - the HELP strip would again be an unbounded centred line, and six of the strings that reach it are wider than the panel (ui/gfx.h)"
+  n=$( strip_comments10 < "$SKETCH/src/ui/ui.cpp" | { grep -cE '\bgfx_banner[[:space:]]*\(' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp does not call gfx_banner() ($n) - the toast would again be drawn in a translation unit no host binary compiles, where nothing can measure it (ui/gfx.h)"
+  n=$( strip_comments10 < "$SKETCH/src/ui/gfx_widgets.cpp" | { grep -cE '\bgfx_banner[[:space:]]*\(' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "ui/gfx_widgets.cpp no longer defines gfx_banner() ($n) - it is implemented ONCE, in the unit both backends link (ui/gfx.h)"
+
+  # ---------------------------------------------------------------------------
+  # 4. THE FIRST-BOOT FLOW HAS TO REACH FLASH, AND BOTH HALVES OF IT.
+  #    persistence/save_manager.cpp's load_all_inner() answers LOAD_FRESH the
+  #    moment the Box pair is missing and returns BEFORE it looks at the config,
+  #    so a step written into a config with no Box beside it is a step the next
+  #    boot never sees - and the whole "resume after a power cut" requirement
+  #    would be a decoration. ui_setup_persist() writes both; this is the gate
+  #    on it, because app/app.cpp and ui/ui.cpp are compiled by no host binary.
+  #    THE GATE IS SCOPED TO THE FUNCTION BODY, AND THE MUTATION RUN IS WHY.
+  #    Written as "ui/ui.cpp calls gs_save_box() at least once" it counted a
+  #    token that is not unique - ui_box_activate() and ui_box_swap() call it
+  #    too - so deleting the call from ui_setup_persist() walked straight
+  #    through and check.sh said GATE OK. That is the phase-8 "gate counted a
+  #    type name" defect in a new shape, found by the mutation meant to confirm
+  #    the gate rather than by the gate. It reads the BODY now.
+  body=$( awk '/^void ui_setup_persist\(void\) \{/{f=1} f{print} f&&/^\}/{exit}' \
+            "$SKETCH/src/ui/ui.cpp" | strip_comments10 )
+  [ -n "$body" ] || fail "ui/ui.cpp has no ui_setup_persist() body - the first-boot flow would have nothing to persist its answers with (ui/ui.h)"
+  n=$( printf '%s\n' "$body" | { grep -cE '\bgs_save_box[[:space:]]*\(' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "ui_setup_persist() does not call gs_save_box() ($n) - persistence/save_manager.cpp answers LOAD_FRESH the moment the Box pair is missing and returns BEFORE it reads the config, so a first boot interrupted by a power cut would come back with every answer discarded (ui/ui.h)"
+  n=$( printf '%s\n' "$body" | { grep -cE '\bcfg_persist[[:space:]]*\([[:space:]]*false' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "ui_setup_persist() does not persist the Config silently ($n) - either the step is not written at all, or it is written with a toast that lands on top of the next question (ui/screen_setup.h)"
+  # ui_set_starter() IS THE ONE CALL IN THE TREE THAT DESTROYS THE ACTIVE
+  # PEBBLE - game/box.cpp's box_release() refuses to, by rule B4 - so it carries
+  # two independent locks and this gate is on the one a host binary cannot see.
+  # game/box.cpp's lock (an untouched ORIGIN_STARTER) is driven by
+  # tests/test_box.cpp; this one is "only while the flow is standing on
+  # OB_STARTER", and it lives in ui/ui.cpp, which no host binary compiles.
+  body=$( awk '/^bool ui_set_starter\(uint8_t species_id\) \{/{f=1} f{print} f&&/^\}/{exit}' \
+            "$SKETCH/src/ui/ui.cpp" | strip_comments10 )
+  [ -n "$body" ] || fail "ui/ui.cpp has no ui_set_starter() body - the starter choice would have nothing to write (ui/ui.h)"
+  n=$( printf '%s\n' "$body" | { grep -cE '\bob_step[[:space:]]*\(' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "ui_set_starter() does not check ob_step() ($n) - the one call in the tree that replaces the ACTIVE Pebble would be reachable outside the first-boot flow, on every device, for ever (ui/ui.h)"
+  n=$( printf '%s\n' "$body" | { grep -cE '\bbox_reroll_starter[[:space:]]*\(' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "ui_set_starter() does not go through box_reroll_starter() ($n) - the second lock, the one about the PEBBLE rather than about the moment, would be bypassed (game/box.h)"
+
+  n=$( strip_comments10 < "$SKETCH/src/app/app.cpp" | { grep -cE '\bob_boot_step[[:space:]]*\([^)]' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "app/app.cpp does not call ob_boot_step() ($n) - the first-boot flow would never be entered, and no host binary compiles this file to say so (app/onboarding.h)"
+  # AND NOBODY OUTSIDE app/onboarding.cpp MAY READ THE STEP BITS BY HAND. Two
+  # bits in a flags byte are exactly the kind of thing a second reader
+  # open-codes with the wrong shift; the accessors exist so there is one.
+  while IFS= read -r f; do
+    case "$f" in *onboarding.h|*onboarding.cpp|*nt_types.h|*game_state.cpp|*save_schema.h) continue ;; esac
+    n=$( { strip_comments10 < "$f" | grep -cE 'CF_SETUP_MASK|CFGV2_F_SETUP_MASK' ; } || true )
+    [ "${n:-0}" -eq 0 ] || fail "$(basename "$f") reads the first-boot step bits by hand ($n) - use ob_step()/ob_set_step(), which are the only place the shift is written (app/onboarding.h)"
+  done <<EOF
+$(find "$SKETCH/src" -name '*.cpp' -o -name '*.h' 2>/dev/null)
+EOF
+
+  # ---------------------------------------------------------------------------
+  # 5. THE SECTION 63 AUDIT IS A COMPLETENESS CLAIM AND NOT A LIST. kAudit[] in
+  #    tests/test_screens.cpp has one row per ScreenId and a static_assert on
+  #    its length, so a screen added without a fixture fails the BUILD. The gate
+  #    is that the table and its assertion still exist: deleting the assertion
+  #    would turn the audit back into "whatever somebody remembered", silently.
+  n=$( { grep -c 'kAudit' "$ROOT/tests/test_screens.cpp" || true; } )
+  [ "${n:-0}" -ge 4 ] || fail "tests/test_screens.cpp no longer carries the kAudit[] table ($n mentions) - the section 63 audit is what makes a screen added without a fixture a FAILURE instead of a silence"
+  n=$( { grep -cE 'static_assert\(sizeof kAudit' "$ROOT/tests/test_screens.cpp" || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "tests/test_screens.cpp has lost the static_assert that kAudit[] is SCR_COUNT long ($n) - without it a new screen simply goes unaudited"
+fi
+
 echo "GATE OK"

@@ -34,6 +34,12 @@ int  fb_get(int x, int y);
 uint32_t    fb_oob(void);
 const char* fb_oob_first(void);
 
+// The malformed-text recorder (P10-C4). Counts strings handed to gfx_text() or
+// gfx_text_w() that are not well-formed UTF-8; fb_bad_utf8_first() renders the
+// first offender with its raw bytes in <HH> form. See the banner in gfx_fb.cpp.
+uint32_t    fb_bad_utf8(void);
+const char* fb_bad_utf8_first(void);
+
 // Golden files, ASCII PBM (P1), one 128-character row per line.
 bool fb_write_pbm(const char* path);
 

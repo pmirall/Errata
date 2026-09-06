@@ -63,6 +63,17 @@ enum ScreenId : uint8_t {
   SCR_CREATOR,       // the creator portal (ex SCR_QR)
   SCR_SETTINGS,
   SCR_TIME,          // on-device time entry (ex SCR_CLOCK)
+  // THE TWO FIRST-BOOT SCREENS (P10-C4). They sit here, beside TIME, because
+  // the three of them are one flow: app/onboarding.h owns the order and
+  // ui/screen_setup.cpp draws the two that are new. Inserting rather than
+  // appending renumbers every id below - which is safe, and was checked rather
+  // than assumed: no ScreenId is persisted or transmitted anywhere (grep over
+  // persistence/ and networking/ is empty), the screen table is positional and
+  // ui/screen_table.cpp's three static_asserts fire on the count, and
+  // tests/test_screens.cpp pins every row to its render hook BY IDENTITY so a
+  // table whose rows did not move with the enum fails by screen name.
+  SCR_SETUP_NAME,    // first boot: name the device
+  SCR_SETUP_STARTER, // first boot: pick one of three starters
   SCR_CONFIRM,       // overlay, cursor defaults to NO
   SCR_ALERT,         // overlay
   SCR_ENCOUNTER,     // phase 5
@@ -398,6 +409,11 @@ static_assert(sizeof(PendingEgg) == 24, "PendingEgg must be 24 bytes");
 #define CF_RESERVED_BLE  0x04u
 #define CF_WEB_ENABLED   0x08u
 #define CF_MUTE          0x20u
+// FIRST-BOOT SETUP, two bits (app/onboarding.h). ZERO MEANS FINISHED, which is
+// what makes every save written before P10-C4 - and gs_cfg_defaults()'s memset
+// - read "this device is already set up" instead of being handed a wizard.
+#define CF_SETUP_MASK    0xC0u
+#define CF_SETUP_SH      6
 
 struct Config {
   uint16_t magic;                        //   0  NT_CFG_MAGIC

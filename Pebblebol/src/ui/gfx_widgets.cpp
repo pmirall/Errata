@@ -163,3 +163,68 @@ void gfx_list(const char* const* items, uint8_t n, uint8_t cur,
     gfx_fill(OLED_W - 3, ty, 2, th);
   }
 }
+
+// -----------------------------------------------------------------------------
+//  THE BANNER (P10-C4, spec section 65)
+//
+//  ONE picture with TWO callers, and until this chunk it was two
+//  implementations of it in two files - one of which no host binary compiles:
+//
+//    ui/ui.cpp     draw_toast()  a solid 11 px slab, one CENTRED line, unbounded
+//    ui/dialog.cpp draw_help()   a solid 12 px slab, one CENTRED line, unbounded
+//
+//  "Unbounded" is the part that mattered. Measured across the whole string
+//  table: SIX of the twenty-five ids that reach ui_help() and FOUR of the fifty
+//  that reach ui_toast() are wider than the 128 px panel at GF_BODY - the worst
+//  is 220 px - and each is one GST_BOTH press or one ordinary refusal away.
+//  ui/render.cpp's draw_utf8() drops leading codepoints on a negative x, so
+//  what the player saw was the MIDDLE of the sentence with both ends gone. And
+//  the toast half of it lived in ui/ui.cpp, which includes Arduino.h, so no
+//  golden in this repository had ever drawn one.
+//
+//  So the slab grows to fit instead: one line stays centred and looks exactly
+//  as it did, and a line that does not fit is WRAPPED into a taller slab. Two
+//  callers, one implementation, in the translation unit both backends link -
+//  which is the same argument gfx_header() and gfx_list() were moved here on.
+//
+//  THE HEIGHT IS COMPUTED FROM gfx_text_w(), which is a MEASUREMENT and not a
+//  wrap: it can only over-estimate the number of lines a word-wrap needs by
+//  the slack of one word per line, never under-estimate it below
+//  ceil(w / inner). tests/test_screens.cpp drives EVERY help id and EVERY toast
+//  id through the real wrap and requires the estimate to be exactly what the
+//  wrap used, so an over-estimate is a failure here and not a blank row nobody
+//  notices.
+// -----------------------------------------------------------------------------
+uint8_t gfx_banner_lines(const char* text) {
+  if (text == nullptr || *text == '\0') return 0u;
+  const uint16_t w = gfx_text_w(GF_BODY, text);
+  if (w == 0u) return 0u;
+  const uint16_t inner = (uint16_t)GFX_BANNER_INNER_W;
+  uint16_t n = (uint16_t)(1u + (w - 1u) / inner);
+  if (n > (uint16_t)GFX_BANNER_MAX_LINES) n = (uint16_t)GFX_BANNER_MAX_LINES;
+  return (uint8_t)n;
+}
+
+uint8_t gfx_banner(const char* text) {
+  const uint8_t lines = gfx_banner_lines(text);
+  if (lines == 0u) return 0u;
+
+  const int16_t h = (int16_t)((lines - 1) * GFX_LINE_BODY + GFX_BANNER_H1);
+  const int16_t y = (int16_t)(UI_AFFORD_Y - h);
+  gfx_fill(0, y, OLED_W, h);
+  gfx_color(GFX_ERASE);
+  // The baseline of line 0. GFX_ASC_BODY glyph rows sit above it and two blank
+  // rows below the last one, which is exactly the 11 px slab the toast has had
+  // since P2-C11 - so a one-line banner is pixel-for-pixel what it always was.
+  const int16_t base = (int16_t)(y + GFX_BANNER_TOP_PAD + GFX_ASC_BODY - 1);
+  uint8_t drawn;
+  if (lines == 1u) {
+    gfx_text_center(GF_BODY, base, text);      // unchanged for a line that fits
+    drawn = 1u;
+  } else {
+    drawn = gfx_text_wrap(GF_BODY, GFX_BANNER_PAD_X, base,
+                          (int16_t)GFX_BANNER_INNER_W, GFX_LINE_BODY, lines, text);
+  }
+  gfx_color(GFX_DRAW);
+  return drawn;
+}

@@ -61,7 +61,10 @@
 #include "ui/screen_battle.h"
 #include "ui/battle_renderer.h"
 #include "ui/screen_box.h"
+#include "core/utf8.h"
+#include "ui/screen_boot.h"
 #include "ui/screen_settings.h"
+#include "ui/screen_setup.h"
 #include "ui/screen_soon.h"
 #include "ui/screen_status.h"
 #include "ui/screen_time.h"
@@ -111,6 +114,11 @@ static uint8_t  g_minigame = 0xFF;
 static uint8_t  g_god      = 0;
 static uint8_t  g_bright   = 0;
 static int      g_cfg_saves = 0;
+static uint8_t  g_root      = 0xFF;   // the last ui_replace_root()
+static int      g_cfg_silent = 0;     // config writes that raised no toast
+static uint8_t  g_starter   = 0;      // the last ui_set_starter() argument
+static int      g_starter_calls = 0;
+static bool     g_starter_ok = true;
 static int      g_flushes  = 0;
 static Config   g_cfg;
 static Config*  g_cfg_p    = &g_cfg;
@@ -156,6 +164,13 @@ static uint8_t  g_box_swap_b   = 0xFF;
 uint32_t ui_now_ms(void)  { return g_now; }
 uint32_t ui_idle_ms(void) { return g_idle; }
 void ui_push(ScreenId s)  { g_push = (uint8_t)s; }
+// THE FIRST-BOOT SEAMS (P10-C4). ui_replace_root() is recorded SEPARATELY from
+// ui_goto(): the difference between them - does the back stack survive - is
+// exactly what the setup flow depends on, so a test that could not tell them
+// apart could not say the flow re-roots rather than stacking.
+void ui_replace_root(ScreenId s) { g_root = (uint8_t)s; }
+void ui_setup_persist(void)      { g_cfg_silent++; }
+bool ui_set_starter(uint8_t sp)  { g_starter = sp; g_starter_calls++; return g_starter_ok; }
 void ui_back(void)        { g_backs++; }
 void ui_note_input(void)  { g_inputs++; }
 Config* ui_cfg(void)      { return g_cfg_p; }
@@ -396,6 +411,11 @@ static void seams2_reset(void) {
   g_god = 0;
   g_bright = 0;
   g_cfg_saves = 0;
+  g_root = 0xFF;
+  g_cfg_silent = 0;
+  g_starter = 0;
+  g_starter_calls = 0;
+  g_starter_ok = true;
   g_flushes = 0;
   g_cfg_p = &g_cfg;
   memset(&g_cfg, 0, sizeof g_cfg);
@@ -623,6 +643,18 @@ static void snapshot_fn(void (*render)(void), const char* name) {
             name, (unsigned)fb_oob(), fb_oob_first());
   }
   CHECK_EQ(fb_oob(), 0u);
+
+  // (a1) and nothing may hand the font a byte sequence it cannot decode. The
+  // same kind of instrument as the recorder above and for the same reason: a
+  // name is stored as raw Latin-1, every list row is composed with
+  // snprintf("%s") which cuts on a BYTE, and on the device a broken lead byte
+  // does not merely draw wrong - u8g2 opens a multi-byte state and swallows
+  // the NEXT character too. tests/fakes/gfx_fb.cpp carries the argument.
+  if (fb_bad_utf8() != 0) {
+    fprintf(stderr, "  %s: %u malformed UTF-8 string(s) drawn, first \"%s\"\n",
+            name, (unsigned)fb_bad_utf8(), fb_bad_utf8_first());
+  }
+  CHECK_EQ(fb_bad_utf8(), 0u);
 
   // (a2) and nothing may allocate. A screen render is a pure function of the
   // model into a fixed buffer; the day one is not, the device's per-frame heap
@@ -3679,4 +3711,788 @@ TEST(an_item_used_with_no_active_pebble_is_refused_by_name_and_kept) {
   care_input(GST_HOLD_R);
   CHECK_EQ(g_toast, (uint16_t)STR_ITEM_NO_PET);
   CHECK_EQ(inv_count(g_inv, candy), 1);
+}
+
+// =============================================================================
+//  THE SPEC SECTION 63 AUDIT, AS A COMPLETENESS CLAIM (P10-C4)
+//
+//  Everything above this line is a snapshot somebody wrote when they added a
+//  screen. That is a good instrument and it has caught real defects, but it
+//  cannot make the claim section 63 actually asks for, because it is a list of
+//  what was REMEMBERED. The survey that opened this chunk measured the gap:
+//  nineteen screen files, sixty-five goldens, and of the eight screens that
+//  can show a twelve-character name only TWO had a fixture that did; the Box
+//  had never once been drawn full; and the longest Spanish string in the table
+//  was driven by nothing at all.
+//
+//  So the audit is a TABLE with one row per ScreenId and a compile-time
+//  assertion that the table is exactly SCR_COUNT long. A screen added to the
+//  enum without a fixture here does not quietly go untested - the BUILD fails,
+//  and it fails naming what is missing. That is the difference between a
+//  failure and a silence, and it is the whole point of this block.
+//
+//  WHAT "WORST CASE" MEANS HERE, and every part of it is a number the product
+//  really allows:
+//    * a nickname of NAME_MAX_LEN characters, ALL of them multi-byte. Twelve
+//      stored bytes, twenty-four drawn ones - the widest a name can be - and it
+//      is built by running the REAL Latin-1 -> UTF-8 crossing (core/utf8.h)
+//      rather than by typing UTF-8 into a fixture, so the conversion is under
+//      the audit too.
+//    * level 30 and every meter at 100: two digits and three-digit percentages
+//      everywhere they can appear.
+//    * a FULL Box - ten of ten, every slot named the same way at level 30 -
+//      which nothing in this repository had ever rendered.
+//    * the widest string core/strings_es.h holds, through the one path that can
+//      show an arbitrary one: the banner (the toast line and the HELP strip).
+//
+//  AND EVERY ROW IS PINNED TO ITS RENDER HOOK BY IDENTITY. The screen table is
+//  positional and P10-C4 INSERTED two ids in the middle of the enum; a row that
+//  did not move with it would draw the wrong screen under the right name and
+//  the count would still match. tests/test_statemachine.cpp makes the same
+//  check for the same reason - two instruments, because this one also has to
+//  say WHICH fixture belongs to which row.
+// =============================================================================
+
+// Twelve Latin-1 characters, every one of them two bytes once drawn. These are
+// exactly the high bytes game/validate.cpp's creator_name_char_ok() admits.
+#define AUDIT_NAME_L1 "\xD1\xC1\xC9\xCD\xD3\xDA\xDC\xD1\xC1\xC9\xCD\xD3"
+
+static void audit_full_box(void) {
+  memset(&g_gs, 0, sizeof g_gs);
+  box_bind(g_gs);
+  Genome gen;
+  memset(&gen, 0, sizeof gen);
+  gen.magic_ver  = GENOME_MAGIC_VER;
+  gen.lineage_id = 0x0BADF00Du;
+  gen.g0 = 0x1234u; gen.g1 = 0x5678u; gen.g2 = 0x9ABCu;
+  gen.generation = 3;
+  for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
+    // Different species per slot, so the list is not ten copies of one row and
+    // the badge column varies with it.
+    const uint8_t sp = (uint8_t)(1u + ((uint16_t)i * 6u) % (uint16_t)SPECIES_TABLE_COUNT);
+    const uint8_t slot = box_new_pebble(sp, 30u, ORIGIN_STARTER, gen,
+                                        0xC0FFEEu + i, 1000u);
+    CHECK(slot != BOX_SLOT_NONE);
+    PebbleInstance* p = box_slot(slot);
+    if (!p) continue;
+    for (uint8_t c = 0; c < PB_CARE_COUNT; ++c) p->care[c] = (int32_t)PB_CARE_MILLI_MAX;
+    p->hp_cur = 250u;
+    // The STORED form: raw Latin-1, exactly as networking/creator_parse.cpp
+    // writes one and as game/validate.cpp accepts one.
+    memcpy(p->nickname, AUDIT_NAME_L1, sizeof AUDIT_NAME_L1);
+  }
+  CHECK_EQ(box_count(), (uint8_t)BOX_SLOTS);
+  CHECK(box_set_active(0));
+}
+
+// The model every audited screen is drawn against.
+static void audit_model(void) {
+  seams2_reset();
+  explore_reset();
+  fixture_maxed();
+  // THE NAME GOES THROUGH THE REAL CROSSING. A fixture that typed the UTF-8
+  // in by hand would prove the LAYOUT and say nothing about the conversion,
+  // which is the half that was wrong.
+  const uint16_t n = u8_from_latin1(g_view.name, (uint16_t)sizeof g_view.name,
+                                    AUDIT_NAME_L1);
+  CHECK_EQ((int)n, 24);                       // 12 characters, 24 bytes
+  CHECK_EQ((int)u8_count(g_view.name), 12);
+  audit_full_box();
+  // WHAT ui_nav_reset() DOES ON EVERY SCREEN CHANGE, and the fixture has to do
+  // it for the same reason: gfx_list()'s highlight SLIDES from wherever the
+  // last list left it, and that anchor is file-scope in ui/gfx_widgets.cpp. A
+  // golden recorded without this is a picture of whichever test ran before it.
+  gfx_list_reset();
+}
+
+// --- the per-row extras ------------------------------------------------------
+static void au_none(void)     { }
+static void au_menu(void)     { menu_enter(); }
+static void au_care(void)     { care_enter(); }
+static void au_play(void)     { play_enter(); }
+static void au_box(void)      { box_enter(); }
+static void au_status_a(void) { status_a_enter(); }
+static void au_status_b(void) { status_b_enter(); }
+static void au_network(void)  { network_enter(); }
+static void au_creator(void)  { g_ap_up = 1; creator_enter(); }
+static void au_settings(void) { settings_enter(); }
+static void au_time(void)     { time_enter(); }
+
+static void au_link(void) {
+  lf_reset();
+  lf_set_pet_name("BOLOTA");
+  g_now = 1000;
+  link_enter();
+  // A PEER NAMED IN LATIN-1, which is what networking/discovery.cpp's name_ok()
+  // accepts off the air. This is the second half of the name story: the Box
+  // holds one form of it and the radio hands over another.
+  for (uint8_t i = 0; i < (uint8_t)LINK_PEER_HITS_MIN; ++i) {
+    lf_push_beacon(0x2001u, AUDIT_NAME_L1, (uint16_t)DISC_CAP_BATTLE, -42, 0);
+    g_now += 600;
+    link_update(g_now);
+  }
+}
+
+static void au_setup_name(void) {
+  setup_name_enter();
+  // Every cell driven to the WIDEST character the ring offers, which is one of
+  // the accented ones - so the field is twelve two-byte characters.
+  for (uint8_t cell = 0; cell < (uint8_t)NAME_MAX_LEN; ++cell) {
+    for (uint8_t k = 0; k < 28u; ++k) setup_name_input(GST_TAP_R);  // ... up to N-tilde
+    setup_name_input(GST_TAP_L);
+  }
+}
+static void au_setup_pick(void) { setup_pick_enter(); }
+
+static void au_encounter(void) {
+  EncounterResult r;
+  memset(&r, 0, sizeof r);
+  r.outcome = (uint8_t)ENC_OUT_WILD; r.species_id = 1; r.level = 30;
+  encounter_arm(r, (uint8_t)NET_CAT_HOME);
+  encounter_enter();
+}
+
+static void au_capture(void) {
+  EncounterResult r;
+  memset(&r, 0, sizeof r);
+  r.outcome = (uint8_t)ENC_OUT_WILD; r.species_id = 1; r.level = 30;
+  encounter_arm(r, (uint8_t)NET_CAT_HOME);
+  inv_add(g_inv, 5u, 3u);
+  g_roll = 0x1000u;
+  g_dev  = 0xABCD0000u;
+  capture_enter();
+}
+
+static void au_battle(void) {
+  battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E02u);
+  battle_enter();
+  battle_pick_team((uint8_t)BATTLE_TEAM_MAX);
+  battle_input(GST_HOLD_R);                    // past the stare-down
+}
+
+static void au_evolution(void) {
+  g_view.stage = STAGE_EGG;
+  g_view.age_s = 60;
+  evo_enter();
+}
+
+static void au_error(void)    { err_set_kind(ERRK_SAVE_CORRUPT); err_enter(); }
+
+struct AuditRow {
+  uint8_t     id;
+  const char* name;
+  void      (*render)(void);
+  void      (*setup)(void);
+};
+
+static const AuditRow kAudit[] = {
+  { SCR_BOOT,          "BOOT",          boot_render,       au_none      },
+  { SCR_LOAD_SAVE,     "LOAD_SAVE",     load_save_render,  au_none      },
+  { SCR_HOME,          "HOME",          home_render,       au_none      },
+  { SCR_MENU,          "MENU",          menu_render,       au_menu      },
+  { SCR_CARE,          "CARE",          care_render,       au_care      },
+  { SCR_PLAY,          "PLAY",          play_render,       au_play      },
+  // GAME's row is five forwarders into ui.cpp, which this binary stubs (the
+  // minigame frames have their own snapshots above, drawn through the registry
+  // rather than through the row). The row is audited for its IDENTITY and its
+  // flags; there is nothing else here that could clip.
+  { SCR_GAME,          "GAME",          ui_game_render,    au_none      },
+  { SCR_BOX,           "BOX",           box_render,        au_box       },
+  { SCR_STATUS,        "STATUS",        status_a_render,   au_status_a  },
+  { SCR_STATUS_B,      "STATUS_B",      status_b_render,   au_status_b  },
+  { SCR_NETWORK,       "NETWORK",       network_render,    au_network   },
+  { SCR_LINK,          "LINK",          link_render,       au_link      },
+  { SCR_CREATOR,       "CREATOR",       creator_render,    au_creator   },
+  { SCR_SETTINGS,      "SETTINGS",      settings_render,   au_settings  },
+  { SCR_TIME,          "TIME",          time_render,       au_time      },
+  { SCR_SETUP_NAME,    "SETUP_NAME",    setup_name_render, au_setup_name},
+  { SCR_SETUP_STARTER, "SETUP_STARTER", setup_pick_render, au_setup_pick},
+  { SCR_CONFIRM,       "CONFIRM",       soon_generic,      au_none      },
+  { SCR_ALERT,         "ALERT",         soon_generic,      au_none      },
+  { SCR_ENCOUNTER,     "ENCOUNTER",     encounter_render,  au_encounter },
+  { SCR_CAPTURE,       "CAPTURE",       capture_render,    au_capture   },
+  { SCR_BATTLE,        "BATTLE",        battle_render,     au_battle    },
+  { SCR_TRADE,         "TRADE",         soon_trade,        au_none      },
+  { SCR_BREED,         "BREED",         soon_breed,        au_none      },
+  { SCR_EVOLUTION,     "EVOLUTION",     evo_render,        au_evolution },
+  { SCR_ITEM_REWARD,   "ITEM_REWARD",   soon_item_reward,  au_none      },
+  { SCR_ERROR,         "ERROR",         err_render,        au_error     },
+  { SCR_SLEEP,         "SLEEP",         soon_sleep,        au_none      },
+  { SCR_DIAG,          "DIAG",          diag_render,       au_none      },
+};
+
+// THE LINE THAT MAKES THIS A COMPLETENESS CLAIM. Add a ScreenId and this fails
+// to COMPILE, by name, before any test runs. A screen with no fixture is a
+// build error and not a silence, which is the whole difference between an audit
+// and a list of what somebody remembered.
+static_assert(sizeof kAudit / sizeof kAudit[0] == (size_t)SCR_COUNT,
+              "spec section 63: every ScreenId needs a row in kAudit[]. A screen "
+              "was added to the enum without a worst-case fixture, so it would "
+              "have shipped without ever being drawn at 12-character names, "
+              "level 30, a full Box and the longest Spanish string.");
+
+TEST(every_screen_is_audited_at_the_worst_case_the_product_allows) {
+  uint32_t drawn = 0;
+  for (uint8_t i = 0; i < (uint8_t)SCR_COUNT; ++i) {
+    const AuditRow& r = kAudit[i];
+    // 1. the table is in ScreenId order and the row really is that screen.
+    if (r.id != i) fprintf(stderr, "  kAudit row %u claims id %u (%s)\n",
+                           (unsigned)i, (unsigned)r.id, r.name);
+    CHECK_EQ((int)r.id, (int)i);
+    const ScreenDef* d = screen_def(i);
+    CHECK(d != nullptr);
+    if (!d) continue;
+    if (d->render != r.render)
+      fprintf(stderr, "  the screen table's row %u is not %s\n", (unsigned)i, r.name);
+    CHECK(d->render == r.render);
+
+    // 2. the worst-case model, then whatever this screen needs on top of it.
+    audit_model();
+    r.setup();
+
+    // 3. draw it and hold it to every rule snapshot_fn() holds a golden to,
+    //    minus the golden itself - there is no picture to approve here, the
+    //    claim is that nothing overflows, nothing allocates and nothing hands
+    //    the font a sequence it cannot decode.
+    fb_reset();
+    const uint32_t allocs_before = alloc_count();
+    d->render();
+    const uint32_t allocs = alloc_count() - allocs_before;
+
+    if (fb_oob() != 0)
+      fprintf(stderr, "  %s at the worst case: %u out-of-bounds primitive(s), "
+                      "first %s\n", r.name, (unsigned)fb_oob(), fb_oob_first());
+    CHECK_EQ(fb_oob(), 0u);
+
+    if (fb_bad_utf8() != 0)
+      fprintf(stderr, "  %s at the worst case: %u malformed UTF-8 string(s), "
+                      "first \"%s\"\n", r.name, (unsigned)fb_bad_utf8(),
+              fb_bad_utf8_first());
+    CHECK_EQ(fb_bad_utf8(), 0u);
+
+    if (allocs != 0u)
+      fprintf(stderr, "  %s at the worst case: %u allocation(s)\n",
+              r.name, (unsigned)allocs);
+    CHECK_EQ(allocs, 0u);
+
+    if (fb_pixels() > SNAP_MAX_PIXELS || fb_ops() > SNAP_MAX_OPS)
+      fprintf(stderr, "  %s at the worst case: %u pixels / %u primitives\n",
+              r.name, (unsigned)fb_pixels(), (unsigned)fb_ops());
+    CHECK(fb_pixels() <= SNAP_MAX_PIXELS);
+    CHECK(fb_ops() <= SNAP_MAX_OPS);
+
+    // 4. ANTI-VACUITY. A screen that drew nothing at all would satisfy every
+    //    rule above. GAME is the one honest exception - its row forwards into
+    //    ui.cpp, which this binary stubs - and it is named rather than skipped.
+    int ink = 0;
+    for (int y = 0; y < FB_H; ++y)
+      for (int x = 0; x < FB_W; ++x) ink += fb_get(x, y) ? 1 : 0;
+    if (i != (uint8_t)SCR_GAME) {
+      if (ink == 0) fprintf(stderr, "  %s drew NOTHING at the worst case\n", r.name);
+      CHECK(ink > 0);
+      ++drawn;
+    }
+  }
+  CHECK_EQ((int)drawn, (int)SCR_COUNT - 1);
+}
+
+// =============================================================================
+//  THE LONGEST SPANISH STRING (P10-C4, spec sections 63 and 65)
+//
+//  Section 63 asks for the longest Spanish string to be driven at 128x64 and
+//  nothing in this repository had ever driven it. The survey measured the
+//  reason it mattered: TWENTY-THREE entries in core/strings_es.h are wider than
+//  the panel at GF_BODY, and TEN of them reach a draw with no fit and no wrap -
+//  six through the HELP strip and four through the toast line.
+//
+//  THE SWEEP IS OVER THE WHOLE TABLE AND NOT OVER A LIST OF THE TEN. A list of
+//  which ids reach which draw is exactly the thing that rots: a new toast in a
+//  new screen would not be in it. Every string in the product has to be
+//  showable, so every string in the product is what is checked.
+// =============================================================================
+static uint16_t widest_str_id(void) {
+  uint16_t worst = STR_EMPTY, w = 0;
+  for (uint16_t id = 0; id < (uint16_t)STR_COUNT; ++id) {
+    const uint16_t sw = gfx_text_w(GF_BODY, S(id));
+    if (sw > w) { w = sw; worst = id; }
+  }
+  return worst;
+}
+
+TEST(every_string_in_the_product_fits_a_banner_and_the_banner_is_the_size_it_used) {
+  uint32_t multiline = 0, widest = 0;
+  uint16_t widest_id = STR_EMPTY;
+
+  for (uint16_t id = 0; id < (uint16_t)STR_COUNT; ++id) {
+    const char* s = S(id);
+    if (s == nullptr || *s == '\0') continue;
+    const uint16_t w = gfx_text_w(GF_BODY, s);
+    if (w > widest) { widest = w; widest_id = id; }
+
+    // (a) HOW MANY LINES THE REAL WRAP NEEDS, measured by running it with room
+    //     to spare rather than by trusting the estimate that sizes the slab.
+    fb_reset();
+    const uint8_t need = gfx_text_wrap(GF_BODY, GFX_BANNER_PAD_X, 8,
+                                       (int16_t)GFX_BANNER_INNER_W, GFX_LINE_BODY,
+                                       (uint8_t)(GFX_BANNER_MAX_LINES + 2), s);
+    if (need > (uint8_t)GFX_BANNER_MAX_LINES)
+      fprintf(stderr, "  string %u (%u px) needs %u wrapped lines and a banner "
+                      "holds %u: \"%s\"\n",
+              (unsigned)id, (unsigned)w, (unsigned)need,
+              (unsigned)GFX_BANNER_MAX_LINES, s);
+    CHECK(need <= (uint8_t)GFX_BANNER_MAX_LINES);
+
+    // (b) THE SLAB IS EXACTLY AS TALL AS THE TEXT TURNED OUT TO BE. Under-size
+    //     and the wrap silently drops the tail; over-size and the banner eats
+    //     rows of the screen underneath for a line it never draws.
+    fb_reset();
+    const uint8_t sized = gfx_banner_lines(s);
+    const uint8_t drew  = gfx_banner(s);
+    if (sized != need || drew != need)
+      fprintf(stderr, "  string %u: wrap needs %u, banner sized %u, drew %u: \"%s\"\n",
+              (unsigned)id, (unsigned)need, (unsigned)sized, (unsigned)drew, s);
+    CHECK_EQ((int)sized, (int)need);
+    CHECK_EQ((int)drew,  (int)need);
+
+    // (c) and it stayed on the panel and stayed decodable.
+    if (fb_oob() != 0)
+      fprintf(stderr, "  string %u drew off the panel (%s): \"%s\"\n",
+              (unsigned)id, fb_oob_first(), s);
+    CHECK_EQ(fb_oob(), 0u);
+    CHECK_EQ(fb_bad_utf8(), 0u);
+
+    // (d) the banner never touches the affordance strip and never leaves the
+    //     panel at the top, whatever it is asked to hold.
+    for (int x = 0; x < FB_W; ++x)
+      CHECK_EQ(fb_get(x, UI_AFFORD_Y), 0);
+
+    if (need > 1u) ++multiline;
+  }
+
+  // ANTI-VACUITY, AND IT IS THE MEASUREMENT THAT MOTIVATED THE WHOLE CHANGE:
+  // strings that need more than one line have to EXIST, or this sweep is a
+  // sweep over a table that always fitted. The survey counted 23 over 128 px.
+  if (multiline < 10u)
+    fprintf(stderr, "  only %u strings need a second banner line - the sweep is "
+                    "not exercising the wrap\n", (unsigned)multiline);
+  CHECK(multiline >= 10u);
+  CHECK_EQ((int)widest_id, (int)widest_str_id());
+  CHECK(widest > (uint16_t)OLED_W);        // the widest really is off-panel
+}
+
+// THE HELP OVERLAY, id by id, through the REAL ui/dialog.cpp. This is the draw
+// the survey measured six overflows on - each of them one GST_BOTH press away
+// on a shipping screen - and snapshot_help covered exactly one of the
+// twenty-five, the one that happened to fit.
+TEST(every_help_line_the_product_can_open_stays_on_the_panel) {
+  uint32_t opened = 0;
+  for (uint16_t id = 1; id < (uint16_t)STR_COUNT; ++id) {
+    if (S(id) == nullptr || S(id)[0] == '\0') continue;
+    seams2_reset();
+    dialog_open_help(id);
+    CHECK_EQ(dialog_modal(), (uint8_t)MODAL_HELP);
+    fb_reset();
+    dialog_render();
+    if (fb_oob() != 0)
+      fprintf(stderr, "  HELP %u drew off the panel (%s): \"%s\"\n",
+              (unsigned)id, fb_oob_first(), S(id));
+    CHECK_EQ(fb_oob(), 0u);
+    CHECK_EQ(fb_bad_utf8(), 0u);
+    // It drew SOMETHING: an overlay that vanished would also not clip.
+    int ink = 0;
+    for (int y = 0; y < FB_H; ++y)
+      for (int x = 0; x < FB_W; ++x) ink += fb_get(x, y) ? 1 : 0;
+    CHECK(ink > 0);
+    ++opened;
+  }
+  CHECK(opened > 300u);                    // the table really was walked
+}
+
+// =============================================================================
+//  A FULL BOX (P10-C4)
+//
+//  Ten of ten, every slot named with twelve two-byte characters at level 30,
+//  swept across every cursor position so the scrolled window AND the scrollbar
+//  are both drawn. The survey found this had never been rendered: box_list is a
+//  3/10 Box and the scrollbar geometry was pinned by nothing.
+// =============================================================================
+TEST(a_full_box_draws_at_every_cursor_position) {
+  audit_model();
+  box_enter();
+  // BOX_SLOTS rows plus the BACK row.
+  for (uint8_t pos = 0; pos <= (uint8_t)BOX_SLOTS; ++pos) {
+    fb_reset();
+    box_render();
+    if (fb_oob() != 0)
+      fprintf(stderr, "  full BOX at cursor %u: %u OOB, first %s\n",
+              (unsigned)pos, (unsigned)fb_oob(), fb_oob_first());
+    CHECK_EQ(fb_oob(), 0u);
+    CHECK_EQ(fb_bad_utf8(), 0u);
+    box_input(GST_TAP_L);                  // A steps the cursor
+  }
+  // and it came back round to the top, so the sweep really covered the list.
+  fb_reset();
+  box_render();
+  CHECK_EQ(fb_oob(), 0u);
+}
+
+TEST(snapshot_box_full) {
+  audit_model();
+  box_enter();
+  // Park the cursor on the last Pebble so the window has SCROLLED and the
+  // scrollbar is at the bottom of its track - the state no golden had.
+  for (uint8_t i = 0; i < (uint8_t)(BOX_SLOTS - 1u); ++i) box_input(GST_TAP_L);
+  // LET THE HIGHLIGHT SETTLE ON THE ROW IT WAS SENT TO. cursor_y() retargets on
+  // the frame it first sees a new selection and returns the OLD position on
+  // that frame, so one render is needed to aim and the clock has to pass
+  // UI_LIST_SLIDE_MS for it to arrive. Found by this golden passing alone and
+  // failing in the suite - the slide anchor is file-scope in gfx_widgets.cpp.
+  box_render();
+  g_now += (uint32_t)UI_LIST_SLIDE_MS * 4u;
+  snapshot(SCR_BOX, "box_list_full");
+}
+
+// =============================================================================
+//  FIRST BOOT ON THE PANEL (P10-C4)
+//
+//  app/onboarding.h owns WHICH question comes next and tests/test_onboarding.cpp
+//  drives that through the real save pipeline. What is here is the other half:
+//  the two screens, their grammar, and the promise that a player who reads
+//  nothing still ends up with a working device.
+// =============================================================================
+static void flow_begin(uint8_t step) {
+  seams2_reset();
+  audit_full_box();                    // app.cpp has already minted a starter
+  ob_set_step(g_cfg, step);
+  CHECK(setup_in_flow());
+}
+
+TEST(the_naming_screen_types_a_name_one_character_at_a_time) {
+  flow_begin(OB_NAME);
+  setup_name_enter();
+  CHECK_EQ((int)setup_name_cursor(), 0);
+  CHECK_EQ((int)setup_name_text()[0], 0);          // an empty field, not spaces
+
+  // R steps the ring; the first stop past the blank is 'A'.
+  setup_name_input(GST_TAP_R);
+  CHECK_EQ((int)setup_name_text()[0], (int)'A');
+  CHECK_EQ((int)setup_name_cursor(), 0);           // and R does not move on
+
+  // A moves on, R types again.
+  setup_name_input(GST_TAP_L);
+  CHECK_EQ((int)setup_name_cursor(), 1);
+  for (int i = 0; i < 2; ++i) setup_name_input(GST_TAP_R);
+  CHECK_EQ(strcmp(setup_name_text(), "AB"), 0);
+
+  // The ring wraps, and it wraps back to the blank rather than to 'A' - which
+  // is what lets a player undo a character without walking the whole alphabet
+  // twice.
+  setup_name_enter();
+  const uint8_t n = setup_ring_len();
+  for (uint8_t i = 0; i < n; ++i) setup_name_input(GST_TAP_R);
+  CHECK_EQ((int)setup_name_text()[0], 0);          // back to blank
+  CHECK_EQ((int)setup_ring_at(0), (int)' ');
+
+  // The cursor wraps too, so twelve taps of A return to the first cell.
+  setup_name_enter();
+  for (uint8_t i = 0; i < (uint8_t)NAME_MAX_LEN; ++i) setup_name_input(GST_TAP_L);
+  CHECK_EQ((int)setup_name_cursor(), 0);
+}
+
+// THE RING CARRIES THE SPANISH REPERTOIRE, and the name it produces is stored
+// as LATIN-1 - which is the whole reason core/utf8.h exists.
+TEST(a_name_typed_on_the_device_is_latin1_and_is_drawn_as_utf8) {
+  flow_begin(OB_NAME);
+  setup_name_enter();
+  // Walk to the n-tilde and take it.
+  uint8_t taps = 0;
+  while (setup_ring_at(taps) != (char)0xD1) {
+    ++taps;
+    CHECK(taps < setup_ring_len());
+  }
+  for (uint8_t i = 0; i < taps; ++i) setup_name_input(GST_TAP_R);
+  CHECK_EQ((int)(uint8_t)setup_name_text()[0], 0xD1);
+  CHECK_EQ((int)strlen(setup_name_text()), 1);     // ONE stored byte
+
+  setup_name_input(GST_HOLD_L);                    // accept
+  CHECK_EQ((int)(uint8_t)g_cfg.pet_name[0], 0xD1); // ...stored as Latin-1
+  CHECK_EQ((int)strlen(g_cfg.pet_name), 1);
+
+  // And what reaches the panel is the two-byte UTF-8 form of the same
+  // character. Drawn through the real screen, not through a fixture.
+  fb_reset();
+  setup_name_enter();
+  setup_name_render();
+  CHECK_EQ(fb_bad_utf8(), 0u);
+  CHECK_EQ(fb_oob(), 0u);
+  // ...and re-entering the screen finds the character it stored.
+  CHECK_EQ((int)(uint8_t)setup_name_text()[0], 0xD1);
+}
+
+// A name is TRIMMED at both ends. game/validate.h argues at length against
+// mending a name, and that argument is about a name arriving from OUTSIDE the
+// device; this one is typed on it, by a player who cannot see a trailing space.
+TEST(a_typed_name_is_trimmed_at_both_ends) {
+  flow_begin(OB_NAME);
+  setup_name_enter();
+  setup_name_input(GST_TAP_L);                     // leave cell 0 blank
+  setup_name_input(GST_TAP_R);                     // 'A' in cell 1
+  setup_name_input(GST_TAP_L);
+  setup_name_input(GST_TAP_L);                     // cell 3, left blank
+  CHECK_EQ(strcmp(setup_name_text(), "A"), 0);
+  setup_name_input(GST_HOLD_L);
+  CHECK_EQ(strcmp(g_cfg.pet_name, "A"), 0);
+}
+
+TEST(the_flow_walks_name_time_starter_and_re_roots_at_every_step) {
+  // NAME -> TIME
+  flow_begin(OB_NAME);
+  setup_name_enter();
+  setup_name_input(GST_TAP_R);
+  setup_name_input(GST_HOLD_L);
+  CHECK_EQ((int)ob_step(g_cfg), (int)OB_TIME);
+  CHECK_EQ((int)g_root, (int)SCR_TIME);            // RE-ROOTED, not pushed
+  CHECK_EQ((int)g_push, 0xFF);
+  CHECK_EQ(g_backs, 0);
+  CHECK(g_cfg_silent > 0);                         // and persisted, with no toast
+  CHECK_EQ((int)g_toast, (int)STR_EMPTY);
+
+  // TIME -> STARTER, through the P2-C6 screen, unchanged except for the branch.
+  flow_begin(OB_TIME);
+  time_enter();
+  g_clock_ok = true;
+  time_input(GST_HOLD_L);                          // commit the date
+  CHECK_EQ((int)ob_step(g_cfg), (int)OB_STARTER);
+  CHECK_EQ((int)g_root, (int)SCR_SETUP_STARTER);
+  CHECK_EQ(g_backs, 0);                            // NOT ui_back(): it would
+                                                   // return to the naming step
+  CHECK_EQ((int)g_toast, (int)STR_EMPTY);          // no "hora guardada" over it
+
+  // STARTER -> HOME, and the chosen species really is handed over.
+  flow_begin(OB_STARTER);
+  setup_pick_enter();
+  CHECK_EQ((int)setup_pick_cursor(), 0);
+  setup_pick_input(GST_TAP_R);
+  CHECK_EQ((int)setup_pick_cursor(), 1);
+  setup_pick_input(GST_HOLD_L);
+  CHECK_EQ((int)g_starter_calls, 1);
+  CHECK_EQ((int)g_starter, (int)ob_starter_species(1));
+  CHECK_EQ((int)ob_step(g_cfg), (int)OB_DONE);
+  CHECK_EQ((int)g_root, (int)SCR_HOME);
+  CHECK_EQ((int)g_toast, (int)STR_SU_DONE);
+  CHECK(!setup_in_flow());
+}
+
+// THE REQUIREMENT, ON THE PANEL: a player who reads nothing still lands on a
+// working device. Two ways out of every step, neither of which destroys
+// anything, because every default is already in place before the question is
+// asked.
+TEST(a_player_who_reads_nothing_still_reaches_a_playable_device) {
+  // (a) SKIP each step in turn: the flow still ends, and ends finished.
+  static const uint8_t kSteps[3] = { OB_NAME, OB_TIME, OB_STARTER };
+  for (uint8_t i = 0; i < 3u; ++i) {
+    flow_begin(kSteps[i]);
+    switch (kSteps[i]) {
+      case OB_NAME:    setup_name_enter(); setup_name_input(GST_BOTH); break;
+      case OB_TIME:    time_enter();       time_input(GST_BOTH);       break;
+      default:         setup_pick_enter(); setup_pick_input(GST_BOTH); break;
+    }
+    CHECK_EQ((int)ob_step(g_cfg), (int)ob_next(kSteps[i]));
+    CHECK_EQ((int)g_root, (int)ob_screen_for(ob_next(kSteps[i])));
+    // Nothing was destroyed on the way past: no name written, no starter
+    // rerolled, and the Box is still ten Pebbles.
+    CHECK_EQ((int)g_cfg.pet_name[0], 0);
+    CHECK_EQ((int)g_starter_calls, 0);
+    CHECK_EQ(box_count(), (uint8_t)BOX_SLOTS);
+  }
+
+  // (b) HOLD BOTH on any step ends the whole flow at once - the one gesture a
+  //     player who is reading nothing will find, because invariant 2 makes it
+  //     mean HOME everywhere else in the product.
+  for (uint8_t i = 0; i < 3u; ++i) {
+    flow_begin(kSteps[i]);
+    switch (kSteps[i]) {
+      case OB_NAME:    setup_name_enter(); setup_name_input(GST_LONG_BOTH); break;
+      case OB_TIME:    time_enter();       time_input(GST_LONG_BOTH);       break;
+      default:         setup_pick_enter(); setup_pick_input(GST_LONG_BOTH); break;
+    }
+    CHECK_EQ((int)ob_step(g_cfg), (int)OB_DONE);
+    CHECK_EQ((int)g_root, (int)SCR_HOME);
+    CHECK(!setup_in_flow());
+    CHECK_EQ((int)g_starter_calls, 0);
+  }
+}
+
+// AND A DEVICE THAT IS ALREADY SET UP NEVER SEES ANY OF IT. The TIME screen is
+// the one that can be reached both ways - it is the flow's middle question AND
+// an ordinary SETTINGS page - so it is the one where the branch can be wrong.
+TEST(a_device_that_is_set_up_gets_the_ordinary_time_screen_back) {
+  seams2_reset();
+  ob_set_step(g_cfg, OB_DONE);
+  CHECK(!setup_in_flow());
+  time_enter();
+  g_clock_ok = true;
+  time_input(GST_HOLD_L);                          // commit
+  CHECK_EQ(g_backs, 1);                            // BACK, not forward
+  CHECK_EQ((int)g_root, 0xFF);                     // and nothing re-rooted
+  CHECK_EQ((int)g_toast, (int)STR_CLK_SAVED);      // and it says so, as always
+  CHECK_EQ((int)ob_step(g_cfg), (int)OB_DONE);
+
+  // B is BACK here and SKIP in the flow.
+  seams2_reset();
+  ob_set_step(g_cfg, OB_DONE);
+  time_enter();
+  time_input(GST_BOTH);
+  CHECK_EQ(g_backs, 1);
+  CHECK_EQ((int)g_root, 0xFF);
+}
+
+// =============================================================================
+//  SPEC SECTION 65: NO TIME-CRITICAL MENUS
+//
+//  Stated as a property of the whole table rather than as a comment on three
+//  rows: any screen that holds something the player is COMPOSING - a date, a
+//  name, a choice - must be SF_STICKY, because invariant 3's twenty second
+//  auto-return would otherwise throw the work away while they thought about it.
+//  The list is named, and the negative half is named too: the screens that are
+//  deliberately NOT sticky, so this cannot be satisfied by making everything
+//  sticky and calling it accessible.
+// =============================================================================
+TEST(no_screen_that_holds_the_players_work_can_time_out_from_under_them) {
+  static const uint8_t kComposing[] = {
+    SCR_TIME,          // five fields of a date
+    SCR_SETUP_NAME,    // twelve cells of a name
+    SCR_SETUP_STARTER, // a choice that mints a creature
+    SCR_GAME,          // a minigame scored in milliseconds
+    SCR_BATTLE,        // a round in progress
+    SCR_EVOLUTION,     // an egg being rubbed
+  };
+  for (size_t i = 0; i < sizeof kComposing / sizeof kComposing[0]; ++i) {
+    const uint8_t s = kComposing[i];
+    if ((SCREENS[s].flags & SF_STICKY) == 0u)
+      fprintf(stderr, "  %s holds the player's work and is NOT SF_STICKY\n",
+              kAudit[s].name);
+    CHECK((SCREENS[s].flags & SF_STICKY) != 0u);
+  }
+
+  // The other half: an ordinary list holds nothing and DOES time out, so
+  // "sticky" still means something.
+  static const uint8_t kOrdinary[] = { SCR_MENU, SCR_PLAY, SCR_STATUS, SCR_BOX };
+  for (size_t i = 0; i < sizeof kOrdinary / sizeof kOrdinary[0]; ++i)
+    CHECK_EQ((int)(SCREENS[kOrdinary[i]].flags & SF_STICKY), 0);
+
+  // AND NO STEP OF THE FLOW IS TIMED IN ANY OTHER WAY EITHER. The right
+  // button's auto-repeat is the only clock any of the three reads, and it only
+  // ever makes a HELD button repeat - it can neither expire a choice nor
+  // advance a step. Driven: a minute of wall time with no press at all changes
+  // nothing on any of the three screens.
+  flow_begin(OB_NAME);
+  setup_name_enter();
+  setup_name_input(GST_TAP_R);
+  const char first = setup_name_text()[0];
+  for (uint32_t t = 0; t < 60000u; t += 250u) {
+    g_now += 250u;
+    setup_name_update(g_now);
+    setup_pick_update(g_now);
+    time_update(g_now);
+  }
+  CHECK_EQ((int)setup_name_text()[0], (int)first);
+  CHECK_EQ((int)setup_name_cursor(), 0);
+  CHECK_EQ((int)setup_pick_cursor(), 0);
+  CHECK_EQ((int)ob_step(g_cfg), (int)OB_NAME);     // still the same question
+  CHECK_EQ((int)g_root, 0xFF);                     // and nowhere else
+}
+
+// =============================================================================
+//  THE TWO NEW GOLDENS
+// =============================================================================
+TEST(snapshot_setup_name) {
+  flow_begin(OB_NAME);
+  setup_name_enter();
+  // "PACO" with an n-tilde on the end, typed the way a player types it: the
+  // field carries an accented character AND a blank tail, which is the layout
+  // the cursor rule has to survive.
+  static const char kWanted[] = { 'P', 'A', 'C', 'O', (char)0xD1, '\0' };
+  for (uint8_t i = 0; kWanted[i] != '\0'; ++i) {
+    uint8_t taps = 0;
+    while (setup_ring_at(taps) != kWanted[i]) { ++taps; CHECK(taps < setup_ring_len()); }
+    for (uint8_t k = 0; k < taps; ++k) setup_name_input(GST_TAP_R);
+    setup_name_input(GST_TAP_L);
+  }
+  CHECK_EQ((int)strlen(setup_name_text()), 5);     // five stored bytes
+  snapshot(SCR_SETUP_NAME, "setup_name");
+}
+
+TEST(snapshot_setup_starter) {
+  flow_begin(OB_STARTER);
+  setup_pick_enter();
+  setup_pick_input(GST_TAP_R);                     // the middle of the three
+  CHECK_EQ((int)setup_pick_cursor(), 1);
+  snapshot(SCR_SETUP_STARTER, "setup_starter");
+}
+
+// THE HEADER BAR SURVIVES THE THREE BODIES, and this is the P10-C3 seam biting
+// on the first screen written after it. An atlas body is 24 rows with an empty
+// margin above its ink; standing one on this floor puts that margin inside
+// UI_HDR_H, and gfx_xbm() is OPAQUE - it paints the 0-bits in the inverse, so
+// the FIRST DRAFT of this screen punched a 24 px hole through the title bar
+// under each creature. It is drawn with gfx_xbm_t() now. Stated as its own
+// property rather than left to the golden, because a golden recorded from the
+// broken draft would have made the hole permanent.
+TEST(the_starter_bodies_never_erase_the_title_bar) {
+  for (uint8_t i = 0; i < (uint8_t)OB_STARTER_COUNT; ++i) {
+    flow_begin(OB_STARTER);
+    setup_pick_enter();
+    for (uint8_t k = 0; k < i; ++k) setup_pick_input(GST_TAP_R);
+    fb_reset();
+    setup_pick_render();
+    // The inverted title bar is solid from edge to edge on its last row, which
+    // is the row a body box reaches into.
+    for (int x = 0; x < FB_W; ++x) {
+      if (!fb_get(x, UI_HDR_H - 1))
+        fprintf(stderr, "  starter %u: the title bar has a hole at x=%d\n",
+                (unsigned)i, x);
+      CHECK(fb_get(x, UI_HDR_H - 1) != 0);
+    }
+    // ANTI-VACUITY: the bar is not solid everywhere - the title is ERASED into
+    // it - so "row 10 is solid" is a real constraint and not a tautology about
+    // an inverted slab.
+    int erased = 0;
+    for (int y = 0; y < UI_HDR_H - 1; ++y)
+      for (int x = 0; x < FB_W; ++x) if (!fb_get(x, y)) ++erased;
+    CHECK(erased > 20);
+  }
+}
+
+// The three bodies are three DIFFERENT bodies, which a golden of one cursor
+// position cannot say and which is the only thing that makes the choice
+// visible. Driven over all three, comparing the panel against itself.
+TEST(the_three_starters_draw_three_different_creatures) {
+  static uint8_t shot[OB_STARTER_COUNT][FB_H][FB_W];
+  for (uint8_t i = 0; i < (uint8_t)OB_STARTER_COUNT; ++i) {
+    flow_begin(OB_STARTER);
+    setup_pick_enter();
+    for (uint8_t k = 0; k < i; ++k) setup_pick_input(GST_TAP_R);
+    CHECK_EQ((int)setup_pick_cursor(), (int)i);
+    fb_reset();
+    setup_pick_render();
+    CHECK_EQ(fb_oob(), 0u);
+    CHECK_EQ(fb_bad_utf8(), 0u);
+    for (int y = 0; y < FB_H; ++y)
+      for (int x = 0; x < FB_W; ++x) shot[i][y][x] = (uint8_t)fb_get(x, y);
+  }
+  // Compare only the BODY band, so the difference is the creatures and not the
+  // selection frame or the name line underneath them.
+  for (uint8_t a = 0; a < (uint8_t)OB_STARTER_COUNT; ++a) {
+    for (uint8_t b = (uint8_t)(a + 1u); b < (uint8_t)OB_STARTER_COUNT; ++b) {
+      int diff = 0;
+      for (int y = 16; y < 39; ++y)
+        for (int x = 0; x < FB_W; ++x) if (shot[a][y][x] != shot[b][y][x]) ++diff;
+      if (diff < 20)
+        fprintf(stderr, "  starters %u and %u differ by only %d pixels in the "
+                        "body band - the choice is not visible\n",
+                (unsigned)a, (unsigned)b, diff);
+      CHECK(diff >= 20);
+    }
+  }
 }

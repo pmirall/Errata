@@ -12,6 +12,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run host test suite
         run: make -C tests check
+      # THE HALF OF THE GATE NO CI JOB REACHED (found by the P10-C4 survey).
+      # `make -C tests check` bypasses tools/check.sh entirely, and the firmware
+      # job runs it with --no-tests - which switches OFF the whole `if
+      # [ $DO_TESTS -eq 1 ]` block. So three things this repository built
+      # deliberately have never run in CI once: the AddressSanitizer set (the
+      # one target that can catch the class of over-read core/utf8.h is about),
+      # the five review instruments under tests/tools/ (added to the gate at
+      # P9-C6 precisely so they could not rot), and every grep gate that lives
+      # inside that block. --no-build is the other half of --no-tests, so the
+      # two jobs together now cover the whole file with no duplicated work.
+      - name: Gate (tests, sanitiser, instruments, grep gates)
+        run: tools/check.sh --no-build
 
   firmware:
     name: firmware (arduino-cli, esp32c3)

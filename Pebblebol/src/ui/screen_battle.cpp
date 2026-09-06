@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "../core/strings_es.h"
+#include "../core/utf8.h"
 #include "../game/battle.h"
 #include "../game/battle_ai.h"
 #include "../game/box.h"
@@ -176,12 +177,26 @@ static void report_once(uint8_t won) {
 //  nickname is one lookup away and the foe falls back to the roster's own
 //  Spanish species name (ui/pet_art.h).
 // -----------------------------------------------------------------------------
+// TWO BUFFERS, ONE PER SIDE, AND THAT IS THE WHOLE LIFETIME RULE. A nickname
+// is stored as Latin-1 and every draw here goes through drawUTF8() (core/utf8.h),
+// so the name has to be transcoded before it is returned - which means a
+// buffer. Never more than two are live at once: br_draw_panel() takes one name
+// per side and the transcript line takes one. Indexing by SIDE rather than
+// rotating means the caller cannot be surprised by which one it got.
+static char s_name_utf8[2][PB_NAME_DRAW_CAP];
+
 static const char* combatant_name(uint8_t side, uint8_t slot) {
   if (side > 1u || slot >= (uint8_t)BATTLE_TEAM_MAX) return "";
   const PebbleInstance& m = s_setup.member[side][slot];
-  if (m.nickname[0] != '\0') return m.nickname;
-  const char* sp = pet_species_name(m.species_id);
-  return sp ? sp : "";
+  char* out = s_name_utf8[side];
+  out[0] = '\0';
+  if (m.nickname[0] != '\0') {
+    (void)u8_cat_latin1(out, (uint16_t)PB_NAME_DRAW_CAP, m.nickname);
+  } else {
+    const char* sp = pet_species_name(m.species_id);
+    (void)u8_cat(out, (uint16_t)PB_NAME_DRAW_CAP, sp ? sp : "");
+  }
+  return out;
 }
 
 // -----------------------------------------------------------------------------
@@ -1071,10 +1086,15 @@ static void draw_pick(void) {
       snprintf(rows[i], BT_ROW_CAP, "%u %s", (unsigned)(i + 1u), S(STR_BOX_EMPTY));
       vals[i][0] = '\0';
     } else {
+      // Appended, not printed: snprintf("%s") cuts on a byte and the name is
+      // the only wide part of the row (ui/screen_box.cpp says the same).
       const char* sp = pet_species_name(p->species_id);
-      snprintf(rows[i], BT_ROW_CAP, "%u %s", (unsigned)(i + 1u),
-               (p->nickname[0] != '\0') ? p->nickname
-                                        : (sp ? sp : S_SPECIES(gene_species(p->genome))));
+      snprintf(rows[i], BT_ROW_CAP, "%u ", (unsigned)(i + 1u));
+      if (p->nickname[0] != '\0')
+        (void)u8_cat_latin1(rows[i], (uint16_t)BT_ROW_CAP, p->nickname);
+      else
+        (void)u8_cat(rows[i], (uint16_t)BT_ROW_CAP,
+                     sp ? sp : S_SPECIES(gene_species(p->genome)));
       bool chosen = false;
       for (uint8_t k = 0; k < s_pick_n; ++k) if (s_pick[k] == i) chosen = true;
       if (chosen) snprintf(vals[i], BT_VAL_CAP, "*%s%u", S(STR_ST_LEVEL), (unsigned)p->level);
@@ -1137,9 +1157,9 @@ static void draw_switch(void) {
       snprintf(rows[i], BT_ROW_CAP, "%s", S(STR_BOX_EMPTY));
       vals[i][0] = '\0';
     } else {
-      snprintf(rows[i], BT_ROW_CAP, "%s%s",
-               (i == s_st.side[s_me].active) ? S(STR_BOX_ACTIVE) : "",
-               combatant_name(s_me, i));
+      snprintf(rows[i], BT_ROW_CAP, "%s",
+               (i == s_st.side[s_me].active) ? S(STR_BOX_ACTIVE) : "");
+      (void)u8_cat(rows[i], (uint16_t)BT_ROW_CAP, combatant_name(s_me, i));
       snprintf(vals[i], BT_VAL_CAP, "%u%%", (unsigned)hp_pct(c->hp_cur, c->hp_max));
     }
     items[i]  = rows[i];

@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "../core/strings_es.h"
+#include "../core/utf8.h"
 #include "../game/box.h"
 #include "../game/genome.h"
 #include "gfx.h"
@@ -67,10 +68,14 @@ static void slot_row(uint8_t slot, char* out, size_t cap, char* val, size_t vcap
     val[0] = '\0';
     return;
   }
-  const char* name = (p->nickname[0] != '\0') ? p->nickname
-                                              : slot_species_name(*p);
-  snprintf(out, cap, "%u %s%s", (unsigned)(slot + 1u),
-           (slot == box_active()) ? S(STR_BOX_ACTIVE) : "", name);
+  // THE NAME IS APPENDED, NOT PRINTED. snprintf("%s") cuts on a BYTE, and the
+  // only wide part of this row is the name - so once a name can hold a
+  // two-byte character (a nickname is stored as Latin-1: core/utf8.h) the cut
+  // lands inside a sequence and hands drawUTF8() a broken lead byte.
+  snprintf(out, cap, "%u %s", (unsigned)(slot + 1u),
+           (slot == box_active()) ? S(STR_BOX_ACTIVE) : "");
+  if (p->nickname[0] != '\0') (void)u8_cat_latin1(out, (uint16_t)cap, p->nickname);
+  else                        (void)u8_cat(out, (uint16_t)cap, slot_species_name(*p));
   snprintf(val, vcap, "%s%u", S(STR_ST_LEVEL), (unsigned)p->level);
 }
 
@@ -141,8 +146,10 @@ static void draw_card(void) {
 
   char tag[10];
   snprintf(tag, sizeof tag, "%s%u", S(STR_ST_LEVEL), (unsigned)p->level);
-  const char* name = (p->nickname[0] != '\0') ? p->nickname
-                                              : slot_species_name(*p);
+  char name[PB_NAME_DRAW_CAP];
+  name[0] = '\0';
+  if (p->nickname[0] != '\0') (void)u8_cat_latin1(name, (uint16_t)sizeof name, p->nickname);
+  else                        (void)u8_cat(name, (uint16_t)sizeof name, slot_species_name(*p));
   gfx_header(name, tag);
 
   char line[32];

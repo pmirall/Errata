@@ -21,11 +21,14 @@
 #include <stdint.h>
 
 #include "../core/nt_types.h"
-#include "../persistence/save_schema.h"    // PB_NICKNAME_CAP
+#include "../persistence/save_schema.h"    // PB_NAME_DRAW_CAP
 
 struct PebbleView {
   // Identity
-  char     name[PB_NICKNAME_CAP];   // nickname, else the deterministic name
+  // ALREADY UTF-8 AND ALREADY TRUNCATED ON A CODEPOINT BOUNDARY. ui.cpp's
+  // ui_pet_name() fills it, and the nickname rung it can take is stored as
+  // Latin-1 (core/utf8.h), so this is the DRAW cap and not the schema one.
+  char     name[PB_NAME_DRAW_CAP];
   Genome   genome;
   uint8_t  species_id;
   uint8_t  level;                   // 1..30

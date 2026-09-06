@@ -17,6 +17,7 @@
 #include "../hardware/input.h"    // INPUT_BTN_R only: a button index, no driver
 #include "gfx.h"
 #include "screen.h"
+#include "screen_setup.h"    // setup_advance(): the first-boot flow
 #include "ui.h"
 
 static uint16_t s_clk[CLK_FIELDS];      // year, month, day, hour, minute
@@ -98,8 +99,21 @@ static void commit(void) {
     ui_input_flush();      // as on the success path: a held L must not re-commit
     return;
   }
-  ui_toast(STR_CLK_SAVED);
   ui_input_flush();        // the release of the confirming hold must not fire below
+  // FIRST BOOT ROUTES FORWARD, EVERY OTHER VISIT ROUTES BACK. This screen is
+  // the middle question of app/onboarding.h's flow and an ordinary SETTINGS
+  // page on every later visit; ui_back() on a first boot would return to
+  // whatever the naming step re-rooted on, which is this screen.
+  //
+  // AND THE TOAST IS SUPPRESSED IN THE FLOW, deliberately. "Hora guardada"
+  // would land on the STARTER screen the same way the boot greeting used to
+  // land on this one - and this screen's own two instruction lines sit inside
+  // the toast band, which is how that was found.
+  if (setup_in_flow()) {
+    setup_advance((uint8_t)OB_TIME);
+    return;
+  }
+  ui_toast(STR_CLK_SAVED);
   ui_back();
 }
 
@@ -162,12 +176,20 @@ void time_input(Gesture g) {
       s_field = (uint8_t)((s_field + 1u) % (uint8_t)CLK_FIELDS);
       break;
     case GST_BOTH:
+      // SKIP on a first boot, BACK on every later visit. Backing out of the
+      // flow's middle question would strand the player on a screen the naming
+      // step already left.
+      if (setup_in_flow()) { ui_input_flush(); setup_advance((uint8_t)OB_TIME); break; }
       ui_back();
       break;
     case GST_LONG_BOTH:
       // Invariant 2. The row is SF_LOCK_INPUT so that HOLD_R can mean "+1"
       // here and nowhere else, which means the global grammar does not run
-      // before this handler and HOME has to be honoured by hand.
+      // before this handler and HOME has to be honoured by hand. On a first
+      // boot it also ENDS the flow, or the next boot would ask again - and
+      // "hold both buttons" is the one gesture a player who is reading nothing
+      // will find.
+      if (setup_in_flow()) { ui_input_flush(); setup_finish_now(); break; }
       ui_goto(SCR_HOME);
       break;
     default:

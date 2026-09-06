@@ -13,6 +13,8 @@
 // =============================================================================
 #include "pet_view.h"
 
+#include "../core/utf8.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -169,6 +171,10 @@ void pet_view_attach(PetView& out, const PebbleInstance* inst) {
   apply_species_design(out);
   out.level      = inst->level ? inst->level : (uint8_t)1;
   out.corrupted  = (uint8_t)((inst->status & PBS_CORRUPTED) != 0u);
+  // THE ONE CROSSING. A nickname is stored as raw Latin-1 and everything
+  // downstream draws with drawUTF8(), so it is transcoded HERE rather than at
+  // each of the four places that used to print it - and the copy is cut on a
+  // CHARACTER boundary, which "%.12s" never was (core/utf8.h).
   if (inst->nickname[0] != '\0')
-    snprintf(out.name, sizeof(out.name), "%s", inst->nickname);
+    (void)u8_from_latin1(out.name, (uint16_t)sizeof(out.name), inst->nickname);
 }

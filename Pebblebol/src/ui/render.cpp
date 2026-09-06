@@ -13,6 +13,7 @@
 // PURE module, because this file is compiled by no host binary and every rule
 // left inside it is a rule no test in this repository can execute.
 #include "../core/perf.h"
+#include "../core/utf8.h"
 
 // -----------------------------------------------------------------------------
 // THE display object. BRIEF risk #2 - the single most dangerous line in the
@@ -114,15 +115,12 @@ static const int8_t RD_SIN16[16] = {
 //  Small internal helpers
 // =============================================================================
 
-// Length in bytes of the UTF-8 sequence starting with byte c. A stray
-// continuation byte counts as 1 so a malformed string can never loop forever.
-static inline uint8_t u8_seq_len(uint8_t c) {
-  if (c < 0x80)          return 1;
-  if ((c & 0xE0) == 0xC0) return 2;
-  if ((c & 0xF0) == 0xE0) return 3;
-  if ((c & 0xF8) == 0xF0) return 4;
-  return 1;
-}
+// THE CODEPOINT RULE LEFT THIS FILE AT P10-C4 and lives in core/utf8.cpp, which
+// a host binary can link. What was here read the LEAD BYTE ONLY and trusted it,
+// so `p += u8_seq_len(*p)` on a lone 0xF1 - a legal nickname byte, because a
+// stored name is raw Latin-1 (core/utf8.h says where that comes from) - stepped
+// four bytes over a one-byte string and past its terminator. u8_len() checks
+// that the continuation bytes are actually there before it believes the lead.
 
 // Clip a rectangle to the panel. Returns false when nothing is left.
 static bool clip_rect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
@@ -144,7 +142,7 @@ static uint16_t draw_utf8(int16_t x, int16_t y, const char* s) {
   if (y < 0 || y >= (int16_t)(OLED_H + 16)) return 0;
   while (x < 0 && *s != '\0') {
     char gl[5];
-    const uint8_t n = u8_seq_len((uint8_t)*s);
+    const uint8_t n = u8_len(s);
     uint8_t i = 0;
     while (i < n && s[i] != '\0') { gl[i] = s[i]; i++; }
     gl[i] = '\0';
@@ -164,11 +162,12 @@ static uint16_t draw_utf8(int16_t x, int16_t y, const char* s) {
 static uint16_t fit_copy(char* dst, size_t dst_sz, const char* s, int16_t max_w) {
   size_t len = 0;
   if (s != NULL) {
-    while (s[len] != '\0' && len + 1 < dst_sz) len++;
-    // if the copy was cut short, back off to a codepoint boundary
-    if (s[len] != '\0') {
-      while (len > 0 && ((uint8_t)s[len] & 0xC0) == 0x80) len--;
-    }
+    // u8_fit() WALKS FORWARD over whole sequences, which is stricter than what
+    // was here: backing off CONTINUATION bytes after a blind cut leaves a lone
+    // LEAD byte standing whenever the cut landed just after one, and a lone
+    // lead byte is precisely what hands drawUTF8() a broken glyph.
+    const size_t room = (dst_sz > 0u) ? (dst_sz - 1u) : 0u;
+    len = u8_fit(s, (room > 0xFFFFu) ? 0xFFFFu : (uint16_t)room);
     if (dst != s) memmove(dst, s, len);
   }
   dst[len] = '\0';
@@ -633,7 +632,7 @@ uint8_t rd_text_wrap(int16_t x, int16_t y, int16_t w, uint8_t line_h,
 
     // measure the next word
     const char* wstart = p;
-    while (*p != '\0' && *p != ' ' && *p != '\n') p += u8_seq_len((uint8_t)*p);
+    while (*p != '\0' && *p != ' ' && *p != '\n') p += u8_len(p);
     size_t wlen = (size_t)(p - wstart);
     if (wlen == 0) break;
 

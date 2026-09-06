@@ -187,6 +187,32 @@ void gfx_dither_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t level);
 void gfx_dither_rect_phase(int16_t x, int16_t y, int16_t w, int16_t h,
                            uint8_t level, uint8_t phase);
 
+// =============================================================================
+//  THE BANNER: the toast line and the HELP strip, which are the same picture.
+//
+//  A solid slab sitting on top of the affordance strip, carrying prose in the
+//  inverse. One line is CENTRED (which is what both callers always drew); a
+//  line too wide for the panel makes the slab taller and wraps into it, up to
+//  GFX_BANNER_MAX_LINES. gfx_banner() returns the number of lines it drew and
+//  gfx_banner_lines() is the same arithmetic without the drawing, so a test can
+//  say the slab is exactly as tall as the text turned out to be.
+//
+//  Implemented ONCE, in ui/gfx_widgets.cpp, for the reason gfx_header() is:
+//  ui/ui.cpp's copy of it was in a translation unit no host binary compiles.
+// =============================================================================
+#define GFX_BANNER_PAD_X       2
+#define GFX_BANNER_INNER_W     (OLED_W - 2 * GFX_BANNER_PAD_X)   // 124
+#define GFX_BANNER_TOP_PAD     3      // blank rows above the first ascender
+#define GFX_BANNER_BOT_PAD     2      // blank rows under the last baseline
+// A one-line banner is 3 + GFX_ASC_BODY + 2 = 11 px, which is the slab
+// ui/ui.cpp's toast has drawn since P2-C11, so nothing about a line that fits
+// changes. Each further line adds one body pitch.
+#define GFX_BANNER_H1          (GFX_BANNER_TOP_PAD + GFX_ASC_BODY + GFX_BANNER_BOT_PAD)
+#define GFX_BANNER_MAX_LINES   3
+
+uint8_t gfx_banner(const char* text);
+uint8_t gfx_banner_lines(const char* text);
+
 // XOR a rectangle (list highlight, tactile echo).
 void gfx_invert_rect(int16_t x, int16_t y, int16_t w, int16_t h);
 

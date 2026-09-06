@@ -48,6 +48,7 @@
 #include "../ui/screen_error.h"   // the ERROR screen's retry / LED bindings
 #include "../networking/webui.h"
 #include "../dev/godmode.h"
+#include "onboarding.h"
 #include "state_machine.h"       // sm_current(): the power ladder's release hook reads it
 // data/index_html.h is deliberately NOT included: networking/webui.cpp is its
 // single translation unit (a second inclusion doubles the page blob in .rodata).
@@ -899,6 +900,11 @@ void app_setup(void)
 
   apply_config();                 // contrast and WiFi credentials
 
+  // WHICH FIRST-BOOT QUESTION THIS BOOT RESUMES AT, computed BEFORE the toast
+  // block below because the greeting depends on the answer (app/onboarding.h).
+  const uint8_t setup_step = ob_boot_step(boot == BOOT_FIRST_RUN,
+                                            gs_readonly(), g_cfg);
+
   // --- splash, then the absence verdict over HOME ---------------------------
   rd_splash();
   boot_absence();
@@ -912,7 +918,15 @@ void app_setup(void)
     // about it. NVS being dead still wins: nothing below it can be trusted.
     ui_toast(g_trade_toast);
     g_trade_toast = 0u;
-  } else if (boot == BOOT_FIRST_RUN) {
+  } else if (boot == BOOT_FIRST_RUN && setup_step == (uint8_t)OB_DONE) {
+    // THE GREETING IS SUPPRESSED WHEN THE SETUP FLOW IS ABOUT TO RUN, and that
+    // is a bug fix rather than a preference. ui_draw() composites the toast
+    // band over any screen that does not own its frame, the band is rows 45-55,
+    // and BOTH of the setup screens' instruction lines - and both of the TIME
+    // screen's, which is where it was found - live inside it. So for the first
+    // UI_TOAST_MS of a fresh device the only line telling the player how to
+    // save was completely covered by "Hola. Soy nuevo aqui.". The naming screen
+    // says hello itself now (STR_SU_HELLO), on a row of its own.
     ui_toast(STR_BOOT_FIRST);
   } else if (boot == BOOT_CRASH) {
     ui_toast(STR_BOOT_DIZZY);     // a crash is not an abandonment
@@ -927,8 +941,32 @@ void app_setup(void)
   // nothing on the way there wipes it (audit risk 3).
   ui_note_load((uint8_t)load);
 
-  if (!gs_readonly() && boot == BOOT_FIRST_RUN && gt_cal_state() == CAL_UNSET) {
-    ui_goto(SCR_TIME);
+  // FIRST BOOT: THE THREE QUESTIONS (P10-C4, app/onboarding.h). This used to be
+  // a single jump to SCR_TIME guarded by `boot == BOOT_FIRST_RUN`, and that
+  // guard is the thing that could not survive a power cut: name the device,
+  // save, pull the power, and the next boot is no longer a first run - so the
+  // remaining questions were never asked and the answers already given decided
+  // nothing. The step is PERSISTED now and ob_boot_step() is what reads it;
+  // OB_DONE is zero, so every save written before this firmware - and every
+  // device that finished - reads "already set up" and is asked nothing.
+  if (setup_step != (uint8_t)OB_DONE) {
+    // Stamp it before the first question, so a power cut between here and the
+    // player's first press resumes rather than restarting. On a true first run
+    // this is the write that makes the flow resumable at all.
+    if (ob_step(g_cfg) != setup_step) {
+      ob_set_step(g_cfg, setup_step);
+      g_cfg.saved_epoch = gt_now();
+      gs_save_cfg(g_cfg);
+      // AND THE BOX, for the reason ui.h gives at ui_setup_persist(): a config
+      // written with no Box beside it is a config persistence/save_manager.cpp
+      // throws away, because load_all_inner() answers LOAD_FRESH the moment the
+      // Box pair is missing and returns before it reads the config. Without
+      // this line the window between here and the player's FIRST press is a
+      // window in which a power cut restarts the flow.
+      gs_save_box();
+      (void)gs_save_active(true);
+    }
+    ui_goto(ob_screen_for(setup_step));
   }
 
   // Last, so it wins the screen: with no panel there is nothing to read, and

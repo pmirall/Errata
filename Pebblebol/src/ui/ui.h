@@ -266,6 +266,13 @@ void     ui_back(void);
 void     ui_home(void);
 void     ui_note_input(void);
 
+// RE-ROOT the navigation: empty the back stack and land on `s`. The first-boot
+// flow (app/onboarding.h) is what needs it - each setup step REPLACES the one
+// before it rather than stacking on it, so B can never walk backwards into a
+// question already answered and HOME at the end of the flow is a root and not a
+// return. sm_replace_root()'s own doc-comment names exactly this case.
+void     ui_replace_root(ScreenId s);
+
 // Ask the frame scheduler for one more frame. A modal that appears between two
 // FPS_LOW frames would otherwise wait up to 250 ms to be seen.
 void     ui_request_frame(void);
@@ -274,6 +281,21 @@ void     ui_request_frame(void);
 // (ui_bind_config()). ui_cfg_changed() stamps and persists it with a toast.
 Config*  ui_cfg(void);
 void     ui_cfg_changed(void);
+
+// EVERYTHING THE FIRST-BOOT FLOW HAS ANSWERED SO FAR, ONTO FLASH, WITH NO
+// TOAST. Two things and not one, and the second is what makes the answers
+// survive:
+//
+//   * the Config, silently - ui_cfg_changed() raises STR_SET_SAVED, and a
+//     "guardado" banner landing on top of the NEXT question is the same defect
+//     as the boot greeting that used to cover the TIME screen's only
+//     instruction (ui/screen_setup.h);
+//   * the BOX and the active Pebble - because persistence/save_manager.cpp's
+//     load_all_inner() returns LOAD_FRESH the moment the Box pair is missing,
+//     BEFORE it ever looks at the config. A first boot that wrote only a config
+//     and then lost power would come back with the config DISCARDED and the
+//     flow restarted, and the step field would have been a decoration.
+void     ui_setup_persist(void);
 
 // The user's brightness choice, through ui.cpp's arbiter rather than straight
 // to the panel: while the pet is asleep the dim override still wins and the new
@@ -593,6 +615,16 @@ uint8_t  ui_fps(void);
 // the same word before and after an evolution, so on its own it could never
 // tell the player their creature had become something else.
 void     ui_pet_name(char* out, size_t cap);
+
+// FIRST BOOT: replace the Pebble app/app.cpp minted with one of the chosen
+// species, keeping the slot, the active flag, the genome and the creation seed.
+//
+// IT REFUSES OUTSIDE THE FLOW, and the refusal is not a comment: ui.cpp checks
+// the persisted step (app/onboarding.h) and game/box.cpp's box_reroll_starter()
+// independently refuses any Pebble that has earned or been named anything. Two
+// locks, because this is the one call in the tree that destroys the ACTIVE
+// Pebble - box_release() will not, by rule B4.
+bool     ui_set_starter(uint8_t species_id);
 
 // hash(lineage_id, generation) -> two Spanish syllables.
 // Deterministic across devices; never empty. cap >= 16 recommended.

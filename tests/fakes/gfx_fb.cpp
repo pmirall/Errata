@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "core/utf8.h"
 #include "ui/gfx.h"
 
 static uint8_t     s_fb[FB_H][FB_W];
@@ -34,6 +35,49 @@ static void oob(const char* what, int x, int y, int w, int h) {
 
 uint32_t    fb_oob(void)       { return s_oob; }
 const char* fb_oob_first(void) { return s_oob_msg; }
+
+// =============================================================================
+//  THE MALFORMED-TEXT RECORDER (P10-C4, spec section 65)
+//
+//  The out-of-bounds recorder answers "did a screen draw off the panel". This
+//  one answers the other half of the same question: "did a screen hand the font
+//  a string it cannot decode". They are the same KIND of instrument - a
+//  property every snapshot gets for free, rather than a check somebody has to
+//  remember to write at each of the eighty-odd text call sites.
+//
+//  IT IS HERE BECAUSE OF WHAT A NAME IS. A nickname, a device name and a peer
+//  name are all stored as raw LATIN-1 (core/utf8.h says where each comes from)
+//  and every draw goes through drawUTF8(). One 0xF1 byte reaching the panel is
+//  not a cosmetic problem: on the device u8g2's decoder opens a four-byte state
+//  and SWALLOWS the next character, so "Nino" with an n-tilde loses the "o" as
+//  well. And every list row in this UI is composed with snprintf("%s"), which
+//  cuts on a BYTE - so a long name in a bounded row can leave half a sequence
+//  behind even when every source string was well formed.
+//
+//  A screen may still draw a name the fonts have no glyph for; that is a
+//  content question. What it may not do is hand over a byte sequence that is
+//  not a sequence.
+// -----------------------------------------------------------------------------
+static uint32_t s_bad_utf8 = 0;
+static char     s_bad_utf8_msg[80];
+
+static void note_text(const char* s) {
+  if (s == nullptr || u8_well_formed(s)) return;
+  if (s_bad_utf8 == 0) {
+    size_t o = 0;
+    for (const unsigned char* p = (const unsigned char*)s;
+         *p != 0 && o + 5u < sizeof s_bad_utf8_msg; ++p) {
+      if (*p >= 0x20u && *p < 0x7Fu) s_bad_utf8_msg[o++] = (char)*p;
+      else o += (size_t)snprintf(s_bad_utf8_msg + o, sizeof s_bad_utf8_msg - o,
+                                 "<%02X>", (unsigned)*p);
+    }
+    s_bad_utf8_msg[o] = '\0';
+  }
+  s_bad_utf8++;
+}
+
+uint32_t    fb_bad_utf8(void)       { return s_bad_utf8; }
+const char* fb_bad_utf8_first(void) { return s_bad_utf8_msg; }
 
 // =============================================================================
 //  THE WORK COUNTERS (P10-C2)
@@ -74,6 +118,8 @@ void fb_reset(void) {
   s_oob_msg[0] = '\0';
   s_ops        = 0;
   s_px         = 0;
+  s_bad_utf8   = 0;
+  s_bad_utf8_msg[0] = '\0';
 }
 
 int fb_get(int x, int y) {
@@ -224,13 +270,15 @@ void gfx_invert_rect(int16_t x, int16_t y, int16_t w, int16_t h) {
 // -----------------------------------------------------------------------------
 //  Text. UTF-8 in, one fixed-advance cell per codepoint out.
 // -----------------------------------------------------------------------------
-static uint8_t seq_len(uint8_t c) {
-  if (c < 0x80) return 1;
-  if ((c & 0xE0) == 0xC0) return 2;
-  if ((c & 0xF0) == 0xE0) return 3;
-  if ((c & 0xF8) == 0xF0) return 4;
-  return 1;                                   // malformed: step one byte
-}
+// THE SEQUENCE LENGTH IS core/utf8.cpp's NOW, AND THE MOVE IS A BUG FIX.
+// What was here read the LEAD BYTE ONLY: seq_len(0xF1) answered 4, count_cps()
+// did `p += 4`, and on the five-byte string "Ni\xF1o" that steps one byte PAST
+// the terminator. AddressSanitizer reported it as a heap-buffer-overflow, READ
+// of size 1, and 0xF1 is not a hypothetical byte - game/validate.cpp's
+// creator_name_char_ok() admits it as a legal nickname character because a
+// stored name is raw Latin-1 (core/utf8.h). ui/render.cpp carried the identical
+// step over a buffer the FIRMWARE owns. Both call u8_len() now, which does not
+// believe a lead byte until it has seen the continuation bytes.
 
 static uint32_t decode(const char* s, uint8_t len) {
   const uint8_t* p = (const uint8_t*)s;
@@ -245,12 +293,13 @@ static uint32_t decode(const char* s, uint8_t len) {
 
 static uint16_t count_cps(const char* s) {
   uint16_t n = 0;
-  for (const char* p = s; *p; p += seq_len((uint8_t)*p)) n++;
+  for (const char* p = s; *p; p += u8_len(p)) n++;
   return n;
 }
 
 uint16_t gfx_text_w(GfxFont f, const char* s) {
   if (s == nullptr || *s == '\0') return 0;
+  note_text(s);
   return (uint16_t)(count_cps(s) * gfx_font_adv(f));
 }
 
@@ -273,10 +322,11 @@ static void glyph(GfxFont f, int16_t x, int16_t y, uint32_t cp) {
 
 uint16_t gfx_text(GfxFont f, int16_t x, int16_t y, const char* s) {
   if (s == nullptr || *s == '\0') return 0;
+  note_text(s);
   const int adv = gfx_font_adv(f);
   int16_t cx = x;
   for (const char* p = s; *p; ) {
-    const uint8_t n = seq_len((uint8_t)*p);
+    const uint8_t n = u8_len(p);
     glyph(f, cx, y, decode(p, n));
     cx = (int16_t)(cx + adv);
     p += n;
@@ -303,7 +353,7 @@ static size_t fit_bytes(GfxFont f, const char* s, int16_t max_w) {
   int16_t w = 0;
   for (const char* p = s; *p; ) {
     if ((int16_t)(w + adv) > max_w) break;
-    const uint8_t n = seq_len((uint8_t)*p);
+    const uint8_t n = u8_len(p);
     w = (int16_t)(w + adv);
     used += n;
     p += n;
@@ -346,7 +396,7 @@ uint8_t gfx_text_wrap(GfxFont f, int16_t x, int16_t y, int16_t w,
     }
 
     const char* wstart = p;
-    while (*p != '\0' && *p != ' ' && *p != '\n') p += seq_len((uint8_t)*p);
+    while (*p != '\0' && *p != ' ' && *p != '\n') p += u8_len(p);
     const size_t wlen = (size_t)(p - wstart);
     if (wlen == 0) break;
 

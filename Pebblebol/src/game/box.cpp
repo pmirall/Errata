@@ -162,20 +162,12 @@ uint8_t box_add(const PebbleInstance& p)
   return slot;
 }
 
-uint8_t box_new_pebble(uint8_t species_id, uint8_t level, uint8_t origin,
-                       const Genome& genome, uint32_t creation_seed,
-                       uint32_t now_epoch)
+// THE MINT, lifted out of box_new_pebble() at P10-C4 so box_reroll_starter()
+// below cannot become a second copy of it. Nothing about it changed.
+static void mint(PebbleInstance& p, const SpeciesDef& sp, uint8_t species_id,
+                 uint8_t level, uint8_t origin, const Genome& genome,
+                 uint32_t creation_seed, uint32_t now_epoch)
 {
-  if (!s_gs) return (uint8_t)BOX_SLOT_NONE;
-  const SpeciesDef* sp = species_get(species_id);
-  if (!sp) return (uint8_t)BOX_SLOT_NONE;
-  if (level == 0u) level = 1u;
-  if (level > (uint8_t)PB_LEVEL_MAX) level = (uint8_t)PB_LEVEL_MAX;
-
-  const uint8_t slot = first_free();
-  if (slot == (uint8_t)BOX_SLOT_NONE) return slot;
-
-  PebbleInstance& p = s_gs->pebbles[slot];
   memset(&p, 0, sizeof p);
   p.magic         = (uint16_t)PEBBLE_MAGIC;
   p.layout_ver    = (uint8_t)PEBBLE_LAYOUT_VER;
@@ -195,7 +187,7 @@ uint8_t box_new_pebble(uint8_t species_id, uint8_t level, uint8_t origin,
   // EVO_STATE_PENDING is deliberately NOT set here: game/xp.cpp raises it on a
   // level-up and validate_pebble()'s rule is one-directional, so a wild capture
   // above its evolution level is legal with the bit clear.
-  p.evo_state     = (uint8_t)(sp->stage & (uint8_t)EVO_STATE_STAGE_MASK);
+  p.evo_state     = (uint8_t)(sp.stage & (uint8_t)EVO_STATE_STAGE_MASK);
   p.genome        = genome;
   p.origin        = (origin < (uint8_t)ORIGIN_COUNT) ? origin : (uint8_t)ORIGIN_WILD;
   p.custom_sprite = (uint8_t)PB_CUSTOM_SPRITE_NONE;
@@ -203,15 +195,85 @@ uint8_t box_new_pebble(uint8_t species_id, uint8_t level, uint8_t origin,
     p.care[i]     = (int32_t)PB_CARE_MILLI_MAX;   // a new Pebble is a well one
     p.care_rem[i] = 0;
   }
-  memcpy(p.moves, sp->moves, sizeof p.moves);
+  memcpy(p.moves, sp.moves, sizeof p.moves);
   // hp_max is derived and never stored (plan 1.5.1); only the CURRENT hp is a
   // Pebble's own, and a new one starts at full. P4-C1: this used to open-code
   // `10 + 2*base_hp + level`, a third copy of a formula game/xp.cpp owns.
-  p.hp_cur = xp_hp_max(sp->base_hp, level);
+  p.hp_cur = xp_hp_max(sp.base_hp, level);
   p.id     = box_mint_id();
+}
 
+uint8_t box_new_pebble(uint8_t species_id, uint8_t level, uint8_t origin,
+                       const Genome& genome, uint32_t creation_seed,
+                       uint32_t now_epoch)
+{
+  if (!s_gs) return (uint8_t)BOX_SLOT_NONE;
+  const SpeciesDef* sp = species_get(species_id);
+  if (!sp) return (uint8_t)BOX_SLOT_NONE;
+  if (level == 0u) level = 1u;
+  if (level > (uint8_t)PB_LEVEL_MAX) level = (uint8_t)PB_LEVEL_MAX;
+
+  const uint8_t slot = first_free();
+  if (slot == (uint8_t)BOX_SLOT_NONE) return slot;
+
+  mint(s_gs->pebbles[slot], *sp, species_id, level, origin, genome,
+       creation_seed, now_epoch);
   mask_sync();
   return slot;
+}
+
+// -----------------------------------------------------------------------------
+//  THE FIRST-BOOT STARTER SWAP (P10-C4, plan "pick a starter from three")
+//
+//  box_release() REFUSES the active slot (rule B4) and it is right to: a
+//  release is a destruction and the active Pebble is the one the player is
+//  holding. But the starter choice has to replace exactly that Pebble - the one
+//  app/app.cpp minted at boot before the player had been asked anything - so it
+//  needs its own door, and a door into "destroy the active Pebble" needs a lock
+//  that is about the PEBBLE and not about when the call happens.
+//
+//  THE LOCK IS ACHIEVEMENT, NOT TIME. A clock-based rule ("within a minute of
+//  boot") fails the moment a player thinks for two minutes about a name, and a
+//  caller-based rule ("only the setup screen may call this") is a comment. So
+//  this refuses any Pebble that has DONE anything: it must be an ORIGIN_STARTER
+//  at level 1 with no XP, no battles either way, no minigame wins, no
+//  evolutions, no trades and no nickname. Every one of those is a thing the
+//  player did, and a Pebble that has done none of them is worth exactly what
+//  the next one would be.
+//
+//  age_s IS DELIBERATELY NOT IN THE LIST. It is the one field that moves on its
+//  own, and putting it in would make the rule "be quick", which is the
+//  accessibility failure spec section 65 is written against.
+// -----------------------------------------------------------------------------
+bool box_reroll_starter(uint8_t slot, uint8_t species_id, uint32_t now_epoch)
+{
+  if (!s_gs || !slot_filled(slot)) return false;
+  const SpeciesDef* sp = species_get(species_id);
+  if (!sp) return false;
+
+  const PebbleInstance& p = s_gs->pebbles[slot];
+  if (p.origin        != (uint8_t)ORIGIN_STARTER) return false;
+  if (p.level         != 1u)  return false;
+  if (p.xp            != 0u)  return false;
+  if (p.battles_won   != 0u)  return false;
+  if (p.battles_lost  != 0u)  return false;
+  if (p.minigames_won != 0u)  return false;
+  if (p.evolutions    != 0u)  return false;
+  if (p.trades        != 0u)  return false;
+  if (p.nickname[0]   != '\0') return false;
+
+  // The genome and the creation seed TRAVEL. They are what this device rolled
+  // for this player at this boot; the species is the only thing being answered
+  // here, and re-rolling the genome would quietly make the choice a reroll of
+  // everything else too.
+  const Genome   keep_genome = p.genome;
+  const uint32_t keep_seed   = p.creation_seed;
+  const uint32_t keep_birth  = p.birth_epoch ? p.birth_epoch : now_epoch;
+
+  mint(s_gs->pebbles[slot], *sp, species_id, 1u, (uint8_t)ORIGIN_STARTER,
+       keep_genome, keep_seed, keep_birth);
+  mask_sync();
+  return true;
 }
 
 bool box_swap(uint8_t a, uint8_t b)

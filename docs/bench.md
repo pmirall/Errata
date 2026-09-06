@@ -277,7 +277,47 @@ is worth writing) and **BLE reads `none (removed in P8-C0, decision D2)`**.
 
 ---
 
-## F. What is measured on the host and named here so it is not measured twice
+## F. First boot, on a board that has never been switched on — spec §65 (P10-C4)
+
+Everything below **H1** can be checked on the host and is (`tests/test_onboarding.cpp` drives the
+step through the real save pipeline; `tests/test_screens.cpp` drives both screens, all six
+gestures and the goldens). What cannot be checked here is the only thing that matters about an
+onboarding flow: **whether a person who has never seen the device can get through it.** That
+needs a person, a board and no explanation.
+
+**H1. A genuinely fresh board.** `esptool erase_flash`, then flash `release`. Expected, in order:
+splash → "Cargando la partida..." → **PONLE NOMBRE**. Not a toast over it: the greeting is drawn
+on the screen itself (`STR_SU_HELLO`), because the toast band is rows 45–55 and both instruction
+lines live there. **If a toast covers the bottom two lines, that is the defect P10-C4 fixed
+coming back.**
+
+**H2. Type a name with an accent in it.** Walk the ring to `Ñ` and accept. Then read the name back
+on HOME and on the creator portal (`GET /api/state`). All three must show the same character. A
+name that renders as one wrong glyph, or that loses the character *after* the accent, is the
+Latin-1/UTF-8 seam (`core/utf8.h`) failing on the panel's own decoder — which is the half no host
+test can see, because the host fake is not u8g2.
+
+**H3. The date, then the starter.** HOLD L on the date must go **forward** to ELIGE PEBBLE, not
+back. Pick the third creature. On HOME the Pebble must be that creature, at level 1, with the name
+from H2.
+
+**H4. THE POWER CUT, and this is the item worth the trip.** Repeat H1, type a name, accept it, and
+**pull the power while the date screen is up**. On the next boot the device must come back **on the
+date screen with the name already stored** — not at PONLE NOMBRE, and not on HOME. Repeat with the
+cut after the date is accepted: it must come back on ELIGE PEBBLE. Then finish the flow, power
+cycle twice more, and confirm **no setup screen is ever shown again**.
+
+**H5. The player who reads nothing.** From a fresh board, hold both buttons on the first screen.
+The device must land on HOME with a working Pebble (species 1, the historical starter), no name,
+and the clock unset — and it must never ask again.
+
+**H6. A board that has been played.** Flash `release` over a device that already has a save from an
+earlier firmware. It must go straight to HOME. Being handed a setup wizard is the failure mode the
+`OB_DONE == 0` encoding exists to prevent, and it is the one that would look like data loss.
+
+---
+
+## G. What is measured on the host and named here so it is not measured twice
 
 | Claim | Where it is checked | What that does not cover |
 |---|---|---|
@@ -287,10 +327,13 @@ is worth writing) and **BLE reads `none (removed in P8-C0, decision D2)`**.
 | The sound setting persists to the piezo | `tests/test_sound.cpp` through the real `save_manager` | that a piezo is fitted and audible |
 | The frame/pass arithmetic, the wrap, the scheduler deadline | `tests/test_perf.cpp` | every microsecond |
 | Wi-Fi never associates | `tools/check.sh` counts `WiFi.begin(` at zero | — |
+| Every screen draws inside 128x64 at a 12-character multi-byte name, level 30, 100 % stats and a full Box | `tests/test_screens.cpp` `kAudit[]`, one row per `ScreenId`, `static_assert`ed to be complete | the fake's font is fixed-advance, so a golden containing `GF_HEAD` or `GF_BIG` is layout-approximate; and `ui/petfx.cpp`, `ui/actfx.cpp` and `ui/ceremony.cpp` are compiled by no host binary, so HOME's animated layer is absent from every one of these renders |
+| Every string in `strings_es.h` fits the banner the toast and HELP strip draw | `tests/test_screens.cpp` | the same font caveat: the device is proportional and the host is 5 px per codepoint, so a string measured at 124 px here can be a few pixels either side there |
+| The first-boot step survives a power cut | `tests/test_onboarding.cpp` through the real `save_manager` and the fake NVS | a real power cut mid-write, real NVS wear, and `hardware/boot.cpp`'s reset-reason classification, none of which exist on the host |
 
 ---
 
-## G. Recording a run
+## H. Recording a run
 
 Commit the capture to `docs/bench/<date>-<sha>.log` and add one row per item to the table below,
 with the **variant**, the **firmware version** (`info` prints it) and the reading. An item with no

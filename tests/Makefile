@@ -25,6 +25,26 @@ CPPFLAGS := -DNT_HOST -I$(SRC_ROOT) -I. -DNT_TESTS_DIR=\"$(CURDIR)\"
 
 TESTS := $(patsubst %.cpp,$(BIN)/%,$(sort $(wildcard test_*.cpp)))
 
+# core/utf8.cpp IS LINKED INTO EVERY BINARY, and it is the one object here that
+# is named once rather than per link line. It holds THE codepoint rule (see
+# core/utf8.h): ui/render.cpp, tests/fakes/gfx_fb.cpp and game/pebble.cpp each
+# carried a private copy until P10-C4 and the three disagreed, so the fix is
+# worth nothing if a binary can quietly link none of them. It is pure, it is
+# ~90 lines, and it has no dependencies at all - the same standing crc16.o would
+# have if it were used this widely.
+$(TESTS): $(OBJ)/utf8.o
+
+# AND THE REVIEW INSTRUMENTS UNDER tests/tools/ TOO, which is not a detail: they
+# are NOT in $(TESTS) ($(wildcard test_*.cpp) does not reach them) and they are
+# not in `check`, so nothing but tools/check.sh's instrument build ever links
+# them. Leaving them out here is exactly the rot P9-C6 added that build to
+# prevent - and it happened: adding utf8.o to $(TESTS) alone left
+# bin/balance_matrix with three undefined references to u8_fit(), and the CI job
+# that would have caught it did not exist until this same commit.
+TOOL_BINS := $(BIN)/balance_matrix $(BIN)/sim_days $(BIN)/sprite_dump \
+             $(BIN)/corrupt_view $(BIN)/creator_decode
+$(TOOL_BINS): $(OBJ)/utf8.o
+
 .PHONY: all check clean golden screens fixtures asan
 all: $(TESTS)
 
@@ -62,8 +82,14 @@ check: all
 # unreachable,return) does compile and run clean, and is one flag away here if
 # a later phase wants it in the gate.
 ASAN_BIN   := bin_asan
+# test_utf8 JOINED THE SET AT P10-C4 and it is here for the reason the set
+# exists: core/utf8.cpp walks bytes that arrived from outside the device (a
+# nickname off the creator portal, a peer name off the air) and the defect it
+# fixes IS an over-read. Its heap-exact case mallocs each name at exactly its
+# own length, so a lead byte believed without its continuation bytes is a heap
+# error rather than a read into the next static array.
 ASAN_SET   := test_creator_api test_creator_gate test_validate test_persistence \
-              test_soak
+              test_soak test_utf8
 ASAN_CXX   := -std=c++17 -Wall -Wextra -Werror -O1 -g -fno-omit-frame-pointer \
               -fsanitize=address -MMD -MP
 
@@ -536,6 +562,17 @@ $(BIN)/test_persistence: $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/genome.o $(OBJ)/rng.o $(OBJ)/species.o \
                         $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/species_custom.o
+# P10-C4. THE FIRST-BOOT STEP, THROUGH THE REAL SAVE PIPELINE. It links
+# game_state.o and save_manager.o for the reason the file's banner gives: the
+# step is two bits of Config, Config is not what reaches flash, and "does the
+# answer survive a power cut" is a question only the real mapping can answer.
+$(BIN)/test_onboarding: $(OBJ)/onboarding.o $(OBJ)/game_state.o \
+                        $(OBJ)/save_manager.o $(OBJ)/migration.o \
+                        $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o \
+                        $(OBJ)/rng.o $(OBJ)/validate.o $(OBJ)/pebble.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
+                        $(OBJ)/species_custom.o
+
 $(BIN)/test_game_state: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o \
                         $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
@@ -551,6 +588,7 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/screen_menu.o $(OBJ)/screen_care.o \
                $(OBJ)/screen_status.o $(OBJ)/screen_settings.o \
                $(OBJ)/screen_time.o $(OBJ)/screen_view.o \
+               $(OBJ)/screen_setup.o $(OBJ)/onboarding.o \
                $(OBJ)/screen_link.o $(OBJ)/screen_diag.o \
                $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/battle_link.o \
                $(OBJ)/trade_link.o $(OBJ)/trade.o \
@@ -813,7 +851,7 @@ $(BIN)/sim_days: tools/sim_days.cpp $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o 
 spritetool: $(BIN)/sprite_dump
 
 $(BIN)/sprite_dump: tools/sprite_dump.cpp $(OBJ)/petfx_core.o | $(BIN)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(OBJ)/petfx_core.o -o $@
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(OBJ)/petfx_core.o $(OBJ)/utf8.o -o $@
 
 # --- the corruption glitch, drawn (P9-C5) -----------------------------------
 # THE SAME ARGUMENT sprite_dump MAKES, ONE LAYER UP. Every automated check this

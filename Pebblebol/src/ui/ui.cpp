@@ -41,6 +41,8 @@
 #include "../core/config.h"
 #include "../core/nt_types.h"
 #include "../core/strings_es.h"
+#include "../core/utf8.h"
+#include "../app/onboarding.h"   // the first-boot step, read by ui_set_starter()
 #include "../data/sprites.h"
 #include "../data/balance.h"   // ACT_PLAY_MIN_ENERGY_PCT for the PLAY entry
 #include "render.h"
@@ -301,7 +303,15 @@ void ui_name_for(uint32_t lineage_id, uint8_t generation, char* out, size_t cap)
 //      FALLBACK now rather than the answer.
 void ui_pet_name(char* out, size_t cap) {
   if (!out || cap == 0) return;
-  if (s_cfg && s_cfg->pet_name[0] != '\0') { snprintf(out, cap, "%s", s_cfg->pet_name); return; }
+  // THE NAME IS STORED AS LATIN-1 AND DRAWN AS UTF-8, and this is the crossing
+  // for the Config rung (core/utf8.h). It had no writer at all until P10-C4's
+  // first-boot naming step, so this line was dead code on every v2-native
+  // device; it is live now, and a name with an n-tilde in it is one 0xF1 byte
+  // that drawUTF8() would otherwise open a four-byte state on.
+  if (s_cfg && s_cfg->pet_name[0] != '\0') {
+    (void)u8_from_latin1(out, (uint16_t)((cap > 0xFFFFu) ? 0xFFFFu : cap), s_cfg->pet_name);
+    return;
+  }
   const SimView* p = pet();
   if (!p) { snprintf(out, cap, "%s", S(STR_EGG_TITLE)); return; }
   const uint8_t slot = box_active();
@@ -432,7 +442,11 @@ static void bright_service(void) {
 
 static void toast_text(const char* txt) {
   if (!txt) return;
-  snprintf(s_toast, sizeof(s_toast), "%s", txt);
+  // u8_cat() and not snprintf("%s"): the copy is cut on a CODEPOINT boundary,
+  // so a line longer than the buffer cannot leave half a sequence behind for
+  // drawUTF8() (core/utf8.h).
+  s_toast[0] = '\0';
+  (void)u8_cat(s_toast, (uint16_t)sizeof s_toast, txt);
   s_toast_ms = now_ms();
 }
 
@@ -441,11 +455,11 @@ void ui_toast(uint16_t str_id) {
   toast_text(S(str_id));
 }
 
-static void cfg_persist(void) {
+static void cfg_persist(bool announce) {
   if (!s_cfg) return;
   s_cfg->saved_epoch = gt_now();
   gs_save_cfg(*s_cfg);
-  ui_toast(STR_SET_SAVED);
+  if (announce) ui_toast(STR_SET_SAVED);
 }
 
 void ui_alert(AlertId a) { dialog_alert((uint8_t)a); }
@@ -663,14 +677,19 @@ static void draw_transition(void) {
   u.setDrawColor(1);
 }
 
+// THE TOAST IS gfx_banner() NOW - the same picture as the HELP strip, drawn by
+// the same code, in a translation unit a host binary compiles.
+//
+// It was eleven pixels of slab and one CENTRED, UNBOUNDED line. Measured over
+// the fifty distinct ids that reach ui_toast(), FOUR are wider than the panel at
+// GF_BODY, the worst being STR_BOX_NO_RELEASE_ACTIVE at 185 px - and because
+// this file includes Arduino.h, no golden in this repository had ever drawn a
+// toast at all. Both halves of that are fixed here: the slab grows to hold the
+// line, and tests/test_screens.cpp now renders EVERY toast id through this
+// exact code.
 static void draw_toast(void) {
   if (s_toast[0] == '\0' || since(s_toast_ms) > UI_TOAST_MS) return;
-  U8G2& u = rd_u8g2();
-  const int16_t y = RD_AFFORD_Y - 11;
-  px_box(0, y, OLED_W, 11);
-  u.setDrawColor(0);
-  rd_text_center((int16_t)(y + 8), RD_FONT_BODY, s_toast);
-  u.setDrawColor(1);
+  (void)gfx_banner(s_toast);
 }
 
 // =============================================================================
@@ -1802,6 +1821,7 @@ uint32_t ui_now_ms(void)   { return now_ms(); }
 uint32_t ui_idle_ms(void)  { return sm_idle_ms(); }
 
 void ui_push(ScreenId s)   { sm_push(s); }
+void ui_replace_root(ScreenId s) { sm_replace_root(s); }
 void ui_wiggle(void)       { s_wiggle_ms = now_ms(); }
 void ui_back(void)         { sm_back(); }
 void ui_home(void)         { sm_home(); }
@@ -1831,6 +1851,38 @@ void ui_box_activate(uint8_t slot) {
   ui_toast(STR_BOX_ACTIVATED);
 }
 
+// FIRST BOOT'S STARTER CHOICE (P10-C4). See ui.h for why there are two locks.
+//
+// THE FIRST LOCK IS HERE and it is the persisted step: this may only run while
+// app/onboarding.h says the flow is standing on OB_STARTER. Without it the
+// entry point exists on every device for ever, one seam away from any screen
+// that later wants to "just change the species".
+//
+// THE SECOND IS game/box.cpp's, and it is the one that actually protects a
+// player: box_reroll_starter() refuses any Pebble that has earned or been named
+// anything, whatever the caller believes about the step.
+bool ui_set_starter(uint8_t species_id) {
+  if (!s_cfg || ob_step(*s_cfg) != (uint8_t)OB_STARTER) return false;
+  const uint8_t slot = box_active();
+  if (slot == (uint8_t)BOX_ACTIVE_NONE) return false;
+  if (!box_reroll_starter(slot, species_id, gt_now())) return false;
+
+  PebbleInstance* p = box_slot(slot);
+  if (!p) return false;
+  // Same tail as ui_box_activate(): the simulation is rebound to the Pebble
+  // that is actually in the slot, the bars start at the truth rather than
+  // crawling from the old creature's, and the body cache is reset so the
+  // renderer does not keep drawing the species that was there a frame ago.
+  sim_switch(*p);
+  gs_save_box();
+  gs_save_active(true);
+  s_stat_ok = 0;
+  actfx_cancel();
+  const SimView* v = pet();
+  if (v) petfx_reset(body_view(*v, POSE_IDLE));
+  return true;
+}
+
 void ui_box_swap(uint8_t a, uint8_t b) {
   // box_sim_swap(), not box_swap(): when the swap moves the ACTIVE slot the two
   // creatures exchange addresses and sim's raw pointer has to follow the one
@@ -1848,7 +1900,14 @@ void ui_box_release(uint8_t slot) {
 }
 
 Config* ui_cfg(void)       { return s_cfg; }
-void ui_cfg_changed(void)  { cfg_persist(); }
+void ui_cfg_changed(void)     { cfg_persist(true); }
+
+void ui_setup_persist(void) {
+  cfg_persist(false);
+  // See ui.h: a config with no Box beside it is a save the loader throws away.
+  gs_save_box();
+  gs_save_active(true);
+}
 
 void ui_apply_brightness(uint8_t contrast) {
   s_bright_base = contrast ? contrast : (uint8_t)OLED_CONTRAST_DEFAULT;

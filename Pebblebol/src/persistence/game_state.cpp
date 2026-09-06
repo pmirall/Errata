@@ -83,6 +83,11 @@ static void cfg_from_v2(const ConfigV2& v2, Config& out) {
   if (v2.flags & CFGV2_F_MUTE) f |= CF_MUTE;
   if (v2.flags & CFGV2_F_WEB)  f |= CF_WEB_ENABLED;
   if (v2.flags & CFGV2_F_BLE)  f |= CF_RESERVED_BLE;
+  // The first-boot step (app/onboarding.h). Two bits, and BOTH ZERO MEANS
+  // FINISHED - so a blob written by any earlier firmware decodes as "already
+  // set up" and no played device is ever handed a setup wizard.
+  f |= (uint8_t)((((uint8_t)((v2.flags & CFGV2_F_SETUP_MASK) >> CFGV2_F_SETUP_SH))
+                  << CF_SETUP_SH) & CF_SETUP_MASK);
   out.flags = f;
 
   // The pet's display name. v2 keeps it on the Pebble; the v1 UI reads it from
@@ -115,10 +120,13 @@ static void cfg_to_v2(const Config& c, ConfigV2& v2) {
   v2.tz[i] = '\0';
 
   uint16_t f = (uint16_t)(v2.flags & (uint16_t)~(CFGV2_F_MUTE | CFGV2_F_WEB |
-                                                 CFGV2_F_BLE | CFGV2_F_SBAR_MASK));
+                                                 CFGV2_F_BLE | CFGV2_F_SBAR_MASK |
+                                                 CFGV2_F_SETUP_MASK));
   if (c.flags & CF_MUTE)        f |= CFGV2_F_MUTE;
   if (c.flags & CF_WEB_ENABLED) f |= CFGV2_F_WEB;
   if (c.flags & CF_RESERVED_BLE) f |= CFGV2_F_BLE;
+  f |= (uint16_t)((((uint16_t)((c.flags & CF_SETUP_MASK) >> CF_SETUP_SH))
+                   << CFGV2_F_SETUP_SH) & CFGV2_F_SETUP_MASK);
   f |= (uint16_t)(((uint16_t)c.statusbar_mode << CFGV2_F_SBAR_SH) & CFGV2_F_SBAR_MASK);
   v2.flags = f;
 

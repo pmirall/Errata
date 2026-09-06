@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "../core/strings_es.h"
+#include "../core/utf8.h"
 #include "../data/sprites.h"
 #include "../data/balance.h"       // XP_LEVEL_MAX: the top of the level band
 #include "../game/box.h"
@@ -26,11 +27,24 @@
 // -----------------------------------------------------------------------------
 //  SHAPE
 // -----------------------------------------------------------------------------
-#define LK_ROW_CAP        20
+// 20 -> PB_NAME_DRAW_CAP at P10-C4: a peer name is up to NAME_MAX_LEN Latin-1
+// characters and therefore up to twice that many UTF-8 bytes once drawn.
+#define LK_ROW_CAP        ((uint8_t)PB_NAME_DRAW_CAP)
 #define LK_VAL_CAP         8
 // The browse list: LINK_PEER_CAP peers plus a "Volver" row.
 #define LK_LIST_ROWS      ((uint8_t)(LINK_PEER_CAP + 1u))
-#define LK_NAME_CAP       ((uint8_t)(NAME_MAX_LEN + 1u))
+// THE PEER NAME IS TRANSCODED ON ARRIVAL, so this cap is the DRAW one.
+// networking/discovery.cpp accepts a peer name as raw LATIN-1 bytes off the air
+// (name_ok() admits 0xF1 and its neighbours one byte at a time) and every draw
+// on this screen goes through drawUTF8(), so twelve stored bytes can be
+// twenty-four drawn ones. core/utf8.h holds the crossing.
+// The trade review line: nine CHARACTERS a side (core/utf8.h cuts on a
+// codepoint boundary, so the cap is stated in the bytes nine characters can
+// take) plus " > " plus the terminator.
+#define LK_TRADE_HALF_CHARS ((uint16_t)9)
+#define LK_TRADE_LINE_CAP   ((uint8_t)(2 * (LK_TRADE_HALF_CHARS * 2) + 3 + 1))
+
+#define LK_NAME_CAP       ((uint8_t)PB_NAME_DRAW_CAP)
 
 // -----------------------------------------------------------------------------
 //  STATE. All of it here, on purpose: the 280 B LinkJob is caller-owned exactly
@@ -307,7 +321,7 @@ static bool open_session(void) {
 
   if (!ui_link_bind(p->slot)) { ui_toast(STR_LK_RADIO_ERR); return false; }
 
-  snprintf(s_peer_name, sizeof s_peer_name, "%s", p->name);
+  (void)u8_from_latin1(s_peer_name, (uint16_t)sizeof s_peer_name, p->name);
 
   SessionCfg cfg;
   memset(&cfg, 0, sizeof cfg);
@@ -613,7 +627,12 @@ static void draw_browse(void) {
   uint8_t r = 0;
   for (; r < n && r < (uint8_t)LINK_PEER_CAP; ++r) {
     const DiscPeer* p = nth_qualified(r);
-    snprintf(rows[r], LK_ROW_CAP, "%s", (p && p->name[0]) ? p->name : S(STR_LK_SEARCH));
+    // The peer name arrives as raw LATIN-1 off the air (networking/discovery.cpp
+    // name_ok() admits the high bytes one at a time) and this list draws with
+    // drawUTF8(), so it is transcoded here and cut on a CHARACTER boundary.
+    rows[r][0] = '\0';
+    if (p && p->name[0]) (void)u8_cat_latin1(rows[r], (uint16_t)LK_ROW_CAP, p->name);
+    else                 (void)u8_cat(rows[r], (uint16_t)LK_ROW_CAP, S(STR_LK_SEARCH));
     // The EMA in whole dBm, which is what discovery.h keeps for a screen to
     // show. The last packet's value would jump a row under the player's thumb.
     snprintf(vals[r], LK_VAL_CAP, "%d", p ? (int)p->rssi : 0);
@@ -652,7 +671,10 @@ static void draw_card(void) {
   const DiscPeer* p = nth_qualified(s_cur);
   char tag[8];
   snprintf(tag, sizeof tag, "%d", p ? (int)p->rssi : 0);
-  gfx_header((p && p->name[0]) ? p->name : S(STR_LINK_TITLE), tag);
+  char nm[PB_NAME_DRAW_CAP];
+  nm[0] = '\0';
+  if (p && p->name[0]) (void)u8_from_latin1(nm, (uint16_t)sizeof nm, p->name);
+  gfx_header(nm[0] ? nm : S(STR_LINK_TITLE), tag);
 
   gfx_text_center(GF_BODY, (int16_t)(UI_HDR_H + 7), S(STR_LK_FOUND));
 
@@ -683,16 +705,28 @@ static void draw_wait(void) {
   // left to say - what goes and what comes - and it replaces the state word,
   // which by then says nothing the player did not already know.
   if (link_trade_wants_consent()) {
-    // 9 + 3 + 9 = 21 characters against GF_BODY's 25-character line, so two
+    // 9 + 3 + 9 = 21 CHARACTERS against GF_BODY's 25-character line, so two
     // long species names cannot push the line off the panel. The separator is
     // ">" and not an arrow glyph: core/strings_es.h forbids arrows outright,
     // because the _tf fonts carry ASCII + Latin-1 and nothing else.
-    char line[24];
+    //
+    // IT USED TO BE "%.9s", AND "%.Ns" IS A BYTE PRECISION WHILE THE COMMENT
+    // ABOVE REASONS IN CHARACTERS. Five of the sixty species names are
+    // multi-byte - Rafagon, Estatic, Jamron, Plagon, Gateon - so the day a
+    // content edit takes one past nine BYTES the cut lands inside a sequence
+    // and drawUTF8() gets a broken lead. Nothing today reaches it (the longest
+    // is eight bytes) and there is no static_assert on species-name byte
+    // length, which is exactly why it is fixed with a codepoint-safe append
+    // rather than left as a comment that is right about the wrong unit.
+    char line[LK_TRADE_LINE_CAP];
     const SpeciesDef* give = species_get(s_tl.out_rec[PBW_OFF_SPECIES]);
     const SpeciesDef* get  = species_get(s_tl.in_rec[PBW_OFF_SPECIES]);
-    snprintf(line, sizeof line, "%.9s > %.9s",
-             give ? S(give->name_idx) : "?",
-             get ? S(get->name_idx) : "?");
+    line[0] = '\0';
+    (void)u8_cat_n(line, (uint16_t)sizeof line,
+                   give ? S(give->name_idx) : "?", LK_TRADE_HALF_CHARS);
+    (void)u8_cat(line, (uint16_t)sizeof line, " > ");
+    (void)u8_cat_n(line, (uint16_t)sizeof line,
+                   get ? S(get->name_idx) : "?", LK_TRADE_HALF_CHARS);
     gfx_text_center(GF_BODY, (int16_t)(UI_HDR_H + 38), line);
   } else {
     gfx_text_center(GF_BODY, (int16_t)(UI_HDR_H + 38), state_word());

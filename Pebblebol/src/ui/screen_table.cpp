@@ -35,6 +35,7 @@
 #include "screen_menu.h"
 #include "screen_network.h"
 #include "screen_settings.h"
+#include "screen_setup.h"
 #include "screen_soon.h"
 #include "screen_status.h"
 #include "screen_time.h"
@@ -130,6 +131,20 @@ const ScreenDef SCREENS[SCR_COUNT] = {
   { time_enter, time_update, time_render, time_input, nop_leave, 0,
     SF_STICKY | SF_LOCK_INPUT },                                  // SCR_TIME
 
+  // --- FIRST BOOT (P10-C4) --------------------------------------------------
+  // The other two thirds of the flow TIME is the middle of. Both carry TIME's
+  // exact flags and for TIME's exact reasons: B means "change the thing under
+  // the cursor" here, so the global grammar may not spend it on BACK
+  // (SF_LOCK_INPUT); and a half-typed name or an unmade choice may not be
+  // thrown away by invariant 3's twenty-second auto-return (SF_STICKY), which
+  // is spec section 65's "no time-critical menus" in the only place this UI
+  // could have broken it. Both have an update hook for the right button's
+  // auto-repeat, exactly as TIME does.
+  { setup_name_enter, setup_name_update, setup_name_render, setup_name_input,
+    nop_leave, 0, SF_STICKY | SF_LOCK_INPUT },                    // SCR_SETUP_NAME
+  { setup_pick_enter, setup_pick_update, setup_pick_render, setup_pick_input,
+    nop_leave, 0, SF_STICKY | SF_LOCK_INPUT },                    // SCR_SETUP_STARTER
+
   // --- the two OVERLAYS -----------------------------------------------------
   // CONFIRM and ALERT float over whatever screen is up and never become
   // sm_current(): ui/dialog.cpp owns them and ui_screen() is what reports
@@ -193,6 +208,14 @@ const ScreenDef SCREENS[SCR_COUNT] = {
 };
 
 // If the enum is renumbered again, these fire and the rows must move with it.
-static_assert((int)SCR_COUNT == 27, "screen table: rows and ScreenId drifted apart");
+// 27 -> 29 at P10-C4: SCR_SETUP_NAME and SCR_SETUP_STARTER were INSERTED beside
+// SCR_TIME, which is the honest place for them (the three are one flow) and
+// which renumbers every id below. That renumbering is safe on disk and on the
+// air - no ScreenId is persisted or transmitted anywhere - but it is NOT safe
+// in this file, because the rows are positional: an enum entry inserted here
+// without its row moves every row below it onto the wrong screen and the count
+// still matches. tests/test_screens.cpp pins each row to its render hook BY
+// IDENTITY for exactly that reason, and fails naming the screen.
+static_assert((int)SCR_COUNT == 29, "screen table: rows and ScreenId drifted apart");
 static_assert((int)SCR_BOOT  ==  0, "screen table: BOOT is the first state");
-static_assert((int)SCR_DIAG  == 26, "screen table: DIAG is the last state");
+static_assert((int)SCR_DIAG  == 28, "screen table: DIAG is the last state");

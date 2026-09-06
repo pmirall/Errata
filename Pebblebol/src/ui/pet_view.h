@@ -113,7 +113,7 @@ struct PetView {
   uint8_t  lineage_bits;      // the lineage id's low 2 bits: which side it hugs
 
   uint8_t  present;           // 0 = there is no Pebble at all
-  char     name[PB_NICKNAME_CAP];
+  char     name[PB_NAME_DRAW_CAP];   // UTF-8; the nickname is Latin-1 (core/utf8.h)
 };
 
 // -----------------------------------------------------------------------------

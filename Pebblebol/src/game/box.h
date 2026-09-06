@@ -79,6 +79,14 @@ bool    box_swap(uint8_t a, uint8_t b);
 // (B4): releasing what you are holding is never a single keystroke away.
 bool    box_release(uint8_t slot, bool confirmed);
 
+// FIRST BOOT ONLY IN PRACTICE, BUT THE RULE IS ABOUT THE PEBBLE. Replace the
+// Pebble in `slot` with a freshly minted one of `species_id`, keeping the slot,
+// the active flag, the genome and the creation seed. Refuses unless the slot
+// holds an ORIGIN_STARTER at level 1 that has earned nothing and been named
+// nothing - see the banner in box.cpp for why the lock is achievement and not
+// elapsed time. This is what "pick a starter from three" writes.
+bool    box_reroll_starter(uint8_t slot, uint8_t species_id, uint32_t now_epoch);
+
 // -----------------------------------------------------------------------------
 // Recovery (B5). Stored Pebbles heal, they do not live.
 // -----------------------------------------------------------------------------

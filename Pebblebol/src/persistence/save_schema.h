@@ -39,6 +39,16 @@
 #define PB_CARE_COUNT            5      // HUNGER HAPPINESS HEALTH CLEANLINESS ENERGY
 #define PB_MOVE_COUNT            4
 #define PB_NICKNAME_CAP         13      // NAME_MAX_LEN 12 + NUL
+// THE SAME NAME, SIZED FOR DRAWING RATHER THAN FOR STORING (P10-C4).
+//
+// A stored name is raw LATIN-1 - networking/creator_parse.cpp converts UTF-8
+// down to it on the way in, game/validate.cpp admits the high bytes one at a
+// time, networking/discovery.cpp accepts them off the air - and everything that
+// DRAWS goes through drawUTF8(). So twelve stored bytes can be twelve accented
+// characters and twenty-four drawn ones, and a display buffer sized in STORED
+// bytes cuts such a name in half, character by character. core/utf8.h holds the
+// one crossing (u8_from_latin1) and this is the cap on its output.
+#define PB_NAME_DRAW_CAP        (2 * (PB_NICKNAME_CAP - 1) + 1)   // 25
 #define PB_LEVEL_MAX            30      // spec section 11: levels 1..30
 #define CUSTOM_SPECIES_SLOTS    10      // cs0..cs9
 #define COOLDOWN_SLOTS          32
@@ -242,6 +252,8 @@ static_assert(BOX_SLOTS <= 16, "slot_mask is 16 bits");
 #define CFGV2_F_WEB             0x0010u   // the creator server is opt-in (radio off
                                           // by default, spec section 68 r5)
 #define CFGV2_F_BLE             0x0020u   // the short-range radio may be brought up
+#define CFGV2_F_SETUP_MASK      0x00C0u   // first-boot step, 2 bits at shift 6
+#define CFGV2_F_SETUP_SH        6         // 0 = finished (app/onboarding.h)
 
 struct ConfigV2 {
   uint16_t magic;                        //   0  CFGV2_MAGIC

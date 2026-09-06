@@ -290,3 +290,102 @@ TEST(box_first_boot_starter_lands_in_slot_zero) {
   CHECK_EQ((int)box_count(), 1);
   CHECK_EQ((int)box_active(), 0);
 }
+
+// =============================================================================
+//  THE FIRST-BOOT STARTER SWAP (P10-C4)
+//
+//  box_release() refuses the active slot by rule B4 and is right to. The
+//  starter choice has to replace exactly that Pebble - the one app/app.cpp
+//  minted at boot before the player had been asked anything - so it needs its
+//  own door, and the lock on that door is about the PEBBLE and not about when
+//  the call happens: a clock-based rule ("within a minute of boot") fails the
+//  moment somebody thinks for two minutes about a name, which is exactly the
+//  accessibility failure spec section 65 is written against.
+// =============================================================================
+static uint8_t starter_slot(uint8_t species) {
+  const uint8_t slot = box_new_pebble(species, 1, (uint8_t)ORIGIN_STARTER,
+                                      zero_genome(), 0xC0FFEEu, BOX_EPOCH0);
+  CHECK(slot != (uint8_t)BOX_SLOT_NONE);
+  CHECK(box_set_active(slot));
+  return slot;
+}
+
+TEST(the_starter_swap_replaces_the_active_pebble_and_keeps_what_it_should) {
+  box_fixture();
+  const uint8_t slot = starter_slot(1u);
+  const PebbleInstance before = *box_peek(slot);
+
+  CHECK(box_reroll_starter(slot, 16u, BOX_EPOCH0 + 90u));
+  const PebbleInstance* after = box_peek(slot);
+  CHECK(after != nullptr);
+  if (!after) return;
+
+  CHECK_EQ((int)after->species_id, 16);
+  CHECK_EQ((int)box_active(), (int)slot);          // still the one being carried
+  CHECK_EQ((int)box_count(), 1);                   // and still one Pebble
+
+  // THE GENOME AND THE CREATION SEED TRAVEL. They are what this device rolled
+  // for this player at this boot; choosing a species must not silently re-roll
+  // everything else about the creature.
+  CHECK_EQ(memcmp(&after->genome, &before.genome, sizeof before.genome), 0);
+  CHECK_EQ((int)after->creation_seed, (int)before.creation_seed);
+  CHECK_EQ((int)after->birth_epoch,   (int)before.birth_epoch);
+
+  // And it really is a NEW creature otherwise: the learnset and the derived HP
+  // are the new species', not the old one's.
+  CHECK_EQ((int)after->level, 1);
+  CHECK(memcmp(after->moves, SPECIES_TABLE[15].moves, sizeof after->moves) == 0);
+  CHECK(after->hp_cur > 0u);
+}
+
+TEST(the_starter_swap_refuses_any_pebble_that_has_done_anything) {
+  // Each case is a thing the PLAYER did. A Pebble that has done none of them is
+  // worth exactly what the next one would be; one that has done any of them is
+  // not replaceable by a menu choice.
+  struct Case { const char* what; void (*taint)(PebbleInstance&); };
+  static const Case kCases[] = {
+    { "level",         [](PebbleInstance& p){ p.level = 2; } },
+    { "xp",            [](PebbleInstance& p){ p.xp = 1; } },
+    { "a battle won",  [](PebbleInstance& p){ p.battles_won = 1; } },
+    { "a battle lost", [](PebbleInstance& p){ p.battles_lost = 1; } },
+    { "a minigame",    [](PebbleInstance& p){ p.minigames_won = 1; } },
+    { "an evolution",  [](PebbleInstance& p){ p.evolutions = 1; } },
+    { "a trade",       [](PebbleInstance& p){ p.trades = 1; } },
+    { "a nickname",    [](PebbleInstance& p){ p.nickname[0] = 'A'; p.nickname[1] = '\0'; } },
+    { "a wild origin", [](PebbleInstance& p){ p.origin = (uint8_t)ORIGIN_WILD; } },
+  };
+  for (size_t i = 0; i < sizeof kCases / sizeof kCases[0]; ++i) {
+    box_fixture();
+    const uint8_t slot = starter_slot(1u);
+    kCases[i].taint(*box_slot(slot));
+    if (box_reroll_starter(slot, 16u, BOX_EPOCH0 + 90u))
+      fprintf(stderr, "  a Pebble with %s was replaced by the starter swap\n",
+              kCases[i].what);
+    CHECK(!box_reroll_starter(slot, 16u, BOX_EPOCH0 + 90u));
+    CHECK_EQ((int)box_peek(slot)->species_id, 1);   // and it is untouched
+  }
+
+  // ANTI-VACUITY: with none of the taints applied, the same call succeeds -
+  // otherwise the nine refusals above would prove nothing about the rule.
+  box_fixture();
+  const uint8_t slot = starter_slot(1u);
+  CHECK(box_reroll_starter(slot, 16u, BOX_EPOCH0 + 90u));
+
+  // TIME IS DELIBERATELY NOT ONE OF THE LOCKS. age_s is the one field that
+  // moves on its own; putting it in the list would make the rule "be quick".
+  box_fixture();
+  const uint8_t s2 = starter_slot(1u);
+  box_slot(s2)->age_s = 3600u * 24u;               // a whole day of thinking
+  CHECK(box_reroll_starter(s2, 31u, BOX_EPOCH0 + 86400u));
+  CHECK_EQ((int)box_peek(s2)->species_id, 31);
+}
+
+TEST(the_starter_swap_refuses_an_empty_slot_and_an_unknown_species) {
+  box_fixture();
+  const uint8_t slot = starter_slot(1u);
+  CHECK(!box_reroll_starter((uint8_t)(slot + 1u), 16u, BOX_EPOCH0));   // empty
+  CHECK(!box_reroll_starter((uint8_t)BOX_SLOTS, 16u, BOX_EPOCH0));     // no slot
+  CHECK(!box_reroll_starter(slot, 0u, BOX_EPOCH0));                    // no species
+  CHECK(!box_reroll_starter(slot, 250u, BOX_EPOCH0));                  // past the roster
+  CHECK_EQ((int)box_peek(slot)->species_id, 1);
+}
