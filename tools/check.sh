@@ -1278,4 +1278,112 @@ if [ -f "$SKETCH/src/ui/corrupt_fx.cpp" ]; then
   done
 fi
 
+# --- P10-C1: THE DIAGNOSTICS SURFACE, THREE GATES ---------------------------
+#
+# 1. dev/diag_core.{h,cpp} STAYS HOST-LINKABLE. Same red line ui/corrupt_fx.cpp
+#    and ui/petfx_core.cpp carry, and for the same measured reason: dev/
+#    godmode.cpp includes <Arduino.h> and U8g2 through ui/render.h, so every
+#    rule inside the console is a rule no host binary can execute. diag_core
+#    exists to hold the parsing, the range checks, the taint decision and the
+#    field formatting OUTSIDE that wall. A single #include of Arduino.h or
+#    render.h here would undo it silently: the firmware would still build, only
+#    tests/bin/test_diag would stop linking, and the natural repair is to drop
+#    the module from tests/Makefile. #include LINES ONLY - diag_core.h discusses
+#    Arduino.h and render.h in prose on purpose.
+if [ -f "$SKETCH/src/dev/diag_core.cpp" ]; then
+  for f in diag_core.h diag_core.cpp; do
+    n=$( { grep -nE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*(Arduino\.h|u8g2|U8g2|render\.h|gfx\.h|godmode\.h)' \
+            "$SKETCH/src/dev/$f" || true; } | wc -l )
+    [ "$n" -eq 0 ] || fail "dev/$f includes a renderer or device header ($n) - it exists to be host-linkable (dev/diag_core.h)"
+  done
+  # And no LINK LINE in tests/ may reach for the console itself, which would
+  # make the whole split pointless the moment somebody tried.
+  #
+  # COMMENT LINES ARE DROPPED FIRST, and that is not tidiness: the first version
+  # of this gate counted the word anywhere and fired on the paragraph in
+  # tests/Makefile that EXPLAINS why dev/godmode.cpp may never be linked. A gate
+  # that a correct explanation trips is a gate people delete. Makefile comments
+  # begin with '#' at the start of a line.
+  n=$( { grep -v '^[[:space:]]*#' "$ROOT/tests/Makefile" || true; } \
+        | { grep -c 'godmode' || true; } )
+  [ "${n:-0}" -eq 0 ] || fail "a tests/Makefile rule names dev/godmode ($n) - that file includes Arduino.h and cannot be host-compiled (dev/diag_core.h)"
+fi
+
+# 2. EVERY god_*() THE HEADER DECLARES IS DEFINED IN THE RELEASE CONFIGURATION.
+#
+#    THIS IS THE ONE PLACE A GATE CAN SEE SOMETHING NO TEST CAN. dev/godmode.cpp
+#    is compiled by ZERO host binaries, so the GOD_MODE_ENABLED 0 bodies - the
+#    sixteen functions that ARE the shipping artefact's whole god-mode API - are
+#    untested by construction. A missing one is a link error in a build nobody
+#    runs between phase tags; a WRONG one is not an error at all, and this gate
+#    cannot see that either. It checks PRESENCE, which is the half a grep can
+#    honestly claim.
+#
+#    "THE RELEASE CONFIGURATION" IS THE TEXT ABOVE THE #if PLUS THE #else ARM,
+#    not the #else arm alone, because P10-C1 deliberately moved two functions
+#    (god_note_load / god_load_result) above the guard - the shipping build's
+#    `info` reads the boot LoadResult, and the phase-6 defect is what happens
+#    when something the artefact needs lives inside a dev-only branch.
+#
+#    COMMENTS ARE STRIPPED FIRST AND A DEFINITION MUST HAVE A BODY. The first
+#    version of this gate carried a fallback that accepted the NAME ANYWHERE,
+#    and the #else arm's own explanatory comment names god_note_load() - so the
+#    fallback made the strict check dead and the gate would have passed with the
+#    function deleted. That is the P9-C6 defect (a gate satisfied by a mention
+#    in prose) reproduced inside the gate written against it, caught by the
+#    mutation run that was supposed to confirm the gate worked.
+if [ -f "$SKETCH/src/dev/godmode.cpp" ]; then
+  if command -v cpp >/dev/null 2>&1; then
+    strip_comments3() { cpp -fpreprocessed -dD -E -P - 2>/dev/null; }
+  else
+    echo "check.sh: NOTE - cpp not found, the god stub gate falls back to line-comment stripping only"
+    strip_comments3() { sed 's://.*::'; }
+  fi
+  # The declarations: `<type> god_name(` at the start of a line in the header.
+  decls=$( { grep -oE '^[A-Za-z_][A-Za-z0-9_]*[[:space:]]+(god_[a-z0-9_]+)[[:space:]]*\(' \
+              "$SKETCH/src/dev/godmode.h" || true; } \
+            | grep -oE 'god_[a-z0-9_]+' | sort -u )
+  [ -n "$decls" ] || fail "check.sh: parsed no god_*() declarations out of dev/godmode.h - the stub gate would pass over an empty list"
+  above=$(sed -n '1,/^#if GOD_MODE_ENABLED/p' "$SKETCH/src/dev/godmode.cpp")
+  stub=$(sed -n '/^#else  *\/\/ ---/,/^#endif \/\/ GOD_MODE_ENABLED/p' "$SKETCH/src/dev/godmode.cpp")
+  [ -n "$stub" ] || fail "check.sh: could not find the #else arm of dev/godmode.cpp - the stub gate cannot see what it guards"
+  release_src=$(printf '%s\n%s\n' "$above" "$stub" | strip_comments3)
+  for d in $decls; do
+    printf '%s\n' "$release_src" | grep -qE "\b$d[[:space:]]*\(.*\)[[:space:]]*\{" \
+      || fail "dev/godmode.h declares $d() and the GOD_MODE_ENABLED 0 configuration of dev/godmode.cpp has no body for it - the release build would not link, and no host test can see that (dev/godmode.h, section 5)"
+  done
+  # The always-compiled half must be reached from BOTH arms. This is the shape
+  # of the phase-6 defect exactly: sim_set_time_scale()'s only callers were
+  # below the #if and the shipping build ran sim_tick(0) for four phases.
+  stub_code=$(printf '%s\n' "$stub" | strip_comments3)
+  for fn in heap_trend_begin shell_line_reset; do
+    printf '%s\n' "$stub_code" | grep -qE "\b$fn[[:space:]]*\([^)]*\)[[:space:]]*;" \
+      || fail "the GOD_MODE_ENABLED 0 god_begin() does not call $fn() - the shipping artefact would lose it (dev/godmode.cpp section 0c)"
+  done
+  for fn in heap_trend_service shell_line_service; do
+    printf '%s\n' "$stub_code" | grep -qE "\b$fn[[:space:]]*\([^)]*\)[[:space:]]*;" \
+      || fail "the GOD_MODE_ENABLED 0 god_service() does not call $fn() - the shipping artefact would be deaf on the serial line, which is what it was until P10-C1 (dev/godmode.cpp section 0c)"
+  done
+fi
+
+# 3. god_note_load() HAS A CALLER IN src/app. Same form and same reason as the
+#    cor_service() gate above: app/app.cpp includes Arduino.h, so no host binary
+#    links it, and a recorded-then-never-recorded value is this project's most
+#    repeated defect. Without the call, spec section 49's "Last error" field
+#    reports LOAD_OK for ever on every device and nothing anywhere notices.
+#    Comments stripped by the preprocessor first, and the call must have an
+#    ARGUMENT, so a mention in prose or a declaration cannot satisfy it.
+if [ -f "$SKETCH/src/dev/godmode.cpp" ]; then
+  if command -v cpp >/dev/null 2>&1; then
+    strip_comments2() { cpp -fpreprocessed -dD -E -P - 2>/dev/null; }
+  else
+    echo "check.sh: NOTE - cpp not found, god_note_load gate falls back to line-comment stripping only"
+    strip_comments2() { sed 's://.*::'; }
+  fi
+  n=$( { cat "$SKETCH"/src/app/*.cpp 2>/dev/null || true; } \
+        | strip_comments2 \
+        | { grep -cE '\bgod_note_load[[:space:]]*\([^)]' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "god_note_load() has NO caller in src/app ($n) - the boot LoadResult would be dropped again and spec 49's Last error field would report LOAD_OK for ever (dev/godmode.h)"
+fi
+
 echo "GATE OK"

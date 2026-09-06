@@ -31,6 +31,21 @@
 
 #define FW_VERSION              "0.2.0-dev"
 
+// THE BUILD STAMP (P10-C1). Spec section 49's field list asks for "Firmware"
+// AND "Build" as two separate lines, and until this phase the second one did
+// not exist anywhere: `grep -rn "__DATE__" Pebblebol/src tools` returned
+// nothing, so a bench operator holding two boards had no way to tell which
+// image was on which. FW_VERSION answers "what release is this"; this answers
+// "which compile", which is the question that matters when the same version
+// string has been flashed nine times in an afternoon.
+//
+// It is FIXED WIDTH ("MMM DD YYYY HH:MM:SS", 20 chars + NUL) whatever the
+// clock says, so it never moves the size numbers between two builds of the
+// same tree. It is the ONE thing in the firmware that is not a pure function
+// of the sources, and it is deliberately confined to this one string: nothing
+// branches on it, nothing persists it and nothing transmits it.
+#define FW_BUILD_STAMP          (__DATE__ " " __TIME__)
+
 #define SAVE_SCHEMA_VERSION     2
 // CONTENT_VERSION LIVES IN data/content_version.h SINCE P4-C1. It is a HASH of
 // tools/content/*.json emitted by tools/gen_content.py, not a counter somebody

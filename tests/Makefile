@@ -100,6 +100,14 @@ $(OBJ)/%.o: $(SRC_ROOT)/ui/%.cpp Makefile | $(OBJ)
 $(OBJ)/%.o: $(SRC_ROOT)/app/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
+# dev/ (P10-C1). ONE file in that directory is host-compilable and it is
+# dev/diag_core.cpp; dev/godmode.cpp includes <Arduino.h> and U8g2 through
+# ui/render.h, so no link line here may ever ask for it. That is the whole
+# reason diag_core exists as a separate translation unit - see its banner and
+# the red-line gate in tools/check.sh.
+$(OBJ)/%.o: $(SRC_ROOT)/dev/%.cpp Makefile | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
 $(OBJ)/%.o: $(SRC_ROOT)/minigames/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
@@ -302,6 +310,27 @@ $(BIN)/test_encounters: $(OBJ)/encounters.o $(OBJ)/species.o $(OBJ)/rng.o \
 # claim about the WRITER, the CRC and the migration - and a memcpy dressed up as
 # a save cannot check any of them. A lost deadline leaves the bit set with
 # nothing to end it, which is the one way this mechanic could destroy a Pebble.
+# P10-C1: THE DIAGNOSTICS SURFACE. diag_core.o is dev/, and it is here for the
+# same reason corrupt_fx.o and petfx_core.o are ui/: dev/godmode.cpp includes
+# Arduino.h, so every rule inside the console is a rule no test in this
+# repository can execute - including its GOD_MODE_ENABLED 0 stubs, which is
+# worse, because a stub that returned garbage would still print ALL PASS.
+#
+# THE LINK LINE IS WIDE ON PURPOSE and it is the same argument test_corruption's
+# makes. "spawn taints" is not a claim about a flag: it is a claim about
+# box_new_pebble()'s real constructor, genome_genesis()'s real taint clear and
+# game/taint.h's real gate, so all three are the SHIPPED objects. sim.o (with
+# daylight.o) is here because `heal` is the first caller sim_god_set_sick() has
+# ever had outside a test; activity.o because set_activity has to answer for a
+# score it can only derive; encounters.o + species.o because test_encounter
+# rolls the real table.
+$(BIN)/test_diag:       $(OBJ)/diag_core.o $(OBJ)/box.o $(OBJ)/sim.o \
+                        $(OBJ)/daylight.o $(OBJ)/inventory.o \
+                        $(OBJ)/activity.o $(OBJ)/encounters.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/species.o \
+                        $(OBJ)/pebble.o $(OBJ)/corruption.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
 $(BIN)/test_corruption: $(OBJ)/corruption.o $(OBJ)/corrupt_fx.o \
                         $(OBJ)/battle.o $(OBJ)/pebble.o \
                         $(OBJ)/breeding.o $(OBJ)/box.o \

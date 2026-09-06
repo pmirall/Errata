@@ -1229,21 +1229,37 @@ static const PetView* ceremony_body(void) {
 // ceremony frame, or answer false so the screen draws the incubator instead.
 static bool evo_ceremony_frame(void) { return ceremony_draw(now_ms()); }
 
-// The pure DIAG screen's input hook (screen_diag.h). Returns true when the
-// console wants the SCREEN closed - which is not the same as the console being
-// switched off: watching an accelerated life on the ordinary screens is the
-// entire point of it.
-static bool diag_gesture(Gesture g) {
-  switch (god_handle(g)) {
+// ONE place every GodEvt is acted on, whether a GESTURE raised it (god_handle)
+// or a TYPED SERIAL LINE did (god_take_evt, P10-C1). Two switches would be two
+// places to forget an arm, and the serial half is the half no host test can
+// reach. Returns true when the console wants the SCREEN closed.
+static bool apply_god_evt(GodEvt e, uint8_t arg) {
+  switch (e) {
     case GOD_EVT_LEAVE:
       return true;
-    // test_battle (spec section 49). The battle screen is PUSHED on top of the
-    // console rather than replacing it, so B walks back into the god menu the
-    // operator started from and god mode stays on - which is the point: the
-    // heap panel is where the per-frame delta this entry exists to measure is
-    // read back.
+    // test_battle / start_battle (spec sections 49 and 66). The battle screen
+    // is PUSHED on top of the console rather than replacing it, so B walks back
+    // into the god menu the operator started from and god mode stays on - which
+    // is the point: the heap panel is where the per-frame delta this entry
+    // exists to measure is read back.
     case GOD_EVT_BATTLE:
       ui_start_battle(BT_ENTRY_DIAG);
+      return false;
+    // spec section 66's start_creator and scan_wifi. Both are PUSHES for the
+    // same reason: the console cannot navigate, and the radio and the scan job
+    // have exactly one owner each (ui/screen_network.cpp), so the console asks
+    // for the screen instead of starting a second scan behind its back.
+    case GOD_EVT_CREATOR:
+      nav_push(SCR_CREATOR);
+      return false;
+    case GOD_EVT_SCAN:
+      nav_push(SCR_NETWORK);
+      return false;
+    // spec section 49's test_minigame. ui_start_minigame() applies the SAME
+    // cooldown and energy refusals the PLAY menu does; a diagnostic that
+    // bypassed them would be testing a path no player can reach.
+    case GOD_EVT_MINIGAME:
+      ui_start_minigame(arg);
       return false;
     case GOD_EVT_WIPED: {
       if (s_cfg) gs_cfg_defaults(*s_cfg);
@@ -1256,6 +1272,14 @@ static bool diag_gesture(Gesture g) {
     default:
       return false;                 // handled inside the console
   }
+}
+
+// The pure DIAG screen's input hook (screen_diag.h). Returns true when the
+// console wants the SCREEN closed - which is not the same as the console being
+// switched off: watching an accelerated life on the ordinary screens is the
+// entire point of it.
+static bool diag_gesture(Gesture g) {
+  return apply_god_evt(god_handle(g), 0);
 }
 
 // Idempotent, and it has to be: the manual rub path calls sim_hatch() itself
@@ -1663,6 +1687,27 @@ void ui_service(void) {
   // ceremony's back for its whole 4.5 s. ui/ceremony.cpp ends it itself, with
   // an input flush and a trip HOME.
   if (ceremony_active()) { ceremony_service(t); return; }
+
+  // P10-C1: the serial command layer's navigation latch. god_service() runs in
+  // app/app.cpp's loop, nowhere near the screen stack, so a typed
+  // `start_creator` leaves an event here and this drains it - through
+  // apply_god_evt(), the same arms a gesture goes through.
+  //
+  // BELOW the ceremony's early return ON PURPOSE. A birth or an evolution owns
+  // the screen for 4.5 s and ends itself with an input flush and a trip HOME, so
+  // a push landing inside one would be clobbered by the trip. The latch holds
+  // until the film is over instead, which is what a latch is for.
+  //
+  // One deep: a second event before the first is drained replaces it, because a
+  // queue of console navigations is a queue of surprises. Inert in the release
+  // build (god_take_evt() stubs to GOD_EVT_NONE).
+  {
+    uint8_t garg = 0;
+    const GodEvt ge = god_take_evt(garg);
+    if (ge != GOD_EVT_NONE) {
+      if (apply_god_evt(ge, garg) && sm_current() == SCR_DIAG) nav_home();
+    }
+  }
 
   // The alert layer surfaces only when nothing else owns the screen, and the
   // HELP strip expires on its own clock. Both are dialog_service()'s. A screen

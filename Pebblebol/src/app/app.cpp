@@ -812,6 +812,12 @@ void app_setup(void)
   // config, and both are answers this call produces.
   save_set_clock(&clock_ms, &clock_epoch);
   const LoadResult load = gs_load(g_cfg);
+  // P10-C1. `load` used to be a local printed once at the bottom of this
+  // function and then dropped, so spec section 49's "Last error" field could
+  // never name the one thing most likely to be wrong about a boot. One byte,
+  // recorded above dev/godmode.cpp's GOD_MODE_ENABLED guard, so the SHIPPING
+  // build's `info` command can read it back.
+  god_note_load((uint8_t)load);
   boot_note_save(gs_have_pebble());
   const BootKind boot = boot_kind();
 

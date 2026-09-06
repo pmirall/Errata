@@ -14,6 +14,28 @@
 
 #include <Arduino.h>
 #include <stdio.h>
+#include <string.h>
+
+// THE PURE HALF. Everything with a right answer - the command table, the
+// parser, the range checks, the taint decision, the field formatting and the
+// execution of every command that only touches pure modules - is in
+// dev/diag_core.cpp, because THIS file includes <Arduino.h> two lines above and
+// therefore no host binary in this repository compiles it. See diag_core.h's
+// banner: it is the same move as ui/petfx_core.cpp (P9-C6) and
+// hardware/power.cpp's pwr_tick_budget() (P6-C3).
+#include "diag_core.h"
+
+// The always-compiled surface reads these. They are all already linked into the
+// release artefact - this adds the READERS, not the modules.
+#include "../core/version.h"
+#include "../game/box.h"
+#include "../hardware/boot.h"
+#include "../hardware/gametime.h"
+#include "../hardware/kv_nvs.h"
+#include "../networking/net.h"
+#include "../persistence/game_state.h"
+#include "../persistence/save_manager.h"
+#include "../ui/screen_network.h"    // network_screen_seen/fresh/phase
 
 // =============================================================================
 //  0. HEAP TREND (plan P2-C12)
@@ -49,9 +71,243 @@ static void heap_trend_service(void)
                 (unsigned long)ESP.getMinFreeHeap());
 }
 
+// =============================================================================
+//  0b. THE BOOT LOAD RESULT (P10-C1, godmode.h)
+//      One byte, above the guard, because the SHIPPING build's `info` prints it
+//      and app/app.cpp's `load` was a local it dropped on the floor.
+// =============================================================================
+static uint8_t s_load_result = 0;   // a LoadResult; LOAD_OK until told otherwise
+
+void god_note_load(uint8_t load_result) { s_load_result = load_result; }
+uint8_t god_load_result(void)           { return s_load_result; }
+
+// =============================================================================
+//  0c. THE ALWAYS-COMPILED DIAGNOSTICS SURFACE (P10-C1)
+//
+//  ONE serial line reader for the whole module. Before this phase there were
+//  TWO - hex_paste_service() and cmd_service() - each calling Serial.read() and
+//  each having to remember not to fight the other, and BOTH were below the
+//  GOD_MODE_ENABLED guard, so a release board was deaf. Now the reader is here,
+//  it assembles a line, and it offers that line to the console first (which
+//  owns the genome paste and every mutating command) and to the read-only
+//  surface second.
+//
+//  WHAT SHIPS: help / info / show_save / stall. dev/diag_core.h's DCF_ALWAYS
+//  flag is the authority and the static_assert next to it forbids a mutating
+//  command from carrying it.
+// =============================================================================
+// The bounded busy-wait. It exists to be able to PROVE the timer-driven button
+// sampler (input.cpp note 6) on real hardware: a press made during the stall
+// must still be recognised, with its true duration, on the poll that follows.
+// P10-C2's "input-to-render latency <= 2 frames measured with the DIAG stall
+// command" is a measurement on a RELEASE board, so this is above the guard.
+// Well under the 5 s task watchdog.
+#define GOD_STALL_MAX_MS   3000UL
+#define GOD_STALL_DEF_MS   500UL
+
+static void shell_do_stall(uint32_t ms)
+{
+  if (ms > GOD_STALL_MAX_MS) ms = GOD_STALL_MAX_MS;
+  Serial.printf("[diag] stall %lu ms begin\r\n", (unsigned long)ms);
+  const uint32_t t0 = millis();
+  while ((uint32_t)(millis() - t0) < ms) {
+    // Deliberately busy. yield() here would defeat the whole point.
+  }
+  Serial.printf("[diag] stall end after %lu ms\r\n", (unsigned long)(millis() - t0));
+}
+
+// Defined in BOTH arms of the #if below: the console's own line handler when it
+// is compiled in, and an inert `false` when it is not. Returns true when the
+// console consumed the line.
+static bool    shell_dev_line(const char* line);
+// The console's accumulated forced-absence skew, 0 in the release build.
+static int32_t shell_skew_s(void);
+
+// Fill spec section 49's inputs from the device. EVERY line here is a read of
+// an accessor that already existed and that the console had never joined up.
+static void shell_fill_fields(DiagFields& f)
+{
+  diag_fields_clear(f);
+
+  f.free_heap  = (uint32_t)ESP.getFreeHeap();
+  f.min_heap   = (uint32_t)ESP.getMinFreeHeap();
+  f.max_alloc  = (uint32_t)ESP.getMaxAllocHeap();
+
+  f.now_epoch   = gt_now();
+  f.last_seen   = save_last_seen();
+  f.cal_state   = (uint8_t)gt_cal_state();
+  f.clock_valid = gt_is_valid() ? 1u : 0u;
+  f.skew_s      = shell_skew_s();
+
+  f.net_mode  = (uint8_t)net_mode();
+  f.net_phase = (uint8_t)net_phase();
+  f.net_err   = (uint8_t)net_last_err();
+  f.ap_up     = net_is_ap_up() ? 1u : 0u;
+
+  const GameState& gs = gs_state();
+  f.save_schema     = gs.box.schema_version;
+  f.content_version = gs.box.content_version;
+  f.save_migrated   = save_was_migrated() ? 1u : 0u;
+  f.quarantine_mask = save_quarantine_mask();
+  f.load_result     = god_load_result();
+
+  f.pebbles = box_count();
+  f.box_cap = box_capacity();
+
+  // ui/screen_network.h says in its own header that these exist "for tests and
+  // for the DIAG console", and the console had never read one of them.
+  f.scan_seen  = network_screen_seen();
+  f.scan_fresh = network_screen_fresh();
+  f.scan_phase = network_screen_phase();
+  f.scan_valid = (uint8_t)((f.scan_seen || f.scan_fresh ||
+                            f.scan_phase != (uint8_t)NSP_SCANNING) ? 1u : 0u);
+
+  f.kv_healthy     = kv_healthy(KV_MAIN) ? 1u : 0u;
+  f.kv_error       = (uint8_t)kv_error();
+  f.kv_write_fails = (uint8_t)kv_write_fails();
+
+  f.uptime_s = (uint32_t)(millis() / 1000UL);
+}
+
+// spec section 49's field list, one field per print so the stack buffer stays
+// small and nothing is ever truncated.
+static void shell_print_info(void)
+{
+  DiagFields f;
+  shell_fill_fields(f);
+  char b[144];
+  for (uint8_t i = 0; i < (uint8_t)DGD_FIELD_COUNT; ++i) {
+    DiagOut o;
+    diag_out_init(o, b, (uint16_t)sizeof(b));
+    diag_fmt_field(i, f, o);
+    Serial.print(b);
+    if (o.truncated) Serial.print(F("..."));
+    Serial.print(F("\r\n"));
+  }
+}
+
+// spec section 66's show_save. Read-only, so it ships.
+static void shell_print_save(void)
+{
+  const GameState& gs = gs_state();
+  const BoxHeader& b  = gs.box;
+  Serial.printf("save schema=%u proto=%u content=0x%04X seq=%lu\r\n",
+                (unsigned)b.schema_version, (unsigned)b.protocol_version,
+                (unsigned)b.content_version, (unsigned long)b.seq);
+  Serial.printf("save slots=0x%04X active=%u count=%u/%u next_id=%lu\r\n",
+                (unsigned)b.slot_mask, (unsigned)b.active_slot,
+                (unsigned)box_count(), (unsigned)box_capacity(),
+                (unsigned long)b.next_id_counter);
+  Serial.printf("save epoch=%lu flags=0x%02X quarantine=0x%04X migrated=%u\r\n",
+                (unsigned long)b.saved_epoch, (unsigned)b.flags,
+                (unsigned)save_quarantine_mask(),
+                (unsigned)(save_was_migrated() ? 1u : 0u));
+  // THE TWO DEAD COUNTERS, NAMED RATHER THAN QUIETLY PRINTED AS ZERO.
+  // BoxHeader.captures and .battles carry the comment "lifetime counters, spec
+  // section 49" and NOTHING IN THE TREE EVER INCREMENTS EITHER: their only
+  // reader is the device-id hash at persistence/game_state.cpp:47. They ship at
+  // zero, so the line says so instead of implying a measurement.
+  Serial.printf("save captures=%u battles=%u (no writer in the tree; they ship at 0)\r\n",
+                (unsigned)b.captures, (unsigned)b.battles);
+  for (uint8_t s = 0; s < (uint8_t)BOX_SLOTS; ++s) {
+    if (!box_occupied(s)) continue;
+    const PebbleInstance* p = box_peek(s);
+    if (!p) continue;
+    Serial.printf("  slot%u sp=%u lv=%u id=%08lX q=%u\r\n",
+                  (unsigned)s, (unsigned)p->species_id, (unsigned)p->level,
+                  (unsigned long)p->id,
+                  (unsigned)save_quarantine_reason(s));
+  }
+}
+
+// The read-only half. Runs in EVERY build; the dev half gets first refusal.
+static void shell_always_line(const char* line)
+{
+  DiagParse pr;
+  diag_parse(line, pr);
+  if (pr.err == DGP_EMPTY) return;
+
+  const bool dev = (GOD_MODE_ENABLED != 0);
+
+  if (pr.err != DGP_OK) {
+    // A command the release build knows about but cannot run is NOT "no such
+    // command": say which it is and why, or the operator retypes it.
+    const DiagCmdSpec* sp = diag_cmd_spec(pr.cmd);
+    if (pr.err == DGP_UNKNOWN) Serial.printf("[diag] no such command; try help\r\n");
+    else Serial.printf("[diag] %s: %s\r\n", sp ? sp->name : "?",
+                       diag_parse_err_str(pr.err));
+    return;
+  }
+
+  const DiagCmdSpec* sp = diag_cmd_spec(pr.cmd);
+  if (!sp) return;
+
+  switch (pr.cmd) {
+    case DGC_HELP: {
+      // Line by line, with a small buffer. The whole text is ~1.2 kB and the
+      // loop task's stack is not the place for it - a truncated help is a help
+      // that lies about what this build can do.
+      Serial.print(F("[diag] commands:\r\n"));
+      char b[96];
+      for (uint8_t i = 0; i <= (uint8_t)DGC_COUNT; ++i) {
+        DiagOut o;
+        diag_out_init(o, b, (uint16_t)sizeof(b));
+        if (!diag_help_line(i, dev, o)) continue;
+        Serial.print(b);
+        if (o.truncated) Serial.print(F("..."));
+        Serial.print(F("\r\n"));
+      }
+      return;
+    }
+    case DGC_INFO:      shell_print_info(); return;
+    case DGC_SHOW_SAVE: shell_print_save(); return;
+    case DGC_STALL:
+      shell_do_stall((pr.argc >= 1) ? pr.arg[0] : GOD_STALL_DEF_MS);
+      return;
+    default: break;
+  }
+
+  // Anything else is a mutating command. In the dev build shell_dev_line() has
+  // already had it and returned true, so reaching here means this build cannot
+  // run it - and it says which flag decides that rather than shrugging.
+  Serial.printf("[diag] %s needs GOD_MODE_ENABLED 1 (not in this build)\r\n",
+                sp->name);
+}
+
+static char    s_line[GOD_LINE_MAX + 1];
+static uint8_t s_linelen = 0;
+
+static void shell_line_reset(void)
+{
+  s_linelen = 0;
+  s_line[0] = '\0';
+}
+
+static void shell_line_service(void)
+{
+  while (Serial.available() > 0) {
+    const int c = Serial.read();
+    if (c < 0) break;
+    if (c == '\n' || c == '\r') {
+      if (s_linelen > 0) {
+        s_line[s_linelen] = '\0';
+        // The console first: it owns the genome paste and every mutating
+        // command. shell_dev_line() is inert in the release build.
+        if (!shell_dev_line(s_line)) shell_always_line(s_line);
+      }
+      shell_line_reset();
+      continue;
+    }
+    // An overlong line RESTARTS rather than truncating into a different
+    // command: "give_item 3<junk...>spawn 1" must not become a spawn.
+    if (s_linelen >= (uint8_t)GOD_LINE_MAX) { shell_line_reset(); continue; }
+    s_line[s_linelen++] = (char)c;
+    s_line[s_linelen]   = '\0';
+  }
+}
+
 #if GOD_MODE_ENABLED
 
-#include <string.h>
 #include <time.h>
 
 #include "../ui/render.h"        // the only U8G2 owner; never construct another one
@@ -197,7 +453,11 @@ static const GodGene GD_GENES[GOD_GENE_COUNT] = {
 // it is the one figure that says whether the ladder is really stopping the CPU
 // or only turning the panel off.
 #define GD_SYS_POWER    5
-#define GD_SYS_PAGES    6
+// P10-C1: spec section 49's FIELD LIST, on the panel rather than only on the
+// serial line, because a bench operator with two boards and no laptop is the
+// person this console is for.
+#define GD_SYS_INFO     6
+#define GD_SYS_PAGES    7
 
 // =============================================================================
 //  4. MODULE STATE
@@ -255,14 +515,14 @@ static int32_t  s_skew_total  = 0;        // what god mode has handed gt_skew_ad
 static AbsenceReport s_abs_rep;
 static bool     s_abs_done    = false;
 
-// Serial genome paste.
-static char     s_hex[GOD_HEX_LINE_MAX + 1];
-static uint8_t  s_hexlen      = 0;
-static char     s_hex_show[33];           // last dumped/loaded genome, 32 + NUL
-
-// Serial bench console (the `stall` command).
-static char     s_cmd[24];
-static uint8_t  s_cmdlen      = 0;
+// The last dumped/loaded genome, 32 hex + NUL, for the GSC_HEX panel.
+// THE TWO SERIAL BUFFERS THAT USED TO LIVE HERE ARE GONE (P10-C1): s_hex[49]
+// and s_cmd[24] each backed their own Serial.read() loop, both below the
+// GOD_MODE_ENABLED guard - so a release board was deaf and the two readers had
+// to be written not to fight each other. One s_line[57] above the guard
+// replaces both, which is 16 bytes of globals back and one reader instead of
+// two.
+static char     s_hex_show[33];
 
 // =============================================================================
 //  5. SMALL HELPERS
@@ -412,99 +672,271 @@ static void install_genome(const Genome& g)
 }
 
 // =============================================================================
-//  7. SERIAL GENOME PASTE (command 5, GENOMA / CARGAR)
+//  7. THE SERIAL COMMAND LAYER (P10-C1, spec sections 49 and 66)
+//
+//  ONE entry point, called from the single reader above the GOD_MODE_ENABLED
+//  guard. It returns true when it consumed the line, false to let the
+//  always-compiled read-only surface have it.
+//
+//  Everything with a right answer already happened in dev/diag_core.cpp before
+//  this function sees a command id: the parse, the range checks, the taint, the
+//  Box and bag mutations. What is left here is the four things a pure module
+//  cannot do - move the clock, push a screen, start the radio, write flash -
+//  and the phase log says plainly that THIS function is covered by no host
+//  test, because dev/godmode.cpp includes Arduino.h and no host binary
+//  compiles it.
 // =============================================================================
-static void hex_paste_service(void)
+
+// The one-deep navigation latch (godmode.h). A typed line cannot return a
+// GodEvt the way a gesture can, so it leaves one here and ui.cpp drains it.
+static uint8_t s_pending_evt = (uint8_t)GOD_EVT_NONE;
+static uint8_t s_pending_arg = 0;
+
+static void latch_evt(GodEvt e, uint8_t arg)
 {
-  if (!(s_console_page == GSC_HEX && s_hex_mode == GHX_LOAD)) return;
-
-  while (Serial.available() > 0) {
-    const int c = Serial.read();
-    if (c < 0) break;
-
-    if (c == '\n' || c == '\r') {
-      if (s_hexlen == 0) continue;
-      s_hex[s_hexlen] = '\0';
-      Genome g;
-      if (genome_from_hex32(s_hex, g)) {
-        install_genome(g);
-        s_console_page = GSC_GENOME;
-      } else {
-        toast((uint16_t)STR_ERR_GENOME);
-      }
-      s_hexlen = 0;
-      s_hex[0] = '\0';
-      continue;
-    }
-    if (c == ' ' || c == '\t') continue;
-    if (s_hexlen >= GOD_HEX_LINE_MAX) { s_hexlen = 0; s_hex[0] = '\0'; }   // restart
-    s_hex[s_hexlen++] = (char)c;
-    s_hex[s_hexlen]   = '\0';
-  }
+  s_pending_evt = (uint8_t)e;
+  s_pending_arg = arg;
 }
 
-// =============================================================================
-//  7b. SERIAL BENCH CONSOLE
-//      One command, `stall <ms>`, and it exists to be able to PROVE the
-//      timer-driven button sampler (input.cpp note 6) on real hardware: it
-//      busy-waits inside loop() for the requested number of milliseconds, so a
-//      press made during the stall must still be recognised - with its true
-//      duration - on the poll that follows. Without a way to create the stall
-//      on demand, the ring is untestable outside a debugger.
-//      The stall is bounded well under the 5 s task watchdog. This console runs
-//      whether or not the god screen is open, but never while the genome paste
-//      owns the serial line.
-// =============================================================================
-#define GOD_STALL_MAX_MS 3000UL
-
-static void do_stall(uint32_t ms)
+GodEvt god_take_evt(uint8_t& arg)
 {
-  if (ms > GOD_STALL_MAX_MS) ms = GOD_STALL_MAX_MS;
-  GOD_LOGF("[god] stall %lu ms begin\r\n", (unsigned long)ms);
-  const uint32_t t0 = millis();
-  while ((uint32_t)(millis() - t0) < ms) {
-    // Deliberately busy. yield() here would defeat the whole point.
-  }
-  GOD_LOGF("[god] stall end after %lu ms\r\n", (unsigned long)(millis() - t0));
+  const GodEvt e = (GodEvt)s_pending_evt;
+  if (e == GOD_EVT_NONE) return GOD_EVT_NONE;
+  arg = s_pending_arg;
+  s_pending_evt = (uint8_t)GOD_EVT_NONE;
+  s_pending_arg = 0;
+  return e;
 }
 
-static void run_cmd(const char* line)
+static int32_t shell_skew_s(void) { return s_skew_total; }
+
+// Print a sink. It lives BELOW the guard because shell_dev_line() is its only
+// caller: the always-compiled surface prints line by line with its own small
+// buffer, so a release build that carried this would carry a function nobody
+// calls - which -Wunused-function says out loud, and which is the honest
+// signal that a piece of the console leaked into the artefact.
+static void shell_print(const DiagOut& o)
 {
-  if (strncmp(line, "stall", 5) == 0) {
-    const char* a = line + 5;
-    while (*a == ' ' || *a == '\t') ++a;
-    uint32_t ms = 0;
-    while (*a >= '0' && *a <= '9') {
-      ms = ms * 10u + (uint32_t)(*a - '0');
-      if (ms > GOD_STALL_MAX_MS) { ms = GOD_STALL_MAX_MS; break; }
-      ++a;
+  if (!o.buf) return;
+  Serial.print(o.buf);
+  if (o.truncated) Serial.print(F("...[truncated]\r\n"));
+}
+
+// Persist what diag_exec() said it touched. The pure layer writes no flash -
+// game/box.h's rule is that persistence decides when a mutated blob lands - so
+// it reports and this commits.
+static void shell_commit(uint8_t commit)
+{
+  if (commit & DGCOMMIT_SLOTS) {
+    for (uint8_t sl = 0; sl < (uint8_t)BOX_SLOTS; ++sl) {
+      if (box_occupied(sl)) (void)gs_save_slot(sl, true);
     }
-    do_stall(ms);
+  }
+  if (commit & DGCOMMIT_ACTIVE) (void)gs_save_active(true);
+  if (commit & DGCOMMIT_BOX)    (void)gs_save_box();
+  if (commit & DGCOMMIT_INV)    (void)save_inventory(gs_state().inv);
+  if (commit & DGCOMMIT_CDS)    (void)save_cooldowns(gs_state().cds);
+}
+
+// -----------------------------------------------------------------------------
+// set_time <epoch>. IT MOVES THE SKEW, NEVER THE SYSTEM CLOCK, and the reason
+// is written at god_exit() thirty lines from here: every timestamp the console
+// wrote into SimView is in skewed time, so a gt_set_epoch() that jumped the
+// wall clock could leave last_seen_epoch in the FUTURE and underflow the next
+// absence computation. This is the same door SALTAR AUSENCIA uses.
+//
+// A BACKWARD set_time is refused rather than quietly clamped, for the same
+// reason: there is no honest way to un-live an hour the simulation has already
+// charged for.
+// -----------------------------------------------------------------------------
+static void run_set_time(uint32_t target, DiagOut& o)
+{
+  const uint32_t now = gt_now();
+  if (target <= now) {
+    diag_puts(o, "set_time refused: ");
+    diag_putu(o, target);
+    diag_puts(o, " is not after now=");
+    diag_putu(o, now);
+    diag_puts(o, " (the skew only moves forward; see god_exit())\n");
     return;
   }
-  GOD_LOGF("[god] commands: stall <ms>\r\n");
+  const uint32_t delta = (uint32_t)(target - now);
+  run_absence(delta);
+  diag_puts(o, "set_time +");
+  diag_putu(o, delta);
+  diag_puts(o, "s -> now=");
+  diag_putu(o, gt_now());
+  diag_puts(o, " steps=");
+  diag_putu(o, (uint32_t)s_abs_rep.steps);
+  diag_nl(o);
 }
 
-static void cmd_service(void)
+// -----------------------------------------------------------------------------
+// test_save_load (spec section 49). Three checks, and the middle one is the
+// point: sealing a blob and finding it valid proves nothing on its own, because
+// a seal that always said "ok" would pass too. So the command CORRUPTS its own
+// copy by one byte and requires pebble_blob_ok() to refuse it. The mutation is
+// built into the command instead of being something a person remembers to do.
+//
+// It does NOT read the blob back off flash. save_restore_checkpoint() is the
+// only read path and it REBINDS save_manager to whatever GameState it is handed
+// (save_manager.cpp:611-621), so a read-back into a scratch would leave the
+// live state unbound. Said here rather than implied by a missing line.
+// -----------------------------------------------------------------------------
+static void run_save_load(DiagOut& o)
 {
-  // The genome paste owns the line while it is open; never fight it.
-  if (s_console_page == GSC_HEX && s_hex_mode == GHX_LOAD) return;
+  const SimView* p = pet();
+  if (!p) { diag_puts(o, "test_save_load: no pet\n"); return; }
+  const uint8_t slot = box_active();
+  const PebbleInstance* live = (slot < (uint8_t)BOX_SLOTS) ? box_peek(slot) : nullptr;
+  if (!live) { diag_puts(o, "test_save_load: no active slot\n"); return; }
 
-  while (Serial.available() > 0) {
-    const int c = Serial.read();
-    if (c < 0) break;
-    if (c == '\n' || c == '\r') {
-      if (s_cmdlen > 0) {
-        s_cmd[s_cmdlen] = '\0';
-        run_cmd(s_cmd);
-      }
-      s_cmdlen = 0;
-      s_cmd[0] = '\0';
-      continue;
+  PebbleInstance copy = *live;
+  pebble_seal(copy);
+  const bool sealed_ok = pebble_blob_ok(copy);
+
+  PebbleInstance bad = copy;
+  bad.level = (uint8_t)(bad.level ^ 0x01u);       // one bit, anywhere under the CRC
+  const bool corrupt_refused = !pebble_blob_ok(bad);
+
+  const uint16_t fails_before = kv_write_fails();
+  const bool wrote  = gs_save_active(true);
+  const bool landed = save_pebble_landed();
+  const uint16_t fails_after = kv_write_fails();
+
+  diag_puts(o, "test_save_load seal=");     diag_putu(o, sealed_ok ? 1u : 0u);
+  diag_puts(o, " corrupt_refused=");        diag_putu(o, corrupt_refused ? 1u : 0u);
+  diag_puts(o, " wrote=");                  diag_putu(o, wrote ? 1u : 0u);
+  diag_puts(o, " landed=");                 diag_putu(o, landed ? 1u : 0u);
+  diag_puts(o, " wfails ");                 diag_putu(o, fails_before);
+  diag_puts(o, "->");                       diag_putu(o, fails_after);
+  diag_puts(o, " nvs=");                    diag_puts(o, kv_healthy(KV_MAIN) ? "OK" : "BAD");
+  diag_nl(o);
+}
+
+// The commands the pure layer handed back. Each one needs a device.
+static void run_deferred(const DiagParse& pr, DiagOut& o)
+{
+  switch (pr.cmd) {
+    case DGC_SET_TIME:
+      run_set_time(pr.arg[0], o);
+      return;
+
+    case DGC_START_BATTLE:
+      latch_evt(GOD_EVT_BATTLE, 0);
+      diag_puts(o, "start_battle: pushing the battle screen on BT_DIAG_SEED\n");
+      return;
+
+    case DGC_START_CREATOR:
+      latch_evt(GOD_EVT_CREATOR, 0);
+      diag_puts(o, "start_creator: pushing the creator portal\n");
+      return;
+
+    case DGC_SCAN_WIFI:
+      // The scan JOB is a ui/screen_network.cpp file-static and the radio has
+      // exactly one owner, so the console asks for the screen rather than
+      // starting a second scan behind its back.
+      latch_evt(GOD_EVT_SCAN, 0);
+      diag_puts(o, "scan_wifi: opening the network screen, which owns the job\n");
+      return;
+
+    case DGC_TEST_MINIGAME: {
+      const uint8_t idx = (pr.argc >= 1) ? (uint8_t)pr.arg[0] : 0u;
+      latch_evt(GOD_EVT_MINIGAME, idx);
+      diag_puts(o, "test_minigame ");
+      diag_putu(o, idx);
+      diag_nl(o);
+      return;
     }
-    if (s_cmdlen + 1u >= sizeof(s_cmd)) { s_cmdlen = 0; }   // overlong: restart
-    s_cmd[s_cmdlen++] = (char)c;
+
+    case DGC_TEST_SAVE_LOAD:
+      run_save_load(o);
+      return;
+
+    default:
+      // DGC_HELP / DGC_INFO / DGC_SHOW_SAVE / DGC_STALL are DCF_ALWAYS and were
+      // filtered out before this function; reaching here is a table drift.
+      diag_puts(o, "not runnable here\n");
+      return;
   }
+}
+
+static bool shell_dev_line(const char* line)
+{
+  // 1. THE GENOME PASTE OWNS THE LINE while GENOMA / CARGAR is open. It was a
+  //    second Serial.read() loop until P10-C1; now it is a line handler like
+  //    everything else, and it strips the spaces the old reader skipped.
+  if (s_console_page == GSC_HEX && s_hex_mode == GHX_LOAD) {
+    char hex[33];
+    uint8_t n = 0;
+    for (const char* c = line; *c; ++c) {
+      if (*c == ' ' || *c == '\t') continue;
+      if (n >= 32u) { n = 33u; break; }               // too long: refuse, do not clip
+      hex[n++] = *c;
+    }
+    if (n <= 32u) {
+      hex[n] = '\0';
+      Genome g;
+      if (genome_from_hex32(hex, g)) {
+        install_genome(g);
+        s_console_page = GSC_GENOME;
+        return true;
+      }
+    }
+    toast((uint16_t)STR_ERR_GENOME);
+    return true;
+  }
+
+  // 2. Everything else goes through the pure parser.
+  DiagParse pr;
+  diag_parse(line, pr);
+  if (pr.err != DGP_OK) return false;                 // the always-surface names it
+  const DiagCmdSpec* sp = diag_cmd_spec(pr.cmd);
+  if (!sp) return false;
+  if (sp->flags & DCF_ALWAYS) return false;           // help / info / show_save / stall
+
+  // A MUTATING TYPED COMMAND *IS* ENTERING GOD MODE, and it says so on the
+  // panel. Without this line a bench operator could `spawn 1` over a cable with
+  // the console never opened, and the top GOD_BAR_H rows - the thing godmode.h
+  // promises makes the state impossible to leave on by accident - would stay
+  // down. god_enter() is idempotent, marks the RTC nonce, prints the CSV header
+  // and taints the LIVING pet; the per-command diag_taint() marks what the
+  // command itself creates or edits, which is a different and narrower claim.
+  //
+  // The read-only surface is deliberately NOT behind this: reading a version
+  // number is not a cheat, and making it one would mean a release board and a
+  // dev board answered `info` differently for no reason.
+  if (sp->flags & DCF_MUTATES) god_enter();
+
+  DiagCtx ctx;
+  ctx.gs        = &gs_state();
+  ctx.now_epoch = gt_now();
+  ctx.cal       = (uint8_t)gt_cal_state();
+  ctx.have_sim  = (pet() != nullptr) ? 1u : 0u;
+
+  char b[224];
+  DiagOut o;
+  diag_out_init(o, b, (uint16_t)sizeof(b));
+  uint8_t commit = 0;
+  const uint8_t r = diag_exec(pr, ctx, o, commit);
+
+  if (r == (uint8_t)DGR_DEFER) {
+    run_deferred(pr, o);
+    shell_print(o);
+    return true;
+  }
+
+  shell_print(o);
+  if (r == (uint8_t)DGR_OK) {
+    shell_commit(commit);
+    // One CSV line after every state change, exactly as a gesture-driven
+    // command produces: a soak log must not have holes where the operator
+    // typed instead of pressed.
+    if (commit) god_dump_line();
+  } else if (r == (uint8_t)DGR_ERR_NO_PET) {
+    Serial.printf("[diag] %s: no active Pebble\r\n", sp->name);
+  }
+  return true;
 }
 
 // =============================================================================
@@ -584,9 +1016,9 @@ void god_begin(void)
   s_frozen      = false;
   s_skew_total  = 0;
   s_abs_done    = false;
-  s_hexlen      = 0;
-  s_hex[0]      = '\0';
   s_hex_show[0] = '\0';
+  s_pending_evt = (uint8_t)GOD_EVT_NONE;
+  s_pending_arg = 0;
 
   s_fh_moves    = 0;
   s_fh_worst    = 0;
@@ -594,6 +1026,7 @@ void god_begin(void)
 
   sim_set_time_scale(1u);
   heap_trend_begin();
+  shell_line_reset();
 
   if (boot_god_tainted()) {
     // The RTC nonce survived a soft reset that happened inside god mode. Do NOT
@@ -688,14 +1121,18 @@ uint8_t god_entry_progress(uint8_t screen_id)
 
 void god_service(void)
 {
-  // The bench console is not gated on god mode being ON: a stall has to be
-  // reachable from a plain serial terminal on a freshly flashed board.
-  cmd_service();
+  // The serial console is not gated on god mode being ON - a stall and a field
+  // list have to be reachable from a plain terminal on a freshly flashed board.
+  // UNTIL P10-C1 THAT SENTENCE WAS TRUE OF THIS BUILD AND FALSE OF THE ONE THAT
+  // SHIPS, because the reader it described sat below the #if: a release board
+  // never called Serial.available() at all. The reader now lives above the
+  // guard and BOTH god_service() bodies call it, which is the shape
+  // heap_trend_service() has had since P2-C12 and the shape the phase-6 defect
+  // taught (a default that lived in a dev-only function).
+  shell_line_service();
   heap_trend_service();
 
   if (!s_active) return;
-
-  hex_paste_service();
 
   const uint32_t now = millis();
 
@@ -827,8 +1264,7 @@ static GodEvt select_sub(void)
         }
         default:
           s_hex_mode = GHX_LOAD;
-          s_hexlen   = 0;
-          s_hex[0]   = '\0';
+          shell_line_reset();          // the shared reader owns the buffer now
           s_console_page   = GSC_HEX;
           GOD_LOGF("[god] %s\n", S(STR_GOD_PASTE));
           break;
@@ -1105,7 +1541,9 @@ static void draw_hex(void)
 
   if (s_hex_mode == GHX_LOAD) {
     rd_text_fit(2, 46, OLED_W - 4, RD_FONT_BODY, S(STR_GOD_PASTE));
-    rd_text_fit(2, 54, OLED_W - 4, RD_FONT_TINY, s_hex);
+    // The line the shared reader has accumulated so far. It was s_hex[] until
+    // P10-C1 collapsed the two serial buffers into one.
+    rd_text_fit(2, 54, OLED_W - 4, RD_FONT_TINY, s_line);
     rd_affordance(0, S(STR_AF_BACK));
   } else {
     rd_affordance(0, S(STR_AF_SEL));
@@ -1114,7 +1552,9 @@ static void draw_hex(void)
 
 static void draw_sys(void)
 {
-  char b[34];
+  // 34 until P10-C1; the spec 49 field lines dev/diag_core.cpp formats are
+  // longer than that and rd_text_fit() clips the PIXELS, not the bytes.
+  char b[64];
 
   switch (s_sys_page) {
     case GD_SYS_CLOCK: {
@@ -1245,7 +1685,11 @@ static void draw_sys(void)
       rd_text(2, 43, RD_FONT_TINY, b);
       break;
     }
-    default: {
+    // NAMED, not `default:`. Until P10-C1 the STORE page was served by the
+    // default arm, so adding a seventh page drew STORE under a new title and
+    // nothing said so. The default arm below is now the compile-time-unreachable
+    // one and it SAYS which page is missing instead of impersonating another.
+    case GD_SYS_STORE: {
       draw_title(S(STR_GOD_STORE));
       snprintf(b, sizeof(b), "nvs %s err=%02X", kv_healthy(KV_MAIN) ? "OK" : "BAD",
                (unsigned)kv_error());
@@ -1260,6 +1704,45 @@ static void draw_sys(void)
       rd_text(2, 51, RD_FONT_TINY, b);
       break;
     }
+    // -----------------------------------------------------------------------
+    // SPEC SECTION 49, THE FIELD LIST. Four rows of 128 px cannot hold twelve
+    // fields, so this page carries the FIVE that had no reader anywhere before
+    // this phase - build, save version, Pebble count, last scan, protocol -
+    // and the serial `info` command prints all twelve. The formatting is
+    // dev/diag_core.cpp's and tests/test_diag.cpp drives it; this arm only
+    // places the strings.
+    // -----------------------------------------------------------------------
+    case GD_SYS_INFO: {
+      draw_title(S(STR_GOD_INFO));
+      DiagFields f;
+      shell_fill_fields(f);
+      DiagOut o;
+
+      diag_out_init(o, b, (uint16_t)sizeof(b));
+      diag_fmt_field((uint8_t)DGD_BUILD, f, o);
+      rd_text_fit(2, 27, OLED_W - 4, RD_FONT_TINY, b);
+
+      diag_out_init(o, b, (uint16_t)sizeof(b));
+      diag_fmt_field((uint8_t)DGD_SAVE_VER, f, o);
+      rd_text_fit(2, 35, OLED_W - 4, RD_FONT_TINY, b);
+
+      diag_out_init(o, b, (uint16_t)sizeof(b));
+      diag_fmt_field((uint8_t)DGD_LAST_SCAN, f, o);
+      rd_text_fit(2, 43, OLED_W - 4, RD_FONT_TINY, b);
+
+      snprintf(b, sizeof(b), "pebbles %u/%u  proto %u  batt n/a",
+               (unsigned)f.pebbles, (unsigned)f.box_cap,
+               (unsigned)PROTOCOL_VERSION);
+      rd_text_fit(2, 51, OLED_W - 4, RD_FONT_TINY, b);
+      break;
+    }
+    default:
+      // Unreachable while GD_SYS_PAGES matches the arms above. It says the page
+      // number rather than drawing somebody else's panel.
+      draw_title(S(STR_GOD_INFO));
+      snprintf(b, sizeof(b), "no page %u", (unsigned)s_sys_page);
+      rd_text(2, 32, RD_FONT_BODY, b);
+      break;
   }
   rd_affordance(S(STR_AF_NEXT), 0);
 }
@@ -1311,8 +1794,13 @@ GodEvt   god_handle(Gesture g)                  { (void)g; return GOD_EVT_NONE; 
 void     god_draw(void)                         { }
 uint32_t god_time_scale(void)                   { return 1u; }
 void     god_dump_line(void)                    { }
-void     god_begin(void)                        { heap_trend_begin(); }
-void     god_service(void)                      { heap_trend_service(); }
+// BOTH of these call the same always-compiled helpers the GOD_MODE_ENABLED 1
+// bodies do. That is the whole structural lesson of the phase-6 defect, where
+// sim_set_time_scale()'s only callers were below the #if and the shipping build
+// ran sim_tick(0) for four phases: what the release artefact must still DO goes
+// above the guard, and both bodies call out to it.
+void     god_begin(void)                        { heap_trend_begin(); shell_line_reset(); }
+void     god_service(void)                      { shell_line_service(); heap_trend_service(); }
 uint8_t  god_entry_progress(uint8_t screen_id)  { (void)screen_id; return 0; }
 void     god_enter(void)                        { }
 void     god_exit(void)                         { }
@@ -1321,5 +1809,17 @@ bool     god_freeze_clock(uint8_t& h, uint8_t& m) { (void)h; (void)m; return fal
 bool     god_dump_enabled(void)                 { return false; }
 uint16_t god_frame_heap_moves(void)             { return 0; }
 int32_t  god_frame_heap_worst(void)             { return 0; }
+// P10-C1. There is no console to raise a navigation event and no forced
+// absence to accumulate a skew, so both are inert - INERT, not a lie: a stub
+// that answered anything else would make a caller act on a console that is not
+// there. (god_note_load()/god_load_result() are NOT stubbed: they live above
+// the guard because the SHIPPING build's `info` prints the boot LoadResult.)
+GodEvt   god_take_evt(uint8_t& arg)              { (void)arg; return GOD_EVT_NONE; }
+
+// The two functions the always-compiled reader forward-declares. This build has
+// no console, so no typed line is ever consumed by one and the read-only
+// surface above gets every line.
+static bool    shell_dev_line(const char* line)  { (void)line; return false; }
+static int32_t shell_skew_s(void)                { return 0; }
 
 #endif // GOD_MODE_ENABLED

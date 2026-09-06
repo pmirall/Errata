@@ -8,8 +8,30 @@
 //
 //  COMPILED ALWAYS. Entry is undocumented in the product:
 //  SCR_STATUS_B + both buttons held GOD_ENTER_HOLD_MS. With GOD_MODE_ENABLED
-//  set to 0 every entry point below still links, god_active() is permanently
-//  false and nothing of the console reaches flash.
+//  set to 0 every entry point below still links and god_active() is permanently
+//  false.
+//
+//  WHAT THE SHIPPING ARTEFACT ACTUALLY HAS (P10-C1, spec section 67
+//  "Diagnostics available"). tools/build_matrix.sh's `release` variant is
+//  GOD_MODE_ENABLED=0, and until this phase that meant SCR_DIAG was
+//  unreachable (god_entry_progress() returns 0, always, and ui.cpp:1658 is the
+//  only navigation to it in the tree), no serial reader ran at all, and the
+//  whole of the product's diagnostics was ONE `DIAG,heap,` line a minute plus
+//  six boot lines. The comment on the bench console even claimed a stall was
+//  "reachable from a plain serial terminal on a freshly flashed board", which
+//  was true of the dev build and false of the artefact - the phase-7 shape,
+//  where a sweep runs against a build the release does not execute.
+//
+//  So the module now splits, and dev/diag_core.h's DCF_ALWAYS flag is where the
+//  split is written down. ALWAYS COMPILED, release included:
+//      the heap trend line, `help`, `info` (the spec 49 field list),
+//      `show_save` and `stall <ms>` - three reads and one bounded busy-wait.
+//  GOD_MODE_ENABLED ONLY: the screen, every gesture, and every command that
+//  MUTATES anything (spec section 66's twelve and spec section 49's actions).
+//  The invariant DCF_ALWAYS => NOT DCF_MUTATES is static_asserted in
+//  dev/diag_core.cpp and walked by tests/test_diag.cpp, so "dangerous debug
+//  commands do not ship in the normal release UI" is a checked property rather
+//  than a promise in a comment.
 //
 //  HONESTY RULES this module enforces, not just implements:
 //   - The system clock is NEVER touched. Time travel is gt_skew_add() only.
@@ -66,10 +88,17 @@
 #define GOD_TOAST_MS           1600UL
 #endif
 
-// Serial paste buffer for "GENOMA / CARGAR". 32 hex chars + slack for spaces
-// and a CR/LF; anything longer is discarded and the line restarts.
-#ifndef GOD_HEX_LINE_MAX
-#define GOD_HEX_LINE_MAX       48
+// THE ONE SERIAL LINE BUFFER (P10-C1). It backs the whole command layer AND the
+// "GENOMA / CARGAR" genome paste, which is why it must clear 32 hex chars plus
+// slack for spaces and a CR/LF. It replaced GOD_HEX_LINE_MAX (48) and a second
+// 24-byte buffer for the bench console; those were two Serial.read() loops that
+// each had to be written not to fight the other, and both sat below the
+// GOD_MODE_ENABLED guard, so a release board never read a byte.
+//
+// An overlong line RESTARTS rather than truncating: a clipped
+// "give_item 3<junk>spawn 1" must not become a spawn.
+#ifndef GOD_LINE_MAX
+#define GOD_LINE_MAX           56
 #endif
 
 // -----------------------------------------------------------------------------
@@ -82,8 +111,11 @@
 // "FIJAR STAT" offers 0 / 25 / 50 / 100.
 #define GOD_STATVAL_COUNT      4
 
-// The root list is the seven surviving god commands plus an
-// explicit exit row. HOLD_R leaves the SCREEN (god mode stays on, and stays visible); the
+// The root list is the EIGHT surviving god commands plus an explicit exit row.
+// (It said "seven" from P2-C7b until P10-C1; P4-C4's test_battle made it eight
+// and GOD_CMD_COUNT has been 8 in config.h since. The static_assert at the
+// bottom of this header is what actually holds the number - this line is prose
+// and prose drifts, which is exactly what it did.) HOLD_R leaves the SCREEN (god mode stays on, and stays visible); the
 // exit row leaves the MODE.
 #define GOD_MENU_ROWS          (GOD_CMD_COUNT + 1)
 
@@ -100,8 +132,16 @@ enum GodEvt : uint8_t {
   GOD_EVT_BATTLE,     // test_battle (spec section 49): PUSH SCR_BATTLE on top of
                       // the console, which the caller must arm with the fixed
                       // BT_DIAG_SEED. The console stays underneath, so B walks
-                      // back into it - this is the third and last thing this
-                      // module cannot do for itself.
+                      // back into it.
+  // P10-C1. Spec section 66 asks for start_creator, scan_wifi and (through
+  // section 49's action list) test_minigame. All three are NAVIGATION, which is
+  // the one thing this module has never been able to do for itself, so they
+  // join test_battle rather than growing a second mechanism. They arrive from a
+  // TYPED LINE rather than a gesture, so god_handle() cannot return them - see
+  // god_take_evt() below.
+  GOD_EVT_CREATOR,    // start_creator: push SCR_CREATOR
+  GOD_EVT_SCAN,       // scan_wifi: push SCR_NETWORK, which owns the scan job
+  GOD_EVT_MINIGAME,   // test_minigame <n>: ui_start_minigame(arg)
   GOD_EVT_COUNT
 };
 
@@ -204,6 +244,39 @@ bool     god_dump_enabled(void);
 // -----------------------------------------------------------------------------
 uint16_t god_frame_heap_moves(void);   // frames whose free heap differed from the last
 int32_t  god_frame_heap_worst(void);   // the widest delta seen, in bytes
+
+// -----------------------------------------------------------------------------
+//  P10-C1: THE SERIAL COMMAND LAYER'S ONE OUTPUT CHANNEL
+//
+//  god_handle() returns what a GESTURE asked for. A typed line arrives from
+//  god_service(), which returns void and is called from app/app.cpp's loop -
+//  nowhere near the screen stack. So a line that asks for navigation LATCHES an
+//  event here and ui.cpp drains it once per frame through the SAME switch that
+//  handles god_handle()'s result. One latch deep: a second event before the
+//  first is drained replaces it, because a queue of console navigations is a
+//  queue of surprises.
+//
+//  Returns GOD_EVT_NONE and leaves `arg` alone when there is nothing pending.
+//  `arg` carries GOD_EVT_MINIGAME's index and is 0 for every other event.
+// -----------------------------------------------------------------------------
+GodEvt  god_take_evt(uint8_t& arg);
+
+// -----------------------------------------------------------------------------
+//  P10-C1: THE BOOT LOAD RESULT, RECORDED INSTEAD OF DROPPED
+//
+//  app/app.cpp took the boot LoadResult as a LOCAL, printed it once inside one
+//  Serial.printf and let it go out of scope. Spec section 49 asks for a "Last
+//  error" field and the single most useful thing that field can say - "this
+//  boot came back LOAD_RECOVERED_PAIR" - was therefore unreachable from any
+//  screen and from any command, for ever, on every build.
+//
+//  ONE BYTE, AND IT LIVES ABOVE THE GOD_MODE_ENABLED GUARD ON PURPOSE. That is
+//  the whole structural lesson of the phase-6 defect: what the SHIPPING artefact
+//  needs must not sit inside the console's #if. The release build calls
+//  god_note_load() from the same line of app.cpp and `info` prints it.
+// -----------------------------------------------------------------------------
+void    god_note_load(uint8_t load_result);   // a LoadResult, from app_setup()
+uint8_t god_load_result(void);
 
 // Compile-time sanity on the constants this module contracts against.
 static_assert(GOD_SCALE_COUNT == 5, "godmode.h: the speed ring is five wide");
