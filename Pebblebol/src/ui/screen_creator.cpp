@@ -24,6 +24,32 @@
 #define CR_MANUAL_MS    10000UL
 #define CR_REBUILD_MS    1000UL
 
+// The spec section 34 stack, as BASELINES in the right-hand column. Named
+// because the two that matter are load-bearing and a magic number in the middle
+// of a render function is where a layout silently walks off a 64-row panel:
+//   CR_ROW_PIN_VAL is a GF_BIG baseline and that face has a 16 px ascent, so it
+//   occupies rows CR_ROW_PIN_VAL-15 .. CR_ROW_PIN_VAL; and
+//   CR_ROW_HINT + 1 must stay above UI_AFFORD_Y or the last line lands in the
+//   affordance strip.
+// The static_asserts below are what hold both, so the panel is checked at
+// compile time and not only by tests/golden/screens/creator_portal.pbm.
+#define CR_ROW_SCAN         7
+#define CR_ROW_WHAT        15
+#define CR_ROW_PIN_LBL     24
+#define CR_ROW_PIN_VAL     44
+#define CR_ROW_HINT        53
+#define CR_ROW_WAIT        26      // the "not up yet" branch: one block, no stack
+
+static_assert(CR_ROW_PIN_VAL - GFX_ASC_BIG + 1 > CR_ROW_PIN_LBL,
+              "the big PIN digits overlap the PIN label");
+static_assert(CR_ROW_HINT - GFX_ASC_BODY + 1 > CR_ROW_PIN_VAL,
+              "the hint line overlaps the big PIN digits");
+static_assert(CR_ROW_HINT < UI_AFFORD_Y,
+              "the hint line lands in the affordance strip");
+static_assert(CR_ROW_SCAN - GFX_ASC_BODY + 1 >= 0, "the headline is off the top of the panel");
+static_assert(CR_ROW_WAIT + 2 * GFX_LINE_BODY < UI_AFFORD_Y,
+              "the three wrapped \"Conectando...\" lines reach the affordance strip");
+
 static uint8_t  s_mod[QR_BUF_BYTES];
 static uint8_t  s_size     = 0;
 static uint8_t  s_variant  = 0;          // 0 = the URL, 1 = join-the-AP
@@ -34,6 +60,18 @@ static char     s_key[CREATOR_TEXT_MAX]; // the payload the cached symbol encode
 
 uint8_t creator_variant(void) { return s_variant; }
 void    creator_set_variant(uint8_t v) { s_variant = (uint8_t)(v ? 1u : 0u); s_key[0] = '\0'; }
+
+// THE EXACT BYTES THE SYMBOL ON SCREEN ENCODES. Exported for the same reason
+// creator_variant() is - a host test has no scanner - but it buys something
+// creator_variant() cannot: spec section 39 says the QR carries no secret, and
+// the only way to hold that is to read the payload back and look. The gate in
+// tools/check.sh greps src/networking for a formatted query parameter, which
+// catches net_url() growing a "?k=" again and CANNOT see this file at all: a
+// PIN appended HERE, in the one function that decides what is encoded, would
+// pass every check in the tree. tests/test_screens.cpp's
+// creator_payload_carries_no_pin_for_any_pin is what closes that, and this is
+// the seam it reads through. Empty when nothing has been encoded.
+const char* creator_payload(void) { return s_key; }
 
 // -----------------------------------------------------------------------------
 //  THE PAYLOAD
@@ -224,29 +262,69 @@ void creator_render(void) {
   const int16_t rx = CR_COL_X;
   const int16_t rw = CR_COL_W;
 
-  gfx_text_fit(GF_BODY, rx, 8, rw, S(STR_CREATOR_TITLE));
-  gfx_text_fit(GF_TINY, rx, 15, rw, S(STR_CREATOR_PHASE));
-
-  char pin[16];
-  snprintf(pin, sizeof(pin), "%04u", (unsigned)(in.pin % 10000u));
-
+  // ---- THE SPEC SECTION 34 SCREEN -------------------------------------------
+  //
+  //      SCAN ME / [QR CODE] / PIN: 1234 / Scan with your phone
+  //
+  // and, in the same breath, "do not clutter this screen with unrelated UI".
+  // The four lines are stacked in the 62 px column beside the symbol because
+  // the symbol is 62 px tall on a 64-row panel and there is nowhere else for
+  // them to go; the ORDER and the CONTENT are the spec's.
+  //
+  // WHAT WAS REMOVED TO GET THERE, because a removal is the part of a layout
+  // change nobody can see afterwards:
+  //   * "Creador - Fase 8" (STR_CREATOR_PHASE, now deleted). It said the page
+  //     this screen points at did not exist yet. It does.
+  //   * "Conectate a la red:" above the SSID. The line under ESCANEAME is the
+  //     SSID or the address, and which one it is says which symbol is up.
+  //   * The IP printed alongside the SSID at all times. Both were on screen
+  //     together while the symbol could only be one of them, so the pair
+  //     contradicted the picture every five seconds.
+  //
+  // THE PIN IS DRAWN HERE AND IS NOT IN THE SYMBOL (spec section 39). A QR is
+  // photographed, forwarded and posted; a four-digit number a person reads off
+  // a screen they are standing in front of is the authorisation layer. build()
+  // above encodes in.url or the SSID and nothing else, and
+  // tests/test_screens.cpp's creator_payload_carries_no_pin_for_any_pin holds
+  // that for all 9,999 PINs cg_mint_pin() can produce.
   if (in.ap_up) {
-    gfx_text_wrap(GF_BODY, rx, 24, rw, GFX_LINE_BODY, 2, S(STR_WEB_AP_HINT));
-    gfx_text_fit(GF_TINY, rx, 41, rw, in.ssid);
-    gfx_text_fit(GF_TINY, rx, 48, rw, in.ip);
-    // The PIN used to be drawn only in the STA branch, while this screen tells
-    // the user to open the address by hand - so a hand-typed URL hit the PIN
-    // prompt with the PIN shown nowhere.
-    {
-      char line[24];
-      snprintf(line, sizeof(line), "%s %s", S(STR_WEB_PIN), pin);
-      gfx_text_fit(GF_BODY, rx, 55, rw, line);
+    gfx_text_fit(GF_BODY, rx, CR_ROW_SCAN, rw, S(STR_CREATOR_SCAN));
+
+    // WHICH SYMBOL IS ON SCREEN, in the words of the thing it encodes: the
+    // network name while the "join me" symbol is up, the address while the URL
+    // symbol is up. GF_TINY is the ASCII-only 4x6 and both of these are ASCII
+    // by construction (AP_SSID_PREFIX plus hex; a dotted quad), which is the
+    // one thing that font is for - no Spanish prose is drawn in it.
+    gfx_text_fit(GF_TINY, rx, CR_ROW_WHAT, rw,
+                 (s_variant == 1) ? in.ssid : in.ip);
+
+    gfx_text_fit(GF_BODY, rx, CR_ROW_PIN_LBL, rw, S(STR_WEB_PIN));
+
+    // THE DIGITS AT 9x19 SO THEY CAN BE READ AT ARM'S LENGTH, which is the
+    // posture this screen is used in: the device is on the table and the phone
+    // is in your hands. GF_BIG is logisoso16_tn - DIGITS ONLY, 18 glyphs - so
+    // the sentinel is NOT drawn in it: web_pin() answers 0 for "none issued
+    // yet" and "----" in a digits-only face is four missing glyphs. The body
+    // font draws the sentinel instead, exactly as ui_info_lines() does on the
+    // DIAG screen, and for the same reason: four zeros would be a screen
+    // stating a PIN that does not exist.
+    if (in.pin == 0u) {
+      gfx_text_fit(GF_BODY, rx, CR_ROW_PIN_VAL, rw, "----");
+    } else {
+      char pin[CREATOR_PIN_DIGITS + 1];
+      snprintf(pin, sizeof(pin), "%04u", (unsigned)(in.pin % (unsigned)WEB_PIN_MAX));
+      gfx_text_fit(GF_BIG, rx, CR_ROW_PIN_VAL, rw, pin);
     }
+
+    gfx_text_fit(GF_BODY, rx, CR_ROW_HINT, rw, S(STR_CREATOR_WITH_PHONE));
   } else {
     // The station branch was here: address, PIN label, big PIN. It is gone with
     // the station itself (P5-C1). Two states remain - the access point is up,
-    // or it is not yet - and both are reachable.
-    gfx_text_wrap(GF_BODY, rx, 26, rw, GFX_LINE_BODY, 3, S(STR_WEB_CONNECTING));
+    // or it is not yet - and both are reachable. There is nothing to scan
+    // before it comes up, so this branch says what it is doing and nothing
+    // else; CREATOR_AP_WAIT_MS is what stops it saying it forever.
+    gfx_text_fit(GF_BODY, rx, CR_ROW_SCAN, rw, S(STR_CREATOR_TITLE));
+    gfx_text_wrap(GF_BODY, rx, CR_ROW_WAIT, rw, GFX_LINE_BODY, 3, S(STR_WEB_CONNECTING));
   }
 
   // Invariant 6, relocated: the symbol box owns the affordance rows, so the

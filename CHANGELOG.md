@@ -105,8 +105,49 @@ tag for a phase is cut only when its gate (`tools/check.sh`) and its variant mat
   registered under `src/networking` (the half a byte-diff structurally cannot see), and the page
   may not name an off-device host (§33 "works offline after connection").
 
+- **The CREATOR screen is spec §34's own screen (P8-C5).** "ESCANÉAME" / the symbol / `PIN` in
+  9×19 digits / "Con el móvil", down the 62 px column beside the 62 px symbol, with the line under
+  the headline naming whichever of the two the symbol currently encodes — the SSID while the
+  "join me" symbol is up, the address while the URL symbol is up. §34's "do not clutter this
+  screen with unrelated UI" is why the connection hint and the always-on IP line are gone with the
+  placeholder. **+26 B of flash and ZERO globals, on every variant.** The five row baselines carry
+  four `static_asserts` (the digits may not overlap the label, the hint may not overlap the digits,
+  the hint may not land in the affordance strip, the headline may not run off the top), so the
+  panel is checked by the compiler and not only by the golden.
+- **`creator_payload()` — the bytes the symbol actually encodes, and the §39 test that reads
+  them.** `tools/check.sh`'s "no secret in the QR" gate greps `src/networking`, which is where
+  `net_url()`'s old `?k=` lived and is **not** where `ui/screen_creator.cpp` is: a PIN appended in
+  `build()`, the one function that decides what `qr_encode()` is handed, would have shipped with
+  the gate green. Three host cases close it, the middle one exhaustively — **the payload is
+  byte-identical at all 9,999 PINs `cg_mint_pin()` can produce, both symbols.** A substring search
+  would have been the wrong test: `PEBBLEBOL-1234` is an ordinary real SSID.
+- **`tools/creator_smoke.sh` — the bench instrument for four §67 boxes.** All seven §38 routes over
+  curl, a body over `CS_BODY_MAX` answered 413 and one over `CS_BODY_DRAIN_MAX` answered with a
+  closed socket, five wrong PINs then a sixth refused as locked (and the lockout refusing the
+  correct PIN too), and the portal dying on schedule under 5 minutes of **unauthenticated** polling.
+  **It binds nothing — it speaks HTTP to a device that ran `app_setup()`** — and it therefore
+  cannot run in a build environment, so it ticks nothing here. `--variant` is required and has no
+  default (`docs/budget.md` §8), every constant is read out of the header that owns it, and phase 1
+  refuses to proceed unless the board's API version, `FW_VERSION`, `CONTENT_VERSION`, advertised
+  body cap and served page length all match this tree.
+- **Three more gates in `tools/check.sh`:** `creator_smoke.sh --dry-run` must still parse the tree
+  (a renamed macro fails the gate by name instead of failing at the bench), the set of routes it
+  probes must EQUAL the set `src/networking` registers **in both directions**, and it may not name
+  a loopback host — a green run against a mock is the fixture-that-is-not-the-firmware defect this
+  project has hit three times.
+
 ### Fixed
 
+- **A test named `creator_payload_carries_no_pin` did not read the payload (P8-C5).** It asserted
+  three things about `CreatorInfo.url` — no `k=`, no `1234`, equal to `http://192.168.4.1/` — all
+  of which the host fixture types into that field forty lines above. It could not fail for the
+  reason its name gave: a PIN appended inside `build()`, between reading `in.url` and encoding the
+  symbol, left every check green. Replaced by three cases that read `creator_payload()`, and the
+  surviving half renamed to what it holds
+  (`creator_join_string_fits_the_version_2_byte_budget`).
+- **`STR_CREATOR_PHASE` was Spanish prose in an ASCII-only font.** "Creador - Fase 8" was drawn in
+  `GF_TINY` (`u8g2_font_4x6_tr`), which `strings_es.h`'s own rendering rules reserve for "version
+  strings, IPs and hex". The string is deleted with the placeholder it belonged to.
 - **The CREATOR screen was timed out from under the user after 20 seconds.** `SCR_CREATOR` had
   the default screen flags, so invariant 3's navigation auto-return applied to the one screen
   whose whole purpose is that the user is looking at a phone instead of pressing buttons:

@@ -2580,3 +2580,159 @@ The fake device in the harness is a fake, and the file says how: **no PIN lockou
 limiter, no body cap, no idle timer and no flash.** Each of those is driven by a host binary
 (`tests/test_creator_gate.cpp`, `tests/test_creator_api.cpp`) or is still unobserved, and a green
 browser run says nothing about any of them.
+
+---
+
+## P8-C5 — the §34 screen, and a bench script that refuses to pretend (recorded 2026-09-06)
+
+### 1. THE SCREEN IS SPEC §34's FOUR LINES, AND THE PLACEHOLDER IS DELETED RATHER THAN EDITED
+
+§34 draws the screen literally: `SCAN ME` / `[QR CODE]` / `PIN: 1234` / `Scan with your phone`,
+followed by "do not clutter this screen with unrelated UI". The symbol is 62 px on a 64-row panel,
+so the stack runs down the right-hand column beside it rather than under it; the order and the
+content are the spec's.
+
+Three things were **removed** to get there, and a removal is the half of a layout change nobody
+can see afterwards:
+
+* `STR_CREATOR_PHASE` — "Creador - Fase 8". It existed to say the page this screen points at did
+  not exist yet. It does. The string is **deleted from `strings_es.h`**, not repurposed, so the
+  enum and the array move together and nothing is left holding a stale sentence. It was also the
+  one Spanish prose string in the tree drawn in `GF_TINY`, which is the ASCII-only 4x6 face —
+  `strings_es.h`'s own rendering rule says that font is for "version strings, IPs and hex".
+* "Conéctate a la red:" above the SSID. The line under the headline **is** the SSID or the
+  address, and which of the two it is says which symbol is currently up.
+* The IP printed alongside the SSID at all times. Both were on screen together while the symbol
+  could only ever be one of them, so the pair contradicted the picture every five seconds.
+
+The PIN is drawn at 9×19 (`GF_BIG`, `logisoso16_tn`) because the posture this screen is used in
+is "device on the table, phone in your hands". That face is **digits only, 18 glyphs**, so the
+`0` sentinel — `web_pin()`'s "none issued yet" — is drawn as `----` in the body font instead:
+four missing glyphs is what a digits-only face makes of a dash, and `0000` would be a screen
+stating a PIN that does not exist. `ui_info_lines()` on the DIAG screen already made that call
+and this follows it.
+
+The five baselines are `#define`s with **four `static_assert`s** over them, so the panel is
+checked at compile time and not only by the golden: the big digits may not overlap the label, the
+hint may not overlap the digits, the hint may not land in the affordance strip, and the headline
+may not run off the top. Moving `CR_ROW_HINT` from 53 to 57 stops the build by name (mutation
+tested), which is the failure a `.pbm` diff reports as 891 changed pixels.
+
+### 2. `creator_payload()` EXISTS BECAUSE THE §39 GATE CANNOT SEE THE FILE THAT DECIDES THE PAYLOAD
+
+`tools/check.sh` has held §39 ("do not put secrets in the QR") since P8-C1 with a grep for a
+formatted query parameter **under `src/networking`** — the directory `net_url()`'s old
+`"http://%s/?k=%04u"` lived in. `ui/screen_creator.cpp` is not in that directory and is not in
+that grep, and `build()` is the one function in the tree that decides what `qr_encode()` is
+handed. **A PIN appended there would have shipped with the whole gate green.**
+
+So the screen exports the bytes it encoded, and `tests/test_screens.cpp` reads them back. Three
+cases, and the middle one is the property:
+
+* the payload is exactly `WIFI:S:PEBBLEBOL-1234;;` or `http://192.168.4.1/`, by variant;
+* **the payload is byte-identical at every PIN `cg_mint_pin()` can produce — all 9,999 of them,
+  both symbols.** A substring search for the digits would have been the obvious test and is the
+  wrong one: the SSID is `AP_SSID_PREFIX` plus four hex characters of the device id, so
+  `PEBBLEBOL-1234` is an ordinary real SSID and searching it for "1234" reports a leak that is
+  not there. "The bytes do not depend on the PIN" has no false positive and is strictly stronger.
+* no `?`, `=` or `&` in either payload — a query parameter of **any** name, which is the claim
+  the `src/networking` grep makes about one file and this makes about the encoder's input.
+
+The sweep costs about 4.5 s of the host suite because each iteration re-encodes two symbols. That
+is paid once per gate run against a firmware build measured in minutes, and it buys the exhaustive
+form of the only §39 claim this tree can check.
+
+### 3. THE TEST NAMED `creator_payload_carries_no_pin` DID NOT READ THE PAYLOAD
+
+It was already in `tests/test_screens.cpp`. It called `ui_creator_info()` and asserted three
+things about `in.url`: no `"k="`, no `"1234"`, equal to `"http://192.168.4.1/"`. **All three are
+things the fixture forty lines above types into that field.** It could not fail for the reason its
+name gave — a PIN appended inside `build()`, between reading `in.url` and encoding the symbol,
+leaves every one of them green — and the fixture's own comment had already admitted the shape of
+the problem ("a test asserting 'no k= in the payload' would only be asserting what the fixture
+typed") without anyone noticing that the test right there was doing exactly that.
+
+It is **replaced**, not supplemented, and renamed to what it actually holds:
+`creator_join_string_fits_the_version_2_byte_budget` keeps the half that was never about the
+fixture — the join string must stay inside QR version 2's 32 B budget, because 33 B forces
+version 3 → 29 modules → 70 px on a 64-row panel — and now measures `creator_payload()` rather
+than a string it rebuilt itself. This is the project's recurring defect found in its own
+regression suite, and it is written down rather than quietly repaired.
+
+### 4. `tools/creator_smoke.sh` DRIVES A BOARD, AND THERE IS DELIBERATELY NO WAY TO RUN IT HERE
+
+Phase 6 shipped four phases of frozen game time because a default lived in a dev-only function.
+Phase 7's fifteen-point power-cut sweep ran against a `save_manager` the release artefact does not
+execute, because the FIXTURE bound a null clock. The instruction that comes out of both is that a
+harness must bind what `app_setup()` binds — and the honest answer for an HTTP API is that **it
+must not be a harness at all.** This script binds nothing: it speaks HTTP to a device that ran
+`app_setup()`, so the wiring is not reproduced, it *is* the wiring — the same `web_bind_config()`,
+the same `web_begin(WEB_PORT)`, the same single 2 KB `CreatorBody`, the same
+`rng_seed_all(esp_random())`.
+
+That decision has a cost and the cost is the point: **it cannot run in the build environment, so
+nothing it asserts is ticked by this chunk.** There is no `--fake`, no mock server and no loopback
+default, and `tools/check.sh` fails if `127.0.0.1`, `localhost` or `::1` ever appears in the file
+(mutation tested). The one edit that would turn this into the defect it exists to avoid is
+pointing it at a stub so it can go green in CI.
+
+What the script *does* control, because it can:
+
+* **`--variant` is REQUIRED and has no default.** `docs/budget.md` §8 records a phase-7 exit that
+  quoted a dev build against a shipping one; this makes the artefact impossible to omit, and it is
+  printed in the run header and in the final line.
+* **Every constant is read out of the header that owns it** — `CS_BODY_MAX`,
+  `CS_BODY_DRAIN_MAX`, `CREATOR_PIN_FAIL_MAX`, `CREATOR_PIN_LOCK_MS`, `CREATOR_IDLE_S_DEFAULT`,
+  `WEB_RATE_*`, `CREATOR_API_VERSION`, `FW_VERSION`, `CONTENT_VERSION` — and a lookup that finds
+  nothing is exit 2 naming the macro. A bench script that types `2048` keeps asserting `2048`
+  after somebody moves the cap, and then fails at the bench for a reason that has nothing to do
+  with the device.
+* **It checks that the board is running this tree before it asserts anything about it.** Phase 1
+  compares the API version, `FW_VERSION`, `CONTENT_VERSION`, the advertised `CS_BODY_MAX` and the
+  page's exact `Content-Length` (measured out of `index_html.h`'s raw string literal, which is
+  `sizeof(INDEX_HTML) - 1` = 42,247 B — two more than the 42,245 `gen_index_html.py` prints,
+  because the literal's own opening and closing newlines are part of it). A stale board fails at
+  the first phase instead of producing a bench result about firmware nobody has.
+* **It states its side effects in its own banner**: it sets the device clock, it creates one
+  Pebble called SMOKE, and it drives the PIN failure counter to the lockout — and then waits
+  `CREATOR_PIN_LOCK_MS` and authorises successfully, so the device is not left armed.
+
+### 5. THE FAILURE ARITHMETIC IN THE LOCKOUT PHASE, AND WHY IT IS WRITTEN OUT
+
+`web_pin_ok()` reads an absent `X-Pin` as the empty string and hands it to the same `cg_verify()`,
+so **"no PIN" is a counted failure, exactly like a wrong one.** The first draft of the script
+probed the headerless case and the malformed case and then ran `CREATOR_PIN_FAIL_MAX - 2` wrong
+PINs, on the assumption that two failures had already happened; the count was off, and the run
+would have reported "locked" where it expected "pin" and blamed the device.
+
+The shape that survives makes the arithmetic unable to be wrong instead of getting it right: each
+probe is followed by an authorised request that clears the counter, and the lockout run is then
+exactly `CREATOR_PIN_FAIL_MAX` consecutive wrong PINs — each answered `"pin"`, the last of them
+arming the lockout — followed by one more attempt that must be answered `"locked"`. It then
+asserts that **the lockout refuses the correct PIN too**, which is the property rather than an
+inconvenience: a gate that let the right PIN through while locked would let an attacker who
+guessed it through.
+
+### 6. THE IDLE PHASE POLLS WITH UNAUTHENTICATED TRAFFIC ON PURPOSE
+
+`GET /api/schema` is the one ungated route and `cg_verify()` success is the only thing that moves
+`last_seen_ms`, so a poll every 15 s for the whole `creator_idle_s` budget is not just a way to
+watch the portal die — it is the strongest available form of `creator_gate.h`'s claim that
+**anyone in radio range cannot hold the access point up by fetching one URL every 299 s.** The
+phase asserts **both** halves, because either alone is satisfied by a broken feature: still
+serving one poll before the budget (it does not die early), and gone by the budget plus a minute
+(it does die). A portal that never comes back up satisfies the second; a portal that never dies
+satisfies the first.
+
+### 7. WHAT WAS EXERCISED HERE AND WHAT IT IS WORTH
+
+The script's **bash** was driven end to end against a throwaway stub in a scratch directory — all
+four phases, both branches of the idle assertion, the 413 path, the socket-close path, the full
+lockout including the 63 s wait — and that found three real defects in it: two whitespace-brittle
+JSON readers, the failure arithmetic in §5 above, and a `die()` inside `$(...)` that exited the
+subshell and let a missing macro print an error and then exit 0 (the gate-that-cannot-fail
+defect, written into the file whose subject is gates that cannot fail).
+
+**The stub was never committed, is not in `tools/check.sh`, and none of that is evidence about a
+device.** It proves the script runs. Whether the firmware behaves is a bench question and the
+boxes stay open.

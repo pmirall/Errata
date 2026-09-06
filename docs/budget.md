@@ -760,3 +760,82 @@ emit a byte array), that `Accept-Encoding` has to join `collectHeaders()` with a
 for the captive-portal probe, and that `curl http://192.168.4.1/` stops being readable.
 **Take it when the raw number actually crosses; do NOT raise `WEB_HTML_MAX` as the first move,
 because the cap is the only thing that makes the overrun visible.**
+
+---
+
+## 12. Phase 8, chunk 5 — the §34 QR screen and the bench smoke script (measured 2026-09-06)
+
+**+26 flash / +0 globals on `release`, and the same +26 / +0 on every one of the six variants
+including `no-web` and `all-off`.** Every figure names its variant. `tools/build_matrix.sh`
+produced all six at this commit; the release `.elf` the sections below come from was built
+separately with `--variant release --define GOD_MODE_ENABLED=0`, and its size line was read back
+**before** any section was — the §8 rule, applied.
+
+| build | after P8-C4 | after P8-C5 | delta | against its cap |
+|---|---|---|---|---|
+| `baseline` | 1,338,776 / 59,572 | 1,338,802 / 59,572 | **+26 / +0** | 55.8 % / 66.2 % |
+| `release`  | 1,326,404 / 59,396 | **1,326,430 / 59,396** | **+26 / +0** | **82.9 % / 91.4 %** |
+| `no-web`   | 1,224,890 / 55,172 | 1,224,916 / 55,172 | **+26 / +0** | — |
+| `all-off`  | 580,588 / 26,612 | 580,614 / 26,612 | **+26 / +0** | — |
+
+### The 26 bytes, by section — and the base build was rebuilt to get them
+
+Twenty-six bytes is too small for `nm -S` to attribute honestly: the symbol that changed is a
+`static` render function the compiler is free to inline, and the strings are literals inside a
+table. So the previous commit's **release** `.elf` was rebuilt from a worktree at `c1fa052` with
+the identical command line, and the two were compared section by section with `objdump -h`:
+
+```
+                     c1fa052 (P8-C4)   this commit    delta
+  .flash.text          0x000ea9a8       0x000ea9ba     +18   code
+  .flash.rodata        0x00032cf4       0x00032cfc      +8   read-only data
+  .dram0.data          0x00003a24       0x00003a24      +0   initialised globals
+  .dram0.bss           0x0000ade0       0x0000ade0      +0   zeroed globals
+  .iram0.text          0x00010aec       0x00010aec      +0
+```
+
+**+18 + 8 = 26, which is exactly the figure the compiler printed** — the two measurements are
+independent and they agree.
+
+The rodata half is the string table. `nm -S -td` on both `.elf`s puts `ES` at `0x2300` = 8,960 B
+before and `0x2304` = 8,964 B after: **one more `StrId` pointer**, because `STR_CREATOR_PHASE`
+("Creador - Fase 8", the line saying the page did not exist yet) was deleted and `STR_CREATOR_SCAN`
+("ESCANÉAME") and `STR_CREATOR_WITH_PHONE` ("Con el móvil") were added. The literal text is
+−17 + 11 + 14 = **+8 B nominal**; the section moved **+8 B total including the +4 pointer**, so
+the linker packed 4 B of it into alignment slack the removed literal was already paying for. The
+18 B of code is the render function's new shape: one `if` on `in.pin == 0`, one `snprintf`, and
+five `gfx_text_fit` calls where there were four plus a `gfx_text_wrap`.
+
+**EVERY VARIANT PAID, INCLUDING THE TWO THAT PAID NOTHING FOR THE PAGE**, and the reason is worth
+writing down next to §11's contrary result: `core/strings_es.h` and `ui/screen_creator.cpp` are
+not behind `#if FEATURE_WEB`. The CREATOR screen is a screen — it compiles and draws in a build
+with no radio at all, where it says "Conectando..." and times out after `CREATOR_AP_WAIT_MS` —
+so a layout change is on the load path of every artefact this project ships. §11's `+0` on
+`no-web` was a property of `data/index_html.h` having exactly one `#if FEATURE_WEB` consumer, not
+a property of creator work in general.
+
+**THE GLOBALS LINE DID NOT MOVE, AND THE SECTION CROSS-CHECK IS THE MEASUREMENT.** `.dram0.data`
+0x3a24 = 14,884 plus `.dram0.bss` 0xade0 = 44,512 is exactly the 59,396 the compiler printed, and
+both are **byte-identical to §11's and to §10's**. The screen allocates nothing new: `s_key` was
+already there, `creator_payload()` returns a pointer to it, and the two new strings are `.rodata`.
+
+`tools/creator_smoke.sh` costs **zero bytes of firmware**. It is a bench instrument that runs on
+the operator's laptop and is not compiled into anything.
+
+### What it leaves
+
+`release` globals are at **59,396 of 65,000 — 5,604 B free, unchanged from §11, §10 and the
+phase-8 forecast.** Phase 8's running total on the globals line is **2,592 B** against §3's
+1.5–3.0 KB forecast for the whole phase, and phase 8 is now complete: **the number phase 9
+inherits is 5,604 B.**
+
+`release` flash is at **82.9 % with 273,570 B free**, where §11 left 273,596. This chunk spent
+26 B, which is 0.0095 % of the flash headroom it started with and the smallest allocation any
+chunk in this phase has made.
+
+**PHASE 8 SINCE P8-C0, ON THE RELEASE ARTEFACT** — and the variant is named because §8 exists:
+`34aab11` left `release` at 1,269,126 / 56,804 (`baseline` was 1,281,500 / 56,980 at the same
+commit, which is the pair of numbers §8 warns against confusing). It is now 1,326,430 / 59,396,
+so chunks 1 through 5 cost **+57,304 flash and +2,592 globals**. The globals figure is the running
+total §11 quotes and it is inside §3's 1.5–3.0 KB forecast for the whole phase; 41,658 of the
+57,304 flash bytes are the page blob, which §11 prices and gives the gzip lever for.

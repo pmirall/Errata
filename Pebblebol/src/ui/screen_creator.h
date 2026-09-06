@@ -24,9 +24,15 @@
 //  Both go through ui_back(), so leaving on a timeout runs exactly the leave
 //  hook a B press runs.
 //
-//  WHAT IT IS NOT YET: the creator itself. Sprite import, the custom-species
-//  editor and everything else the page will serve is Phase 8, so the screen
-//  says "Creador - Fase 8" rather than implying a page that is not there.
+//  WHAT IT SAYS SINCE P8-C5 IS SPEC SECTION 34's OWN SCREEN, and the placeholder
+//  line is gone: "SCAN ME / [QR CODE] / PIN: 1234 / Scan with your phone", laid
+//  out down the 62 px column beside the symbol because the symbol is 62 px tall
+//  on a 64-row panel. "Creador - Fase 8" said the page this screen points at did
+//  not exist yet; it does, so the line is deleted rather than kept saying a
+//  phase number. The section 34 instruction that comes with the layout - "do not
+//  clutter this screen with unrelated UI" - is why the connection hint and the
+//  always-on IP line went with it: the one line under the headline is whichever
+//  of the two the symbol currently encodes.
 //
 //  PURE translation unit: gfx.h, qr.h's portable encoder half, the strings and
 //  the two ui.h seams below. The QR modules are painted here with gfx_fill()
@@ -77,5 +83,14 @@ void creator_leave(void);
 // the tests and for the snapshot names.
 uint8_t creator_variant(void);
 void    creator_set_variant(uint8_t v);
+
+// The NUL-terminated payload the symbol currently on screen encodes, or "" when
+// nothing has been encoded. THE POINT OF IT IS SPEC SECTION 39: a QR is
+// photographed, forwarded and posted, so the PIN must not be inside one, and
+// "the PIN is not in the payload" is a claim only a reader of the payload can
+// check. tools/check.sh's grep watches net_url() in src/networking and cannot
+// see ui/screen_creator.cpp, so without this seam a PIN appended in build()
+// would pass the whole gate.
+const char* creator_payload(void);
 
 #endif  // PB_SCREEN_CREATOR_H

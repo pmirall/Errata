@@ -430,13 +430,18 @@ enum StrId : uint16_t {
   //          bus, so nobody will ever read these: they are written for the
   //          retry that succeeds, when the screen comes back and the device
   //          has to explain what it has been blinking about.
-  // --- 33j. the Phase 2 placeholders (P2-C11c). CREATOR still is one: it owns
-  //          the radio and prints the PIN, and what it is FOR arrives in
-  //          Phase 8, so its screen says so instead of pretending. LINK IS NOT
-  //          ONE ANY MORE (P7-C2) - STR_LINK_PHASE and STR_LINK_BODY are gone
-  //          with the frame that drew them, and only the title is left.
+  // --- 33j. the Phase 2 placeholders (P2-C11c). CREATOR IS NO LONGER ONE
+  //          (P8-C5): STR_CREATOR_PHASE was "Creador - Fase 8", the line the
+  //          screen printed while the page it points at did not exist yet, and
+  //          phase 8 has arrived - so it is DELETED rather than left saying a
+  //          phase number nobody needs. What replaces it is the spec section 34
+  //          headline: the screen's job is to be photographed, and "ESCANEAME"
+  //          is the instruction. LINK stopped being a placeholder at P7-C2 -
+  //          STR_LINK_PHASE and STR_LINK_BODY went with the frame that drew
+  //          them, and only the title is left.
   STR_CREATOR_TITLE,
-  STR_CREATOR_PHASE,
+  STR_CREATOR_SCAN,
+  STR_CREATOR_WITH_PHONE,
   STR_LINK_TITLE,
   STR_DIAG_TITLE,
   STR_DIAG_OFF,
@@ -1120,7 +1125,12 @@ inline constexpr const char* const ES[] = {
 
   /* --- 33j. Phase 2 placeholders --- */
   /* STR_CREATOR_TITLE */         "CREADOR",
-  /* STR_CREATOR_PHASE */         "Creador - Fase 8",
+  /* The spec section 34 screen: "SCAN ME / [QR] / PIN: 1234 / Scan with your
+     phone". Both lines are drawn in the 62 px right-hand column at 5x8, so the
+     budget here is 12 characters and not 25: "ESCANEAME" is 9 and
+     "Con el movil" is 12 exactly. Neither may grow. */
+  /* STR_CREATOR_SCAN */          "ESCANÉAME",
+  /* STR_CREATOR_WITH_PHONE */    "Con el móvil",
   /* STR_LINK_TITLE */            "ENLACE",
 
   /* STR_DIAG_TITLE */            "DIAG",

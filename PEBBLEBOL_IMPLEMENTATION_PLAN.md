@@ -1013,7 +1013,7 @@ is rediscovered. Five items; the first two are the ones that can stop phase 8 de
 - [x] Cases in `tests/test_screens.cpp` (sticky flag, both exits, the payload carries no PIN) and `tests/test_statemachine.cpp` (over the real table and the real machine). **3 more mutations, 3 caught, 0 survivors.**
 - [ ] **DEVIATION — `ap_pass` IS NOT GENERATED AND THE SOFT AP STAYS OPEN.** The arithmetic refuses WPA for **every** passphrase length and **every** SSID this product may use: `"WIFI:T:WPA;S:"` 13 + SSID 14 + `";P:"` 3 + `";;"` 2 = **32 B of fixed text before one passphrase character**, against QR **version 2-L's 32 B** budget; WPA2-PSK's own 8-character minimum puts the shortest legal payload at 40 B → v3 → 29 modules → **70 px on a 64-row panel**. Dropping the `-XXXX` suffix does not save it (35 B) and dropping the `PEBBLEBOL-` prefix would break D3. Turning it on regardless would have produced two failures no host test can see: `draw_symbol()` clamps to 1 px/module and paints an unscannable 35 px symbol, and `snprintf` truncates the payload at `CREATOR_TEXT_MAX` 39 without reporting it. §39 makes the PIN the authorisation layer and prefers the bare URL, and what makes an open AP defensible is measured, not assumed: the portal exists only while this screen is open, it dies after 300 s, and the lockout bounds an in-range attacker to **≈ 9 guesses per portal session out of 10,000**. **Owner decision if WPA is still wanted: a redesigned CREATOR layout, or the join symbol dropped for on-screen text.** Recorded at the field in `save_schema.h` and beside the payload in `ui/screen_creator.cpp`.
 - [ ] **DEVIATION — the phase is `NPH_AP_PORTAL`, not a new `NPH_AP_CREATOR`.** It already *is* the AP-only phase, there is no second AP phase to distinguish it from, and `net.h`'s `NPH_COUNT == 4` assertion plus every consumer would have moved for a rename with no behaviour in it.
-- [ ] **NOT OBSERVED, NO HARDWARE:** §67 "Wi-Fi activates only when necessary" and "Inactivity timeout works". The *decision* to tear the portal down is host-driven case by case and the screen's response to it is driven over the real state machine, but **no radio has been switched on in this environment**. **Owner: flash a board, open CREATOR, confirm the AP appears as `PEBBLEBOL-XXXX`, leave it untouched for five minutes and confirm the AP disappears and the device is on HOME.**
+- [ ] **NOT OBSERVED, NO HARDWARE:** §67 "Wi-Fi activates only when necessary" and "Inactivity timeout works". The *decision* to tear the portal down is host-driven case by case and the screen's response to it is driven over the real state machine, but **no radio has been switched on in this environment**. **Owner: flash a board, open CREATOR, confirm the AP appears as `PEBBLEBOL-XXXX`, leave it untouched for five minutes and confirm the AP disappears and the device is on HOME.** **P8-C5 SCRIPTED THIS:** `tools/creator_smoke.sh --variant release --pin NNNN` phase 4 does the five minutes with an unauthenticated poll every 15 s and asserts both halves (it does not die early, and it does die); confirming the screen left CREATOR is the operator's own eyes.
 - [x] Measured, naming the variant every time: `baseline` 1,281,500 / 56,980 -> **1,284,074 / 56,996**; `release` 1,269,126 / 56,804 -> **1,271,700 / 56,820**. **+2,574 flash / +16 globals on both**, and `nm` over the release `.elf` names the sixteen: `_ZL6s_gate` (`.dram0.bss`, 16 B). `no-web` and `all-off` move by flash only. **8,180 B of release globals free**, where P8-C0 left 8,196 — this chunk spent **0.20 %** of the remaining headroom and pre-spends nothing of P8-C3's `CS_BODY_MAX`. `docs/budget.md` §9; §2's `FEATURE_WEB` row re-measured at **61,174 / 2,072** (it read 676,158 / 24,596, stale since P7-C1 made `NT_NET_WANT_WIFI` include ESP-NOW).
 - [x] MATRIX OK on six variants, 0 project warnings; gate green **48/48** host binaries.
 - Acceptance: §67 "Wi-Fi activates only when necessary", "Inactivity timeout works" — **both left unticked above.**
@@ -1030,7 +1030,7 @@ is rediscovered. Five items; the first two are the ones that can stop phase 8 de
 - [x] **DEVIATION - A CUSTOM SPECIES HAS NO FAMILY, WHICH ANSWERS TWO §35 INPUTS STRUCTURALLY.** `family = 0`, `evo_rule = SPECIES_EVO_NONE`, `spawn_weight = 0`, `compat_group = 0`: no evolution (there is no next stage of a family that does not exist), no breeding (`breeding.cpp` derives the child from the parents' FAMILIES and already refuses a zero group by name), never a wild encounter. And **a custom Pebble does not travel**: `protocol.cpp` refuses `species > 199` as `VR_WIRE_CUSTOM_UNRESOLVED`, so it is local until a later phase sends the record with it. All four are in `docs/decisions.md` with their tests.
 - [x] `test_validate.cpp` += **11 creator cases** (the Appendix C 72 % vector and its whole band, the unreachability enumeration, "too strong" on all four axes plus both edges of the band, the move rules with their positive controls, `budget_used`, the name charset over all 256 bytes, the registry, and the end-to-end "a creator Pebble is an ordinary Pebble to the one validator"). **NEW `tests/test_creator_api.cpp`, 30 cases**: the cap at every boundary, a lying `Content-Length` in both directions, truncation at every prefix, byte-flip fuzz, 4,000 seeded random bodies, embedded NULs, duplicate keys, deep nesting, the schema document's own numbers, and the whole pipeline minus the socket. **Its banner states the three ways it differs from `app_setup()`'s wiring.**
 - [x] **RUN UNDER AddressSanitizer, CLEAN, LEAKS INCLUDED** - every fuzz body is heap-allocated at exactly its own length so a one-byte over-read is a heap overflow rather than a read into the rest of a static array. `-fsanitize=undefined` **cannot compile this tree at all**, and that is PRE-EXISTING and not P8-C3's: UBSan instruments the null check at `data/evolution_table.h:112`, which makes `evo_rules_are_well_formed()`'s pointer comparison non-constant and fails the `static_assert` in a generated header. Verified against the unmodified `species_table.h`. A UBSan SUBSET (`signed-integer-overflow,shift,bounds,alignment,integer-divide-by-zero,unreachable,return`) compiles and runs clean.
-- [ ] **NOT OBSERVED, NO HARDWARE AND NO PHONE:** §67 "PIN required" and "Device-side validation works" are host-driven case by case, but **no HTTP request has been made in this environment** - there is no socket in any host binary and `creator_server.cpp` is never compiled by `tests/Makefile`. **Owner: flash a board, open CREATOR, and curl all seven routes** - `GET /api/schema` (expect the 744 B document), `POST /api/pebble` with no `X-Pin` (403 `{"err":"pin"}`), with the right one (200 with a `slot`), with `Content-Length: 3000` (413 `{"err":"big","max":2048}`), with `Content-Length: 9000` (connection closed, no answer), with `Content-Length: 0` (411), and with `Content-Type: multipart/form-data; boundary=b` (415, and the device does not crash - that last one is the null dereference). P8-C5's `tools/creator_smoke.sh` is where this gets scripted.
+- [ ] **NOT OBSERVED, NO HARDWARE AND NO PHONE:** §67 "PIN required" and "Device-side validation works" are host-driven case by case, but **no HTTP request has been made in this environment** - there is no socket in any host binary and `creator_server.cpp` is never compiled by `tests/Makefile`. **Owner: flash a board, open CREATOR, and curl all seven routes** - `GET /api/schema` (expect the 744 B document), `POST /api/pebble` with no `X-Pin` (403 `{"err":"pin"}`), with the right one (200 with a `slot`), with `Content-Length: 3000` (413 `{"err":"big","max":2048}`), with `Content-Length: 9000` (connection closed, no answer), with `Content-Length: 0` (411), and with `Content-Type: multipart/form-data; boundary=b` (415, and the device does not crash - that last one is the null dereference). **P8-C5 SCRIPTED THIS AND THE LIST ABOVE IS SUPERSEDED:** run `tools/creator_smoke.sh --variant release --pin NNNN` instead — it drives all seven routes, both 413 bands, the five failures and the sixth lockout, and it refuses to proceed unless the board is running this tree.
 - [x] **DEVIATION - THE CONSTRUCTOR IS `box_new_pebble()`, NOT `pebble_new()`.** The plan's name has never existed (`grep -rn pebble_new src/ tests/` == 0); `game/box.cpp`'s `box_new_pebble()` is the tree's ONE Pebble constructor and already does the right things for this path (`ORIGIN_CREATOR`, the P4-C5 `evo_state` fix, `hp_cur = xp_hp_max`, a minted id). The two fields it cannot know - `PBF_CUSTOM | PBF_HAS_CUSTOM_SPRITE` and `custom_sprite` - are set at the constructor's own moment and then judged by `validate_pebble()`, whose `VR_BAD_CUSTOM_SPRITE` rule holds both directions of the flag/slot agreement. **AND NOTHING REACHES FLASH UNTIL BOTH HALVES ARE KNOWN GOOD**: the registry is RAM, so the species is installed, the creature is built and validated, and only then are the `cs` record and the Pebble written - content before state, which is the power-cut order (a Pebble whose record is missing is quarantined by name; a record whose Pebble is missing is one orphaned slot).
 - [x] **A `cs` SLOT IS STILL ONLY FREED BY A USER ACTION THAT DOES NOT EXIST YET.** `csp_forget()` exists and no shipping path calls it; nothing reference-counts a record against the Pebbles pointing at it. **The rule P8-C4's screen must implement**: free a `cs` slot only on an explicit CREATOR-screen action, and only when no Pebble in the Box carries that `custom_sprite`. Recorded in `docs/decisions.md`.
 - [x] **THE CUSTOM SPRITE IS STORED, CRC-COVERED AND NOT YET DRAWN.** `CustomSpeciesRec.sprite` holds the user's two 24x24 frames and `game/species_custom.cpp` projects `sprite_id = 0`, so a creator Pebble is currently drawn as the first atlas body. That is P8-C4/P9-C3's renderer work, and it is written at the field rather than left to be discovered.
@@ -1126,10 +1126,85 @@ one-handed reach and no on-screen keyboard eating half the viewport.
   `curl http://192.168.4.1/ | wc -c` (expect 42,245), `curl -H 'X-Pin: NNNN'
   http://192.168.4.1/api/state`, and confirm the page loads over the AP in under two seconds.
 
-**P8-C5 QR screen, smoke script, exit** — S
-- [ ] CREATOR screen "ESCANÉAME / [QR] / PIN: NNNN" (§34); QR payload alternates `WIFI:S:<ssid>;T:WPA;P:<pass>;;` and `http://192.168.4.1/` (existing alternation ui.cpp:2357-2441 minus `?k=`); `qr.cpp` untouched.
-- [ ] `tools/creator_smoke.sh`: curl over all 7 routes incl. oversize body → 413, wrong PIN → 403, 6th wrong PIN → locked, idle timeout observed.
-- Acceptance: §67 "QR connection works"; matrix + tag `v0.8.0-creator`.
+**P8-C5 QR screen, smoke script, exit** — S — **LANDED.** Gate green (49/49 host binaries +
+PAGE TEST OK 51/51), MATRIX OK on six variants, **+26 flash / +0 globals on every one of them**.
+`ui/qr.cpp` untouched, as the box asked.
+
+- [x] **CREATOR screen "ESCANÉAME / [QR] / PIN: NNNN" (§34).** Four lines down the 62 px column
+  beside the 62 px symbol: `ESCANÉAME` (`GF_BODY`), the SSID or the address by variant
+  (`GF_TINY`, ASCII-only and legally so — both are ASCII by construction), `PIN` and the four
+  digits at 9×19 (`GF_BIG`), and `Con el móvil`. §34's "do not clutter this screen with unrelated
+  UI" is why **three things were removed**: `STR_CREATOR_PHASE` ("Creador - Fase 8", deleted from
+  `strings_es.h` rather than repurposed — the page it said did not exist now does, and it was
+  also the tree's one Spanish prose string drawn in the ASCII-only 4x6 face), the "Conéctate a la
+  red:" hint, and the always-on IP line that contradicted the symbol every five seconds. The
+  five row baselines carry **four `static_asserts`** so the panel is checked by the compiler, not
+  only by `tests/golden/screens/creator_portal.pbm`. `web_pin() == 0` ("none issued") draws
+  `----` in the body font: `logisoso16_tn` is digits only and a dash in it is a missing glyph.
+- [x] **The QR payload alternates and carries NO PIN (§39).** The existing five-second alternation
+  is unchanged and `qr.cpp` is untouched; the payload is `WIFI:S:<ssid>;;` or `http://<ip>/` and
+  nothing else. The `WPA` half of the box's own sentence is **not** implemented and P8-C2 records
+  why in `screen_creator.cpp` at length: the shortest legal WPA2 payload is 40 B → QR version 3 →
+  29 modules → 70 px, on a 64-row panel. Reopening it needs a bench call, not a code change.
+- [x] **`creator_payload()` and the test the §39 gate could not be.** `tools/check.sh`'s grep for
+  a formatted query parameter looks at `src/networking`, which is where `net_url()`'s old `?k=`
+  lived and is not where `ui/screen_creator.cpp` is — **a PIN appended in `build()` would have
+  shipped with the gate green.** Three host cases now read the encoded bytes back: the two
+  payloads by name; **byte-identity at all 9,999 PINs, both symbols** (a substring search would
+  false-positive, because `PEBBLEBOL-1234` is an ordinary real SSID); and no `?`, `=` or `&`,
+  which is a query parameter of any name. Mutation: appending the PIN with no `?` at all fails
+  `creator_payload_carries_no_pin_for_any_pin` at pin 2 and survives the query-parameter check,
+  which is exactly why the sweep exists.
+- [x] **A test in the suite that could not fail, fixed rather than left.** `creator_payload_carries_no_pin`
+  asserted three properties of `CreatorInfo.url` — things the FIXTURE types into that field. It is
+  replaced, and the half that was never about the fixture is renamed to
+  `creator_join_string_fits_the_version_2_byte_budget` and now measures `creator_payload()`.
+- [x] **`tools/creator_smoke.sh`: all 7 routes, 413, 403, the 6th wrong PIN locked, the idle
+  timeout** — plus the catch-all, the `CS_BODY_DRAIN_MAX` band (socket closed, no answer), the
+  411 an empty or chunked body gets, and the 415 a multipart POST gets **followed by a request
+  that must still be answered**, because that path is the one where `WebServer::raw()`
+  dereferences a null pointer. The last four are there so this script really does supersede
+  P8-C3's owner curl list rather than covering most of it. Written as a script for a BOARD. **It binds nothing** — it speaks HTTP
+  to a device that ran `app_setup()`, so the wiring is not reproduced, it is the wiring — and the
+  top of the file lists the six things it therefore cannot control and what it does about each.
+  `--variant` is REQUIRED and has no default (`docs/budget.md` §8); every constant is read out of
+  the header that owns it and a missing macro is exit 2 naming it; phase 1 refuses to proceed
+  unless the board's API version, `FW_VERSION`, `CONTENT_VERSION`, advertised `CS_BODY_MAX` and
+  served page `Content-Length` all match this tree. There is no `--fake`, no mock and no loopback
+  default.
+- [x] **Three gates for it in `tools/check.sh`**, all mutation-tested: `--dry-run` must still parse
+  the tree; the route set it probes must EQUAL the set `src/networking` registers, **in both
+  directions** (a route nobody smoke-tests is as much a finding as a route nothing serves); and it
+  may not name a loopback host.
+
+**WHAT THIS CHUNK DID NOT OBSERVE, AND IT IS MOST OF WHAT THE SCRIPT IS FOR.** There is no board,
+no access point and no phone in this environment. The script's **bash** was driven end to end
+against a throwaway stub in a scratch directory — all four phases, both branches of the idle
+assertion, the 413 path, the socket-close path and the full 63 s lockout — which found three real
+defects in it (two whitespace-brittle JSON readers, the failure arithmetic below, and a `die()`
+inside `$(...)` that exited the subshell and let a missing macro print an error and then exit 0).
+**The stub is not committed, is not in the gate, and none of that is evidence about a device.**
+
+- [ ] §67 **"QR connection works"** — NOT OBSERVED. A symbol is only "working" when a phone reads
+  it, and nothing here has a camera. **What IS held:** the encoder is validated module-by-module
+  against the Python `qrcode` reference by `tests/test_qr.cpp`; the payload is exactly the two
+  strings and carries no PIN at any PIN; and the drawn symbol is pinned at the real 128x64 by
+  `creator_portal.pbm` at `QR_BOX_SIZE / (25 + 6) = 2` px per module. **OWNER: flash a board, open
+  CREATOR, and with a phone (a) scan the alternating "join" symbol and confirm the phone offers to
+  join `PEBBLEBOL-XXXX`, (b) scan the other symbol and confirm the browser opens
+  `http://192.168.4.1/`, and (c) confirm the PIN on the device screen is readable at arm's length
+  and is NOT anywhere in the scanned URL.** This is also where the still-open P8-C2 question —
+  whether a 62 px version-2 symbol scans at all at arm's length — is settled.
+- [ ] §67 **"PIN required"**, **"Device-side validation works"**, **"Wi-Fi activates only when
+  necessary"** and **"Inactivity timeout works"** — NOT OBSERVED, and this chunk is what turns
+  their four separate owner curl lists into one command. **OWNER: join the board's AP and run
+  `tools/creator_smoke.sh --variant release --pin NNNN`.** Expect `CREATOR SMOKE OK`; it takes
+  about eight minutes, most of it the 60 s lockout wait and the 5 min idle wait. **Run it against
+  the RELEASE build** — a baseline result is evidence about baseline and nothing else. It creates
+  one Pebble called SMOKE and sets the device clock; release the Pebble afterwards.
+- Acceptance: §67 "QR connection works" — **left unticked above.** Matrix green on six variants.
+  **NOT TAGGED**: `v0.8.0-creator` is the phase-8 exit tag and four §67 boxes in this phase are
+  still open on the bench, so cutting it would date a claim nobody has checked.
 - Commit message: `phase-8: creator — persisted PIN, AP-only Wi-Fi with idle shutdown, §38 routes with raw-body cap and shared validator, committed page source with 24x24 sprite editor, secret-free QR`
 
 ### Phase 9 — Content — size L — goal: 60+ Pebbles, attacks, items, evolution families, encounter tables; corruption mechanic
@@ -1318,13 +1393,13 @@ each of which is a sentence about two devices rather than about one function.
 - [ ] Generated Pebbles remain balanced. — P7-C5 (10k-pair ceiling test). *Held open with the box above and for the same reason - there is no bred Pebble in the product yet. The measurement exists: 10,000 random pairs stay inside the genesis gene band, and 200 dynasties x 40 generations of UNCLAMPED breeding leave it 8,655 times against the clamped arm's 0. The battle half of the ceiling is structural and the test that asserts it says so rather than claiming credit.*
 
 ### Creator
-- [ ] PIN required. — P8-C1, P8-C3
-- [ ] QR connection works. — P8-C5
-- [ ] Wi-Fi activates only when necessary. — P2-C6 (OFF by default), P8-C2
-- [ ] Inactivity timeout works. — P8-C2
+- [ ] PIN required. — P8-C1, P8-C3, P8-C5. *The rules are pure and swept case by case in `tests/test_creator_gate.cpp`, the persisted half in `tests/test_game_state.cpp` against the real `save_manager` — but **no HTTP request has been made in this environment**, and "PIN required" is a sentence about a socket. Since P8-C5 the owner step is one command instead of a curl list: `tools/creator_smoke.sh --variant release --pin NNNN`, whose phase 3 drives the five failures, the sixth refused as locked, the lockout refusing the CORRECT PIN as well, and the counter cleared afterwards so the device is not left armed.*
+- [ ] QR connection works. — P8-C5. *The screen is §34's, the payload is §39's and both are held on the host: `tests/test_qr.cpp` validates the encoder module-by-module against the Python `qrcode` reference, `creator_payload_carries_no_pin_for_any_pin` proves the encoded bytes are identical at all 9,999 PINs, and `creator_portal.pbm` pins the drawn symbol at the real 128x64. **None of that is a phone reading a 62 px symbol,** which is the whole of what this box asks. Owner step in the P8-C5 box.*
+- [ ] Wi-Fi activates only when necessary. — P2-C6 (OFF by default), P8-C2, P8-C5. *Unchanged: the radio is screen-owned, taken in `creator_enter()` and released through the ONE teardown however the screen is left, and the host suite drives all three exits — but **no radio has been switched on in this environment.** `tools/creator_smoke.sh`'s phase 4 is the instrument; its last check is that the portal is gone, and the operator confirms the screen has left CREATOR with it.*
+- [ ] Inactivity timeout works. — P8-C2, P8-C5. *`tools/creator_smoke.sh --variant release --pin NNNN` phase 4 polls the ONE ungated route every 15 s for the whole budget and asserts BOTH halves — still serving at `creator_idle_s − 60`, gone by `creator_idle_s + 60` — which is also the strongest available form of `creator_gate.h`'s claim that unauthenticated traffic cannot hold the access point up. Nothing has run it.*
 - [ ] Mobile editor works. — P8-C4. *P8-C4 has LANDED and this box is deliberately NOT ticked, which is the phase-7 rule applied to the first box it fits since: a bench item is the one kind this rule cannot close. The page exists, is committed source, is generated into the firmware under a gate, and is driven end to end in a headless Chromium at a 390x844 viewport by `tools/page_test.mjs` (51 assertions, in `tools/check.sh`) — and none of that is a thumb on glass. A desktop browser has one exact pixel of contact, no palm, no glove, no sunlight, no one-handed reach and no on-screen keyboard eating half the viewport. The owner step is in the P8-C4 box.*
 - [ ] Sprite editor works. — P8-C4. *Same, and with one specific thing to look at: at 24 cells across a 390 px phone a grid cell is about 16 CSS px, where every BUTTON on the page is 44. The geometry is `CustomSpeciesRec`'s and cannot change, so the mitigations are full-width grid, a live `x , y` readout of the cell under the thumb, and DESHACER as a first-class tool. Whether that is enough is the question this box is about, and it is a phone question. What HAS been observed on the host: the exported XBM decodes, through the real `creator_parse.cpp` and the real `validate.cpp`, to exactly the cells the harness painted — bit order, byte order and both frames.*
-- [ ] Device-side validation works. — P8-C3
+- [ ] Device-side validation works. — P8-C3, P8-C5. *One validator, 27 named codes, driven over the whole pipeline by `tests/test_creator_api.cpp` and end-to-end from a real browser by `tools/page_test.mjs` — and **nothing has sent it a byte over a socket.** `tools/creator_smoke.sh` phases 1 and 2 are the bench half: the document the page would send accepted through `POST /api/validate` and `POST /api/pebble`, a body over `CS_BODY_MAX` answered 413 with the cap in it, and one over `CS_BODY_DRAIN_MAX` answered with a closed socket.*
 
 ### Power
 - [ ] Wi-Fi shuts down after use. — P5-C1, P8-C2. *Held open with "Wi-Fi scanning works" and for the same reason: the release-once-per-run property has six host cases over all four exit paths (done, failed, timed out, cancelled) plus a `net_service()` backstop for a job nobody is pumping, and `wifi_down()` frees the driver's result array — but a radio switching off is an observation, not a property, and nothing has been observed.*

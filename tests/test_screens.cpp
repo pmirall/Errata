@@ -122,6 +122,11 @@ static uint8_t  g_ap_up    = 0;
 // the property is "what does it do when told", and the decision itself has its
 // own binary (tests/test_creator_gate.cpp).
 static uint8_t  g_idle_exp = 0;
+// THE PIN THE SCREEN IS TOLD TO PRINT. It was the literal 1234 inside
+// ui_creator_info() until P8-C5, which is fine for a golden and useless for the
+// spec-39 property below: "the QR carries no secret" is a claim about EVERY
+// pin, and a fixture that can only produce one cannot make it.
+static uint16_t g_pin      = 1234;
 // g_sta_up went with CreatorInfo.sta_up at P5-C1: the station path is deleted,
 // so "joined the user's network" is not a state this firmware can be in.
 static int      g_commits  = 0;
@@ -190,7 +195,7 @@ void ui_creator_info(CreatorInfo& out) {
   memset(&out, 0, sizeof out);
   out.ap_up  = g_ap_up;
   out.idle_expired = g_idle_exp;
-  out.pin    = 1234;
+  out.pin    = g_pin;
   snprintf(out.ssid, sizeof out.ssid, "PEBBLEBOL-1234");
   snprintf(out.ip,   sizeof out.ip,   "192.168.4.1");
   // NO "?k=NNNN" SINCE P8-C1. net_url() lost the PIN and the argument that
@@ -394,6 +399,7 @@ static void seams2_reset(void) {
   g_radio_calls = 0;
   g_ap_up = 0;
   g_idle_exp = 0;
+  g_pin = 1234;
   g_commits = 0;
   g_commit_id = CFM_NONE;
   g_goto = 0xFF;
@@ -1376,6 +1382,88 @@ TEST(snapshot_creator_offline) {
   snapshot(SCR_CREATOR, "creator_offline");
 }
 
+// =============================================================================
+//  SPEC SECTION 39: WHAT THE SYMBOL ACTUALLY ENCODES
+//
+//  A QR is photographed, forwarded and posted. The PIN is the authorisation
+//  layer and must not be in it - and until P8-C5 nothing in this tree could see
+//  whether it was. tools/check.sh greps src/networking for a formatted query
+//  parameter, which is where net_url()'s old "?k=%04u" lived; ui/screen_creator.cpp
+//  is not in that directory and is not in that grep, so a PIN appended in
+//  build() - the ONE function that decides what is encoded - would have shipped
+//  green. creator_payload() is the seam these three cases read through.
+// =============================================================================
+
+// The two payloads, named. Anything else on screen is a symbol pointing
+// somewhere nobody chose.
+TEST(creator_encodes_the_join_string_and_the_url_and_nothing_else) {
+  seams2_reset();
+  g_ap_up = 1;
+  creator_enter();
+  CHECK_EQ(creator_variant(), (uint8_t)1);
+  CHECK_STR_EQ(creator_payload(), "WIFI:S:PEBBLEBOL-1234;;");
+
+  creator_input(GST_TAP_L);                       // flip to the URL
+  CHECK_EQ(creator_variant(), (uint8_t)0);
+  CHECK_STR_EQ(creator_payload(), "http://192.168.4.1/");
+}
+
+// THE PAYLOAD IS NOT A FUNCTION OF THE PIN, at any PIN the device can mint.
+//
+// A substring search would be the obvious test and it is the WRONG one: the
+// SSID is AP_SSID_PREFIX plus four hex characters of the device id, so
+// "PEBBLEBOL-1234" is a perfectly ordinary real SSID and a search for the
+// digits "1234" inside it reports a leak that is not there. What is actually
+// being claimed is stronger and has no false positive: the bytes encoded at
+// every PIN are the SAME bytes, so no addition anywhere in build() can be
+// carrying one.
+TEST(creator_payload_carries_no_pin_for_any_pin) {
+  seams2_reset();
+  g_ap_up = 1;
+
+  g_pin = 1u;
+  creator_enter();
+  char join[CREATOR_TEXT_MAX];
+  char url[CREATOR_TEXT_MAX];
+  snprintf(join, sizeof join, "%s", creator_payload());
+  creator_input(GST_TAP_L);
+  snprintf(url, sizeof url, "%s", creator_payload());
+  CHECK(join[0] != '\0');
+  CHECK(url[0]  != '\0');
+  CHECK(strcmp(join, url) != 0);                  // the two really are different
+
+  // Every PIN cg_mint_pin() can produce: 1..WEB_PIN_MAX-1, never the 0
+  // sentinel. Both symbols at each one.
+  int bad = 0;
+  for (uint32_t pin = 1u; pin < (uint32_t)WEB_PIN_MAX; ++pin) {
+    g_pin = (uint16_t)pin;
+    creator_enter();                              // re-encodes from scratch
+    if (strcmp(creator_payload(), join) != 0) { bad++; break; }
+    creator_input(GST_TAP_L);
+    if (strcmp(creator_payload(), url) != 0) { bad++; break; }
+  }
+  if (bad) fprintf(stderr, "    payload moved at pin %u: \"%s\"\n",
+                   (unsigned)g_pin, creator_payload());
+  CHECK_EQ(bad, 0);
+}
+
+// A QUERY PARAMETER OF ANY NAME, not just "?k=". The gate in tools/check.sh
+// makes this claim about net.cpp with a grep; this makes it about the bytes
+// that reach qr_encode(), which is the only place it is finally true.
+TEST(creator_payload_never_carries_a_query_parameter) {
+  seams2_reset();
+  g_ap_up = 1;
+  g_pin = 4242u;
+  creator_enter();
+  for (int i = 0; i < 2; ++i) {
+    const char* p = creator_payload();
+    CHECK(strchr(p, '?') == nullptr);
+    CHECK(strchr(p, '=') == nullptr);
+    CHECK(strchr(p, '&') == nullptr);
+    creator_input(GST_TAP_L);
+  }
+}
+
 // The radio is SCREEN-OWNED: taken on the way in, given back on the way out.
 // Holding the station after the screen closes is the always-on policy the plan
 // removed, and it costs ~50 KB of heap and the largest current draw on the
@@ -1500,21 +1588,29 @@ TEST(creator_leave_releases_the_radio_however_it_is_reached) {
 // What this binary can see is the payload the screen chooses; the format string
 // itself lives in net.cpp, which no host binary compiles, and tools/check.sh
 // gates that half.
-TEST(creator_payload_carries_no_pin) {
+// THIS CASE WAS CALLED creator_payload_carries_no_pin AND DID NOT READ THE
+// PAYLOAD. It called ui_creator_info() and asserted three things about
+// `in.url` - no "k=", no "1234", equal to "http://192.168.4.1/" - which are
+// three things the FIXTURE thirty lines above types into that field. It could
+// not fail for the reason its name gave: a PIN appended inside
+// screen_creator.cpp's build(), between reading in.url and encoding the symbol,
+// left every one of those checks green. That is this project's recurring defect
+// with a spec-39 label on it, and the three cases above are the replacement -
+// they read creator_payload(), which is the string qr_encode() was actually
+// handed.
+//
+// WHAT SURVIVES IS THE HALF THAT WAS NEVER ABOUT THE FIXTURE: the join symbol
+// must fit QR version 2's 32 B byte budget, because 33 B forces version 3 -> 29
+// modules -> 70 px on a 64-row panel. ui/screen_creator.cpp argues at length why
+// no WPA passphrase can ever be added to it; this is the arithmetic that would
+// catch a longer SSID prefix trying.
+TEST(creator_join_string_fits_the_version_2_byte_budget) {
   seams2_reset();
   g_ap_up = 1;
   creator_enter();
-  CreatorInfo in;
-  ui_creator_info(in);
-  CHECK(strstr(in.url, "k=") == nullptr);
-  CHECK(strstr(in.url, "1234") == nullptr);
-  CHECK_STR_EQ(in.url, "http://192.168.4.1/");
-  // The join symbol is the open-network form and stays inside QR version 2's
-  // 32 B budget. ui/screen_creator.cpp argues at length why no WPA passphrase
-  // can ever be added to it.
-  char join[64];
-  snprintf(join, sizeof join, "WIFI:S:%s;;", in.ssid);
-  CHECK(strlen(join) <= 32u);
+  CHECK_EQ(creator_variant(), (uint8_t)1);
+  CHECK(strlen(creator_payload()) <= 32u);      // the encoded bytes, not a copy
+  CHECK(strncmp(creator_payload(), "WIFI:S:", 7) == 0);
 }
 
 // =============================================================================

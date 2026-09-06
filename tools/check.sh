@@ -182,6 +182,64 @@ if [ -f "$ROOT/tools/page_test.mjs" ] && [ $DO_TESTS -eq 1 ]; then
   fi
 fi
 
+# --- P8-C5: THE BENCH SMOKE SCRIPT STILL DESCRIBES THIS FIRMWARE -----------
+# tools/creator_smoke.sh is the ONLY instrument for four spec section 67 boxes
+# (PIN required, device-side validation, Wi-Fi only when necessary, inactivity
+# timeout) and NOTHING IN THIS ENVIRONMENT CAN RUN IT: it needs a board, an
+# access point and a PIN off the device's own screen. What CAN rot without a
+# board is the script's picture of the firmware - a renamed macro, a route that
+# moved, a status code that changed - and a bench script that is wrong is worse
+# than none, because it fails at the bench and the operator debugs the device.
+#
+# THREE CHECKS, none of which pretends to be a run:
+#
+#  1. `--dry-run` parses the tree. Every number the script asserts is read out
+#     of the header that owns it (CS_BODY_MAX, CREATOR_PIN_FAIL_MAX,
+#     CREATOR_IDLE_S_DEFAULT, CREATOR_API_VERSION, FW_VERSION, CONTENT_VERSION
+#     and the measured INDEX_HTML_LEN); a lookup that finds nothing is exit 2
+#     naming the macro. Rename a macro in config.h and this fails HERE instead
+#     of in a field.
+#  2. THE ROUTE SETS MUST BE EQUAL, in both directions. A route the script does
+#     not probe is a route nobody smoke-tests; a route the script probes that
+#     nothing registers is a bench failure with no cause. This is the same
+#     comparison the page gate makes one direction of, made two-way because
+#     this script's whole job is coverage.
+#  3. NO LOOPBACK HOST. The one edit that would turn this script into the
+#     defect this project keeps repeating is pointing it at a mock so it can go
+#     green in CI. There is no --fake and no localhost default, and this line
+#     is what keeps it that way.
+if [ -f "$ROOT/tools/creator_smoke.sh" ]; then
+  bash -n "$ROOT/tools/creator_smoke.sh" \
+    || fail "tools/creator_smoke.sh does not parse - the bench script must at least run"
+  "$ROOT/tools/creator_smoke.sh" --dry-run >/dev/null \
+    || fail "tools/creator_smoke.sh --dry-run failed: it can no longer read its expectations out of "\
+"src/ (a renamed macro, or the generated page literal changed shape). Run it for the name."
+
+  if [ -d "$SKETCH/src/networking" ]; then
+    # What the firmware registers: srv.on("/api/xxx", ...) in webui.cpp and
+    # creator_server.cpp. "/" is registered too and is checked separately
+    # because a bare slash is not greppable the same way.
+    reg="$( { grep -rhoE '\.on\("/api/[a-z]+"' "$SKETCH/src/networking" || true; } \
+            | grep -oE '/api/[a-z]+' | sort -u )"
+    # What the script probes. /api/pebbles is DELIBERATELY absent from this set:
+    # the script asks for it on purpose to prove the catch-all answers, so it is
+    # excluded here rather than being allowed to look like a real route.
+    prb="$( { grep -ohE '(GET|POST) /api/[a-z]+' "$ROOT/tools/creator_smoke.sh" || true; } \
+            | grep -oE '/api/[a-z]+' | grep -v '^/api/pebbles$' | sort -u )"
+    if [ "$reg" != "$prb" ]; then
+      echo "GATE FAIL: tools/creator_smoke.sh and src/networking disagree about the spec 38 route set" >&2
+      echo "  registered but never smoke-tested: $(comm -23 <(echo "$reg") <(echo "$prb") | tr '\n' ' ')" >&2
+      echo "  smoke-tested but not registered:   $(comm -13 <(echo "$reg") <(echo "$prb") | tr '\n' ' ')" >&2
+      fail "the bench script's route coverage has drifted from the firmware"
+    fi
+    grep -q 'req GET / ' "$ROOT/tools/creator_smoke.sh" \
+      || fail "tools/creator_smoke.sh never fetches GET / - the page route is one of the seven"
+  fi
+
+  n=$( { grep -nE '127\.0\.0\.1|localhost|::1' "$ROOT/tools/creator_smoke.sh" || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "tools/creator_smoke.sh names a loopback host ($n) - it drives a BOARD. A green run against a mock is the fixture-that-is-not-the-firmware defect this project has hit three times"
+fi
+
 # --- P4-C2/C3 FOLLOW-UP: THE FIRMWARE'S TUNING MATCHES THE CONTENT PACK'S ---
 # NUMBERS THAT LIVE IN TWO PLACES AND NOTHING COMPARED. Every one of
 # them is in tools/content/balance.json - which feeds CONTENT_VERSION, and which
