@@ -136,14 +136,21 @@ round-trip untouched through an **older** firmware.
 
 Why not `Inventory`, which the plan's bullet asked for: it is 32 B with zero
 padding and zero reserved bytes, so growing it is a `SAVE_SCHEMA_VERSION` bump —
-and a bump is not "add a row to `migrate_run()`". `pair_load()` sorts any
-non-equal version into `bad` and `load_all_inner()` returns `LOAD_CORRUPT`
-before the migration branch is reached, so a bump needs a version-tolerant pair
-reader written first and invalidates `box`, `cfg`, `cd`, `cs` and `tr` as
+and a bump is not "add a row to `migrate_run()`". `pair_load()` sorted any
+non-equal version into `bad` and `load_all_inner()` returned `LOAD_CORRUPT`
+before the migration branch was reached, so a bump needed a version-tolerant
+pair reader written first and invalidated `box`, `cfg`, `cd`, `cs` and `tr` as
 collateral (five blob types that did not change), plus the `ck_*` checkpoint the
 SAVE ERROR screen's *Recuperar* offers. That is the right price for a real
-widening (`INVENTORY_SLOTS` 7→12); it is the wrong price for four bytes that
+widening (`INVENTORY_SLOTS` 7→12); it was the wrong price for four bytes that
 were already reserved.
+
+**That paragraph was a prediction and P10-C5 collected on it.** The version
+number moved 2 → 3 for spec §31 — the migration machinery has to be *exercised*
+before the release, not merely present — and the first thing the bump did was
+reproduce, exactly, the failure described above: every played device would have
+booted into SAVE ERROR with perfectly intact data. §8 below is what had to be
+written to make a bump survivable.
 
 The four per-term counters and the distinct-network set are **not** here: they
 are per-boot RAM in `game/activity.cpp`, and that header states exactly what a
@@ -301,8 +308,13 @@ bytes are good data and the fix is a firmware update.
 
 ## 8. Migration
 
-`migrate_run(from, out)` is table-driven: adding v3 means adding a row, not a
-branch. The only row today is v1 → v2, whose field map is:
+`migrate_run(from, out)` is table-driven: adding a version means adding a row,
+not a branch. There are two rows: **v1 → v2** (the field map below) and
+**v2 → v3** (P10-C5, a no-op transform — see §8.2). The chain is checked at
+compile time: `migration.cpp` carries a `constexpr` walk from
+`SAVE_SCHEMA_VERSION_V1` to `SAVE_SCHEMA_VERSION` and a `static_assert` that it
+lands exactly, so bumping the number without adding a row **fails the build**
+rather than turning into `LOAD_CORRUPT` on somebody's device.
 
 | v1 | v2 |
 |---|---|
@@ -342,6 +354,77 @@ The migration writes nothing itself: committing the result and erasing the v1
 keys is `save_load_all()`'s job, so a power cut in the middle leaves the v1 save
 intact and the migration simply runs again. The v1 blobs reach `pbbl` through
 the one-shot import in `kv_begin()` (decision D3).
+
+### 8.1 A step has two shapes
+
+`migrate_run()` hands each step the same `GameState&`, and what a step does with
+it depends on where it starts.
+
+- **v1 → v2 fills it.** v1 lived under its own keys (`save`, `cfg`) with its own
+  magics and its own layouts, so the step reads those keys and writes a complete
+  v2 state over whatever was in `out`.
+- **Every step from v2 onwards transforms it in place.** Those generations share
+  every key, every magic and every layout, so the caller has already loaded the
+  state and the step's job is to change fields and re-seal. `out` must therefore
+  already hold the loaded save when `from` ≥ 2, and is ignored on entry when
+  `from` is 1.
+
+### 8.2 v2 → v3 (P10-C5): the bump, and what it cost
+
+**Not one field moves.** Every struct has the same size, the same offsets and
+the same meaning in v2 and v3; the `static_assert`s in `save_schema.h` pin all
+three. The number moved because spec §31 asks for the migration path to be
+exercised before the release, and because a release is the honest moment to find
+out whether "bump the number and add a row" is really all it takes.
+
+It was not. Three things had to be written first, and each has a mutation that
+shows what it is holding up:
+
+1. **`BlobOps::min_version` — the read side.** `pair_load()` and `single_load()`
+   tested `stored == o.version` and nothing else, so a v2 blob under a v3
+   firmware was a *bad* copy. Both copies of the Box bad is `LOAD_CORRUPT`,
+   which is the SAVE ERROR screen, on every played device, on the first flash.
+   The readers now accept anything in `[SAVE_SCHEMA_INPLACE_MIN, version]` and
+   report which version won; `SAVE_SCHEMA_INPLACE_MIN` is 2, and it is a claim
+   about *layout* — a blob inside the range can be read straight into the live
+   struct. v1 is outside it and has a transform instead.
+2. **`pair_write()` — the write side.** It asked `blob_ok()`, current version
+   only, so on the upgrade boot both copies looked unusable: the `seq` restarted
+   at 1 while the untouched copy kept its old, much higher one. `pair_load()`
+   takes the highest `seq`, so the copy the migration had just written was the
+   copy the next boot would *not* read — it read the old one and migrated the
+   whole save again. Not data loss (the transform is a no-op, so both copies
+   hold the same fields, and it converges on the third boot), but "upgraded"
+   has to mean upgraded.
+3. **The creator registry — outside `GameState` entirely.** `cs0..cs9` are not
+   part of the state the chain transforms, so their upgrade lives in
+   `custom_species_install_all()`. Without it `validate_custom_species()`
+   refuses the record by name (`VR_CS_BAD_HEADER`), the slot stays empty, and
+   every Pebble pointing at it comes back `VR_UNKNOWN_SPECIES`: the creature the
+   owner designed, gone on the first boot after a firmware update.
+
+The checkpoint path needed the same treatment (`checkpoint_load()` reads through
+`single_load()`), and both its entry points — the automatic
+`LOAD_RECOVERED_CKPT` and the SAVE ERROR screen's *Recuperar* — run the chain
+before committing. With today's no-op transform the version bytes would come out
+right either way, because `checkpoint_load()` re-seals the Box and
+`save_config()` seals into the caller's struct; `save_was_migrated()` is what
+observes the call, and it is also the honest answer for the SAVE VERSION diag
+line. The next bump will not be a no-op.
+
+**One copy of each pair is still at the old version after the upgrade, and that
+is correct.** `commit_all()` writes each pair once, into the copy a reader would
+not pick, so the winner is at the new version and the loser is the spare — which
+is what a pair is *for*: if the new copy rots, the old one still serves and is
+upgraded in its turn. The spare catches up on the next ordinary write of that
+blob, with no rule of its own, because the upgraded copy carries the highest
+`seq` and `pair_write()`'s ordinary "overwrite the older one" already points at
+the spare.
+
+Driven by `tests/test_persistence.cpp` §8b: a whole played save (two Pebbles,
+one of them a creator species, a changed config, a bag, a cooldown, a trade
+journal, both copies of every pair written) stamped back down to v2 and read by
+this firmware.
 
 ## 9. The temporary bridge — GONE
 

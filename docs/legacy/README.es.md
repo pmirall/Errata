@@ -1,3 +1,14 @@
+> **ARCHIVADO (P10-C5, b534f26). Documento en espanol, sustituido por `README.md`.**
+> Se conserva sin editar. Borrarlo seria borrar la historia: es el registro
+> de lo que este proyecto fue y de por que dejo de serlo. Lo unico que sigue siendo material es el §2, el cableado: documenta el OTRO mapa de pines, el conflicto que la decision D1 registra y que sigue abierto.
+> Nada de este fichero se mantiene desde P10-C5 en adelante.
+>
+> **ARCHIVED (P10-C5, b534f26). Spanish document, superseded by `README.md`.**
+> Kept unedited; deleting it would delete the history. The only part still material is §2, the wiring: it documents the OTHER pin map, the conflict decision D1 records and which is still open.
+> Nothing here is maintained from P10-C5 onwards.
+
+---
+
 # NOTTAMAGOCHI
 
 > **AVISO: este documento describe la versión Nottamagochi y está obsoleto.**

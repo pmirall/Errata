@@ -285,15 +285,103 @@ static MigrateResult step_v1_to_v2(GameState& out) {
   return migrate_v1_to_v2(save_bytes, cfg_ptr, out);
 }
 
+// -----------------------------------------------------------------------------
+//  v2 -> v3 (P10-C5). A NO-OP TRANSFORM, AND SAYING SO IS THE POINT.
+//
+//  Not one field moves between v2 and v3: every struct in save_schema.h has the
+//  same size, the same offsets and the same meaning, and the static_asserts in
+//  that header pin all three. The version number moves because spec section 31
+//  asks for the migration path to be EXERCISED before the release rather than
+//  merely to exist, and because a release is the honest moment to find out
+//  whether "bump the number and add a row" is really all it takes.
+//
+//  IT TURNED OUT NOT TO BE, and that is recorded in three places rather than
+//  fixed in silence: core/version.h (why a naive bump is LOAD_CORRUPT on every
+//  played device), save_manager.cpp's BlobOps::min_version (the read side) and
+//  its pair_write() (the write side, where a converging upgrade needs the
+//  WRITER to accept what the reader accepts).
+//
+//  WHAT IT ACTUALLY DOES is re-seal: blob_seal() stamps o.version and
+//  recomputes the CRC, so after this step every blob in 'out' says 3.
+//
+//  AND THE MUTATION SAYS EXACTLY HOW MUCH OF THAT IS LOAD-BEARING, which is
+//  worth more than the claim it replaced. Emptied to `return MIGRATE_OK;`, the
+//  suite fails on THREE of the five: `inv.version 2 != 3`, `cds.version 2 != 3`
+//  and `trade.version 2 != 3`. The Box and the config come out right ANYWAY -
+//  load_all_inner() box_seal()s the header before it calls the chain (the
+//  slot_mask may have healed), and save_config() seals into the CALLER'S struct
+//  rather than a copy - so those two would have been an accident rather than a
+//  migration, and this comment would have been claiming credit for it.
+//
+//  THE PEBBLES ARE DELIBERATELY NOT TOUCHED. PebbleInstance carries
+//  PEBBLE_LAYOUT_VER, a version axis of its own that has not moved; sealing
+//  them here would produce identical bytes and imply a change that did not
+//  happen. If a later bump does move a Pebble field, PEBBLE_LAYOUT_VER is what
+//  moves with it, and this is where the loop goes.
+// -----------------------------------------------------------------------------
+static MigrateResult step_v2_to_v3(GameState& out) {
+  box_seal(out.box);
+  cfgv2_seal(out.cfg);
+  inventory_seal(out.inv);
+  cooldowns_seal(out.cds);
+  trade_seal(out.trade);
+  return MIGRATE_OK;
+}
+
 struct MigrateStep {
   uint8_t       from;
   uint8_t       to;
   MigrateStepFn fn;
 };
 
-static const MigrateStep MIGRATE_STEPS[] = {
+static constexpr MigrateStep MIGRATE_STEPS[] = {
   { 1, 2, &step_v1_to_v2 },
+  { 2, 3, &step_v2_to_v3 },
 };
+
+// -----------------------------------------------------------------------------
+//  THE CHAIN IS COMPLETE, CHECKED BY THE COMPILER.
+//
+//  The failure this exists to prevent is a one-character edit: somebody bumps
+//  SAVE_SCHEMA_VERSION in core/version.h and does not add a row here. Nothing
+//  would complain - migrate_run() would answer MIGRATE_UNSUPPORTED at runtime,
+//  the loader would turn that into LOAD_CORRUPT, and the first person to find
+//  out would be a player watching SAVE ERROR after a firmware update. A grep
+//  gate cannot check it (the numbers live in two files and one of them is a
+//  table), so it is a static_assert: the walk from the oldest readable save to
+//  this firmware's version must land exactly, using only rows that exist.
+// -----------------------------------------------------------------------------
+static constexpr bool migrate_chain_reaches_current(void) {
+  uint8_t at = (uint8_t)SAVE_SCHEMA_VERSION_V1;
+  // At most one hop per row, so a table with a cycle terminates here rather
+  // than hanging the compiler.
+  for (size_t guard = 0; guard <= NT_ARRAY_LEN(MIGRATE_STEPS); ++guard) {
+    if (at == (uint8_t)SAVE_SCHEMA_VERSION) return true;
+    bool moved = false;
+    for (size_t i = 0; i < NT_ARRAY_LEN(MIGRATE_STEPS); ++i) {
+      if (MIGRATE_STEPS[i].from == at && MIGRATE_STEPS[i].to > at) {
+        at = MIGRATE_STEPS[i].to;
+        moved = true;
+        break;
+      }
+    }
+    if (!moved) return false;
+  }
+  return at == (uint8_t)SAVE_SCHEMA_VERSION;
+}
+static_assert(migrate_chain_reaches_current(),
+              "SAVE_SCHEMA_VERSION was bumped without a matching MIGRATE_STEPS row. "
+              "A save written by the previous firmware would reach migrate_run(), "
+              "find no step, and be reported to the player as LOAD_CORRUPT - "
+              "SAVE ERROR on a device whose data is perfectly intact.");
+
+// The in-place range is a claim about LAYOUT, not about kindness: a blob inside
+// it is read straight into the live struct, so its fields must still be where
+// this firmware expects them. v1 is outside it and has a transform instead.
+static_assert(SAVE_SCHEMA_INPLACE_MIN >= 2 &&
+              SAVE_SCHEMA_INPLACE_MIN <= (uint8_t)SAVE_SCHEMA_VERSION,
+              "SAVE_SCHEMA_INPLACE_MIN must name a version whose layout is this "
+              "firmware's, and never v1, which is a different set of keys");
 
 bool migrate_v1_present(void) {
   // kv_get refuses to truncate, so the whole blob is read even though only the

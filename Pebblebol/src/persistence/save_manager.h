@@ -152,7 +152,12 @@ bool save_trade_journal(const PendingTrade& t);
 // custom species is content, not state, and a bad CRC costs a sprite rather
 // than a Pebble (save_schema.h section 6). The slot comes from c.slot.
 bool save_custom_species(const CustomSpeciesRec& c);
-bool save_load_custom_species(uint8_t slot, CustomSpeciesRec& out);
+// 'found_ver', when given, receives the schema version the record was STORED
+// with, which may be older than this firmware's (P10-C5). The record itself is
+// handed back exactly as it was read; re-sealing it is the caller's job, and
+// save_load_all() does it - see custom_species_install_all().
+bool save_load_custom_species(uint8_t slot, CustomSpeciesRec& out,
+                              uint8_t* found_ver = nullptr);
 
 // Flushes writes that SAVE_MIN_GAP_MS deferred. Safe to call every loop.
 void save_service(void);

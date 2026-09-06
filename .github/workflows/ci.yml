@@ -50,3 +50,25 @@ jobs:
           arduino-cli lib install "U8g2@2.35.30"
       - name: Gate (build + size caps)
         run: tools/check.sh --no-tests
+
+      # THE CAPS THAT MATTER HAD NEVER RUN IN CI (found by the P10-C5 survey,
+      # and it is the more useful half of that chunk's CI item).
+      #
+      # The step above builds ONE variant - the baseline, with the developer
+      # console in it - and checks it against GATE_FLASH_MAX 2,400,000 and
+      # GATE_GLOBALS_MAX 90,000. Those are ceilings so far above the artefact
+      # (1.36 MB / 59.5 KB) that they cannot fail. The caps every acceptance
+      # claim in this project is actually made against are
+      # GATE_RELEASE_FLASH_MAX 1,600,000 and GATE_RELEASE_GLOBALS_MAX 65,000,
+      # and they live in tools/build_matrix.sh, which NO CI job had ever run.
+      # For eight phases the release budget was policed only on a developer's
+      # machine, by hand.
+      #
+      # It also compiles the five other feature variants at --warnings all, so
+      # a change that only breaks `no-web` or `all-off` - the configurations
+      # nobody builds by accident - fails here instead of at the next phase
+      # exit. It is six arduino-cli compiles on a warm cache, so it runs after
+      # the gate rather than instead of it, and it reuses the core and the
+      # library this job already installed.
+      - name: Variant matrix + release size caps
+        run: tools/build_matrix.sh

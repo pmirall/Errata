@@ -8,6 +8,180 @@ Versions are tagged at phase boundaries of `PEBBLEBOL_IMPLEMENTATION_PLAN.md`; t
 tag for a phase is cut only when its gate (`tools/check.sh`) and its variant matrix
 (`tools/build_matrix.sh`) are both green.
 
+**This log restarts at `1.0.0-rc1` (P10-C5).** The ten `0.x` sections below it
+are the build, one per phase, and they stay: they are where every decision in
+this firmware was argued and they are the only record of thirty-six instruments
+that could not fail until somebody broke them. The Spanish changelog that
+covered the Nottamagochi codebase this replaced is archived unedited at
+`docs/legacy/CHANGELOG.es.md`.
+
+**Every size in this file names its variant.** `release` is
+`GOD_MODE_ENABLED=0` and is the artefact that would be flashed; `baseline`
+carries the developer console and ships to nobody. A number quoted without its
+variant is not a number — `docs/budget.md` §8 records a phase exit that compared
+one with the other.
+
+## [1.0.0-rc1] — 2026-09-06
+
+The release build and the English documents. Phase 10, five chunks. **Not
+`1.0.0`, and the suffix is the honest part**: the gate is green, the six-variant
+matrix is green, the release image fits its caps with 251 KB of flash to spare,
+and **no line of this firmware has ever run on hardware**. Seventeen §67
+acceptance boxes are open, sixteen of them for want of a board; decision D1 (the
+pin map) is open and `PB_PINS_CONFIRMED` has never been defined. See
+`README.md` §2 and `docs/bench.md`.
+
+### Measured
+
+| Variant | Defines | Flash | Globals |
+|---|---|---|---|
+| **release** | `GOD_MODE_ENABLED=0` | **1,348,854** | **59,452** |
+| baseline | — | 1,365,776 | 59,548 |
+| no-web | `FEATURE_WEB=0` | 1,252,116 | 55,172 |
+| no-god | `GOD_MODE_ENABLED=0` | 1,348,854 | 59,452 |
+| sh1106 | `DISPLAY_IS_SH1106=1` | 1,365,776 | 59,548 |
+| all-off | web + ESP-NOW + god mode off | 603,304 | 26,692 |
+
+Release caps `GATE_RELEASE_FLASH_MAX` 1,600,000 and
+`GATE_RELEASE_GLOBALS_MAX` 65,000, enforced by `tools/build_matrix.sh`:
+**251,146 B of flash and 5,548 B of globals free.** Six variants, 0 project
+warnings each, `--warnings all`.
+
+`ALL PASS 58/58` host binaries (~5.8 M assertions), `ASAN OK 6/6`,
+`PAGE TEST OK 51/51`, `GATE OK`, `MATRIX OK`.
+
+The whole build, phase by phase, on the release variant:
+
+| Phase exit | Flash | Globals | Source |
+|---|---|---|---|
+| 7 (social) | 1,269,468 | 56,820 | `docs/budget.md` §7 |
+| 8 (creator) | 1,326,400 | 59,396 | `docs/budget.md` §13 |
+| 9 (content) | 1,329,972 | 59,044 | `docs/budget.md` §14 |
+| 10 (polish) | **1,348,854** | **59,452** | this commit |
+
+Phase 10 cost **18,882 B of flash and 408 B of globals** for diagnostics in the
+shipping artefact, an error-recovery sweep, a performance instrument, six
+animation films, a first-boot flow, one codepoint rule where there were three,
+and the schema bump below.
+
+### Added
+
+- **`SAVE_SCHEMA_VERSION` 2 → 3, with a no-op migration and the machinery to
+  survive it** (spec §31). The number moved because the migration path had to be
+  *exercised* before the release rather than merely present — and the first
+  thing the bump did was prove that "bump the number and add a row" was not all
+  it takes. Three things had to be written first:
+  - **`BlobOps::min_version`, the read side.** `pair_load()` and `single_load()`
+    tested `stored == o.version` and nothing else, so a v2 blob under a v3
+    firmware was a *bad* copy. Both copies of the Box bad is `LOAD_CORRUPT`,
+    which is the SAVE ERROR screen, on every played device, on the first flash.
+    The mutation is in the log: reverting one line turns the new test's whole
+    field sweep into zeroes.
+  - **`pair_write()`, the write side, which no test found first.** It asked
+    `blob_ok()` — current version only — so on the upgrade boot both copies
+    looked unusable: the `seq` restarted at 1 while the untouched copy kept its
+    old, much higher one, and `pair_load()` takes the highest `seq`. The copy
+    the migration had just written was the copy the next boot would *not* read.
+    Not data loss, and it converges on the third boot, but "upgraded" has to
+    mean upgraded. Nothing in the suite could see it until a test wrote **both**
+    copies of every pair with real sequence numbers.
+  - **The creator registry, which is outside `GameState` entirely.** `cs0..cs9`
+    are not part of the state the chain transforms, so their upgrade lives in
+    `custom_species_install_all()`. Without it `validate_custom_species()`
+    refuses the record by name and every Pebble pointing at it comes back
+    `VR_UNKNOWN_SPECIES`: the creature the owner designed, gone on the first
+    boot after a firmware update.
+- **The v2 → v3 step, and how much of it is load-bearing.** It changes no field
+  and only re-seals. Emptied to `return MIGRATE_OK;` the suite fails on three of
+  the five blobs (`inv`, `cds`, `trade`); the Box and the config come out right
+  anyway, because the loader seals the header before it calls the chain and
+  `save_config()` seals into the caller's struct rather than a copy. The comment
+  in `migration.cpp` says which two are an accident, because the first draft
+  claimed credit for all five.
+- **The migration chain is checked by the compiler.** `migration.cpp` carries a
+  `constexpr` walk from `SAVE_SCHEMA_VERSION_V1` to `SAVE_SCHEMA_VERSION` and a
+  `static_assert` that it lands exactly. Bumping the version without adding a
+  `MIGRATE_STEPS` row now **fails the build, by name**, instead of shipping and
+  reading every existing save as `LOAD_CORRUPT`. A grep could not check it: the
+  numbers live in two files and one of them is a table.
+- **`SAVE_SCHEMA_INPLACE_MIN`** — the oldest schema readable in place. It is a
+  claim about *layout*, not about kindness, and it has a floor: a blob stamped
+  v1 under the v2/v3 keys is refused (`LOAD_CORRUPT`, nothing written) rather
+  than reinterpreted through the wrong offsets. Asserted at compile time.
+- **`README.md` at the repository root, in English**, written for someone
+  holding the hardware who has never seen this repository: the pin map that
+  fails its own guard *first*, then the seventeen open acceptance boxes, then the
+  toolchain, the build, the gate, the architecture, the partition table and the
+  save. There was no README at the root before this commit.
+- **`tests/test_persistence.cpp` §8b** — nine cases driving a whole played save
+  (two Pebbles, one of them a creator species, a changed config, a bag, a
+  cooldown, a trade journal, **both copies of every pair**) stamped back down to
+  v2 and read by this firmware: carried forward field by field, re-sealed, and
+  an ordinary `LOAD_OK` on the second boot. Plus a v2 checkpoint restored after
+  an `nvs` erase, through both of its entry points; the in-place floor; the
+  foreign-newer end; the v1 → v2 → v3 chain running two hops for the first time;
+  and a factory reset after a migration.
+- **Five gates in `tools/check.sh`** for the bump, each mutated and each failing
+  by name: the three flash readers judge a stored blob with `blob_class()` and
+  never with `blob_ok()` (function-body scoped, because `blob_ok` appears eleven
+  times in that file and ten of them are the exported helpers); the chain
+  assertion still exists; the in-place floor is still asserted; the creator
+  record is still re-sealed; and the test still pins the literal version number.
+
+### Changed
+
+- **`FW_VERSION` `0.2.0-dev` → `1.0.0-rc1`.** Exactly nine characters, like the
+  string it replaces, which is not a coincidence:
+  `networking/creator_server.cpp` budgets `GET /api/state` against
+  `sizeof(FW_VERSION)` with a `static_assert`, so a longer string is a real
+  change to a response buffer.
+- **The Spanish documents moved to `docs/legacy/`** with an archival header in
+  both languages naming what replaced them: `README.es.md`, `CHANGELOG.es.md`,
+  `ESTUDIO_VISUAL.es.md`, `estudio_visual.es.html`. Unedited otherwise. The only
+  part of the old README still material is its §2, the wiring — which documents
+  the **other** pin map, and that conflict is exactly what decision D1 is.
+- **`docs/decisions.md` is closed.** An index at the top, every one of the
+  fourteen decisions given a terminal state in the table, the **six still open
+  at ship** written out again at the end with an owner step each (D1 the pin
+  map, D5 the panel variant, D8 the piezo pin, D10 the battery divider, D11 the
+  boost module's idle draw, D12 the bulk capacitor), the two superseded sections
+  marked where they stand, and every "what phase N did NOT measure" section
+  pointed at `docs/bench.md`. 238 KB and twenty phase narratives kept: closing a
+  log is not deleting it, and rewriting a phase record from a later phase's
+  knowledge is how a log stops being a record.
+- **`docs/bench.md` gains section G (the save on a board), items C5 and D6, and
+  a correction.** The items in section F were labelled `H1`..`H6` — the section
+  was drafted as H and renumbered to F when it landed, and the item prefixes did
+  not move with it. Nothing outside that file cited them, which is why it went
+  unnoticed; `README.md` cites F4 now, so it would not have again.
+- **`.github/workflows/ci.yml` runs the six-variant matrix and the release size
+  caps.** The finding is worth more than the fix: the caps every acceptance
+  claim in this project is made against — 1,600,000 flash, 65,000 globals — live
+  in `build_matrix.sh`, and **no CI job had ever run `build_matrix.sh`**. The
+  firmware job runs `check.sh --no-tests`, which builds the *baseline* and
+  checks it against `GATE_FLASH_MAX` 2,400,000 and `GATE_GLOBALS_MAX` 90,000 —
+  ceilings so far above the artefact that they could not fail. The release caps
+  had been enforced only on a developer's machine, by hand, for eight phases.
+
+### Not verified, and named so it is not assumed
+
+- **Nothing has run on hardware.** Seventeen §67 acceptance boxes are open, and
+  every one of them now has a written owner step in `docs/bench.md`. **Two did
+  not until this commit**, which is the sort of gap a bench list acquires by
+  being written a phase at a time: *device-side validation works* — the box with
+  the strongest host evidence in the repository (27 named reject codes, driven
+  under AddressSanitizer on every commit) and no item of its own, because
+  "validation works" is a sentence about a socket and `creator_server.cpp` is
+  compiled by no host binary — and *no obvious memory leak*, the 24 h soak,
+  named as owed by P2-C12 and again by P10-C2 and never given a procedure.
+  Bench D6 and C5.
+- **The tag is not cut.** `v1.0.0` is the plan's acceptance and it belongs to
+  whoever runs the bench list, because the tag is a claim about a device.
+- **`POSE_SICK` is one body for sixty species**, and `POSE_EAT` has no art at
+  all. Decided rather than left unmentioned; the price is in P10-C3's record.
+- **Six `ui/` translation units and `app/app.cpp` are compiled by no host
+  binary.** Anything in them is untested by construction.
+
 ## [0.9.0-content] — Unreleased
 
 ### Added — the phase-9 exit (P9-C6)

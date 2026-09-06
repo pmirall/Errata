@@ -1,3 +1,14 @@
+> **ARCHIVADO (P10-C5, b534f26). Documento en espanol, sustituido por `docs/content.md`.**
+> Se conserva sin editar. Borrarlo seria borrar la historia: es el registro
+> de lo que este proyecto fue y de por que dejo de serlo. Estudio de pulido visual escrito contra el codigo de Nottamagochi. El atlas y las animaciones que de verdad se construyeron son los de las fases 4, 6, 9 y 10.
+> Nada de este fichero se mantiene desde P10-C5 en adelante.
+>
+> **ARCHIVED (P10-C5, b534f26). Spanish document, superseded by `docs/content.md`.**
+> Kept unedited; deleting it would delete the history. A visual-polish study written against the Nottamagochi code. The atlas and the animations that were actually built are phases 4, 6, 9 and 10.
+> Nothing here is maintained from P10-C5 onwards.
+
+---
+
 # Nottamagochi — Estudio de pulido visual
 
 Qué se puede hacer, de verdad, en un SSD1306 de 128x64 y 1 bit movido por un

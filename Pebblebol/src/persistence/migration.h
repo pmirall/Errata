@@ -59,10 +59,19 @@ bool migration_needed(uint8_t found);
 MigrateResult migrate_v1_to_v2(const uint8_t* petsave128, const uint8_t* cfg256,
                                GameState& out);
 
-// Reads whatever the older firmware left in KV_MAIN and runs every step from
-// 'from' up to SAVE_SCHEMA_VERSION. Writes nothing: committing the result and
-// erasing the legacy keys is save_manager's job, so a power cut in the middle
-// of a migration leaves the v1 save intact and the migration simply runs again.
+// Runs every step from 'from' up to SAVE_SCHEMA_VERSION. Writes nothing:
+// committing the result and erasing the legacy keys is save_manager's job, so a
+// power cut in the middle of a migration leaves the old save intact and the
+// migration simply runs again.
+//
+// A STEP TAKES ONE OF TWO SHAPES and 'out' is what tells them apart. The v1 hop
+// READS KV_MAIN's legacy keys and fills 'out' from nothing, because v1 is a
+// different set of keys holding differently shaped structs. Every hop from v2
+// onwards TRANSFORMS 'out' IN PLACE, because those generations share every key
+// and every layout and the caller has already loaded them - so 'out' must
+// already hold the loaded state when 'from' is 2 or more, and is ignored on
+// entry when 'from' is 1. persistence/save_manager.cpp's upgrade_in_place() is
+// the only caller of the second shape.
 MigrateResult migrate_run(uint8_t from, GameState& out);
 
 // True when KV_MAIN still holds a legacy v1 "save" blob (magic and version only

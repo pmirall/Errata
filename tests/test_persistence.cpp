@@ -114,7 +114,8 @@ TEST(schema_sizes_are_the_wire_sizes) {
   CHECK_EQ(offsetof(PebbleInstance, nickname), 96);
   CHECK_EQ(offsetof(PebbleInstance, seq),     110);
   CHECK_EQ(offsetof(PebbleInstance, crc16),   126);
-  CHECK_EQ(SAVE_SCHEMA_VERSION, 2);
+  CHECK_EQ(SAVE_SCHEMA_VERSION, 3);       // bumped 2 -> 3 by P10-C5, spec section 31
+  CHECK_EQ(SAVE_SCHEMA_INPLACE_MIN, 2);   // ... and v2 is still readable in place
 }
 
 TEST(every_nvs_key_fits_in_fifteen_chars) {
@@ -933,6 +934,467 @@ TEST(v1_fixtures_migrate_with_the_documented_field_map) {
   CHECK(!save_was_migrated());
   CHECK_EQ(again.pebbles[0].id, p.id);
   CHECK_STR_EQ(again.pebbles[0].nickname, "Pebble");
+}
+
+// =============================================================================
+//  8b. THE v2 -> v3 SCHEMA BUMP (P10-C5, spec section 31)
+//
+//  WHY THIS SECTION IS SHAPED THE WAY IT IS. The v1 migration above proves a
+//  transform between two DIFFERENT sets of keys. v2 and v3 share every key,
+//  every magic and every layout, so nothing that section drives is exercised
+//  here: the only thing standing between a played device and SAVE ERROR after a
+//  firmware update is whether save_manager.cpp's readers accept a blob whose
+//  version byte is one less than this firmware's. Before P10-C5 they did not -
+//  `if (tmp[o.ver_off] != o.version) { st.bad++; }` - so a v2 Box pair was two
+//  bad copies, which is LOAD_CORRUPT.
+//
+//  A v2 IMAGE IS BUILT BY WRITING A v3 ONE AND STAMPING IT BACK DOWN, which is
+//  exact rather than approximate: the migration's whole claim is that the two
+//  layouts are identical, so the bytes v2 firmware would have written differ
+//  from these in the version byte and the CRC that covers it, and in nothing
+//  else. If that claim were false the static_asserts in save_schema.h would
+//  already have failed the build.
+// =============================================================================
+static void stamp_version(KvPart part, const char* key, size_t size,
+                          size_t ver_off, uint8_t to_ver, bool required) {
+  uint8_t buf[512];
+  CHECK(size <= sizeof buf);
+  const int n = kv_get(part, key, buf, size);
+  if (n != (int)size) { CHECK(!required); return; }
+  buf[ver_off] = to_ver;
+  const uint16_t crc = crc16_ccitt(buf, size - 2);
+  memcpy(buf + size - 2, &crc, sizeof crc);
+  CHECK(kv_put(part, key, buf, size));
+}
+
+// Every blob that carries SAVE_SCHEMA_VERSION, in KV_MAIN. The Pebbles are NOT
+// here: PebbleInstance.layout_ver is PEBBLE_LAYOUT_VER, a version axis of its
+// own that this bump does not move, and stamping it would be testing a
+// different thing under this name.
+static void stamp_main_partition(uint8_t to_ver) {
+  char key[KV_KEY_CAP];
+  for (uint8_t c = 0; c < 2; ++c) {
+    stamp_version(KV_MAIN, key_pair(KEY_BOX_PREFIX, c, key), sizeof(BoxHeader),
+                  offsetof(BoxHeader, schema_version), to_ver, false);
+    stamp_version(KV_MAIN, key_pair(KEY_CFG_PREFIX, c, key), sizeof(ConfigV2),
+                  offsetof(ConfigV2, version), to_ver, false);
+    stamp_version(KV_MAIN, key_pair(KEY_INV_PREFIX, c, key), sizeof(Inventory),
+                  offsetof(Inventory, version), to_ver, false);
+    stamp_version(KV_MAIN, key_pair(KEY_CD_PREFIX, c, key), sizeof(CooldownTable),
+                  offsetof(CooldownTable, version), to_ver, false);
+  }
+  stamp_version(KV_MAIN, KEY_TRADE, sizeof(PendingTrade),
+                offsetof(PendingTrade, version), to_ver, false);
+  for (uint8_t slot = 0; slot < CUSTOM_SPECIES_SLOTS; ++slot) {
+    stamp_version(KV_MAIN, key_custom(slot, key), sizeof(CustomSpeciesRec),
+                  offsetof(CustomSpeciesRec, version), to_ver, false);
+  }
+}
+
+static uint8_t version_of(KvPart part, const char* key, size_t size, size_t ver_off) {
+  uint8_t buf[512];
+  CHECK(size <= sizeof buf);
+  if (kv_get(part, key, buf, size) != (int)size) return 0;
+  return buf[ver_off];
+}
+
+// True when the blob under 'key' passes magic + CRC, i.e. is readable at all.
+static bool blob_is_sealed(KvPart part, const char* key, size_t size, uint16_t magic) {
+  uint8_t buf[512];
+  CHECK(size <= sizeof buf);
+  if (kv_get(part, key, buf, size) != (int)size) return false;
+  uint16_t m; memcpy(&m, buf, sizeof m);
+  if (m != magic) return false;
+  uint16_t stored; memcpy(&stored, buf + size - 2, sizeof stored);
+  return stored == crc16_ccitt(buf, size - 2);
+}
+
+// A whole, ordinary save: two Pebbles, a config the player changed, a bag, a
+// cooldown and a creator species one of the Pebbles depends on.
+static void write_a_played_save(GameState& gs) {
+  CHECK_EQ(save_load_all(gs), LOAD_FRESH);
+  // valid_pebble(), not sample_pebble(): this save has to survive the load
+  // path's quarantine scan intact, and sample_pebble() deliberately sets
+  // reserved status bits so that a layout slip shows up.
+  gs.pebbles[0] = valid_pebble(0, 1, 9);
+  gs.pebbles[4] = creator_pebble(4, 3);
+  gs.box.slot_mask     = 0x0011u;
+  gs.box.active_slot   = 4;
+  gs.box.next_id_counter = 77u;
+  gs.box.captures      = 12u;
+  gs.box.battles       = 34u;
+  box_seal(gs.box);
+  gs.cfg.device_id     = 0xFEEDBEEFu;
+  gs.cfg.brightness    = 91u;
+  gs.cfg.time_cal_state = (uint8_t)CAL_USER;
+  memcpy(gs.cfg.device_name, "Bruno", 6);
+  cfgv2_seal(gs.cfg);
+  gs.inv.items[0].item_id = 1u;
+  gs.inv.items[0].count   = 5u;
+  inventory_seal(gs.inv);
+  gs.cds.n = 1u;
+  gs.cds.rows[0].net_hash = 0xC0FFEE01u;
+  gs.cds.rows[0].until_epoch = s_epoch + 600u;
+  cooldowns_seal(gs.cds);
+
+  // EVERY PAIR IS WRITTEN TWICE, which is what makes this a played device
+  // rather than a freshly minted one: both copies exist, both carry a real seq,
+  // and the upgrade therefore has to choose between two readable old blobs. A
+  // save written once has only one copy per pair and hides every seq question
+  // this section is about.
+  for (int pass = 0; pass < 2; ++pass) {
+    advance(5000);
+    CHECK(save_pebble(0, gs.pebbles[0], true));
+    advance(5000);
+    CHECK(save_pebble(4, gs.pebbles[4], true));
+    CHECK(save_box_header(gs.box));
+    CHECK(save_config(gs.cfg));
+    CHECK(save_inventory(gs.inv));
+    CHECK(save_cooldowns(gs.cds));
+    CHECK(save_trade_journal(gs.trade));
+  }
+  CHECK(save_custom_species(creator_record(3)));
+}
+
+TEST(a_v2_save_is_read_carried_forward_and_re_sealed_at_v3) {
+  begin();
+  csp_reset();
+  GameState gs;
+  write_a_played_save(gs);
+
+  // The device this test is about: one that was played on the previous
+  // firmware. Everything on flash now says schema 2.
+  stamp_main_partition(2u);
+  char key[KV_KEY_CAP];
+  CHECK_EQ(version_of(KV_MAIN, key_pair(KEY_BOX_PREFIX, 0, key),
+                      sizeof(BoxHeader), offsetof(BoxHeader, schema_version)), 2);
+
+  GameState back;
+  const LoadResult r = save_load_all(back);
+  // NOT LOAD_CORRUPT, which is what this returned before the readers learned
+  // the in-place range - and LOAD_CORRUPT is SAVE ERROR on a device whose data
+  // is perfectly intact.
+  CHECK_EQ((int)r, (int)LOAD_MIGRATED);
+  CHECK(save_was_migrated());
+
+  // CARRIED FORWARD: every field, not just the ones the loader happens to touch.
+  CHECK_EQ(back.box.slot_mask, 0x0011u);
+  CHECK_EQ(back.box.active_slot, 4);
+  CHECK_EQ(back.box.next_id_counter, 77u);
+  CHECK_EQ(back.box.captures, 12u);
+  CHECK_EQ(back.box.battles, 34u);
+  CHECK_EQ(back.pebbles[0].id, gs.pebbles[0].id);
+  CHECK_EQ(back.pebbles[0].level, 9);
+  CHECK_EQ(back.pebbles[0].hp_cur, gs.pebbles[0].hp_cur);
+  CHECK_EQ(back.pebbles[0].genome.lineage_id, gs.pebbles[0].genome.lineage_id);
+  CHECK_EQ(back.pebbles[4].id, gs.pebbles[4].id);
+  CHECK_EQ(back.pebbles[4].species_id, gs.pebbles[4].species_id);
+  CHECK_EQ(back.cfg.device_id, 0xFEEDBEEFu);
+  CHECK_EQ(back.cfg.brightness, 91u);
+  CHECK_EQ((int)back.cfg.time_cal_state, (int)CAL_USER);
+  CHECK_STR_EQ(back.cfg.device_name, "Bruno");
+  CHECK_EQ(back.inv.items[0].count, 5u);
+  CHECK_EQ(back.inv.items[0].item_id, 1u);
+  CHECK_EQ(back.cds.rows[0].until_epoch, s_epoch + 600u);
+  CHECK_EQ(back.cds.rows[0].net_hash, 0xC0FFEE01u);
+
+  // RE-SEALED AT v3, in RAM and on flash. The RAM half is what the migration
+  // step does; the flash half is what commit_all() wrote afterwards.
+  CHECK_EQ(back.box.schema_version, (uint8_t)SAVE_SCHEMA_VERSION);
+  CHECK_EQ(back.cfg.version,        (uint8_t)SAVE_SCHEMA_VERSION);
+  CHECK_EQ(back.inv.version,        (uint8_t)SAVE_SCHEMA_VERSION);
+  CHECK_EQ(back.cds.version,        (uint8_t)SAVE_SCHEMA_VERSION);
+  CHECK_EQ(back.trade.version,      (uint8_t)SAVE_SCHEMA_VERSION);
+  CHECK(blob_is_sealed(KV_MAIN, key_pair(KEY_BOX_PREFIX, 0, key),
+                       sizeof(BoxHeader), (uint16_t)BOX_MAGIC) ||
+        blob_is_sealed(KV_MAIN, key_pair(KEY_BOX_PREFIX, 1, key),
+                       sizeof(BoxHeader), (uint16_t)BOX_MAGIC));
+
+  // AND THE SECOND BOOT IS AN ORDINARY ONE. A migration that has to run again
+  // every time is not a migration, it is a permanent tax and a permanent risk.
+  GameState again;
+  CHECK_EQ((int)save_load_all(again), (int)LOAD_OK);
+  CHECK(!save_was_migrated());
+  CHECK_EQ(again.box.schema_version, (uint8_t)SAVE_SCHEMA_VERSION);
+  CHECK_EQ(again.pebbles[4].id, gs.pebbles[4].id);
+}
+
+TEST(the_upgrade_converges_on_one_boot_instead_of_migrating_for_ever) {
+  // THE WRITE SIDE, and it is invisible from the read side alone. pair_write()
+  // decides which copy of a pair to overwrite and what seq to give it, and it
+  // used to ask blob_ok() - CURRENT VERSION ONLY. On the upgrade boot both
+  // copies are at the old version, so it saw two unusable copies, wrote copy 0
+  // with seq = 1, and left copy 1 holding the old blob with its old and much
+  // HIGHER seq. pair_load() takes the highest seq, so the very copy the
+  // migration had just written was the one the next boot would NOT read: it
+  // read the old one, migrated again, and rewrote every blob in the save a
+  // second time. It does converge, on the boot after that - the claim here is
+  // not data loss, it is that "upgraded" must mean upgraded, and that a seq
+  // counter which silently restarts at 1 beside a copy holding 99 has broken
+  // the one invariant the pair has ("the copy a reader would choose is never
+  // the copy a writer touches").
+  begin();
+  csp_reset();
+  GameState gs;
+  write_a_played_save(gs);
+  // Give the pair a seq worth beating: this is a device that has been played,
+  // not one that was written once.
+  for (int i = 0; i < 9; ++i) { advance(2000); CHECK(save_box_header(gs.box)); }
+  stamp_main_partition(2u);
+
+  GameState boot1;
+  CHECK_EQ((int)save_load_all(boot1), (int)LOAD_MIGRATED);
+  // The first session after the upgrade catches a Pebble.
+  boot1.pebbles[7] = valid_pebble(7, 1, 3);
+  boot1.box.slot_mask |= (uint16_t)(1u << 7);
+  boot1.box.captures = 99u;
+  box_seal(boot1.box);
+  advance(2000);
+  CHECK(save_pebble(7, boot1.pebbles[7], true));
+  CHECK(save_box_header(boot1.box));
+
+  GameState boot2;
+  CHECK_EQ((int)save_load_all(boot2), (int)LOAD_OK);   // NOT LOAD_MIGRATED again
+  CHECK(!save_was_migrated());
+  CHECK_EQ(boot2.box.captures, 99u);
+  CHECK(boot2.box.slot_mask & (1u << 7));
+  CHECK_EQ(boot2.pebbles[7].id, boot1.pebbles[7].id);
+  CHECK_EQ(boot2.cfg.device_id, 0xFEEDBEEFu);
+
+  // THE REDUNDANT COPY IS STILL AT THE OLD VERSION HERE, AND THAT IS CORRECT
+  // rather than a leftover. commit_all() writes each pair ONCE, into the copy a
+  // reader would not pick, so the winner is at the new version and the loser is
+  // the spare - which is what a pair is for: if the new copy ever rots, the old
+  // one still serves and the loader upgrades it in its turn. What must be true
+  // is that the spare CATCHES UP on the next ordinary write of that blob, and
+  // it does so with no rule of its own: the upgraded copy was written with the
+  // HIGHEST seq, so pair_write()'s ordinary "overwrite the older one" already
+  // points at the spare. (The first draft added an explicit "prefer the
+  // downlevel copy" branch for this. No mutation could kill it, because it is
+  // unreachable; it was deleted and the reasoning left in save_manager.cpp.)
+  char key[KV_KEY_CAP];
+  uint8_t old_copies = 0;
+  for (uint8_t c = 0; c < 2; ++c) {
+    if (version_of(KV_MAIN, key_pair(KEY_CFG_PREFIX, c, key), sizeof(ConfigV2),
+                   offsetof(ConfigV2, version)) != (uint8_t)SAVE_SCHEMA_VERSION) old_copies++;
+  }
+  CHECK_EQ(old_copies, 1);                       // the spare, and only the spare
+  CHECK(save_config(boot2.cfg));                 // one ordinary write
+  for (uint8_t c = 0; c < 2; ++c) {
+    CHECK_EQ(version_of(KV_MAIN, key_pair(KEY_CFG_PREFIX, c, key), sizeof(ConfigV2),
+                        offsetof(ConfigV2, version)), (uint8_t)SAVE_SCHEMA_VERSION);
+  }
+}
+
+TEST(a_v2_creator_species_survives_the_bump_instead_of_deleting_the_pebble) {
+  // The creator registry is NOT part of GameState, so the migration chain
+  // cannot reach it and its upgrade lives in custom_species_install_all().
+  // Without that, validate_custom_species() refuses the record by name
+  // (VR_CS_BAD_HEADER), csp_install() leaves the slot empty, and the Pebble
+  // that points at it comes back VR_UNKNOWN_SPECIES: the creature the owner
+  // designed, gone on the first boot after a firmware update.
+  begin();
+  csp_reset();
+  GameState gs;
+  write_a_played_save(gs);
+  stamp_main_partition(2u);
+  char key[KV_KEY_CAP];
+  CHECK_EQ(version_of(KV_MAIN, key_custom(3, key), sizeof(CustomSpeciesRec),
+                      offsetof(CustomSpeciesRec, version)), 2);
+
+  GameState back;
+  CHECK_EQ((int)save_load_all(back), (int)LOAD_MIGRATED);
+  CHECK_EQ(save_quarantine_mask(), 0u);
+  CHECK_EQ((int)save_quarantine_reason(4), (int)VR_OK);
+  const SpeciesDef* sp = species_get(back.pebbles[4].species_id);
+  CHECK(sp != nullptr);
+  CHECK_EQ(sp->base_hp,  6);        // the record's own stats, not a stand-in row
+  CHECK_EQ(sp->base_atk, 5);
+  CHECK_EQ((int)sp->type, (int)TYPE_SIGNAL);
+  CHECK(csp_occupied(3));
+  // ... and the record on flash is at the new version, so it happens once.
+  CHECK_EQ(version_of(KV_MAIN, key_custom(3, key), sizeof(CustomSpeciesRec),
+                      offsetof(CustomSpeciesRec, version)),
+           (uint8_t)SAVE_SCHEMA_VERSION);
+}
+
+TEST(a_v2_checkpoint_restores_after_the_nvs_erase_and_comes_back_at_v3) {
+  // Item 3 of P10-C5 crossed with item 1: the Arduino core erases "nvs" before
+  // setup() runs (audit section 5), so the checkpoint in nvs2 is the only copy
+  // - and on the first boot of new firmware it is a copy written by the OLD
+  // one. checkpoint_load() reads through single_load(), which had the same
+  // strict version test pair_load() had, so this path needed the same fix and
+  // does not get it for free.
+  begin();
+  csp_reset();
+  GameState gs;
+  write_a_played_save(gs);
+  CHECK(save_checkpoint_all());
+  // The checkpoint was written by v2 firmware too.
+  stamp_version(KV_CKPT, KEY_CK_BOX, sizeof(BoxHeader),
+                offsetof(BoxHeader, schema_version), 2u, true);
+  stamp_version(KV_CKPT, KEY_CK_CFG, sizeof(ConfigV2),
+                offsetof(ConfigV2, version), 2u, true);
+
+  kv_mem_wipe_partition(KV_MAIN);
+  CHECK_EQ(kv_mem_key_count(KV_MAIN), 0);
+
+  GameState back;
+  CHECK_EQ((int)save_load_all(back), (int)LOAD_RECOVERED_CKPT);
+  CHECK_EQ(back.box.slot_mask, 0x0011u);
+  CHECK_EQ(back.box.active_slot, 4);
+  CHECK_EQ(back.pebbles[0].id, gs.pebbles[0].id);
+  CHECK_EQ(back.cfg.device_id, 0xFEEDBEEFu);
+  CHECK_EQ(back.box.schema_version, (uint8_t)SAVE_SCHEMA_VERSION);
+  CHECK_EQ(back.cfg.version, (uint8_t)SAVE_SCHEMA_VERSION);
+  // AND THE MIGRATION IS WHAT SAID SO. The two version bytes above come out
+  // right either way with today's no-op transform - checkpoint_load() re-seals
+  // the Box and save_config() seals into the caller's struct - so they cannot
+  // tell whether the chain ran. This flag can, and it is also the honest answer
+  // for the SAVE VERSION diag line: this save was carried across a schema.
+  CHECK(save_was_migrated());
+
+  // Committed back to KV_MAIN at the new version, so the next boot is ordinary.
+  char key[KV_KEY_CAP];
+  CHECK_EQ(version_of(KV_MAIN, key_pair(KEY_BOX_PREFIX, 0, key), sizeof(BoxHeader),
+                      offsetof(BoxHeader, schema_version)),
+           (uint8_t)SAVE_SCHEMA_VERSION);
+  GameState again;
+  CHECK_EQ((int)save_load_all(again), (int)LOAD_OK);
+}
+
+TEST(the_manual_restore_button_also_upgrades_a_v2_checkpoint) {
+  // save_restore_checkpoint() is the SAVE ERROR screen's "Recuperar", a
+  // different entry point from the automatic path above and one that reaches
+  // checkpoint_load() without going through load_all_inner() at all.
+  begin();
+  csp_reset();
+  GameState gs;
+  write_a_played_save(gs);
+  CHECK(save_checkpoint_all());
+  stamp_version(KV_CKPT, KEY_CK_BOX, sizeof(BoxHeader),
+                offsetof(BoxHeader, schema_version), 2u, true);
+  stamp_version(KV_CKPT, KEY_CK_CFG, sizeof(ConfigV2),
+                offsetof(ConfigV2, version), 2u, true);
+
+  GameState live;
+  memset(&live, 0, sizeof live);
+  CHECK(save_restore_checkpoint(live));
+  CHECK(save_was_migrated());
+  CHECK_EQ(live.box.schema_version, (uint8_t)SAVE_SCHEMA_VERSION);
+  CHECK_EQ(live.cfg.version, (uint8_t)SAVE_SCHEMA_VERSION);
+  CHECK_EQ(live.box.active_slot, 4);
+  CHECK_EQ(live.pebbles[0].id, gs.pebbles[0].id);
+}
+
+TEST(a_checkpoint_already_at_this_version_is_not_reported_as_migrated) {
+  // The anti-vacuity for the two cases above: save_was_migrated() has to be
+  // able to say NO, or "the checkpoint was upgraded" means nothing.
+  begin();
+  csp_reset();
+  GameState gs;
+  write_a_played_save(gs);
+  CHECK(save_checkpoint_all());
+  kv_mem_wipe_partition(KV_MAIN);
+
+  GameState back;
+  CHECK_EQ((int)save_load_all(back), (int)LOAD_RECOVERED_CKPT);
+  CHECK(!save_was_migrated());
+  CHECK_EQ(back.box.active_slot, 4);
+
+  GameState live;
+  memset(&live, 0, sizeof live);
+  CHECK(save_restore_checkpoint(live));
+  CHECK(!save_was_migrated());
+}
+
+TEST(a_schema_older_than_the_in_place_range_is_refused_rather_than_reinterpreted) {
+  // The range has a FLOOR and the floor is the honest half of the feature. A
+  // blob stamped v1 under the v2/v3 keys is not a v1 save (v1 lived under
+  // "save"/"cfg" with its own magics) - it is a layout this firmware cannot
+  // know, and reading it in place would hand the player fields from the wrong
+  // offsets. It must be LOAD_CORRUPT, which asks, rather than a silent
+  // reinterpretation.
+  begin();
+  csp_reset();
+  GameState gs;
+  write_a_played_save(gs);
+  stamp_main_partition(1u);
+
+  GameState back;
+  CHECK_EQ((int)save_load_all(back), (int)LOAD_CORRUPT);
+  // Nothing was written: the save is still there for a firmware that knows it.
+  char key[KV_KEY_CAP];
+  CHECK_EQ(version_of(KV_MAIN, key_pair(KEY_BOX_PREFIX, 0, key), sizeof(BoxHeader),
+                      offsetof(BoxHeader, schema_version)), 1);
+}
+
+TEST(a_newer_schema_is_still_refused_and_still_untouched) {
+  // The other end of the range, re-driven at the new version because
+  // schema_is_foreign_newer() moved with it.
+  begin();
+  csp_reset();
+  GameState gs;
+  write_a_played_save(gs);
+  stamp_main_partition((uint8_t)(SAVE_SCHEMA_VERSION + 1));
+  const uint32_t puts_before = kv_mem_puts();
+
+  GameState back;
+  CHECK_EQ((int)save_load_all(back), (int)LOAD_FOREIGN_NEWER);
+  CHECK_EQ(kv_mem_puts(), puts_before);          // not one byte written
+  CHECK(schema_is_foreign_newer((uint8_t)(SAVE_SCHEMA_VERSION + 1)));
+  CHECK(!schema_is_foreign_newer((uint8_t)SAVE_SCHEMA_VERSION));
+  CHECK(!schema_is_foreign_newer(2));            // v2 is old, not foreign
+}
+
+TEST(the_migration_chain_runs_v1_all_the_way_to_this_firmwares_version) {
+  // migrate_run() is a CHAIN and until this bump it had one row, so "runs every
+  // step from 'from'" had never actually run two. A v1 fixture must now arrive
+  // at v3, having passed through v2, with no second migration on the next boot.
+  begin();
+  csp_reset();
+  seed_v1(true);
+  GameState gs;
+  CHECK_EQ((int)save_load_all(gs), (int)LOAD_MIGRATED);
+  CHECK_EQ(gs.box.schema_version, (uint8_t)SAVE_SCHEMA_VERSION);
+  CHECK_EQ(gs.cfg.version,        (uint8_t)SAVE_SCHEMA_VERSION);
+  CHECK_EQ(gs.inv.version,        (uint8_t)SAVE_SCHEMA_VERSION);
+  CHECK_EQ(gs.cds.version,        (uint8_t)SAVE_SCHEMA_VERSION);
+  CHECK(migration_needed(1));
+  CHECK(migration_needed(2));
+  CHECK(!migration_needed((uint8_t)SAVE_SCHEMA_VERSION));
+
+  GameState again;
+  CHECK_EQ((int)save_load_all(again), (int)LOAD_OK);
+}
+
+TEST(factory_reset_after_an_upgrade_leaves_a_genuinely_fresh_unit) {
+  // Item 3's other half. A reset that ran after a migration used to be the one
+  // combination nothing drove: the registry is rebuilt on every load, so a
+  // custom species that outlived a wipe would resolve an id whose record is
+  // gone.
+  begin();
+  csp_reset();
+  GameState gs;
+  write_a_played_save(gs);
+  stamp_main_partition(2u);
+  GameState back;
+  CHECK_EQ((int)save_load_all(back), (int)LOAD_MIGRATED);
+  CHECK(kv_mem_key_count(KV_MAIN) > 0);
+  CHECK(save_checkpoint_all());
+  CHECK(kv_mem_key_count(KV_CKPT) > 0);
+
+  CHECK(save_factory_reset());
+  CHECK_EQ(kv_mem_key_count(KV_MAIN), 0);
+  CHECK_EQ(kv_mem_key_count(KV_CKPT), 0);
+  CHECK(!save_was_migrated());
+
+  GameState fresh;
+  CHECK_EQ((int)save_load_all(fresh), (int)LOAD_FRESH);
+  CHECK_EQ(fresh.box.slot_mask, 0);
+  CHECK_EQ(fresh.box.active_slot, BOX_ACTIVE_NONE);
+  CHECK_EQ(fresh.box.schema_version, (uint8_t)SAVE_SCHEMA_VERSION);
+  CHECK(species_get(CREATOR_SPECIES_ID_MIN + 3) == nullptr);
 }
 
 // =============================================================================

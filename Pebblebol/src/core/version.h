@@ -29,7 +29,21 @@
 #ifndef PB_VERSION_H
 #define PB_VERSION_H
 
-#define FW_VERSION              "0.2.0-dev"
+// 1.0.0-rc1, NOT 1.0.0, AND THE SUFFIX IS THE HONEST PART (P10-C5). Phase 10
+// is the last build phase, the gate and the six-variant matrix are green, and
+// the release artefact fits its caps with room to spare - but spec section 67
+// still owes SIX bench items that need two boards and a phone, decision D1 (the
+// pin map) is open and PB_PINS_CONFIRMED has never been defined. Nothing in
+// this tree has been observed running on hardware. A device whose boot screen
+// says "1.0.0" is claiming something no one has checked; "rc1" claims what is
+// true, and the person who checks it cuts the tag. See README.md, "What has
+// never run on hardware".
+//
+// EXACTLY NINE CHARACTERS, like the "0.2.0-dev" it replaces, and that is not a
+// coincidence: networking/creator_server.cpp budgets GET /api/state against
+// sizeof(FW_VERSION) with a static_assert, so a longer string is a real change
+// to a response buffer and not a cosmetic edit.
+#define FW_VERSION              "1.0.0-rc1"
 
 // THE BUILD STAMP (P10-C1). Spec section 49's field list asks for "Firmware"
 // AND "Build" as two separate lines, and until this phase the second one did
@@ -46,7 +60,36 @@
 // branches on it, nothing persists it and nothing transmits it.
 #define FW_BUILD_STAMP          (__DATE__ " " __TIME__)
 
-#define SAVE_SCHEMA_VERSION     2
+// BUMPED 2 -> 3 BY P10-C5, and the bump is the point rather than a side effect:
+// spec section 31 wants the migration machinery EXERCISED before the release,
+// not merely present, so this is a real number change with a real (no-op)
+// transform and a test that reads a v2 save back.
+//
+// WHAT A NAIVE BUMP DOES, MEASURED BEFORE THE REST OF THIS CHUNK WAS WRITTEN.
+// v1 lived under its OWN keys ("save"/"cfg") with its own magics, so
+// migrate_v1_to_v2() reads a place nothing else reads. v2 and v3 share every
+// key, every magic and every layout, and differ only in one version byte - so
+// the ONLY thing that had to work was save_manager.cpp's pair_load(), and it
+// said `if (tmp[o.ver_off] != o.version) { st.bad++; }`. A v2 Box pair on a
+// v3 firmware is therefore two BAD copies, which is `bst.good == 0 &&
+// bst.bad > 0`, which is LOAD_CORRUPT: every played device, on the first flash
+// of this firmware, would have shown SAVE ERROR. Changing this line alone was
+// the whole defect.
+#define SAVE_SCHEMA_VERSION     3
+
+// THE OLDEST SCHEMA THIS FIRMWARE CAN READ IN PLACE.
+//
+// "In place" means: same keys, same magics, byte-identical layouts, so the
+// blob can be read straight into the live struct and the migration's only work
+// is to re-seal it at the new version. That is true of 2 -> 3 and it is NOT
+// true of 1 -> 2 - v1 is a different set of keys holding differently shaped
+// structs, which is why it has a transform function and this range starts at 2.
+//
+// A future bump that MOVES A FIELD must raise this number to its own value in
+// the same commit, so that the old blob is read by a real transform instead of
+// being reinterpreted as the new layout. persistence/save_manager.cpp is where
+// the range is applied; migration.cpp's step table is where the transform goes.
+#define SAVE_SCHEMA_INPLACE_MIN 2
 // CONTENT_VERSION LIVES IN data/content_version.h SINCE P4-C1. It is a HASH of
 // tools/content/*.json emitted by tools/gen_content.py, not a counter somebody
 // remembers to bump, because plan line 668 requires it to change when the JSON

@@ -1782,4 +1782,96 @@ EOF
   [ "${n:-0}" -ge 1 ] || fail "tests/test_screens.cpp has lost the static_assert that kAudit[] is SCR_COUNT long ($n) - without it a new screen simply goes unaudited"
 fi
 
+# =============================================================================
+#  P10-C5 - THE RELEASE BUILD AND THE SCHEMA BUMP
+# =============================================================================
+if grep -qE '^#define[[:space:]]+SAVE_SCHEMA_INPLACE_MIN[[:space:]]+[0-9]+' \
+     "$SKETCH/src/core/version.h"; then
+  if printf '' | cpp -fpreprocessed -dD -E -P - >/dev/null 2>&1; then
+    strip_comments11() { cpp -fpreprocessed -dD -E -P - 2>/dev/null; }
+  else
+    strip_comments11() { sed 's://.*::'; }
+  fi
+
+  # ---------------------------------------------------------------------------
+  # 1. THE WRITE SIDE OF A SCHEMA BUMP, WHICH IS THE HALF NO TEST FOUND FIRST.
+  #
+  # save_manager.cpp's three flash readers - pair_load(), pair_write() and
+  # single_load() - must all judge a stored blob with blob_class(), which knows
+  # about BlobOps::min_version, and NOT with blob_ok(), which is "exactly this
+  # firmware's version" and is kept only for the exported *_blob_ok() helpers
+  # that judge a struct in RAM.
+  #
+  # pair_write() IS THE ONE THIS GATE EXISTS FOR. It decides which copy of a
+  # pair to overwrite and what seq to give it. Asking blob_ok() there meant that
+  # on the upgrade boot BOTH copies looked unusable, so the seq restarted at 1
+  # beside a copy still holding 99 - and pair_load() takes the highest seq, so
+  # the copy the migration had just written was the copy the next boot would not
+  # read. It migrated the whole save again. Nothing in the suite could see it
+  # until a test wrote BOTH copies of every pair with real seqs, which is a
+  # setup no earlier test had needed; the gate is cheaper than remembering that.
+  #
+  # SCOPED TO THE FUNCTION BODY, for P10-C4's reason: blob_ok() appears eleven
+  # times in this file and ten of them are the exported helpers, so a count over
+  # the whole file would be a gate that counts a token it cannot judge.
+  sm="$SKETCH/src/persistence/save_manager.cpp"
+  [ -f "$sm" ] || fail "persistence/save_manager.cpp is missing - it is the only reader of every blob on flash"
+  for fn in pair_load pair_write single_load; do
+    case "$fn" in
+      pair_load)   sig='^static void pair_load' ;;
+      pair_write)  sig='^static bool pair_write' ;;
+      single_load) sig='^static bool single_load' ;;
+    esac
+    body=$( awk -v re="$sig" '$0 ~ re {f=1} f{print} f&&/^\}/{exit}' "$sm" | strip_comments11 )
+    [ -n "$body" ] || fail "persistence/save_manager.cpp has no $fn() body - every blob on flash is read through it"
+    n=$( printf '%s\n' "$body" | { grep -cE '\bblob_class[[:space:]]*\(' || true; } )
+    [ "${n:-0}" -ge 1 ] || fail "$fn() does not call blob_class() ($n) - it is judging a stored blob against this firmware's version alone, so a save written by the PREVIOUS firmware is a bad copy: LOAD_CORRUPT, SAVE ERROR, on every played device, on the first flash (persistence/save_manager.cpp, core/version.h)"
+    n=$( printf '%s\n' "$body" | { grep -cE '\bblob_ok[[:space:]]*\(' || true; } )
+    [ "${n:-0}" -eq 0 ] || fail "$fn() calls blob_ok() ($n) - that is \"exactly this firmware's version\" and it is the wrong question for bytes that came off flash; blob_class() is the one that knows about SAVE_SCHEMA_INPLACE_MIN (persistence/save_manager.cpp)"
+  done
+
+  # ---------------------------------------------------------------------------
+  # 2. THE MIGRATION CHAIN IS COMPLETE, AND THE COMPILER SAYS SO.
+  #
+  # The failure is a one-character edit: bump SAVE_SCHEMA_VERSION and forget the
+  # MIGRATE_STEPS row. migrate_run() would answer MIGRATE_UNSUPPORTED, the
+  # loader would turn that into LOAD_CORRUPT, and the first person to find out
+  # would be a player watching SAVE ERROR after a firmware update. The check
+  # itself is a static_assert in migration.cpp, because the numbers live in two
+  # files and one of them is a table - a grep cannot walk it. THIS gate is that
+  # the static_assert still exists: deleting it is silent, and it is exactly the
+  # kind of line somebody deletes to make a build green.
+  mg="$SKETCH/src/persistence/migration.cpp"
+  n=$( { grep -c 'migrate_chain_reaches_current' "$mg" || true; } )
+  [ "${n:-0}" -ge 2 ] || fail "persistence/migration.cpp has lost migrate_chain_reaches_current() ($n mentions) - a SAVE_SCHEMA_VERSION bump with no MIGRATE_STEPS row would compile, ship, and read every existing save as LOAD_CORRUPT"
+  n=$( { grep -cE 'static_assert\([[:space:]]*migrate_chain_reaches_current' "$mg" || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "persistence/migration.cpp defines migrate_chain_reaches_current() but no longer asserts it ($n) - a function nobody calls is not a gate"
+  n=$( { grep -cE 'static_assert\([[:space:]]*SAVE_SCHEMA_INPLACE_MIN' "$mg" || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "persistence/migration.cpp no longer asserts the SAVE_SCHEMA_INPLACE_MIN range ($n) - the floor is a claim about LAYOUT, and a floor of 1 would read v1's differently shaped structs in place"
+
+  # ---------------------------------------------------------------------------
+  # 3. THE CREATOR REGISTRY IS OUTSIDE GameState, SO THE CHAIN CANNOT REACH IT.
+  #
+  # cs0..cs9 are not part of the state migrate_run() transforms, so their
+  # upgrade lives in custom_species_install_all(). Without it
+  # validate_custom_species() refuses the record by name (VR_CS_BAD_HEADER), the
+  # slot stays empty, and every Pebble pointing at it comes back
+  # VR_UNKNOWN_SPECIES - the creature the owner designed, gone on the first boot
+  # after a firmware update.
+  body=$( awk '/^static void custom_species_install_all\(void\) \{/{f=1} f{print} f&&/^\}/{exit}' \
+            "$sm" | strip_comments11 )
+  [ -n "$body" ] || fail "persistence/save_manager.cpp has no custom_species_install_all() body - species_get() resolves a creator id through that registry and through nothing else"
+  n=$( printf '%s\n' "$body" | { grep -cE '\bcustom_species_seal[[:space:]]*\(' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "custom_species_install_all() does not re-seal a downlevel record ($n) - a schema bump would delete every creature made in the creator portal and quarantine the Pebbles that point at them (persistence/save_manager.cpp)"
+
+  # ---------------------------------------------------------------------------
+  # 4. THE TWO VERSION NUMBERS AGREE WITH EACH OTHER AND WITH THE TEST.
+  #    tests/test_persistence.cpp pins the literal, which is the only thing that
+  #    makes a bump a deliberate act rather than a typo somebody carries.
+  sv=$( grep -oE '^#define[[:space:]]+SAVE_SCHEMA_VERSION[[:space:]]+[0-9]+' \
+          "$SKETCH/src/core/version.h" | grep -oE '[0-9]+$' )
+  n=$( { grep -cE "CHECK_EQ\(SAVE_SCHEMA_VERSION, $sv\)" "$ROOT/tests/test_persistence.cpp" || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "tests/test_persistence.cpp does not pin SAVE_SCHEMA_VERSION at $sv ($n) - the number moved and the test that makes moving it deliberate did not"
+fi
+
 echo "GATE OK"

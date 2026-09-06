@@ -1,28 +1,63 @@
 # Pebblebol — decisions log
 
+> ## THIS LOG IS CLOSED (P10-C5, the last build chunk)
+>
+> **Nothing is appended here from this commit onwards.** Later changes go in
+> `CHANGELOG.md`. The file is kept whole — 3,000-odd lines and twenty phase
+> narratives — because it is where every decision in this firmware was argued,
+> and a closed log is not a deleted one. What "closed" means concretely:
+>
+> 1. **Every decision has a terminal state.** The table below carries it; the
+>    ones still open at ship are listed again in
+>    [§ THE STATE AT SHIP](#the-state-at-ship-p10-c5) at the end of this file
+>    **with a written owner step**, because there is no phase after this one and
+>    an open decision with a step is the honest terminal state.
+> 2. **The superseded sections are marked** where they stand, rather than
+>    edited or removed. A consequence section that a later phase overturned is a
+>    record of what was believed and why, and it is only misleading if it is
+>    silent about having been overturned.
+> 3. **Every "what phase N did NOT measure" section carries a pointer to
+>    `docs/bench.md`**, which is the one place those items are gathered as
+>    something a person can run. The sections themselves stay where they are:
+>    each is still true of its phase, and rewriting a phase record from a later
+>    phase's knowledge is how a log stops being a record.
+>
+> ### How to read this file
+>
+> | If you want | Go to |
+> |---|---|
+> | What the owner decided, and what is still open | the table below, then [§ THE STATE AT SHIP](#the-state-at-ship-p10-c5) |
+> | Why a hardware choice was made the way it was | the `D<n> — consequences` sections after the tables |
+> | What a phase actually built, and what it declined to build | the `Phase-<n> exit` sections |
+> | Sizes, per phase, per variant | `docs/budget.md` |
+> | Every byte that reaches flash | `docs/save_schema.md` |
+> | What still needs a board | `docs/bench.md` |
+> | How to build any of it | `README.md` |
+
 Every decision that changes hardware mapping, persisted names, transport choice or
 language policy gets a row here. Closed decisions record the commit that applied them.
 Evidence and defaults come from `PEBBLEBOL_IMPLEMENTATION_PLAN.md` §0.
 
 Status values: **OPEN** (owner must decide), **DEFAULT** (plan default in force, owner
-may override), **CLOSED** (decided; commit named).
+may override), **CLOSED** (decided; commit named). At the close, a decision that is
+still OPEN carries an owner step instead of a resolution.
 
 ## Owner decisions (plan §0.2)
 
 | # | Decision | Status | Evidence | Default in force | Blocks | Outcome |
 |---|---|---|---|---|---|---|
-| **D1** | GPIO map (pin conflict) | **DEFERRED BY OWNER (2026-09-02)** — keep the values the repository already carries; revisit later | `config.h` compiles `PIN_SDA 8, PIN_SCL 9, PIN_BTN_L 10, PIN_BTN_R 2, PIN_LED 5` with the human comments "tu cableado actual del TinyLLM" / "OBLIGATORIO cambiarlo: 8 ya es SDA". README §2, CHANGELOG, `render.h`, `render.cpp` all document the other map (SDA=6, SCL=7, BTN_L=3, BTN_R=4, LED=8) and warn that GPIO2/8/9 are strapping pins. Nothing has ever run on hardware. | **Values stay exactly as committed.** `PB_PINS_CONFIRMED` is NOT defined, so the guard `static_assert`s added in P2-C8 stay dormant. | P2-C0 first flash (hardware track only), P6-C3 deep sleep | Owner defers; consequences recorded below the table. |
+| **D1** | GPIO map (pin conflict) | **OPEN AT SHIP (P10-C5).** Deferred by the owner 2026-09-02; never revisited, because no board exists. Owner step in "THE STATE AT SHIP" at the end of this file. It gates every item in `docs/bench.md`. | `config.h` compiles `PIN_SDA 8, PIN_SCL 9, PIN_BTN_L 10, PIN_BTN_R 2, PIN_LED 5` with the human comments "tu cableado actual del TinyLLM" / "OBLIGATORIO cambiarlo: 8 ya es SDA". README §2, CHANGELOG, `render.h`, `render.cpp` all document the other map (SDA=6, SCL=7, BTN_L=3, BTN_R=4, LED=8) and warn that GPIO2/8/9 are strapping pins. Nothing has ever run on hardware. | **Values stay exactly as committed.** `PB_PINS_CONFIRMED` is NOT defined, so the guard `static_assert`s added in P2-C8 stay dormant. | P2-C0 first flash (hardware track only), P6-C3 deep sleep | Owner defers; consequences recorded below the table. |
 | **D2** | Peer-session transport: BLE vs Wi-Fi (ESP-NOW) | **CLOSED — ESP-NOW (2026-09-02, owner). BUILT IN PHASE 7 AND UNPROVEN ON HARDWARE: the BLE deletion the decision authorises is still pending a two-board bench test — see "Phase-7 exit" at the end of this file.** | The legacy BLE advert carries 19 B/frame and cannot carry the §15 message set; GATT was rejected by the original author for stability; each BLE bring-up burns one of 32 sessions with a claimed ~672 B Bluedroid leak; BLE costs 721,632 B flash / 23,688 B static RAM **as measured in phase 1 — re-measured at the phase-4 exit as 712,466 B / 23,504 B (baseline minus `no-ble`); the phase-1 pair is kept because it is what the owner decided on, and the correction is worked through under "D2 — consequences"**. ESP-NOW ships in the core (250 B/frame, unicast + send-callback ACK) and needs the same `WIFI_STA` residency the §40 scanner already requires. | ESP-NOW is the transport, behind the §59 `Transport` seam. `FEATURE_BLE 0` in the release build. | P7-C1 | Decided: ESP-NOW. See the consequences below the table. |
 | **D3** | Sketch folder rename and product identity in persisted names | DEFAULT | `sketch_aug30b/` → `Pebblebol/`; `NVS_NS "notta"`, AP prefix `NOTTAMAGOCHI-`, mDNS `nottamagochi.local`. No device has ever run this firmware, so renaming orphans nothing real. | Folder renamed in P2-C1; NVS namespace `"pbbl"` in P2-C9 with a one-shot import of a legacy `"notta"` save; AP prefix `PEBBLEBOL-` in P8-C2; mDNS deleted in P2-C5. | P2-C1, P2-C9 | **CLOSED (P2-C9b, 2026-09-03).** Namespace is `"pbbl"` (`hardware/kv_nvs.h`, `PB_NVS_NAMESPACE`). `kv_begin()` performs a ONE-SHOT import: the raw v1 blobs (`save`, `cfg`, `gl`, `t`) are copied out of `"notta"` under their old key names into `"pbbl"`, where `persistence/migration.cpp` finds them, and `"notta"` is then cleared so a later factory reset cannot resurrect a deleted pet. It runs only when `"pbbl"` holds neither a v2 Box nor an already-imported v1 save, so it can never overwrite live state, and it is idempotent across a power cut in the middle. Verified by `tests/test_compat.cpp` (`compat_migrates_a_v1_save_into_the_live_pet`) and `tests/test_persistence.cpp` (the v1 fixtures). AP prefix and mDNS are unaffected (mDNS was deleted in P2-C5). **The AP prefix landed in P8-C2: `AP_SSID_PREFIX` is `"PEBBLEBOL-"` and the SSID is `PEBBLEBOL-XXXX`, 14 chars, inside `net.h`'s `SSID_MAX_LEN >= 15` assertion. D3 has nothing open.** |
-| **D4** | Language of user-facing UI strings | DEFAULT | Spanish `strings_es.h` (439 strings, `StrId` mechanism) vs English. Spec header allows Spanish UI. | Keep Spanish; new BOX/BATTLE/NET/LINK/CREATOR/ERROR/TIME blocks written in Spanish in the same mechanism. An `strings_en.h` twin is a one-file swap later. | P2-C11 | — |
-| **D5** | Panel variant SSD1306 vs SH1106 | DEFAULT | `DISPLAY_IS_SH1106` (`config.h:64`); both drivers verified to link. | Keep 0 (SSD1306). Flip only with the panel in front of you (README §3 symptoms). | P2-C0 | — |
-| **D6** | Partition table / OTA room (§61) | DEFAULT | `huge_app.csv` = nvs 20 KB, otadata 8 KB, app0 3 MB, spiffs 896 KB unused, coredump 64 KB; no OTA slot. Core 3.1.1 honours a `partitions.csv` in the sketch folder. `initArduino()` erases the whole `nvs` partition on `ESP_ERR_NVS_NO_FREE_PAGES` / `NEW_VERSION_FOUND` before `setup()`. | Custom `Pebblebol/partitions.csv`: `nvs 0x9000 0x5000 · otadata 0xE000 0x2000 · app0 0x10000 0x300000 · nvs2 0x310000 0x10000 · spiffs 0x320000 0xD0000 (reserved) · coredump 0x3F0000 0x10000`. `nvs2` = checkpoint partition. OTA stays a V1 non-goal. | P2-C9d | **CLOSED (P2-C9d, 2026-09-03).** `Pebblebol/partitions.csv` committed exactly as proposed: `nvs 0x9000 0x5000 · otadata 0xE000 0x2000 · app0 0x10000 0x300000 · nvs2 0x310000 0x10000 · spiffs 0x320000 0xD0000 · coredump 0x3F0000 0x10000`, filling 4 MB with no gap. **`PartitionScheme=huge_app` STAYS in the FQBN**, contrary to the plan's wording, and the reason is worth recording: arduino-cli copies a sketch-local `partitions.csv` into the build directory and esptool flashes THAT — so the table in force is ours either way — but `upload.maximum_size`, the ceiling the compile is checked against, comes from the board menu. Dropping the option left the check at the default scheme's 1,310,720 B and failed a 1.87 MB build that fits `app0` perfectly. `huge_app`'s ceiling is 3,145,728 B, which is exactly `app0` in our CSV, so the two agree. `tools/build.sh` now gates both facts: the reported app maximum must equal 3,145,728, and the partition table about to be flashed must contain `nvs2`. |
-| **D7** | Creator inactivity grace (§34) | DEFAULT | 120 s vs 300 s. | `ConfigV2.creator_idle_s` default 300, editable in SETTINGS. | P8-C2 | **CLOSED (P8-C2, 2026-09-05).** 300 s, and `cfgv2_defaults()` already shipped that value. The timer is `networking/creator_gate.cpp`'s `cg_idle_expired()`, measured on `gt_mono32()`, and it is reset **only by a request that passed the PIN gate** - an unauthenticated client in radio range must not be able to hold the access point open. A persisted `0` (a save older than the field) resolves to the default rather than to an instant shutdown, and a value above `CREATOR_IDLE_S_MAX` is clamped. The SETTINGS editor is not built: nothing writes `creator_idle_s` yet, so the value in force is the default. Driven case by case in `tests/test_creator_gate.cpp`; **observed on hardware: NO.** |
-| **D8** | Piezo GPIO (new hardware, V1 baseline §6) | **STILL OPEN — owner confirms when soldering** | A passive ~15 mm piezo joins the V1 BOM. Free, non-strapping GPIOs on this board: 3, 4, 6, 7. GPIO0 is kept for the battery divider (D10). `tone()`/`noTone()` and the LEDC driver are both in the installed core, so no library is needed. | `PIN_PIEZO 3` is now **committed as the proposal** in `core/config.h` §2 (P6-C1). The tone engine is written against the macro, so changing it is a one-line edit, and `tools/check.sh` fails any other file that defines a `PIN_` macro. | P6-C3 (sleep GPIO states); the tone engine landed EARLY, in **P6-C1**, not P10-C2 | **The engine shipped against an open decision — see "D8 — the tone engine landed…" below.** The pin itself is unconfirmed and nothing has been heard. |
+| **D4** | Language of user-facing UI strings | **CLOSED AT SHIP (P10-C5)** — Spanish UI, English code and documents; the Spanish documents are archived under `docs/legacy/` and the English `README.md` exists (plan T12/G8). | Spanish `strings_es.h` (439 strings, `StrId` mechanism) vs English. Spec header allows Spanish UI. | Keep Spanish; new BOX/BATTLE/NET/LINK/CREATOR/ERROR/TIME blocks written in Spanish in the same mechanism. An `strings_en.h` twin is a one-file swap later. | P2-C11 | — |
+| **D5** | Panel variant SSD1306 vs SH1106 | **OPEN AT SHIP (P10-C5)** — a property of the panel in front of you, not of this repository. Both drivers link and both variants are green in the matrix. Owner step at the end of this file. | `DISPLAY_IS_SH1106` (`config.h:64`); both drivers verified to link. | Keep 0 (SSD1306). Flip only with the panel in front of you (README §3 symptoms). | P2-C0 | — |
+| **D6** | Partition table / OTA room (§61) | **CLOSED (P2-C9d)** | `huge_app.csv` = nvs 20 KB, otadata 8 KB, app0 3 MB, spiffs 896 KB unused, coredump 64 KB; no OTA slot. Core 3.1.1 honours a `partitions.csv` in the sketch folder. `initArduino()` erases the whole `nvs` partition on `ESP_ERR_NVS_NO_FREE_PAGES` / `NEW_VERSION_FOUND` before `setup()`. | Custom `Pebblebol/partitions.csv`: `nvs 0x9000 0x5000 · otadata 0xE000 0x2000 · app0 0x10000 0x300000 · nvs2 0x310000 0x10000 · spiffs 0x320000 0xD0000 (reserved) · coredump 0x3F0000 0x10000`. `nvs2` = checkpoint partition. OTA stays a V1 non-goal. | P2-C9d | **CLOSED (P2-C9d, 2026-09-03).** `Pebblebol/partitions.csv` committed exactly as proposed: `nvs 0x9000 0x5000 · otadata 0xE000 0x2000 · app0 0x10000 0x300000 · nvs2 0x310000 0x10000 · spiffs 0x320000 0xD0000 · coredump 0x3F0000 0x10000`, filling 4 MB with no gap. **`PartitionScheme=huge_app` STAYS in the FQBN**, contrary to the plan's wording, and the reason is worth recording: arduino-cli copies a sketch-local `partitions.csv` into the build directory and esptool flashes THAT — so the table in force is ours either way — but `upload.maximum_size`, the ceiling the compile is checked against, comes from the board menu. Dropping the option left the check at the default scheme's 1,310,720 B and failed a 1.87 MB build that fits `app0` perfectly. `huge_app`'s ceiling is 3,145,728 B, which is exactly `app0` in our CSV, so the two agree. `tools/build.sh` now gates both facts: the reported app maximum must equal 3,145,728, and the partition table about to be flashed must contain `nvs2`. |
+| **D7** | Creator inactivity grace (§34) | **CLOSED (P8-C2)** — but nothing writes the field, so the value in force is the default; that is a UI gap, not an open decision. | 120 s vs 300 s. | `ConfigV2.creator_idle_s` default 300, editable in SETTINGS. | P8-C2 | **CLOSED (P8-C2, 2026-09-05).** 300 s, and `cfgv2_defaults()` already shipped that value. The timer is `networking/creator_gate.cpp`'s `cg_idle_expired()`, measured on `gt_mono32()`, and it is reset **only by a request that passed the PIN gate** - an unauthenticated client in radio range must not be able to hold the access point open. A persisted `0` (a save older than the field) resolves to the default rather than to an instant shutdown, and a value above `CREATOR_IDLE_S_MAX` is clamped. The SETTINGS editor is not built: nothing writes `creator_idle_s` yet, so the value in force is the default. Driven case by case in `tests/test_creator_gate.cpp`; **observed on hardware: NO.** |
+| **D8** | Piezo GPIO (new hardware, V1 baseline §6) | **OPEN AT SHIP (P10-C5)** — owner confirms when soldering. Nothing has ever been heard. Owner step at the end of this file. | A passive ~15 mm piezo joins the V1 BOM. Free, non-strapping GPIOs on this board: 3, 4, 6, 7. GPIO0 is kept for the battery divider (D10). `tone()`/`noTone()` and the LEDC driver are both in the installed core, so no library is needed. | `PIN_PIEZO 3` is now **committed as the proposal** in `core/config.h` §2 (P6-C1). The tone engine is written against the macro, so changing it is a one-line edit, and `tools/check.sh` fails any other file that defines a `PIN_` macro. | P6-C3 (sleep GPIO states); the tone engine landed EARLY, in **P6-C1**, not P10-C2 | **The engine shipped against an open decision — see "D8 — the tone engine landed…" below.** The pin itself is unconfirmed and nothing has been heard. |
 | **D9** | Supply architecture for 2×AAA | **CLOSED — 3.3 V boost converter (2026-09-03, owner)** | Alkaline AAA pairs sag from ~2.8 V loaded to ~2.4 V at 80 % discharge, while the core arms brownout at level 7 (~3.0 V, verified `CONFIG_ESP_BROWNOUT_DET_LVL 7`), and the board's LDO cannot step 3.0 V up. A boost module removes the whole problem: the 3.3 V rail stays flat across the discharge curve and ~90 % of cell capacity becomes usable. | Boost module fitted, feeding 3.3 V. The board's always-on power LED is being desoldered (it cost ~48 mAh/day, more than the rest of the device combined). | — | Decided: boost. Two follow-ups it creates are tracked as D11 and D12. |
-| **D10** | Battery sense divider on GPIO0 | OPEN | Spec §26 wants NORMAL/LOW/CRITICAL levels. `PIN_VBAT_ADC 0` is already reserved and GPIO0 is ADC1_CH0, so this needs only two resistors. Without it those levels cannot exist and a flat pack corrupts a save instead of warning. | Two resistors; the firmware side lands with the power states in P6-C3. | P6-C3 | — |
-| **D11** | Boost module quiescent current | **OPEN — now the single biggest factor in battery life** | With the voltage window solved and the power LED gone, the dominant idle load is whatever the boost module draws doing nothing. Cheap PFM modules range from ~20 µA to ~2 mA, a 100× spread that decides the runtime outright. Budget from ~680 mAh of usable energy at 3.3 V and the spec's 60 min/day profile: 25 µA idle → ~26 days · 200 µA → ~23 days · 1 mA → ~14 days · 2 mA → ~9 days. | Measure it: multimeter in series with the cells, ESP32 in deep sleep, OLED off, radios off. Anything above ~200 µA and the ≥30-day target needs a different module, not firmware work. | Battery-life target | — |
-| **D12** | Bulk capacitor on the boost output | OPEN | The ESP32-C3 pulls ~350 mA in Wi-Fi TX. Drawn through a boost from 2.4 V cells that have ~0.3 Ω internal resistance, that transient can collapse the rail and trip exactly the reset the hardware checklist §30 asks about ("Wi-Fi scan does not cause resets"). | A 100–470 µF electrolytic across the boost output, for a few cents. Firmware already helps: the scanner is specified `passive=true` (plan P5-C1), so it listens rather than sending probe requests, which is the cheap half of a scan. | P5-C1 bench test | — |
+| **D10** | Battery sense divider on GPIO0 | **OPEN AT SHIP (P10-C5)** — no divider is fitted, so spec §26's NORMAL/LOW/CRITICAL levels cannot exist and every battery field reads `n/a` with a reason. Owner step at the end of this file. | Spec §26 wants NORMAL/LOW/CRITICAL levels. `PIN_VBAT_ADC 0` is already reserved and GPIO0 is ADC1_CH0, so this needs only two resistors. Without it those levels cannot exist and a flat pack corrupts a save instead of warning. | Two resistors; the firmware side lands with the power states in P6-C3. | P6-C3 | — |
+| **D11** | Boost module quiescent current | **OPEN AT SHIP (P10-C5) — the single biggest factor in battery life**, a 100x spread between modules. Owner step at the end of this file. | With the voltage window solved and the power LED gone, the dominant idle load is whatever the boost module draws doing nothing. Cheap PFM modules range from ~20 µA to ~2 mA, a 100× spread that decides the runtime outright. Budget from ~680 mAh of usable energy at 3.3 V and the spec's 60 min/day profile: 25 µA idle → ~26 days · 200 µA → ~23 days · 1 mA → ~14 days · 2 mA → ~9 days. | Measure it: multimeter in series with the cells, ESP32 in deep sleep, OLED off, radios off. Anything above ~200 µA and the ≥30-day target needs a different module, not firmware work. | Battery-life target | — |
+| **D12** | Bulk capacitor on the boost output | **OPEN AT SHIP (P10-C5)** — a few cents, before the Wi-Fi scan test. Owner step at the end of this file. | The ESP32-C3 pulls ~350 mA in Wi-Fi TX. Drawn through a boost from 2.4 V cells that have ~0.3 Ω internal resistance, that transient can collapse the rail and trip exactly the reset the hardware checklist §30 asks about ("Wi-Fi scan does not cause resets"). | A 100–470 µF electrolytic across the boost output, for a few cents. Firmware already helps: the scanner is specified `passive=true` (plan P5-C1), so it listens rather than sending probe requests, which is the cheap half of a scan. | P5-C1 bench test | — |
 | **D13** | Light ON by default, and what it does to a hands-off player | **CLOSED — delete the light (2026-09-03, owner)** | `sim_new_pet()` set `PF_LIGHT_ON`, and `sleep_machine()` auto-slept only when it was night AND the light was off. A player who never found the light toggle therefore owned a Pebble that **never slept**: energy pinned at 0 after 16.7 h, the 2 h zero-dwell grace started, and health bled to the 10 % floor at about 64 h. Spec-compliant (section 27: inconveniently unhappy, never destroyed) but the WORST case reachable, and reached by doing nothing — the opposite of what "fun even if you ignore it for hours" is meant to feel like. Measured during P3-C1's retune. | — (superseded) | P3-C5's soak criterion | **The light mechanic is deleted, not defaulted (P3-C2b).** The owner's judgement was that the switch "doesn't add anything": neither of the two one-line fixes was taken. Sleep now follows an approximated daylight table and a player who insists can wake the creature. See the consequences below the table. |
 
 ## D1 — consequences of deferring (recorded 2026-09-02)
@@ -281,6 +316,11 @@ first flash. The soak is listed below with the other first-hardware measurements
 
 ## Measurements to record when hardware exists (P2-C0)
 
+> **SUPERSEDED BY `docs/bench.md` (P10-C5).** This list was written when the
+> bench file did not exist. Everything in it is now an item there, in the
+> order one person should run it, with the variant named. Kept because it is
+> the first time this project wrote down that it had measured nothing.
+
 - **1 h heap soak (P2-C12).** Boot to HOME, radio OFF, god mode OFF, leave it for an hour
   and capture the `DIAG,heap,` lines. Pass = `free_b` flat within allocator noise and
   `min_free_b` reaching a floor early and then not falling. A `min_free_b` that keeps
@@ -329,6 +369,11 @@ first flash. The soak is listed below with the other first-hardware measurements
   says so.
 
 ## D14 — the species roster stops at family 1 (recorded 2026-09-03, P3-C3)
+
+> **SUPERSEDED (P10-C5).** The roster is 60 species in 20 families since
+> phase 9. What survives here is the ARGUMENT, which is still true of any
+> future content change: the contiguity guard makes the roster all-or-nothing
+> in whole family blocks, so "add one family" is never one family.
 
 - **What shipped.** `data/species_table.h` grew from one placeholder row to the THREE REAL
   rows of family 1 — Paketo (id 1, base stage), Fragmar (2, mid), Rafagón (3, final) — copied
@@ -863,6 +908,10 @@ recovers **712,466 B / 23,504 B**, not the phase-1 audit's 721,632 / 23,688.
 
 ### What phase 4 did NOT measure, stated as unmeasured
 
+> **Gathered in `docs/bench.md` (P10-C5).** Everything below that needs a
+> board is an item in that file, with a variant, keystrokes and an acceptance
+> number. This section is left as written: it is what was true at this phase.
+
 - **The device frame budget.** `FRAME_BUDGET_US` is 50,000 µs (20 fps) and
   `rd_frame_time_us()` exists to be compared against it on real hardware. The battle screen
   is the heaviest thing this firmware draws — two mirrored 24×24 XBM bodies, bars, dither,
@@ -1060,6 +1109,10 @@ exit does not rediscover it: at some point the fix is one shape of guard in the 
 not N neutralised lines in a hand-copied tree.
 
 ### What phase 5 did NOT measure, stated as unmeasured
+
+> **Gathered in `docs/bench.md` (P10-C5).** Everything below that needs a
+> board is an item in that file, with a variant, keystrokes and an acceptance
+> number. This section is left as written: it is what was true at this phase.
 
 - **No radio has ever scanned anything.** Every scan in every test came from a fake
   `WifiScanDriver` behind the four-function seam that exists so the 12 s timeout and the B
@@ -1307,6 +1360,10 @@ above 500.
 
 ### What P6-C2 did NOT measure, stated as unmeasured
 
+> **Gathered in `docs/bench.md` (P10-C5).** Everything below that needs a
+> board is an item in that file, with a variant, keystrokes and an acceptance
+> number. This section is left as written: it is what was true at this phase.
+
 - **Nothing has run on a board.** The score, its persistence and its three rewards are host
   tests over pure modules; the wiring in `app/app.cpp`, `ui/ui.cpp` and
   `ui/screen_network.cpp` is checked by the compiler, by `tests/test_screens.cpp` (which
@@ -1493,6 +1550,10 @@ OF CLOCK is executed rather than grepped — is written into the P7-C6 box, not 
   other ticked box uses.
 
 ### What phase 6 did NOT measure, stated as unmeasured
+
+> **Gathered in `docs/bench.md` (P10-C5).** Everything below that needs a
+> board is an item in that file, with a variant, keystrokes and an acceptance
+> number. This section is left as written: it is what was true at this phase.
 
 - **Nothing in this phase has run on hardware, and it is a larger caveat here than in any
   earlier phase, because two of the three chunks are about hardware.** No piezo has been
@@ -1701,6 +1762,10 @@ stale binary, and the TTL mutation was re-planted as a TTL that never expires.
 
 ### What P7-C1 did NOT measure, stated as unmeasured
 
+> **Gathered in `docs/bench.md` (P10-C5).** Everything below that needs a
+> board is an item in that file, with a variant, keystrokes and an acceptance
+> number. This section is left as written: it is what was true at this phase.
+
 - **No radio ran.** Nothing in this environment can bring up ESP-NOW: the channel, the
   broadcast peer entry, `esp_now_init()` ordering after `esp_wifi_start()`, ESP-NOW's own
   duplicate suppression and MTU enforcement, and whether two boards hear each other are all
@@ -1846,6 +1911,10 @@ outcome word, the armed battle modifier and the four test queries. Left as liter
 two devices and paid the wrong half of the fight.
 
 ### What P7-C2/C3 did NOT measure, stated as unmeasured
+
+> **Gathered in `docs/bench.md` (P10-C5).** Everything below that needs a
+> board is an item in that file, with a variant, keystrokes and an acceptance
+> number. This section is left as written: it is what was true at this phase.
 
 - **No radio ran, again.** Nothing here is evidence about ESP-NOW, the Wi-Fi task, a real
   channel, a real duplicate or callback threading. §67's "Local multiplayer works" is
@@ -2197,6 +2266,10 @@ Every fix above was mutation-tested; each mutation made a NAMED case or a NAMED 
   seam held". Any exit check written with the short path is a test that cannot fail.
 
 ### What phase 7 did NOT measure, stated as unmeasured
+
+> **Gathered in `docs/bench.md` (P10-C5).** Everything below that needs a
+> board is an item in that file, with a variant, keystrokes and an acceptance
+> number. This section is left as written: it is what was true at this phase.
 
 **No radio ran, and this is a larger caveat than in any previous phase**, because phase 7's
 whole subject is two devices talking. Unobserved: whether two boards see each other's beacon
@@ -3175,3 +3248,135 @@ Recorded because the exit's job is the documents as much as the code.
   `tests/golden/care_v1.txt`.
 * **The HOME layout.** A 24 px body on `HOME_FLOOR_Y` leaves 19 blank rows above it on every
   still frame where the 40 px adult filled the band. Owed to P10-C3/C4.
+
+---
+
+# THE STATE AT SHIP (P10-C5)
+
+**Written at the last build chunk. Every decision above, given a terminal state.
+Six are still open, and each one has a step the owner can act on — that is what
+"closed log" means here, not that every question was answered.**
+
+## Closed
+
+| # | Decision | Outcome | Applied in |
+|---|---|---|---|
+| **D2** | Peer transport | **ESP-NOW.** BLE deleted whole in P8-C0, which is where 712,466 B of flash and 23,504 B of static RAM went. | P7-C1, P8-C0 |
+| **D3** | Persisted names and product identity | NVS namespace `"pbbl"` with a one-shot import of a legacy `"notta"` save; AP prefix `PEBBLEBOL-`; mDNS deleted. | P2-C9b, P8-C2 |
+| **D4** | UI language | Spanish user-facing strings in `core/strings_es.h`; English identifiers, comments and documents. **Completed here**: the Spanish documents are archived under `docs/legacy/` and the English `README.md` exists (plan T12/G8). | P2-C8, P2-C11, P10-C5 |
+| **D6** | Partition table | `Pebblebol/partitions.csv` with the private `nvs2` checkpoint partition; `PartitionScheme=huge_app` stays in the FQBN because the board menu supplies `upload.maximum_size`. Both facts gated by `tools/build.sh`. | P2-C9d |
+| **D7** | Creator inactivity grace | 300 s, `ConfigV2.creator_idle_s`, reset only by a request that passed the PIN gate. **Nothing writes the field** — the SETTINGS editor was never built — so the value in force is the default. That is a gap in the UI, not an open decision. | P8-C2 |
+| **D9** | Supply architecture | 3.3 V boost converter for 2×AAA; the board's always-on power LED comes off. Created D11 and D12. | owner, 2026-09-03 |
+| **D13** | The light mechanic | **Deleted, not defaulted.** Sleep follows an approximated daylight table. | P3-C2b |
+| **D14** | Roster staging | Superseded. The roster stopped at family 1 for phases 3-4 by the contiguity guard; phase 9 shipped all 60 species in 20 families. The section is kept because its argument — the roster is all-or-nothing in whole family blocks — is still true of any future content change. | P3-C3, superseded by P9 |
+| **T1-T13** | Plan decisions | All applied; see the T-table above. | phases 2-10 |
+
+## Open at ship — the owner's list
+
+**D1 gates all six.** Nothing below D1 can be done until a board is wired.
+
+### D1 — the GPIO map. *The first thing owed, and it blocks every bench item.*
+
+The repository compiles `PIN_SDA 8, PIN_SCL 9, PIN_BTN_L 10, PIN_BTN_R 2,
+PIN_LED 5`. The archived Spanish README documents a different map (SDA 6, SCL 7,
+BTN_L 3, BTN_R 4, LED 8) with a wiring diagram. Neither has been on a board, and
+the committed one **fails this repository's own assertions**:
+
+```console
+$ g++ -DPB_PINS_CONFIRMED -fsyntax-only Pebblebol/src/core/config.h
+core/config.h:114: error: static assertion failed: D1: no button on a strapping pin (GPIO2/8/9)
+```
+
+**Owner step.** Inspect the physical wiring and declare one map. Edit the five
+`#define`s in `core/config.h` §2 — they are the only pin numbers in the
+firmware, and `tools/check.sh` fails any other file that defines a `PIN_` macro.
+Then **define `PB_PINS_CONFIRMED`** and let the seven `static_assert`s check
+your map. Free, non-strapping GPIOs on this board: 3, 4, 6, 7, 10; GPIO0 is
+reserved for D10.
+
+### D8 — the piezo GPIO
+
+`PIN_PIEZO 3` is a **proposal**, committed once, in the same block as D1. The
+seven-effect tone engine (P6-C1) is written against the macro and never against
+a number.
+
+**Owner step.** Confirm the pin when the sounder is soldered — 3, 4, 6 or 7 —
+and edit that one line. Nothing else in the tree changes. Then bench §A5 and
+§F: **nothing has ever been heard.**
+
+### D5 — SSD1306 or SH1106
+
+`DISPLAY_IS_SH1106` is 0. The `sh1106` variant is built and green in the matrix,
+so both drivers link and fit; which one is right is a property of the panel in
+front of you.
+
+**Owner step.** Flash, look at the boot screen. Everything aligned and the frame
+against all four edges is an SSD1306. Everything shifted 2 px with a 2 px band
+of rubbish at one edge is an SH1106: set `DISPLAY_IS_SH1106 1` and reflash. The
+SH1106 has 132 columns of memory and 128 visible, which is the whole of the
+difference.
+
+### D10 — the battery sense divider
+
+`PIN_VBAT_ADC 0` is reserved and GPIO0 is ADC1\_CH0, so this needs two
+resistors. **Without it the NORMAL/LOW/CRITICAL levels of spec §26 cannot
+exist**, the DIAG battery field reads `n/a` with a reason, and a flat pack
+corrupts a save instead of warning.
+
+**Owner step.** Fit the divider, or accept that the product has no battery
+warning and say so in the manual. The firmware side is written and dormant.
+
+### D11 — the boost module's quiescent current. *The single biggest factor in battery life.*
+
+With the voltage window solved (D9) and the power LED removed, the dominant idle
+load is whatever the boost module draws doing nothing. Cheap PFM modules span
+~20 µA to ~2 mA — a 100× spread that decides the runtime outright. From ~680 mAh
+of usable energy at 3.3 V and the spec's 60 min/day profile:
+
+| Idle draw | Runtime |
+|---|---|
+| 25 µA | ~26 days |
+| 200 µA | ~23 days |
+| 1 mA | ~14 days |
+| 2 mA | ~9 days |
+
+**Owner step.** Multimeter in series with the cells, ESP32 in deep sleep, OLED
+off, radios off. Above ~200 µA the ≥30-day target needs a different module, not
+firmware work.
+
+### D12 — a bulk capacitor on the boost output
+
+The ESP32-C3 pulls ~350 mA in Wi-Fi TX. Drawn through a boost from 2.4 V cells
+with ~0.3 Ω internal resistance, that transient can collapse the rail and trip
+exactly the reset bench §C1 asks about.
+
+**Owner step.** A 100-470 µF electrolytic across the boost output, for a few
+cents, before running the scan test. The firmware already helps: the scanner is
+passive, so it listens rather than sending probe requests.
+
+## What is measured, and what is not
+
+**Measured on the host, by the gate, at this commit:** 58 test binaries
+(~5.8 M assertions), an AddressSanitizer subset over every path that reads bytes
+the device did not write, 51 browser assertions over the phone page, ~129 named
+grep gates, six firmware variants at zero project warnings, and the release
+image against its caps — 1,348,854 / 1,600,000 flash and 59,452 / 65,000
+globals.
+
+**Not measured, at all:** everything that needs a board. **Seventeen §67
+acceptance boxes are open**, sixteen with a written owner step in
+`docs/bench.md` (the seventeenth is the 24 h soak, for which nobody has written
+one); the five performance thresholds of spec §46, which are runnable today and
+gated by nothing; the three save flows of bench §G; and battery life, which
+waits on D11.
+
+**A note on what a green gate is evidence for.** It is evidence that the rules
+behave as written, that no screen draws outside 128×64 at the worst content the
+product allows, that a save survives a power cut at every write, and that the
+image fits. It is not evidence that a board boots. Those are different claims
+and this project has been careful, on the record, not to let one stand in for
+the other.
+
+---
+
+*`docs/decisions.md` closed at P10-C5. Later changes: `CHANGELOG.md`.*

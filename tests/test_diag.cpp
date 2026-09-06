@@ -23,6 +23,7 @@
 // =============================================================================
 #include "nt_test.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "core/config.h"
@@ -628,7 +629,17 @@ TEST(save_version_reports_the_firmwares_and_the_flashs_and_the_migration) {
   DiagOut o;
   diag_out_init(o, g_buf, (uint16_t)sizeof(g_buf));
   diag_fmt_field((uint8_t)DGD_SAVE_VER, f, o);
-  CHECK(has("fw=2"));
+  // "fw=2" WAS A LITERAL HERE UNTIL P10-C5 BUMPED THE SCHEMA, and it failed by
+  // name, which is what it was for. It is derived now because this is a
+  // FORMATTER test - the three questions the line answers and the shape of the
+  // answer - while the value of SAVE_SCHEMA_VERSION itself is pinned where it
+  // belongs, in tests/test_persistence.cpp's schema_sizes_are_the_wire_sizes.
+  // The two numbers below stay literal: they come from the fields, not the
+  // build, and a formatter that printed the firmware's version for all three
+  // would still pass a test that derived all three.
+  char want[16];
+  snprintf(want, sizeof want, "fw=%u", (unsigned)SAVE_SCHEMA_VERSION);
+  CHECK(has(want));
   CHECK(has("onflash=1"));
   CHECK(has("migrated=1"));
 }

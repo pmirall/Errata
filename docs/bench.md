@@ -10,7 +10,9 @@ host binaries, an AddressSanitizer subset, 51 browser assertions and about thirt
 of that is evidence for a single line below.
 
 **Why it exists as one document.** These items were spread across seven phase records, and a list
-distributed over seven records is a list nobody runs. Written by P10-C2, the last build chunk.
+distributed over seven records is a list nobody runs. Written by P10-C2; sections F (first boot)
+and G (the save) added by P10-C4 and P10-C5. **This is the file the release hands to whoever has
+the hardware**, and `README.md` §2 points at it.
 
 ---
 
@@ -222,6 +224,29 @@ its whole run, because `PWR_SLEEP_SLICE_MS` (8,000) is below `NT_TICK_MAX_OWED_S
 networks with no keystroke. Confirm whether that reproduces; the three ways out are written in
 the P6 carry-forward.
 
+**C5. §67 "No obvious memory leak" — the 24 h soak. ADDED AT P10-C5, because this was the one
+§67 box in the product with no owner step anywhere.** It is the oldest owed item in the file:
+P2-C12 named it, P10-C2 named it again and said plainly that what it could run was one whole
+SIMULATED day of the pure loop with the allocation counter armed and requiring zero — a different
+claim from a device that has been powered for a day.
+
+`release`, one board, mains USB, left alone for 24 h with the serial line captured:
+
+```bash
+arduino-cli monitor -p /dev/ttyACM0 -c baudrate=115200 \
+  | tee docs/bench/$(date +%F)-soak.log
+```
+
+The artefact prints `DIAG,heap,<uptime_s>,<free_b>,<min_free_b>` every 60 s on every screen, with
+no console and no god mode, and that format has been stable since P2-C12 precisely so a capture
+can be parsed years later. **Acceptance: `free_b` at hour 24 is within a few hundred bytes of
+`free_b` at hour 1, and `min_free_b` has stopped falling.** A slope is the finding; the absolute
+number is not.
+
+Run it twice if you can: once on HOME (the animated layer, `ui/petfx.cpp`, which no host binary
+compiles) and once left on the CREATOR screen with the radio up, because the two exercise
+completely different allocators. The screen the board was left on goes in the log.
+
 ---
 
 ## D. The phone — spec §67, the creator block
@@ -255,6 +280,22 @@ keyboard eating half the viewport. This box is a thumb on glass.
 readout under the thumb, and DESHACER as a first-class tool. Whether that is enough is what this
 box asks.
 
+**D6. §67 "Device-side validation works" — ADDED AT P10-C5, because it was the one §67 box in the
+file with no item of its own.** The rules are the strongest-held thing in this repository: one
+validator, 27 named reject codes, driven over the whole parse pipeline by
+`tests/test_creator_api.cpp` **under AddressSanitizer on every commit**, and end to end from a
+real browser by `tools/page_test.mjs`. None of that is a socket. `networking/creator_server.cpp`
+is compiled by no host binary, so **the transport half is held by four greps and by this item.**
+
+Phases 1 and 2 of `tools/creator_smoke.sh --variant release --pin NNNN` are the instrument:
+a well-formed creature accepted; a body over the raw cap refused with 413 **including on an
+UNMATCHED path**, which must answer 413 rather than 404; truncated JSON, a stat total over
+budget, an unknown attack id and a name with an illegal byte each refused with **their own named
+code**, not a generic 400. Read the codes off the responses and check them against
+`game/validate.h`: a validator that answers `VR_OK` to one of these, or the same code to all of
+them, is the failure this box is about. **And the Box count must not move** across the whole
+phase.
+
 ---
 
 ## E. The serial console, on the first board
@@ -279,45 +320,114 @@ is worth writing) and **BLE reads `none (removed in P8-C0, decision D2)`**.
 
 ## F. First boot, on a board that has never been switched on — spec §65 (P10-C4)
 
+> **The items in this section were labelled `H1`..`H6` until P10-C5 and are `F1`..`F6`
+> now.** The section was drafted as H and renumbered to F when it landed; the item
+> prefixes did not move with it. Nothing outside this file cited them, which is exactly
+> why it went unnoticed - and `README.md` cites F4 now, so it would not have again.
+
 Everything below **H1** can be checked on the host and is (`tests/test_onboarding.cpp` drives the
 step through the real save pipeline; `tests/test_screens.cpp` drives both screens, all six
 gestures and the goldens). What cannot be checked here is the only thing that matters about an
 onboarding flow: **whether a person who has never seen the device can get through it.** That
 needs a person, a board and no explanation.
 
-**H1. A genuinely fresh board.** `esptool erase_flash`, then flash `release`. Expected, in order:
+**F1. A genuinely fresh board.** `esptool erase_flash`, then flash `release`. Expected, in order:
 splash → "Cargando la partida..." → **PONLE NOMBRE**. Not a toast over it: the greeting is drawn
 on the screen itself (`STR_SU_HELLO`), because the toast band is rows 45–55 and both instruction
 lines live there. **If a toast covers the bottom two lines, that is the defect P10-C4 fixed
 coming back.**
 
-**H2. Type a name with an accent in it.** Walk the ring to `Ñ` and accept. Then read the name back
+**F2. Type a name with an accent in it.** Walk the ring to `Ñ` and accept. Then read the name back
 on HOME and on the creator portal (`GET /api/state`). All three must show the same character. A
 name that renders as one wrong glyph, or that loses the character *after* the accent, is the
 Latin-1/UTF-8 seam (`core/utf8.h`) failing on the panel's own decoder — which is the half no host
 test can see, because the host fake is not u8g2.
 
-**H3. The date, then the starter.** HOLD L on the date must go **forward** to ELIGE PEBBLE, not
+**F3. The date, then the starter.** HOLD L on the date must go **forward** to ELIGE PEBBLE, not
 back. Pick the third creature. On HOME the Pebble must be that creature, at level 1, with the name
 from H2.
 
-**H4. THE POWER CUT, and this is the item worth the trip.** Repeat H1, type a name, accept it, and
+**F4. THE POWER CUT, and this is the item worth the trip.** Repeat F1, type a name, accept it, and
 **pull the power while the date screen is up**. On the next boot the device must come back **on the
 date screen with the name already stored** — not at PONLE NOMBRE, and not on HOME. Repeat with the
 cut after the date is accepted: it must come back on ELIGE PEBBLE. Then finish the flow, power
 cycle twice more, and confirm **no setup screen is ever shown again**.
 
-**H5. The player who reads nothing.** From a fresh board, hold both buttons on the first screen.
+**F5. The player who reads nothing.** From a fresh board, hold both buttons on the first screen.
 The device must land on HOME with a working Pebble (species 1, the historical starter), no name,
 and the clock unset — and it must never ask again.
 
-**H6. A board that has been played.** Flash `release` over a device that already has a save from an
+**F6. A board that has been played.** Flash `release` over a device that already has a save from an
 earlier firmware. It must go straight to HOME. Being handed a setup wizard is the failure mode the
 `OB_DONE == 0` encoding exists to prevent, and it is the one that would look like data loss.
 
 ---
 
-## G. What is measured on the host and named here so it is not measured twice
+## G. The save, on a board — spec §31 (P10-C5)
+
+**Variant: `release`.** Three flows the host proves *arithmetically* and cannot prove
+*physically*. Every one of them is driven end to end in `tests/test_persistence.cpp` against
+`tests/fakes/kv_mem.cpp`, a RAM NVS with fault injection — which is why the rules are known to be
+right, and why none of that is a sentence about flash.
+
+**What the host has already proved, so you do not run it twice:** the pair discipline (every
+write to the copy a reader would not pick, read back and compared); a load never destroying a
+save it could not read; both copies of every blob rotted, one copy rotted, a header/slot
+mismatch, a torn write at each of ten points in a trade; the whole v1 -> v2 -> v3 migration
+chain; and the factory reset and checkpoint restore below, against `kv_mem`'s erase path.
+
+**What only a board can settle:** that NVS behaves like the fake. Real NVS has wear levelling, a
+page allocator that can run out, a partition table that has to have been flashed, and an
+`initArduino()` that erases things before `setup()` runs. Nothing in this repository has ever
+written a byte to one.
+
+**G1. Factory reset really empties both partitions.** SETTINGS -> *Reset de fábrica* -> both
+confirmations. The device must come back on the first-boot flow (section F), naming, clock and
+starter all asked again. Then power-cycle: it must still be a fresh device, not the old one
+returning. *The failure mode this looks for is a reset that clears `nvs` and leaves `nvs2`, so
+the next boot restores the checkpoint of the creature the owner just deleted* — the two-partition
+wipe is one line in `save_factory_reset()` and it is the line that matters.
+
+**G2. Checkpoint restore after a real `nvs` erase.** This is the flow `nvs2` exists for, and it
+is worth doing deliberately because the accident it models is the Arduino core's own:
+
+```bash
+esptool.py --chip esp32c3 -p /dev/ttyACM0 erase_region 0x9000 0x5000   # "nvs" only
+```
+
+Play for a minute first so there is something to lose (name the device, catch or level something,
+change the brightness). Then erase, reboot, and the device must come back with the creature, the
+Box and the config **from the last checkpoint** and toast that it recovered — not a fresh
+starter. Check `show_save` on the serial line before and after — `save slots=`, `active=` and
+`count=` are the three that settle it. *Do not erase `nvs2`
+(`0x310000`): that is the copy under test.* Then reboot a second time: the recovered state was
+committed back to `nvs`, so the second boot must be ordinary.
+
+**G3. The schema upgrade, on a device that has been played.** The one item here that needs two
+firmware images, and the one that would have been catastrophic to get wrong:
+
+1. Check out the previous commit (`git log` — the parent of the P10-C5 commit), build `release`,
+   flash it, and **play**: name the device, set the clock, catch something, make a creature in the
+   creator portal if you have the phone out. That image writes `SAVE_SCHEMA_VERSION` 2.
+2. Build the current `release` and flash it **without erasing** (`Erase All Flash Before Sketch
+   Upload = Disabled`, which is the default).
+3. **Acceptance: the device comes up with everything intact** and toasts *«Partida
+   actualizada»* — `LOAD_MIGRATED`. Not SAVE ERROR. The creature made in the creator must still
+   be there and must not be quarantined.
+4. Power-cycle. The second boot must be **ordinary** — no second «Partida actualizada» — and
+   the serial line must agree: `show_save` reports `save schema=3 ... migrated=0`, and `info`'s
+   SAVE VERSION field reads `fw=3 onflash=3 migrated=0`. Both are `DCF_ALWAYS`, so they answer on
+   `release`.
+
+*Why it is worth the trip.* Every part of this is proved on the host, including the byte-level
+one: a whole played save is written, stamped back down to v2 and read by this firmware. What the
+host cannot do is write it through a real NVS page allocator, lose power inside the rewrite, and
+come back. If step 3 shows SAVE ERROR on a device whose data is intact, the fault is in
+`BlobOps::min_version` or in `pair_write()` and `docs/save_schema.md` §8.2 is the account of both.
+
+---
+
+## H. What is measured on the host and named here so it is not measured twice
 
 | Claim | Where it is checked | What that does not cover |
 |---|---|---|
@@ -330,10 +440,13 @@ earlier firmware. It must go straight to HOME. Being handed a setup wizard is th
 | Every screen draws inside 128x64 at a 12-character multi-byte name, level 30, 100 % stats and a full Box | `tests/test_screens.cpp` `kAudit[]`, one row per `ScreenId`, `static_assert`ed to be complete | the fake's font is fixed-advance, so a golden containing `GF_HEAD` or `GF_BIG` is layout-approximate; and `ui/petfx.cpp`, `ui/actfx.cpp` and `ui/ceremony.cpp` are compiled by no host binary, so HOME's animated layer is absent from every one of these renders |
 | Every string in `strings_es.h` fits the banner the toast and HELP strip draw | `tests/test_screens.cpp` | the same font caveat: the device is proportional and the host is 5 px per codepoint, so a string measured at 124 px here can be a few pixels either side there |
 | The first-boot step survives a power cut | `tests/test_onboarding.cpp` through the real `save_manager` and the fake NVS | a real power cut mid-write, real NVS wear, and `hardware/boot.cpp`'s reset-reason classification, none of which exist on the host |
+| A v2 save is read, carried forward field by field and re-sealed at v3, and the second boot is ordinary | `tests/test_persistence.cpp` §8b, a whole played save stamped down to v2 | that real NVS returns the bytes it was given; a power cut inside the rewrite; the two-image flash of G3 |
+| A factory reset empties both partitions and the next load is `LOAD_FRESH` | `tests/test_persistence.cpp`, against `kv_mem`'s erase path | that `kv_wipe()` reaches a real partition, and that `nvs2` goes with `nvs` (G1) |
+| A checkpoint restores after `KV_MAIN` is wiped, at v2 or v3, through both entry points | `tests/test_persistence.cpp` | that the `nvs2` partition was actually flashed and that `initArduino()` leaves it alone (G2) |
 
 ---
 
-## H. Recording a run
+## I. Recording a run
 
 Commit the capture to `docs/bench/<date>-<sha>.log` and add one row per item to the table below,
 with the **variant**, the **firmware version** (`info` prints it) and the reading. An item with no
