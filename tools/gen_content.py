@@ -20,52 +20,48 @@ keys, and nothing here reads the clock, the environment or a random source.
 `--check` is what proves it in the gate.
 
 ------------------------------------------------------------------------------
-WHY THE ROSTER IS 36 SPECIES (12 families x 3) AND NOT 12 OR 60
+WHY THE ROSTER IS 60 SPECIES (20 families x 3), AND WHAT USED TO CAP IT AT 36
 ------------------------------------------------------------------------------
 The content pack in tools/content/ holds the FULL 60-species roster and its own
 gate (`cd tools/content && python3 verify.py --fast`) validates all 60. What
 gets EMITTED is a prefix of it, because SpeciesDef ids are contiguous
 (`id == index + 1`, a static_assert) - so the only legal subsets are prefixes,
-and a prefix is a whole number of families.
+and a prefix is a whole number of families. ROSTER_FAMILIES = 20 now emits the
+whole pack, so the prefix is the pack.
 
-Three numbers were measured before choosing:
+THE ROSTER WAS 36 UNTIL P9-C3, AND THE ART IS WHAT HELD IT THERE, not the
+tables. The three numbers, as they were measured and as they now stand:
 
-  * FLASH. It does not bind. The baseline firmware is 1,893,072 B against a
-    GATE_FLASH_MAX of 2,400,000, i.e. 506,928 B of headroom, and the whole
-    60-species content set is 5,397 B of tables plus strings (the pack's own
-    14,037 B figure includes an 8,640 B sprite atlas that does not exist yet).
-    Flash permits all 60 with three orders of magnitude to spare.
+  * FLASH. It never bound. The whole 60-species content set is 5,397 B of
+    tables plus strings against hundreds of kilobytes of headroom.
 
-  * THE SPRITE ATLAS. It binds, hard. The pack's invariant is
-    sprite_id == id - 1, and SPR_BABY_BLOB + sprite_id < SPRITE_SET_COUNT is
-    2 + (N-1) < 38, i.e. N <= 36. Shipping 60 would mean deleting a live guard
-    against real art. 36 is the largest roster today's atlas can address.
+  * THE SPRITE ATLAS. It bound, hard, and P9-C3 is what unbound it. The pack's
+    invariant is sprite_id == id - 1, and the guard was
+    SPR_BABY_BLOB + sprite_id < SPRITE_SET_COUNT, i.e. 2 + (N-1) < 38, i.e.
+    N <= 36 - the 38 sets being the legacy Nottamagochi bodies, of which only
+    24 were creatures at all. Shipping 60 then would have meant deleting a live
+    guard against real art; 36 was the largest roster that atlas could address.
 
-    P4-C4a NARROWED THIS PARAGRAPH TWICE. (1) It used to say sprite_id "is
-    resolved as" that sum. It is not, and never was: nothing evaluated it to
-    draw anything, and against the 38-set atlas species 25..36 would have
-    landed on GHOST, TOMB and the ten pose sets. It is a FORWARD bound on the
-    P10 atlas (2 eggs + one 24x24 body per species) and it still caps the
-    roster at 36, which is all this paragraph needs it for. What the firmware
-    draws is ui/pet_art.h's key folded into the authored pools, and
-    game/species.cpp asserts THAT separately. (2) The guard is in
-    game/species.cpp as a static_assert and in tests/test_content.cpp at
-    runtime; tests/test_evolution.cpp carried a byte-identical copy of the
-    runtime one until P4-C4a replaced it with the question that file owns.
+    P9-C3 DREW THE SIXTY BODIES (tools/sprites/*.txt, 24x24x2, one per roster
+    id), deleted the 36 legacy body and pose sets, and pointed the lookup at
+    PB_SPRITE_BODY_FIRST + (id - 1). The same guard now reads 4 + (N-1) < 64,
+    i.e. N <= 60, and it is no longer a forward bound on an atlas that does not
+    exist: it is the arithmetic the firmware performs to pick a body.
+    game/species.cpp asserts it at compile time; tests/test_content.cpp
+    re-checks each half at runtime with a named case.
 
-  * WHAT 12 WOULD COST. Families 1..5 of the pack are all SIGNAL, so a
-    12-species roster carries exactly one type: no shipped creature could ever
-    hold a CORRUPT or SYSTEM attack (a learnset is "own type or NEUTRAL"), the
-    type triangle of spec section 12 would evaluate to 0 for every pair of
-    shipped species, and 20 of the 34 attacks would sit on no learnset at all -
-    reintroducing, at ten times the scale, the exact orphan-attack defect that
-    P4-C1 obligation 2 exists to close. 36 species spans all three types
-    (SIGNAL families 1-5, CORRUPT 6-10, SYSTEM 11-12), leaves 2 attacks for the
-    families still to come (13 Infeccion on species 46, 22 Firewall on 60), and
-    gives the eight legacy v1 families eight DISTINCT base-stage destinations,
-    which 4 families cannot do.
+  * TYPE COVERAGE. 60 species spans all three types with families 1-5 SIGNAL,
+    6-10 CORRUPT, 11-12 SYSTEM and 13-20 completing the spread, and every one of
+    the 34 attacks now sits on at least one learnset - including 13 Infeccion
+    (species 46) and 22 Firewall (species 60), the two that families 13..20 were
+    the only home for. That orphan-attack question is tests/test_content.cpp's,
+    and at 20 families it answers zero for the first time.
 
-Raise ROSTER_FAMILIES to 20 when the P10 art pass grows SPRITE_SETS.
+RAISING IT FURTHER IS NOT A ONE-LINE CHANGE. 21 families needs three more
+bodies drawn into tools/sprites/, three more lines in tools/sprites/atlas.txt
+at their ids' positions, and data/sprites.h's SPRITE_DATA_BYTES_MAX raised and
+said out loud - it is the end state plus a stated margin now, not a transition
+allowance with room to hide in.
 """
 
 import argparse
@@ -74,7 +70,7 @@ import os
 import sys
 
 # --- the roster size, and the one place to change it -------------------------
-ROSTER_FAMILIES = 12          # 12 x 3 = 36 species; see the banner above
+ROSTER_FAMILIES = 20          # 20 x 3 = 60 species, the whole pack; see the banner
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)

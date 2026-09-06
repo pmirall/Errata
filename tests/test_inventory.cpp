@@ -338,10 +338,19 @@ TEST(the_two_battle_modifiers_buff_different_stats) {
 }
 
 TEST(the_evolution_key_is_offered_to_the_rules_and_never_spent_when_none_bites) {
-  // ITEM 9's ANSWER, ASSERTED. At this roster no shipped rule has cond
-  // EVOC_ITEM, so the key finds no lock - and a key that vanished into a lock
-  // that does not exist is exactly the "reachable item that does nothing" the
-  // plan forbids, one step worse.
+  // ITEM 9's ANSWER, ASSERTED. The key must never be consumed by a creature
+  // whose rule is not ITS lock - a key that vanished into a lock that does not
+  // exist is the "reachable item that does nothing" the plan forbids, one step
+  // worse.
+  //
+  // THE ROSTER FACT THIS CASE RESTS ON CHANGED AT P9-C3. It used to be "no
+  // shipped rule has cond EVOC_ITEM", because the only such rule (species
+  // 53 -> 54, Cifrax -> Ransora) was outside the 36-species prefix. Raising
+  // ROSTER_FAMILIES to 20 landed it, so the emptiness is gone and the case is
+  // rewritten around the creature it was always really about: a species-1
+  // Paketo, whose own rule is cond EVOC_NONE, and for whom the key is not a
+  // key. The full path - key used, creature evolves, item consumed - is now
+  // reachable and is driven by the case below.
   fresh_bag();
   const uint8_t id = first_of((uint8_t)ITEM_KLASS_EVOLUTION);
   CHECK(id != 0);
@@ -350,7 +359,7 @@ TEST(the_evolution_key_is_offered_to_the_rules_and_never_spent_when_none_bites) 
   int item_rules = 0;
   for (uint8_t i = 0; i < EVOLUTION_RULES_COUNT; ++i)
     if (EVOLUTION_RULES[i].cond == (uint8_t)EVOC_ITEM) item_rules++;
-  CHECK_EQ(item_rules, 0);          // the roster fact this case rests on
+  CHECK_EQ(item_rules, 1);          // exactly one lock in the whole roster
 
   PebbleInstance p;
   mk_pebble(p, 1, (uint8_t)XP_LEVEL_MAX);      // well past every evolution level
@@ -405,12 +414,39 @@ TEST(the_key_is_cut_for_one_lock_and_the_condition_arm_agrees) {
   ctx.item_id = id;                          // set, but EVOCTX_ITEM not raised
   CHECK(!evolution_cond_holds(r, ctx));
 
-  // The full path - key used, creature evolves, item consumed - CANNOT be
-  // driven at this roster, because no shipped species points at an EVOC_ITEM
-  // rule (the case above asserts that emptiness). This is the seam: land the
-  // species 53 -> 54 rule and inv_use() needs no change.
-  for (uint8_t i = 0; i < EVOLUTION_RULES_COUNT; ++i)
-    CHECK(EVOLUTION_RULES[i].cond != (uint8_t)EVOC_ITEM);
+  // THE FULL PATH, WHICH THIS CASE COULD NOT DRIVE BEFORE P9-C3. It said: "the
+  // full path - key used, creature evolves, item consumed - CANNOT be driven at
+  // this roster, because no shipped species points at an EVOC_ITEM rule. This
+  // is the seam: land the species 53 -> 54 rule and inv_use() needs no change."
+  // The rule landed with families 13..20 and inv_use() needed no change; here
+  // is the path, driven end to end on the SHIPPED table rather than on the
+  // hand-built rule above.
+  const EvolutionRule* real = evolution_rule_for(53);   // Cifrax -> Ransora
+  CHECK(real != nullptr);
+  if (real) {
+    CHECK_EQ(real->cond, (uint8_t)EVOC_ITEM);
+    CHECK_EQ((int)real->cond_value, (int)id);
+    fresh_bag();
+    CHECK_EQ(inv_add(g_inv, id, 2), 2);
+    PebbleInstance c;
+    mk_pebble(c, 53, real->level);
+    ItemEffect eff;
+    CHECK_EQ(inv_use(g_inv, id, &c, 2000u, (uint8_t)CAL_USER, eff), (uint8_t)IU_OK);
+    CHECK_EQ(eff.klass, (uint8_t)ITEM_KLASS_EVOLUTION);
+    CHECK_EQ(eff.evolved, 1);
+    CHECK_EQ(c.species_id, real->target);        // it really is a Ransora now
+    CHECK_EQ(inv_count(g_inv, id), 1);           // and the key was SPENT
+
+    // One below the rule's level and the same key does nothing and stays.
+    fresh_bag();
+    CHECK_EQ(inv_add(g_inv, id, 1), 1);
+    PebbleInstance young;
+    mk_pebble(young, 53, (uint8_t)(real->level - 1u));
+    CHECK_EQ(inv_use(g_inv, id, &young, 2000u, (uint8_t)CAL_USER, eff),
+             (uint8_t)IU_NO_EFFECT);
+    CHECK_EQ(young.species_id, 53);
+    CHECK_EQ(inv_count(g_inv, id), 1);
+  }
 }
 
 TEST(a_capture_item_is_never_spent_from_a_menu) {

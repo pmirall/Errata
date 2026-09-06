@@ -61,6 +61,8 @@
 #include "ui/screen_status.h"
 #include "ui/screen_time.h"
 #include "ui/screen_view.h"
+#include "ui/gfx.h"        // gfx_xbm(): the clipping proof draws one directly
+#include "ui/pet_art.h"    // pet_art_key(): the body box a species-difference check measures
 #include "ui/ui.h"
 
 // =============================================================================
@@ -789,6 +791,96 @@ TEST(snapshot_home_maxed) {
 }
 
 // =============================================================================
+//  THE TWO POSE BODIES, RECORDED (P9-C3)
+//
+//  P9-C3 replaced seven legacy pose sets with ONE generic SLEEP and ONE generic
+//  SICK, and dropped EAT's art entirely. Before these two cases NOTHING DREW
+//  EITHER OF THEM: `pet_pose_of()` returns POSE_SLEEP and POSE_SICK from the
+//  simulation, HOME shows them on the still path, and not one of the 63
+//  recorded goldens contained a pose body - so two brand-new 24x24 drawings
+//  would have shipped with the suite green and nobody's eye on them.
+//
+//  They are the SAME fixture as home_starter with one field changed, so the
+//  pair of goldens beside it is a diff a reviewer can read: the body is the
+//  only thing that may move.
+// =============================================================================
+TEST(snapshot_home_sleeping) {
+  seams2_reset();
+  fixture_starter();
+  g_view.pose = POSE_SLEEP;
+  snapshot(SCR_HOME, "home_sleeping");
+}
+
+TEST(snapshot_home_sick) {
+  seams2_reset();
+  fixture_starter();
+  g_view.pose = POSE_SICK;
+  snapshot(SCR_HOME, "home_sick");
+}
+
+// A POSE IS THE ONLY THING A POSE CHANGES. Both pose sets are generic - every
+// species sleeps as the same body, which is the identity loss P9-C3 INHERITED
+// rather than introduced - so the two frames above must differ from
+// home_starter INSIDE the body box and nowhere else. Without this the pair
+// could be two recordings of a screen whose pose plumbing had come unhooked.
+TEST(a_pose_changes_the_body_and_nothing_else_on_home) {
+  static uint8_t idle[FB_H][FB_W];
+  const ScreenDef* home = screen_def(SCR_HOME);
+  CHECK(home != nullptr);
+  if (!home) return;
+
+  seams2_reset();
+  fixture_starter();
+  fb_reset();
+  home->render();
+  for (int y = 0; y < FB_H; ++y)
+    for (int x = 0; x < FB_W; ++x) idle[y][x] = (uint8_t)fb_get(x, y);
+
+  static const uint8_t kPoses[] = { POSE_SLEEP, POSE_SICK };
+  for (int k = 0; k < 2; ++k) {
+    seams2_reset();
+    fixture_starter();
+    g_view.pose = kPoses[k];
+    fb_reset();
+    home->render();
+
+    const SpriteRef r = sprite_lookup_pose(
+        g_view.stage,
+        sprite_form_of(pet_art_key(g_view.species_id, gene_species(g_view.genome)),
+                       (Stage)g_view.stage),
+        g_view.pose, 0u);
+    CHECK_EQ(r.w, 24);
+    CHECK_EQ(r.h, 24);
+    const int bx = (int)sprite_center_x(r.w);
+    const int by = (int)HOME_FLOOR_Y - (int)r.h;
+    int changed = 0, outside = 0;
+    for (int y = 0; y < FB_H; ++y)
+      for (int x = 0; x < FB_W; ++x) {
+        if ((uint8_t)fb_get(x, y) == idle[y][x]) continue;
+        ++changed;
+        if (x < bx || x >= bx + (int)r.w || y < by || y >= by + (int)r.h) ++outside;
+      }
+    CHECK(changed > 0);        // the pose reached the pixels
+    CHECK_EQ(outside, 0);      // and reached nothing else
+  }
+
+  // EAT DOES NOT, AND THAT IS THE ANSWER P9-C3 GAVE RATHER THAN AN OVERSIGHT.
+  // POSE_EAT has no art: it falls through to the species body, and the feeding
+  // film carries the pose from ui/actfx.cpp, which no host binary compiles.
+  // Pinned here so "we dropped it" cannot decay into "we forgot it".
+  seams2_reset();
+  fixture_starter();
+  g_view.pose = POSE_EAT;
+  fb_reset();
+  home->render();
+  int eat_diff = 0;
+  for (int y = 0; y < FB_H; ++y)
+    for (int x = 0; x < FB_W; ++x)
+      if ((uint8_t)fb_get(x, y) != idle[y][x]) ++eat_diff;
+  CHECK_EQ(eat_diff, 0);
+}
+
+// =============================================================================
 //  P4-C4a: THE SPECIES - NOT THE GENOME - CHOSE THE CREATURE.
 //
 //  This fixture is home_starter with ONE BYTE CHANGED: species_id, 1 -> 3.
@@ -798,8 +890,9 @@ TEST(snapshot_home_maxed) {
 //
 //  The two goldens together are the artefact; the checks below are what stops
 //  them from being two files nobody diffs. They assert that the frames differ
-//  AT ALL and that every differing pixel is inside the 40x40 body box - i.e.
-//  that the species moved the creature and nothing else on the screen.
+//  AT ALL and that every differing pixel is inside the body box the LOOKUP
+//  reports - i.e. that the species moved the creature and nothing else on the
+//  screen.
 // =============================================================================
 TEST(snapshot_home_species) {
   seams2_reset();
@@ -818,23 +911,233 @@ TEST(snapshot_home_species) {
   fb_reset();
   home->render();
 
-  // The adult body box: 40x40, centred by sprite_center_x() and standing on
-  // HOME_FLOOR_Y, which is where draw_static_body() puts it.
-  const int bx = (int)sprite_center_x(40);
-  const int by = (int)HOME_FLOOR_Y - 40;
+  // THE BODY BOX IS DERIVED, NOT TYPED (P9-C3). It read
+  // `sprite_center_x(40)` / `HOME_FLOOR_Y - 40`, the legacy adult body's box,
+  // and the atlas is 24x24 now - so the box would have described a rectangle
+  // the pet is no longer in, and the "nothing changed outside it" check would
+  // have passed VACUOUSLY as long as the smaller body happened to sit inside
+  // the larger rectangle. That is the shape of an assertion that stops being
+  // about anything, so the box comes from the lookup the screen itself calls.
+  const SpriteRef body = sprite_lookup_pose(
+      g_view.stage,
+      sprite_form_of(pet_art_key(g_view.species_id, gene_species(g_view.genome)),
+                     (Stage)g_view.stage),
+      g_view.pose, 0u);
+  CHECK(body.bits != nullptr);
+  CHECK_EQ(body.w, 24);
+  CHECK_EQ(body.h, 24);
+  const int bx = (int)sprite_center_x(body.w);
+  const int by = (int)HOME_FLOOR_Y - (int)body.h;
   int changed = 0, changed_outside_the_body = 0;
   for (int y = 0; y < FB_H; ++y) {
     for (int x = 0; x < FB_W; ++x) {
       if ((uint8_t)fb_get(x, y) == starter[y][x]) continue;
       ++changed;
-      if (x < bx || x >= bx + 40 || y < by || y >= by + 40)
+      if (x < bx || x >= bx + (int)body.w || y < by || y >= by + (int)body.h)
         ++changed_outside_the_body;
     }
   }
   CHECK(changed > 0);                        // the species reached the pixels
   CHECK_EQ(changed_outside_the_body, 0);     // and reached nothing else
+  // AND THE BOX IS NOT VACUOUS. A rectangle that contains every changed pixel
+  // proves nothing if it also contains the whole screen; this pins it to the
+  // body's own size, which is 24x24 = 576 of the 8,192 pixels on the panel.
+  CHECK(bx >= 0 && by >= 0);
+  CHECK(bx + (int)body.w <= FB_W);
+  CHECK(by + (int)body.h <= FB_H);
+  CHECK(changed <= (int)body.w * (int)body.h);
 
   snapshot(SCR_HOME, "home_species");
+}
+
+// =============================================================================
+//  THE SECTION 63 SWEEP - EVERY SPECIES, EVERY POSE, EVERY FRAME, THREE SCREENS
+//  (P9-C3)
+//
+//  Section 63 asks for three things about sprites: "consistent pixel scale",
+//  "predictable bounding boxes" and "no accidental clipping". Sixty bodies drawn
+//  by five different hands is exactly the change that can break all three, and
+//  the sixty-five recorded goldens contain FOUR SPECIES between them - Paketo on
+//  three HOME frames, Rafagon on the fourth, and two per battle frame. Fifty-six
+//  species are drawn by no golden at all, so a body that clipped, floated or
+//  came out the wrong size would ship with the suite green.
+//
+//  WHAT "1x AND 2x" IN THE PLAN LINE MEANS, SAID PLAINLY RATHER THAN FUDGED.
+//  P9-C3's plan line asks for "every species at 1x and 2x". THERE IS NO 2x BLIT
+//  IN THIS REPOSITORY: ui/gfx.h has no scale parameter, u8g2's drawXBM has none,
+//  and the host fake has none. That line was written when the atlas held bodies
+//  at 24, 28, 32 and 40 px and "1x and 2x" meant the smallest and the largest -
+//  a check that the layout survived a body nearly twice as wide as a baby's.
+//  Every body is 24x24 now, so there is no second scale to render at, and
+//  claiming to have rendered one would be the kind of tick this project keeps
+//  being caught by. What IS checked, for all sixty, is the property list
+//  section 63 actually names, plus the OOB requirement:
+//
+//    * CONSISTENT PIXEL SCALE - every body reports 24x24 through the same
+//      lookup the screen calls, at every stage and every pose.
+//    * PREDICTABLE BOUNDING BOX - the draw origin is derived, the box is inside
+//      the panel, and the body's INK reaches its own last row so it stands on
+//      HOME_FLOOR_Y instead of hovering above it.
+//    * NO ACCIDENTAL CLIPPING - fb_oob() is 0 after every render.
+//
+//  AND THE SWEEP IS PROVED NOT TO BE VACUOUS by the case after it, which draws
+//  a body where it WOULD clip and requires the recorder to count it.
+// =============================================================================
+static int sweep_species_on_home(uint8_t stage, uint8_t pose, uint8_t frame) {
+  int drawn = 0;
+  for (uint8_t id = 1; id <= (uint8_t)SPECIES_TABLE_COUNT; ++id) {
+    seams2_reset();
+    fixture_starter();
+    g_view.species_id = id;
+    g_view.stage      = stage;
+    g_view.pose       = pose;
+    g_now = 100000u + (uint32_t)frame * UI_ANIM_FRAME_MS;
+
+    const ScreenDef* home = screen_def(SCR_HOME);
+    CHECK(home != nullptr);
+    if (!home) return drawn;
+    fb_reset();
+    home->render();
+    if (fb_oob() != 0)
+      fprintf(stderr, "  species %u stage %u pose %u frame %u: %u OOB, first %s\n",
+              (unsigned)id, (unsigned)stage, (unsigned)pose, (unsigned)frame,
+              (unsigned)fb_oob(), fb_oob_first());
+    CHECK_EQ(fb_oob(), 0u);
+
+    // The body the screen resolved, through the screen's own expression.
+    const SpriteRef r = sprite_lookup_pose(
+        stage,
+        sprite_form_of(pet_art_key(id, gene_species(g_view.genome)), (Stage)stage),
+        pose, frame);
+    CHECK(r.bits != nullptr);
+    CHECK_EQ(r.w, 24);                       // consistent pixel scale
+    CHECK_EQ(r.h, 24);
+    const int bx = (int)sprite_center_x(r.w);
+    const int by = (int)HOME_FLOOR_Y - (int)r.h;
+    CHECK(bx >= 0 && by >= 0);               // predictable bounding box
+    CHECK(bx + (int)r.w <= FB_W);
+    CHECK(by + (int)r.h <= FB_H);
+    CHECK(by >= (int)SPRITE_AREA_Y);         // inside the sprite band
+
+    // AND THE BODY IS ACTUALLY ON THE PANEL. A lookup that answered a valid
+    // SpriteRef nobody drew would pass every line above; this reads the
+    // framebuffer back and requires ink inside the box the box says it is in.
+    int ink_in_box = 0, ink_on_floor_row = 0;
+    for (int y = by; y < by + (int)r.h; ++y)
+      for (int x = bx; x < bx + (int)r.w; ++x)
+        if (fb_get(x, y)) {
+          ++ink_in_box;
+          if (y == by + (int)r.h - 1) ++ink_on_floor_row;
+        }
+    CHECK(ink_in_box > 0);
+    // The body's own last row carries ink, so it STANDS on the floor rule
+    // rather than hovering above it - the failure no byte check can see and
+    // the reason tools/gen_sprites.py counts blank rows under a body.
+    CHECK(ink_on_floor_row > 0);
+    ++drawn;
+  }
+  return drawn;
+}
+
+TEST(every_species_draws_on_home_at_every_stage_and_pose_without_clipping) {
+  int drawn = 0;
+  static const uint8_t kStages[] = { STAGE_BABY, STAGE_CHILD, STAGE_TEEN,
+                                     STAGE_ADULT, STAGE_SENIOR };
+  for (uint8_t s = 0; s < (uint8_t)(sizeof kStages / sizeof kStages[0]); ++s)
+    for (uint8_t pose = 0; pose < (uint8_t)POSE_COUNT; ++pose)
+      for (uint8_t frame = 0; frame < 2u; ++frame)
+        drawn += sweep_species_on_home(kStages[s], pose, frame);
+  // 60 species x 5 stages x 4 poses x 2 frames.
+  CHECK_EQ(drawn, (int)SPECIES_TABLE_COUNT * 5 * (int)POSE_COUNT * 2);
+  CHECK_EQ(drawn, 2400);
+  printf("  %d species/stage/pose/frame renders on HOME, 0 out of bounds\n", drawn);
+}
+
+// THE PROOF THAT THE OOB ARM ABOVE IS NOT VACUOUS. Every body is 24x24 and the
+// panel is 128x64, so a sweep that never clips is exactly what a sweep looks
+// like when the recorder is broken. This draws the same bodies at origins that
+// MUST clip and requires the recorder to count every one of them.
+TEST(the_out_of_bounds_recorder_would_see_a_body_that_clipped) {
+  for (uint8_t id = 1; id <= (uint8_t)SPECIES_TABLE_COUNT; ++id) {
+    const SpriteRef r = sprite_lookup_pose(
+        (uint8_t)STAGE_ADULT, sprite_form_of((uint8_t)(id - 1u), STAGE_ADULT),
+        (uint8_t)POSE_IDLE, 0u);
+    CHECK(r.bits != nullptr);
+    // Off each of the four edges by one pixel, and once fully off the bottom.
+    static const int kdx[] = { -1, FB_W - (int)23, 0, 0, 0 };
+    static const int kdy[] = { 0, 0, -1, FB_H - (int)23, FB_H };
+    for (int k = 0; k < 5; ++k) {
+      fb_reset();
+      gfx_xbm((int16_t)kdx[k], (int16_t)kdy[k], r.w, r.h, r.bits);
+      CHECK(fb_oob() > 0u);
+    }
+    // ...and once where it fits, so the recorder is not simply always on.
+    fb_reset();
+    gfx_xbm((int16_t)sprite_center_x(r.w),
+            (int16_t)((int)HOME_FLOOR_Y - (int)r.h), r.w, r.h, r.bits);
+    CHECK_EQ(fb_oob(), 0u);
+  }
+}
+
+// THE BATTLE FIELD, all sixty, on BOTH sides and BOTH frames. The foe is drawn
+// MIRRORED through ui/xbm_mirror.cpp into a scratch buffer sized by
+// XBM_MIRROR_MAX_W, so this is also the only sweep that exercises the mirror on
+// sixty different bitmaps.
+TEST(every_species_draws_on_the_battle_field_without_clipping) {
+  for (uint8_t id = 1; id <= (uint8_t)SPECIES_TABLE_COUNT; ++id) {
+    const uint8_t key = pet_art_key(id, 0u);
+    const uint8_t set = br_body_set_id(key);
+    CHECK_EQ((int)set, (int)PB_SPRITE_BODY_FIRST + (int)(id - 1u));
+    CHECK_EQ(sprite_set(set).w, (uint8_t)BR_BODY_W);
+    CHECK_EQ(sprite_set(set).h, (uint8_t)BR_BODY_H);
+    for (uint8_t frame = 0; frame < 2u; ++frame) {
+      // The player: upright, at the player's slot.
+      fb_reset();
+      br_draw_body(BR_YOU_BODY_X, BR_YOU_BODY_Y, key, frame, false, false, false);
+      if (fb_oob() != 0)
+        fprintf(stderr, "  BATTLE you species %u frame %u: %u OOB, first %s\n",
+                (unsigned)id, (unsigned)frame, (unsigned)fb_oob(), fb_oob_first());
+      CHECK_EQ(fb_oob(), 0u);
+      int ink_you = 0;
+      for (int y = BR_YOU_BODY_Y; y < BR_YOU_BODY_Y + BR_BODY_H; ++y)
+        for (int x = BR_YOU_BODY_X; x < BR_YOU_BODY_X + BR_BODY_W; ++x)
+          ink_you += fb_get(x, y) ? 1 : 0;
+      CHECK(ink_you > 0);
+
+      // The foe: mirrored, at the foe's slot, and in the two states the field
+      // can put a body in.
+      for (int k = 0; k < 3; ++k) {
+        fb_reset();
+        br_draw_body(BR_FOE_BODY_X, BR_FOE_BODY_Y, key, frame, true,
+                     k == 1, k == 2);
+        if (fb_oob() != 0)
+          fprintf(stderr, "  BATTLE foe species %u frame %u k %d: %u OOB, first %s\n",
+                  (unsigned)id, (unsigned)frame, k,
+                  (unsigned)fb_oob(), fb_oob_first());
+        CHECK_EQ(fb_oob(), 0u);
+      }
+
+      // MIRRORED IS A DIFFERENT PICTURE. A mirror that quietly became a copy
+      // would leave both fighters facing the same way and nothing else here
+      // would notice - the OOB count is the same and the ink count is the same.
+      static uint8_t upright[FB_H][FB_W];
+      fb_reset();
+      br_draw_body(BR_YOU_BODY_X, BR_YOU_BODY_Y, key, frame, false, false, false);
+      for (int y = 0; y < FB_H; ++y)
+        for (int x = 0; x < FB_W; ++x) upright[y][x] = (uint8_t)fb_get(x, y);
+      fb_reset();
+      br_draw_body(BR_YOU_BODY_X, BR_YOU_BODY_Y, key, frame, true, false, false);
+      int mirror_diff = 0;
+      for (int y = 0; y < FB_H; ++y)
+        for (int x = 0; x < FB_W; ++x)
+          if ((uint8_t)fb_get(x, y) != upright[y][x]) ++mirror_diff;
+      // Only a body that is exactly symmetric about its own centre column can
+      // mirror to itself. None of the sixty is, and if one ever is, it should
+      // be named here rather than allowed to pass silently.
+      if (mirror_diff == 0)
+        nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[set]);
+    }
+  }
 }
 
 TEST(snapshot_home_empty) {
@@ -1713,6 +2016,48 @@ static void box_fixture(uint8_t occupied) {
   }
   if (occupied) CHECK(box_set_active(0));
   box_enter();
+}
+
+// THE BOX SCREEN, all sixty. screen_box.cpp draws NAMES and badges, not bodies
+// (the badge is indexed by the genome nibble and is 13 rows wide whatever the
+// roster does), so what this sweep is really about is the LIST: a 60-species
+// roster means names the list has never been asked to draw, and section 63's
+// "text must not overflow" is the half of it that can move here.
+TEST(every_species_draws_in_the_box_list_without_clipping) {
+  for (uint8_t id = 1; id <= (uint8_t)SPECIES_TABLE_COUNT; ++id) {
+    seams2_reset();
+    memset(&g_gs, 0, sizeof g_gs);
+    box_bind(g_gs);
+    Genome gen;
+    memset(&gen, 0, sizeof gen);
+    gen.magic_ver  = GENOME_MAGIC_VER;
+    gen.lineage_id = 0x0BADF00Du;
+    gen.g0 = 0x1234u; gen.g1 = 0x5678u; gen.g2 = 0x9ABCu;
+    gen.generation = 3;
+    const uint8_t slot = box_new_pebble(id, 30u, ORIGIN_STARTER, gen,
+                                        0xC0FFEEu + id, 1000u);
+    CHECK(slot != BOX_SLOT_NONE);
+    if (slot == BOX_SLOT_NONE) continue;
+    CHECK(box_set_active(slot));
+    box_enter();
+
+    const ScreenDef* d = screen_def(SCR_BOX);
+    CHECK(d != nullptr);
+    if (!d) return;
+    fb_reset();
+    d->render();
+    if (fb_oob() != 0)
+      fprintf(stderr, "  BOX species %u: %u OOB, first %s\n",
+              (unsigned)id, (unsigned)fb_oob(), fb_oob_first());
+    CHECK_EQ(fb_oob(), 0u);
+    // The row is not blank: a list that drew nothing would also not clip.
+    int ink = 0;
+    for (int y = 0; y < FB_H; ++y)
+      for (int x = 0; x < FB_W; ++x) ink += fb_get(x, y) ? 1 : 0;
+    CHECK(ink > 0);
+    // And the roster's own name for it really is what the screen can reach.
+    CHECK(pet_species_name(id) != nullptr);
+  }
 }
 
 TEST(snapshot_box_list) {

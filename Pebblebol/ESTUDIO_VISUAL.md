@@ -65,10 +65,15 @@ simplemente empujará el siguiente frame y además le robará tiempo a
 |---|---|---|
 | Flash (huge_app) | 2.105.548 B (66 %, medido 2026-09-02) | **~1,04 MB** |
 | RAM (globales) | 72.748 B (22 %, medido 2026-09-02) | ~249 KB |
-| Arte de sprites | 10.893 B | 3.443 B antes de tocar el `static_assert` |
+| Arte de sprites | 10.247 B (medido por el compilador, P9-C3) | 1.017 B hasta `SPRITE_DATA_BYTES_MAX` = 11.264 B |
 
-Flash y RAM no son la restricción de nada de lo que viene. Si hace falta más
-arte, sobra sitio: basta con subir el tope de `SPRITE_DATA_BYTES`.
+Flash y RAM no son la restricción de nada de lo que viene. La cifra de arte
+estaba obsoleta hasta P9-C3: decía 10.893 B contra un tope de 14.336 B, dos
+números que ya no existían. Hoy `SPRITE_DATA_BYTES` la calcula el compilador
+recorriendo las tablas (64 sets de 24x24x2 más iconos y emotes) y el tope es el
+estado final más un margen declarado, no una asignación de transición. Subirlo
+NO es "basta con": hay que mover `PB_DATA_BYTES_MAX` en `tools/gen_sprites.py`
+y `SPRITE_DATA_BYTES_MAX` en `data/sprites.h` a la vez, y decirlo en el commit.
 
 ### Las dos palancas para comprar movimiento
 

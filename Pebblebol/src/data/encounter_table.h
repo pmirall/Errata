@@ -27,15 +27,6 @@
 //  every SPECIAL row against its own category's event list, at compile
 //  time, next to encounter_wild_rows_have_a_pool() - see the three guards
 //  at the foot of this file.
-//
-//  ROWS CLAMPED FOR THIS ROSTER (36 species): a WILD row whose rarity band
-//  holds no species in the shipped prefix is folded down to the highest
-//  band the category does carry, so every row resolves. The full
-//  60-species roster needs no clamping.
-//    PUBLIC   rarity 3..3 -> 2
-//    BUSINESS rarity 3..3 -> 2
-//    OPEN     rarity 3..3 -> 2
-//    HIDDEN   rarity 3..3 -> 2
 // =============================================================================
 
 #ifndef PB_ENCOUNTER_TABLE_H
@@ -90,28 +81,28 @@ inline constexpr EncounterRow ENCOUNTER_TABLE[] = {
   { NET_CAT_PUBLIC,   ENC_OUT_WILD,      36, 0, 0, { 0, 0, 0 } },
   { NET_CAT_PUBLIC,   ENC_OUT_WILD,      17, 1, 1, { 0, 0, 0 } },
   { NET_CAT_PUBLIC,   ENC_OUT_WILD,       4, 2, 2, { 0, 0, 0 } },
-  { NET_CAT_PUBLIC,   ENC_OUT_WILD,       1, 2, 2, { 0, 0, 0 } },
+  { NET_CAT_PUBLIC,   ENC_OUT_WILD,       1, 3, 3, { 0, 0, 0 } },
   { NET_CAT_PUBLIC,   ENC_OUT_ITEM,      14, 0, 1, { 0, 0, 0 } },
   { NET_CAT_PUBLIC,   ENC_OUT_SPECIAL,    5, 0, 0, { 0, 0, 0 } },
   { NET_CAT_PUBLIC,   ENC_OUT_NOTHING,   23, 0, 0, { 0, 0, 0 } },
   { NET_CAT_BUSINESS, ENC_OUT_WILD,      25, 0, 0, { 0, 0, 0 } },
   { NET_CAT_BUSINESS, ENC_OUT_WILD,      21, 1, 1, { 0, 0, 0 } },
   { NET_CAT_BUSINESS, ENC_OUT_WILD,       8, 2, 2, { 0, 0, 0 } },
-  { NET_CAT_BUSINESS, ENC_OUT_WILD,       2, 2, 2, { 0, 0, 0 } },
+  { NET_CAT_BUSINESS, ENC_OUT_WILD,       2, 3, 3, { 0, 0, 0 } },
   { NET_CAT_BUSINESS, ENC_OUT_ITEM,      16, 1, 2, { 0, 0, 0 } },
   { NET_CAT_BUSINESS, ENC_OUT_SPECIAL,    6, 0, 0, { 0, 0, 0 } },
   { NET_CAT_BUSINESS, ENC_OUT_NOTHING,   22, 0, 0, { 0, 0, 0 } },
   { NET_CAT_OPEN,     ENC_OUT_WILD,      33, 0, 0, { 0, 0, 0 } },
   { NET_CAT_OPEN,     ENC_OUT_WILD,      16, 1, 1, { 0, 0, 0 } },
   { NET_CAT_OPEN,     ENC_OUT_WILD,       5, 2, 2, { 0, 0, 0 } },
-  { NET_CAT_OPEN,     ENC_OUT_WILD,       2, 2, 2, { 0, 0, 0 } },
+  { NET_CAT_OPEN,     ENC_OUT_WILD,       2, 3, 3, { 0, 0, 0 } },
   { NET_CAT_OPEN,     ENC_OUT_ITEM,      18, 0, 2, { 0, 0, 0 } },
   { NET_CAT_OPEN,     ENC_OUT_SPECIAL,    5, 0, 0, { 0, 0, 0 } },
   { NET_CAT_OPEN,     ENC_OUT_NOTHING,   21, 0, 0, { 0, 0, 0 } },
   { NET_CAT_HIDDEN,   ENC_OUT_WILD,      12, 0, 0, { 0, 0, 0 } },
   { NET_CAT_HIDDEN,   ENC_OUT_WILD,      17, 1, 1, { 0, 0, 0 } },
   { NET_CAT_HIDDEN,   ENC_OUT_WILD,      13, 2, 2, { 0, 0, 0 } },
-  { NET_CAT_HIDDEN,   ENC_OUT_WILD,      12, 2, 2, { 0, 0, 0 } },
+  { NET_CAT_HIDDEN,   ENC_OUT_WILD,      12, 3, 3, { 0, 0, 0 } },
   { NET_CAT_HIDDEN,   ENC_OUT_ITEM,      12, 1, 2, { 0, 0, 0 } },
   { NET_CAT_HIDDEN,   ENC_OUT_SPECIAL,   10, 0, 0, { 0, 0, 0 } },
   { NET_CAT_HIDDEN,   ENC_OUT_NOTHING,   24, 0, 0, { 0, 0, 0 } },

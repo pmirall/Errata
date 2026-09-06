@@ -78,7 +78,7 @@ TEST(attach_is_a_no_op_without_a_slot) {
   v.level        = 1;
   v.stage        = STAGE_ADULT;
   v.gene_species = 4;
-  v.form         = sprite_form_of(4u, 0u, STAGE_ADULT);
+  v.form         = sprite_form_of(4u, STAGE_ADULT);
   const uint8_t form_before = v.form;
   pet_view_attach(v, nullptr);
   CHECK_EQ(v.identity, 0xDEADBEEFu);
@@ -286,33 +286,59 @@ TEST(the_species_and_not_the_genome_chooses_the_body) {
     CHECK(drawn_set(b, POSE_IDLE) <= SPRITE_BODY_LAST);
   }
 
-  // CHILD and TEEN are deliberately NOT species-keyed: those two designs carry
-  // the care quality sim.cpp froze into minor_form, and the atlas authors no
-  // species art at either stage. Stating it here is what stops a later change
-  // from silently overwriting care quality with a species and calling it a fix.
+  // CHILD AND TEEN ARE SPECIES-KEYED NOW, AND THE INVERSION IS THE POINT.
+  //
+  // This block asserted the OPPOSITE until P9-C3: `CHECK_EQ(a.form, b.form)`
+  // and the same drawn set, because the atlas authored two designs at each of
+  // those stages and they carried the CARE QUALITY sim.cpp froze into
+  // minor_form - not the species. The comment said "stating it here is what
+  // stops a later change from silently overwriting care quality with a species
+  // and calling it a fix".
+  //
+  // P9-C3 IS THAT CHANGE, AND IT IS NOT CALLING IT A FIX. The care-quality
+  // bodies are deleted, with the rest of the 38-set legacy atlas, because one
+  // 24x24 body per species has nowhere to put a second variant: keeping it
+  // would have meant 60 more drawings. data/sprites.h's LOOKUP banner records
+  // the deletion and says what a screen should do instead (draw care quality
+  // with the renderer - a sweat emote, a dulled dither - not with a second
+  // atlas). What is asserted here is the rule that replaced it, at the same two
+  // stages, so the change is pinned in both directions rather than removed.
   for (uint8_t st = STAGE_CHILD; st <= STAGE_TEEN; ++st) {
     PetView a, b;
     live_view(a, kG0, st, 1);
     live_view(b, kG0, st, 3);
-    CHECK_EQ(a.form, b.form);
-    CHECK_EQ(drawn_set(a, POSE_IDLE), drawn_set(b, POSE_IDLE));
+    CHECK(a.form != b.form);
+    CHECK(drawn_set(a, POSE_IDLE) != drawn_set(b, POSE_IDLE));
+  }
+
+  // AND minor_form NO LONGER REACHES THE ATLAS AT ALL. Every value of the two
+  // nibbles, at every stage, must draw the same body for one species - which is
+  // the deletion above stated as the property a reader can check rather than as
+  // a paragraph. It fails the moment anything re-reads minor_form for art.
+  for (uint8_t st = 0; st < 6u; ++st) {
+    const uint8_t base = sprite_set_id(st, sprite_form_of(11u, (Stage)st),
+                                       (uint8_t)POSE_IDLE);
+    for (unsigned mf = 0; mf <= 255u; ++mf) {
+      (void)mf;   // there is no parameter left to pass it through
+      CHECK_EQ(sprite_set_id(st, sprite_form_of(11u, (Stage)st),
+                             (uint8_t)POSE_IDLE), base);
+    }
   }
 }
 
 // -----------------------------------------------------------------------------
-//  MUTATIONS THIS CATCHES, MEASURED: pet_art_key() ignoring species_id
-//  (73 failed checks), SPRITE_BABY_BODIES 8 -> 1 (25), SPRITE_ADULT_BODIES
-//  6 -> 1 (49), and restoring the naive SPR_BABY_BLOB + sprite_id resolution
-//  (41).
+//  MUTATIONS THIS CATCHES. pet_art_key() ignoring species_id; sprite_form_of()
+//  answering a constant; apply_species_design() dropping a stage.
 //
-//  AND THE ONE IT DOES NOT, WHICH THE FIRST DRAFT OF THIS COMMENT CLAIMED IT
-//  DID. Shrinking the pool to 3 (or the adult pool to 2) does NOT break it, and
-//  saying so was a sentence wider than the tree: EVERY shipped rule is a SINGLE
-//  step between CONSECUTIVE art keys (sprite_id == id - 1, and a family's three
-//  stages are three consecutive ids), so `k % P != (k+1) % P` holds for every
-//  pool size except 1. Measured: with SPRITE_BABY_BODIES at 3 this case passes
-//  and `a_pebble_with_no_species_row_draws_what_it_always_did` is what catches
-//  it, at 3,549 checks. The pool size is guarded; it is just not guarded here.
+//  THE THREE THE OLD COMMENT MEASURED ARE GONE WITH THE THING THEY MUTATED.
+//  They were SPRITE_BABY_BODIES 8 -> 1 (25 failed checks), SPRITE_ADULT_BODIES
+//  6 -> 1 (49) and "restore the naive SPR_BABY_BLOB + sprite_id resolution"
+//  (41). P9-C3 deleted both pools and MADE the naive resolution the real one,
+//  so there is no fold left to shrink. The observation the old comment carried
+//  is still true and still worth keeping: a fold of 3 would NOT break this case,
+//  because every shipped rule is a SINGLE step between CONSECUTIVE art keys
+//  (sprite_id == id - 1, and a family's three stages are three consecutive ids),
+//  so `k % P != (k+1) % P` holds for every P except 1.
 //
 //  It walks EVERY rule in EVOLUTION_RULES, not a sample, and it walks the LIVE
 //  path - so it also fails if pet_view_attach() stops re-deriving the form.
@@ -335,7 +361,11 @@ TEST(every_evolution_reaches_the_body) {
   uint8_t moved = 0;
   for (uint8_t r = 0; r < n; ++r) {
     const EvolutionRule& rule = EVOLUTION_RULES[r];
-    static const uint8_t kStages[] = { STAGE_BABY, STAGE_ADULT, STAGE_SENIOR };
+    // FIVE STAGES SINCE P9-C3, where this was three. CHILD and TEEN were
+    // excluded because their two bodies carried care quality rather than the
+    // species; they are species-keyed now like every other stage.
+    static const uint8_t kStages[] = { STAGE_BABY, STAGE_CHILD, STAGE_TEEN,
+                                       STAGE_ADULT, STAGE_SENIOR };
     for (uint8_t s = 0; s < (uint8_t)(sizeof kStages / sizeof kStages[0]); ++s) {
       PetView from, to;
       live_view(from, 0x1234u, kStages[s], rule.species);
@@ -344,67 +374,48 @@ TEST(every_evolution_reaches_the_body) {
       CHECK(drawn_set(from, POSE_IDLE) != drawn_set(to, POSE_IDLE));
     }
   }
-  // Every rule, at all three species-keyed stages. Written as a number so that
-  // a rule quietly dropped from the table fails here too.
-  CHECK_EQ((int)moved, (int)n * 3);
+  // Every rule, at all five stages. Written as a number so that a rule quietly
+  // dropped from the table fails here too.
+  CHECK_EQ((int)moved, (int)n * 5);
 }
 
 // -----------------------------------------------------------------------------
-//  THE FALLBACK IS BIT-IDENTICAL TO THE OLD BEHAVIOUR.
+//  THE FALLBACK FOR A PEBBLE WITH NO SPECIES ROW.
 //
-//  A Pebble with no species row - id 0, the creator's 200..209, or anything
-//  past the roster - must render EXACTLY as it did before P4-C4a, because that
-//  is what makes this change safe for an unfiled egg and for P8's customs. The
-//  pre-change arithmetic is written out below rather than described.
+//  A Pebble with no row - id 0, the creator's 200..209, or anything past the
+//  roster - falls on the genome's species nibble. This case carried a
+//  byte-for-byte FROZEN COPY of the pre-P4-C4a resolution (legacy_set_id(),
+//  38 sets, four sleep bodies, three sick, three eat, `gene & 7` at BABY and
+//  `% 6` at ADULT) and asserted the live lookup agreed with it everywhere.
 //
-//  MUTATION THIS CATCHES: `% SPRITE_BABY_BODIES` -> `% 6` in
-//  sprite_design_of(), or pet_art_key() answering 0 instead of gene_species for
-//  an unresolvable id.
+//  P9-C3 DELETED THE ATLAS THAT ORACLE DESCRIBED, so the oracle is REWRITTEN,
+//  not deleted - which is what SURVEY ONE asked for and what stops this from
+//  becoming a case that tests nothing. What is frozen now is the resolution
+//  this chunk introduced, written out as arithmetic rather than as a call to
+//  the function under test:
+//
+//      EGG                     -> PBSPR_EGG_IDLE, at every pose
+//      POSE_SLEEP, any stage   -> PBSPR_SLEEP
+//      POSE_SICK,  any stage   -> PBSPR_SICK
+//      anything else           -> PB_SPRITE_BODY_FIRST + nibble
+//
+//  and, separately, that minor_form changes nothing - the property the old
+//  oracle spent two of its branches on and that P9-C3 removed.
+//
+//  MUTATIONS THIS CATCHES: pet_art_key() answering 0 instead of gene_species
+//  for an unresolvable id; sprite_set_id() losing its `+ form`; the sleep or
+//  sick branch falling through to the body; POSE_EAT growing a set of its own;
+//  and any re-introduced fold `% P` with P <= 15.
 // -----------------------------------------------------------------------------
-static uint8_t legacy_form_of(uint8_t gene, uint8_t minor_form, uint8_t stage) {
-  if (stage >= STAGE_ADULT) return (uint8_t)(gene % SPRITE_ADULT_BODIES);
-  if (stage == STAGE_TEEN)  return (uint8_t)(minor_form >> 4);
-  if (stage == STAGE_CHILD) return (uint8_t)(minor_form & 0x0Fu);
-  return 0;
+static uint8_t expected_set_id(uint8_t gene, uint8_t stage, uint8_t pose) {
+  if (stage == STAGE_EGG)          return (uint8_t)PBSPR_EGG_IDLE;
+  if (pose  == POSE_SLEEP)         return (uint8_t)PBSPR_SLEEP;
+  if (pose  == POSE_SICK)          return (uint8_t)PBSPR_SICK;
+  return (uint8_t)(PB_SPRITE_BODY_FIRST
+                   + (gene < (uint8_t)PB_SPRITE_BODY_COUNT ? gene : 0u));
 }
 
-static uint8_t legacy_set_id(uint8_t gene, uint8_t stage, uint8_t form,
-                             uint8_t pose) {
-  if (stage == STAGE_EGG)  return SPR_EGG_IDLE;
-  if (pose == POSE_SLEEP) {
-    switch (stage) {
-      case STAGE_BABY:  return SPR_SLEEP_BABY;
-      case STAGE_CHILD: return SPR_SLEEP_CHILD;
-      case STAGE_TEEN:  return SPR_SLEEP_TEEN;
-      default:          return SPR_SLEEP_ADULT;
-    }
-  }
-  if (pose == POSE_SICK && stage >= STAGE_CHILD) {
-    switch (stage) {
-      case STAGE_CHILD: return SPR_SICK_CHILD;
-      case STAGE_TEEN:  return SPR_SICK_TEEN;
-      default:          return SPR_SICK_ADULT;
-    }
-  }
-  if (pose == POSE_EAT && stage >= STAGE_CHILD) {
-    switch (stage) {
-      case STAGE_CHILD: return SPR_EAT_CHILD;
-      case STAGE_TEEN:  return SPR_EAT_TEEN;
-      default:          return SPR_EAT_ADULT;
-    }
-  }
-  switch (stage) {
-    case STAGE_BABY:   return (uint8_t)(SPR_BABY_BLOB + (gene & 0x07u));
-    case STAGE_CHILD:  return (uint8_t)(SPR_CHILD_GOOD + (form <= 1u ? form : 0u));
-    case STAGE_TEEN:   return (uint8_t)(SPR_TEEN_GOOD  + (form <= 1u ? form : 0u));
-    case STAGE_ADULT:  return (uint8_t)(SPR_ADULT_BOLOTA
-                                       + (form < SPRITE_ADULT_BODIES ? form : 0u));
-    default:           return (uint8_t)(SPR_SENIOR_BOLOTA
-                                       + (form < SPRITE_ADULT_BODIES ? form : 0u));
-  }
-}
-
-TEST(a_pebble_with_no_species_row_draws_what_it_always_did) {
+TEST(a_pebble_with_no_species_row_draws_its_genome_nibbles_body) {
   // 0, the whole creator range, one id past the roster and the top of the byte.
   static const uint8_t kNoRow[] = { 0, 200, 201, 202, 203, 204, 205, 206, 207,
                                     208, 209, (uint8_t)(SPECIES_TABLE_COUNT + 1u),
@@ -414,29 +425,33 @@ TEST(a_pebble_with_no_species_row_draws_what_it_always_did) {
     for (uint8_t gene = 0; gene < 16u; ++gene) {
       // The key IS the nibble when there is no row.
       CHECK_EQ(pet_art_key(kNoRow[k], gene), gene);
-      // minor_form only reaches CHILD and TEEN, and only as two nibbles: the
-      // in-range pair, the out-of-range values both clamps have to fold, and
-      // the two extremes. A full 0..255 sweep is 1.2 M checks that say nothing
-      // these seven do not.
-      static const uint8_t kMinor[] = { 0x00, 0x01, 0x10, 0x11, 0x2F, 0xF0, 0xFF };
       for (uint8_t stage = 0; stage < 6u; ++stage) {
-        for (uint8_t m = 0; m < (uint8_t)(sizeof kMinor / sizeof kMinor[0]); ++m) {
-          const uint8_t mf = kMinor[m];
-          for (uint8_t pose = 0; pose < (uint8_t)POSE_COUNT; ++pose) {
-            const uint8_t key  = pet_art_key(kNoRow[k], gene);
-            const uint8_t form = sprite_form_of(key, mf, (Stage)stage);
-            CHECK_EQ(sprite_set_id(stage, form, pose),
-                     legacy_set_id(gene, stage,
-                                   legacy_form_of(gene, mf, stage), pose));
-          }
+        for (uint8_t pose = 0; pose < (uint8_t)POSE_COUNT; ++pose) {
+          const uint8_t key  = pet_art_key(kNoRow[k], gene);
+          const uint8_t form = sprite_form_of(key, (Stage)stage);
+          CHECK_EQ(sprite_set_id(stage, form, pose),
+                   expected_set_id(gene, stage, pose));
         }
+      }
+      // Sixteen nibbles, sixteen DIFFERENT bodies. The old atlas folded them
+      // onto eight at BABY and six at ADULT, so half of them collided; this is
+      // the half of the change a player would see on an unfiled egg.
+      for (uint8_t other = 0; other < 16u; ++other) {
+        if (other == gene) continue;
+        CHECK(sprite_set_id((uint8_t)STAGE_ADULT,
+                            sprite_form_of(gene, STAGE_ADULT),
+                            (uint8_t)POSE_IDLE)
+              != sprite_set_id((uint8_t)STAGE_ADULT,
+                               sprite_form_of(other, STAGE_ADULT),
+                               (uint8_t)POSE_IDLE));
       }
     }
   }
 }
 
 // -----------------------------------------------------------------------------
-//  THE NAME. The roster carries all 36 Spanish names; pet_species_name() hands
+//  THE NAME. The roster carries a Spanish name per species (60 since P9-C3);
+//  pet_species_name() hands
 //  back nullptr - never "" - for the three no-row inputs, so a caller has to
 //  choose a fallback instead of drawing an empty header.
 //
@@ -537,21 +552,29 @@ TEST(an_evolution_changes_the_creature_the_live_view_draws) {
 //  three stages the other case walks are three stages those twelve rules can
 //  never occur at, so it cannot notice.
 //
-//  THE POLICY IS UNCHANGED AND IS THE RIGHT ONE: the atlas authors exactly two
-//  CHILD designs and two TEEN designs, and both pairs already carry the care
-//  quality sim.cpp froze into minor_form. Folding 36 species onto two designs
-//  would say almost nothing about the species and would destroy the one thing
-//  those designs do say. What was wrong was the CLAIM, not the code, so this
-//  case states the exclusion as a NUMBER, against the levels the table really
-//  carries, and bounds it in time: the creature does reach the body, at ADULT.
+//  P9-C3 CLOSED IT, and this case is what records that rather than being
+//  deleted with the policy it measured. The old policy was: the atlas authors
+//  exactly two CHILD designs and two TEEN designs, both carrying the care
+//  quality sim.cpp froze into minor_form, and folding 36 species onto two
+//  designs would say almost nothing about the species while destroying the one
+//  thing those designs did say. That was the right call against THAT atlas.
+//  There is one 24x24 body per species now, the care-quality bodies are gone
+//  (data/sprites.h's LOOKUP banner records the deletion), apply_species_design()
+//  no longer skips CHILD and TEEN, and every rule moves the drawn body at the
+//  level it actually fires at - the starter's Paketo -> Fragmar at level 8
+//  included, for the first time in the project.
 //
-//  MUTATIONS THIS CATCHES: apply_species_design() spending CHILD/TEEN as well
-//  (the CHECK(!moved) arm fails); apply_species_design() also skipping ADULT or
-//  SENIOR (the CHECK(moved) arm, and the later-body arm); a content pack moving
-//  a rule's level across a stage threshold in either direction (the two counts,
-//  which are the numbers CHANGELOG.md and the plan quote).
+//  THE COUNTS STAY. `only_the_name` is asserted to be ZERO now rather than 12,
+//  and the CHILD/TEEN population is still counted separately, because a content
+//  pack that moves a rule across a stage threshold is still the thing that
+//  makes the sentence in CHANGELOG.md and the plan wrong.
+//
+//  MUTATIONS THIS CATCHES: apply_species_design() skipping any stage again (the
+//  CHECK(moved) arm fails, naming nothing else); sprite_form_of() answering a
+//  constant; a content pack moving a rule's level across a stage threshold (the
+//  two counts).
 // =============================================================================
-TEST(every_rule_measured_at_the_level_it_actually_fires_at) {
+TEST(every_rule_changes_the_body_at_the_level_it_actually_fires_at) {
   // The ladder itself, at the five anchors, so a reader can check the mapping
   // below without opening sim.cpp - and so a retuned ladder fails HERE, with a
   // sentence, rather than only in the counts.
@@ -582,33 +605,35 @@ TEST(every_rule_measured_at_the_level_it_actually_fires_at) {
     CHECK(b != nullptr);
     if (a && b) CHECK(strcmp(a, b) != 0);
 
+    // EVERY rule, at the level it really fires at, moves the drawn body. The
+    // arm below used to be `CHECK(!moved)` for the CHILD/TEEN population.
+    CHECK(moved);
+    CHECK(from.form != to.form);
+    if (!moved) ++only_the_name;
+    ++body_too;
+
     if (st == (uint8_t)STAGE_CHILD || st == (uint8_t)STAGE_TEEN) {
-      ++only_the_name;
-      // Stated, not discovered: the body is IDENTICAL here, on purpose.
-      CHECK(!moved);
-      CHECK_EQ(from.form, to.form);
-      // And the exclusion is bounded in time rather than permanent - the same
-      // pair, at the first species-keyed stage above the level the rule fires
-      // at, draws two different creatures.
+      // Counted so the stage split is still visible, and checked at ADULT too -
+      // the body has to keep moving after the pet grows past the level the rule
+      // fired at, which is a different statement from the one above.
       PetView fa, ta;
       live_view(fa, 0x1234u, (uint8_t)STAGE_ADULT, rule.species);
       live_view(ta, 0x1234u, (uint8_t)STAGE_ADULT, rule.target);
       CHECK(drawn_set(fa, POSE_IDLE) != drawn_set(ta, POSE_IDLE));
       ++reaches_the_body_at_adult;
-    } else {
-      ++body_too;
-      CHECK(moved);
     }
   }
 
-  // THE TWO NUMBERS CHANGELOG.md AND THE PLAN QUOTE. A content pack that moves
-  // a rule across a stage threshold fails here, which is what makes the
-  // sentence in those files a checked one instead of a remembered one.
-  CHECK_EQ(only_the_name + body_too, (int)n);
-  CHECK_EQ(only_the_name, 12);
-  CHECK_EQ(body_too, 12);
-  CHECK_EQ(reaches_the_body_at_adult, only_the_name);
+  // THE NUMBERS CHANGELOG.md AND THE PLAN QUOTE. A content pack that moves a
+  // rule across a stage threshold fails here, which is what makes the sentence
+  // in those files a checked one instead of a remembered one.
+  CHECK_EQ(body_too, (int)n);
+  CHECK_EQ(only_the_name, 0);
+  // Half the roster's rules fire below ADULT - every family's FIRST evolution,
+  // at level 8, 10 or 12 - and those are precisely the twenty this project drew
+  // no body for until P9-C3.
+  CHECK_EQ(reaches_the_body_at_adult, 20);
   printf("  %d of %d rules change the drawn body at the level they fire at; "
-         "%d change only the name until the pet reaches ADULT\n",
-         body_too, (int)n, only_the_name);
+         "%d of them fire below ADULT\n",
+         body_too, (int)n, reaches_the_body_at_adult);
 }

@@ -398,18 +398,23 @@ TEST(a_chained_evolution_re_raises_pending_without_another_award) {
 // This walks every shipped rule at the three stages a species chooses its own
 // body at, through the SAME two functions the renderer calls.
 //
-// MEASURED, so that the claim is no wider than the tree: it fails at 24 checks
-// with SPRITE_BABY_BODIES 8 -> 1, at 48 with SPRITE_ADULT_BODIES 6 -> 1, and at
-// 40 when the naive SPR_BABY_BLOB + sprite_id resolution is restored. It does
-// NOT fail at a pool of 3 or 2, and that is a property of the roster rather
-// than a weakness worth papering over: every rule is a SINGLE step between
-// CONSECUTIVE art keys, so `k % P != (k+1) % P` for every P except 1. A pool of
-// 3 is caught instead by test_pet_view.cpp's
+// MEASURED, so that the claim is no wider than the tree. It used to read: "it
+// fails at 24 checks with SPRITE_BABY_BODIES 8 -> 1, at 48 with
+// SPRITE_ADULT_BODIES 6 -> 1, and at 40 when the naive SPR_BABY_BLOB +
+// sprite_id resolution is restored". P9-C3 deleted both pools and made the
+// naive resolution the real one, so the mutations that break it now are:
+// sprite_form_of() answering a constant (fails at the first rule), dropping the
+// `+ form` from sprite_set_id() (same), and re-introducing any fold `% P` with
+// P == 1. It does NOT fail at a fold of 3 or 2, and that is a
+// property of the roster rather than a weakness worth papering over: every rule
+// is a SINGLE step between CONSECUTIVE art keys, so `k % P != (k+1) % P` for
+// every P except 1. A pool of 3 is caught instead by test_pet_view.cpp's
 // a_pebble_with_no_species_row_draws_what_it_always_did.
 TEST(every_evolution_rule_changes_the_body) {
   const uint8_t n = (uint8_t)(sizeof EVOLUTION_RULES / sizeof EVOLUTION_RULES[0]);
   CHECK(n > 0);
-  static const uint8_t kStages[] = { STAGE_BABY, STAGE_ADULT, STAGE_SENIOR };
+  static const uint8_t kStages[] = { STAGE_BABY, STAGE_CHILD, STAGE_TEEN,
+                                     STAGE_ADULT, STAGE_SENIOR };
   for (uint8_t r = 0; r < n; ++r) {
     const EvolutionRule& rule = EVOLUTION_RULES[r];
     const SpeciesDef* from = species_get(rule.species);
@@ -417,22 +422,20 @@ TEST(every_evolution_rule_changes_the_body) {
     CHECK(from != nullptr);
     CHECK(to   != nullptr);
     if (!from || !to) continue;
+    // ALL FIVE STAGES NOW, WHERE IT USED TO BE THREE. CHILD and TEEN were
+    // excluded because the atlas authored two designs at each of those stages
+    // and they carried the CARE QUALITY rather than the species, so an
+    // evolution deliberately did not move them. P9-C3 deleted the care-quality
+    // bodies with the rest of the legacy atlas (data/sprites.h's LOOKUP banner
+    // records the deletion), so a species' body is its species at every stage
+    // and there is no stage left where an evolution is invisible.
     for (uint8_t s = 0; s < (uint8_t)(sizeof kStages / sizeof kStages[0]); ++s) {
       const Stage st = (Stage)kStages[s];
-      const uint8_t a = sprite_set_id((uint8_t)st, sprite_form_of(from->sprite_id, 0u, st),
+      const uint8_t a = sprite_set_id((uint8_t)st, sprite_form_of(from->sprite_id, st),
                                       (uint8_t)POSE_IDLE);
-      const uint8_t b = sprite_set_id((uint8_t)st, sprite_form_of(to->sprite_id, 0u, st),
+      const uint8_t b = sprite_set_id((uint8_t)st, sprite_form_of(to->sprite_id, st),
                                       (uint8_t)POSE_IDLE);
       CHECK(a != b);
-    }
-    // CHILD and TEEN deliberately do NOT move: the atlas authors two designs at
-    // each and they carry the care quality, not the species. Stated so that a
-    // later change cannot quietly spend them.
-    for (uint8_t st = STAGE_CHILD; st <= STAGE_TEEN; ++st) {
-      CHECK_EQ(sprite_set_id(st, sprite_form_of(from->sprite_id, 0u, (Stage)st),
-                             (uint8_t)POSE_IDLE),
-               sprite_set_id(st, sprite_form_of(to->sprite_id, 0u, (Stage)st),
-                             (uint8_t)POSE_IDLE));
     }
   }
 }

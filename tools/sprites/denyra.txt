@@ -1,0 +1,79 @@
+# Family 15 PING motif: a FAT OPEN CRESCENT whose mouth faces right - a disc
+# with a second disc bitten out of it, so the arc is solid and comes to a point
+# at both tips and never closes into a ring - with the FOCUS DOT sitting in the
+# mouth as the creature's eye, and two stub feet. Growth adds rank after rank
+# outside the shell: one emitted ping, then three, then five plus barbs, and
+# the shell itself gains grooves so it reads as nested arcs too.
+# Ranks are 2px solid with 2px gaps and never 1px with 1px gaps: at 1x on the
+# panel a 1px/1px comb is a grey field, which is the thing this phase forbids.
+#
+# DENYRA - species 45, family 15 stage 2, type CORRUPT (PING / FAST).
+# 'Nadie mas podra entrar.' - nobody else is getting in. The flood that denies.
+# root:       open arcs, never closing into a ring
+# silhouette: seven arcs spanning 22px, the outer two barbed with 2px spikes,
+#             a filled 6px lozenge core.
+# frame 2:    spike parity flips so the whole fan ripples.
+# FIVE ranks, not seven: the fan spans x0..23 and seven ranks inside 24px is a
+# 1px/1px comb, which on this panel is grey, not arcs. Five (a three-band shell
+# and two emitted ranks) at 2px on / 2px off is the densest that still reads,
+# and the barbs at r18-19 push past the left edge so the outermost really is
+# clipped by the frame. The lozenge core is filled and carries a slit eye - the
+# PINGO dot, grown twice and gone mean.
+# frame 1 moves every barb half a period around the fan; the shell, the core
+# and the feet do not move at all.
+
+name: DENYRA
+size: 24x24
+frames: 2
+species: 45
+
+--- frame 0
+........................
+...#....................
+..####..................
+.##.##..........#####...
+...##...##....#########.
+...##..##...#########...
+####...##..#########....
+####..##...##.########..
+#.#...##..########.###..
+.##..##...##.##.##.####.
+.##..##..#####.##..####.
+.##..##..##.##.##..#...#
+###..##..##.##.##..#####
+###..##..##.##.##..#####
+###..##..#####.##..####.
+.##..##...##.##.##.####.
+..#...##..########.###..
+####..##...##.########..
+####...##..#########....
+##.##..##...#########...
+...##...##..###########.
+....##......##..#####...
+....##......##...##.....
+............##...##.....
+--- frame 1
+........................
+........................
+....##..................
+.#..##..........#####...
+.####...##....#########.
+##.##..##...#########...
+.###...##..#########....
+..##..##...##.########..
+..#...##..########.###..
+###..##...##.##.##.####.
+###..##..#####.##..####.
+###..##..##.##.##..#####
+.##..##..##.##.##..#...#
+.##..##..##.##.##..#####
+###..##..#####.##..####.
+###..##...##.##.##.####.
+#.#...##..########.###..
+..##..##...##.########..
+..##...##..#########....
+.#.##..##...#########...
+.####...##..###########.
+.##.##......##..#####...
+....##......##...##.....
+............##...##.....

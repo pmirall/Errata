@@ -24,5 +24,116 @@
 EGG_IDLE
 EGG_CRACK
 
+# The two POSE sets.  They carry no `species:` key because they are not a
+# creature: sprite_set_id() returns one of these for POSE_SLEEP / POSE_SICK at
+# EVERY stage and for EVERY species, exactly as the legacy atlas did with its
+# seven pose sets, and P9-C3 records why in data/sprites.h's LOOKUP banner.
+SLEEP
+SICK
+
 # --- species bodies, one per roster id, PB_SPRITE_BODY_FIRST + (id - 1) ------
-# (none yet - P9-C3 draws them; see tools/sprites/README.md)
+# P9-C3 registered all 60. The order below IS the roster order and is checked
+# both ways by check_species_binding(): entry k of this block must declare
+# `species: k+1`, and its name must be the pack's name for that id folded by
+# slug(). Do not sort this list, do not group it by family, do not append to
+# it - a new species goes at its id's position or the generator refuses.
+
+# family 1 - PACKET
+PAKETO
+FRAGMAR
+RAFAGON
+
+# family 2 - RADIO
+BIPPO
+ESTATIC
+JAMRON
+
+# family 3 - LATENCY
+LAGUI
+JITERA
+TIMAUT
+
+# family 4 - PIXEL
+PIXIO
+ARTEFAX
+BURNIX
+
+# family 5 - SPAM
+SPAMITO
+KADENAX
+BLAKLIX
+
+# family 6 - BUG
+BUGGO
+EXPLOID
+ROOTKAR
+
+# family 7 - WORM
+WORMI
+PARASIX
+PLAGON
+
+# family 8 - PHISH
+KARNADA
+KLONIX
+ESTAFEX
+
+# family 9 - NULL
+NULIX
+VOIDINA
+SEGFALT
+
+# family 10 - BITROT
+BITTO
+FLIPIX
+PODRIX
+
+# family 11 - DAEMON
+DAEMI
+SERVIK
+KERNON
+
+# family 12 - FIREWALL
+PROXI
+GATEON
+MURAX
+
+# family 13 - MEMORY
+KACHI
+MEMORO
+LEKRON
+
+# family 14 - FILE
+FILITO
+ARKIVO
+ZIPBOM
+
+# family 15 - PING
+PINGO
+FLOODRA
+DENYRA
+
+# family 16 - GLITCH
+GLITCHI
+ERROX
+PANIKA
+
+# family 17 - PORT
+PORTU
+SKANOR
+BAKDORA
+
+# family 18 - CRYPTO
+KLAVIK
+CIFRAX
+RANSORA
+
+# family 19 - PROBE
+PROBIX
+BEAKON
+TWINIX
+
+# family 20 - COOKIE
+COOKIT
+TRAKKAR
+PANOPTIX

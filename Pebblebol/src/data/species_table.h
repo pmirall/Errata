@@ -7,7 +7,7 @@
 //
 //  THE SPECIES ROSTER (plan 1.5.2, spec sections 11/12/19/22).
 //
-//  36 species = 12 families x 3 stages, a PREFIX of the 60-species content
+//  60 species = 20 families x 3 stages, a PREFIX of the 60-species content
 //  pack in tools/content/. Contiguity (id == index + 1) is a static_assert,
 //  so the only legal subset of the pack is a prefix; see the banner in
 //  tools/gen_content.py for the flash and sprite-atlas measurements that
@@ -157,11 +157,59 @@ inline constexpr SpeciesDef SPECIES_TABLE[] = {
     SPECIES_RARITY_COMMON,    115,  4,  11, 34, STR_SPC_NAME_35, STR_SPC_FLAV_35, { 0, 0 } },   // Gateón
   {  36, 12,  2, TYPE_SYSTEM,   9,  6, 10,  3, { 20, 26, 28, 31 }, SPECIES_EVO_NONE,
     SPECIES_RARITY_UNCOMMON,   78,  4,  40, 35, STR_SPC_NAME_36, STR_SPC_FLAV_36, { 0, 0 } },   // Murax
+  {  37, 13,  0, TYPE_SYSTEM,   6,  5,  3,  2, { 18, 27, 23, 24 }, 24,
+    SPECIES_RARITY_COMMON,    190,  3,  11, 36, STR_SPC_NAME_37, STR_SPC_FLAV_37, { 0, 0 } },   // Kachi
+  {  38, 13,  1, TYPE_SYSTEM,   7,  8,  4,  3, { 19, 27, 31, 24 }, 25,
+    SPECIES_RARITY_COMMON,    118,  3,  11, 37, STR_SPC_NAME_38, STR_SPC_FLAV_38, { 0, 0 } },   // Memoro
+  {  39, 13,  2, TYPE_SYSTEM,   9,  9,  6,  4, { 19, 28, 23, 24 }, SPECIES_EVO_NONE,
+    SPECIES_RARITY_UNCOMMON,   76,  3,  40, 38, STR_SPC_NAME_39, STR_SPC_FLAV_39, { 0, 0 } },   // Lekron
+  {  40, 14,  0, TYPE_SYSTEM,   4,  5,  3,  4, { 18, 27, 33, 24 }, 26,
+    SPECIES_RARITY_COMMON,    188,  3,  11, 39, STR_SPC_NAME_40, STR_SPC_FLAV_40, { 0, 0 } },   // Filito
+  {  41, 14,  1, TYPE_SYSTEM,   5,  7,  5,  5, { 31, 27, 21, 33 }, 27,
+    SPECIES_RARITY_COMMON,    116,  3,  11, 40, STR_SPC_NAME_41, STR_SPC_FLAV_41, { 0, 0 } },   // Arkivo
+  {  42, 14,  2, TYPE_SYSTEM,   7,  8,  6,  7, { 19, 27, 33, 31 }, SPECIES_EVO_NONE,
+    SPECIES_RARITY_UNCOMMON,   74,  3,  40, 41, STR_SPC_NAME_42, STR_SPC_FLAV_42, { 0, 0 } },   // Zipbom
+  {  43, 15,  0, TYPE_SIGNAL,   3,  4,  2,  7, {  1,  6,  7, 27 }, 28,
+    SPECIES_RARITY_COMMON,    200,  1,  23, 42, STR_SPC_NAME_43, STR_SPC_FLAV_43, { 0, 0 } },   // Pingo
+  {  44, 15,  1, TYPE_SIGNAL,   4,  6,  3,  9, {  1, 27,  4,  6 }, 29,
+    SPECIES_RARITY_COMMON,    122,  1,  21, 43, STR_SPC_NAME_44, STR_SPC_FLAV_44, { 0, 0 } },   // Floodra
+  {  45, 15,  2, TYPE_CORRUPT,  7,  7,  5,  9, { 33, 27, 30, 11 }, SPECIES_EVO_NONE,
+    SPECIES_RARITY_SPECIAL,    10,  1,  48, 44, STR_SPC_NAME_45, STR_SPC_FLAV_45, { 0, 0 } },   // Denyra
+  {  46, 16,  0, TYPE_CORRUPT,  4,  4,  3,  5, { 13, 27, 29, 16 }, 30,
+    SPECIES_RARITY_COMMON,    178,  5,  39, 45, STR_SPC_NAME_46, STR_SPC_FLAV_46, { 0, 0 } },   // Glitchi
+  {  47, 16,  1, TYPE_CORRUPT,  5,  6,  4,  7, { 15, 27, 10, 12 }, 31,
+    SPECIES_RARITY_UNCOMMON,   88,  5,  35, 46, STR_SPC_NAME_47, STR_SPC_FLAV_47, { 0, 0 } },   // Errox
+  {  48, 16,  2, TYPE_SYSTEM,   7,  7,  6,  8, { 20, 31, 18, 27 }, SPECIES_EVO_NONE,
+    SPECIES_RARITY_RARE,       36,  5,  33, 47, STR_SPC_NAME_48, STR_SPC_FLAV_48, { 0, 0 } },   // Panika
+  {  49, 17,  0, TYPE_SYSTEM,   6,  4,  5,  1, { 18, 27, 23, 24 }, 32,
+    SPECIES_RARITY_COMMON,    172,  4,  25, 48, STR_SPC_NAME_49, STR_SPC_FLAV_49, { 0, 0 } },   // Portu
+  {  50, 17,  1, TYPE_SYSTEM,   8,  5,  7,  2, { 18, 27, 23, 24 }, 33,
+    SPECIES_RARITY_UNCOMMON,   92,  4,  25, 49, STR_SPC_NAME_50, STR_SPC_FLAV_50, { 0, 0 } },   // Skanor
+  {  51, 17,  2, TYPE_CORRUPT,  9,  6, 10,  3, { 10, 27, 28, 16 }, SPECIES_EVO_NONE,
+    SPECIES_RARITY_UNCOMMON,   72,  4,  40, 50, STR_SPC_NAME_51, STR_SPC_FLAV_51, { 0, 0 } },   // Bakdora
+  {  52, 18,  0, TYPE_SYSTEM,   4,  8,  1,  3, { 18, 27, 23, 24 }, 34,
+    SPECIES_RARITY_COMMON,    168,  4,  11, 51, STR_SPC_NAME_52, STR_SPC_FLAV_52, { 0, 0 } },   // Klavik
+  {  53, 18,  1, TYPE_SYSTEM,   5, 10,  2,  5, { 19, 27, 23, 24 }, 35,
+    SPECIES_RARITY_UNCOMMON,   86,  4,   9, 52, STR_SPC_NAME_53, STR_SPC_FLAV_53, { 0, 0 } },   // Cifrax
+  {  54, 18,  2, TYPE_CORRUPT,  6,  9,  5,  8, {  9, 27, 14, 16 }, SPECIES_EVO_NONE,
+    SPECIES_RARITY_SPECIAL,    10,  4,  40, 53, STR_SPC_NAME_54, STR_SPC_FLAV_54, { 0, 0 } },   // Ransora
+  {  55, 19,  0, TYPE_SYSTEM,   4,  4,  2,  6, { 19, 27, 23, 24 }, 36,
+    SPECIES_RARITY_COMMON,    176,  2,  21, 54, STR_SPC_NAME_55, STR_SPC_FLAV_55, { 0, 0 } },   // Probix
+  {  56, 19,  1, TYPE_SYSTEM,   5,  6,  3,  8, { 20, 27, 30, 24 }, 37,
+    SPECIES_RARITY_UNCOMMON,   94,  2,  21, 55, STR_SPC_NAME_56, STR_SPC_FLAV_56, { 0, 0 } },   // Beakon
+  {  57, 19,  2, TYPE_SIGNAL,   7,  8,  5,  8, {  3, 27, 31,  6 }, SPECIES_EVO_NONE,
+    SPECIES_RARITY_RARE,       44,  2,  48, 56, STR_SPC_NAME_57, STR_SPC_FLAV_57, { 0, 0 } },   // Twinix
+  {  58, 20,  0, TYPE_SIGNAL,   3,  5,  2,  6, {  1,  6,  7, 27 }, 38,
+    SPECIES_RARITY_COMMON,    192,  5,   7, 57, STR_SPC_NAME_58, STR_SPC_FLAV_58, { 0, 0 } },   // Cookit
+  {  59, 20,  1, TYPE_SIGNAL,   4,  7,  3,  8, {  1, 27, 31,  4 }, 39,
+    SPECIES_RARITY_UNCOMMON,   96,  5,  15, 58, STR_SPC_NAME_59, STR_SPC_FLAV_59, { 0, 0 } },   // Trakkar
+  {  60, 20,  2, TYPE_SYSTEM,   6,  8,  5,  9, { 20, 22, 33, 28 }, SPECIES_EVO_NONE,
+    SPECIES_RARITY_SPECIAL,    10,  5,  36, 59, STR_SPC_NAME_60, STR_SPC_FLAV_60, { 0, 0 } },   // Panoptix
 };
 
 inline constexpr uint8_t SPECIES_TABLE_COUNT =
     (uint8_t)(sizeof(SPECIES_TABLE) / sizeof(SPECIES_TABLE[0]));
-inline constexpr uint8_t SPECIES_FAMILY_COUNT = 12;
+inline constexpr uint8_t SPECIES_FAMILY_COUNT = 20;
 
 // HOW BIG THE PACK IS, as against how much of it this build SHIPS. The two
 // numbers are different today and the difference is the whole shape of phase 9:
@@ -188,7 +236,8 @@ static_assert(SPECIES_TABLE_COUNT <= SPECIES_PACK_COUNT,
 // the base stage of its parent's family (plan line 633).
 inline constexpr uint8_t SPECIES_BASE_OF_FAMILY[SPECIES_FAMILY_COUNT] = {
     1,   4,   7,  10,  13,  16,  19,  22,
-   25,  28,  31,  34,
+   25,  28,  31,  34,  37,  40,  43,  46,
+   49,  52,  55,  58,
 };
 
 // SPAWN WEIGHT SUMS, precomputed per (network category, rarity band).
@@ -198,12 +247,12 @@ inline constexpr uint8_t SPECIES_BASE_OF_FAMILY[SPECIES_FAMILY_COUNT] = {
 // would silently truncate the range the encounter roll draws from.
 #define NET_CATEGORY_COUNT  6
 inline constexpr uint16_t SPECIES_SPAWN_SUM[NET_CATEGORY_COUNT][SPECIES_RARITY_COUNT] = {
-  {  2930,   375,   100,     0 },   // UNKNOWN
-  {  1815,   165,    45,     0 },   // HOME
-  {  1480,   185,    55,     0 },   // PUBLIC
-  {   825,   508,    78,     0 },   // BUSINESS
-  {  1460,   285,    92,     0 },   // OPEN
-  {   500,   573,   315,     0 },   // HIDDEN
+  {  4750,   831,   136,     0 },   // UNKNOWN
+  {  3165,   349,    45,     0 },   // HOME
+  {  2348,   375,    55,    10 },   // PUBLIC
+  {  1777,  1004,    78,    10 },   // BUSINESS
+  {  2130,   471,   136,    10 },   // OPEN
+  {   678,   883,   395,    30 },   // HIDDEN
 };
 
 // --- generator-emitted compile-time guards (plan 1.5.2) ----------------------

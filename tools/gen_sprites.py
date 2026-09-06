@@ -79,11 +79,20 @@ MAX_W = 40
 MAX_H = 40
 MAX_FRAMES = 4
 
-# The generated atlas's own ceiling. The shared 24,576 B transition allowance in
-# data/sprites.h covers BOTH atlases while they are in the tree at once; this
-# number is this file's half of it and tests/test_sprite_pipeline.cpp is where
-# the sum is checked, because it is the only place both headers are visible.
-PB_DATA_BYTES_MAX = 12288
+# The generated atlas's own ceiling, TIGHTENED AT P9-C3 from 12,288.
+#
+# 12,288 was this file's half of data/sprites.h's 24,576 B TRANSITION allowance,
+# which covered both atlases while they were in the tree at once. The legacy
+# atlas is deleted, so the transition is over and both numbers came down to the
+# end state plus a stated margin. This one: 64 sets x 144 B = 9,216 B of art
+# today, plus 1,024 B - seven more 24x24x2 sets, which is one more three-stage
+# family and four effect sets - rounded to 10 KiB.
+#
+# It is deliberately the TIGHTER of the two ceilings, so a runaway is refused
+# by the generator (with a message naming the overrun) before it reaches
+# data/sprites.h's 11,264 B static_assert, which counts the icons and emotes
+# too. Raising either is a re-plan, not a fix: say so in the commit.
+PB_DATA_BYTES_MAX = 10240
 
 INK = "#"
 GAP = "."
@@ -499,6 +508,129 @@ def check_species_binding(sets):
 
 
 # =============================================================================
+#  WHAT A GRID LOOKS LIKE, MEASURED
+#
+#  Everything here answers a question a byte count cannot: how many separate
+#  pieces is this body in, how much of its ink is one pixel wide (which reads as
+#  dirt at 1x, not as anatomy), and where are its eyes. They are reported by
+#  --self-check and, for the eyes, EMITTED, so ui/petfx.cpp's eyelid table stops
+#  being a second hand-maintained copy of the art it indexes.
+# =============================================================================
+def _lit(rows, x, y, w, h):
+    return 0 <= x < w and 0 <= y < h and rows[y][x] == INK
+
+
+def components(rows, w, h):
+    """Number of 4-connected runs of ink. A body drawn as one mass is 1; a
+    deliberate detached part (a pupil, a trail, a hanging door) raises it.
+
+    THIS IS THE ONE CHECK THAT CATCHES A CLASS OF DEFECT EVERY BYTE CHECK
+    PASSES. It is what found MURAX's two crenellations floating free of their
+    rim: --self-check called that file OK before and after the break, because
+    the grid was still rectangular and the frames still differed. It is
+    reported, never fatal - detached ink is legal and several bodies use it -
+    but a number that moves when you did not mean to move it is the point.
+    """
+    seen = [[False] * w for _ in range(h)]
+    n = 0
+    for y in range(h):
+        for x in range(w):
+            if rows[y][x] == INK and not seen[y][x]:
+                n += 1
+                stack = [(x, y)]
+                seen[y][x] = True
+                while stack:
+                    cx, cy = stack.pop()
+                    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                        nx, ny = cx + dx, cy + dy
+                        if _lit(rows, nx, ny, w, h) and not seen[ny][nx]:
+                            seen[ny][nx] = True
+                            stack.append((nx, ny))
+    return n
+
+
+def hairlines(rows, w, h):
+    """Ink pixels that are 1 px wide in BOTH axes locally - no lit neighbour
+    left or right AND none above or below. At 1x these do not read as a limb or
+    an antenna, they read as a stuck pixel."""
+    n = 0
+    for y in range(h):
+        for x in range(w):
+            if rows[y][x] != INK:
+                continue
+            if (not _lit(rows, x - 1, y, w, h) and not _lit(rows, x + 1, y, w, h)
+                    and not _lit(rows, x, y - 1, w, h)
+                    and not _lit(rows, x, y + 1, w, h)):
+                n += 1
+    return n
+
+
+# The band pf_build_lids() closes when a body blinks. y1 < y0 means "this body
+# does not blink" and ui/petfx.cpp's pf_build_lids() already returns 0 for it.
+NO_EYES = (255, 0, 0, 0)
+
+
+def eye_band(rows, w, h):
+    """WHERE THE EYES ARE, DERIVED FROM THE ART instead of measured by hand.
+
+    ui/petfx.cpp carried a 24-row hand-authored table of eyelid bands, indexed
+    by set id, 1,100 lines away from the pixels it describes; its own comment
+    records that the automatic heuristic of the day got 30 of 38 sets right and
+    that the rest were read off the decoded art by eye. Sixty bodies would have
+    made that 60 rows of the same. This derives the band from the same file as
+    the pixels, so the two cannot drift, and the rule is stated rather than
+    tuned:
+
+      an eye is a HOLE - unlit pixels fully enclosed by ink - in the TOP 60 %
+      of the body's ink box.
+
+    Every one of the sixty bodies was drawn to that rule on purpose (a 1px lit
+    outline does not survive 1x, so every agent punched eyes rather than
+    outlining them), which is why it can be a rule here at all.
+
+    WHAT IT GETS WRONG, said plainly: any other enclosed hole in the top 60 % -
+    a mouth drawn high, a window, the gap inside a crescent - is included, so
+    that body blinks with more than its eyes. It never reaches outside the body
+    and it never covers the whole face, so the failure is an ugly blink, not a
+    corrupted frame; and it is now visible in ONE place beside the pixels.
+    """
+    x0b, y0b, x1b, y1b, ink = ink_box(rows)
+    if not ink:
+        return NO_EYES
+    # Flood the background from the border: what it cannot reach is a hole.
+    outside = [[False] * w for _ in range(h)]
+    stack = []
+    for x in range(w):
+        for y in (0, h - 1):
+            if rows[y][x] != INK and not outside[y][x]:
+                outside[y][x] = True
+                stack.append((x, y))
+    for y in range(h):
+        for x in (0, w - 1):
+            if rows[y][x] != INK and not outside[y][x]:
+                outside[y][x] = True
+                stack.append((x, y))
+    while stack:
+        cx, cy = stack.pop()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = cx + dx, cy + dy
+            if (0 <= nx < w and 0 <= ny < h and rows[ny][nx] != INK
+                    and not outside[ny][nx]):
+                outside[ny][nx] = True
+                stack.append((nx, ny))
+    cut = y0b + ((y1b - y0b) * 3) // 5      # the top 60 % of the ink box
+    ys, xs = [], []
+    for y in range(y0b, min(cut, h - 1) + 1):
+        for x in range(w):
+            if rows[y][x] != INK and not outside[y][x]:
+                ys.append(y)
+                xs.append(x)
+    if not ys:
+        return NO_EYES
+    return (min(ys), max(ys), max(0, min(xs) - 1), min(w - 1, max(xs) + 1))
+
+
+# =============================================================================
 #  XBM
 # =============================================================================
 def pack_frame(rows, w):
@@ -544,9 +676,10 @@ def art_hash(sets):
     """
     h = 0x811C9DC5
     for s in sets:
+        eyes = b"".join(bytes(eye_band(f, s["w"], s["h"])) for f in s["frames"])
         for b in (s["name"].encode("ascii") + bytes([s["w"], s["h"],
                                                      len(s["frames"])])
-                  + pack_set(s)):
+                  + pack_set(s) + eyes):
             h ^= b
             h = (h * 0x01000193) & 0xFFFFFFFF
     v = (h ^ (h >> 16)) & 0xFFFF
@@ -653,6 +786,32 @@ def emit(sets):
                  % (s["name"].lower(), s["w"], s["h"], len(s["frames"]), s["name"]))
     o.append("};")
     o.append("")
+    o.append("// " + "-" * 77)
+    o.append("//  EYE BANDS - DERIVED FROM THE ART, NOT MEASURED BY HAND")
+    o.append("//")
+    o.append("//  ui/petfx.cpp used to carry a 24-row table of blink bands read off the")
+    o.append("//  decoded art BY EYE, 1,100 lines away from the pixels it indexed, frozen")
+    o.append("//  by static_assert(SPRITE_REV == 1) because nothing else could notice when")
+    o.append("//  the two drifted. Sixty bodies would have made it sixty rows of the same.")
+    o.append("//  These come out of the same .txt files as the pixels, by one stated rule -")
+    o.append("//  an eye is a HOLE (unlit pixels fully enclosed by ink) in the top 60 % of")
+    o.append("//  the body's ink box - so they cannot drift, and what the rule gets wrong")
+    o.append("//  is written down in gen_sprites.py's eye_band() rather than discovered.")
+    o.append("//")
+    o.append("//  { 255, 0, 0, 0 } means THIS BODY DOES NOT BLINK: y1 < y0, which")
+    o.append("//  pf_build_lids() already answers 0 for. It is what a body with no")
+    o.append("//  enclosed hole in its upper face gets, and it is a legal answer.")
+    o.append("inline constexpr SpriteEyeBand PB_SPRITE_EYES[PB_SPRITE_SET_COUNT][%d] = {"
+             % max(len(s["frames"]) for s in sets))
+    for s in sets:
+        cells = []
+        for f in s["frames"]:
+            cells.append("{ %3d, %3d, %3d, %3d }" % eye_band(f, s["w"], s["h"]))
+        while len(cells) < max(len(x["frames"]) for x in sets):
+            cells.append("{ 255,   0,   0,   0 }")
+        o.append("  { %s },  // %s" % (", ".join(cells), s["name"]))
+    o.append("};")
+    o.append("")
     o.append("// Every row tied to the array it points at, frames included. drawXBM() reads")
     o.append("// ((w+7)>>3)*h bytes with no bound of its own, so a row that disagrees with")
     o.append("// its array is a silent read into the NEXT sprite - see data/sprite_types.h.")
@@ -676,6 +835,27 @@ def emit(sets):
     o.append('              "generated atlas size disagrees with the generator");')
     o.append("static_assert(PB_SPRITE_DATA_BYTES <= PB_SPRITE_DATA_BYTES_MAX,")
     o.append('              "generated sprite art over its half of the flash budget");')
+    o.append("")
+    o.append("// EVERY EYE BAND LIES INSIDE THE BODY IT BELONGS TO. pf_build_lids() blits")
+    o.append("// the fill and lash strips at (x, y + y0) for (y1 - y0 + 1) rows with a plain")
+    o.append("// drawXBM, so a band that runs past the sprite's own height writes rows that")
+    o.append("// are not in the sprite - silently, on the device, with no diagnostic. The")
+    o.append("// bands are derived, so this cannot fail from a typo; it CAN fail from a")
+    o.append("// change to eye_band() or to the sprite dimensions, which is the whole reason")
+    o.append("// it is a compile error and not a comment.")
+    o.append("constexpr bool pb_sprite_eyes_fit() {")
+    o.append("  for (unsigned i = 0; i < (unsigned)PB_SPRITE_SET_COUNT; ++i)")
+    o.append("    for (unsigned f = 0; f < 2u; ++f) {")
+    o.append("      const SpriteEyeBand& e = PB_SPRITE_EYES[i][f];")
+    o.append("      if (e.y1 < e.y0) continue;            // 'does not blink'")
+    o.append("      if (e.y1 >= PB_SPRITE_SETS[i].h) return false;")
+    o.append("      if (e.x1 >= PB_SPRITE_SETS[i].w) return false;")
+    o.append("      if (e.x1 < e.x0) return false;")
+    o.append("    }")
+    o.append("  return true;")
+    o.append("}")
+    o.append("static_assert(pb_sprite_eyes_fit(),")
+    o.append('              "an eye band runs outside the sprite it indexes");')
     o.append("")
     o.append("#endif  // PB_SPRITES_PEBBLES_H")
     text = "\n".join(ln.rstrip() for ln in o)
@@ -726,11 +906,19 @@ def describe(s, verbose=True):
     if s["species"] is not None:
         out.append("  species %d" % s["species"])
     for fi in range(len(s["frames"])):
-        x0, y0, x1, y1, n = ink_box(s["frames"][fi])
+        rows = s["frames"][fi]
+        x0, y0, x1, y1, n = ink_box(rows)
         out.append("  frame %d: %d ink px, box x %d..%d, y %d..%d%s"
                    % (fi, n, x0, x1, y0, y1,
                       "" if y1 == s["h"] - 1 else
                       "  (%d blank row(s) under the body)" % (s["h"] - 1 - y1)))
+        hair = hairlines(rows, s["w"], s["h"])
+        eb = eye_band(rows, s["w"], s["h"])
+        out.append("           %d piece(s), %d hairline px%s, eyes %s"
+                   % (components(rows, s["w"], s["h"]), hair,
+                      "  <-- 1px-wide ink reads as dirt at 1x" if hair else "",
+                      "none" if eb == NO_EYES else
+                      "y %d..%d x %d..%d" % (eb[0], eb[1], eb[2], eb[3])))
     d = frame_diff(s)
     if d is not None:
         out.append("  frames differ in %d px%s"
@@ -774,6 +962,25 @@ def main():
         return self_check(args.self_check)
 
     sets = load_sets()
+
+    # THE BYTE BUDGET, REFUSED AT THE SOURCE.
+    #
+    # tools/sprites/README.md section 5 has always said "the generator refuses
+    # to emit at all when ... the art is over the byte budget". IT DID NOT: the
+    # only budget check lived in self_check() with no arguments, so
+    # `python3 tools/gen_sprites.py` happily wrote a header 1,152 B over the
+    # ceiling and exited 0, leaving the emitted static_assert to fail the next
+    # build with a message about a file nobody hand-edited. Found by mutation at
+    # P9-C3 (eight spare effect sets appended); a documented refusal that does
+    # not refuse is the same defect as a test that cannot fail.
+    total_art = sum(set_bytes(s) for s in sets)
+    if total_art > PB_DATA_BYTES_MAX:
+        die("%d B of art is over the %d B budget by %d B (%d sets). This is a "
+            "re-plan, not a build error: raise PB_DATA_BYTES_MAX in "
+            "tools/gen_sprites.py AND SPRITE_DATA_BYTES_MAX in "
+            "Pebblebol/src/data/sprites.h together, and say so in the commit"
+            % (total_art, PB_DATA_BYTES_MAX, total_art - PB_DATA_BYTES_MAX,
+               len(sets)))
 
     if args.render:
         for s in sets:
@@ -845,6 +1052,7 @@ def self_check(files):
         listed = set(read_manifest())
     except SystemExit:
         listed = set()
+    pack = species_names()
     bad = 0
     for path in files:
         if not os.path.exists(path):
@@ -861,9 +1069,52 @@ def self_check(files):
         if s["name"] not in listed:
             print("  NOTE: %s is not in tools/sprites/atlas.txt yet, so it "
                   "would not ship. Add it" % s["name"])
+
+        # THE SLOT CHECK, ON THE FILES THIS RUN WAS HANDED (P9-C3).
+        #
+        # This was the hole an art agent found and reproduced: with file
+        # arguments, self_check() never reached check_species_binding(), which
+        # only runs through load_sets(). So copying kachi.txt and changing
+        # `species: 37` to `species: 44` printed "self-check: 1 file(s) OK" and
+        # exited 0 - the worst failure the format has (a body in the wrong slot
+        # draws the wrong creature and every other check stays green), declared
+        # fine by the exact command five art agents were told to run.
+        #
+        # The ORDER half of the binding still needs the whole atlas and is still
+        # only checkable in load_sets(). The ID-TO-NAME half needs only
+        # species.json, so it runs here, per file.
+        if s["species"] is not None and pack is not None:
+            sid = s["species"]
+            if sid not in pack:
+                sys.stderr.write(
+                    "gen_sprites.py: %s is bound to species %d, which "
+                    "tools/content/species.json does not contain (the pack "
+                    "holds ids 1..%d)\n" % (rel(path), sid, max(pack)))
+                bad += 1
+                continue
+            want = slug(pack[sid])
+            if s["name"] != want:
+                sys.stderr.write(
+                    "gen_sprites.py: %s says `species: %d`, which is %s in the "
+                    "pack, so this set must be named %s and the file %s.txt - "
+                    "not %s. A body in another species' slot draws the wrong "
+                    "creature and nothing else in the tree notices\n"
+                    % (rel(path), sid, pack[sid], want, want.lower(), s["name"]))
+                bad += 1
+                continue
+
+        # A FRAME 1 THAT IS A COPY OF FRAME 0 IS A FAILURE HERE, NOT A NOTE.
+        # It used to print `WARNING: this body will not animate` and then
+        # `self-check: 1 file(s) OK` with exit 0 - a check that names the defect
+        # and then calls the file OK is a check people learn to skim.
+        # tests/test_sprite_pipeline.cpp has always failed on it; the command
+        # the README tells an art agent to run now agrees with the test.
         if frame_diff(s) == 0:
-            print("  WARNING: frame 1 is identical to frame 0 - this body will "
-                  "not animate")
+            sys.stderr.write(
+                "gen_sprites.py: %s: frame 1 is byte-identical to frame 0 - "
+                "this body does not animate\n" % rel(path))
+            bad += 1
+            continue
         print("")
     if bad:
         sys.stderr.write("gen_sprites.py: %d file(s) rejected\n" % bad)

@@ -75,14 +75,23 @@ static uint32_t identity_of_genome(const Genome& g) {
 // -----------------------------------------------------------------------------
 //  THE COSMETIC GENES, DECODED ONCE
 // -----------------------------------------------------------------------------
-static void fill_genome(PetView& out, const Genome& g, uint8_t minor_form,
+// `minor_form` is UNNAMED, not absent, and the difference is the point: every
+// caller still has one and still passes it, so the day something wants to draw
+// care quality again the parameter is where it always was. P9-C3 took it out of
+// the ATLAS, not out of the view - see the note on out.form below.
+static void fill_genome(PetView& out, const Genome& g, uint8_t /*minor_form*/,
                         uint8_t stage) {
   out.gene_species = gene_species(g);
   // The genome nibble is the art key's FALLBACK, and this is the only place it
   // is used as the key itself: pet_view_attach() overwrites `form` a moment
   // later for any Pebble the Box has a species row for. A view that never gets
   // an attach - an egg nothing has filed - keeps exactly the body it always had.
-  out.form         = sprite_form_of(out.gene_species, minor_form, (Stage)stage);
+  // P9-C3: minor_form no longer reaches the atlas. It picked SPR_CHILD_POOR /
+  // SPR_TEEN_POOR out of the care quality frozen at growth, and one body per
+  // species has nowhere to put that; see data/sprites.h's LOOKUP banner. The
+  // parameter is still filled into the view (the HUD and the save both use it),
+  // it just no longer chooses a drawing.
+  out.form         = sprite_form_of(out.gene_species, (Stage)stage);
   out.temper       = gene_temper_class(g);
   if (out.temper >= (uint8_t)TEMPER_COUNT) out.temper = (uint8_t)TEMPER_TRANQUILO;
   out.body_size    = gene_body_size(g);
@@ -133,14 +142,23 @@ void pet_view_fill_sim(PetView& out, const SimView& p, uint8_t pose) {
 //  `form` from the genome, and this re-derives it from the species row the
 //  instant there is one.
 //
-//  ONLY THE STAGES WHOSE DESIGN IS THE ART KEY ARE TOUCHED. CHILD and TEEN
-//  forms are the care-quality variant sim.cpp froze into minor_form when the
-//  pet grew; the view does not carry minor_form, and it does not need to,
-//  because an evolution does not move those two designs at all.
+//  EVERY STAGE ABOVE EGG IS TOUCHED NOW (P9-C3). This used to skip CHILD and
+//  TEEN as well, because those two forms were the CARE-QUALITY variant sim.cpp
+//  froze into minor_form when the pet grew, and an evolution did not move them.
+//  The care-quality bodies went with the legacy atlas - one 24x24 body per
+//  species has nowhere to put a second variant - so a Pebble's body is its
+//  species at every stage from BABY to SENIOR, and skipping CHILD and TEEN here
+//  would leave those two stages drawing the GENOME's body while every other
+//  stage drew the species'. data/sprites.h's LOOKUP banner records what was
+//  deleted; tests/test_pet_view.cpp pins both directions of the change.
+//
+//  EGG is still skipped, and that is not the same kind of statement: an egg is
+//  an egg, sprite_form_of() answers 0 for it, and sprite_set_id() returns
+//  PBSPR_EGG_IDLE whatever `form` holds.
 // -----------------------------------------------------------------------------
 static void apply_species_design(PetView& out) {
   const Stage st = (Stage)out.stage;
-  if (st == STAGE_EGG || st == STAGE_CHILD || st == STAGE_TEEN) return;
+  if (st == STAGE_EGG) return;
   out.form = pet_art_design(out.species_id, out.gene_species, st);
 }
 

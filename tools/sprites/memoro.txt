@@ -1,0 +1,73 @@
+# Family 13 MEMORY motif: a SOLID VERTICAL SLAB with a comb of contact notches
+# bitten out of its bottom edge, a 1px waist notched into both side walls, and
+# one 2x2 unlit eye per slab. Growth is by slab count - one, two, three - and
+# the bottom edge decays across the three stages: clean comb, clean comb,
+# then a melt. Eyes are unlit holes, never lit dots: the body is a solid
+# silhouette, so a lit eye inside it is invisible.
+#
+# MEMORO - species 38, family 13 stage 1, type SYSTEM (MEMORY / BRUISER).
+# 'Se acuerda de todo.' - it remembers everything.
+# root:       vertical notched stick melting DOWNWARD
+# silhouette: two sticks side by side bridged at the top, eight notches, small
+#             feet.
+# frame 2:    the bridge bar slides 1px left and right.
+# The bridge makes the pair one silhouette - an arch - so the growth from one
+# slab to two is a shape change and not just a duplicate. Eight notches, four
+# per slab, on the same 2px pitch as KACHI so the comb is the same comb.
+# The waist notch and the eye hole are carried over unchanged.
+
+name: MEMORO
+size: 24x24
+frames: 2
+species: 38
+
+--- frame 0
+........................
+........................
+........................
+........................
+........................
+........................
+...##################...
+..####################..
+..####################..
+..#########..#########..
+..#########..#########..
+..##..#####..####..###..
+..##..#####..####..###..
+..#########..#########..
+..#########..#########..
+..#########..#########..
+...#######....#######...
+...#######....#######...
+..#########..#########..
+..#########..#########..
+..#.#.#.#.#..#.#.#.#.#..
+..#.#.#.#.#..#.#.#.#.#..
+..#.#.#.#.#..#.#.#.#.#..
+..#.#.#.#.#..#.#.#.#.#..
+--- frame 1
+........................
+........................
+........................
+........................
+........................
+........................
+....##################..
+...####################.
+...####################.
+..#########..#########..
+..#########..#########..
+..##..#####..#########..
+..##..#####..####..###..
+..#########..#########..
+..#########..#########..
+..#########..#########..
+...#######....#######...
+...#######....#######...
+..#########..#########..
+..#########..#########..
+..#.#.#.#.#..#.#.#.#.#..
+..#.#.#.#.#..#.#.#.#.#..
+..#.#.#.#.#..#.#.#.#.#..
+..#.#.#.#.#..#.#.#.#.#..

@@ -34,11 +34,25 @@
 #include "xbm_mirror.h"
 #include "../data/sprites.h"
 
-// The eyelid table below is indexed by SpriteSetId and holds hand-verified row
-// numbers read out of the art. If the art is regenerated the ids and the row
-// numbers move together and the blink would land on a cheek, so make that a
-// build error rather than a bug report.
-static_assert(SPRITE_REV == 1, "petfx eyelid table was measured against SPRITE_REV 1 - re-verify it");
+// THE EYELID TABLE IS NO LONGER IN THIS FILE, and the assert that froze it is
+// gone with it (P9-C3).
+//
+// It was 24 hand-measured rows indexed by SpriteSetId, 1,100 lines from the
+// pixels it described, held in step with them by
+// `static_assert(SPRITE_REV == 1, "re-verify it")` - a guard that worked
+// exactly as intended and that sixty bodies would have turned into sixty rows
+// of the same hand work. tools/gen_sprites.py derives the band from the same
+// .txt file as the pixels now (PB_SPRITE_EYES in data/sprites_pebbles.h) by one
+// stated rule, so the two cannot drift and there is nothing left to freeze.
+// SPRITE_REV is itself derived now - it is the art hash - so the old assert
+// would have had to be re-typed after every art edit, which is the failure mode
+// it existed to prevent.
+//
+// What the derivation gets wrong is written down in gen_sprites.py's
+// eye_band(): any enclosed hole in the top 60 % of the ink box is included, so
+// a body with a high mouth or a window blinks with more than its eyes. That is
+// an ugly blink on one body, not a corrupted frame - and it is now visible in
+// ONE place, beside the pixels, instead of in a table nobody re-measures.
 
 // Every horizontal limit in this file comes from PETFX_STAGE_L / PETFX_STAGE_R
 // (petfx.h) and from nothing else. There is deliberately no softer, second
@@ -58,12 +72,23 @@ static_assert(SPRITE_REV == 1, "petfx eyelid table was measured against SPRITE_R
 // bodies and walls; it never goes looking in the sim for what the walls are.
 #define PF_OBST_MAX     4
 
-// Geometry of the biggest body we will ever cache: ADULT is 40x40, stride 5.
-#define PF_MAX_W        40
-#define PF_MAX_H        40
-#define PF_MAX_STRIDE   5
-#define PF_FRAME_BYTES  (PF_MAX_STRIDE * PF_MAX_H)   // 200 B
-#define PF_EYE_MAX_H    12                           // ADULT_BUHO needs 11
+// Geometry of the biggest body we will ever cache. THIS WENT FROM 40 TO 24 AT
+// P9-C3 and it is a RAM saving, not a cost: the legacy atlas held five body
+// sizes (24 baby, 28 child, 32 teen, 40 adult, 32 senior) and these caches were
+// sized for the largest. Every body in the generated atlas is 24x24, and
+// data/sprites_pebbles.h's own guard refuses a set wider than that, so the two
+// decode caches drop from 2 x 200 B to 2 x 72 B and the four lid strips from
+// 4 x 60 B to 4 x 24 B: 640 B of .bss becomes 240 B. Phase 10 gets the 400 B.
+//
+// If a future set is ever wider than 24, pf_load_cache()'s own bounds check
+// (s.w > PF_MAX_W) refuses to cache it and the body simply does not animate -
+// it does not overflow. Raise these two numbers and BODY_W/H in
+// tools/gen_sprites.py together, or not at all.
+#define PF_MAX_W        24
+#define PF_MAX_H        24
+#define PF_MAX_STRIDE   3
+#define PF_FRAME_BYTES  (PF_MAX_STRIDE * PF_MAX_H)   // 72 B
+#define PF_EYE_MAX_H    12
 #define PF_STRIP_BYTES  (PF_MAX_STRIDE * PF_EYE_MAX_H)
 
 // =============================================================================
@@ -115,70 +140,34 @@ static uint8_t pf_scan_ink(const uint8_t* bits, uint8_t w, uint8_t h,
 // -----------------------------------------------------------------------------
 //  EYELIDS
 //
-//  Verified fact about this art: the eyes are HOLES in the silhouette, with
-//  the pupil as a lit island inside the hole. spr_adult_bolota rows 15-20:
-//      .######......##############......######.
-//      .######..##..##############..##..######.
-//  So "close the eye" = fill the hole (the socket goes solid, the pupil was
-//  already solid) and then carve one dark row back out as the lash line.
+//  Verified fact about this art, and it survived the atlas swap because every
+//  one of the sixty bodies was drawn to it on purpose: the eyes are HOLES in
+//  the silhouette, with the pupil as a lit island inside the hole - a 1px lit
+//  outline does not survive on a 1-bit panel at 24px. So "close the eye" =
+//  fill the hole (the socket goes solid, the pupil was already solid) and then
+//  carve one dark row back out as the lash line.
 //
-//  WHY THIS IS A TABLE AND NOT A HEURISTIC.
-//  The obvious rule - "fill every interior run of zeros in the top 55 % of the
-//  ink" - was implemented and run against all 38 sets (scratchpad/petfx/
-//  eyes.py, eyes2.py). It is wrong on this art for two independent reasons:
-//    * decorative silhouette gaps are geometrically identical to eye sockets.
-//      BABY_CACTUS spines, ADULT_PUNKI's mohawk, TEEN_POOR's spikes and
-//      BABY_SETA's cap notches all read as "a pair of interior runs high up in
-//      the body" and win the vote over the real eyes.
-//    * the 55 % cut is simply false for some bodies. BABY_SETA's face is on
-//      the STEM, at 67-79 % of the ink height; a 55 % or 60 % band cannot
-//      reach it, and widening the band to 80 % starts swallowing mouths.
-//  Refining the heuristic (pupil-split detection, symmetry scoring) got 30 of
-//  38 sets right, which is worse than useless for a cosmetic effect: seven
-//  bodies would blink with their spikes. So the rows were read off the decoded
-//  art by hand, once, and frozen with the SPRITE_REV assert above. 192 B of
-//  flash buys an exact answer.
+//  WHERE THE BAND COMES FROM. data/sprites_pebbles.h's PB_SPRITE_EYES, read
+//  through sprite_eyes(), derived by tools/gen_sprites.py from the same .txt
+//  file as the pixels. It was a 24-row hand-measured table HERE until P9-C3;
+//  the argument for that, recorded so the trade is legible, was that the
+//  heuristic of the day ("fill every interior run of zeros in the top 55 % of
+//  the ink") got 30 of 38 legacy sets right - decorative silhouette gaps were
+//  geometrically identical to eye sockets, so BABY_CACTUS blinked with its
+//  spines and BABY_SETA's face was at 67-79 % of its ink height, outside any
+//  band that did not also swallow mouths.
 //
-//  x0/x1 clip the band horizontally. Some bodies have a hole in the eye rows
-//  that is not an eye - ADULT_QUIMERA has a 2 px seam between its two heads at
-//  x19, BABY_PEZ has a tail notch, BABY_ROBOT has an armpit - and filling
-//  those would fuse body parts for 90 ms. The window keeps the fill on the
-//  face. Coordinates are in UNMIRRORED sprite space; the mirror flips them.
+//  WHY THE SAME RULE IS ACCEPTABLE NOW: it is not the same art. The legacy
+//  atlas was 38 sets at five sizes drawn over years to no shared rule; this one
+//  is 60 bodies at one size drawn to a written contract in which an eye is a
+//  hole and a blink is a squint. The rule is stated in eye_band() with what it
+//  gets wrong, and it lives beside the pixels rather than 1,100 lines away.
+//
+//  x0/x1 clip the band horizontally, because a body can have a hole in its eye
+//  rows that is not an eye and filling it would fuse two body parts for the
+//  length of a blink. Coordinates are in UNMIRRORED sprite space; the mirror
+//  flips them.
 // -----------------------------------------------------------------------------
-struct PfEyeBand { uint8_t y0, y1, x0, x1; };
-
-#define PF_EYE_FIRST  SPR_BABY_BLOB
-#define PF_EYE_LAST   SPR_SENIOR_QUIMERA
-#define PF_EYE_SETS   (PF_EYE_LAST - PF_EYE_FIRST + 1)
-
-// [set - PF_EYE_FIRST][frame]
-static const PfEyeBand PF_EYE[PF_EYE_SETS][2] = {
-  /* BABY_BLOB         */ { {  8, 12,  5, 18 }, { 11, 12,  5, 18 } },
-  /* BABY_ORUGA        */ { {  9, 13,  5, 18 }, { 11, 12,  5, 18 } },
-  /* BABY_PAJARO       */ { {  8, 12,  5, 18 }, { 10, 11,  5, 18 } },
-  /* BABY_GATO         */ { {  8, 12,  4, 19 }, { 10, 11,  3, 19 } },
-  /* BABY_SETA         */ { { 16, 19,  9, 13 }, { 16, 19,  9, 13 } },  // f1 already blinks
-  /* BABY_CACTUS       */ { { 12, 14,  8, 15 }, { 13, 13,  8, 15 } },
-  /* BABY_PEZ          */ { {  9, 12,  4,  6 }, {  9, 12,  4,  6 } },  // one eye, faces left
-  /* BABY_ROBOT        */ { {  9, 12,  6, 20 }, {  9, 12,  6, 20 } },
-  /* CHILD_GOOD        */ { { 11, 15,  7, 20 }, { 13, 14,  7, 20 } },
-  /* CHILD_POOR        */ { { 11, 15,  6, 20 }, { 13, 15,  6, 20 } },
-  /* TEEN_GOOD         */ { {  9, 13,  9, 22 }, { 11, 12,  9, 22 } },
-  /* TEEN_POOR         */ { {  9, 13,  8, 23 }, { 11, 12,  8, 22 } },
-  /* ADULT_BOLOTA      */ { { 15, 20,  7, 32 }, { 16, 17,  7, 32 } },
-  /* ADULT_ZAMPASALTO  */ { {  9, 13, 11, 26 }, { 11, 12, 11, 26 } },
-  /* ADULT_BUHO        */ { {  9, 19,  5, 34 }, {  9, 19,  5, 34 } },  // 11 rows of owl
-  /* ADULT_PUNKI       */ { { 12, 19,  7, 29 }, { 12, 19,  6, 28 } },
-  /* ADULT_MOHO        */ { { 14, 17,  8, 33 }, { 13, 16,  8, 33 } },
-  /* ADULT_QUIMERA     */ { { 12, 17,  6, 13 }, { 14, 17,  6, 13 } },  // left head only
-  /* SENIOR_BOLOTA     */ { {  9, 11,  5, 22 }, { 11, 12,  5, 22 } },
-  /* SENIOR_ZAMPASALTO */ { {  8, 10,  6, 19 }, { 10, 11,  6, 19 } },
-  /* SENIOR_BUHO       */ { {  5, 11,  5, 26 }, {  5, 11,  5, 26 } },
-  /* SENIOR_PUNKI      */ { {  8, 11,  6, 23 }, {  9, 10,  6, 23 } },
-  /* SENIOR_MOHO       */ { {  8, 10,  7, 22 }, {  8, 10,  7, 22 } },
-  /* SENIOR_QUIMERA    */ { {  8, 10,  5,  9 }, {  9, 11,  5,  9 } },  // left head only
-};
-
 // -----------------------------------------------------------------------------
 //  pf_build_lids - turn one eye band into two little XBM strips.
 //
@@ -466,6 +455,15 @@ static inline int16_t pf_stage_hi(uint8_t w) {
 // live pose instead would fix the overlap but move the wall in the middle of a
 // stroll, which is the same jump wearing a different hat; the maximum is stable
 // for as long as the stage is, which is what a clamp has to be.
+//
+// P9-C3 MADE THE ANSWER CONSTANT AND THE LOOP IS KEPT ANYWAY. Every set in the
+// generated atlas is 24x24 - the two poses included - so this returns 24 for
+// every input today and the senior-jump defect above is impossible by
+// construction. The loop stays because it is the STATEMENT of the rule, not an
+// optimisation: an atlas that ever grows a wider pose set again would move the
+// clamp without anyone editing this function, which is exactly what did not
+// happen the first time. It is four sprite_set() reads on a stage change, not
+// per frame.
 static uint8_t pf_width_of(const PetView& p) {
   static const uint8_t kPoses[] = { POSE_IDLE, POSE_SLEEP, POSE_SICK, POSE_EAT };
   const uint8_t form = p.form;
@@ -575,8 +573,12 @@ static void pf_cache_sync(uint8_t set_id, uint8_t mirrored) {
 
     s_lid_h[f] = 0;
     s_lid_y[f] = 0;
-    if (set_id >= PF_EYE_FIRST && set_id <= PF_EYE_LAST) {
-      const PfEyeBand& b = PF_EYE[set_id - PF_EYE_FIRST][src_f];
+    // The band comes out of the atlas beside the pixels. `y1 < y0` is the
+    // generator's way of saying THIS BODY DOES NOT BLINK - a body with no
+    // enclosed hole in its upper face - and pf_build_lids() already answers 0
+    // for it, so there is no extra branch here.
+    {
+      const SpriteEyeBand b = sprite_eyes(set_id, src_f);
       uint8_t x0 = b.x0, x1 = b.x1;
       if (mirrored) {                       // the window mirrors with the art
         const uint8_t nx0 = (uint8_t)(s.w - 1u - b.x1);
@@ -1024,13 +1026,15 @@ void petfx_draw_body(const PetView& p, uint8_t pose, uint8_t frame, int16_t dy,
   if (p.stage == STAGE_EGG) {
     // Same rule ui.cpp uses, kept in sync deliberately: the egg starts
     // cracking a minute before it hatches.
-    set_id = (uint8_t)(((uint32_t)p.age_s + 60u >= AGE_EGG_S) ? SPR_EGG_CRACK : SPR_EGG_IDLE);
+    set_id = (uint8_t)(((uint32_t)p.age_s + 60u >= AGE_EGG_S)
+                       ? (uint8_t)PBSPR_EGG_CRACK : (uint8_t)PBSPR_EGG_IDLE);
   } else {
     // PetView.form is the ONLY source of the body, and since P4-C4a it is the
-    // SPECIES' design: ui/pet_view.cpp folded the species row's sprite_id (or,
-    // for a Pebble with no row, the genome nibble) into the pool this life
-    // stage draws from. This module does not know what a species is and must
-    // not learn - see the banner in ui/pet_art.h.
+    // SPECIES' design: ui/pet_view.cpp puts the species row's sprite_id there
+    // (or, for a Pebble with no row, the genome nibble). Since P9-C3 there is
+    // no fold left - one 24x24 body per species - so `form` IS the art key.
+    // This module does not know what a species is and must not learn - see the
+    // banner in ui/pet_art.h.
     s_qry_stage   = p.stage;
     s_qry_form    = p.form;
     s_qry_ok      = 1;

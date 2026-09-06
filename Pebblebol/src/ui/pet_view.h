@@ -65,7 +65,7 @@ struct PetView {
   uint8_t  species_id;        // the Box's species row, 0 = unknown
   uint8_t  gene_species;      // 0..15, the genome nibble; the art-key FALLBACK
   uint8_t  stage;             // Stage
-  uint8_t  form;              // sprite_form_of(art key, minor_form, stage):
+  uint8_t  form;              // sprite_form_of(art key, stage):
                               // the resolved design, species-chosen at BABY /
                               // ADULT / SENIOR, care-chosen at CHILD / TEEN
   uint8_t  pose;              // SpritePose the caller wants drawn

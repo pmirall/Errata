@@ -8,6 +8,139 @@ Versions are tagged at phase boundaries of `PEBBLEBOL_IMPLEMENTATION_PLAN.md`; t
 tag for a phase is cut only when its gate (`tools/check.sh`) and its variant matrix
 (`tools/build_matrix.sh`) are both green.
 
+## [0.9.0-content] — Unreleased
+
+### Added
+
+- **Sixty creature bodies, drawn (P9-C3).** `tools/sprites/*.txt`, 24x24, two frames each, one
+  per roster id, in twenty families of three. The atlas is **64 sets / 9,216 B**: the two eggs,
+  a `SLEEP` and a `SICK` pose set, and the sixty bodies. Every one of the 120 frames was
+  rendered from the COMPILED header and looked at — as text, as a 5x contact sheet per family
+  and as a whole-roster sheet at 1x, 2x and 4x — because nothing automated can tell you whether
+  a body looks like a creature and this repository says so in four separate files.
+- **`PB_SPRITE_EYES`, the eyelid table, generated.** `ui/petfx.cpp` carried 24 rows of blink
+  bands read off the decoded art BY HAND, 1,100 lines from the pixels they indexed, held in
+  step by `static_assert(SPRITE_REV == 1, "re-verify it")`. Sixty bodies would have made it
+  sixty rows of the same. `tools/gen_sprites.py` derives the band from the same `.txt` file as
+  the pixels by one stated rule — an eye is a HOLE in the top 60 % of the ink box — so they
+  cannot drift, and what the rule gets wrong is written down in `eye_band()` rather than
+  discovered. `SPRITE_REV` is now the derived art hash, so it also cannot be forgotten.
+- **The §63 sweep.** `tests/test_screens.cpp` renders **every species at every stage, every
+  pose and both frames on HOME** (2,400 renders), every species in the BOX list, and every
+  species on both sides of the BATTLE field including the mirror — all with `fb_oob() == 0`,
+  the body's own last row inked so it stands on the floor rule, and the draw box inside the
+  panel. Sixty-five goldens contain four species between them; fifty-six were drawn by no
+  golden at all.
+- **`home_sleeping.pbm` and `home_sick.pbm`.** The two new pose bodies were drawn by NOTHING:
+  no fixture set `POSE_SLEEP` or `POSE_SICK`, so two brand-new 24x24 drawings would have
+  shipped unrecorded. `a_pose_changes_the_body_and_nothing_else_on_home` additionally pins that
+  a pose changes pixels only inside the body box — and that `POSE_EAT` changes **zero** pixels,
+  which is P9-C3's answer to the pose question rather than an oversight.
+
+### Changed
+
+- **The roster ships the whole pack: `ROSTER_FAMILIES` 12 → 20, 36 → 60 species.** The clamp
+  was never the tables, it was the art: the old guard `SPR_BABY_BLOB + sprite_id < 38` capped
+  the roster at 36 because the legacy atlas held 36 addressable bodies. The same three lines
+  now read `PB_SPRITE_BODY_FIRST + sprite_id < 64` and describe the resolution the firmware
+  performs. **Every one of the 34 attacks is on a reachable learnset for the first time** (13
+  Infección on species 46, 22 Firewall on 60), and the evolution key (item 9) has a lock:
+  species 53 → 54, driven end to end in `test_inventory.cpp`.
+- **`SPRITE_DATA_BYTES_MAX` 24,576 → 11,264 B.** That number was a TRANSITION allowance sized
+  for the window in which both rosters were in the tree at once. Both rosters are no longer in
+  the tree, so it is the measured end state (**10,247 B** — 9,216 of atlas plus 1,031 of icons,
+  mini-icons, badges and emotes) plus **1,017 B**, which is seven more 24x24x2 sets: one more
+  three-stage family and four effect sets. `tools/gen_sprites.py`'s own `PB_DATA_BYTES_MAX`
+  came down from 12,288 to 10,240 and now actually refuses to emit over it — README section 5
+  had claimed that refusal since P9-C1 and there was no such check.
+- **`br_body_set_id()` no longer folds.** Sixty species resolve onto sixty distinct 24x24
+  combat bodies, `worst == 1`. The old case asserted `n == SPRITE_BABY_BODIES` (8) with at most
+  5 species sharing a body; raising 8 to 60 alone would have made it un-failable again, because
+  `sprite_set_id()` clamps an out-of-range form to the first body — so the case asserts the
+  EXACT slot per species and `worst == 1`, and a mutation that points species 60 past the end
+  of the atlas fails it by both.
+
+### Removed
+
+- **The 38 legacy Nottamagochi sets, `enum SpriteSetId` and `SPRITE_SETS`.** `data/sprites.h`
+  keeps the icons, mini-icons, badges, emotes, the pose enum, the budget assert over both
+  atlases' worth of art, and the hand-written LOOKUP block, and it includes the generated
+  atlas. `tests/tools/sprite_dump.cpp` lost its transcribed 38-name list and needs no edit when
+  a body is added, which is what its P9-C1 comment predicted.
+- **The care-quality body.** `SPR_CHILD_GOOD`/`POOR` and `SPR_TEEN_GOOD`/`POOR` carried the care
+  quality `sim.cpp` froze into `minor_form` when the pet grew. One 24x24 body per species has
+  nowhere to put a second variant — it would be sixty more drawings — so the distinction is
+  **deleted**, not refactored. `sprite_form_of()` lost its `minor_form` parameter so every call
+  site had to be visited rather than silently keeping a no-op; `test_pet_view.cpp` pins both
+  directions. A screen that wants care quality back should draw it with the renderer.
+  **What this bought:** a Pebble's body is its species at EVERY stage, so all forty evolution
+  rules now move the drawn body at the level they actually fire at — including the twenty that
+  fire at CHILD or TEEN, every family's first evolution, the starter's Paketo → Fragmar among
+  them. That number was 12 of 24 seeing "only the name" and is now 0 of 40.
+- **Seven pose sets, replaced by two.** `SLEEP` at four sizes and `SICK` and `EAT` at three
+  become ONE generic `SLEEP` and ONE generic `SICK`, both 24x24 (288 B); `POSE_EAT` gets no art
+  at all and falls through to the species body. The identity loss on sleep and sickness is
+  **inherited, not introduced** — the old `sprite_set_id()` ignored `form` in every pose branch,
+  so a sleeping Gato and a sleeping Pez were already the same blob. **The cost of dropping
+  EAT's art, stated:** the authored "leaning over the bowl" silhouette is gone, and what
+  replaces it (the `EMO_BOWL` prop `actfx` already parks and `petfx_squash()`) lives in
+  device-only translation units no host binary compiles. It is the one place this chunk moves
+  behaviour into the layer the suite cannot see, and it is the pose that was already invisible
+  to it — `pet_pose_of()` never returns `POSE_EAT` and no golden has ever recorded one.
+
+### Fixed
+
+- **`--self-check` called two real defects OK and exited 0.** Both were found by the art agents
+  writing against it. A file copied to another species' id — the worst failure this format has,
+  because a body in the wrong slot draws the wrong creature and every other check stays green —
+  printed `1 file(s) OK`, because the slot check was reachable only through the whole atlas. A
+  frame 1 that was a byte-for-byte copy of frame 0 printed `WARNING: this body will not
+  animate` and then `OK`. Both are hard failures now, and the command five art agents were told
+  to run agrees with the test that had always caught them.
+- **Three bodies were exactly symmetric about their own centre column** (`PORTU`, `PROXI`,
+  `GATEON`), so `ui/xbm_mirror.cpp` produced a byte-identical picture and the two fighters on
+  the battle field faced the same way. Nothing in the pipeline can see that — the mirror still
+  runs, the ink count is the same, the bounding box is the same. Found by a test that renders
+  both and requires them to differ; fixed in the art, which §18/19 wanted asymmetric anyway.
+- **Five bodies redrawn and two edited after looking at all sixty together**, which is the only
+  way any of it could have been found: `RAFAGON` (its family's stage 2 read as confetti and kept
+  none of the family's vocabulary), `KADENAX` (seven plates whose links bridged whole rows fused
+  into a circuit board), `PANIKA` (carried its identity in texture and flattened to television
+  static at 1x), `PIXIO` (three blocks and a crumb read as an icon, not an animal), `BAKDORA`
+  (nine 2px through-holes read as stripes, not holes); `KERNON`'s halo bar was floating clear of
+  its spire and now has a stem, `ESTAFEX` lost 36 px of 1-3 pixel barb islands that read as dirt.
+- **Stale atlas arithmetic in three documents.** `docs/budget.md` §4.3 and §12 and
+  `Pebblebol/ESTUDIO_VISUAL.md` carried 10,893 B against a 14,336 B ceiling and a 9,959 B end
+  state that double-counted the eggs and predicted no pose sets. All three now carry the
+  measured numbers and the measured cost.
+
+### Measured
+
+- **Release variant (`GOD_MODE_ENABLED=0`): flash 1,326,400 → 1,328,090 (+1,690 B), globals
+  59,396 → 59,044 (−352 B).** Split by cause, with an intermediate build: the **art swap alone**
+  — sixty bodies in, thirty-eight legacy sets out, the eye table generated, `PF_MAX_W/H` 40 → 24
+  — is **+6 B of flash**, because the atlas it replaces was almost exactly the same size. The
+  remaining **+1,684 B** is the roster 36 → 60 (24 species rows, 16 evolution rules, encounter
+  rows, 48 more Spanish strings). The globals line moved DOWN, and every byte is accounted for:
+  `ui/petfx.cpp`'s two decode caches go from 2 x 200 B to 2 x 72 B and its four lid strips from
+  4 x 60 B to 4 x 24 B — **exactly 352 B**, returned to phase 10 rather than spent.
+- Matrix green on six variants; release caps 1,328,090/1,600,000 flash and 59,044/65,000
+  globals. `ALL PASS 50/50`, ASAN 4/4, PAGE TEST 51/51, GATE OK.
+
+### Still owed
+
+- **The HOME layout.** A 24 px body standing on `HOME_FLOOR_Y` leaves **19 blank rows** above it
+  on every still frame, where the 40 px adult filled the band. The re-recorded goldens show it.
+  It is a layout decision for P10-C3/C4, not a defect a golden can report.
+- **`XP_TABLE`.** `data/balance.h` ships one 31-entry curve and `tools/content/balance.json`
+  ships a different one; the plan sequences the decision into **P9-C4** and its instrument
+  (`tests/tools/sim_days.cpp`) does not exist yet. Two sources of truth, untouched here.
+- **Nothing on this list was seen on hardware.** There is no board and no panel in this
+  environment. Every judgement about whether a body reads at 1x is a judgement from a rendered
+  image on a monitor, and the thin features are the ones at risk: `PLAGON`'s 1-2 px teeth,
+  `BUGGO`'s 1 px pupils, `PANOPTIX`'s nine pupils, `TWINIX`'s four eyes, `BAKDORA`'s hanging
+  door. `KLONIX`'s 6 px blink is the subtlest idle in the atlas and may be invisible in practice.
+
 ## [0.8.0-creator] — Unreleased
 
 ### Added

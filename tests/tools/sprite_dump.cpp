@@ -15,23 +15,21 @@
 //  holds full screens of which six would ever contain a body, and
 //  creator_decode prints sprite frames as hex.
 //
-//  IT READS THE HEADERS, NOT THE ASCII SOURCES, and that is the point. A
+//  IT READS THE HEADER, NOT THE ASCII SOURCES, and that is the point. A
 //  rendering of tools/sprites/*.txt would only prove the .txt files say what
-//  they say. This walks data/sprites.h's SPRITE_SETS and
-//  data/sprites_pebbles.h's PB_SPRITE_SETS through the same
+//  they say. This walks data/sprites_pebbles.h's PB_SPRITE_SETS through the
+//  same
 //  ((w+7)>>3) / LSB-first decode the device's drawXBM performs, so what appears
 //  here is what the panel will show.
 //
 //  Usage
-//    ./bin/sprite_dump list                 every set in both atlases
+//    ./bin/sprite_dump list                 every set in the atlas
 //    ./bin/sprite_dump text [NAME|INDEX]    one set (or all) as '#' and '.'
 //    ./bin/sprite_dump sheet OUT.pbm        contact sheet, frame 0 of every set
 //    ./bin/sprite_dump sheet OUT.pbm 1      contact sheet, frame 1
 //
 //  A name is matched case-insensitively against the enum tag with or without
-//  its prefix: ADULT_BUHO, spr_adult_buho and SPR_ADULT_BUHO all work, and
-//  EGG_IDLE names the set in BOTH atlases (both are printed - which is how the
-//  generated egg is eyeballed against the legacy one).
+//  its prefix: PAKETO, pb_spr_paketo and PBSPR_PAKETO all work.
 //
 //  Built by `make -C tests spritetool`, NOT by `make check`: it writes files and
 //  answers a human, which is what tests/tools/ means. It asserts nothing.
@@ -48,30 +46,13 @@
 #include "data/sprites.h"
 #include "data/sprites_pebbles.h"
 
-// The legacy atlas's enum tags, in order. sprites.h is hand-written and its
-// enum carries no string form, so the names are listed once here. A drift
-// between this list and the enum is caught at compile time by the
-// static_assert below, not left to a reader.
-static const char* const kLegacyName[] = {
-  "EGG_IDLE", "EGG_CRACK",
-  "BABY_BLOB", "BABY_ORUGA", "BABY_PAJARO", "BABY_GATO", "BABY_SETA",
-  "BABY_CACTUS", "BABY_PEZ", "BABY_ROBOT",
-  "CHILD_GOOD", "CHILD_POOR", "TEEN_GOOD", "TEEN_POOR",
-  "ADULT_BOLOTA", "ADULT_ZAMPASALTO", "ADULT_BUHO", "ADULT_PUNKI",
-  "ADULT_MOHO", "ADULT_QUIMERA",
-  "SENIOR_BOLOTA", "SENIOR_ZAMPASALTO", "SENIOR_BUHO", "SENIOR_PUNKI",
-  "SENIOR_MOHO", "SENIOR_QUIMERA",
-  "GHOST", "TOMB",
-  "SLEEP_BABY", "SLEEP_CHILD", "SLEEP_TEEN", "SLEEP_ADULT",
-  "SICK_CHILD", "SICK_TEEN", "SICK_ADULT",
-  "EAT_CHILD", "EAT_TEEN", "EAT_ADULT",
-};
-static_assert(sizeof(kLegacyName) / sizeof(kLegacyName[0]) == SPRITE_SET_COUNT,
-              "the legacy name list and SpriteSetId have drifted apart");
-
-// The generated atlas carries its own names (PB_SPRITE_NAMES), emitted by
-// tools/gen_sprites.py from atlas.txt. Nothing is transcribed here, so when
-// P9-C3 lands 60 bodies this tool needs no edit at all.
+// THE LEGACY NAME LIST IS GONE (P9-C3). It transcribed the 38 tags of
+// data/sprites.h's hand-written `enum SpriteSetId`, because that enum carried
+// no string form; that atlas was deleted with this chunk and there is exactly
+// one atlas now, which emits its own PB_SPRITE_NAMES from tools/sprites/
+// atlas.txt. So nothing here is transcribed and this tool needs no edit when a
+// body is added - which is what the P9-C1 comment predicted and is worth
+// recording as having come true.
 
 struct Entry {
   const char*      atlas;   // "legacy" or "generated"
@@ -80,17 +61,13 @@ struct Entry {
   int              index;
 };
 
-static Entry g_all[SPRITE_SET_COUNT + PB_SPRITE_SET_COUNT];
+static Entry g_all[PB_SPRITE_SET_COUNT];
 static int   g_n = 0;
 
 static void collect(void)
 {
-  for (int i = 0; i < (int)SPRITE_SET_COUNT; ++i) {
-    Entry e = { "legacy", kLegacyName[i], &SPRITE_SETS[i], i };
-    g_all[g_n++] = e;
-  }
   for (int i = 0; i < (int)PB_SPRITE_SET_COUNT; ++i) {
-    Entry e = { "generated", PB_SPRITE_NAMES[i], &PB_SPRITE_SETS[i], i };
+    Entry e = { "atlas", PB_SPRITE_NAMES[i], &PB_SPRITE_SETS[i], i };
     g_all[g_n++] = e;
   }
 }
@@ -142,7 +119,7 @@ static void print_list(void)
            (unsigned)s.frames, bytes, ink_count(s, 0),
            d < 0 ? "-" : (d == 0 ? "IDENTICAL" : "differs"));
   }
-  printf("\n%d sets, %u B of art in both atlases together\n", g_n, total);
+  printf("\n%d sets, %u B of art\n", g_n, total);
 }
 
 static void print_text(const Entry& e)

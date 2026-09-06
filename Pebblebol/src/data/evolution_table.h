@@ -77,6 +77,22 @@ inline constexpr EvolutionRule EVOLUTION_RULES[] = {
   {  32,  33,  24, EVOC_HAPPINESS_GE,       70 },   // [21] Servik -> Kernon
   {  34,  35,  10, EVOC_NONE,                0 },   // [22] Proxi -> Gateón
   {  35,  36,  20, EVOC_NONE,                0 },   // [23] Gateón -> Murax
+  {  37,  38,  10, EVOC_NONE,                0 },   // [24] Kachi -> Memoro
+  {  38,  39,  20, EVOC_NONE,                0 },   // [25] Memoro -> Lekron
+  {  40,  41,  12, EVOC_NONE,                0 },   // [26] Filito -> Arkivo
+  {  41,  42,  24, EVOC_NONE,                0 },   // [27] Arkivo -> Zipbom
+  {  43,  44,  10, EVOC_NONE,                0 },   // [28] Pingo -> Floodra
+  {  44,  45,  20, EVOC_NONE,                0 },   // [29] Floodra -> Denyra
+  {  46,  47,  10, EVOC_NONE,                0 },   // [30] Glitchi -> Errox
+  {  47,  48,  20, EVOC_CORRUPTED,           1 },   // [31] Errox -> Panika
+  {  49,  50,  10, EVOC_NONE,                0 },   // [32] Portu -> Skanor
+  {  50,  51,  20, EVOC_NONE,                0 },   // [33] Skanor -> Bakdora
+  {  52,  53,  12, EVOC_NONE,                0 },   // [34] Klavik -> Cifrax
+  {  53,  54,  24, EVOC_ITEM,                9 },   // [35] Cifrax -> Ransora
+  {  55,  56,  10, EVOC_NONE,                0 },   // [36] Probix -> Beakon
+  {  56,  57,  20, EVOC_NONE,                0 },   // [37] Beakon -> Twinix
+  {  58,  59,  10, EVOC_NONE,                0 },   // [38] Cookit -> Trakkar
+  {  59,  60,  20, EVOC_ACTIVITY_GE,        60 },   // [39] Trakkar -> Panoptix
 };
 
 inline constexpr uint8_t EVOLUTION_RULES_COUNT =

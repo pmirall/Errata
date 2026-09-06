@@ -38,15 +38,19 @@ static_assert(BR_YOU_BODY_X + BR_BODY_W <= BR_YOU_PANEL_X,
 static_assert(BR_YOU_PANEL_X + BR_PANEL_W <= OLED_W, "the player's panel runs off the panel");
 
 uint8_t br_body_set_id(uint8_t art_key) {
-  // STAGE_BABY, and the choice is stated rather than implied: the atlas authors
-  // eight 24x24 bodies at BABY and six 40x40 / 32x32 ones at ADULT / SENIOR
-  // (data/sprites.h), and two 40x40 creatures plus two name panels do not fit
-  // on one 128x64 frame. sprite_design_of() is the SAME fold ui/pet_art.h's
-  // pet_art_design() applies, so the combat body and the HOME body are chosen
-  // by the same rule out of the same key - a different pool, never a different
-  // rule.
+  // THE COMBAT BODY IS NOW THE SAME BODY HOME DRAWS (P9-C3). It used to fold
+  // the art key into the eight authored BABY designs with `% 8`, because the
+  // atlas had 8 baby bodies and 6 forty-pixel adult ones and two 40x40
+  // creatures plus two name panels do not fit on a 128x64 frame. Every body in
+  // the atlas is 24x24 now and there is one per species, so there is nothing
+  // to fold and nothing to choose: the fighter on screen is the species.
+  //
+  // STAGE_BABY and POSE_IDLE are still passed rather than assumed - a battle
+  // body is never asleep, never ill and never eating, and the stage is
+  // irrelevant to the body since P9-C3, but going through sprite_set_id() means
+  // the clamp lives in ONE place instead of two.
   return sprite_set_id((uint8_t)STAGE_BABY,
-                       sprite_design_of(art_key, STAGE_BABY),
+                       sprite_form_of(art_key, STAGE_BABY),
                        (uint8_t)POSE_IDLE);
 }
 

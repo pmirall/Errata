@@ -126,30 +126,43 @@ Lengths are counted in **glyphs, not bytes** — `Rafagón` is 7 glyphs in 8 byt
 
 ---
 
-## 3. Why the shipped roster is smaller than the pack
+## 3. The shipped roster IS the pack (since P9-C3)
 
-`tools/content/` holds **60 species in 20 families**. `data/species_table.h`
-ships **36**, and the clamp is one constant — `ROSTER_FAMILIES` at the top of
-`tools/gen_content.py`, whose banner explains it at length.
+`tools/content/` holds **60 species in 20 families** and `data/species_table.h`
+ships all 60. `ROSTER_FAMILIES` at the top of `tools/gen_content.py` is still the
+one constant that decides, and its banner still explains why — but it is at 20
+now and the prefix it emits is the whole pack.
 
-**The clamp is the art, not the tables.** Species ids are contiguous, so the only
-legal subsets are prefixes, and the pack's `sprite_id == id - 1` invariant means
-species *N* needs the *N*-th body in the atlas. The legacy atlas holds 36
-addressable bodies. Flash is not the constraint and never was: all 60 species'
-tables and strings are about 5.4 KB against 273 KB of release headroom.
+**IT WAS 36 UNTIL P9-C3, AND THE CLAMP WAS THE ART, NOT THE TABLES.** Species ids
+are contiguous, so the only legal subsets are prefixes, and the pack's
+`sprite_id == id - 1` invariant means species *N* needs the *N*-th body in the
+atlas. The legacy Nottamagochi atlas held 36 addressable bodies —
+`SPR_BABY_BLOB + (N-1) < 38` — so 36 was the largest roster it could draw. Flash
+was never the constraint: all 60 species' tables and strings are about 5.4 KB
+against 273 KB of release headroom, and the whole of P9-C3 measured **+1,690 B**.
 
-Raising it is P9-C3's job and it is a package deal:
+P9-C3 drew the sixty bodies, deleted the legacy atlas and raised the constant, in
+one change, because the three are one change: a roster wider than the atlas puts
+a species on an egg, and an atlas wider than the roster is art that never ships.
+Both directions are asserted — `test_content.cpp`'s
+`the_pack_is_complete_and_the_whole_pack_ships` pins
+`SPECIES_TABLE_COUNT == PB_SPRITE_BODY_COUNT == 60`.
 
-1. draw the bodies (section 4) so `PB_SPRITE_BODY_COUNT` reaches 60;
-2. raise `ROSTER_FAMILIES` to 20 and regenerate;
-3. repair the two cases that are **written to fail** at this moment —
-   `test_content.cpp`'s `the_pack_is_complete_and_the_roster_is_clamped_by_the_atlas`
-   and `the_naive_sprite_sum_would_mis_draw_a_third_of_the_roster`. They are pins,
-   not bugs; each says in its own comment what the correct repair is.
+**RAISING IT AGAIN IS THE SAME PACKAGE DEAL.** A 21st family needs:
 
-`SPECIES_PACK_COUNT` (60) and `SPECIES_TABLE_COUNT` (36) are both emitted, so
-both halves — "the content is complete" and "the ship is clamped by the art" —
-are assertable from the headers rather than only from Python.
+1. three bodies drawn into `tools/sprites/` (section 4);
+2. three lines added to `tools/sprites/atlas.txt` **at their ids' positions** —
+   the species block is an ordered, gapless tail and the generator refuses
+   anything else;
+3. `ROSTER_FAMILIES` raised and everything regenerated;
+4. `PB_DATA_BYTES_MAX` (`tools/gen_sprites.py`, 10,240) and
+   `SPRITE_DATA_BYTES_MAX` (`data/sprites.h`, 11,264) raised **together** and said
+   out loud in the commit. They are the end state plus a stated margin now, not a
+   transition allowance with room to hide in: 1,017 B, which is seven more sets.
+
+`SPECIES_PACK_COUNT` and `SPECIES_TABLE_COUNT` are both still emitted, so "the
+content is complete" and "the ship matches it" stay assertable from the headers
+rather than only from Python.
 
 ---
 

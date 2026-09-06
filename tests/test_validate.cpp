@@ -601,7 +601,10 @@ static void mk_setup_from(BattleSetup& s, const PebbleInstance* team, uint8_t co
   mk_valid(s.member[1][0], 16, 10, 0xB00Bu);        // a fixed legal opponent
 }
 
-// ONE SWEEP, TWO CLAIMS. 36 species x 5 levels x 8 hostile variants, run once
+// ONE SWEEP, TWO CLAIMS. The whole roster x 5 levels x 8 hostile variants - 60
+// species since P9-C3, and the number is not written down here on purpose: the
+// loop walks SPECIES_TABLE_COUNT and a comment carrying a literal is a comment
+// that goes stale the next time the roster moves. Run once
 // against validate_team() alone and once against the whole chain a linked
 // battle actually puts a team through. `with_battle_ready` is the ONLY
 // difference, so the two cases below are the same measurement asking two

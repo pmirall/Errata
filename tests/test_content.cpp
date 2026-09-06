@@ -200,59 +200,106 @@ TEST(species_rows_are_well_formed_at_runtime) {
 // THE CASE THIS REPLACES COULD NOT FAIL IN THE WAY THAT MATTERED, and it was
 // the eighth of this project's recurring defect. It asserted that
 // `SPR_BABY_BLOB + sprite_id` was arithmetically inside SPRITE_SETS - and
-// NOTHING EVALUATED THAT SUM TO DRAW ANYTHING. It passed happily while species
-// 25..36 would have resolved onto SPR_GHOST, SPR_TOMB and the sleep / sick /
-// eat pose sets; Murax would have been drawn as an adult eating. A
-// byte-identical copy of it also sat in tests/test_evolution.cpp, so the tree
-// carried the same un-failable statement twice.
+// NOTHING EVALUATED THAT SUM TO DRAW ANYTHING. P9-C3 made the sum real: the
+// atlas is 4 fixed slots plus one 24x24 body per species, and
+// PB_SPRITE_BODY_FIRST + sprite_id IS the expression sprite_set_id() evaluates.
 //
-// The sum is still checked, because it is still the forward bound that caps the
-// roster at 36 until P10's art pass lands (see game/species.cpp guard 1). What
-// is NEW is the second loop: the resolution the firmware runs, at every stage,
-// asserted to land on one of the 24 authored creature bodies.
+// THREE PROPERTIES, THREE CASES, ONE INPUT EACH. They were one case with three
+// CHECKs until P9-C3, which is the aggregate shape phase 8 was caught with: a
+// single case that fails on any of three mutations tells you the roster is
+// broken and not which invariant broke, and it lets two of the three rot behind
+// the first. Each of these fails on exactly one mutation and names the species.
+TEST(every_species_sprite_id_is_its_id_minus_one) {
+  for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
+    const SpeciesDef& sp = SPECIES_TABLE[i];
+    // The pack's invariant, and the reason a body's slot is DETERMINED rather
+    // than chosen: tools/gen_sprites.py refuses an atlas whose species block
+    // disagrees with it, game/species.cpp static_asserts it, and this names the
+    // row when it goes. `sp.id` is in the message because "the roster is
+    // broken" is not a bug report.
+    CHECK_EQ((int)sp.sprite_id, (int)sp.id - 1);
+  }
+}
+
+TEST(every_species_body_slot_is_inside_the_atlas) {
+  for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
+    const SpeciesDef& sp = SPECIES_TABLE[i];
+    // The sum the firmware performs. Past the end of PB_SPRITE_SETS is not a
+    // crash and not a wrong picture: sprite_set() clamps the ID, so the pet
+    // silently becomes an egg - which is why this is asserted rather than
+    // trusted to be noticed.
+    CHECK((int)sp.sprite_id < (int)PB_SPRITE_BODY_COUNT);
+    CHECK((int)PB_SPRITE_BODY_FIRST + (int)sp.sprite_id < (int)SPRITE_SET_COUNT);
+  }
+}
+
 TEST(every_species_row_draws_a_creature_body) {
   static const uint8_t kStages[] = { STAGE_BABY, STAGE_CHILD, STAGE_TEEN,
                                      STAGE_ADULT, STAGE_SENIOR };
   for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
     const SpeciesDef& sp = SPECIES_TABLE[i];
-    CHECK(sp.sprite_id < (uint8_t)SPRITE_SET_COUNT);
-    CHECK((uint16_t)(SPR_BABY_BLOB + sp.sprite_id) < (uint16_t)SPRITE_SET_COUNT);
-    CHECK_EQ(sp.sprite_id, (uint8_t)(sp.id - 1u));
-
     for (uint8_t s = 0; s < (uint8_t)(sizeof kStages / sizeof kStages[0]); ++s) {
       const Stage st = (Stage)kStages[s];
-      const uint8_t id = sprite_set_id((uint8_t)st, sprite_form_of(sp.sprite_id, 0u, st),
+      const uint8_t id = sprite_set_id((uint8_t)st, sprite_form_of(sp.sprite_id, st),
                                        (uint8_t)POSE_IDLE);
       CHECK(id >= SPRITE_BODY_FIRST);
       CHECK(id <= SPRITE_BODY_LAST);
-      CHECK(id != (uint8_t)SPR_GHOST);
-      CHECK(id != (uint8_t)SPR_TOMB);
+      // Never an egg and never one of the two pose sets - a species drawn as
+      // furniture still draws 24x24 pixels and still animates.
+      CHECK(id != (uint8_t)PBSPR_EGG_IDLE);
+      CHECK(id != (uint8_t)PBSPR_EGG_CRACK);
+      CHECK(id != (uint8_t)PBSPR_SLEEP);
+      CHECK(id != (uint8_t)PBSPR_SICK);
     }
   }
 }
 
-// AND THE REASON THE GUARD ABOVE IS NOT THE SUM. This states, as a number, how
-// much of the roster the naive `SPR_BABY_BLOB + sprite_id` resolution would
-// mis-draw against TODAY's 38-set atlas: species 25..36, i.e. all of families
-// 9 to 12, land on GHOST, TOMB and the ten pose sets.
+// EVERY SPECIES IS A DIFFERENT DRAWING. Distinctness is what the naive-sum case
+// below used to be about from the other side: until P9-C3 the atlas folded 36
+// species onto 8 baby and 6 adult bodies, so twelve of them wore a body that
+// belonged to another species and the NAME beside it was the only difference.
 //
-// It is written to FAIL when P10's art pass lands and the atlas becomes one
-// body per species - at which point the naive sum becomes correct, this number
-// goes to 0, and whoever is holding it should come here and delete both this
-// case and sprite_design_of()'s folding.
-TEST(the_naive_sprite_sum_would_mis_draw_a_third_of_the_roster) {
+// This is not implied by "sprite_id == id - 1". Two rows could carry the same
+// sprite_id and still satisfy every other guard here, and the atlas would
+// happily draw the same 144 bytes twice.
+TEST(no_two_species_share_a_body) {
+  for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i)
+    for (uint8_t j = (uint8_t)(i + 1u); j < SPECIES_TABLE_COUNT; ++j) {
+      const uint8_t a = sprite_set_id((uint8_t)STAGE_ADULT,
+                                      sprite_form_of(SPECIES_TABLE[i].sprite_id,
+                                                     STAGE_ADULT),
+                                      (uint8_t)POSE_IDLE);
+      const uint8_t b = sprite_set_id((uint8_t)STAGE_ADULT,
+                                      sprite_form_of(SPECIES_TABLE[j].sprite_id,
+                                                     STAGE_ADULT),
+                                      (uint8_t)POSE_IDLE);
+      CHECK(a != b);
+    }
+}
+
+// WHAT THE OLD ATLAS COST, NOW MEASURED AT ZERO - and the case is kept rather
+// than deleted, because a number that has reached its target is a regression
+// test for the day somebody re-introduces folding.
+//
+// It read `CHECK_EQ(not_a_body, 12)` and carried a comment saying "this is
+// written to FAIL when the art pass lands, at which point this number goes to 0
+// and whoever is holding it should come here". P9-C3 is holding it. Against the
+// 38-set legacy atlas, species 25..36 resolved onto GHOST, TOMB and the ten
+// pose sets - a third of the roster drawn as furniture. Against the generated
+// atlas the same arithmetic is what the firmware runs, for all 60.
+TEST(no_species_resolves_onto_something_that_is_not_a_body) {
   uint8_t not_a_body = 0;
   uint8_t first_bad  = 0;
   for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
     const SpeciesDef& sp = SPECIES_TABLE[i];
-    const uint16_t naive = (uint16_t)(SPR_BABY_BLOB + sp.sprite_id);
-    if (naive < SPRITE_BODY_FIRST || naive > SPRITE_BODY_LAST) {
+    const uint16_t slot = (uint16_t)(PB_SPRITE_BODY_FIRST + sp.sprite_id);
+    if (slot < SPRITE_BODY_FIRST || slot > SPRITE_BODY_LAST) {
       if (!not_a_body) first_bad = sp.id;
       ++not_a_body;
     }
   }
-  CHECK_EQ((int)not_a_body, 12);
-  CHECK_EQ((int)first_bad, 25);
+  CHECK_EQ((int)not_a_body, 0);
+  CHECK_EQ((int)first_bad, 0);
 }
 
 // =============================================================================
@@ -278,22 +325,25 @@ TEST(the_naive_sprite_sum_would_mis_draw_a_third_of_the_roster) {
 //  fails, and the correct repair is to raise ROSTER_FAMILIES to 20 and re-point
 //  this case at PB_SPRITE_BODY_COUNT - not to delete it. It is the same shape as
 //  the_naive_sprite_sum_would_mis_draw_a_third_of_the_roster above.
-TEST(the_pack_is_complete_and_the_roster_is_clamped_by_the_atlas) {
+TEST(the_pack_is_complete_and_the_whole_pack_ships) {
   CHECK(SPECIES_PACK_COUNT >= 60);
   CHECK_EQ((int)SPECIES_PACK_COUNT, (int)SPECIES_PACK_FAMILY_COUNT * 3);
-  CHECK(SPECIES_TABLE_COUNT <= SPECIES_PACK_COUNT);
   CHECK_EQ((int)SPECIES_TABLE_COUNT, (int)SPECIES_FAMILY_COUNT * 3);
 
-  // The roster may never exceed what the live atlas can draw. Today that is
-  // data/sprites.h's: one body per species from SPR_BABY_BLOB up.
-  CHECK(SPECIES_TABLE_COUNT <= (int)SPRITE_SET_COUNT - (int)SPR_BABY_BLOB);
-  CHECK_EQ((int)SPECIES_TABLE_COUNT, (int)SPRITE_SET_COUNT - (int)SPR_BABY_BLOB);
-  CHECK_EQ((int)SPECIES_TABLE_COUNT, 36);
+  // THE CLAMP IS GONE AND THIS IS WHERE THAT IS RECORDED. The pin this case
+  // carried was `SPECIES_TABLE_COUNT == SPRITE_SET_COUNT - SPR_BABY_BLOB` and
+  // `== 36`, with a comment saying P9-C3 was meant to break it and that the
+  // repair was to raise ROSTER_FAMILIES to 20 and re-point the case at
+  // PB_SPRITE_BODY_COUNT rather than delete it. That is what happened.
+  CHECK_EQ((int)SPECIES_TABLE_COUNT, (int)SPECIES_PACK_COUNT);
+  CHECK_EQ((int)SPECIES_TABLE_COUNT, 60);
 
-  // And the atlas P9-C3 replaces it with, the moment it has any bodies at all:
-  // shipping 60 species against 40 drawn bodies is the failure this forbids.
-  CHECK(PB_SPRITE_BODY_COUNT == 0 ||
-        PB_SPRITE_BODY_COUNT >= SPECIES_TABLE_COUNT);
+  // The roster may still never exceed what the atlas can draw - the direction
+  // that matters is unchanged, it is only satisfied differently now. Shipping
+  // 63 species against 60 drawn bodies would put three of them on an egg.
+  CHECK_EQ((int)SPECIES_TABLE_COUNT, (int)PB_SPRITE_BODY_COUNT);
+  CHECK_EQ((int)SPRITE_SET_COUNT,
+           (int)PB_SPRITE_BODY_FIRST + (int)PB_SPRITE_BODY_COUNT);
 }
 
 // plan 1.5.2's `sum(spawn_weight) > 0 per category`, and the reason the table
@@ -436,15 +486,22 @@ TEST(the_two_orphan_attacks_are_on_a_learnset) {
       if (SPECIES_TABLE[i].moves[m] == 26) on26++;
       if (SPECIES_TABLE[i].moves[m] == 30) on30++;
     }
-  // 26 Panico landed on exactly one species; 30 Cache on two of the shipped
-  // twelve families (four across the full 60-species pack: 12, 26, 45, 56).
+  // P9-C3 RAISED ROSTER_FAMILIES FROM 12 TO 20, so the shipped table is the
+  // whole pack and these two counts moved with it: 30 Cache goes from two
+  // species to the pack's four. The numbers below are the FULL pack's, and
+  // there is no prefix left for them to grow into.
   CHECK_EQ(on26, 1);      // species 36, Murax   (family 12, SYSTEM,  stage 2)
-  CHECK_EQ(on30, 2);      // species 12, Burnix  (family 4,  SIGNAL,  stage 2)
+  CHECK_EQ(on30, 4);      // species 12, Burnix  (family 4,  SIGNAL,  stage 2)
                           // species 26, Voidina (family 9,  CORRUPT, stage 1)
+                          // species 45, Denyra  (family 15, CORRUPT, stage 2)
+                          // species 56, Beakon  (family 19, SYSTEM,  stage 1)
   const SpeciesDef* murax   = species_get(36);
   const SpeciesDef* burnix  = species_get(12);
   const SpeciesDef* voidina = species_get(26);
+  const SpeciesDef* denyra  = species_get(45);
+  const SpeciesDef* beakon  = species_get(56);
   CHECK(murax != nullptr && burnix != nullptr && voidina != nullptr);
+  CHECK(denyra != nullptr && beakon != nullptr);
   if (murax)   CHECK_EQ(murax->moves[1], 26);
   if (burnix)  CHECK_EQ(burnix->moves[1], 30);
   if (voidina) CHECK_EQ(voidina->moves[2], 30);
@@ -460,13 +517,23 @@ TEST(every_unreachable_attack_belongs_to_a_family_not_yet_shipped) {
       used[SPECIES_TABLE[i].moves[m]] = true;
 
   int unreachable = 0;
-  for (uint8_t a = 1; a <= ATTACK_COUNT; ++a) if (!used[a]) unreachable++;
-  // 13 (Infeccion, on species 46) and 22 (Firewall, on species 60): both live
-  // in families 16 and 20, which the 12-family prefix does not carry. Raising
-  // ROSTER_FAMILIES to 20 takes this to 0.
-  CHECK_EQ(unreachable, 2);
-  CHECK(!used[13]);
-  CHECK(!used[22]);
+  int first_unreachable = 0;
+  for (uint8_t a = 1; a <= ATTACK_COUNT; ++a)
+    if (!used[a]) { if (!unreachable) first_unreachable = a; unreachable++; }
+
+  // ZERO, AND THAT IS THE NUMBER MOVING FOR THE RIGHT REASON. This read
+  // `CHECK_EQ(unreachable, 2)` with a comment saying 13 (Infeccion, species 46)
+  // and 22 (Firewall, species 60) live in families 16 and 20, which the
+  // 12-family prefix did not carry, and that raising ROSTER_FAMILIES to 20
+  // would take it to 0. P9-C3 raised it. Every one of the 34 attacks is now on
+  // a learnset the player can reach, for the first time in the project.
+  //
+  // The case is KEPT rather than deleted: 0 is the value that has to hold, and
+  // first_unreachable names the attack the day a retune orphans one again.
+  CHECK_EQ(unreachable, 0);
+  CHECK_EQ(first_unreachable, 0);
+  CHECK(used[13]);
+  CHECK(used[22]);
 }
 
 // =============================================================================
@@ -602,12 +669,27 @@ TEST(the_evolution_key_has_its_own_class_and_no_shipped_rule_spends_it) {
   for (uint8_t i = 0; i < ITEM_COUNT; ++i)
     if (ITEMS_TABLE[i].klass == (uint8_t)ITEM_KLASS_CARE)
       CHECK(ITEMS_TABLE[i].value > 0);
-  // AND THE HALF THAT IS STILL OPEN, asserted rather than described: no shipped
-  // rule can spend the key, because the species 53 -> 54 rule is outside the
-  // 36-species prefix. When P9 lands it this fails, and the person who lands it
-  // reads game/inventory.h's paragraph and deletes this line.
+  // AND THE HALF THAT WAS OPEN, NOW CLOSED. This read "no shipped rule can
+  // spend the key, because the species 53 -> 54 rule is outside the 36-species
+  // prefix. When P9 lands it this fails, and the person who lands it reads
+  // game/inventory.h's paragraph and deletes this line." P9-C3 landed it. The
+  // line is not deleted, it is INVERTED: item 9 is reachable and it is spent,
+  // and the rule that spends it is named so a retune that quietly drops the
+  // only EVOC_ITEM rule puts an unusable key back in the shop.
+  int spends_the_key = 0;
   for (uint8_t i = 0; i < EVOLUTION_RULES_COUNT; ++i)
-    CHECK(EVOLUTION_RULES[i].cond != (uint8_t)EVOC_ITEM);
+    if (EVOLUTION_RULES[i].cond == (uint8_t)EVOC_ITEM) {
+      spends_the_key++;
+      CHECK_EQ((int)EVOLUTION_RULES[i].cond_value, 9);   // and it is THAT key
+    }
+  CHECK_EQ(spends_the_key, 1);
+  const EvolutionRule* r53 = evolution_rule_for(53);     // Cifrax -> Ransora
+  CHECK(r53 != nullptr);
+  if (r53) {
+    CHECK_EQ(r53->target, 54);
+    CHECK_EQ(r53->cond, (uint8_t)EVOC_ITEM);
+    CHECK_EQ((int)r53->cond_value, 9);
+  }
 }
 
 // =============================================================================
@@ -701,11 +783,33 @@ TEST(the_conditional_rules_carry_the_condition_the_pack_names) {
     CHECK_EQ(r32->cond, (uint8_t)EVOC_HAPPINESS_GE);
     CHECK_EQ(r32->cond_value, 70);
   }
-  // Exactly two of the twenty-four rules are conditional on this roster.
+  // FIVE of the forty rules are conditional now (it was two of twenty-four at
+  // 12 families), and section 53 caps `evo_cond` at five families - so this is
+  // the number at the ceiling, not a number on the way to it.
   int conditional = 0;
   for (uint8_t i = 0; i < EVOLUTION_RULES_COUNT; ++i)
     if (EVOLUTION_RULES[i].cond != (uint8_t)EVOC_NONE) conditional++;
-  CHECK_EQ(conditional, 2);
+  CHECK_EQ(conditional, 5);
+  CHECK(conditional <= 5);      // spec section 53: at most five families
+
+  // The three that families 13..20 brought with them, each named, so a retune
+  // that silently changes one fails here rather than in a player's save.
+  const EvolutionRule* r47 = evolution_rule_for(47);   // Errox -> Panika
+  CHECK(r47 != nullptr);
+  if (r47) {
+    CHECK_EQ(r47->target, 48);
+    CHECK_EQ(r47->cond, (uint8_t)EVOC_CORRUPTED);
+  }
+  const EvolutionRule* r53b = evolution_rule_for(53);  // Cifrax -> Ransora
+  CHECK(r53b != nullptr);
+  if (r53b) CHECK_EQ(r53b->cond, (uint8_t)EVOC_ITEM);
+  const EvolutionRule* r59 = evolution_rule_for(59);   // Trakkar -> Panoptix
+  CHECK(r59 != nullptr);
+  if (r59) {
+    CHECK_EQ(r59->target, 60);
+    CHECK_EQ(r59->cond, (uint8_t)EVOC_ACTIVITY_GE);
+    CHECK_EQ((int)r59->cond_value, 60);
+  }
 }
 
 TEST(encounter_rows_are_well_formed_at_runtime) {

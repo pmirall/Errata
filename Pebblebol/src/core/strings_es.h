@@ -572,6 +572,54 @@ enum StrId : uint16_t {
   STR_SPC_FLAV_35,
   STR_SPC_NAME_36,      // species 36, Murax
   STR_SPC_FLAV_36,
+  STR_SPC_NAME_37,      // species 37, Kachi
+  STR_SPC_FLAV_37,
+  STR_SPC_NAME_38,      // species 38, Memoro
+  STR_SPC_FLAV_38,
+  STR_SPC_NAME_39,      // species 39, Lekron
+  STR_SPC_FLAV_39,
+  STR_SPC_NAME_40,      // species 40, Filito
+  STR_SPC_FLAV_40,
+  STR_SPC_NAME_41,      // species 41, Arkivo
+  STR_SPC_FLAV_41,
+  STR_SPC_NAME_42,      // species 42, Zipbom
+  STR_SPC_FLAV_42,
+  STR_SPC_NAME_43,      // species 43, Pingo
+  STR_SPC_FLAV_43,
+  STR_SPC_NAME_44,      // species 44, Floodra
+  STR_SPC_FLAV_44,
+  STR_SPC_NAME_45,      // species 45, Denyra
+  STR_SPC_FLAV_45,
+  STR_SPC_NAME_46,      // species 46, Glitchi
+  STR_SPC_FLAV_46,
+  STR_SPC_NAME_47,      // species 47, Errox
+  STR_SPC_FLAV_47,
+  STR_SPC_NAME_48,      // species 48, Panika
+  STR_SPC_FLAV_48,
+  STR_SPC_NAME_49,      // species 49, Portu
+  STR_SPC_FLAV_49,
+  STR_SPC_NAME_50,      // species 50, Skanor
+  STR_SPC_FLAV_50,
+  STR_SPC_NAME_51,      // species 51, Bakdora
+  STR_SPC_FLAV_51,
+  STR_SPC_NAME_52,      // species 52, Klavik
+  STR_SPC_FLAV_52,
+  STR_SPC_NAME_53,      // species 53, Cifrax
+  STR_SPC_FLAV_53,
+  STR_SPC_NAME_54,      // species 54, Ransora
+  STR_SPC_FLAV_54,
+  STR_SPC_NAME_55,      // species 55, Probix
+  STR_SPC_FLAV_55,
+  STR_SPC_NAME_56,      // species 56, Beakon
+  STR_SPC_FLAV_56,
+  STR_SPC_NAME_57,      // species 57, Twinix
+  STR_SPC_FLAV_57,
+  STR_SPC_NAME_58,      // species 58, Cookit
+  STR_SPC_FLAV_58,
+  STR_SPC_NAME_59,      // species 59, Trakkar
+  STR_SPC_FLAV_59,
+  STR_SPC_NAME_60,      // species 60, Panoptix
+  STR_SPC_FLAV_60,
 
   //     Attack names, data/attacks_table.h --- <= 10 chars @ t0_11b ----------
   STR_ATK_NAME_1,      // attack 1, Ping
@@ -1248,6 +1296,54 @@ inline constexpr const char* const ES[] = {
   /* STR_SPC_FLAV_35  */          "Decide quién pasa hoy.",
   /* STR_SPC_NAME_36  */          "Murax",
   /* STR_SPC_FLAV_36  */          "Nada entra sin permiso.",
+  /* STR_SPC_NAME_37  */          "Kachi",
+  /* STR_SPC_FLAV_37  */          "Guarda tus cosas cerca.",
+  /* STR_SPC_NAME_38  */          "Memoro",
+  /* STR_SPC_FLAV_38  */          "Se acuerda de todo.",
+  /* STR_SPC_NAME_39  */          "Lekron",
+  /* STR_SPC_FLAV_39  */          "Pide más y nunca suelta.",
+  /* STR_SPC_NAME_40  */          "Filito",
+  /* STR_SPC_FLAV_40  */          "Un archivo con nombre.",
+  /* STR_SPC_NAME_41  */          "Arkivo",
+  /* STR_SPC_FLAV_41  */          "Guarda mil cosas dentro.",
+  /* STR_SPC_NAME_42  */          "Zipbom",
+  /* STR_SPC_FLAV_42  */          "Se abre y ya no cabe.",
+  /* STR_SPC_NAME_43  */          "Pingo",
+  /* STR_SPC_FLAV_43  */          "Solo quiere respuesta.",
+  /* STR_SPC_NAME_44  */          "Floodra",
+  /* STR_SPC_FLAV_44  */          "Pregunta mil veces.",
+  /* STR_SPC_NAME_45  */          "Denyra",
+  /* STR_SPC_FLAV_45  */          "Nadie más podrá entrar.",
+  /* STR_SPC_NAME_46  */          "Glitchi",
+  /* STR_SPC_FLAV_46  */          "Baila donde no debería.",
+  /* STR_SPC_NAME_47  */          "Errox",
+  /* STR_SPC_FLAV_47  */          "Rompe cosas sin querer.",
+  /* STR_SPC_NAME_48  */          "Panika",
+  /* STR_SPC_FLAV_48  */          "El sistema se rinde.",
+  /* STR_SPC_NAME_49  */          "Portu",
+  /* STR_SPC_FLAV_49  */          "Una puertecita educada.",
+  /* STR_SPC_NAME_50  */          "Skanor",
+  /* STR_SPC_FLAV_50  */          "Prueba todas las puertas.",
+  /* STR_SPC_NAME_51  */          "Bakdora",
+  /* STR_SPC_FLAV_51  */          "Deja una puerta abierta.",
+  /* STR_SPC_NAME_52  */          "Klavik",
+  /* STR_SPC_FLAV_52  */          "Guarda tu secreto bien.",
+  /* STR_SPC_NAME_53  */          "Cifrax",
+  /* STR_SPC_FLAV_53  */          "Nadie lee lo que escribe.",
+  /* STR_SPC_NAME_54  */          "Ransora",
+  /* STR_SPC_FLAV_54  */          "Te lo devuelve si pagas.",
+  /* STR_SPC_NAME_55  */          "Probix",
+  /* STR_SPC_FLAV_55  */          "¿Hay alguien ahí?",
+  /* STR_SPC_NAME_56  */          "Beakon",
+  /* STR_SPC_FLAV_56  */          "Grita su nombre sin parar",
+  /* STR_SPC_NAME_57  */          "Twinix",
+  /* STR_SPC_FLAV_57  */          "Se hace pasar por tu red.",
+  /* STR_SPC_NAME_58  */          "Cookit",
+  /* STR_SPC_FLAV_58  */          "Una miga que te sigue.",
+  /* STR_SPC_NAME_59  */          "Trakkar",
+  /* STR_SPC_FLAV_59  */          "Sabe por dónde has ido.",
+  /* STR_SPC_NAME_60  */          "Panoptix",
+  /* STR_SPC_FLAV_60  */          "Lo ve todo, siempre.",
   /* STR_ATK_NAME_1   */          "Ping",
   /* STR_ATK_NAME_2   */          "Pulso",
   /* STR_ATK_NAME_3   */          "Ráfaga",

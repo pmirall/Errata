@@ -102,7 +102,7 @@ static void draw_static_body(const PebbleView& v, uint8_t frame) {
   // function - pet_art_key() into sprite_form_of() - so the golden below is a
   // statement about the body the device draws and not about a second rule.
   const uint8_t key  = pet_art_key(v.species_id, gene_species(v.genome));
-  const uint8_t form = sprite_form_of(key, v.minor_form, (Stage)v.stage);
+  const uint8_t form = sprite_form_of(key, (Stage)v.stage);
   const SpriteRef r  = sprite_lookup_pose(v.stage, form, v.pose, frame);
   if (!r.bits || r.w == 0 || r.h == 0) return;
   const int16_t x = (int16_t)sprite_center_x(r.w);

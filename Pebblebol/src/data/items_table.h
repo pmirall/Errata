@@ -39,12 +39,6 @@
 //    a care item that restores nothing by the contract above.
 //    game/inventory.cpp routes this class to EvoContext.item_id
 //    and refuses to spend the key when no rule consumes it.
-//    NOT REACHABLE AT THIS ROSTER: the emitted
-//    EVOLUTION_RULES[] carries no EVOC_ITEM row, because the
-//    rule that spends the key is outside the shipped species
-//    prefix. P9 lands it; the class and its consumer are
-//    here so that landing it is a content edit and nothing
-//    more.
 // =============================================================================
 
 #ifndef PB_ITEMS_TABLE_H

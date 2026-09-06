@@ -53,39 +53,37 @@
 //                 gravestone.
 //    * anything past the roster - a save written by a build with more families
 //                 than this one carries.
-//  All three fall on gene_species, and sprite_design_of() folds it with
-//  `% 8` / `% 6` - literally the `species & 7` and `% SPRITE_ADULT_BODIES` the
-//  atlas used before this change. So a Pebble with no row renders exactly as it
-//  did, and there is no "unknown species" body to author.
+//  All three fall on gene_species, which is 0..15. P9-C3 REMOVED THE FOLD: the
+//  atlas has one 24x24 body per species now and sprite_set_id() clamps rather
+//  than folds, so a row-less Pebble draws the body of species (nibble + 1) -
+//  one of the first sixteen - instead of one of eight genome bodies. It is
+//  still deterministic, still stable for a given genome, and still needs no
+//  "unknown species" drawing; what it is not any more is byte-identical to the
+//  pre-P4-C4a behaviour, and the roster it lands in is 60 bodies wide.
 // -----------------------------------------------------------------------------
 inline uint8_t pet_art_key(uint8_t species_id, uint8_t gene_species) {
   const SpeciesDef* sp = species_get(species_id);
   return sp ? sp->sprite_id : gene_species;
 }
 
-// The art key already folded into the design its life stage draws from.
-//
-// ONE CALLER, NOT TWO, AND THAT IS CORRECT (narrowed in P4-C6). This said "the
-// two call sites that hold a species id and a stage - ui/pet_view.cpp for the
-// animated body, ui/screen_home.cpp for the still one - go through this so they
-// cannot fold it two different ways". screen_home.cpp does not and must not:
-// sprite_design_of() only answers for the three stages whose design IS the art
-// key, and the still body has to draw EGG, CHILD and TEEN as well, so it folds
-// pet_art_key() through sprite_form_of() instead. pet_view.cpp's
-// apply_species_design() makes the same EGG/CHILD/TEEN discrimination by hand
-// and then calls this. So there ARE two stage ladders in the tree; they agree
-// today, and this function narrows the second one rather than preventing it.
-// A screen that wants a design for ONE known stage should use this; a screen
-// that has to cover all five should use sprite_form_of().
+// The art key as the atlas wants it. P9-C3 COLLAPSED THIS: it used to call
+// sprite_design_of(), which folded the key into the pool its life stage drew
+// from (`% 8` at BABY, `% 6` at ADULT/SENIOR), and it was the second of two
+// stage ladders in the tree - screen_home.cpp went through sprite_form_of()
+// instead because the still body also has to draw EGG, CHILD and TEEN. There is
+// one ladder now and both call sites are on it: sprite_form_of() answers for
+// every stage, so this is a spelling of it that keeps the call sites reading
+// the same as they did.
 inline uint8_t pet_art_design(uint8_t species_id, uint8_t gene_species,
                               Stage stage) {
-  return sprite_design_of(pet_art_key(species_id, gene_species), stage);
+  return sprite_form_of(pet_art_key(species_id, gene_species), stage);
 }
 
 // -----------------------------------------------------------------------------
 //  THE NAME
 //
-//  The roster carries all 36 Spanish names (STR_SPC_NAME_1..36). This answers
+//  The roster carries a Spanish name per species (STR_SPC_NAME_1..N; 60 at
+//  P9-C3). This answers
 //  nullptr - never a placeholder - for the same three inputs as above, so a
 //  caller has to decide what to show instead rather than being handed an empty
 //  string it will happily draw. ui.cpp falls back to the dynasty syllables;

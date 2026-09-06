@@ -389,7 +389,8 @@ got through. The rule is now named `VR_MEMBER_FAINTED`, it runs on the **local**
 team in `session_set_team()` before a frame is sent and on the **peer's** in
 `on_team_submit()`, and `game/validate.h`'s containment claim is now the strong
 one: after the whole chain, `battle_init()` returns `BR_OK` — asserted over
-36 species × 5 levels × 8 hostile variants by
+every shipped species × 5 levels × 8 hostile variants (36 when this was written,
+60 since P9-C3; the sweep walks `SPECIES_TABLE_COUNT`) by
 `a_battle_ready_team_is_one_the_engine_accepts_outright`.
 
 **SS_VERIFY** — the round-1 agreement barrier. *rx BATTLE_STATE(1), open hash

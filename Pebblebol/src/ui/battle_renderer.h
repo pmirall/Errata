@@ -78,10 +78,13 @@
 //
 //  `art_key` is ui/pet_art.h's pet_art_key(species_id, gene_species) - the
 //  SAME resolution HOME and the BOX use, which is what makes the creature in a
-//  battle the creature the player has been looking after. It is folded into the
-//  24x24 BABY pool here (sprite_design_of at STAGE_BABY): the combat body is a
-//  small body whatever life stage the Pebble is at, because two 40x40 adults
-//  and two name panels do not fit on a 128x64 panel together.
+//  battle the creature the player has been looking after. Since P9-C3 it is not
+//  folded at all: every body in the atlas is 24x24 and there is one per species,
+//  so the fighter on the field is the species. It used to be folded into the
+//  eight authored 24x24 BABY designs, because the atlas also held 40x40 adults
+//  and two of those plus two name panels do not fit on a 128x64 panel together;
+//  br_body_set_id() still passes STAGE_BABY, which now changes nothing and is
+//  kept so the clamp lives in one place.
 // -----------------------------------------------------------------------------
 struct BattleCombatantArt {
   const char* name;      // never NULL; drawn clipped to BR_PANEL_W

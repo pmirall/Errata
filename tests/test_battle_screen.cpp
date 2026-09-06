@@ -757,9 +757,9 @@ TEST(the_flip_refuses_a_frame_wider_than_the_atlas) {
 // the key now comes through pet_art_key() exactly as ui/screen_battle.cpp's
 // resolve_art() builds it, and the name says what the rest of the case checks -
 // the FOLD, and the distribution it produces.
-TEST(the_roster_folds_onto_the_authored_combat_bodies) {
-  // Every roster row draws a CREATURE at battle size - never an egg, a pose set
-  // or one of the two retired bodies.
+TEST(every_species_has_its_own_combat_body) {
+  // Every roster row draws a CREATURE at battle size - never an egg and never
+  // one of the two pose sets.
   int per_set[SPRITE_SET_COUNT];
   memset(per_set, 0, sizeof per_set);
   for (uint8_t id = 1; id <= (uint8_t)SPECIES_TABLE_COUNT; ++id) {
@@ -772,6 +772,14 @@ TEST(the_roster_folds_onto_the_authored_combat_bodies) {
     // that ignored the species.
     CHECK_EQ(pet_art_key(id, 0u), sp->sprite_id);
     const uint8_t set = br_body_set_id(pet_art_key(id, 0u));
+
+    // THE EXACT SLOT, NOT THE WINDOW, AND THAT IS THE POINT OF THIS LINE.
+    // sprite_set_id() CLAMPS an out-of-range form to the first body, so a
+    // resolution that has stopped depending on the species at all still lands
+    // inside SPRITE_BODY_FIRST..LAST for every row and still passes a
+    // window check. Asserting the arithmetic per species is what makes that
+    // fail, and it fails naming the species rather than the roster.
+    CHECK_EQ((int)set, (int)PB_SPRITE_BODY_FIRST + (int)sp->sprite_id);
     CHECK(set >= SPRITE_BODY_FIRST);
     CHECK(set <= SPRITE_BODY_LAST);
     // 24x24, which is what the field geometry is laid out against.
@@ -784,16 +792,20 @@ TEST(the_roster_folds_onto_the_authored_combat_bodies) {
     if (per_set[i]) ++n;
     if (per_set[i] > worst) worst = per_set[i];
   }
-  // COUNTING THE DISTINCT BODIES IS NOT ENOUGH, and the first draft of this
-  // case did exactly that and could not fail: sprite_set_id() CLAMPS an
-  // out-of-pool form to 0, so dropping sprite_design_of()'s fold sends species
-  // 9..36 onto SPR_BABY_BLOB and still leaves eight distinct bodies - the eight
-  // that species 1..8 reach on their own. What the fold is FOR is the
-  // distribution, so that is what is asserted: 36 species over 8 authored
-  // bodies is at most ceil(36/8) = 5 species per body, and the unfolded
-  // resolution puts 29 of them on one.
-  CHECK_EQ(n, SPRITE_BABY_BODIES);
-  CHECK(worst <= ((int)SPECIES_TABLE_COUNT + SPRITE_BABY_BODIES - 1) / SPRITE_BABY_BODIES);
+  // THE FOLD IS GONE (P9-C3) AND THE NUMBERS SAY SO. This case was
+  // `the_roster_folds_onto_the_authored_combat_bodies` and asserted
+  // `n == SPRITE_BABY_BODIES` (8) with `worst <= ceil(36/8) = 5`, because the
+  // atlas had eight authored 24x24 bodies and sprite_design_of() folded 36
+  // species onto them with `% 8`. There is one body per species now.
+  //
+  // MERELY RAISING 8 TO 60 WOULD HAVE MADE THIS UN-FAILABLE AGAIN, which is
+  // this project's recurring defect and was called out in the chunk brief:
+  // sprite_set_id() clamps, so a resolution that ignored the species entirely
+  // would put every row on body 0 - n would be 1, not 60, but only because
+  // `worst` is asserted too. `worst == 1` is the assertion that carries this
+  // case: no two of the sixty species share a drawing.
+  CHECK_EQ(n, (int)SPECIES_TABLE_COUNT);
+  CHECK_EQ(worst, 1);
   printf("  %d species resolve onto %d distinct 24x24 combat bodies, "
          "at most %d of them sharing one\n",
          (int)SPECIES_TABLE_COUNT, n, worst);

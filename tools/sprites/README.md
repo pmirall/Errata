@@ -53,7 +53,7 @@ species: 1
 | `name:` | yes | `UPPER_SNAKE`. Becomes the enum tag `PBSPR_PAKETO` and the array `pb_spr_paketo`. **Must equal the filename**: `paketo.txt` declares `name: PAKETO` and nothing else. |
 | `size:` | yes | `<width>x<height>` in pixels. **A species body is exactly `24x24`.** |
 | `frames:` | yes | How many `--- frame` blocks follow. **A species body has exactly 2.** |
-| `species:` | no | The roster id this body draws (`tools/content/species.json`). Present on creature bodies, absent on eggs and effects. Section 6 explains what it binds. |
+| `species:` | no | The roster id this body draws (`tools/content/species.json`). Present on creature bodies, absent on eggs and effects — the atlas holds four of those: `EGG_IDLE`, `EGG_CRACK`, `SLEEP` and `SICK`. Section 6 explains what it binds. |
 
 There are **no other keys**. Inventing one (`eyes:`, `author:`, `pose:`) is a
 hard error naming the line, because the vocabulary is a contract — five people
@@ -128,8 +128,11 @@ the LEFTMOST pixel** — pixel 0 is bit 0, pixel 7 is bit 7. Row 0 is
 A real one to read: `tools/sprites/egg_idle.txt` is the egg the device has been
 drawing since phase 1, transcribed back into this format pixel for pixel.
 `tests/test_sprite_pipeline.cpp` asserts that the bytes the generator produces
-from it are byte-identical to the hand-typed hex in `data/sprites.h`, which is
-how the bit order above is *proved* rather than asserted.
+from it match the hand-typed hex that used to live in `data/sprites.h`, which is
+how the bit order above is *proved* rather than asserted. Those twelve bytes are
+now written out inside the test itself: P9-C3 deleted the array they were
+compared against, and deleting the case with it would have thrown away the only
+check in this repository that the packer is not mirrored.
 
 ---
 
@@ -152,13 +155,36 @@ python3 tools/gen_sprites.py --self-check tools/sprites/*.txt
 python3 tools/gen_sprites.py --self-check            # everything, manifest included
 ```
 
-Two things it reports that are not errors but almost always mistakes:
+For every frame it also prints three numbers that no byte check can produce and
+that catch a class of defect all of them pass:
 
-* `FRAME 1 IS A COPY OF FRAME 0` — the body will not animate. Legal, but it is
-  nearly always a copy-paste, and `tests/test_sprite_pipeline.cpp` **fails** on
-  it, so it will not ship silently.
+* **`N piece(s)`** — 4-connected runs of ink. A body drawn as one mass is 1; a
+  deliberate detached part (a pupil, an echo trail, a hanging door) raises it. A
+  number that moved when you did not mean to move it is a part that came loose.
+  This is what found MURAX's two crenellations floating free of their rim, and
+  `--self-check` called that file OK both before and after it was broken.
+* **`N hairline px`** — ink that is one pixel wide in BOTH axes locally. At 1x
+  that is not a limb or an antenna, it is a stuck pixel.
+* **`eyes y a..b x c..d`** — the blink band the generator derived for that frame,
+  or `none`. See section 5.
+
+Three things it says that are **hard failures**, so it exits non-zero:
+
+* `frame 1 is byte-identical to frame 0` — the body does not animate. It used to
+  print `WARNING: this body will not animate` and then `1 file(s) OK` with exit
+  0; a check that names the defect and then calls the file OK is a check people
+  learn to skim, and `tests/test_sprite_pipeline.cpp` had always failed on it.
+  The two agree now.
+* `says species: N, which is <X> in the pack, so this set must be named <X>` —
+  the SLOT check, run per file. It used to be reachable only through the whole
+  atlas, so a file copied to another species' id printed `1 file(s) OK` and
+  exited 0 — the worst failure this format has (section 6), declared fine by the
+  exact command five art agents were told to run.
+
+And one NOTE that is not an error:
+
 * `NOTE: … is not in tools/sprites/atlas.txt yet` — the art exists and would
-  never be drawn. See section 6.
+  never be drawn. Normal halfway through the work; see section 6.
 
 ---
 
@@ -207,7 +233,35 @@ On top of the text diff, the generator refuses to emit at all when:
   or names a species `tools/content/species.json` does not have;
 * a body's set name does not match the pack's name for its id
   (`Rafagón` → `RAFAGON`);
-* the art is over the byte budget.
+* the art is over the byte budget — `PB_DATA_BYTES_MAX`, 10,240 B, which is the
+  atlas's 9,216 B plus seven more sets. **This line was here before the check
+  was**: until P9-C3 the budget was only tested by `--self-check` with no
+  arguments, so `python3 tools/gen_sprites.py` wrote a header 1,152 B over the
+  ceiling and exited 0. Found by mutation, and fixed by making the sentence true.
+  Raising the ceiling means raising `SPRITE_DATA_BYTES_MAX` in
+  `Pebblebol/src/data/sprites.h` in the same change.
+
+### The eye bands come out of the same file as the pixels
+
+The header also carries `PB_SPRITE_EYES`: for each set and frame, the rows a
+blink closes, which `ui/petfx.cpp` blits as a fill strip and a lash strip. **You
+do not write these.** They are derived from the art by one stated rule —
+
+> an eye is a HOLE (unlit pixels fully enclosed by ink) in the top 60 % of the
+> body's ink box
+
+— which is a rule only because every body in this atlas was drawn to it: a 1px
+lit outline does not survive at 1x, so an eye is punched, not drawn. `{255,0,0,0}`
+means *this body does not blink*, and it is what a body with no enclosed hole in
+its upper face gets. What the rule gets wrong is written down in
+`gen_sprites.py`'s `eye_band()`: any other enclosed hole up there — a mouth drawn
+high, a window — is included, so that body blinks with more than its eyes.
+
+This replaced a 24-row table hand-measured off the decoded art, 1,100 lines away
+from the pixels in `ui/petfx.cpp`, held in step with them by
+`static_assert(SPRITE_REV == 1, "re-verify it")`. Sixty bodies would have made it
+sixty rows of the same. If your body blinks with the wrong pixels, **move the
+hole, do not add a key**: the band is a consequence of the drawing.
 
 The header it writes carries its own compile-time guards: every table row is
 tied to the array it points at through `NT_SPR_SET_FITS`
@@ -247,12 +301,12 @@ noise passes every check in this directory.** The instrument for that is:
 
 ```bash
 make -C tests spritetool
-./tests/bin/sprite_dump list                    # every set in both atlases
+./tests/bin/sprite_dump list                    # every set in the atlas
 ./tests/bin/sprite_dump text PAKETO             # one set, frames side by side
 ./tests/bin/sprite_dump sheet /tmp/atlas.pbm    # contact sheet, opens anywhere
 ```
 
-`sprite_dump` reads the **compiled headers**, not these `.txt` files, and decodes
+`sprite_dump` reads the **compiled header**, not these `.txt` files, and decodes
 them the same way the device's `drawXBM` does — so what it prints is what the
 panel will show. A rendering of the source would only prove the source says what
 it says.
@@ -266,9 +320,11 @@ it says.
 * `Pebblebol/src/data/sprite_types.h` — the XBM contract: stride, bit order,
   frame layout, and the two size-guard macros.
 * `Pebblebol/src/data/sprites_pebbles.h` — **generated**, do not edit.
-* `Pebblebol/src/data/sprites.h` — the legacy Nottamagochi atlas. Still what the
-  firmware draws today. P9-C3 deletes its 36 body and pose sets and points the
-  lookup at the generated atlas; the two eggs exist in both files and are
-  asserted byte-identical until then.
+* `Pebblebol/src/data/sprites.h` — **no longer an atlas.** P9-C3 deleted its 36
+  legacy Nottamagochi body and pose sets, its `SpriteSetId` enum and its
+  `SPRITE_SETS` table, and pointed the lookup at the generated one. What is left
+  is the icons, mini-icons, badges and emotes, the pose enum, the budget assert
+  over both, and the LOOKUP block — `sprite_set_id()`, `sprite_form_of()`,
+  `sprite_frame()` — whose banner records what the swap deleted and what it cost.
 * `tests/test_sprite_pipeline.cpp` — the assertions.
 * `docs/content.md` — the authoring rules for the roster these bodies belong to.

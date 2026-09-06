@@ -50,6 +50,23 @@ constexpr unsigned spr_set_bytes(const SpriteSet& s) {
   return spr_xbm_bytes(s.w, s.h) * s.frames;
 }
 
+// The rows a blink closes, for one frame of one set. GENERATED beside the
+// pixels by tools/gen_sprites.py (PB_SPRITE_EYES in data/sprites_pebbles.h) and
+// consumed by ui/petfx.cpp's pf_build_lids(), which fills every enclosed hole
+// inside the window and re-opens the band's first row one row down.
+//
+// y1 < y0 means THIS BODY DOES NOT BLINK, and { 255, 0, 0, 0 } is how the
+// generator says it. pf_build_lids() already returns 0 for that case, so it
+// needs no new branch. x0/x1 clip the band horizontally: a body can have a hole
+// in its eye rows that is not an eye, and filling it would fuse two body parts
+// for the length of a blink.
+struct SpriteEyeBand {
+  uint8_t y0;
+  uint8_t y1;
+  uint8_t x0;
+  uint8_t x1;
+};
+
 // -----------------------------------------------------------------------------
 //  THE TWO SIZE GUARDS
 //

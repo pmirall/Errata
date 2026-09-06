@@ -16,36 +16,43 @@
 // and this is it.
 #include "../data/sprites.h"
 
-// GUARD 1 - THE ROSTER'S OWN SHAPE, AND A FORWARD BOUND ON P10's ATLAS.
+// GUARD 1 - THE ROSTER'S OWN SHAPE, AND THE ATLAS BOUND THAT USED TO CAP IT.
 //
-// `SPR_BABY_BLOB + sprite_id` IS NOT HOW ANYTHING DRAWS, and until P4-C4a this
-// file said it was. It is the resolution the plan's T13 / P10 art pass will use
-// once the atlas is 2 eggs plus one 24x24 body PER SPECIES; applied to TODAY's
-// atlas it would send species 25..36 onto GHOST, TOMB and the sleep / sick /
-// eat pose sets - a third of the roster drawn as gravestones. What the firmware
-// actually draws is guard 2 below.
+// `PB_SPRITE_BODY_FIRST + sprite_id` IS NOW EXACTLY HOW THE FIRMWARE DRAWS. It
+// was not until P9-C3: this guard asserted the arithmetic of an atlas that did
+// not exist yet, applied to an atlas of 38 mixed-size legacy sets, and the sum
+// `SPR_BABY_BLOB + (N-1) < 38` is what capped the shipped roster at 36 species
+// and ROSTER_FAMILIES at 12. The art landed, the atlas is 60 bodies wide, and
+// the same three lines now describe the resolution that runs.
 //
-// The sum is still asserted, because it is still load-bearing: it is the
-// arithmetic that caps the shipped roster at 36 (SPR_BABY_BLOB 2 + (N-1) < 38),
-// which is the measurement plan 1.5.2 chose ROSTER_FAMILIES = 12 from. Widening
-// the roster past it means the art pass has to land first.
+// EACH LINE FAILS ON ITS OWN INPUT, and that matters more than the count:
+//   * `sprite_id != id - 1` catches a pack whose invariant has been broken -
+//     one body, one species, in slot order.
+//   * the BODY_FIRST sum catches a species whose body is past the end of the
+//     atlas, which is the failure that reads whatever follows PB_SPRITE_SETS.
+//   * the third catches the same thing said the other way, through the id the
+//     table actually indexes with.
+// tests/test_content.cpp re-checks all three at runtime with a NAMED case per
+// property, because a static_assert that fires tells you the file and not the
+// species.
 static constexpr bool species_sprites_resolve(void) {
   for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
     const SpeciesDef& sp = SPECIES_TABLE[i];
     if (sp.sprite_id >= (uint8_t)SPRITE_SET_COUNT) return false;
-    if ((uint16_t)(SPR_BABY_BLOB + sp.sprite_id) >= (uint16_t)SPRITE_SET_COUNT) return false;
+    if ((uint16_t)(PB_SPRITE_BODY_FIRST + sp.sprite_id)
+        >= (uint16_t)SPRITE_SET_COUNT) return false;
     if (sp.sprite_id != (uint8_t)(sp.id - 1u)) return false;   // the pack's invariant
   }
   return true;
 }
 static_assert(species_sprites_resolve(),
               "a species sprite_id is outside the atlas, or is not id - 1: the roster "
-              "has outgrown the P10 art pass's one-set-per-species bound");
+              "has outgrown the atlas tools/gen_sprites.py emits");
 
 // GUARD 2 - EVERY SPECIES DRAWS A CREATURE (P4-C4a). This is the one about the
 // resolution the firmware runs: art key -> sprite_form_of() -> sprite_set_id().
-// Every row, at every stage that has a body, must land inside the 24 authored
-// creature sets and never on an egg, a pose or one of the two retired sets.
+// Every row, at every stage that has a body, must land inside the 60 creature
+// bodies and never on an egg or on one of the two pose sets.
 //
 // It is a static_assert rather than only a test because it is decidable at
 // compile time and because the failure it guards is silent: a species resolved
@@ -58,7 +65,7 @@ static constexpr bool species_bodies_are_creatures(void) {
     const uint8_t key = SPECIES_TABLE[i].sprite_id;
     for (uint8_t s = 0; s < (uint8_t)(sizeof(kStages) / sizeof(kStages[0])); ++s) {
       const Stage st = kStages[s];
-      const uint8_t id = sprite_set_id((uint8_t)st, sprite_form_of(key, 0u, st),
+      const uint8_t id = sprite_set_id((uint8_t)st, sprite_form_of(key, st),
                                        (uint8_t)POSE_IDLE);
       if (id < SPRITE_BODY_FIRST || id > SPRITE_BODY_LAST) return false;
     }
