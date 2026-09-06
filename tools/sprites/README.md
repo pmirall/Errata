@@ -247,15 +247,37 @@ The header also carries `PB_SPRITE_EYES`: for each set and frame, the rows a
 blink closes, which `ui/petfx.cpp` blits as a fill strip and a lash strip. **You
 do not write these.** They are derived from the art by one stated rule —
 
-> an eye is a HOLE (unlit pixels fully enclosed by ink) in the top 60 % of the
-> body's ink box
+> an eye is an enclosed HOLE — unlit pixels the background cannot reach — of at
+> least 3 px, at most 8 rows tall and at most half the body wide. **THE EYES**
+> are the biggest group of such holes that can be closed together WITHOUT
+> CLOSING ANYTHING THAT IS NOT A HOLE.
 
 — which is a rule only because every body in this atlas was drawn to it: a 1px
-lit outline does not survive at 1x, so an eye is punched, not drawn. `{255,0,0,0}`
-means *this body does not blink*, and it is what a body with no enclosed hole in
-its upper face gets. What the rule gets wrong is written down in
-`gen_sprites.py`'s `eye_band()`: any other enclosed hole up there — a mouth drawn
-high, a window — is included, so that body blinks with more than its eyes.
+lit outline does not survive at 1x, so an eye is punched, not drawn.
+`{255,0,0,0}` means *this body does not blink*, and it is what a body with no
+small enclosed hole gets.
+
+**THE LAST CLAUSE IS CHECKED, NOT ASSUMED, AND IT IS THERE BECAUSE THE FIRST
+VERSION OF THIS RULE SHIPPED A DEFECT.** Until P9-C6 the rule was "the bounding
+box of every enclosed hole in the top 60 % of the ink box", and `pf_build_lids()`
+fills every interior run of unlit pixels on every row of the band — so on a body
+whose upper half is made of gaps the band was most of the sprite and the blink
+drew the creature SOLID: DENYRA gained 79 px on a 283 px body, BLAKLIX 78 on 264,
+MURAX 68 on 242, and PANOPTIX lost all nine of the eyes it is named for. Nothing
+could see it, because the composited blink frame is in NEITHER of your two frames
+— it is made at draw time — and `pf_build_lids()` was in a translation unit no
+host binary compiled. The generator now runs the device's own fill over each
+candidate band and rejects it if one filled pixel is not a hole pixel.
+
+**WHAT IT STILL CANNOT DO:** tell an eye from any other small enclosed hole. A
+porthole, a bolt or a bite will be blinked instead. It can never fill anything
+that is not a hole and never reach outside the body, so the worst case is a blink
+in the wrong place rather than a body erased.
+
+**LOOK AT YOUR BLINK.** `--self-check` prints the band and how many pixels it
+closes for every frame of your file; `make -C tests spritetool &&
+./bin/sprite_dump blink NAME` draws the composited frame beside the two you drew,
+with `+` for a pixel the blink adds and `-` for one it takes away.
 
 This replaced a 24-row table hand-measured off the decoded art, 1,100 lines away
 from the pixels in `ui/petfx.cpp`, held in step with them by

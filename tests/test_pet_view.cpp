@@ -311,19 +311,19 @@ TEST(the_species_and_not_the_genome_chooses_the_body) {
     CHECK(drawn_set(a, POSE_IDLE) != drawn_set(b, POSE_IDLE));
   }
 
-  // AND minor_form NO LONGER REACHES THE ATLAS AT ALL. Every value of the two
-  // nibbles, at every stage, must draw the same body for one species - which is
-  // the deletion above stated as the property a reader can check rather than as
-  // a paragraph. It fails the moment anything re-reads minor_form for art.
-  for (uint8_t st = 0; st < 6u; ++st) {
-    const uint8_t base = sprite_set_id(st, sprite_form_of(11u, (Stage)st),
-                                       (uint8_t)POSE_IDLE);
-    for (unsigned mf = 0; mf <= 255u; ++mf) {
-      (void)mf;   // there is no parameter left to pass it through
-      CHECK_EQ(sprite_set_id(st, sprite_form_of(11u, (Stage)st),
-                             (uint8_t)POSE_IDLE), base);
-    }
-  }
+  // AND minor_form NO LONGER REACHES THE ATLAS AT ALL. THAT IS ENFORCED BY THE
+  // COMPILER, NOT BY THIS FILE, and the 1,536-check loop that used to stand here
+  // claiming otherwise was DELETED AT P9-C6 because it could not fail: both
+  // sides of its CHECK_EQ were the same constexpr call with the same arguments
+  // (`sprite_set_id(st, sprite_form_of(11u, st), POSE_IDLE)` against a `base`
+  // computed from that same expression), and its loop variable was discarded on
+  // the next line with `(void)mf`. It asserted f(x) == f(x), 1,536 times, under
+  // a comment that promised a sweep over minor_form's whole range.
+  //
+  // P9-C3 removed the minor_form parameter from sprite_form_of() outright, so
+  // "something re-reads minor_form for art" is now a BUILD ERROR at every call
+  // site rather than a test failure - which is the stronger guarantee, and the
+  // reason there is nothing left to run here.
 }
 
 // -----------------------------------------------------------------------------

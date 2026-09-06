@@ -185,6 +185,13 @@ $(BIN)/test_evolution:  $(OBJ)/evolution.o $(OBJ)/xp.o
 # firmware one. evolution.o + xp.o come as a pair (they call each other) because
 # test_content drives evolution_apply() through a failing CONDITION.
 $(BIN)/test_content:    $(OBJ)/species.o $(OBJ)/evolution.o $(OBJ)/xp.o
+# THE PIXEL HALF OF petfx, HOST-LINKED FOR THE FIRST TIME (P9-C6). petfx_core.o
+# is ui/, and it is here for the same reason corrupt_fx.o and xbm_mirror.o are:
+# ui/petfx.cpp includes render.h -> Arduino.h, so every rule inside it is a rule
+# no test in this repository can execute. pf_build_lids() is what composites the
+# BLINK frame - a picture that is in neither authored frame of the atlas - and
+# it was drawing over the body on four species while every byte check passed.
+$(BIN)/test_sprite_pipeline: $(OBJ)/petfx_core.o
 # Derived stats. genome.o drags crc16.o and rng.o, exactly as test_genome does.
 $(BIN)/test_stats:      $(OBJ)/pebble.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 # The Box <-> sim seam: the real box.cpp and the real sim.cpp together, which
@@ -678,8 +685,20 @@ $(BIN)/balance_matrix: tools/balance_matrix.cpp $(OBJ)/battle_ai.o $(OBJ)/battle
 # sim_days is the whole care/XP/encounter day, so it links the three modules the
 # app layer wires together and NOT app.cpp itself, which is Arduino-bound:
 # sim.o (care), xp.o + evolution.o (the curve, as the pair they always are),
-# encounters.o + species.o (the roll), box.o (the Box recovery half of the care
-# model) and daylight.o (the sleep window sim.cpp reads).
+# encounters.o + species.o (the roll) and daylight.o (the sleep window sim.cpp
+# reads).
+#
+# box.o IS LINKED DEAD AND THAT IS DELIBERATE (corrected at P9-C6: this comment
+# used to claim box.o was here for "the Box recovery half of the care model",
+# which is the opposite of the truth). sim_days.cpp calls no box_* function and
+# never calls box_bind(), so box.cpp's static state stays null and none of its
+# code is reachable; game/sim.cpp does not call into it either. THE SIMULATED
+# DAY IS ONE ACTIVE PEBBLE. BOX_RECOVER_MPH governs BENCHED slots, which earn no
+# XP and take no care actions, so it is outside the question sim_days answers -
+# and the XP-curve decision P9-C4 settled rests on these numbers, so what the
+# instrument did and did not cover has to be right where a reader looks for it.
+# The object stays on the link line only because game/sim.cpp declares against
+# it; removing it is a separate change to sim.cpp'''s dependencies.
 $(BIN)/sim_days: tools/sim_days.cpp $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o \
                         $(OBJ)/xp.o $(OBJ)/evolution.o $(OBJ)/encounters.o \
                         $(OBJ)/species.o $(OBJ)/genome.o $(OBJ)/crc16.o \
@@ -693,13 +712,15 @@ $(BIN)/sim_days: tools/sim_days.cpp $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o 
 # can be reviewed by a person rather than by a byte count.
 #
 # NOT part of `check`: it writes files and answers a human, which is what
-# tests/tools/ means. `make -C tests spritetool` builds it. Header-only - it
-# links no firmware object because both atlases are `inline constexpr` tables.
+# tests/tools/ means. `make -C tests spritetool` builds it. The atlas itself is
+# `inline constexpr`, so the ONE object it links is petfx_core.o - the shipped
+# pf_build_lids(), for the `blink` mode, which composites the frame that is in
+# neither authored frame and that nothing in this tree could draw before P9-C6.
 .PHONY: spritetool
 spritetool: $(BIN)/sprite_dump
 
-$(BIN)/sprite_dump: tools/sprite_dump.cpp | $(BIN)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< -o $@
+$(BIN)/sprite_dump: tools/sprite_dump.cpp $(OBJ)/petfx_core.o | $(BIN)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(OBJ)/petfx_core.o -o $@
 
 # --- the corruption glitch, drawn (P9-C5) -----------------------------------
 # THE SAME ARGUMENT sprite_dump MAKES, ONE LAYER UP. Every automated check this

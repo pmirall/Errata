@@ -27,6 +27,17 @@
 //    ./bin/sprite_dump text [NAME|INDEX]    one set (or all) as '#' and '.'
 //    ./bin/sprite_dump sheet OUT.pbm        contact sheet, frame 0 of every set
 //    ./bin/sprite_dump sheet OUT.pbm 1      contact sheet, frame 1
+//    ./bin/sprite_dump blink [NAME]         frame 0 | THE BLINK | frame 1
+//
+//  THE BLINK MODE IS NEW AT P9-C6 AND IT IS THE REASON THIS TOOL EXISTS,
+//  RESTATED. The frame a player sees while a pet blinks is in NEITHER authored
+//  frame: it is composited at draw time from the art, the generated eye band and
+//  ui/petfx_core.cpp's pf_build_lids(). Nothing in this repository had ever drawn
+//  it, and when the P9 exit review drew it by hand it found four bodies whose
+//  blink filled a third of the creature solid. This mode runs the SHIPPED
+//  pf_build_lids() over the SHIPPED atlas and prints the result beside the two
+//  frames, with the band marked, so the next person can look instead of trusting
+//  a percentage.
 //
 //  A name is matched case-insensitively against the enum tag with or without
 //  its prefix: PAKETO, pb_spr_paketo and PBSPR_PAKETO all work.
@@ -45,6 +56,7 @@
 
 #include "data/sprites.h"
 #include "data/sprites_pebbles.h"
+#include "ui/petfx_core.h"
 
 // THE LEGACY NAME LIST IS GONE (P9-C3). It transcribed the 38 tags of
 // data/sprites.h's hand-written `enum SpriteSetId`, because that enum carried
@@ -151,6 +163,65 @@ static void print_text(const Entry& e)
   printf("\n");
 }
 
+// -----------------------------------------------------------------------------
+//  THE COMPOSITED BLINK FRAME. Body, then the fill strip at colour 1, then the
+//  lash strip at colour 0 - the same three steps, in the same order, that
+//  ui/petfx.cpp's draw path performs with drawXBM. The '+' marks a pixel the
+//  blink ADDS and '-' one it takes away, so what the blink does is legible
+//  without diffing two pictures by eye.
+// -----------------------------------------------------------------------------
+static void print_blink(const Entry& e)
+{
+  const SpriteSet& s = *e.set;
+  printf("== %s[%d] %s  blink\n", e.atlas, e.index, e.name);
+  for (int f = 0; f < (int)s.frames; ++f) {
+    const SpriteEyeBand b = sprite_eyes((uint8_t)e.index, (uint8_t)f);
+    if (b.y1 < b.y0) {
+      printf("   frame %d: this body does not blink (no band)\n", f);
+      continue;
+    }
+    uint8_t fill[PF_STRIP_BYTES], lid[PF_STRIP_BYTES];
+    const int stride = ((int)s.w + 7) >> 3;
+    const uint8_t* bits = s.bits + (long)stride * s.h * f;
+    const int rows = (int)pf_build_lids(bits, s.w, s.h, b.y0, b.y1, b.x0, b.x1,
+                                        fill, lid);
+    int added = 0, cut = 0, ink = 0;
+    for (int y = 0; y < (int)s.h; ++y)
+      for (int x = 0; x < (int)s.w; ++x) ink += pixel_at(s, f, x, y);
+    printf("   frame %d: band y %u..%u x %u..%u, %d row(s), body %d px\n",
+           f, (unsigned)b.y0, (unsigned)b.y1, (unsigned)b.x0, (unsigned)b.x1,
+           rows, ink);
+    printf("      frame %d                 BLINK                    band\n", f);
+    for (int y = 0; y < (int)s.h; ++y) {
+      printf("      ");
+      for (int x = 0; x < (int)s.w; ++x) putchar(pixel_at(s, f, x, y) ? '#' : '.');
+      printf("   ");
+      for (int x = 0; x < (int)s.w; ++x) {
+        const int r = y - (int)b.y0;
+        int fb = 0, lb = 0;
+        if (r >= 0 && r < rows) {
+          fb = (fill[r * stride + (x >> 3)] >> (x & 7)) & 1;
+          lb = (lid [r * stride + (x >> 3)] >> (x & 7)) & 1;
+        }
+        const int was = pixel_at(s, f, x, y);
+        const int now = lb ? 0 : (fb ? 1 : was);
+        if (now && !was)      { putchar('+'); ++added; }
+        else if (!now && was) { putchar('-'); ++cut; }
+        else                  putchar(now ? '#' : '.');
+      }
+      printf("   ");
+      for (int x = 0; x < (int)s.w; ++x) {
+        const int in = (y >= (int)b.y0 && y <= (int)b.y1
+                        && x >= (int)b.x0 && x <= (int)b.x1);
+        putchar(in ? (pixel_at(s, f, x, y) ? '#' : ' ') : '.');
+      }
+      printf("\n");
+    }
+    printf("      %d px added, %d px cut = %d%% of the body changes\n\n",
+           added, cut, ink ? (100 * (added + cut)) / ink : 0);
+  }
+}
+
 // ONE PBM, ASCII P1, the same format tests/golden/screens/*.pbm uses - so the
 // sheet opens in any image viewer and diffs as text.
 static int write_sheet(const char* path, int frame)
@@ -240,6 +311,17 @@ int main(int argc, char** argv)
     return 0;
   }
 
+  if (strcmp(cmd, "blink") == 0) {
+    int hits = 0;
+    for (int i = 0; i < g_n; ++i)
+      if (argc < 3 || name_eq(argv[2], g_all[i].name)) { print_blink(g_all[i]); ++hits; }
+    if (!hits) {
+      fprintf(stderr, "sprite_dump: no set named %s (try `list`)\n", argv[2]);
+      return 2;
+    }
+    return 0;
+  }
+
   if (strcmp(cmd, "sheet") == 0) {
     if (argc < 3) { fprintf(stderr, "sprite_dump: sheet needs an output path\n"); return 2; }
     const int frame = argc > 3 ? atoi(argv[3]) : 0;
@@ -248,6 +330,7 @@ int main(int argc, char** argv)
 
   fprintf(stderr,
           "usage: sprite_dump list\n"
+          "       sprite_dump blink [NAME]\n"
           "       sprite_dump text [NAME|INDEX]\n"
           "       sprite_dump sheet OUT.pbm [FRAME]\n");
   return 2;

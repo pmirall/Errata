@@ -228,13 +228,17 @@ a stated margin.
 | line | bytes | what it is |
 |---|---|---|
 | generated atlas | **9,216** | 2 eggs + SLEEP + SICK + 60 species bodies, every one 24x24x2 at 144 B (`PB_SPRITE_DATA_BYTES`) |
-| survivors | **1,031** | `spr_icon12` 384 + `spr_mini8` 96 + `spr_badge12` 312 + the twelve emotes 239 |
+| survivors | **1,031** | `spr_icon12` 384 + `spr_mini8` 168 + `spr_badge12` 312 + the twelve emotes 167 (corrected P9-C6: was "96" and "239", wrong by ∓72 B and cancelling) |
 | **end state** | **10,247** | `SPRITE_DATA_BYTES_DECLARED` |
 | margin | 1,017 | seven more 24x24x2 sets (1,008 B): one more three-stage family and four effect sets |
 | **ceiling** | **11,264** | `SPRITE_DATA_BYTES_MAX`, the two rounded up to 11 KiB |
 
-That is 0.47 % of the 2,400,000 B flash cap and 4.1 % of the 273,600 B the release variant had
-spare at 37511d5. There is a SECOND, TIGHTER ceiling in front of it:
+That is **0.70 % of the 1,600,000 B RELEASE flash cap** and 4.1 % of the 273,600 B the release
+variant had spare at 37511d5. (Corrected at P9-C6: this sentence quoted 0.47 % of
+`GATE_FLASH_MAX` = 2,400,000, which `check.sh` polices on the BASELINE build, beside a number
+derived from `GATE_RELEASE_FLASH_MAX` = 1,600,000 — the two-caps confusion §4.1 and
+`docs/decisions.md` both already correct. Both halves name the same variant now.)
+There is a SECOND, TIGHTER ceiling in front of it:
 `tools/gen_sprites.py`'s `PB_DATA_BYTES_MAX = 10240` covers the generated atlas alone, so a
 runaway is refused by the generator — with a message naming the overrun — before it reaches
 either static_assert. Raising them is a re-plan and both have to move together.
@@ -260,9 +264,18 @@ banner for why, and what dropping EAT's art cost instead.
 Sixty bodies cost SIX BYTES net, because the legacy atlas they replace was almost exactly the
 same size (9,448 B of sets against 9,216 B, plus a wider table and the generated eye bands).
 The globals line moved DOWN, and every byte of it is accounted for: `PF_MAX_W/H` fell from 40
-to 24 because every body is now 24x24, so `ui/petfx.cpp`'s two decode caches went from
-2 x 200 B to 2 x 72 B and its four lid strips from 4 x 60 B to 4 x 24 B — exactly 352 B, and it
-is a gift to phase 10 rather than a cost.
+to 24 because every body is now 24x24, so the two decode caches went from 2 x 200 B to
+2 x 72 B and the four lid strips from 4 x 60 B to **4 x 36 B** — exactly 352 B, and it is a gift
+to phase 10 rather than a cost.
+
+**The strip arithmetic above was wrong until P9-C6 and it is the one number a reader would use
+to re-derive the size.** `PF_STRIP_BYTES` is `PF_MAX_STRIDE (3) * PF_EYE_MAX_H (12)` = **36**,
+not 24, and the release `.elf` agrees: `s_lid_fill` and `s_lid_cut` are 0x48 = 72 B each (each
+is `[2][36]`). So the .bss story is **640 B -> 288 B**, not "640 -> 240", and phase 10 gets
+**352 B**, not 400. The sentence was internally contradictory — its own decomposition summed to
+400 while the same paragraph concluded 352 — and 352 is the figure the matrix printed, so the
+bottom line was never wrong, only the way to check it. The constants and the comment now live
+together in `ui/petfx_core.h`.
 
 ## 5. What is NOT in this budget
 
@@ -1009,3 +1022,95 @@ globals** — which is the comfortable one here.
 * On the globals line phase 9 forecasts 0.2-0.5 K. The registry that phase 8 left
   (`_ZL6s_rows`, 240 B for ten `SpeciesDef` rows) is sized by `CREATOR_SPECIES_SLOTS` and not
   by the roster, so growing the roster to 60 does not move it.
+
+## 14. Phase 9 — the roster, the atlas, the balance pass and the exit (measured 2026-09-06)
+
+**+3,572 flash and −352 globals on `release` across the whole phase.** Phase 9 is the only phase
+so far that GAVE BACK globals, which is the budget line the project is actually short of. Every
+figure below names its variant; the `release` column is the artefact the caps in
+`tools/build_matrix.sh` police (`GATE_RELEASE_FLASH_MAX` 1,600,000 / `GATE_RELEASE_GLOBALS_MAX`
+65,000), and the `baseline` column is what `tools/check.sh` polices against the much looser
+`GATE_FLASH_MAX` 2,400,000. **§8's mistake — quoting a baseline cap next to a release headroom —
+is the one this section is written to avoid, and §4.3 carried it until this commit.**
+
+### 14.1 Chunk by chunk, release variant (`GOD_MODE_ENABLED=0`)
+
+| commit | what landed | flash | Δ | globals | Δ |
+|---|---|---|---|---|---|
+| `37511d5` | phase 8 closed | 1,326,400 | — | 59,396 | — |
+| `88b4499` P9-C1 | sprite pipeline, content guards, `docs/content.md` | 1,326,400 | **+0** | 59,396 | **+0** |
+| `25c0134` P9-C3 | 60 bodies in, 38 legacy sets out, roster 36 → 60 | 1,328,090 | **+1,690** | 59,044 | **−352** |
+| `1a86ea7` P9-C4 | `EVASION_PER_SPD`, the XP decision, the nickname move | 1,328,580 | **+490** | 59,044 | +0 |
+| `db00755` P9-C5 | corruption effects, `cor_service()`, `corrupt_fx` | 1,329,830 | **+1,250** | 59,044 | +0 |
+| **P9-C6** | **the exit: `petfx_core`, the blink fix, five bodies redrawn** | **1,329,972** | **+142** | **59,044** | **+0** |
+| | **PHASE 9 TOTAL** | | **+3,572** | | **−352** |
+
+P9-C1 is **byte-identical** in all six variants, and that is a fact about the chunk rather than
+a rounding: the generated atlas it produced is included by no firmware translation unit — only
+by `tests/test_sprite_pipeline.cpp` and `tests/tools/sprite_dump.cpp` — so P9-C3 is where the
+art reaches the image.
+
+### 14.2 All six variants at the phase-9 exit
+
+| variant | after P9-C5 | after P9-C6 (this commit) | delta | against its cap |
+|---|---|---|---|---|
+| `baseline` | 1,342,202 / 59,220 | 1,342,344 / 59,220 | **+142 / +0** | 55.9 % / 65.8 % |
+| `release` | 1,329,830 / 59,044 | **1,329,972 / 59,044** | **+142 / +0** | **83.12 % / 90.84 %** |
+| `no-god` | 1,329,830 / 59,044 | 1,329,972 / 59,044 | +142 / +0 | — |
+| `sh1106` | 1,342,202 / 59,220 | 1,342,344 / 59,220 | +142 / +0 | — |
+| `no-web` | 1,228,348 / 54,820 | 1,228,490 / 54,820 | +142 / +0 | — |
+| `all-off` | 584,044 / 26,260 | 584,186 / 26,260 | +142 / +0 | — |
+
+**Every variant moved by the identical +142**, so nothing in the exit is hiding behind
+`GOD_MODE_ENABLED` or behind a feature flag. The exit introduced no preprocessor conditional
+other than one include guard.
+
+### 14.3 Where the flash went, and where the globals came from
+
+**The +3,572 B of flash, by cause.** The roster 36 → 60 species is **+1,684** (24 species rows,
+16 evolution rules, encounter rows and 48 more Spanish strings) — the single largest item, and
+it is content, which is what the phase is. The corruption effects are **+1,250**. The nickname
+move out of `ui.cpp` is **+486**, of which +358 is named `.text`. **The art swap itself is +6**:
+sixty 24x24 bodies replaced thirty-eight legacy sets that were almost exactly the same size
+(9,216 B against 9,448 B). The exit's **+142** is the regenerated eye-band table plus
+`pf_scan_ink` / `pf_build_lids` becoming cross-translation-unit calls; the redrawn bodies cost
+nothing at all, because every set is 144 B whatever is drawn inside it.
+
+**THE GLOBALS LINE MOVED DOWN AND EVERY BYTE IS ACCOUNTED FOR.** −352 B, and it is four symbols
+in the release `.elf` and nothing else:
+
+```
+  s_cache_bits   400 -> 144   (-256)   petfx XBM decode caches, 2 x [3*40*40] -> 2 x [3*24]
+  s_lid_fill     120 ->  72   ( -48)   eyelid fill strips, 2 x [PF_STRIP_BYTES]
+  s_lid_cut      120 ->  72   ( -48)   eyelid lash strips, same
+  s_corrupt        0 ->   1   (  +1)   the corruption edge tracker (state, not a table)
+```
+
+`PF_MAX_W/H` fell from 40 to 24 because every body in the generated atlas is 24x24, and
+`PF_STRIP_BYTES` is `PF_MAX_STRIDE (3) * PF_EYE_MAX_H (12)` = **36**. All four symbols and both
+constants now live in `ui/petfx_core.h`, beside the arithmetic.
+
+**NO TABLE LOST ITS `const`.** All 64 sprite arrays, `PB_SPRITE_SETS`, `PB_SPRITE_EYES` and
+`PF_TEMPER` are in `.flash.rodata` in the release image; `PB_SPRITE_NAMES` is discarded by
+`--gc-sections` because only the tests use it. That is the property the phase was told to watch
+and it held in all six variants at every chunk.
+
+### 14.4 What phase 10 has left
+
+**270,028 B of flash and 5,956 B of globals**, on the `release` variant, against the caps
+`tools/build_matrix.sh` enforces. Phase 9 was handed 273,600 / 5,604 and hands on **3,572 B less
+flash and 352 B MORE globals** than it received.
+
+The flash column is not the constraint and has not been since P8-C0: 270 KB is four times the
+whole creator page. **The globals column is**, and 5,956 B is what phase 10's diagnostics, its
+animation pass, its error-recovery state and its release build have to live in together. Two
+things are worth knowing before spending it:
+
+* **Counters are where globals go.** §8's own list put "phase 10's diagnostics — historically
+  where counters accumulate" third among the threats, and phases 8 and 9 both came in under
+  forecast, so the forecast is still standing.
+* **The art budget has 1,017 B of margin and it is FLASH, not globals** (`SPRITE_DATA_BYTES_MAX`
+  11,264 against a measured 10,247). Seven more 24x24x2 sets fit — one three-stage family and
+  four effect sets. An animation pass that wants a POSE set per species does not fit, and
+  `data/sprites.h`'s LOOKUP banner already prices that conversation: 60 sleep + 60 sick bodies
+  would be 17,280 B, and a per-FAMILY pose (20) rather than per-species (60) is 2,880 B.

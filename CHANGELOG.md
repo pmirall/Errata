@@ -10,6 +10,170 @@ tag for a phase is cut only when its gate (`tools/check.sh`) and its variant mat
 
 ## [0.9.0-content] — Unreleased
 
+### Added — the phase-9 exit (P9-C6)
+
+- **The pixel half of `petfx` is host-linkable for the first time: `ui/petfx_core.{h,cpp}`.**
+  `pf_stride` / `pf_get` / `pf_set`, `pf_scan_ink` and `pf_build_lids` moved out of
+  `ui/petfx.cpp` unchanged. They had sat since phase 4 behind a banner reading *"everything
+  between these markers is host-testable: it depends on sprites.h and stdint only"* — true of
+  the CODE and false of the BUILD, because `petfx.cpp` includes `render.h` → `Arduino.h`, so no
+  host binary had ever compiled a line of it. This is the third module moved out of that file
+  for exactly this reason (`xbm_mirror.cpp` P4-C4, `corrupt_fx.cpp` P9-C5) and `tools/check.sh`
+  now holds the same red line over it.
+- **`the_blink_closes_holes_and_never_draws_over_the_body`** — the shipped `pf_build_lids()`
+  run over the shipped atlas for all 128 (set, frame) pairs, asserting that **every pixel a
+  blink fills is an enclosed hole of that frame's own drawing**, computed here by a flood fill
+  rather than read back from the generator. Plus `the_over_fill_recorder_would_see_a_blink_that
+  _swallowed_the_body`, which hands the same instrument a band that MUST over-fill and requires
+  it to say so — because a containment sweep that never fires is what a broken recorder looks
+  like.
+- **`sprite_dump blink [NAME]`** — frame 0 | THE BLINK | the band, side by side, with `+` for a
+  pixel the blink adds and `-` for one it takes away. The composited blink frame is in neither
+  authored frame of the atlas and nothing in this repository had ever drawn it.
+- **`the_idle_animation_has_an_amplitude_and_a_spread`** — 4-45 % of ink, at least 6 px, over at
+  least 2 rows and 2 columns. `diff > 0` was previously the only thing the tree said about the
+  idle animation.
+- **`tools/check.sh` builds `tests/tools/`** (`spritetool corrupttool balancetool pagetool`,
+  ~4 s). Five review instruments were in no build at all, so any of them could stop compiling
+  without a word — named by P9-C5 and declined there as a change to what every commit pays for,
+  which is the phase exit's call to make.
+- **`tools/check.sh` runs `gen_sprites.py --self-check`** over the whole tree. `--check` proves
+  only that the header matches the `.txt` files; it passes a frame 1 that is a byte copy of
+  frame 0, a body carrying another species' pixels, and a body lifted off the floor. The command
+  five art agents were told to trust is now the command the gate runs — and `--self-check` with
+  no arguments FAILS on identical frames, where it used to only warn.
+
+### Fixed — the phase-9 exit (P9-C6)
+
+- **THE BLINK WAS FILLING FOUR BODIES SOLID, AND THE FRAME IT HAPPENS ON WAS ONE NOTHING IN THE
+  TREE HAD EVER DRAWN.** The eye band was "the bounding box of every enclosed hole in the top
+  60 % of the ink box" and `pf_build_lids()` fills every interior run on every row of the band,
+  so on a body whose upper half is made of gaps the band is most of the sprite: **DENYRA +79 px
+  on a 283 px body, BLAKLIX +78 on 264, MURAX +68 on 242, and PANOPTIX losing all nine of the
+  eyes it is named for**, for 90 ms every few seconds on the home screen. The rule is now stated
+  in terms of the drawing — **the eyes are the biggest group of enclosed holes that can be
+  closed together without closing anything that is not a hole** — and verified against the
+  device's own fill before a band is emitted. Restoring the old rule fails the new case by name
+  on twelve bodies.
+- **Three species were silently emitted as non-blinkers while carrying a drawn face.** BIPPO
+  ("one eye on the foot"), TIMAUT ("the hollow is the face") and KLONIX ("the mask's eye slots
+  blink shut") all draw their face BELOW the old 60 % cut. The rule's docstring claimed "every
+  one of the sixty bodies was drawn to that rule on purpose"; it was not. There is no cut now.
+- **Five bodies redrawn or repaired after the art review.** **TIMAUT** was the only body in the
+  roster whose ink did not grow at stage 2 (§18) — 108 px in four detached blobs, largest mass
+  68 against its own stage 1's 98 — and is now 157 px in one 128 px hull with a 28 px socket.
+  **ARTEFAX** had the worst silhouette cohesion in the roster (128 px in four equal pieces) and
+  2x2 eyes in 4x4 blocks, the 1px-wall construction `pixio.txt` had already diagnosed and fixed
+  five files away; it is 173 px in ONE piece with Pixio's own socket. **PAKETO**, the starter,
+  was split into two masses of 69 and 63 by a full-height seam and read as two creatures; it and
+  **RAFAGON** got `pixio.txt`'s 3px bridge. **FRAGMAR**'s ink fell below its own stage 0 and its
+  "shatter" was a 3px dash that would read as dirt (123 → 139). **COOKIT** put a 7px eye on the
+  family whose root is "an eye on a stalk", leaving no room for an unlit ring, so no frame of
+  the family's stage 0 contained a readable eye (64 → 92 px). **Every family's ink now grows
+  across all three stages**; three did not before.
+- **Four idle animations were out of band.** KLONIX's entire idle was six pixels on ONE row of a
+  187 px body; JITERA changed 70 of its 109 px in a shear that reads as tearing, which its own
+  header offered a reviewer the fix for. KLONIX, MEMORO, MURAX and JITERA edited.
+- **`tools/check.sh`'s `cor_service()` gate could be defeated by a block comment.** It stripped
+  `//` comments only, so wrapping the one call site in `/* ... */` left the gate AND the suite
+  green — the defect the gate exists to prevent, surviving inside it, for the second time. It
+  strips comments with `cpp -fpreprocessed` now.
+- **The eye-band assertion was a floor with 54 entries of slack** (`blinkers > 64` against 118):
+  53 of 128 bands could be dropped one at a time with the suite green. Demonstrated by moving
+  the derivation's cut from 60 % to 40 %, which took 26 bodies' blinks away and printed ALL PASS
+  51/51 and GATE OK. It is an equality now.
+- **A 1,536-check loop in `test_pet_view` asserted `f(x) == f(x)`** — both operands the same
+  constexpr call, the loop variable discarded on the next line — under a comment promising a
+  sweep over `minor_form`'s whole range. Deleted: P9-C3 made the property a build error.
+- **`the_name_cap_never_splits_a_utf8_sequence` had no instrument for the CAP half of its own
+  name.** A stray `out[cap] = 0` in `pebble_name_join()` passed the whole suite; the 0x7F fill
+  that was already there "so a write can be detected" is now inspected past the cap.
+- **`verify.py`'s five-key CORRUPTION mask** reported four different failures under one name and
+  died with an unhandled `KeyError` on the fifth. Five named checks now.
+- **The padding half of `every_generated_frame_has_ink_and_no_stray_padding_bits` was dead
+  code** — every generated set is 24x24, so the mask is always 0. It walks `SPRITE_EMOTES`
+  (5x7, 6x8, 12x10, 14x8) as well now, which is the shape it was written for.
+- **Three documents carried the same wrong survivors decomposition** (`spr_mini8` 96 and emotes
+  239, wrong by ∓72 B and cancelling under one aggregate assertion). Corrected to 384 + 168 +
+  312 + 167 in `data/sprites.h`, `docs/budget.md` and `test_sprite_pipeline.cpp`, **and the test
+  now asserts the four terms**. Also corrected: `PF_STRIP_BYTES` is 36 not 24 (640 → 288 B of
+  .bss, phase 10 gets 352 not 400), the art budget quoted against the baseline cap rather than
+  the release one (0.70 %, not 0.47 %), `tests/Makefile`'s claim that `sim_days` links `box.o`
+  "for the Box recovery half of the care model" (it is linked dead and the simulated day is one
+  ACTIVE Pebble), and the generated atlas banner's claim that `SPRITE_REV` breaks the build
+  (P9-C3 deleted that `static_assert`; the hash is a DIAG readout and a cache key).
+
+### Measured — the phase-9 exit (P9-C6)
+
+- Release (`GOD_MODE_ENABLED=0`): flash **1,329,830 → 1,329,972 (+142)**, globals **59,044,
+  unchanged**. The +142 is the eye-band table's new values, the redrawn art (identical byte
+  count — every set is 144 B whatever is drawn in it) and `pf_scan_ink` / `pf_build_lids`
+  becoming cross-TU calls; the globals line did not move because nothing left `.rodata` and
+  `petfx_core.o` has no state.
+- Baseline **1,342,202 → 1,342,344 (+142)**, globals 59,220 unchanged. Every variant moved by
+  the same +142, so nothing is hiding behind `GOD_MODE_ENABLED`.
+- **Phase 9 in total, release: 1,326,400 → 1,329,972 flash (+3,572) and 59,396 → 59,044 globals
+  (−352).** The phase GAVE BACK 352 B of the scarcest budget in the project. Phase 10 inherits
+  **270,028 B of flash and 5,956 B of globals**.
+- `ALL PASS 51/51`, ASAN 4/4, PAGE TEST 51/51, GATE OK, MATRIX OK on six variants.
+
+### Still owed after P9-C6
+
+- **Nothing in phase 9 has been seen on a 128x64 OLED.** Every judgement about whether a body
+  reads at 1x came from a rendered image on a monitor. Nobody has watched a frame pair animate
+  at `UI_ANIM_FRAME_MS`, watched a blink land, or watched the corruption glitch on a panel.
+- **The art the exit saw and did not fix**, in the order it would matter: family 11 (DAEMON)
+  reads as architecture and collides with family 12 at 1x; BLAKLIX is the one body whose rim
+  pixels toggle between frames, which is the pattern a slow passive mono LCD boils; ZIPBOM's
+  nested corners read as furniture; ERROX's detached head can read as two objects; NULIX, BITTO
+  and PORTU are the three babies with no protruding feature and cluster tightly; TWINIX is the
+  only stage-2 less spiky than its stage 1; ESTAFEX is the weakest body in the roster.
+- **The blink has no floor.** LEKRON's blink changes 2 px of a 303 px body and is invisible at
+  1x; a body whose only small hole is 3 px gets a 3 px blink. Whether an animation READS is the
+  class of question no assertion in this repository can settle.
+- **The idle SHAPE bound is deliberately weak** (>= 2 rows, >= 2 columns). A 3-row rule would
+  fail six bodies that move one 4-8 px feature between two rows, and would fight family 20's
+  design, where the pupil is meant to be the only moving part.
+- **`ui/petfx.cpp` is still compiled by no host binary**, and it is still 1,100 lines of
+  automaton, choreography and draw path. What moved out is the pixel core; the blink's PAINTING
+  loop, the corruption edge re-derive and every renderer call remain unexecuted by any test.
+- Everything on the P9-C3/C4/C5 "still owed" lists below stands: the HOME layout's 19 blank
+  rows, the v1 stage floor, the care rates, the five species outside the win-rate band, 3v3
+  balance, and `CORRUPT_BATTLE_INFECT_PERMILLE` still being read by nothing.
+
+### Added — the corruption effects (P9-C5)
+
+- **`cor_service()`, and the timer that had no reader.** `cor_expire()` was called by nothing in
+  `Pebblebol/src`: the encounter armed the 24 h deadline and the Antivirus cleared the bit, so
+  `PBS_CORRUPTED` was permanent on every device while `verify.py`'s "corruption clears by timer"
+  check passed over the JSON for four phases. `cor_service()` is a Box-wide walk in
+  `game/corruption.cpp` (pure, host-tested) called once a second from `app/app.cpp`'s
+  `logic_tick()`, and `tools/check.sh` gates the call site because `app.cpp` cannot be linked on
+  the host.
+- **`ui/corrupt_fx.{h,cpp}`** — the glitch's row geometry, the 1-in-8 gate and the behaviour-row
+  choice, in a pure translation unit, because a bound that lives in `petfx.cpp` is a bound no
+  test can check. `petfx_draw_body()` paints what it is handed with the existing
+  `rd_dither_rect_phase()` at draw colour 2, inside the ink box it already publishes.
+- **The battle modifier's missing half was `battle_init()`.** `battle_stat_eff()`'s +1 ATK /
+  −1 DEF has read `corrupt_left` since P4-C2 and nothing ever set it from the stored Pebble, so
+  a creature corrupted out of battle walked into one cured. One ASSIGNMENT into the same field
+  attack 12 Infectar writes, so the two sources are one fact and cannot stack.
+  `BATTLE_ENGINE_VER` 2 → 3; `tests/golden/battle_v1.txt` re-recorded, and split with an
+  intermediate build to prove the whole diff is the version stamp and the hashes.
+- **`tests/test_corruption.cpp`** — 19 cases, 231,174 checks, the 51st host binary. The glitch
+  containment is measured on PIXELS painted into the host framebuffer over a control render,
+  not on the struct fields, with `fb_oob()` watching the panel; a corrupted Pebble survives a
+  REAL NVS round trip, a REAL wire round trip and a REAL breeding with its deadline intact.
+- **`tests/tools/corrupt_view.cpp`** — the glitch drawn over a real body from the compiled atlas
+  at the real floor line, plus a `strip` mode for the 1-in-8 rate over a minute and a `temper`
+  mode for the behaviour row, because a still frame cannot show motion.
+
+### Measured — the corruption effects (P9-C5)
+
+- Release (`GOD_MODE_ENABLED=0`): flash **1,328,580 → 1,329,830 (+1,250)**, globals **59,044,
+  unchanged** — no table left `.rodata` and the new `PF_TEMPER` row (16 B) is still
+  `static const`.
+
 ### Added
 
 - **The balance pass, with two instruments that print numbers a person reads (P9-C4).**
@@ -67,7 +231,8 @@ tag for a phase is cut only when its gate (`tools/check.sh`) and its variant mat
   expensive half and it is the half that fixes the UTF-8 truncation.
 - `ALL PASS 50/50`, ASAN 4/4, PAGE TEST 51/51, GATE OK, MATRIX OK on six variants;
   release caps 1,328,580/1,600,000 flash and 59,044/65,000 globals, i.e. 271,420 B of flash and
-  5,956 B of globals still in front of phase 10.
+  5,956 B of globals in front of phase 10 **as of P9-C4** — P9-C5 and P9-C6 spend 1,392 of the
+  flash between them and the exit's own Measured block above carries the closing figure.
 
 ### Still owed after P9-C4
 

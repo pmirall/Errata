@@ -2937,3 +2937,241 @@ image by disassembly at the exit. **The SETTINGS editor is still not built**, so
 product writes `creator_idle_s` and the value in force is the default on every device. Whether
 300 s is the right number is a question about a person waiting at a device, and no person has
 waited at one: `tools/creator_smoke.sh` phase 4 is the instrument and it has never run.
+
+## Phase-9 exit (P9-C6, 2026-09-06)
+
+Phase 9 is content: the 60-species roster, the 24x24 atlas that had to exist before the roster
+could ship, ~30 attacks, items, evolution families, encounter tables, the corruption mechanic
+and two balance passes. This section records what the phase DECIDED — the questions that had
+more than one defensible answer — and what the exit found when three lenses were pointed at it.
+
+### 1. THE XP CURVE: THE SHIPPED CURVE WINS, THE PACK'S IS DELETED (P9-C4)
+
+**The question, deferred three times.** `data/balance.h` shipped `XP_TABLE` as `10 + L*L`
+(8,845 points to level 30) and `tools/content/balance.json` shipped a different one,
+`25 + 12(L-1) + 4(L-1)^2` (36,453 points). Two sources of truth for one curve survived P4-C1,
+P4-C6 and P9-C3, each time because the instrument that could settle it did not exist.
+
+**The instrument.** `tests/tools/sim_days.cpp` runs 30 simulated days of the REAL care model,
+the REAL XP ledger and the REAL encounter roll under four written-down player profiles, and
+reports XP/day. A "day" is device-ON hours plus an absence, because `game/xp.cpp` defines the
+anti-farm meter that way.
+
+| profile | device-ON | measured XP/day | days to L30, shipped | days to L30, pack |
+|---|---|---|---|---|
+| light | 2 h | 18.8 | 471 | 1,942 |
+| normal | 8 h | 109.4 | **81** | 333 |
+| heavy | 14 h | 352.8 | **25** | 103 |
+| saturate | 16 h, every action every minute | 1,031.9 | 9 | 35 |
+
+**The decision.** The target is the plan's "level 30 ≈ 3-4 weeks of normal play", i.e. 21-28
+days. The shipped curve lands INSIDE the band for a heavy player and overshoots ~3x for a
+normal one. The pack's curve does not reach the band under ANY profile — not even the
+physically unreachable ceiling, where it still needs five weeks. So the shipped curve stays and
+the pack's `XP_TABLE` and `XP_TOTAL_TO_MAX` are **deleted from `balance.json`**, not merely
+unadopted. `verify.py` now reads the surviving curve out of `data/balance.h` and **fails by
+name if an `XP_TABLE` key reappears in the pack**, which is what makes the deletion permanent
+rather than a state the next content edit can undo.
+
+**Two honesty notes that belong with the decision.** (1) "3-4 weeks" is the PLAN's gloss, not a
+spec line: §57 contains no number, no week and no level 30. It is still the only stated pacing
+target, so it is what the curves were measured against, and the attribution is corrected rather
+than repeated. (2) The profiles are ASSUMPTIONS. Nobody has watched a person play this device,
+and every pacing number above is conditional on the four tables in `sim_days.cpp`'s banner.
+
+### 2. THE POSE QUESTION: ONE SLEEP, ONE SICK, NO EAT (P9-C3)
+
+Sixty species x four poses is 240 bodies and 34,560 B; the atlas budget is 11,264. So the pose
+question had to be answered per pose rather than per species.
+
+* **SLEEP and SICK get ONE generic 24x24 body each (288 B).** Both are STATES that
+  `pet_pose_of()` returns, and the STILL path — the only body path a host test can see — has to
+  show them. Losing species identity in those two poses is INHERITED, not new: the legacy
+  lookup ignored `form` in every pose branch too.
+* **EAT gets NO art and falls through to the species body.** It is reachable only from
+  `actfx_pose()` during the feeding film, which already parks `EMO_BOWL` and can lean the body
+  with `petfx_squash()`. **Cost, stated:** the authored "leaning over the bowl" silhouette is
+  gone and what replaces it lives in device-only translation units no host binary compiles.
+  `test_screens` pins that `POSE_EAT` moves exactly ZERO pixels on HOME, so "we dropped it"
+  cannot decay into "we forgot it".
+
+The same budget argument answered the corruption pose (P9-C5): "altered idle" is ONE
+`PF_TEMPER` row of 16 B, not a `POSE_GLITCH` set that would need 60 more bodies.
+
+### 3. THE CARE-QUALITY BODY IS DELETED, AND THAT IS A FEATURE REMOVAL (P9-C3)
+
+`SPR_CHILD_POOR` / `SPR_TEEN_POOR` carried the care quality `sim.cpp` freezes into
+`minor_form`. One body per species has nowhere to put a second variant, so
+`sprite_form_of()` LOST the `minor_form` parameter rather than ignoring it — every call site
+had to be visited, and a future re-read of `minor_form` for art is now a build error rather
+than a test failure. A screen that wants care quality back should draw it with the renderer (a
+sweat emote, a dulled dither), not with a second atlas.
+
+### 4. THE BALANCE LEVER WAS ONE CONSTANT, NOT NINE HAND EDITS (P9-C4)
+
+3.6 M battles of the real engine driven by the real AI found SIGNAL at 42.9 % against CORRUPT's
+56.8 % same-stage cross-type. The cause is that SIGNAL carries 11 of the 12 speed archetypes and
+CORRUPT 13 of the 13 damage ones, so a rule that underpays SPD reads as "SIGNAL is weak".
+`EVASION_PER_SPD` 2 -> 3 moved SIGNAL to 46.6 % and CORRUPT to 55.0 %; 4 and 5 were measured and
+OVERSHOOT. **No species' stats or learnsets moved**, and the reason is measured: every
+one-point redistribution of species 26's fixed 22 points made it STRONGER, and the learnset
+lever was net-neutral in the count. Re-cutting learnsets to satisfy a greedy 1v1 matrix is
+over-fitting to an AI that cannot see DRAIN or status moves at all.
+
+### 5. WHAT THE EXIT FOUND, AND THE ONE THAT MATTERED
+
+Three lenses ran over the phase: one on the ART (60 bodies rendered and looked at), one on the
+ARTEFACT (five firmware builds, symbol diffs, gate mutations), one on the TESTS (every new case
+and gate broken to see whether it fails).
+
+**THE ART LENS FOUND THE DEFECT THIS PHASE WOULD HAVE SHIPPED, AND IT WAS NOT IN THE ATLAS.**
+The frame a player sees while a pet blinks is in NEITHER authored frame: it is composited at
+draw time from the art, the generated eye band and `pf_build_lids()`. Nothing in this repository
+had ever drawn it. Composited by hand, four bodies' "blink" did not close a pair of eyes, it
+filled a third of the creature solid — **DENYRA +79 px on a 283 px body, BLAKLIX +78 on 264,
+MURAX +68 on 242, and PANOPTIX losing all nine of the eyes the species is named for** — for
+90 ms every few seconds, on the home screen, on the roster's showcase adults.
+
+*Why nothing saw it.* The rule was "the bounding box of every enclosed hole in the top 60 % of
+the ink box", and `pf_build_lids()` fills every interior run on every row of the band — so on a
+body whose upper half is made of gaps, the band is most of the sprite. The only assertion about
+the band was that it lay inside the sprite and contained one unlit pixel. And
+`pf_build_lids()` lived in `ui/petfx.cpp`, which includes `render.h` -> `Arduino.h`, **so no
+host binary had ever compiled it**, behind a banner that said "everything between these markers
+is host-testable". That banner described an intention; nothing enforced it.
+
+*The fix, in three parts.* (a) The pixel core moved to `ui/petfx_core.{h,cpp}` — the third time
+this project has moved code out of `petfx.cpp` for exactly this reason (`xbm_mirror.cpp` P4-C4,
+`corrupt_fx.cpp` P9-C5), and `tools/check.sh` now holds the red line. (b) The derivation rule
+was replaced with one stated in terms of the drawing rather than of a percentage of a box: **the
+eyes are the biggest group of enclosed holes that can be closed together without closing
+anything that is not a hole**, verified against the device's own fill before a band is emitted.
+(c) `tests/test_sprite_pipeline.cpp` now runs the SHIPPED `pf_build_lids()` over the SHIPPED
+atlas for all 128 (set, frame) pairs and asserts the property, and `sprite_dump blink NAME`
+draws the composited frame for a person.
+
+*And the old rule's docstring was wrong about the roster too.* It claimed "every one of the
+sixty bodies was drawn to that rule on purpose". BIPPO ("one eye on the foot"), TIMAUT ("the
+hollow is the face") and KLONIX ("the mask's eye slots blink shut") all draw their face BELOW
+the 60 % cut, and all three were silently emitted as non-blinkers. There is no cut any more and
+all three blink.
+
+**FIVE BODIES WERE REDRAWN OR REPAIRED BECAUSE OF WHAT THE ART LENS SAW.**
+
+* **TIMAUT** was the only body in the roster whose ink did not grow at stage 2 (71 -> 109 -> 108
+  across family 3, largest mass 61 -> 98 -> 68). §18 asks the final evolution to look more
+  dangerous; four detached blobs and four loose single pixels read as a comma and a full stop.
+  Redrawn at 157 ink / 128 largest mass, with a 28 px socket — the biggest in the roster.
+* **ARTEFAX** had the worst silhouette cohesion in the roster (128 px in four equal pieces, no
+  dominant mass) AND 2x2 eye holes in 4x4 blocks — the 1px-wall construction `pixio.txt` had
+  already diagnosed and fixed in its own file five files away. Redrawn at 173 px in ONE piece,
+  with Pixio's own socket construction.
+* **PAKETO**, the starter every player meets first, was split into two 8-connected masses of 69
+  and 63 by a full-height unlit seam, each half with its own pair of feet: two small creatures
+  standing side by side. `pixio.txt` names that exact defect and fixes it with a 3px bridge;
+  Paketo got the same bridge, and so did RAFAGON, which inherits the seam.
+* **FRAGMAR**'s ink FELL from its own stage 0 and its "shatter" was a 3px dash near the frame
+  edge that would read as dirt. Its third shard is a shard now (123 -> 139).
+* **COOKIT** put a 7px eye on the family whose root is "an eye on a stalk", which leaves 3px of
+  interior — not enough for a 2px pupil AND an unlit ring, so the pupil was fused to the rim in
+  BOTH frames and no frame of the family's stage 0 contained a readable eye. 9px eye now, 64 ->
+  92 ink, and it is no longer the lightest body in the roster.
+
+**EVERY FAMILY'S INK NOW GROWS ACROSS ALL THREE STAGES.** Before the exit, three did not
+(PACKET, PIXEL, LATENCY).
+
+**THE IDLE ANIMATION HAD NO FLOOR AND NO CEILING.** `diff > 0` was the only thing the tree said
+about it, and amplitude varied 22x: KLONIX's entire idle was SIX PIXELS ON ONE ROW (3.2 % of its
+ink, a diff box 1.6 % of its body box) while JITERA changed 70 of its 109 px in a shear that
+reads as tearing. Four bodies were edited — KLONIX, MEMORO, MURAX and JITERA, the last by
+halving both jitter offsets, which `jitera.txt`'s own header offered a reviewer in as many
+words — and `the_idle_animation_has_an_amplitude_and_a_spread` now bounds it at 4-45 % of ink,
+>= 6 px, and >= 2 rows and >= 2 columns. **The shape bound is deliberately weak and says so:** a
+3-row rule would fail six bodies that move one 4-8 px feature between two rows, and for family
+20 it would fight the design, because cookit.txt's whole idea is that the pupil is the only
+moving part. Written down as owed, with the numbers, rather than asserted with six exceptions.
+
+**WHAT THE ART LENS FOUND AND THIS EXIT DID NOT FIX**, ranked, because they are real and a
+reader should know they were seen: family 11 (DAEMON) reads as architecture rather than as
+creatures and collides with family 12 at 1x; ZIPBOM's nested corners read as furniture; ERROX's
+detached head can read as two objects; ESTAFEX is the weakest body in the roster; BLAKLIX is the
+one body whose rim pixels toggle between frames, which is the pattern a slow passive mono LCD
+renders as boiling; NULIX/BITTO/PORTU are the three babies with no protruding feature at all and
+cluster tightly at 6x6; family 19's TWINIX is the only stage-2 in the roster LESS spiky than its
+stage 1. None of those is a mechanical failure; all of them are judgements from a rendered
+image on a monitor, which is the only instrument that exists here.
+
+### 6. WHAT NO TEST IN THIS PHASE CAN ASSERT, SAID ONCE
+
+**CAN**, mechanically, over the compiled atlas: geometry, byte count, byte order through the
+compiled decode, slot binding both ways, sixty distinct drawings, feet on the floor, frames
+differ by a bounded amount in a bounded shape, eye bands inside their bodies, **and — new at
+the exit — that a blink closes holes and never draws over the body, using the shipped function**.
+
+**CANNOT**: that any body looks like the creature its flavour line describes; that two frames
+read as one creature breathing; that a final stage reads as more dangerous. A well-formed 24x24
+of noise passes every assertion in this repository. `tests/bin/sprite_dump text|sheet|blink` is
+the instrument and it needs a person, and the person who looked was an agent reading rendered
+output on a monitor, never a 128x64 OLED at `UI_ANIM_FRAME_MS`.
+
+### 7. THREE PLACES WHERE THE PHASE'S OWN NUMBERS WERE WRONG
+
+Recorded because the exit's job is the documents as much as the code.
+
+1. **The survivors decomposition** — `spr_icon12 384 + spr_mini8 96 + spr_badge12 312 + emotes
+   239` — was wrong in `data/sprites.h`, `docs/budget.md` and `test_sprite_pipeline.cpp`,
+   identically. The real terms are **384 + 168 + 312 + 167**; the two errors are ±72 B and
+   cancel, so the total (1,031) was right and neither wrong term could fail the one aggregate
+   assertion sitting next to them. That is the phase-8 shape exactly. The test asserts the four
+   TERMS now.
+2. **The lid-strip arithmetic.** `PF_STRIP_BYTES` is `3 * 12` = **36**, not 24; the .bss story
+   is **640 -> 288** and phase 10 gets **352 B**, not 400. 352 was always the right bottom line
+   (it is the globals delta the matrix printed); the way to re-derive it was not.
+3. **The art-budget percentage** quoted 0.47 % of `GATE_FLASH_MAX` (2,400,000, a BASELINE cap)
+   beside a headroom figure derived from `GATE_RELEASE_FLASH_MAX` (1,600,000). Against the cap
+   that polices the artefact that ships it is **0.70 %**.
+
+### 8. FOUR GATES AND TESTS THAT COULD NOT FAIL, FOUND BY BREAKING THEM
+
+* **`tools/check.sh`'s `cor_service()` gate stripped `//` comments only**, so wrapping the call
+  site in `/* ... */` — what a person bisecting a bug actually does — left the gate AND the
+  suite green. It runs the source through `cpp -fpreprocessed` now. This is the SECOND time this
+  one gate has been caught: P9-C5's own first version was defeated by an include comment.
+* **The eye-band count was a floor with 54 entries of slack** (`blinkers > 64` against 118), so
+  53 of the 128 bands could be dropped one at a time with the suite green. Demonstrated:
+  moving the derivation's cut from 60 % to 40 % took 26 bodies' blinks away and printed ALL PASS
+  51/51 and GATE OK. It is an equality now.
+* **`test_pet_view` carried a 1,536-check loop asserting `f(x) == f(x)`** with its loop variable
+  discarded on the next line, under a comment promising a sweep over `minor_form`'s whole range.
+  Deleted; the property is a build error since P9-C3 and the comment now says so.
+* **`the_name_cap_never_splits_a_utf8_sequence` had no instrument for the CAP half of its own
+  name.** `test_stats` is not in `ASAN_SET`, and a stray `out[cap] = 0` — the classic one-byte
+  overflow for a bounded copy, and `pebble_name_join()` is new in P9-C4 — passed the whole
+  suite. The 0x7F fill was already there for exactly this; it is now inspected past the cap.
+* Also: `verify.py`'s five-key CORRUPTION mask reported four failures under ONE name and died
+  with an unhandled `KeyError` on the fifth; it is five named checks now.
+
+### 9. WHAT PHASE 9 DELIBERATELY DID NOT DO
+
+* **No §67 box was ticked.** §67 contains no roster line — the "content roster >= 60 (Appendix
+  A)" criterion is the plan's own acceptance line and §19/§53 — and every §67 box phase 9 could
+  otherwise touch is either already ticked or waiting on a bench. The six creator/multiplayer
+  bench items owed from phases 7 and 8 are untouched and keep their written conditions.
+* **`CORRUPT_BATTLE_INFECT_PERMILLE` is still read by nothing.** A per-hit infection roll is a
+  new draw from the per-battle stream and contradicts `battle.h`'s ZERO-DRAWS property of step
+  7, for a mechanic not among the four effects §55 names. `balance.h`'s claim that P9-C5 wired
+  "both halves" was corrected rather than left as a promise.
+* **"Or a rare trait" as a second source of CORRUPTED is unimplementable, not undone.** There is
+  no traits table anywhere in the tree; `validate.h`'s `VR_BAD_TRAIT` refuses a nonzero
+  `trait_id`.
+* **The v1 stage floor was measured and left.** `sim.cpp`'s `stage_commit()` still writes
+  `level_of_stage()` back into `PebbleInstance.level`, so a Pebble earning no XP reaches level
+  20 in 3.5 days and 2,660 of the curve's 8,845 points are never earned by anybody. `sim.cpp`'s
+  own comment ("this map becomes read-only") is false while that write stands. It is a
+  game-model change with its own commit, not an exit edit.
+* **The care rates were measured and left.** `balance.h`'s "3-4 touches a day is a well-kept
+  Pebble" is optimistic — satiety falls 100.8 points a day against a 30-point meal — so the
+  CLAIM was corrected with the measurement and no rate moved, because moving one re-records
+  `tests/golden/care_v1.txt`.
+* **The HOME layout.** A 24 px body on `HOME_FLOOR_Y` leaves 19 blank rows above it on every
+  still frame where the 40 px adult filled the band. Owed to P10-C3/C4.

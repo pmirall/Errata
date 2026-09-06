@@ -356,8 +356,16 @@ NT_SPR_REF_FITS(spr_emo_spark,     SPRITE_EMOTES, EMO_SPARK);
 //      generated atlas   9,216 B   2 eggs + SLEEP + SICK + 60 bodies, all
 //                                  24x24x2 at 144 B (data/sprites_pebbles.h,
 //                                  PB_SPRITE_DATA_BYTES_DECLARED)
-//      survivors         1,031 B   spr_icon12 384 + spr_mini8 96 + spr_badge12
-//                                  312 + the 12 emotes 239
+//      survivors         1,031 B   spr_icon12 384 + spr_mini8 168 +
+//                                  spr_badge12 312 + the 12 emotes 167
+//                                  (CORRECTED AT P9-C6: this line read "96" and
+//                                  "239", which are wrong by +/-72 B and cancel,
+//                                  so the total was right and neither term was.
+//                                  spr_mini8 is MIC_COUNT = 21 icons x 8 B; 96
+//                                  would be twelve. The test below now asserts
+//                                  the four TERMS and not only their sum, which
+//                                  is what let two wrong numbers sit next to a
+//                                  passing assertion in three files.)
 //      END STATE        10,247 B   = SPRITE_DATA_BYTES_DECLARED below
 //      margin            1,017 B   SEVEN more 24x24x2 sets (1,008 B): one more
 //                                  three-stage family and four effect sets,
@@ -365,8 +373,12 @@ NT_SPR_REF_FITS(spr_emo_spark,     SPRITE_EMOTES, EMO_SPARK);
 //                                  P10's animation pass could plausibly want
 //      MAX              11,264 B   the two, rounded up to 11 KiB
 //
-//  That is 0.47 % of the 2,400,000 B flash cap and 4.1 % of the 273,600 B the
-//  release variant had spare at 37511d5. A roster that grows past it is not a
+//  That is 0.70 % of the 1,600,000 B RELEASE flash cap and 4.1 % of the 273,600 B
+//  the release variant had spare at 37511d5. Both halves name the same variant
+//  now: the sentence used to quote 0.47 % of GATE_FLASH_MAX (2,400,000), which
+//  check.sh polices on the BASELINE build, beside a number derived from
+//  GATE_RELEASE_FLASH_MAX - the two-caps confusion docs/decisions.md already has
+//  a paragraph correcting. A roster that grows past it is not a
 //  budget failure to absorb, it is a re-plan: 21 families would need this number
 //  raised and said out loud, which is exactly the conversation 24,576 was
 //  swallowing.

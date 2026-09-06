@@ -42,6 +42,22 @@ fi
 if [ $DO_TESTS -eq 1 ]; then
   make -C "$ROOT/tests" check || fail "host tests"
 
+  # --- THE INSTRUMENTS MUST STILL COMPILE (P9-C6) ---------------------------
+  # tests/tools/ holds five binaries that answer a HUMAN rather than an
+  # assertion - sprite_dump (the only instrument for "does this body look like a
+  # creature", and now for the composited blink frame), corrupt_view,
+  # balance_matrix, sim_days, creator_decode - and none of them is in
+  # `make check`, correctly, because they assert nothing. But nothing BUILT them
+  # either, so any of them could stop compiling without a word and the next
+  # phase would find its review instrument gone at the moment it reached for it.
+  # P9-C5 named this and declined to fix it on the grounds that adding a build
+  # to the gate is a change to what every future commit pays for. It is the
+  # phase exit's call to make: it costs about 4 s and the alternative is a review
+  # instrument that rots in silence.
+  make -C "$ROOT/tests" spritetool corrupttool balancetool pagetool \
+    >/dev/null || fail "tests/tools/ instruments no longer build - they are the "\
+"only answer this project has to \"does the art look right\" (tests/Makefile)"
+
   # --- THE SANITISER RUN (P8 exit) ------------------------------------------
   # THE ONE PROPERTY THE PLAIN SUITE STRUCTURALLY CANNOT CHECK, on the first
   # code in this product that reads bytes from outside the device.
@@ -150,6 +166,19 @@ if [ -f "$ROOT/tools/gen_sprites.py" ]; then
       python3 "$ROOT/tools/gen_sprites.py" --check --quiet >/dev/null \
         || fail "src/data/sprites_pebbles.h and tools/sprites/ have drifted apart "\
 "(run: python3 tools/gen_sprites.py)"
+      # AND THE PER-FILE ART CONTRACT, ADDED AT P9-C6. `--check` proves only that
+      # the header matches the .txt files; it passes a frame 1 that is a byte
+      # copy of frame 0, a body carrying another species' pixels, and a body
+      # lifted off the floor - the three defects the art agents were told to run
+      # `--self-check` for and that no gate ran. It costs 0.2 s and it refuses the
+      # WHOLE tree (manifest, species binding, budget, identical frames), so the
+      # command five hands were told to trust is the command the gate runs.
+      # The host suite still owns the rest and names the body: see
+      # tests/test_sprite_pipeline.cpp (no_two_species_bodies_hold_the_same_pixels,
+      # every_body_has_ink_on_its_last_row, the_blink_closes_holes_...).
+      python3 "$ROOT/tools/gen_sprites.py" --self-check >/dev/null \
+        || fail "tools/sprites/ fails its own --self-check "\
+"(run: python3 tools/gen_sprites.py --self-check)"
     else
       echo "check.sh: python3 not found, SKIPPING the sprite gate" >&2
     fi
@@ -1198,9 +1227,26 @@ fi
 # The form below strips every trailing comment FIRST and then requires a call
 # with an ARGUMENT - `cor_service(` followed by something that is not `)` - so a
 # mention in prose, in a comment or in a declaration cannot stand in for one.
+#
+# AND IT MISSED THE OTHER COMMENT SYNTAX UNTIL P9-C6. `sed 's://.*::'` strips
+# line comments only, so wrapping the call site in /* ... */ - which is what a
+# person bisecting a bug actually does - left the gate green AND the suite green,
+# because test_corruption.cpp drives cor_service() directly and cannot see that
+# no device calls it. That is the four-phase-old defect this gate exists to stop
+# (cor_expire() with no caller) surviving inside the gate written to stop it. The
+# preprocessor is what strips comments correctly, so that is what strips them:
+# `cpp -fpreprocessed -dD -E -P` removes /* */ and // without touching #include
+# lines or expanding anything. If cpp is unavailable the sed fallback still runs,
+# and says so, rather than the gate quietly passing.
 if [ -f "$SKETCH/src/game/corruption.cpp" ]; then
+  if command -v cpp >/dev/null 2>&1; then
+    strip_comments() { cpp -fpreprocessed -dD -E -P - 2>/dev/null; }
+  else
+    echo "check.sh: NOTE - cpp not found, cor_service gate falls back to line-comment stripping only"
+    strip_comments() { sed 's://.*::'; }
+  fi
   n=$( { cat "$SKETCH"/src/app/*.cpp 2>/dev/null || true; } \
-        | sed 's://.*::' \
+        | strip_comments \
         | { grep -cE '\bcor_service[[:space:]]*\([^)]' || true; } )
   [ "${n:-0}" -ge 1 ] || fail "cor_service() has NO caller in src/app ($n) - the 24 h corruption deadline would be written and never read on a device, exactly as cor_expire() was from P5-C3 to P9-C5 (game/corruption.h)"
 fi
@@ -1219,11 +1265,16 @@ fi
 # include is a red line rather than a convention. It matches #include LINES
 # ONLY - corrupt_fx.h discusses render.h and rd_dither_rect_phase() in prose on
 # purpose, and must not trip it.
+# P9-C6 adds ui/petfx_core.{h,cpp} to the same red line, for the same reason and
+# with a bigger receipt: pf_build_lids() lived inside petfx.cpp behind a banner
+# that CLAIMED it was host-testable, no host binary ever compiled it, and the
+# blink it composites was drawing over four species' bodies while every byte
+# check in the tree passed. It is the guarded file now, so it stays linkable.
 if [ -f "$SKETCH/src/ui/corrupt_fx.cpp" ]; then
-  for f in corrupt_fx.h corrupt_fx.cpp; do
+  for f in corrupt_fx.h corrupt_fx.cpp petfx_core.h petfx_core.cpp; do
     n=$( { grep -nE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*(Arduino\.h|u8g2|U8g2|render\.h|gfx\.h|petfx\.h|pet_view\.h)' \
             "$SKETCH/src/ui/$f" || true; } | wc -l )
-    [ "$n" -eq 0 ] || fail "ui/$f includes a renderer or device header ($n) - it exists to be host-linkable (ui/corrupt_fx.h)"
+    [ "$n" -eq 0 ] || fail "ui/$f includes a renderer or device header ($n) - it exists to be host-linkable (ui/corrupt_fx.h, ui/petfx_core.h)"
   done
 fi
 

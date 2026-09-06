@@ -566,38 +566,28 @@ def hairlines(rows, w, h):
 
 
 # The band pf_build_lids() closes when a body blinks. y1 < y0 means "this body
-# does not blink" and ui/petfx.cpp's pf_build_lids() already returns 0 for it.
+# does not blink" and ui/petfx_core.cpp's pf_build_lids() already returns 0 for
+# it.
 NO_EYES = (255, 0, 0, 0)
 
+# An eye is a small hole. These two numbers are what "small" means, and they are
+# the difference between a blink and a body going solid:
+#   EYE_MAX_H  an eye socket is not nine rows tall. Above this the hole is a
+#              cavity, a slot or the gap inside an arc. (The DEVICE truncates a
+#              band at PF_EYE_MAX_H = 12 without saying so; staying under 8 means
+#              that truncation can never fire.)
+#   EYE_MIN_PX a one- or two-pixel nick is not an eye, and a "blink" that moves
+#              two pixels is a claim the panel does not honour.
+# A hole wider than half the body is not an eye either.
+EYE_MAX_H = 8
+EYE_MIN_PX = 3
+EYE_MAX_CAND = 8            # bounds the subset search below; see _eye_groups()
 
-def eye_band(rows, w, h):
-    """WHERE THE EYES ARE, DERIVED FROM THE ART instead of measured by hand.
 
-    ui/petfx.cpp carried a 24-row hand-authored table of eyelid bands, indexed
-    by set id, 1,100 lines away from the pixels it describes; its own comment
-    records that the automatic heuristic of the day got 30 of 38 sets right and
-    that the rest were read off the decoded art by eye. Sixty bodies would have
-    made that 60 rows of the same. This derives the band from the same file as
-    the pixels, so the two cannot drift, and the rule is stated rather than
-    tuned:
-
-      an eye is a HOLE - unlit pixels fully enclosed by ink - in the TOP 60 %
-      of the body's ink box.
-
-    Every one of the sixty bodies was drawn to that rule on purpose (a 1px lit
-    outline does not survive 1x, so every agent punched eyes rather than
-    outlining them), which is why it can be a rule here at all.
-
-    WHAT IT GETS WRONG, said plainly: any other enclosed hole in the top 60 % -
-    a mouth drawn high, a window, the gap inside a crescent - is included, so
-    that body blinks with more than its eyes. It never reaches outside the body
-    and it never covers the whole face, so the failure is an ugly blink, not a
-    corrupted frame; and it is now visible in ONE place beside the pixels.
-    """
-    x0b, y0b, x1b, y1b, ink = ink_box(rows)
-    if not ink:
-        return NO_EYES
-    # Flood the background from the border: what it cannot reach is a hole.
+def _holes(rows, w, h):
+    """Unlit pixels the background cannot reach: the enclosed holes of the
+    drawing. Flood 4-connected from the border, everything unlit and unvisited
+    is a hole."""
     outside = [[False] * w for _ in range(h)]
     stack = []
     for x in range(w):
@@ -618,16 +608,160 @@ def eye_band(rows, w, h):
                     and not outside[ny][nx]):
                 outside[ny][nx] = True
                 stack.append((nx, ny))
-    cut = y0b + ((y1b - y0b) * 3) // 5      # the top 60 % of the ink box
-    ys, xs = [], []
-    for y in range(y0b, min(cut, h - 1) + 1):
-        for x in range(w):
-            if rows[y][x] != INK and not outside[y][x]:
-                ys.append(y)
-                xs.append(x)
-    if not ys:
+    return set((x, y) for y in range(h) for x in range(w)
+               if rows[y][x] != INK and not outside[y][x])
+
+
+def _hole_clusters(rows, w, h):
+    """The holes grouped into 4-connected clusters: one cluster is one socket.
+    Biggest first, then topmost, then leftmost, so the order is deterministic."""
+    hs = _holes(rows, w, h)
+    seen, out = set(), []
+    for p in sorted(hs):
+        if p in seen:
+            continue
+        stack, cl = [p], []
+        seen.add(p)
+        while stack:
+            c = stack.pop()
+            cl.append(c)
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                q = (c[0] + dx, c[1] + dy)
+                if q in hs and q not in seen:
+                    seen.add(q)
+                    stack.append(q)
+        xs = [a for a, _ in cl]
+        ys = [b for _, b in cl]
+        out.append({"n": len(cl), "x0": min(xs), "x1": max(xs),
+                    "y0": min(ys), "y1": max(ys)})
+    out.sort(key=lambda c: (-c["n"], c["y0"], c["x0"]))
+    return out
+
+
+def blink_fill(rows, w, h, band):
+    """WHAT THE DEVICE WILL ACTUALLY FILL, by the same rule as the device.
+
+    This is a transcription of ui/petfx_core.cpp's pf_build_lids() fill loop -
+    every run of unlit pixels bounded by ink ON ITS OWN ROW, inside the x window,
+    on every row of the band. It is a SECOND implementation and it is here on
+    purpose: the generator's job is to emit a band that this rule handles, so it
+    has to know the rule. It is not the guard. The guard is
+    tests/test_sprite_pipeline.cpp, which calls the SHIPPED pf_build_lids() over
+    the SHIPPED atlas and asserts the same property; if this transcription ever
+    drifts from that function, that test fails and this one goes quiet, which is
+    the right way round.
+
+    Returns the set of (x, y) the fill would light, or None for "no band".
+    """
+    y0, y1, x0, x1 = band
+    if y0 == 255 or y1 >= h or y1 < y0:
+        return None
+    bh = min(y1 - y0 + 1, 12)                    # PF_EYE_MAX_H
+    x1 = min(x1, w - 1)
+    out = set()
+    for r in range(bh):
+        row = rows[y0 + r]
+        lit = [x for x in range(w) if row[x] == INK]
+        if not lit:
+            continue
+        last = lit[-1]
+        x = 0
+        while x < last and row[x] != INK:
+            x += 1
+        while x < last:
+            if row[x] == INK:
+                x += 1
+                continue
+            s = x
+            while x <= last and row[x] != INK:
+                x += 1
+            if s >= x0 and (x - 1) <= x1:
+                for k in range(s, x):
+                    out.add((k, y0 + r))
+    return out or None
+
+
+def _eye_groups(cand):
+    """Every set of candidate holes that can be CLOSED TOGETHER: their rows must
+    overlap, or one would be shut while the other is open. Yielded best-first -
+    most holes, then most pixels, then highest on the body - so the first one
+    that survives verification is the answer and the search stops."""
+    import itertools
+    idx = range(len(cand))
+    subs = []
+    for r in range(len(cand), 0, -1):
+        for sub in itertools.combinations(idx, r):
+            g = [cand[i] for i in sub]
+            if any(not (g[i]["y0"] <= g[j]["y1"] and g[i]["y1"] >= g[j]["y0"])
+                   for i in range(len(g)) for j in range(i + 1, len(g))):
+                continue
+            subs.append(g)
+    subs.sort(key=lambda g: (-len(g), -sum(c["n"] for c in g),
+                             min(c["y0"] for c in g)))
+    return subs
+
+
+def eye_band(rows, w, h):
+    """WHERE THE EYES ARE, DERIVED FROM THE ART instead of measured by hand.
+
+    THE RULE, and it is about the drawing rather than about a percentage of the
+    box:
+
+        an eye is an enclosed HOLE - unlit pixels the background cannot reach -
+        of at least EYE_MIN_PX pixels, at most EYE_MAX_H rows tall and at most
+        half the body wide. THE EYES are the biggest group of such holes that
+        can be closed together WITHOUT CLOSING ANYTHING THAT IS NOT A HOLE.
+
+    That last clause is the whole of it, and it is checked rather than assumed:
+    the candidate band is run through blink_fill() - the device's own row-wise
+    rule - and rejected if one filled pixel is not a hole pixel. Groups are tried
+    best-first (most holes, then most pixels, then highest), so a PAIR of eyes
+    beats a single decorative slot even when the slot has more pixels; PAKETO is
+    exactly that case.
+
+    WHAT THIS REPLACED, because the failure is the reason the rule is written
+    this way. Until P9-C6 the rule was "the bounding box of every enclosed hole
+    in the top 60 % of the ink box", and its own docstring called what it got
+    wrong "an ugly blink on one body". It was four bodies and it was not ugly:
+    the band became most of the sprite, pf_build_lids() fills every interior run
+    on every row of the band, and the blink drew the creature solid - DENYRA
+    +79 px on 283, BLAKLIX +78 on 264, MURAX +68 on 242, and PANOPTIX losing all
+    nine of the eyes it is named for. Nothing in the tree could see it: the
+    composited blink frame is not in the atlas, and the only assertion about the
+    band was that it lay inside the sprite and contained one unlit pixel.
+
+    The old rule also claimed "every one of the sixty bodies was drawn to that
+    rule on purpose". It was not: BIPPO ("one eye on the foot"), TIMAUT ("the
+    hollow is the face") and KLONIX ("the mask's eye slots blink shut") all draw
+    their face BELOW the 60 % cut and all three were silently emitted as
+    non-blinkers. There is no cut any more.
+
+    WHAT THIS ONE CANNOT DO, said as plainly. It cannot tell an eye from any
+    other small enclosed hole - a porthole, a bolt, a bite - so a body whose only
+    small hole is decorative blinks with that instead. It never fills anything
+    that is not a hole, and it never reaches outside the body, so the worst case
+    is a blink in the wrong place rather than a body erased. Which bodies blink,
+    where, and by how many pixels is printed per file by --self-check and drawn
+    by `tests/bin/sprite_dump blink NAME`, and a human has to look.
+    """
+    x0b, y0b, x1b, y1b, ink = ink_box(rows)
+    if not ink:
         return NO_EYES
-    return (min(ys), max(ys), max(0, min(xs) - 1), min(w - 1, max(xs) + 1))
+    hs = _holes(rows, w, h)
+    cand = [c for c in _hole_clusters(rows, w, h)
+            if c["n"] >= EYE_MIN_PX
+            and (c["y1"] - c["y0"] + 1) <= EYE_MAX_H
+            and (c["x1"] - c["x0"] + 1) <= w // 2][:EYE_MAX_CAND]
+    if not cand:
+        return NO_EYES
+    for g in _eye_groups(cand):
+        band = (min(c["y0"] for c in g), max(c["y1"] for c in g),
+                max(0, min(c["x0"] for c in g) - 1),
+                min(w - 1, max(c["x1"] for c in g) + 1))
+        fill = blink_fill(rows, w, h, band)
+        if fill and all(p in hs for p in fill):
+            return band
+    return NO_EYES
 
 
 # =============================================================================
@@ -732,10 +866,18 @@ def emit(sets):
     o.append("#include <stdint.h>")
     o.append('#include "sprite_types.h"')
     o.append("")
-    o.append("// Derived from the emitted bytes and the set order (FNV-1a 32 folded to 16),")
-    o.append("// so it moves when the art moves and cannot be forgotten. P9-C3 wires")
-    o.append("// SPRITE_REV to it; ui/petfx.cpp:41 then breaks the build on purpose when the")
-    o.append("// art its hand-measured eyelid table was read off changes.")
+    o.append("// Derived from the emitted bytes, the set order and the eye bands (FNV-1a 32")
+    o.append("// folded to 16), so it moves when the art moves and cannot be forgotten.")
+    o.append("// data/sprites.h defines SPRITE_REV as this value.")
+    o.append("//")
+    o.append("// WHAT IT DOES NOT BUY, corrected at P9-C6 because this banner claimed it for")
+    o.append("// three chunks: there is no static_assert(SPRITE_REV == n) anywhere any more.")
+    o.append("// P9-C3 deleted it together with the hand-measured eyelid table it froze - a")
+    o.append("// derived hash pinned to a literal would have to be re-typed after every art")
+    o.append("// edit, which is the failure mode the assert existed to prevent. This number")
+    o.append("// is a DIAG readout and a cache key. The guards on the art are")
+    o.append("// tools/gen_sprites.py --check (drift), the static_asserts below (geometry)")
+    o.append("// and tests/test_sprite_pipeline.cpp (everything else).")
     o.append("#define PB_SPRITE_ART_HASH 0x%04Xu" % art_hash(sets))
     o.append("")
     o.append("// Set ids. The ORDER IS A CONTRACT and comes from tools/sprites/atlas.txt,")
@@ -794,13 +936,21 @@ def emit(sets):
     o.append("//  by static_assert(SPRITE_REV == 1) because nothing else could notice when")
     o.append("//  the two drifted. Sixty bodies would have made it sixty rows of the same.")
     o.append("//  These come out of the same .txt files as the pixels, by one stated rule -")
-    o.append("//  an eye is a HOLE (unlit pixels fully enclosed by ink) in the top 60 % of")
-    o.append("//  the body's ink box - so they cannot drift, and what the rule gets wrong")
-    o.append("//  is written down in gen_sprites.py's eye_band() rather than discovered.")
+    o.append("//  an eye is an enclosed HOLE, and THE EYES are the biggest group of holes")
+    o.append("//  that can be closed together without closing anything that is not a hole -")
+    o.append("//  so they cannot drift from the art, and what the rule gets wrong is written")
+    o.append("//  down in gen_sprites.py's eye_band() rather than discovered.")
+    o.append("//")
+    o.append("//  THE GUARD IS NOT HERE. The band is only half the blink; the other half is")
+    o.append("//  ui/petfx_core.cpp's pf_build_lids(), and until P9-C6 that function was in")
+    o.append("//  a translation unit no host binary could link, so the composited blink")
+    o.append("//  frame was a picture nothing in the tree had ever drawn. It is now:")
+    o.append("//  tests/test_sprite_pipeline.cpp runs the shipped fill over the shipped")
+    o.append("//  atlas, and tests/bin/sprite_dump blink NAME draws it for a human.")
     o.append("//")
     o.append("//  { 255, 0, 0, 0 } means THIS BODY DOES NOT BLINK: y1 < y0, which")
     o.append("//  pf_build_lids() already answers 0 for. It is what a body with no")
-    o.append("//  enclosed hole in its upper face gets, and it is a legal answer.")
+    o.append("//  small enclosed hole gets, and it is a legal answer.")
     o.append("inline constexpr SpriteEyeBand PB_SPRITE_EYES[PB_SPRITE_SET_COUNT][%d] = {"
              % max(len(s["frames"]) for s in sets))
     for s in sets:
@@ -914,11 +1064,17 @@ def describe(s, verbose=True):
                       "  (%d blank row(s) under the body)" % (s["h"] - 1 - y1)))
         hair = hairlines(rows, s["w"], s["h"])
         eb = eye_band(rows, s["w"], s["h"])
+        if eb == NO_EYES:
+            eyes = "none (this body does not blink)"
+        else:
+            fill = blink_fill(rows, s["w"], s["h"], eb) or set()
+            eyes = ("y %d..%d x %d..%d, blink closes %d px (%d%% of the ink)"
+                    % (eb[0], eb[1], eb[2], eb[3], len(fill),
+                       (100 * len(fill) + n // 2) // max(1, n)))
         out.append("           %d piece(s), %d hairline px%s, eyes %s"
                    % (components(rows, s["w"], s["h"]), hair,
                       "  <-- 1px-wide ink reads as dirt at 1x" if hair else "",
-                      "none" if eb == NO_EYES else
-                      "y %d..%d x %d..%d" % (eb[0], eb[1], eb[2], eb[3])))
+                      eyes))
     d = frame_diff(s)
     if d is not None:
         out.append("  frames differ in %d px%s"
@@ -1042,11 +1198,22 @@ def self_check(files):
         total = sum(set_bytes(s) for s in sets)
         print("self-check: %d set(s) OK, %d B of art, %d over budget"
               % (len(sets), total, max(0, total - PB_DATA_BYTES_MAX)))
+        rc = 0
+        # A SET WHOSE TWO FRAMES ARE THE SAME BYTES IS AN ERROR HERE TOO (P9-C6).
+        # The per-file path has failed on it since P9-C3 ("this body does not
+        # animate", exit 1); this path only WARNED and returned 0, so the whole
+        # -tree form of the same command was the weaker one - and it is the form
+        # tools/check.sh runs. Two behaviours for one flag is how a check gets
+        # trusted for something it does not do.
+        if same:
+            sys.stderr.write("gen_sprites.py: %d set(s) do not animate: %s\n"
+                             % (len(same), ", ".join(same)))
+            rc = 1
         if total > PB_DATA_BYTES_MAX:
             sys.stderr.write("gen_sprites.py: %d B of art over the %d B budget\n"
                              % (total, PB_DATA_BYTES_MAX))
-            return 1
-        return 0
+            rc = 1
+        return rc
 
     try:
         listed = set(read_manifest())

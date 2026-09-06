@@ -36,6 +36,7 @@
 #include "data/species_table.h"
 #include "data/sprites.h"
 #include "data/sprites_pebbles.h"
+#include "ui/petfx_core.h"
 
 // The decode, written out once. Same rule as data/sprite_types.h, same rule as
 // u8g2's drawXBM and the host fake's gfx_xbm: row stride ((w+7)>>3) bytes, byte
@@ -152,6 +153,29 @@ TEST(every_generated_frame_has_ink_and_no_stray_padding_bits) {
       CHECK(ink > 0);                   // a blank frame makes the pet vanish
     }
   }
+
+  // THE PADDING HALF ABOVE IS DEAD CODE ON THIS ATLAS AND SAYING SO IS THE
+  // POINT (P9-C6). Every one of the 64 generated sets is 24x24, so stride is 3,
+  // pad is 0, mask is 0 and the `if (mask)` body never executes: the case's name
+  // claims two properties and the input can only exercise one. The emote sets in
+  // data/sprites.h are 5x7, 6x8, 12x10 and 14x8 - they carry REAL padding bits,
+  // they are the shape this check was written for, and they go through the same
+  // xbm_mirror and the same art hash. So the padding half is given something to
+  // check rather than left latent under a name that implies it ran.
+  int padded_rows = 0;
+  for (int i = 0; i < (int)EMO_COUNT; ++i) {
+    const SpriteRef& e = SPRITE_EMOTES[i];
+    const int stride = ((int)e.w + 7) >> 3;
+    const int pad    = stride * 8 - (int)e.w;
+    if (!pad) continue;
+    const unsigned mask = (unsigned)((0xFFu << (8 - pad)) & 0xFFu);
+    for (int y = 0; y < (int)e.h; ++y) {
+      ++padded_rows;
+      CHECK_EQ(e.bits[y * stride + stride - 1] & mask, 0u);
+    }
+  }
+  // ...and the walk is not vacuous: some emote really does have a padded row.
+  CHECK(padded_rows > 0);
 }
 
 // The generator WARNS about this on every run; here it is fatal, because a warning
@@ -173,6 +197,82 @@ TEST(a_two_frame_set_actually_animates) {
     }
     CHECK(diff > 0);
   }
+}
+
+// THE IDLE HAS A SIZE AND A SHAPE, NOT JUST A NONZERO DIFFERENCE (P9-C6).
+//
+// `diff > 0` above was the ONLY thing this repository said about the idle
+// animation, and the P9 exit review measured what that permits: amplitude across
+// the shipped roster varied 22x with no floor and no ceiling. At the bottom,
+// KLONIX's entire idle was SIX PIXELS ON ONE ROW - a 7px bar swapping sides in a
+// 187 px body, 3.2 % of its ink, a diff box 1.6 % of its body box - which on a
+// mono panel reads as a display fault rather than as a creature breathing, and
+// which passed `diff > 0` with room to spare. At the top, JITERA changed 70 of
+// its 109 px, the two body halves shearing 3 px in opposite directions, which
+// reads as horizontal tearing; three other files in the roster explicitly refuse
+// that for themselves ("the jump moves 96 px and reads as a second drawing") so
+// the roster contained both the failure and its own written cure.
+//
+// FOUR BODIES WERE EDITED RATHER THAN EXEMPTED: KLONIX (its crest now leans, 6 ->
+// 16 px over 4 rows), MEMORO (2.9 % -> 5.7 %), MURAX (3.3 % -> 7.4 %) and JITERA
+// (64.2 % -> 27.5 %, by halving both jitter offsets to 1 px, which is the change
+// jitera.txt's own header offered a reviewer in as many words).
+//
+// WHAT THE BOUNDS ARE AND WHERE THEY COME FROM. They are MEASURED, not chosen:
+// after those four edits the roster runs from 4.3 % (EXPLOID, SICK) to 41.5 %
+// (ROOTKAR, which the review called the best idle in the set - the whole body
+// drops 1 px while the legs splay). So 4 % and 45 % are the measured range with a
+// small margin. Re-measure them if the art changes; do not widen one to make a
+// build pass.
+//
+// AND WHAT THEY DO NOT SAY, because a bound that is quietly weaker than its name
+// is this project's recurring defect. `>= 2 rows and >= 2 columns` is a floor on
+// SHAPE that catches exactly the KLONIX failure (one row) and nothing subtler. A
+// 3-row rule would fail six bodies today - EXPLOID, GATEON, NULIX, BEAKON,
+// PROBIX and BUGGO, each of which moves one 4-8 px feature between two rows - and
+// for family 20 it would fight the design: cookit.txt's whole idea is that the
+// PUPIL is the only moving part. Six exceptions would make the rule a list. It is
+// written down here as owed instead, with the numbers, so the next art pass can
+// decide it rather than rediscover it.
+TEST(the_idle_animation_has_an_amplitude_and_a_spread) {
+  int lo = 1000, hi = 0;
+  for (int i = 0; i < (int)PB_SPRITE_SET_COUNT; ++i) {
+    const SpriteSet& s = PB_SPRITE_SETS[i];
+    if (s.frames < 2) continue;
+    int diff = 0, ink = 0;
+    bool row_hit[24] = {false}, col_hit[24] = {false};
+    for (int y = 0; y < (int)s.h; ++y)
+      for (int x = 0; x < (int)s.w; ++x) {
+        ink += pixel_at(s, 0, x, y);
+        if (pixel_at(s, 0, x, y) != pixel_at(s, 1, x, y)) {
+          ++diff;
+          row_hit[y] = true;
+          col_hit[x] = true;
+        }
+      }
+    int rows = 0, cols = 0;
+    for (int k = 0; k < 24; ++k) { rows += row_hit[k]; cols += col_hit[k]; }
+
+    const int pct = (100 * diff) / (ink ? ink : 1);
+    if (pct < 4 || pct > 45) nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+    CHECK(pct >= 4);
+    CHECK(pct <= 45);
+    // An absolute floor as well as a relative one: 4 % of a 300 px body is 12 px,
+    // but 4 % of a 79 px body is 3, and three pixels is not an animation.
+    if (diff < 6) nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+    CHECK(diff >= 6);
+    // THE SHAPE. One row of pixels flickering is the defect this half exists for.
+    if (rows < 2 || cols < 2) nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+    CHECK(rows >= 2);
+    CHECK(cols >= 2);
+
+    if (pct < lo) lo = pct;
+    if (pct > hi) hi = pct;
+  }
+  // The measured range, pinned so a change to the roster's spread is a visible
+  // fact in the diff rather than a silent drift inside the band.
+  CHECK_EQ(lo, 4);
+  CHECK_EQ(hi, 41);
 }
 
 // =============================================================================
@@ -280,6 +380,16 @@ TEST(every_body_has_ink_on_its_last_row) {
 // as a test, for the same reason section 5 below exists - and it additionally
 // checks the property the static_assert cannot express cheaply: a band that
 // says a body blinks must actually contain an unlit pixel to close.
+//
+// THE COUNT IS PINNED AT P9-C6 AND THAT IS THE POINT OF THIS EDIT. It used to
+// read `CHECK(blinkers > PB_SPRITE_SET_COUNT)` against a value of 118, i.e. 53
+// of the 128 bands could be dropped ONE AT A TIME with the suite green - the
+// aggregate-mask shape the phase-8 review was caught with, and the exit review
+// demonstrated it: moving the derivation's cut from 60 % to 40 % took 26 bodies'
+// blinks away and printed ALL PASS 51/51 and GATE OK. An equality cannot do
+// that. It is a RECORDED FACT, not a rule: if you change the art or the
+// derivation, run `python3 tools/gen_sprites.py --self-check tools/sprites/*.txt`,
+// count the frames that report eyes, and re-record it here in the same commit.
 TEST(every_eye_band_lies_inside_its_body_and_has_something_to_close) {
   int blinkers = 0;
   for (int i = 0; i < (int)PB_SPRITE_SET_COUNT; ++i) {
@@ -291,6 +401,13 @@ TEST(every_eye_band_lies_inside_its_body_and_has_something_to_close) {
       CHECK(e.y1 < s.h);
       CHECK(e.x1 < s.w);
       CHECK(e.x0 <= e.x1);
+      // The device truncates a band taller than PF_EYE_MAX_H WITHOUT SAYING SO
+      // (ui/petfx_core.cpp: `if (bh > PF_EYE_MAX_H) bh = PF_EYE_MAX_H;`), which
+      // would silently blink half a socket. The generator's own EYE_MAX_H is 8;
+      // this is the other end of that agreement.
+      if ((int)e.y1 - (int)e.y0 + 1 > PF_EYE_MAX_H)
+        nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+      CHECK((int)e.y1 - (int)e.y0 + 1 <= PF_EYE_MAX_H);
       int holes = 0;
       for (int y = e.y0; y <= (int)e.y1; ++y)
         for (int x = e.x0; x <= (int)e.x1; ++x)
@@ -299,10 +416,174 @@ TEST(every_eye_band_lies_inside_its_body_and_has_something_to_close) {
       CHECK(holes > 0);
     }
   }
-  // Most of the roster blinks. If this ever reads 0 the derivation has broken
-  // in a way every other assertion above would pass: an all-{255,0,0,0} table
-  // is "inside its body" for every set.
-  CHECK(blinkers > (int)PB_SPRITE_SET_COUNT);
+  CHECK_EQ(blinkers, 121);
+}
+
+// =============================================================================
+//  3b. THE BLINK ITSELF - THE FRAME NOTHING IN THIS TREE HAD EVER DRAWN
+//
+//  WHY THIS CASE EXISTS. The atlas holds two authored frames per set. The frame
+//  the player sees while a pet blinks is in NEITHER of them: it is composited at
+//  draw time from the art plus pf_build_lids() plus one eye band. Until P9-C6
+//  pf_build_lids() lived in ui/petfx.cpp, which includes render.h -> Arduino.h,
+//  so no host binary could link it and no test could draw that frame. The P9
+//  exit review composited it by hand in Python and found four bodies whose
+//  "blink" filled a third of the creature solid - DENYRA +79 px on 283, BLAKLIX
+//  +78 on 264, MURAX +68 on 242, PANOPTIX losing all nine eyes it is named for -
+//  while every byte check, every golden and the gate stayed green.
+//
+//  THE PROPERTY, stated so it is clear what it does and does not say:
+//    A BLINK MAY CLOSE HOLES. IT MAY NOT DRAW OVER THE BODY.
+//  Every pixel pf_build_lids() fills must be a pixel the background cannot
+//  reach - an enclosed hole of that frame's own drawing. That is computed HERE,
+//  from the pixels, by a flood fill; it is not read back from the generator, so
+//  a generator that emitted a nonsense band cannot satisfy it by agreeing with
+//  itself.
+//
+//  WHAT IT STILL CANNOT SAY: that the hole being closed is an EYE. A body whose
+//  only small hole is a porthole blinks with the porthole and passes here. That
+//  needs a person and `./bin/sprite_dump blink NAME` is what they look at.
+// =============================================================================
+
+// Unlit pixels the background can reach, 4-connected from the border. Anything
+// unlit and unreached is an enclosed hole.
+static void reachable_gaps(const SpriteSet& s, int frame, bool* out /*w*h*/) {
+  const int w = s.w, h = s.h;
+  for (int k = 0; k < w * h; ++k) out[k] = false;
+  int stack[24 * 24 * 2];
+  int sp = 0;
+  const int edge_y[2] = {0, h - 1};
+  const int edge_x[2] = {0, w - 1};
+  for (int x = 0; x < w; ++x)
+    for (int k = 0; k < 2; ++k) {
+      const int y = edge_y[k];
+      if (!pixel_at(s, frame, x, y) && !out[y * w + x]) { out[y * w + x] = true; stack[sp++] = y * w + x; }
+    }
+  for (int y = 0; y < h; ++y)
+    for (int k = 0; k < 2; ++k) {
+      const int x = edge_x[k];
+      if (!pixel_at(s, frame, x, y) && !out[y * w + x]) { out[y * w + x] = true; stack[sp++] = y * w + x; }
+    }
+  while (sp > 0) {
+    const int c = stack[--sp], cx = c % w, cy = c / w;
+    const int dx[4] = {1, -1, 0, 0}, dy[4] = {0, 0, 1, -1};
+    for (int d = 0; d < 4; ++d) {
+      const int nx = cx + dx[d], ny = cy + dy[d];
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+      if (pixel_at(s, frame, nx, ny) || out[ny * w + nx]) continue;
+      out[ny * w + nx] = true;
+      stack[sp++] = ny * w + nx;
+    }
+  }
+}
+
+// Runs the SHIPPED pf_build_lids() for one (set, frame) with one band and
+// reports how many pixels it fills and how many of those are not holes.
+struct BlinkResult { int rows; int filled; int over_body; int max_x; int changed; };
+static BlinkResult blink_of(const SpriteSet& s, int frame, SpriteEyeBand e) {
+  uint8_t fill[PF_STRIP_BYTES], lid[PF_STRIP_BYTES];
+  memset(fill, 0xAA, sizeof fill);
+  memset(lid,  0xAA, sizeof lid);
+  const int stride = ((int)s.w + 7) >> 3;
+  const uint8_t* bits = s.bits + (ptrdiff_t)stride * s.h * frame;
+  BlinkResult r{0, 0, 0, -1, 0};
+  r.rows = (int)pf_build_lids(bits, s.w, s.h, e.y0, e.y1, e.x0, e.x1, fill, lid);
+  if (r.rows == 0) return r;
+  bool reach[24 * 24];
+  reachable_gaps(s, frame, reach);
+  for (int row = 0; row < r.rows; ++row)
+    for (int x = 0; x < (int)s.w; ++x) {
+      const int y   = (int)e.y0 + row;
+      const int fbit = (fill[row * stride + (x >> 3)] >> (x & 7)) & 1;
+      const int lbit = (lid [row * stride + (x >> 3)] >> (x & 7)) & 1;
+      // What the panel ends up with: the body, then the fill at colour 1, then
+      // the lash at colour 0. render.h's drawXBM order, in two bits.
+      const int was = pixel_at(s, frame, x, y);
+      const int now = lbit ? 0 : (fbit ? 1 : was);
+      if (was != now) ++r.changed;
+      if (!fbit) continue;
+      ++r.filled;
+      if (x > r.max_x) r.max_x = x;
+      if (was || reach[y * (int)s.w + x]) ++r.over_body;
+    }
+  return r;
+}
+
+TEST(the_blink_closes_holes_and_never_draws_over_the_body) {
+  int worst_pct = 0, blinkers = 0;
+  for (int i = 0; i < (int)PB_SPRITE_SET_COUNT; ++i) {
+    const SpriteSet& s = PB_SPRITE_SETS[i];
+    for (int f = 0; f < (int)s.frames; ++f) {
+      const SpriteEyeBand e = sprite_eyes((uint8_t)i, (uint8_t)f);
+      const BlinkResult r = blink_of(s, f, e);
+      if (e.y1 < e.y0) {
+        // "does not blink" must actually not blink - the band and the fill are
+        // two different mechanisms and this is where they have to agree.
+        CHECK_EQ(r.rows, 0);
+        continue;
+      }
+      ++blinkers;
+      // A band that claims to blink and fills nothing is a lie the old
+      // assertion could not tell from a blink.
+      if (r.filled == 0) nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+      CHECK(r.filled > 0);
+      // THE PROPERTY.
+      if (r.over_body != 0) nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+      CHECK_EQ(r.over_body, 0);
+      // Nothing outside the sprite, ever.
+      CHECK(r.max_x < (int)s.w);
+      CHECK_EQ(r.rows, (int)e.y1 - (int)e.y0 + 1);
+
+      int ink = 0;
+      for (int y = 0; y < (int)s.h; ++y)
+        for (int x = 0; x < (int)s.w; ++x) ink += pixel_at(s, f, x, y);
+      const int pct = (100 * r.changed) / (ink ? ink : 1);
+      if (pct > worst_pct) worst_pct = pct;
+    }
+  }
+  CHECK_EQ(blinkers, 121);
+  // AND A BOUND ON HOW MUCH OF THE CREATURE A BLINK IS ALLOWED TO BE, measured
+  // on the COMPOSITED frame - body, then fill, then lash - because that is the
+  // picture the panel shows. Closing a socket that IS the face is the biggest
+  // legitimate blink in the roster: FLIPIX 29 %, BEAKON 29 %, TWINIX 23 %. It is
+  // a MEASURED ceiling, so re-measure it if the art changes; do not raise it to
+  // make a build pass.
+  //
+  // THERE IS NO FLOOR AND I AM NOT PRETENDING OTHERWISE. LEKRON's blink changes
+  // 2 px of a 303 px body and is invisible at 1x; a body whose only small hole
+  // is 3 px gets a 3 px blink. That is a judgement about whether an animation
+  // reads, which is the class of question no assertion in this file can settle -
+  // `./bin/sprite_dump blink LEKRON` is the instrument and it needs a person.
+  CHECK(worst_pct <= 30);
+}
+
+// THE CONTROL. Every case above would also pass if blink_of() could not see an
+// over-fill at all - which is exactly the shape of a test that cannot fail, and
+// the roster passes it by construction. So hand the same instrument a band that
+// MUST over-fill (the whole upper half of a body, which is what the pre-P9-C6
+// derivation produced for DENYRA) and require it to say so, by name.
+TEST(the_over_fill_recorder_would_see_a_blink_that_swallowed_the_body) {
+  int caught = 0, tried = 0;
+  for (int i = (int)PB_SPRITE_BODY_FIRST; i < (int)PB_SPRITE_SET_COUNT; ++i) {
+    const SpriteSet& s = PB_SPRITE_SETS[i];
+    // rows 3..14 across the full width: the shape of the band the old rule
+    // emitted for DENYRA ({3, 14, 0, 23}).
+    SpriteEyeBand wide{3, 14, 0, (uint8_t)(s.w - 1)};
+    const BlinkResult r = blink_of(s, 0, wide);
+    if (r.rows == 0) continue;          // no interior run up there at all
+    ++tried;
+    if (r.over_body > 0) ++caught;
+  }
+  // Not every body has a fillable gap in that band, so this is a rate, not a
+  // sweep - but it must be most of the roster, or the recorder is asleep.
+  CHECK(tried >= 30);
+  CHECK(caught >= 20);
+  // And the one the review actually measured, by name.
+  {
+    const SpriteSet& d = PB_SPRITE_SETS[PBSPR_DENYRA];
+    const BlinkResult r = blink_of(d, 0, SpriteEyeBand{3, 14, 0, 23});
+    CHECK(r.over_body > 40);
+  }
 }
 
 // =============================================================================
@@ -322,11 +603,26 @@ TEST(the_atlas_is_at_its_end_state_and_the_transition_allowance_is_gone) {
   CHECK_EQ((unsigned)PB_SPRITE_DATA_BYTES,
            (unsigned)PB_SPRITE_DATA_BYTES_DECLARED);
 
-  // The survivors data/sprites.h still owns: icons 384 + mini 96 + badges 312
-  // + the twelve emotes 239.
+  // The survivors data/sprites.h still owns, ASSERTED TERM BY TERM (P9-C6).
+  // This used to be one CHECK_EQ on the SUM, sitting under a comment that said
+  // "icons 384 + mini 96 + badges 312 + the twelve emotes 239". Two of those
+  // four numbers were wrong - spr_mini8 is 21 icons x 8 B = 168, and the emotes
+  // are 167 - by +72 and -72, so they cancelled and the aggregate assertion
+  // could not see either. That is the phase-8 shape exactly: an assertion next
+  // to the wrong numbers, checking only their total. Whoever next tries to shave
+  // the survivors to make room for art would have sized two arrays wrong in
+  // opposite directions.
+  unsigned emotes = 0;
+  for (unsigned i = 0; i < (unsigned)EMO_COUNT; ++i)
+    emotes += spr_xbm_bytes(SPRITE_EMOTES[i].w, SPRITE_EMOTES[i].h);
+  CHECK_EQ((unsigned)sizeof(spr_icon12),  384u);
+  CHECK_EQ((unsigned)sizeof(spr_mini8),   168u);
+  CHECK_EQ((unsigned)sizeof(spr_badge12), 312u);
+  CHECK_EQ(emotes,                        167u);
   const unsigned survivors = (unsigned)SPRITE_DATA_BYTES
                            - (unsigned)PB_SPRITE_DATA_BYTES;
   CHECK_EQ(survivors, 1031u);
+  CHECK_EQ(survivors, 384u + 168u + 312u + 167u);
 
   CHECK_EQ((unsigned)SPRITE_DATA_BYTES, 10247u);
   CHECK_EQ((unsigned)SPRITE_DATA_BYTES, (unsigned)SPRITE_DATA_BYTES_DECLARED);

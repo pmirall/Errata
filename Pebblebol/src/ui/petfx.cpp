@@ -31,6 +31,7 @@
 #include <string.h>
 
 #include "corrupt_fx.h"
+#include "petfx_core.h"
 #include "render.h"
 #include "xbm_mirror.h"
 #include "../data/sprites.h"
@@ -49,11 +50,14 @@
 // would have had to be re-typed after every art edit, which is the failure mode
 // it existed to prevent.
 //
-// What the derivation gets wrong is written down in gen_sprites.py's
-// eye_band(): any enclosed hole in the top 60 % of the ink box is included, so
-// a body with a high mouth or a window blinks with more than its eyes. That is
-// an ugly blink on one body, not a corrupted frame - and it is now visible in
-// ONE place, beside the pixels, instead of in a table nobody re-measures.
+// THAT FIRST DERIVATION WAS WRONG AND THE P9 EXIT REPLACED IT. The rule was
+// "any enclosed hole in the top 60 % of the ink box", and its own docstring
+// called the failure "an ugly blink on one body, not a corrupted frame". It was
+// four bodies and it was not ugly, it was solid: the band became the bounding
+// box of every hole up there, pf_build_lids() fills every interior run on every
+// row of the band, and DENYRA gained 79 px on a 283 px body for the length of
+// each blink. See tools/gen_sprites.py's eye_band() for the rule that replaced
+// it and for what THAT one cannot do.
 
 // Every horizontal limit in this file comes from PETFX_STAGE_L / PETFX_STAGE_R
 // (petfx.h) and from nothing else. There is deliberately no softer, second
@@ -73,162 +77,34 @@
 // bodies and walls; it never goes looking in the sim for what the walls are.
 #define PF_OBST_MAX     4
 
-// Geometry of the biggest body we will ever cache. THIS WENT FROM 40 TO 24 AT
-// P9-C3 and it is a RAM saving, not a cost: the legacy atlas held five body
-// sizes (24 baby, 28 child, 32 teen, 40 adult, 32 senior) and these caches were
-// sized for the largest. Every body in the generated atlas is 24x24, and
-// data/sprites_pebbles.h's own guard refuses a set wider than that, so the two
-// decode caches drop from 2 x 200 B to 2 x 72 B and the four lid strips from
-// 4 x 60 B to 4 x 24 B: 640 B of .bss becomes 240 B. Phase 10 gets the 400 B.
+// The geometry constants (PF_MAX_W/H, PF_FRAME_BYTES, PF_STRIP_BYTES) and the
+// PIXEL CORE - pf_stride/pf_get/pf_set, pf_scan_ink and pf_build_lids - MOVED
+// TO ui/petfx_core.{h,cpp} AT P9-C6, unchanged.
 //
-// If a future set is ever wider than 24, pf_load_cache()'s own bounds check
-// (s.w > PF_MAX_W) refuses to cache it and the body simply does not animate -
-// it does not overflow. Raise these two numbers and BODY_W/H in
-// tools/gen_sprites.py together, or not at all.
-#define PF_MAX_W        24
-#define PF_MAX_H        24
-#define PF_MAX_STRIDE   3
-#define PF_FRAME_BYTES  (PF_MAX_STRIDE * PF_MAX_H)   // 72 B
-#define PF_EYE_MAX_H    12
-#define PF_STRIP_BYTES  (PF_MAX_STRIDE * PF_EYE_MAX_H)
-
-// =============================================================================
-// ---8<--- PETFX PIXEL CORE BEGIN ---8<---
-// Everything between these markers is host-testable: it depends on sprites.h
-// and stdint only. Do not reach for U8G2, millis() or the sim in here.
-// =============================================================================
-
-// The row stride and the horizontal flip moved to ui/xbm_mirror.h with P4-C4:
-// ui/battle_renderer.cpp needs the same flip to face two combatants at each
-// other, and a second copy of a routine whose whole difficulty is one
-// off-by-four on a 28 px sprite is exactly the kind that gets fixed once.
-static inline uint8_t pf_stride(uint8_t w) { return xbm_stride(w); }
-
-static inline uint8_t pf_get(const uint8_t* row, uint8_t x) {
-  return (uint8_t)((row[x >> 3] >> (x & 7u)) & 1u);
-}
-
-static inline void pf_set(uint8_t* row, uint8_t x) {
-  row[x >> 3] = (uint8_t)(row[x >> 3] | (uint8_t)(1u << (x & 7u)));
-}
-
-// -----------------------------------------------------------------------------
-//  pf_scan_ink - tightest box that contains a lit pixel.
-//  The art has empty margins (spr_adult_bolota is 40x40 with ink only in rows
-//  1..36) and they are not the same on every body, so the floor, the shadow
-//  and the coat pattern all have to be measured, never assumed.
-//  Returns 0 when the frame is blank; the callers then fall back to the box.
-// -----------------------------------------------------------------------------
-static uint8_t pf_scan_ink(const uint8_t* bits, uint8_t w, uint8_t h,
-                           uint8_t* top, uint8_t* bot, uint8_t* left, uint8_t* right) {
-  const uint8_t stride = pf_stride(w);
-  uint8_t t = 0xFF, b = 0, l = 0xFF, r = 0;
-  for (uint8_t y = 0; y < h; y++) {
-    const uint8_t* row = bits + (uint16_t)y * stride;
-    for (uint8_t x = 0; x < w; x++) {
-      if (!pf_get(row, x)) continue;
-      if (t == 0xFF) t = y;
-      b = y;
-      if (x < l) l = x;
-      if (x > r) r = x;
-    }
-  }
-  if (t == 0xFF) return 0;
-  *top = t; *bot = b; *left = l; *right = r;
-  return 1;
-}
-
-// -----------------------------------------------------------------------------
-//  EYELIDS
+// The block they lived in was headed "everything between these markers is
+// host-testable: it depends on sprites.h and stdint only". That was true of the
+// code and false of the build - this file includes render.h, so no host binary
+// has ever compiled a line of it - and the P9 exit review found what the gap
+// cost: pf_build_lids() was filling a third of four bodies solid on every
+// blink, a frame nothing in the tree had ever drawn. petfx_core.h says the rest
+// and tests/test_sprite_pipeline.cpp now drives the shipped function.
 //
-//  Verified fact about this art, and it survived the atlas swap because every
-//  one of the sixty bodies was drawn to it on purpose: the eyes are HOLES in
-//  the silhouette, with the pupil as a lit island inside the hole - a 1px lit
-//  outline does not survive on a 1-bit panel at 24px. So "close the eye" =
-//  fill the hole (the socket goes solid, the pupil was already solid) and then
-//  carve one dark row back out as the lash line.
+// WHERE THE EYE BAND COMES FROM. data/sprites_pebbles.h's PB_SPRITE_EYES, read
+// through sprite_eyes(), derived by tools/gen_sprites.py from the same .txt
+// file as the pixels. It was a 24-row hand-measured table HERE until P9-C3;
+// the argument for that, recorded so the trade is legible, was that the
+// heuristic of the day ("fill every interior run of zeros in the top 55 % of
+// the ink") got 30 of 38 legacy sets right - decorative silhouette gaps were
+// geometrically identical to eye sockets. P9-C6 replaced that rule with one
+// stated in terms of the drawing rather than of a percentage of the box: the
+// eyes are the largest group of enclosed holes that can be closed together
+// WITHOUT CLOSING ANYTHING THAT IS NOT A HOLE, and the generator verifies that
+// against pf_build_lids()'s own row-wise fill before it emits a band.
 //
-//  WHERE THE BAND COMES FROM. data/sprites_pebbles.h's PB_SPRITE_EYES, read
-//  through sprite_eyes(), derived by tools/gen_sprites.py from the same .txt
-//  file as the pixels. It was a 24-row hand-measured table HERE until P9-C3;
-//  the argument for that, recorded so the trade is legible, was that the
-//  heuristic of the day ("fill every interior run of zeros in the top 55 % of
-//  the ink") got 30 of 38 legacy sets right - decorative silhouette gaps were
-//  geometrically identical to eye sockets, so BABY_CACTUS blinked with its
-//  spines and BABY_SETA's face was at 67-79 % of its ink height, outside any
-//  band that did not also swallow mouths.
-//
-//  WHY THE SAME RULE IS ACCEPTABLE NOW: it is not the same art. The legacy
-//  atlas was 38 sets at five sizes drawn over years to no shared rule; this one
-//  is 60 bodies at one size drawn to a written contract in which an eye is a
-//  hole and a blink is a squint. The rule is stated in eye_band() with what it
-//  gets wrong, and it lives beside the pixels rather than 1,100 lines away.
-//
-//  x0/x1 clip the band horizontally, because a body can have a hole in its eye
-//  rows that is not an eye and filling it would fuse two body parts for the
-//  length of a blink. Coordinates are in UNMIRRORED sprite space; the mirror
-//  flips them.
-// -----------------------------------------------------------------------------
-// -----------------------------------------------------------------------------
-//  pf_build_lids - turn one eye band into two little XBM strips.
-//
-//    fill : every interior hole inside the window, drawn with colour 1, so the
-//           socket goes solid.
-//    lid  : the holes of the band's FIRST row, placed on the band's MIDDLE row
-//           and drawn with colour 0. The first row is the un-split socket
-//           outline (lower rows are cut in two by the pupil), so re-opening it
-//           one row down gives a continuous slit instead of two notches.
-//
-//  Both strips are full sprite width so they can be blitted at (x, y + y0)
-//  with a plain drawXBM. Returns the band height, 0 when there is nothing to
-//  do (blank band - BABY_SETA frame 1 is already drawn blinking).
-// -----------------------------------------------------------------------------
-static uint8_t pf_build_lids(const uint8_t* bits, uint8_t w, uint8_t h,
-                             uint8_t y0, uint8_t y1, uint8_t x0, uint8_t x1,
-                             uint8_t* fill, uint8_t* lid) {
-  const uint8_t stride = pf_stride(w);
-  if (y1 >= h || y1 < y0) return 0;
-  uint8_t bh = (uint8_t)(y1 - y0 + 1u);
-  if (bh > PF_EYE_MAX_H) bh = PF_EYE_MAX_H;
-  if (x1 >= w) x1 = (uint8_t)(w - 1u);
-
-  memset(fill, 0, (uint16_t)stride * bh);
-  memset(lid,  0, (uint16_t)stride * bh);
-
-  uint8_t any = 0;
-  for (uint8_t r = 0; r < bh; r++) {
-    const uint8_t* row = bits + (uint16_t)(y0 + r) * stride;
-    uint8_t*       out = fill + (uint16_t)r * stride;
-
-    // last lit pixel of the row bounds the search: a run of zeros is only
-    // "interior" when there is ink on BOTH sides of it.
-    uint8_t last = 0, seen = 0;
-    for (uint8_t x = 0; x < w; x++) if (pf_get(row, x)) { last = x; seen = 1; }
-    if (!seen) continue;
-
-    uint8_t x = 0;
-    while (x < last && !pf_get(row, x)) x++;   // skip the left margin
-    while (x < last) {
-      if (pf_get(row, x)) { x++; continue; }
-      const uint8_t s = x;
-      while (x <= last && !pf_get(row, x)) x++;
-      // [s, x) is bounded by ink on both sides by construction
-      if (s >= x0 && (uint8_t)(x - 1u) <= x1) {
-        for (uint8_t k = s; k < x; k++) { pf_set(out, k); any = 1; }
-      }
-    }
-  }
-  if (!any) return 0;
-
-  // The lash line: copy the top row's mask onto the middle row. A one-row band
-  // gets no lash (it would undo the whole fill).
-  if (bh >= 2) memcpy(lid + (uint16_t)(bh / 2u) * stride, fill, stride);
-  return bh;
-}
-
-// =============================================================================
-// ---8<--- PETFX PIXEL CORE END ---8<---
-// =============================================================================
+// x0/x1 clip the band horizontally, because a body can have a hole in its eye
+// rows that is not an eye and filling it would fuse two body parts for the
+// length of a blink. Coordinates are in UNMIRRORED sprite space; the mirror
+// flips them.
 
 // =============================================================================
 //  PRNG

@@ -402,6 +402,15 @@ TEST(the_name_cap_never_splits_a_utf8_sequence) {
     CHECK_EQ((int)buf[w], 0);                    // and is terminated
     for (uint8_t i = 0; i < w; ++i) CHECK((uint8_t)buf[i] != 0x7Fu);  // no gaps
     CHECK(utf8_well_formed(buf, w));
+    // AND NOTHING PAST THE CAP WAS TOUCHED (P9-C6). The 0x7F fill above was
+    // already here "so a write can be detected" and then only buf[0..w] was
+    // inspected, so the half of this case's NAME that is about the CAP had no
+    // instrument at all: test_stats is not in ASAN_SET, and a stray
+    // `out[cap] = 0` - the classic one-byte overflow for a bounded string copy,
+    // and pebble_name_join() is new in P9-C4 - passed the whole suite. This is
+    // that instrument. It is cheap because the fill is already paid for.
+    for (unsigned i = cap; i < sizeof buf; ++i)
+      CHECK_EQ((int)(uint8_t)buf[i], 0x7F);
     // ...and it is a PREFIX of the whole name, never a different word.
     CHECK(memcmp(buf, "\xC3\x91" "arr\xC3\xB3" "n", w) == 0);
   }

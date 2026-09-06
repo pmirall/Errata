@@ -349,11 +349,25 @@ check("every EVOLUTION item is the cond_value of a real ITEM rule",
 check("every ItemDef.value fits the uint8_t in the 8 B struct",
       all(0 <= i["value"] <= 255 for i in ITEMS),
       "max %d" % max(i["value"] for i in ITEMS))
+# THE FIVE CORRUPTION KEYS ARE CHECKED ONE AT A TIME AND HERE, BEFORE ANYTHING
+# DEREFERENCES ONE (P9-C6). They used to be one aggregate `all(k in ...)` mask
+# 130 lines below - which is the shape the phase-8 review was caught with: four
+# of the five failed under a single name that did not say which key had gone.
+# The fifth, cleared_by_item, never reached the mask at all: the line under this
+# comment dereferenced it first and died with an unhandled KeyError, printing no
+# RESULT line and no named FAILED - "exactly the kind of hand edit a content
+# author" makes, in this file's own words.
+for _k in ("sprite_glitch", "idle_anim_set", "cleared_by_item", "evo_families",
+           "battle_infect_permille"):
+    check("balance.json CORRUPTION carries %s (P9-C5)" % _k, _k in BAL["CORRUPTION"])
+check("CORRUPTION gates exactly two evolution families",
+      len(BAL["CORRUPTION"].get("evo_families", [])) == 2)
+
 check("the CARE cure item clears corruption and is reachable",
-      BAL["CORRUPTION"]["cleared_by_item"] in {i["id"] for i in ITEMS})
+      BAL["CORRUPTION"].get("cleared_by_item") in {i["id"] for i in ITEMS})
 # ...and it does so IN THE COLUMN, not only in balance.json's prose. Until
 # items.json had a `clears` column these two files could not be compared at all.
-_cure = [i for i in ITEMS if i["id"] == BAL["CORRUPTION"]["cleared_by_item"]]
+_cure = [i for i in ITEMS if i["id"] == BAL["CORRUPTION"].get("cleared_by_item")]
 check("CORRUPTION.cleared_by_item really clears CORRUPTED in its own row",
       bool(_cure) and "CORRUPTED" in _cure[0]["clears"],
       str(_cure[0]["clears"]) if _cure else "no such item")
@@ -482,10 +496,6 @@ check("creator budget <= stage-1 budget (cannot out-stat a final evolution)",
       BAL["CREATOR_ATTACK_BUDGET"] <= BAL["ATTACK_BUDGET_BY_STAGE"][1])
 check("creator POWER% formula exists (Appendix C bar)",
       "creator_power_pct" in BAL["FORMULAS"])
-check("CORRUPTION ships sprite glitch + idle set + cure + 2 evo families (P9-C5)",
-      all(k in BAL["CORRUPTION"] for k in
-          ("sprite_glitch","idle_anim_set","cleared_by_item","evo_families","battle_infect_permille"))
-      and len(BAL["CORRUPTION"]["evo_families"]) == 2)
 check("STRING_CONTRACT names the four StrId blocks and their bases",
       len(BAL["STRING_CONTRACT"]["blocks"]) == 4)
 

@@ -4,7 +4,7 @@
 |---|---|
 | Title | Pebblebol implementation plan (spec §69 second deliverable; task checklist for §52 Phases 1-10) |
 | Date | 2026-09-02 |
-| Status | Plan complete. Phase 1 (archaeology + housekeeping) and **Phases 2-7** done — tags `v0.2.0-core`, `v0.3.0-pet`, `v0.4.0-battle`, `v0.5.0-explore`, `v0.6.0-activity`, **`v0.7.0-social`**. **PHASE 8 IS BUILT AND CLOSED AT P8-C6 AND IS DELIBERATELY NOT TAGGED:** the gate is green (49 host binaries + ASAN 4/4 + 51 browser assertions), the matrix is green on six variants at 0 warnings, `release` is 1,326,400 / 59,396 — and **all seven §67 creator boxes are open on the bench**, because a socket, a radio, a phone camera and a thumb on glass are none of them things this environment has. A phase-exit tag is a claim about acceptance, and nobody has checked this one. Phases 9-10 open. *(This row said "Phases 3-10 open" through four phase exits; corrected at the phase-6 exit, P6-C4, advanced at the phase-7 exit, P7-C6, and again at the phase-8 exit, P8-C6.)* The two **P2-C0** boxes (first flash, on-device measurements) stay open by construction: D1 is deferred and no board exists, so the on-device half of the Phase-2 exit criteria is unverified — **and nothing in phases 3-8 has run on hardware either**, which is why §67's `Device boots reliably`, `Wi-Fi scanning works`, `Device sleeps correctly`, `Local multiplayer works` and the seven Creator boxes are all still open. **PHASE 7 LEAVES TWO BENCH ITEMS AND THEY GATE THE LARGEST CLEANUP IN THE TREE:** ESP-NOW is implemented and has never run — and P8-C0 deleted BLE anyway, on the owner's explicit bet, so the two-board beacon test is now the test that decides whether that deletion needs reverting rather than the test that authorises it. |
+| Status | Plan complete. Phase 1 (archaeology + housekeeping) and **Phases 2-7** done — tags `v0.2.0-core`, `v0.3.0-pet`, `v0.4.0-battle`, `v0.5.0-explore`, `v0.6.0-activity`, **`v0.7.0-social`**. **PHASE 8 IS BUILT AND CLOSED AT P8-C6 AND IS DELIBERATELY NOT TAGGED:** the gate is green (49 host binaries + ASAN 4/4 + 51 browser assertions), the matrix is green on six variants at 0 warnings, `release` is 1,326,400 / 59,396 — and **all seven §67 creator boxes are open on the bench**, because a socket, a radio, a phone camera and a thumb on glass are none of them things this environment has. A phase-exit tag is a claim about acceptance, and nobody has checked this one. **PHASE 9 IS BUILT AND CLOSED AT P9-C6 AND IS NOT TAGGED HERE** — the exit agent does not cut tags; the orchestrator does, after its own verification. Its acceptance IS met and was re-run from a clean `git archive` export of HEAD so nothing green depends on an untracked file: **51 host binaries + ASAN 4/4 + 51 browser assertions + GATE OK**, matrix green on six variants at 0 warnings, `release` **1,329,972 / 59,044**, and the roster ships the whole **60 species / 20 families**. **Phase 9 is the first phase to GIVE BACK globals** (−352 B), so phase 10 inherits 5,956 B rather than 5,604. **NO §67 BOX WAS TICKED BY PHASE 9** — §67 contains no roster line, and every box it could otherwise touch is already ticked or waiting on a bench. Phase 10 open. *(This row said "Phases 3-10 open" through four phase exits; corrected at the phase-6 exit, P6-C4, advanced at the phase-7 exit, P7-C6, and again at the phase-8 exit, P8-C6.)* The two **P2-C0** boxes (first flash, on-device measurements) stay open by construction: D1 is deferred and no board exists, so the on-device half of the Phase-2 exit criteria is unverified — **and nothing in phases 3-8 has run on hardware either**, which is why §67's `Device boots reliably`, `Wi-Fi scanning works`, `Device sleeps correctly`, `Local multiplayer works` and the seven Creator boxes are all still open. **PHASE 7 LEAVES TWO BENCH ITEMS AND THEY GATE THE LARGEST CLEANUP IN THE TREE:** ESP-NOW is implemented and has never run — and P8-C0 deleted BLE anyway, on the owner's explicit bet, so the two-board beacon test is now the test that decides whether that deletion needs reverting rather than the test that authorises it. |
 | Source commit | `b53cfe4` ("first commit", the only commit; `docs/` and the audit are untracked) |
 | Inputs | Audit: `/home/user/Pebblebol/PEBBLEBOL_IMPLEMENTATION_AUDIT.md` (669 lines). Spec: `/home/user/Pebblebol/docs/PEBBLEBOL_PRODUCT_SYSTEM_SPEC.md` (2,708 lines; §5 architecture, §6 states, §52 phases, §67 done, §68 rules, §69 audit items). Three plan drafts (buildable / reuse / spec-purist) and two judge verdicts, merged here. |
 | Firmware | `/home/user/Pebblebol/sketch_aug30b/` — "Nottamagochi" `FW_VERSION "1.0.0"`, 26,703 lines in 16 `.cpp` + 1 `.ino` + 21 `.h` |
@@ -1414,19 +1414,20 @@ this commit, size line read before any symbol (`docs/budget.md` §8's rule):
 ### Phase 9 — Content — size L — goal: 60+ Pebbles, attacks, items, evolution families, encounter tables; corruption mechanic
 
 **P9-C1 Content pipeline complete** — M
-- [ ] `gen_content.py` finished (all guards, `balance_report.py` printing per-type averages and budget histogram); `test_content.cpp` extended (≥ 60 species, every family has a spawnable stage 0, every evolution target is the next stage of the same family, every built-in 4-move set passes the budget, names ≤ 9 chars at 5x8 width, `CONTENT_VERSION` changes when JSON changes); `docs/content.md` (§53 authoring rules, regeneration).
+- [x] `gen_content.py` finished (all guards, `balance_report.py` printing per-type averages and budget histogram); `test_content.cpp` extended (≥ 60 species, every family has a spawnable stage 0, every evolution target is the next stage of the same family, every built-in 4-move set passes the budget, names ≤ 9 chars at 5x8 width, `CONTENT_VERSION` changes when JSON changes); `docs/content.md` (§53 authoring rules, regeneration).
 
 **P9-C2 Roster** — L
-- [ ] 20 families x 3 stages from Appendix A (§19, §53): proper-noun names, types balanced 20/20/20, base stats 1..10 with per-stage totals (≈ 16 / 22 / 28), 4 legal moves each from ~30 attacks, `evo_level` 10/20 pattern with `evo_cond` used by ≤ 5 families, rarity 30/18/9/3, `category_mask`, 5 compat groups; ~10 items; encounter tables per category (NOTHING ≥ 15 %); Spanish flavor lines (≤ 25 chars at 5x8, strings_es.h:17-22 width rule) and the §54 terminology pass.
+- [x] 20 families x 3 stages from Appendix A (§19, §53): proper-noun names, types balanced 20/20/20, base stats 1..10 with per-stage totals (≈ 16 / 22 / 28), 4 legal moves each from ~30 attacks, `evo_level` 10/20 pattern with `evo_cond` used by ≤ 5 families, rarity 30/18/9/3, `category_mask`, 5 compat groups; ~10 items; encounter tables per category (NOTHING ≥ 15 %); Spanish flavor lines (≤ 25 chars at 5x8, strings_es.h:17-22 width rule) and the §54 terminology pass.
 
 **P9-C3 Sprites** — L
-- [x] `tools/gen_sprites.py` (ASCII art → XBM; re-creation of the uncommitted `sprite_src.py`, sprites.h:3-4) + `tools/sprites/*.txt`; 60 x 2 frames 24x24 = 8,640 B into `sprites_pebbles.h`; delete the 38 Nottamagochi sets; `SPRITE_DATA_BYTES` assert re-set; final stages visibly "more destructive" (§18-§19); `test_screens` renders every species on HOME/BOX/BATTLE fixtures with zero out-of-bounds (§63).
+- [x] `tools/gen_sprites.py` (ASCII art → XBM; re-creation of the uncommitted `sprite_src.py`, sprites.h:3-4) + `tools/sprites/*.txt`; 60 x 2 frames 24x24 = 8,640 B into `sprites_pebbles.h`; delete the 38 Nottamagochi sets; `SPRITE_DATA_BYTES` assert re-set; final stages visibly "more destructive" (§18-§19); `test_screens` renders every species **at 1x and 2x** on HOME/BOX/BATTLE fixtures with zero out-of-bounds (§63).
+  - **"AT 1x AND 2x" IS RESTORED TO THE LINE ABOVE AND ANSWERED HERE (P9-C6).** P9-C3 deleted the clause from the criterion in the same diff that ticked it, which is how a criterion stops being one; the outcome was right and the record was not. **There is no 2x blit anywhere in this repository** — `ui/gfx.h` has no scale parameter, u8g2's `drawXBM` has none, the host fake has none — and the clause was written when the atlas held bodies at 24, 28, 32 and 40 px, where "1x and 2x" meant the smallest and the largest. Every body is 24x24 now. **What was done:** all 120 frames reviewed by hand at 1x, 2x and 4x through `tests/tools/sprite_dump` (which is what P9-C3's own commit message says, and it is where the nine art changes came from), and `test_screens` sweeps all sixty **at 1x only**, over the three properties §63 actually names, with `the_out_of_bounds_recorder_would_see_a_body_that_clipped` proving the sweep is not vacuous.
   - **THE 38 LEGACY SETS ARE DELETED**, `SpriteSetId` and `SPRITE_SETS` with them; `data/sprites.h` keeps the icons, emotes, badges and the LOOKUP block and includes the generated atlas. `ROSTER_FAMILIES` is 20 and the shipped roster is the whole 60-species pack.
   - **THE ATLAS IS 64 SETS / 9,216 B**: 2 eggs + `SLEEP` + `SICK` + 60 bodies, all 24x24x2. `SPRITE_DATA_BYTES_MAX` came down from the 24,576 B **transition allowance** to **11,264 B** — the measured end state (10,247 B, atlas + icons/emotes) plus a stated 1,017 B margin, which is seven more sets. `tools/gen_sprites.py`'s own `PB_DATA_BYTES_MAX` is 10,240 and refuses to emit over it.
   - **MEASURED, release variant** (`GOD_MODE_ENABLED=0`): flash 1,326,400 → **1,328,090 (+1,690)**, globals 59,396 → **59,044 (−352)**. The art swap alone is **+6 B of flash**; the +1,684 is the roster 36 → 60. The globals line moved DOWN by exactly the 352 B `PF_MAX_W/H` 40 → 24 returns to `ui/petfx.cpp`'s decode caches. MATRIX OK on six variants; release caps 1,328,090/1,600,000 and 59,044/65,000.
   - **THE POSE QUESTION IS ANSWERED** in `data/sprites.h`'s LOOKUP banner: ONE generic 24x24 `SLEEP` and ONE `SICK` (288 B), because both are STATES the still path has to show; `POSE_EAT` gets NO art and falls through to the species body, because it is reachable only from `actfx_pose()` during the feeding film, which already parks `EMO_BOWL` and can lean the body with `petfx_squash()`. **Cost, stated:** the authored "leaning over the bowl" silhouette is gone and what replaces it lives in device-only translation units no host binary compiles.
   - **THE CARE-QUALITY BODY IS DELETED** with `SPR_CHILD_POOR` / `SPR_TEEN_POOR`. One body per species has nowhere to put it. `sprite_form_of()` lost its `minor_form` parameter so every call site had to be visited, and `test_pet_view.cpp` pins both directions of the change. A screen that wants care quality back should draw it with the renderer, not with a second atlas.
-  - **`PF_EYE` IS GENERATED.** The 24-row hand-measured eyelid table in `ui/petfx.cpp` is now `PB_SPRITE_EYES`, derived from the same `.txt` files as the pixels by one stated rule (an eye is a hole in the top 60 % of the ink box), so it cannot drift; `static_assert(SPRITE_REV == 1)` is gone and `SPRITE_REV` is itself the derived art hash.
+  - **`PF_EYE` IS GENERATED.** The 24-row hand-measured eyelid table in `ui/petfx.cpp` is now `PB_SPRITE_EYES`, derived from the same `.txt` files as the pixels, so it cannot drift; `static_assert(SPRITE_REV == 1)` is gone and `SPRITE_REV` is itself the derived art hash. **THE RULE THIS CHUNK CHOSE WAS WRONG AND P9-C6 REPLACED IT:** "an eye is a hole in the top 60 % of the ink box" took the BOUNDING BOX of every such hole, and `pf_build_lids()` fills every interior run on every row of the band — so on four bodies the blink filled a third of the creature solid (DENYRA +79 px on 283, BLAKLIX +78 on 264, MURAX +68 on 242, PANOPTIX losing all nine eyes) and on three more (BIPPO, TIMAUT, KLONIX) it emitted "does not blink" over a drawn face. Nothing in the tree could see either, because the composited blink frame is in neither authored frame and `pf_build_lids()` was in a translation unit no host binary compiled. See the P9-C6 box.
   - **STILL OWED, AND NOT TICKED HERE:** the HOME layout. A 24 px body standing on `HOME_FLOOR_Y` leaves **19 blank rows** above it on every still frame, where the 40 px adult filled the band. The goldens now show it. That is a layout decision for P10-C3/C4, not a defect the goldens can report.
   - **NOT DONE, AND NOT THIS BOX'S:** the `XP_TABLE` decision. The plan sequences it into **P9-C4** and its instrument (`tests/tools/sim_days.cpp`) does not exist yet; `data/balance.h` still ships the 8,845-point curve and `tools/content/balance.json` still ships the 36,453-point one. Two sources of truth, unchanged, still owed. **CLOSED BY P9-C4:** the shipped curve won on measured evidence and the pack's was deleted from `balance.json`.
 
@@ -1467,9 +1468,125 @@ this commit, size line read before any symbol (`docs/budget.md` §8's rule):
   - **`EVO_COND_CORRUPTED` NEEDED NO WORK AND IS PINNED ANYWAY.** Both pack rows ship since P9-C3 unclamped the roster (11→12 Artefax→Burnix, 47→48 Errox→Panika): exactly 2 families, each one stage up inside its own family, each refusing on an unsupplied context, on a false flag and below its level — asserted over the EMITTED table, where `verify.py` asserts it over the JSON.
   - **MUTATION-TESTED, AND ONE OF THE MUTATIONS FOUND A GATE THAT COULD NOT FAIL.** The first form of the `cor_service()` gate dropped lines that BEGIN with `//` and counted the name anywhere else — so `#include "../game/corruption.h"  // cor_service(): the 24 h deadline` satisfied it and **deleting the actual call printed GATE OK**. That is the phase-8 defect exactly, reproduced by the mutation meant to confirm the gate. It now strips trailing comments first and requires a call with an argument. Nine further mutations each fail one named case; the full list is in the exit note.
   - **THE ART IS NOT EXEMPT AND THE TEST DOES NOT PRETEND.** A containment proof says nothing about whether the effect READS as corruption, so `tests/tools/corrupt_view.cpp` renders a real body from the compiled atlas at the real floor line, asks the SHIPPED `cfx_rows()` for the rows and XORs them in — text a person can look at, with the ink box and the stage edges marked. `strip` prints one character per 60 ms slot over a minute so the 1-in-8 rate is visible; `temper` prints the five behaviour rows as numbers, because a still frame cannot show motion and saying so is better than implying otherwise.
-  - **MEASURED, release variant** (`GOD_MODE_ENABLED=0`): flash 1,328,580 → **1,329,838 (+1,258)**, globals **59,044, unchanged** — no table left `.rodata`, and the new `PF_TEMPER` row is still `static const`.
+  - **MEASURED, release variant** (`GOD_MODE_ENABLED=0`): flash 1,328,580 → **1,329,830 (+1,250)** *(the P9-C5 box said 1,329,838 / +1,258; the exit rebuilt the variant and it is 1,329,830 / +1,250)*, globals **59,044, unchanged** — no table left `.rodata`, and the new `PF_TEMPER` row is still `static const`.
+**P9-C6 Phase-9 exit** — M
+- [x] Three adversarial lenses (art / artefact / tests), every blocking and major finding reproduced before it was fixed, the roster acceptance discharged, the budget re-measured, and the phase-10 handover written.
+  - **THE MAJOR FINDING WAS A FRAME NOTHING IN THIS TREE HAD EVER DRAWN.** The picture a player sees while a pet blinks is in NEITHER authored frame of the atlas: it is composited at draw time from the art, the generated eye band and `pf_build_lids()`. Composited by hand for the first time, **four bodies' blinks filled a third of the creature solid** — DENYRA +79 px on a 283 px body, BLAKLIX +78 on 264, MURAX +68 on 242, **PANOPTIX losing all nine of the eyes it is named for** — for 90 ms every few seconds, on HOME, on the roster's showcase adults. Every byte check, every golden and the gate stayed green throughout.
+  - **THE REASON IT WAS INVISIBLE IS THE REASON THIS PROJECT KEEPS MOVING CODE OUT OF `petfx.cpp`.** `pf_build_lids()` sat behind a banner reading "everything between these markers is host-testable"; `petfx.cpp` includes `render.h` → `Arduino.h`, so **no host binary had ever compiled a line of it**. The banner described an intention and nothing enforced it. The pixel core is `ui/petfx_core.{h,cpp}` now — the third such move (`xbm_mirror.cpp` P4-C4, `corrupt_fx.cpp` P9-C5) — `tools/check.sh` holds the red line, and `tests/test_sprite_pipeline.cpp` drives the SHIPPED function over the SHIPPED atlas for all 128 (set, frame) pairs.
+  - **THE NEW RULE IS ABOUT THE DRAWING, NOT ABOUT A PERCENTAGE OF A BOX:** *the eyes are the biggest group of enclosed holes that can be closed together WITHOUT CLOSING ANYTHING THAT IS NOT A HOLE*, verified against the device's own row-wise fill before a band is emitted. 121 of 128 (set, frame) pairs blink, worst case 29 % of the body (FLIPIX, whose whole face IS one socket), and BIPPO, TIMAUT and KLONIX blink for the first time. **MUTATION:** restoring the old rule verbatim fails `the_blink_closes_holes_and_never_draws_over_the_body` by name on twelve bodies including all four; before this chunk it printed ALL PASS and GATE OK.
+  - **FIVE BODIES REDRAWN OR REPAIRED, AND EVERY FAMILY'S INK NOW GROWS ACROSS ITS THREE STAGES** (three did not: PACKET, PIXEL, LATENCY). **TIMAUT** was the only stage 2 in the roster lighter than its own stage 1 (§18) — 108 px in four detached blobs, largest mass 68 against Jitera's 98 — now 157 px in one 128 px hull with the roster's biggest socket. **ARTEFAX** had the worst silhouette cohesion in the roster (128 px, four equal pieces, no dominant mass) and 2x2 eyes in 4x4 blocks, **the 1px-wall construction `pixio.txt` had already diagnosed and fixed five files away**; now 173 px in ONE piece. **PAKETO**, the starter, was two 8-connected masses of 69 and 63 split by a full-height seam, each with its own feet — `pixio.txt`'s 3px bridge, and the same for **RAFAGON**. **FRAGMAR**'s ink fell below its own stage 0 (123 → 139). **COOKIT** put a 7px eye on the family whose root is "an eye on a stalk", leaving no room for an unlit ring, so no frame of that family's stage 0 held a readable eye (64 → 92 px).
+  - **THE IDLE ANIMATION HAD NO FLOOR AND NO CEILING.** `diff > 0` was the only thing the tree said about it and amplitude varied 22x: KLONIX's entire idle was **six pixels on one row** of a 187 px body, JITERA changed 70 of 109 px in a shear that reads as tearing. Four bodies edited (KLONIX, MEMORO, MURAX, JITERA — the last by halving both jitter offsets, which `jitera.txt`'s own header offered a reviewer in as many words) and `the_idle_animation_has_an_amplitude_and_a_spread` bounds it at 4-45 % of ink, ≥ 6 px, ≥ 2 rows and ≥ 2 columns. **The shape bound is deliberately weak and the box says so:** a 3-row rule would fail six bodies that move one 4-8 px feature between two rows, and would fight family 20's design, where the pupil is meant to be the only moving part.
+  - **FOUR GATES AND TESTS THAT COULD NOT FAIL, FOUND BY BREAKING THEM.** (1) `tools/check.sh`'s `cor_service()` gate stripped `//` comments only, so **a `/* ... */` around the call site left the gate AND the suite green** — the defect the gate exists to prevent, surviving inside it, for the SECOND time; it strips with `cpp -fpreprocessed` now. (2) The eye-band assertion was `blinkers > 64` against 118, i.e. **53 of 128 bands droppable one at a time with the suite green** — demonstrated by moving the old rule's cut to 40 %, which cost 26 bodies their blink and printed ALL PASS 51/51 and GATE OK; it is an equality. (3) `test_pet_view` carried a **1,536-check loop asserting `f(x) == f(x)`** with its loop variable discarded, under a comment promising a sweep over `minor_form`; deleted, because P9-C3 made the property a build error. (4) `the_name_cap_never_splits_a_utf8_sequence` had **no instrument for the CAP half of its own name** — a stray `out[cap] = 0` passed the whole suite, and `test_stats` is not in `ASAN_SET`. Also: `verify.py`'s five-key CORRUPTION mask failed four keys under ONE name and died with an unhandled `KeyError` on the fifth.
+  - **THE GATE NOW BUILDS `tests/tools/` AND RUNS `gen_sprites.py --self-check`.** Five review instruments were in no build at all — P9-C5 named it and declined to fix it, which is the exit's call to make — and `--check` alone passes a duplicated frame, a body carrying another species' pixels and a body lifted off the floor, which are the three defects the art agents were told to run `--self-check` for.
+  - **THREE DOCUMENTED NUMBERS WERE WRONG AND ARE MEASURED NOW:** the survivors decomposition (`spr_mini8` 96 and emotes 239, **wrong by ∓72 B and cancelling under one aggregate assertion** in three files — 384 + 168 + 312 + 167, and the test asserts the four TERMS); `PF_STRIP_BYTES` is 36 not 24, so .bss is 640 → **288** and phase 10 gets **352** not 400; and the art budget quoted **0.47 % of the 2,400,000 BASELINE cap** beside a headroom derived from the 1,600,000 release one (it is 0.70 %).
+  - **MEASURED, release variant** (`GOD_MODE_ENABLED=0`): flash 1,329,830 → **1,329,972 (+142)**, globals **59,044, unchanged**. **All six variants moved by the identical +142**, so nothing hides behind `GOD_MODE_ENABLED`; the exit adds no preprocessor conditional but one include guard. **PHASE 9 IN TOTAL: +3,572 flash and −352 GLOBALS** — the only phase so far that gave back the scarce budget. Phase 10 inherits **270,028 B of flash and 5,956 B of globals**. `ALL PASS 51/51`, ASAN 4/4, PAGE TEST 51/51, GATE OK, MATRIX OK on six variants, all from a clean `git archive` export of HEAD.
 - Acceptance: gate; §67 content roster ≥ 60 (Appendix A); matrix + tag `v0.9.0-content`.
+  - **MET, except the tag, which the orchestrator cuts.** `tools/check.sh` and `tools/build_matrix.sh` both green **from a clean export of HEAD**, so nothing green depends on an untracked file: `ALL PASS 51/51` / `ASAN OK 4/4` / `PAGE TEST OK 51/51` / `GATE OK`; `MATRIX OK` with `release caps: flash 1329972/1600000  globals 59044/65000`.
+  - **THE ROSTER CRITERION IS MET AND IT IS NOT A §67 BOX.** `SPECIES_TABLE` holds **60 rows** (`SPECIES_TABLE_COUNT == 60`, `SPECIES_FAMILY_COUNT == 20`, `SPECIES_PACK_COUNT == 60`), the emitted table is the whole pack rather than a prefix, and `tests/test_content.cpp` asserts both halves. **§67 CONTAINS NO ROSTER LINE** — it lists mechanisms, not content — so this criterion is discharged in §3 here and §5 below is unchanged by phase 9. **NO §67 BOX WAS TICKED BY THIS PHASE**, and the six bench items owed from phases 7 and 8 (local multiplayer, the two-board beacon, PIN required, device-side validation, the mobile editor, the sprite editor) keep their written conditions untouched.
 - Commit message: `phase-9: content — 60-species roster with generated tables and 24x24 atlas, ~30 attacks, items, evolution families, encounter tables, corruption as a signature mechanic, balance passes`
+
+### PHASE 10 HANDOVER — what it inherits, what will bite it, measured versus assumed
+
+**WHAT IS MEASURED.** On the artefact the caps police — `release`, `GOD_MODE_ENABLED=0`, built at
+this commit from a clean `git archive` export, size line read before any symbol
+(`docs/budget.md` §8's rule):
+
+* **globals 59,044 of `GATE_RELEASE_GLOBALS_MAX` 65,000 — 90.84 % used, 5,956 B FREE.**
+  Phase 9 was handed 5,604 and hands on **352 B MORE**, which no previous phase has done.
+* **flash 1,329,972 of `GATE_RELEASE_FLASH_MAX` 1,600,000 — 83.12 % used, 270,028 B FREE.**
+* `baseline` is 1,342,344 / 59,220 and is **not** that artefact. Quoting it as headroom is the
+  mistake `docs/budget.md` §8 exists to record — and §4.3 of that file was still making it at the
+  start of this chunk.
+* `SPRITE_DATA_BYTES` is **10,247 B** against `SPRITE_DATA_BYTES_MAX` **11,264** — **1,017 B of
+  margin, which is seven more 24x24x2 sets.** The generator has a second, tighter refusal at
+  10,240 B for the atlas alone.
+* The roster is **60 species / 20 families / 34 attacks / 10 items / 40 evolution rules / 40
+  encounter rows**, and the emitted tables are the WHOLE pack, not a prefix.
+* `INDEX_HTML` is **~42.8 KB of `WEB_HTML_MAX` 49,152**, unchanged by phase 9.
+* The gate is **51 host binaries + 4 under ASan + 51 browser assertions + 4 review instruments
+  built**, and `make -C tests check` is ~35 s from cold.
+
+**WHAT WILL BITE PHASE 10, IN ORDER.**
+
+1. **THE HOME LAYOUT IS WRONG AND ONLY A PERSON CAN SEE IT.** Every body is 24 px tall now and
+   stands on `HOME_FLOOR_Y`, where the legacy 40 px adult filled the sprite band: **19 blank rows
+   above the creature on every still frame.** The re-recorded goldens show it plainly and no
+   assertion will ever report it, because nothing is out of bounds and nothing clips. This is
+   P10-C3/C4's, it is the first thing a player looks at, and it is the reason the animation pass
+   should start by looking at `home_starter.pbm` rather than at code.
+2. **`ui/petfx.cpp` IS THE ANIMATION PASS'S SUBJECT AND NO HOST BINARY COMPILES IT.** It includes
+   `render.h` → `Arduino.h` → `U8g2lib.h`. Phase 9 moved three things out of it for exactly that
+   reason — `xbm_mirror.cpp` (P4-C4), `corrupt_fx.cpp` (P9-C5), `petfx_core.cpp` (P9-C6) — and the
+   P9-C6 move was made *because a defect had already shipped through the gap*: the blink was
+   filling four bodies solid and nothing could see it. **What is still in there and still
+   unexecuted:** the behaviour automaton, the whole choreography, the walk, the squash, the
+   glitch's painting loop and every renderer call. If phase 10 changes motion, the rule that
+   worked three times is: move the geometry out, leave the painting in, and gate the include.
+3. **THE BLINK LANDS ON A DERIVED BAND AND NOBODY HAS WATCHED ONE.** `PB_SPRITE_EYES` is generated
+   from the art by a rule that is now verified against the device's own fill, so a blink can only
+   close holes — but **whether the hole it closes is an EYE is a human judgement**, and five
+   bodies' blinks are 2-6 px on a 200-300 px body, which may be invisible at 1x. Instrument:
+   `make -C tests spritetool && ./bin/sprite_dump blink NAME`.
+4. **GLOBALS, NOT FLASH, IS STILL THE SCARCE LINE, AND DIAGNOSTICS IS HISTORICALLY WHERE COUNTERS
+   ACCUMULATE.** 5,956 B for the animation pass, error recovery, the §49 field list, the §66
+   commands and the 24 h soak's bookkeeping. §3's forecast for phase 10 was 0.5-1.5 KB and both
+   phases since have come in under theirs. The lever if bytes are ever needed back is still
+   `CS_BODY_MAX` (2,060 B, one `#define`, and `creator_smoke.sh` reads it out of `config.h`).
+5. **AN ANIMATION PASS THAT WANTS A POSE PER SPECIES DOES NOT FIT AND THE ARITHMETIC IS ALREADY
+   WRITTEN DOWN.** 60 sleep + 60 sick bodies is 17,280 B against 1,017 B of margin. A per-FAMILY
+   pose (20 sets) is 2,880 B and also does not fit without a re-plan. `data/sprites.h`'s LOOKUP
+   banner prices it; raising `SPRITE_DATA_BYTES_MAX` **and** `gen_sprites.py`'s `PB_DATA_BYTES_MAX`
+   together is a re-plan to be said out loud in a commit, not a fix.
+6. **THE RELEASE BUILD BOX (§67 "Release build compiles cleanly") IS P10-C5's AND IT IS ALREADY
+   TRUE OF THE TREE — the box is about the PROCESS, not the artefact.** Six variants build at **0
+   warnings** and have since phase 7. What P10-C5 owes is the migration-bump proof and "no known
+   save corruption path", both of which touch `persistence/` and neither of which phase 9 went
+   near.
+7. **FOUR FIELDS HAVE BEEN CARVED OUT OF `reserved[]` BYTES WITH NO SCHEMA BUMP** —
+   `corrupt_until_epoch`, `act_day`, `act_score` and the box header's pair — and **only the first
+   now has a case that fails when the save path loses it.** P9-C5 proved that gap by mutation: a
+   `pebble_seal()` that zeroed `corrupt_until_epoch` left test_persistence 31/31, test_game_state
+   16/16, test_trade 23/23 and test_encounters 27/27 ALL GREEN. The other three are worth the same
+   five lines, and P10-C5's migration proof is where they belong.
+8. **`game/sim.cpp`'s v1 STAGE CLOCK STILL WRITES `level`.** `stage_commit()` puts
+   `level_of_stage()` back into `PebbleInstance.level`, so a Pebble earning **no XP at all**
+   reaches level 20 in 3.5 days and 2,660 of the curve's 8,845 points are never earned by anybody.
+   `sim.cpp`'s own comment says that map "becomes read-only"; it is false while that write stands.
+   Undoing it is a save-visible change to what `level` means, which is why P9-C4 measured it and
+   left it — but any phase-10 balance or pacing claim that quotes the XP curve has to know it.
+9. **`CONTENT_VERSION` IS STAMPED INTO EVERY `BattleState` AND PHASE 9 MOVED IT.** Any phase-10
+   edit to `tools/content/*.json` re-hashes it and turns `test_battle_golden` red on 40 lines of
+   recorded state hashes **with no battle behaviour changed at all**. Regenerate goldens in a
+   commit that does nothing else, and read the diff — the same advice phase 8 gave phase 9, which
+   phase 9 needed twice.
+10. **THE ART AND THE PACK TEXT DISAGREE IN WRITING FOR TWELVE SPECIES.** Eight were flagged by the
+    art agents, four more by P9-C3's integration pass and five by the P9-C6 exit; each file's own
+    header carries the reason, and `gen_sprites.py` carries those headers into the generated atlas
+    so the deviation travels with the pixels. **Somebody has to decide which side gets corrected**
+    — the `_silhouette` and `_frame2` keys in `species.json` are design notes excluded from
+    `CONTENT_VERSION`, so correcting them costs nothing but a diff.
+
+**WHAT IS ASSUMED AND NOT MEASURED — say so before quoting any of it.**
+
+* **EVERY JUDGEMENT ABOUT THE ART IS A JUDGEMENT FROM A MONITOR.** No body has been seen on a
+  128x64 OLED, no frame pair has been watched animate at `UI_ANIM_FRAME_MS`, no blink has been
+  watched land and no corruption glitch has been seen on a panel. The bodies most at risk are the
+  ones with 1-2 px features (`BUGGO`'s pupils, `PLAGON`'s teeth, `PANOPTIX`'s nine pupils) and
+  `BLAKLIX`, whose rim pixels toggle between frames — the one pattern a slow passive mono LCD
+  renders as boiling rather than as motion.
+* **THE PACING NUMBERS ARE CONDITIONAL ON FOUR INVENTED PLAYER PROFILES.** `sim_days.cpp` states
+  them as a table so they can be argued with, and the XP-curve decision rests on them. Nobody has
+  watched a person play this device.
+* **THE BALANCE MATRIX IS 1v1 AND THE DEVICE PLAYS 3v3.** The switch rule, the forced replacement
+  and team composition are unmeasured; `battle_ai.h` already records that its switch rule cannot
+  fire at all for a mono-type team, which every shipped family is. 3v3 was measured as affordable
+  (~100 s for the full grid) and not run.
+* **THE MATRIX ALSO MEASURES ONE AI.** `battle_ai.cpp` scores every power-0 move at 0 and cannot
+  see `DRAIN_PCT`, so `PROTECT_HALF`, the `BUFF_*` moves, `CLEANSE` and the DOT are invisible to
+  the ranking. A species can be flagged there for a reason that belongs to the AI.
+* **Everything about a socket, a radio, a phone camera, a thumb on glass and a power cut on real
+  flash.** Six §67 bench boxes, the two phase-7 boxes and the two P2-C0 boxes are all open for
+  that reason, and phase 9 touched none of them.
 
 ### Phase 10 — Polish — size M — goal: animation, sound abstraction, balance, UX, battery, diagnostics, release build
 
@@ -1583,6 +1700,20 @@ not landed. **Updated at the phase-6 exit (P6-C4):** P6-C3 has landed, so
 below on that rule — and `Device sleeps correctly` is deliberately NOT, for the same reason
 `Wi-Fi shuts down after use` is held open: a device sleeping is an observation, and nothing
 has been observed.
+
+**UPDATED AT THE PHASE-9 EXIT (P9-C6): PHASE 9 TICKS NOTHING HERE, AND THAT IS THE RIGHT
+ANSWER RATHER THAN A SHORTFALL.** Phase 9 is CONTENT — sixty species, an atlas, attacks, items,
+evolution families, encounter tables, corruption and two balance passes — and **§67 lists
+MECHANISMS, not content**. It has no roster line: the "content roster ≥ 60 (Appendix A)"
+criterion is the plan's own P9 acceptance and spec §19/§53, and it is discharged in §3 with the
+evidence (`SPECIES_TABLE_COUNT == 60`, `SPECIES_FAMILY_COUNT == 20`, the emitted table being the
+whole pack rather than a prefix, asserted from the generated headers by
+`tests/test_content.cpp`). Every §67 box phase 9 could otherwise have touched is either already
+ticked ("Evolution works", "Items work", "Encounters work") or is one of the six bench items
+owed from phases 7 and 8 — local multiplayer, the two-board beacon, PIN required, device-side
+validation, the mobile editor, the sprite editor — **all of which are untouched and keep their
+written conditions**. Ticking a §67 box for a roster would be the sentence wider than the tree
+this section exists to prevent.
 
 **UPDATED AT THE PHASE-8 EXIT (P8-C6), AND NOT ONE CREATOR BOX IS TICKED.** All seven are
 bench items — a socket, a radio, a phone camera, a thumb on glass — and this section's rule
