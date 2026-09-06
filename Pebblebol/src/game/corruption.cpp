@@ -67,6 +67,19 @@ bool cor_clear(PebbleInstance& p)
   return was;
 }
 
+uint8_t cor_service(PebbleInstance* slots, uint8_t n, uint32_t now_epoch, uint8_t cal)
+{
+  if (slots == nullptr || !clock_ok(cal)) return 0u;
+  uint8_t ended = 0;
+  for (uint8_t i = 0; i < n; ++i) {
+    // cor_expire() is the ONE rule, called once per slot. Re-deciding "is it
+    // due" here would be a second copy of the boundary condition, and the
+    // boundary is exactly what tests/test_encounters.cpp pins on both sides.
+    if (cor_expire(slots[i], now_epoch, cal) && ended < 255u) ++ended;
+  }
+  return ended;
+}
+
 bool cor_is_corrupted(const PebbleInstance& p)
 {
   return usable(p) && (p.status & (uint8_t)PBS_CORRUPTED) != 0u;

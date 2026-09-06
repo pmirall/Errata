@@ -76,6 +76,35 @@ bool cor_expire(PebbleInstance& p, uint32_t now_epoch, uint8_t cal);
 // -----------------------------------------------------------------------------
 bool cor_clear(PebbleInstance& p);
 
+// -----------------------------------------------------------------------------
+// cor_service(slots, n, now_epoch, cal) -> how many statuses just ended.
+//
+//   THE THING THAT WAS MISSING UNTIL P9-C5, AND IT IS WHY THIS FUNCTION EXISTS
+//   RATHER THAN A LOOP IN app.cpp. A survey of the tree at 37511d5 found
+//   cor_expire() with NO CALLER anywhere in Pebblebol/src: cor_apply() ran from
+//   ui/screen_encounter.cpp and cor_clear() from game/inventory.cpp, so on a
+//   real device the 24 h deadline was WRITTEN AND NEVER READ and the status was
+//   permanent until an Antivirus cleared it. Every effect this chunk attaches
+//   would have inherited that, and tools/content/verify.py's "corruption clears
+//   by timer" check passed over the JSON the whole time the property was false
+//   in the firmware.
+//
+//   app/app.cpp's 1 Hz logic tick is the caller. It is a LOOP OVER THE WHOLE
+//   BOX and not over the active slot alone: a benched Pebble's deadline passes
+//   at the same rate as the active one's, and expiring it only when the player
+//   happens to select it would make the status last until it was looked at.
+//
+//   IT LIVES HERE, in a pure translation unit, so a host test can drive the
+//   walk. app.cpp cannot be linked on the host (it includes Arduino.h), so the
+//   one thing no test in this repository can execute is the single call site -
+//   which is what tools/check.sh's corruption gate greps for by name.
+//
+//   Empty slots and Pebbles that are not corrupted cost one branch each and are
+//   skipped. Refuses everything on an untrustworthy clock, exactly as
+//   cor_expire() does, and returns 0 rather than pretending it did work.
+// -----------------------------------------------------------------------------
+uint8_t cor_service(PebbleInstance* slots, uint8_t n, uint32_t now_epoch, uint8_t cal);
+
 // True while the status is set. Reads the BIT and not the deadline: they are
 // kept in step by the three functions above and the bit is what every consumer
 // (evolution's EVOC_CORRUPTED, ui/pet_view.cpp, app.cpp) already asks about.

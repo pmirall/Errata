@@ -278,6 +278,34 @@ $(BIN)/test_encounters: $(OBJ)/encounters.o $(OBJ)/species.o $(OBJ)/rng.o \
 # status: the encounter is the only writer of PBS_CORRUPTED in the tree, so
 # the status and its 24 h deadline are tested where they are produced.
 
+# P9-C5: THE EFFECTS HALF OF CORRUPTION. Deliberately a WIDE link line, because
+# the claim under test is not about one module: "it never destroys" is a claim
+# about a Pebble that goes through the save validator, the wire codec, the real
+# breeding path and a real Box, and "the modifier does not stack" is a claim
+# about the engine. Every one of those is the SHIPPED object, not a fake.
+#
+# corrupt_fx.o is ui/, and it is here because it is the only part of the visual
+# half a host binary can execute: ui/petfx.cpp includes render.h and therefore
+# Arduino.h. gfx_fb.o is the host framebuffer whose out-of-bounds recorder is
+# the instrument for the glitch bound - the same one every screen golden uses.
+#
+# save_manager.o + migration.o + kv_mem.o are here for one case and it is the
+# load-bearing one: PebbleInstance.corrupt_until_epoch was carved out of
+# reserved[12] with NO schema bump, so "the deadline survives a reboot" is a
+# claim about the WRITER, the CRC and the migration - and a memcpy dressed up as
+# a save cannot check any of them. A lost deadline leaves the bit set with
+# nothing to end it, which is the one way this mechanic could destroy a Pebble.
+$(BIN)/test_corruption: $(OBJ)/corruption.o $(OBJ)/corrupt_fx.o \
+                        $(OBJ)/battle.o $(OBJ)/pebble.o \
+                        $(OBJ)/breeding.o $(OBJ)/box.o \
+                        $(OBJ)/inventory.o $(OBJ)/protocol.o \
+                        $(OBJ)/validate.o $(OBJ)/species.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o \
+                        $(OBJ)/save_manager.o $(OBJ)/migration.o \
+                        $(OBJ)/kv_mem.o $(OBJ)/species_custom.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
+                        $(OBJ)/gfx_fb.o
+
 # P5-C4: CAPTURE. The REAL box.cpp, because the whole point of the case set is
 # that a captured Pebble comes out of the tree's one constructor and passes the
 # tree's one validator - a fake Box would prove neither. validate.o drags the
@@ -672,6 +700,22 @@ spritetool: $(BIN)/sprite_dump
 
 $(BIN)/sprite_dump: tools/sprite_dump.cpp | $(BIN)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< -o $@
+
+# --- the corruption glitch, drawn (P9-C5) -----------------------------------
+# THE SAME ARGUMENT sprite_dump MAKES, ONE LAYER UP. Every automated check this
+# chunk offers about the glitch is about GEOMETRY - it stays in the box, it
+# changes some pixels, the gate lights one slot in eight - and none of them can
+# see whether the effect READS as corruption. This renders a real body from the
+# compiled atlas at the real floor line, asks the SHIPPED ui/corrupt_fx.cpp for
+# the rows and XORs them in, so a person can look at it.
+#
+# NOT part of `check`: it prints a picture and asserts nothing, which is what
+# tests/tools/ means.
+.PHONY: corrupttool
+corrupttool: $(BIN)/corrupt_view
+
+$(BIN)/corrupt_view: tools/corrupt_view.cpp $(OBJ)/corrupt_fx.o | $(BIN)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
 
 # --- goldens ----------------------------------------------------------------
 golden: $(BIN)/test_care_golden $(BIN)/test_battle_golden

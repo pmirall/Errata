@@ -385,6 +385,22 @@ BattleReject battle_init(BattleState& st, const BattleSetup& setup)
       c.spd            = stats.spd;
       c.flags          = BCF_PRESENT;
       c.type_edge_left = (uint8_t)TYPE_MOD_MAX_HITS;
+      // THE STORED CORRUPTION ENTERS THE FIGHT HERE, AND THIS IS THE ONLY LINE
+      // THAT WAS MISSING (P9-C5). battle_stat_eff()'s +1 ATK / -1 DEF has read
+      // corrupt_left since P4-C2 and nothing ever set it from the Pebble, so a
+      // creature that was corrupted out of battle walked into one cured.
+      //
+      // ONE ASSIGNMENT, NOT AN ADDITION, and that is the no-stacking rule in
+      // its cheapest form: re-initialising the same battle twice, or entering a
+      // second battle, writes the same value rather than accumulating one.
+      // Everything downstream reads `corrupt_left > 0` as a boolean, so the
+      // stat effect is +1/-1 however this field got here.
+      //
+      // corrupt_until_epoch IS NOT READ. The engine counts rounds and holds no
+      // clock; whether the deadline has passed is app/app.cpp's question and it
+      // answers it once a second through cor_service().
+      c.corrupt_left   = ((p.status & (uint8_t)PBS_CORRUPTED) != 0u)
+                             ? (uint8_t)CORRUPT_BATTLE_ROUNDS : 0u;
       for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) c.moves[m] = p.moves[m];
       // hp_max/atk/def/spd are written HERE and never again: level and genome
       // cannot move mid-battle, so the cache is provably constant.

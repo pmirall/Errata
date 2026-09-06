@@ -89,7 +89,15 @@ struct PetView {
   // Two places to be wrong about one fact is the defect; one is the fix.
   uint8_t  mood_pct;          // 0..100 care-quality score; petfx scales motion by it
   uint8_t  care_pct[PB_CARE_COUNT];   // INDEXED BY CareId (save_schema.h), not StatId
-  uint8_t  corrupted;         // PBS_CORRUPTED, the Phase 9 status
+  // PBS_CORRUPTED, the section 55 status. IT WAS THE FOURTH INSTANCE OF THE
+  // SHAPE THE PARAGRAPH ABOVE DELETED THREE FIELDS FOR - written by
+  // pet_view_fill_sim(), asserted once in tests/test_pet_view.cpp and read by
+  // nothing in Pebblebol/src - and it survived only because P9-C5 was
+  // scheduled. P9-C5 consumed it: ui/petfx.cpp reads it three times, for the
+  // behaviour row (pf_derive), for the mid-life re-derive (petfx_service) and
+  // for the glitch gate (petfx_draw_body). If a future chunk removes the last
+  // of those, this field goes with it rather than joining the list above.
+  uint8_t  corrupted;
   uint8_t  poop_count;        // 0..POOP_MAX; actfx dissolves these on ACT_CLEAN
 
   // ---- the cosmetic genes, ALREADY DECODED --------------------------------

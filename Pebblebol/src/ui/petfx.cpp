@@ -30,6 +30,7 @@
 
 #include <string.h>
 
+#include "corrupt_fx.h"
 #include "render.h"
 #include "xbm_mirror.h"
 #include "../data/sprites.h"
@@ -276,7 +277,21 @@ struct PfTemper {
   uint8_t  hop_amp;              // px at the apex
 };
 
-static const PfTemper PF_TEMPER[TEMPER_COUNT] = {
+// THE LAST ROW IS NOT A TEMPERAMENT AND NO GENOME SELECTS IT. It is the
+// CORRUPTED behaviour (spec section 55), and it is one table row rather than a
+// POSE_GLITCH sprite set because the alternative is 60 more 24x24 bodies -
+// ui/corrupt_fx.h argues that at length. Corruption overrides the genome for as
+// long as the status is set and not one tick longer: cfx_temper_index() is the
+// only thing that picks this row, pf_derive() re-runs when the bit flips, and
+// tests/test_corruption.cpp is what proves the pet's own row comes back.
+//
+// What it reads as: 6/64 left for STAND against GOTICO's 36, dwell times a
+// fifth of NERVIOSO's, the highest turn weight in the table and the jitter flag
+// on. The creature stutters back and forth instead of settling - which is the
+// point, and is also why it is deliberately NOT simply "faster": speed 22
+// against NERVIOSO's 18 is a small part of it and the 26/64 turn weight is the
+// rest.
+static const PfTemper PF_TEMPER[CFX_TEMPER_ROWS] = {
   /* SOLAR     hops often and short, changes its mind cheerfully */
   {  500, 1600,  500, 1500, 13, 18, 14, 10,  4,  6, 0, 6 },
   /* TRANQUILO long stops, slow walk, little amplitude            */
@@ -285,7 +300,24 @@ static const PfTemper PF_TEMPER[TEMPER_COUNT] = {
   {  250,  900,  250,  800, 18, 20, 10, 20,  2,  4, 1, 5 },
   /* GOTICO    nearly immobile, drifts to a corner and stays      */
   { 3500,11000, 1200, 3200,  4, 10,  1,  3, 16,  6, 0, 2 },
+  /* CORRUPTED not a gene: stutters, turns constantly, twitches   */
+  {  150,  700,  150,  600, 22, 14,  6, 26,  8,  4, 1, 4 },
 };
+
+// The two tables must stay the same shape. Add a fifth genome temperament and
+// this fails HERE, at the line that would otherwise have handed the corrupted
+// pet the new temperament's dwell times by silent off-by-one.
+static_assert((int)CFX_TEMPER_CORRUPT == (int)TEMPER_COUNT,
+              "corrupt_fx.h's behaviour row is no longer one past the last "
+              "genome temperament - see core/nt_types.h");
+static_assert((int)CFX_TEMPER_ROWS == (int)TEMPER_COUNT + 1,
+              "PF_TEMPER must hold every temperament plus the corrupted row");
+// The out-of-range fold moved into cfx_temper_index() with the corruption
+// override. This is what stops the move from silently changing WHICH body a
+// garbage genome nibble animates as - pf_derive() folded to TRANQUILO and this
+// keeps it there.
+static_assert((int)CFX_TEMPER_FALLBACK == (int)TEMPER_TRANQUILO,
+              "the out-of-range temperament fold moved - see ui/corrupt_fx.h");
 
 // gene_pattern -> coat dither, as an ERASE level out of 16.
 //
@@ -347,6 +379,13 @@ static uint32_t s_last_ms     = 0;
 
 // --- character, derived from the genome once per reset ---
 static uint8_t  s_temper      = TEMPER_TRANQUILO;
+// The corruption bit AS THE AUTOMATON LAST SAW IT. pf_derive() runs from
+// petfx_reset(), which ui.cpp calls on an IDENTITY change - and a Pebble that
+// gets corrupted is the same Pebble, so nothing would ever re-derive without
+// this latch and the altered behaviour would first appear on the next hatch.
+// It is also what bounds the effect in the other direction: the moment the
+// status ends, the pet's own temperament row is derived again.
+static uint8_t  s_corrupt     = 0;
 static uint16_t s_speed_q4    = 96;    // 1/16 px per second
 static uint8_t  s_hop_amp     = 4;
 static int16_t  s_anchor      = 64;    // preferred body-centre x
@@ -600,8 +639,11 @@ static void pf_cache_sync(uint8_t set_id, uint8_t mirrored) {
 // the player is looking; unsociable ones pick a side and hug it. The side is
 // chosen from the lineage, not from a coin toss, so it is part of the pet.
 static void pf_derive(const PetView& p) {
-  s_temper = p.temper;
-  if (s_temper >= TEMPER_COUNT) s_temper = TEMPER_TRANQUILO;
+  // The out-of-range fold moved into cfx_temper_index() with the corruption
+  // override, so there is ONE expression that answers "which behaviour row",
+  // and it is in a translation unit a host binary can link.
+  s_temper  = cfx_temper_index(p.temper, p.corrupted);
+  s_corrupt = (uint8_t)(p.corrupted != 0u);
   const PfTemper& T = PF_TEMPER[s_temper];
 
   const uint8_t bs  = p.body_size;            // 0..7
@@ -619,7 +661,11 @@ static void pf_derive(const PetView& p) {
     s_anchor = (p.lineage_bits & 1u) ? 22 : 106;
     s_roam   = (uint8_t)(10u + soc * 2u);
   }
-  if (s_temper == TEMPER_GOTICO) {            // drifts to a corner and stays
+  // Keyed on the ROW, not on p.temper, so a corrupted GOTICO stops hugging its
+  // corner for as long as the status lasts and goes back to it afterwards. That
+  // is the intended reading of "altered behaviour": the corruption overrides
+  // the gene rather than layering on top of it.
+  if (s_temper == (uint8_t)TEMPER_GOTICO) {   // drifts to a corner and stays
     s_anchor = (p.lineage_bits & 2u) ? 14 : 114;
     s_roam   = 12;
   }
@@ -790,6 +836,7 @@ void petfx_begin(void) {
   s_jitter     = 0;
   s_identity   = 0;
   s_seeded     = 0;
+  s_corrupt    = 0;
   s_obst_n     = 0;
   s_obst_w     = 0;
 }
@@ -841,6 +888,18 @@ void petfx_service(const PetView& p, uint32_t now_ms) {
   s_energy_pct = p.care_pct[CARE_ENERGY];
   const uint32_t id = p.identity;
   if (!s_seeded || id != s_identity) { petfx_reset(p); return; }
+
+  // CORRUPTION ARRIVES AND LEAVES MID-LIFE AND CHANGES NO IDENTITY, so the
+  // reseed above never fires for it. Re-derive on the EDGE, not every tick: the
+  // derivation is cheap but it is not free, and running it unconditionally
+  // would also re-run pf_clamp_anchor()'s effects sixty times a second for a
+  // pet whose genes have not moved. NOT a petfx_reset(): that reseeds the PRNG
+  // and teleports the body to its anchor, and a Pebble catching a virus must
+  // not jump across the panel.
+  // No pf_clamp_anchor() here: the four lines below re-clamp unconditionally
+  // with a freshly measured body width, which is the call that has to happen
+  // anyway and is strictly better than one made against last frame's.
+  if ((uint8_t)(p.corrupted != 0u) != s_corrupt) pf_derive(p);
 
   uint32_t dt = (uint32_t)(now_ms - s_last_ms);
   s_last_ms = now_ms;
@@ -1278,6 +1337,38 @@ void petfx_draw_body(const PetView& p, uint8_t pose, uint8_t frame, int16_t dy,
       u.setDrawColor(0);
       rd_dither_rect_phase(px0, py0, (int16_t)(px1 - px0 + 1), (int16_t)(py1 - py0 + 1),
                            lvl, ph);
+      u.setDrawColor(1);
+    }
+  }
+
+  // --- the corruption glitch (spec section 55) ---------------------------------
+  // XOR-noise rows over the body, on roughly one 60 ms slot in eight.
+  //
+  // THE FRAMEBUFFER, NOT THE DECODE CACHE. s_cache_bits[] is mutable and would
+  // have been the shorter patch, and it is the wrong seam twice over:
+  // pf_cache_sync() returns early on an unchanged (set, mirror) pair, so a
+  // poisoned cache would persist across frames instead of flickering, and
+  // pf_scan_ink() / pf_build_lids() derive the ink bounds, the blink masks and
+  // every prop anchor from the same buffer - so noise in it would move the
+  // eyelids and drag the food bowl around. Draw colour 2 is render.h's
+  // documented shimmer and touches nothing but the panel.
+  //
+  // WHERE IT MAY DRAW IS ui/corrupt_fx.cpp'S DECISION, NOT THIS BLOCK'S, and
+  // that is deliberate: this translation unit includes render.h and therefore
+  // Arduino.h, so nothing here can be executed by a host test. The rectangle
+  // handed over is the INK box this function has just published - s_ink_* -
+  // which is clamped to the stage and to PETFX_FLOOR_Y - 1 above, so the noise
+  // cannot reach the HUD badge columns, the floor line or the shadow rows.
+  if (p.corrupted && cfx_glitch_on(s_now, s_seed)) {
+    CfxRect box;
+    box.x0 = s_ink_x0; box.y0 = s_ink_y0; box.x1 = s_ink_x1; box.y1 = s_ink_y1;
+    CfxRow rows[CFX_ROWS_MAX];
+    const uint8_t n = cfx_rows(box, s_now, s_seed, rows);
+    if (n) {
+      u.setDrawColor(2);                        // GFX_XOR / render.h's shimmer
+      for (uint8_t i = 0; i < n; ++i)
+        rd_dither_rect_phase(rows[i].x, rows[i].y, (int16_t)rows[i].w, 1,
+                             rows[i].level, rows[i].phase);
       u.setDrawColor(1);
     }
   }

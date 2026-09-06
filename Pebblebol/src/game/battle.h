@@ -162,9 +162,49 @@
 //  change it - a claim a host test can check without recompiling the engine
 //  three times.
 // -----------------------------------------------------------------------------
-#define BATTLE_ENGINE_VER   2u    // P4-C2/C3 follow-up: battle_init() now
-                                  // refuses a moveset no species can teach
+#define BATTLE_ENGINE_VER   3u    // P9-C5: battle_init() now carries the STORED
+                                  // PBS_CORRUPTED into BattleCombatant.corrupt_left
 #define BATTLE_HASH_VERSION 2u    // the basis mixing changed with it
+
+// CORRUPTION ENTERS A FIGHT THROUGH THE PebbleInstance THE CALLER ALREADY
+// SUPPLIES, NOT THROUGH A NEW BattleSetup FIELD, AND THAT IS A DECISION.
+//
+// The obvious cut is a `uint8_t corrupt_rounds[2][BATTLE_TEAM_MAX]` in
+// BattleSetup, filled by whoever holds the clock. It was rejected for three
+// reasons, in order of weight:
+//
+//   1. IT WOULD BE A SECOND SOURCE OF TRUTH FOR ONE FACT. BattleSetup already
+//      carries the whole PebbleInstance, `status` included. A parallel array
+//      the caller fills from that same byte is a copy that can disagree with
+//      it, and battle_init() would have no way to tell which one was right.
+//
+//   2. THE ENGINE STILL READS NO CLOCK. The paragraph below about there being
+//      "no clock argument, no callback, no frame, no millis()" is intact: what
+//      is read is a STATUS BIT, and `corrupt_until_epoch` - the seconds-shaped
+//      half - is ignored here exactly as it always was. Whoever holds the clock
+//      is still the one who decides whether that bit is still true, and since
+//      P9-C5 app/app.cpp's logic tick does it once a second through
+//      cor_service().
+//
+//   3. BattleSetup IS THE REPLAY INPUT AND THE VERSION-CHECKED RECORD TWO PEERS
+//      AGREE ON. Growing it would move sizeof(BattleSetup), re-derive the
+//      padding proof above it and change what a recorded setup means - for a
+//      byte that is already inside it.
+//
+// THE CONSEQUENCE, STATED RATHER THAN DISCOVERED: A LINKED BATTLE IS NEVER
+// CORRUPTED, ON EITHER SIDE. networking/session.cpp's load_own_team() decodes
+// even the LOCAL team through pbw_decode(), which is what makes the two
+// endpoints' BattleSetups byte-identical - and networking/protocol.h's
+// PBW_STATUS_MASK deliberately refuses PBS_CORRUPTED on the wire, because it is
+// EVOC_CORRUPTED's input and a forged bit would hand the receiver a free
+// evolution condition. So both peers see the bit stripped, both derive
+// corrupt_left == 0, and the lockstep hash agrees at round 1. A practice battle
+// built straight off the Box (ui/screen_battle.cpp) does carry it. That is the
+// same shape as the armed BATTLE_MOD in game/inventory.h - local, not linked -
+// and tests/test_corruption.cpp pins the symmetry rather than leaving it to a
+// reader to notice.
+static_assert((int)CORRUPT_BATTLE_ROUNDS == (int)BATTLE_MAX_ROUNDS,
+              "a stored corruption must last exactly as long as a battle can");
 
 // A switch outruns every attack in the pack. The constexpr guard below fails
 // the BUILD if a content pack ever ships a move at or above this priority,

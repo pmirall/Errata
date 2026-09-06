@@ -25,6 +25,7 @@
 #include "../core/rng.h"
 #include "../game/activity.h"    // the daily activity score (P6-C2)
 #include "../game/cooldowns.h"   // cd_begin() from setup (P5-C2/C3)
+#include "../game/corruption.h"  // cor_service(): the 24 h deadline (P9-C5)
 #include "../game/sim.h"
 #include "../persistence/game_state.h"
 #include "../game/box.h"
@@ -989,6 +990,32 @@ static void logic_tick(uint32_t owed)
     (void)act_note_carried(gs_state().cds, step, app_act_clock());
   }
   app_pay_activity();
+
+  // THE 24 H CORRUPTION DEADLINE (spec section 55, P9-C5). THIS IS THE CALL
+  // THAT DID NOT EXIST: game/corruption.cpp shipped in P5-C3 with cor_apply()
+  // called from the encounter screen and cor_clear() called from the item
+  // route, and cor_expire() called by nothing outside tests/ - so the deadline
+  // was armed on every device and read on none, and PBS_CORRUPTED was permanent
+  // until an Antivirus was used. Every effect P9-C5 attaches (the glitch, the
+  // altered idle, the battle modifier, EVOC_CORRUPTED) hangs off that bit, so
+  // this line is what makes "it clears by timer" true in the firmware and not
+  // only in tools/content/balance.json.
+  //
+  // WHOLE BOX, NOT THE ACTIVE SLOT. A benched Pebble's day passes at the same
+  // rate, and expiring it only when the player selects it would make a 24 h
+  // status last until it was next looked at.
+  //
+  // gs_readonly() is honoured because a read-only session must not change a
+  // stored Pebble; the status simply stays until the session ends. The status
+  // and the deadline live in the Pebble record, so the change is persisted by
+  // gs_save_active() below on the active slot - and by save_pebble_now() when a
+  // benched slot is next written. A benched expiry that is lost to a power cut
+  // costs nothing: the deadline is still in the past next boot and this same
+  // line clears it again.
+  if (!gs_readonly() && cor_service(gs_state().pebbles, (uint8_t)BOX_SLOTS,
+                                    env.now_epoch, (uint8_t)gt_cal_state()) != 0u) {
+    (void)gs_save_active(true);
+  }
 
   const uint32_t ev = sim_take_events();
   ui_note_events(ev);

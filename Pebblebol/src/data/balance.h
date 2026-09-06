@@ -467,18 +467,37 @@ inline constexpr uint8_t TYPE_MUL_DEN[3] = { 5, 1, 4 };
 // --- corruption in battle (spec section 55) ----------------------------------
 #define CORRUPT_BATTLE_ATK_STAGE      (+1)
 #define CORRUPT_BATTLE_DEF_STAGE      (-1)
-// THE TWO WITH NO CONSUMER, EACH NAMING THE CHUNK THAT OWNS IT (P4-C6). The
-// first two above are read by game/battle.cpp's ATK_EFF_CORRUPT arm. These two
-// are not read anywhere in Pebblebol/src or tests/, and until this commit only
-// one of them said so:
-//   * CORRUPT_BATTLE_INFECT_PERMILLE - the chance a hit spreads corruption.
-//     battle.cpp never reads the STORED PBS_CORRUPTED either, so corruption
-//     reaches a fight only through attack 12 Infectar. game/battle.h names the
-//     absence; P9-C5 wires both halves.
-//   * CORRUPT_DURATION_S - the 24 h timer a SPECIAL encounter arms when it
-//     corrupts the active Pebble (spec section 22). There is no encounter roll
-//     yet: P5-C3 is the first code that can start this clock, and P9-C5 the
-//     first that reads it in battle.
+
+// HOW LONG A STORED CORRUPTION LASTS INSIDE A FIGHT (P9-C5). The engine counts
+// in ROUNDS and owns no clock (game/battle.h says so at length), while the
+// stored status is a 24 h wall-clock deadline - and a battle is seconds. So the
+// answer is "the whole battle": battle_init() seeds BattleCombatant.corrupt_left
+// with this when the PebbleInstance carries PBS_CORRUPTED, and BATTLE_MAX_ROUNDS
+// is exactly the number of rounds that can be played.
+//
+// IT IS THE SAME FIELD attack 12 Infectar USES, ON PURPOSE. game/battle.h's rule
+// is "one fact, one representation, so there is no status bit", and two sources
+// writing two fields would be the stacking bug this chunk is guarding against:
+// battle_stat_eff() applies the +1/-1 behind a single `corrupt_left > 0`, so an
+// already-corrupted Pebble hit by Infectar reaches +1 and not +2, and the
+// Infectar arm's `if (d > f.corrupt_left)` cannot shorten what is already there.
+#define CORRUPT_BATTLE_ROUNDS         BATTLE_MAX_ROUNDS
+
+// CORRUPT_BATTLE_INFECT_PERMILLE IS STILL UNREAD, AND P9-C5 DID NOT WIRE IT.
+// This paragraph used to say "P9-C5 wires both halves"; it wired ONE. What
+// landed is the stored status reaching a fight - battle_init() reads
+// PBS_CORRUPTED, which is the half spec section 55 lists as an effect. What did
+// not is a per-hit infection ROLL, and the reason is written in game/battle.h
+// beside step 7: "ZERO DRAWS: DOT and corruption are deterministic in the tuned
+// simulator". A probability check in the damage path is a new draw from the
+// per-battle stream, which moves every subsequent roll in every transcript and
+// makes the lockstep hash disagree with every recorded golden - for a mechanic
+// that is not among the four effects section 55 names. It is left unread, and
+// this comment names the cost rather than the chunk.
+//
+// CORRUPT_DURATION_S is the 24 h timer a SPECIAL encounter arms on the active
+// Pebble (spec section 22). P5-C3 was the first code that could start this
+// clock; P9-C5's app/app.cpp logic tick is the first that reads it.
 #define CORRUPT_BATTLE_INFECT_PERMILLE 120
 #define CORRUPT_DURATION_S            86400UL
 

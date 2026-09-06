@@ -1167,4 +1167,64 @@ if [ -d "$ROOT/tests/fakes/arduino" ]; then
   [ "$n" -eq 2 ] || fail "tests/fakes/arduino holds $n files, not 2 - a wider fake is a second Arduino core nobody diffs against the real one"
 fi
 
+# --- P9-C5: THE CORRUPTION DEADLINE HAS A READER IN THE FIRMWARE ------------
+# THE DEFECT THIS EXISTS FOR WAS REAL AND SHIPPED FOR FOUR PHASES. P5-C3 landed
+# game/corruption.cpp with cor_apply() called from ui/screen_encounter.cpp and
+# cor_clear() called from game/inventory.cpp - and cor_expire() called by
+# NOTHING outside tests/. So the 24 h deadline was armed on every device and
+# read on none, PBS_CORRUPTED was permanent until an Antivirus cleared it, and
+# tools/content/verify.py's own "corruption clears by timer" check passed over
+# the JSON the whole time the property was false in the firmware. Five host
+# cases in tests/test_encounters.cpp drove cor_expire() perfectly and none of
+# them could see that no device ever called it.
+#
+# WHAT THIS GATE IS AND IS NOT, said exactly, because "the test that cannot
+# fail" is this project's recurring defect and a grep is the shape it usually
+# takes. It asserts that game/corruption.h's expiry walk HAS A CALL SITE in
+# app/, which is the one thing tests/ structurally cannot: app/app.cpp includes
+# Arduino.h, so no host binary links it. It proves NOTHING about whether that
+# call runs, how often, or with the right clock - tests/test_corruption.cpp's
+# `the_timer_walk_expires_every_due_slot_and_leaves_the_rest_alone` is what
+# drives the walk itself. Deleting the line in app.cpp fails HERE by name;
+# breaking what the walk does fails THERE by name.
+#
+# THE FIRST VERSION OF THIS GATE COULD NOT FAIL, AND THE MUTATION IS WHY IT SAYS
+# SO. It dropped lines that BEGIN with `//` and counted `cor_service` anywhere
+# else - so `#include "../game/corruption.h"  // cor_service(): the 24 h
+# deadline`, the include comment three hundred lines above the call, satisfied
+# it. Deleting the actual call printed GATE OK. That is the same defect the
+# phase-8 review found (a gate counting a TYPE NAME instead of a registration),
+# reproduced here by the mutation that was supposed to confirm the gate worked.
+# The form below strips every trailing comment FIRST and then requires a call
+# with an ARGUMENT - `cor_service(` followed by something that is not `)` - so a
+# mention in prose, in a comment or in a declaration cannot stand in for one.
+if [ -f "$SKETCH/src/game/corruption.cpp" ]; then
+  n=$( { cat "$SKETCH"/src/app/*.cpp 2>/dev/null || true; } \
+        | sed 's://.*::' \
+        | { grep -cE '\bcor_service[[:space:]]*\([^)]' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "cor_service() has NO caller in src/app ($n) - the 24 h corruption deadline would be written and never read on a device, exactly as cor_expire() was from P5-C3 to P9-C5 (game/corruption.h)"
+fi
+
+# --- P9-C5: ui/corrupt_fx.cpp STAYS HOST-LINKABLE ---------------------------
+# The module exists for ONE reason: ui/petfx.cpp includes render.h, hence
+# Arduino.h and U8g2lib.h, so no host binary can link it and every rule left
+# inside it is a rule no test in this repository can execute. The glitch's
+# geometry and the behaviour-row choice were moved out so that
+# tests/test_corruption.cpp can drive them and so that
+# tests/tools/corrupt_view.cpp can draw them.
+#
+# A single #include of render.h here would undo all of that silently: the file
+# would still compile in the firmware, the host binaries would stop linking,
+# and the natural repair is to drop the module from tests/Makefile. So the
+# include is a red line rather than a convention. It matches #include LINES
+# ONLY - corrupt_fx.h discusses render.h and rd_dither_rect_phase() in prose on
+# purpose, and must not trip it.
+if [ -f "$SKETCH/src/ui/corrupt_fx.cpp" ]; then
+  for f in corrupt_fx.h corrupt_fx.cpp; do
+    n=$( { grep -nE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*(Arduino\.h|u8g2|U8g2|render\.h|gfx\.h|petfx\.h|pet_view\.h)' \
+            "$SKETCH/src/ui/$f" || true; } | wc -l )
+    [ "$n" -eq 0 ] || fail "ui/$f includes a renderer or device header ($n) - it exists to be host-linkable (ui/corrupt_fx.h)"
+  done
+fi
+
 echo "GATE OK"
