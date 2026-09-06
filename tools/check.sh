@@ -100,12 +100,63 @@ if [ -d "$ROOT/tools/content" ]; then
     python3 "$ROOT/tools/gen_content.py" --check >/dev/null \
       || fail "src/data/*_table.h and tools/content/*.json have drifted apart "\
 "(run: python3 tools/gen_content.py)"
+    # 3. THE PLAN'S "CONTENT_VERSION CHANGES WHEN THE JSON CHANGES", actually
+    #    checked. It is the one content requirement a C++ test structurally
+    #    cannot cover - test_content.cpp never sees the JSON - and the case that
+    #    claimed it rejected 2 of 65,536 values. --selftest perturbs each
+    #    tools/content/*.json in memory ONE AT A TIME and requires the hash to
+    #    move for every one of them, requires it NOT to move for a `_`-prefixed
+    #    design note, and requires the roster size to be in it. ~0.4 s.
+    python3 "$ROOT/tools/gen_content.py" --selftest >/dev/null \
+      || fail "CONTENT_VERSION does not change when tools/content/*.json does - "\
+"read the named files above (run: python3 tools/gen_content.py --selftest)"
   else
     echo "check.sh: python3 not found, SKIPPING the content gate" >&2
   fi
 else
   fail "tools/content is missing - src/data/*_table.h is generated from it and "\
 "nothing can check them against it"
+fi
+
+# --- THE SPRITE GATE (P9-C1) -----------------------------------------------
+# src/data/sprites_pebbles.h is GENERATED from tools/sprites/*.txt exactly the
+# way src/data/*_table.h is generated from tools/content/*.json, and for the
+# same reason: 8.6 KB of hex is not a diff anybody reads, so the ASCII art is
+# what gets reviewed and the header has to be provably what that art produces.
+# `--check` regenerates in memory and hard-fails on any byte of drift, so a
+# hand-edited header AND an art edit that was never regenerated both fail here
+# instead of shipping.
+#
+# THIS GATE IS WHY tools/sprites/ CAN BE HANDED TO FIVE PEOPLE AT ONCE. The
+# generator refuses the whole tree - not just the file it is looking at - when a
+# name in atlas.txt has no file, when a .txt file is in no manifest (art that
+# would never ship), when the species block is out of order or has a hole, or
+# when a body is bound to a species the pack does not have. Those are the
+# failures that a per-file check cannot see and that a human reviewing 120
+# frames will not see either.
+#
+# WHAT IT DOES NOT PROVE, SAID PLAINLY: nothing about whether a body looks like
+# a creature. A 24x24 of noise passes every check in the generator and every
+# case in tests/test_sprite_pipeline.cpp. `make -C tests spritetool &&
+# ./bin/sprite_dump text <NAME>` renders the compiled atlas for a person, and it
+# is a person that has to look.
+#
+# Skipped with a WORD if python3 is missing, and a HARD FAIL if tools/sprites is
+# gone - the same distinction the content and page gates draw, for the same
+# reason.
+if [ -f "$ROOT/tools/gen_sprites.py" ]; then
+  if [ -d "$ROOT/tools/sprites" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+      python3 "$ROOT/tools/gen_sprites.py" --check --quiet >/dev/null \
+        || fail "src/data/sprites_pebbles.h and tools/sprites/ have drifted apart "\
+"(run: python3 tools/gen_sprites.py)"
+    else
+      echo "check.sh: python3 not found, SKIPPING the sprite gate" >&2
+    fi
+  else
+    fail "tools/sprites is missing - src/data/sprites_pebbles.h is generated "\
+"from it and nothing else can check them against each other"
+  fi
 fi
 
 # --- THE PAGE GATE (P8-C4) -------------------------------------------------

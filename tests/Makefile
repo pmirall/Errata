@@ -631,6 +631,21 @@ $(BIN)/creator_decode: tools/creator_decode.cpp $(OBJ)/creator_parse.o \
                         $(OBJ)/rng.o | $(BIN)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
 
+# --- the sprite renderer (P9-C1) --------------------------------------------
+# THE ONLY INSTRUMENT THIS PROJECT HAS FOR "DOES IT LOOK LIKE A CREATURE".
+# Every other check about art is a check about bytes. This one prints the
+# COMPILED atlas as text and writes a PBM contact sheet, so 60 incoming bodies
+# can be reviewed by a person rather than by a byte count.
+#
+# NOT part of `check`: it writes files and answers a human, which is what
+# tests/tools/ means. `make -C tests spritetool` builds it. Header-only - it
+# links no firmware object because both atlases are `inline constexpr` tables.
+.PHONY: spritetool
+spritetool: $(BIN)/sprite_dump
+
+$(BIN)/sprite_dump: tools/sprite_dump.cpp | $(BIN)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< -o $@
+
 # --- goldens ----------------------------------------------------------------
 golden: $(BIN)/test_care_golden $(BIN)/test_battle_golden
 	./$(BIN)/test_care_golden --record

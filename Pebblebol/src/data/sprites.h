@@ -1,11 +1,28 @@
 // -----------------------------------------------------------------------------
-//  sprites.h - Nottamagochi pixel art.  GENERATED FILE - DO NOT HAND EDIT.
-//  Source of truth: scratchpad/sprite_src.py (ASCII art, one char per pixel).
-//  Regenerate with:  python sprite_src.py
+//  sprites.h - THE LEGACY NOTTAMAGOCHI ATLAS. HAND-WRITTEN, and P9-C1 corrected
+//  this banner because it was not.
 //
-//  Format: XBM.  Row stride = (w+7)>>3 bytes, LSB of each byte is the
-//  LEFTMOST pixel (u8g2_bitmap.c:117 mask=1, :143 mask<<=1).  Feed straight
-//  to u8g2.drawXBM(x, y, w, h, bits) and to the web sprite mirror.
+//  IT SAID: "GENERATED FILE - DO NOT HAND EDIT. Source of truth:
+//  scratchpad/sprite_src.py. Regenerate with: python sprite_src.py".
+//  THAT FILE HAS NEVER EXISTED IN THIS REPOSITORY - `git log --all` over all 77
+//  commits finds no trace of it, scratchpad/ is not in the tree and is not even
+//  in .gitignore, and ui/petfx.cpp:13 and ui/xbm_mirror.h:19 both already say
+//  so out loud. tools/check.sh had no rule for this file either, so it was
+//  labelled generated, its generator was unreachable, and nothing checked it in
+//  either direction. An instruction that cannot be followed is worse than no
+//  instruction: it tells the next reader their edit will be overwritten, when in
+//  fact nothing will ever overwrite it.
+//
+//  SO: the bytes below ARE the source of truth, they are edited by hand, and
+//  they are on their way out. tools/gen_sprites.py (P9-C1) is the real
+//  generator, tools/sprites/*.txt is its real ASCII source, and it emits
+//  data/sprites_pebbles.h. P9-C3 deletes the 36 body/pose sets here and points
+//  the lookup at that atlas; the two EGG sets already exist in both files and
+//  tests/test_sprite_pipeline.cpp asserts they are byte-identical.
+//
+//  Format: XBM - see data/sprite_types.h, which owns the stride/bit-order/frame
+//  contract and the two size-guard macros. Feed straight to
+//  u8g2.drawXBM(x, y, w, h, bits).
 //  All arrays are `inline constexpr` so the linker keeps ONE copy in .rodata
 //  (flash) no matter how many translation units include this header.
 // -----------------------------------------------------------------------------
@@ -13,30 +30,17 @@
 #define NT_SPRITES_H
 
 #include <stdint.h>
+#include "sprite_types.h"
 #include "../core/nt_types.h"
 
 // Bump on ANY change to the art or to the set order: the browser caches
 // sprite blobs by (id, rev) and the id list below is a wire contract.
 #define SPRITE_REV 1
 
-struct SpriteRef {
-  const uint8_t* bits;   // XBM rows, LSB-first
-  uint8_t        w;
-  uint8_t        h;
-};
-
-struct SpriteSet {
-  const uint8_t* bits;   // frames stored back to back
-  uint8_t        w;
-  uint8_t        h;
-  uint8_t        frames;
-};
-
-// Bytes one w*h XBM frame occupies. Same row-stride rule the runtime uses, so
-// the static_asserts below measure exactly what drawXBM() will read.
-constexpr unsigned spr_xbm_bytes(unsigned w, unsigned h) {
-  return ((w + 7u) >> 3) * h;
-}
+// SpriteRef, SpriteSet, spr_xbm_bytes(), spr_set_bytes() and the two size-guard
+// macros moved to data/sprite_types.h at P9-C1, unchanged. They are the format,
+// not the art, and the generated atlas has to assert its own rows without
+// including this file.
 
 // Body pose. IDLE always exists; the others fall back to IDLE when the stage
 // has no distinct art (see sprite_set_id()).
@@ -1143,17 +1147,20 @@ inline constexpr SpriteRef SPRITE_EMOTES[EMO_COUNT] = {
 // -----------------------------------------------------------------------------
 //  ATLAS / TABLE SIZE GUARDS
 //
-//  The SpriteRef table above carries a w/h that drawXBM() trusts absolutely:
-//  it reads ((w+7)>>3)*h bytes from `bits` with no bound of its own. These
-//  asserts tie every emote array to the w/h its own table entry advertises, so
-//  an art edit that changes a bitmap's dimensions without updating the table
-//  (or the other way round) is a compile error instead of a silent
-//  out-of-bounds read into the neighbouring sprite.
+//  Both tables above carry a w/h that drawXBM() trusts absolutely: it reads
+//  ((w+7)>>3)*h bytes from `bits` with no bound of its own. These asserts tie
+//  every array to the dimensions its own table entry advertises, so an art edit
+//  that changes a bitmap without updating the table (or the other way round) is
+//  a compile error instead of a silent out-of-bounds read into the neighbouring
+//  sprite. The macros live in data/sprite_types.h.
+//
+//  UNTIL P9-C1 ONLY THE EMOTE HALF EXISTED. The 38 SpriteSet rows were guarded
+//  by per-array `sizeof(spr_x) == <literal>` asserts, which compare an array to
+//  a number and say nothing about what the TABLE claims - so
+//  `{ spr_adult_bolota, 48, 40, 2 }` compiled clean and read 80 bytes past the
+//  end of a 400-byte array. The literal asserts stay (they pin the art size
+//  itself); NT_SPR_SET_FITS is what ties them to the table.
 // -----------------------------------------------------------------------------
-#define NT_SPR_REF_FITS(arr, tbl, idx) \
-  static_assert(sizeof(arr) == spr_xbm_bytes((tbl)[idx].w, (tbl)[idx].h), \
-                #arr " size vs " #tbl "[" #idx "]")
-
 NT_SPR_REF_FITS(spr_emo_zzz,       SPRITE_EMOTES, EMO_ZZZ);
 NT_SPR_REF_FITS(spr_emo_heart,     SPRITE_EMOTES, EMO_HEART);
 NT_SPR_REF_FITS(spr_emo_note,      SPRITE_EMOTES, EMO_NOTE);
@@ -1167,34 +1174,102 @@ NT_SPR_REF_FITS(spr_emo_bowl,      SPRITE_EMOTES, EMO_BOWL);
 NT_SPR_REF_FITS(spr_emo_bubbles,   SPRITE_EMOTES, EMO_BUBBLES);
 NT_SPR_REF_FITS(spr_emo_spark,     SPRITE_EMOTES, EMO_SPARK);
 
+NT_SPR_SET_FITS(spr_egg_idle,            SPRITE_SETS, SPR_EGG_IDLE);
+NT_SPR_SET_FITS(spr_egg_crack,           SPRITE_SETS, SPR_EGG_CRACK);
+NT_SPR_SET_FITS(spr_baby_blob,           SPRITE_SETS, SPR_BABY_BLOB);
+NT_SPR_SET_FITS(spr_baby_oruga,          SPRITE_SETS, SPR_BABY_ORUGA);
+NT_SPR_SET_FITS(spr_baby_pajaro,         SPRITE_SETS, SPR_BABY_PAJARO);
+NT_SPR_SET_FITS(spr_baby_gato,           SPRITE_SETS, SPR_BABY_GATO);
+NT_SPR_SET_FITS(spr_baby_seta,           SPRITE_SETS, SPR_BABY_SETA);
+NT_SPR_SET_FITS(spr_baby_cactus,         SPRITE_SETS, SPR_BABY_CACTUS);
+NT_SPR_SET_FITS(spr_baby_pez,            SPRITE_SETS, SPR_BABY_PEZ);
+NT_SPR_SET_FITS(spr_baby_robot,          SPRITE_SETS, SPR_BABY_ROBOT);
+NT_SPR_SET_FITS(spr_child_good,          SPRITE_SETS, SPR_CHILD_GOOD);
+NT_SPR_SET_FITS(spr_child_poor,          SPRITE_SETS, SPR_CHILD_POOR);
+NT_SPR_SET_FITS(spr_teen_good,           SPRITE_SETS, SPR_TEEN_GOOD);
+NT_SPR_SET_FITS(spr_teen_poor,           SPRITE_SETS, SPR_TEEN_POOR);
+NT_SPR_SET_FITS(spr_adult_bolota,        SPRITE_SETS, SPR_ADULT_BOLOTA);
+NT_SPR_SET_FITS(spr_adult_zampasalto,    SPRITE_SETS, SPR_ADULT_ZAMPASALTO);
+NT_SPR_SET_FITS(spr_adult_buho,          SPRITE_SETS, SPR_ADULT_BUHO);
+NT_SPR_SET_FITS(spr_adult_punki,         SPRITE_SETS, SPR_ADULT_PUNKI);
+NT_SPR_SET_FITS(spr_adult_moho,          SPRITE_SETS, SPR_ADULT_MOHO);
+NT_SPR_SET_FITS(spr_adult_quimera,       SPRITE_SETS, SPR_ADULT_QUIMERA);
+NT_SPR_SET_FITS(spr_senior_bolota,       SPRITE_SETS, SPR_SENIOR_BOLOTA);
+NT_SPR_SET_FITS(spr_senior_zampasalto,   SPRITE_SETS, SPR_SENIOR_ZAMPASALTO);
+NT_SPR_SET_FITS(spr_senior_buho,         SPRITE_SETS, SPR_SENIOR_BUHO);
+NT_SPR_SET_FITS(spr_senior_punki,        SPRITE_SETS, SPR_SENIOR_PUNKI);
+NT_SPR_SET_FITS(spr_senior_moho,         SPRITE_SETS, SPR_SENIOR_MOHO);
+NT_SPR_SET_FITS(spr_senior_quimera,      SPRITE_SETS, SPR_SENIOR_QUIMERA);
+NT_SPR_SET_FITS(spr_ghost,               SPRITE_SETS, SPR_GHOST);
+NT_SPR_SET_FITS(spr_tomb,                SPRITE_SETS, SPR_TOMB);
+NT_SPR_SET_FITS(spr_sleep_baby,          SPRITE_SETS, SPR_SLEEP_BABY);
+NT_SPR_SET_FITS(spr_sleep_child,         SPRITE_SETS, SPR_SLEEP_CHILD);
+NT_SPR_SET_FITS(spr_sleep_teen,          SPRITE_SETS, SPR_SLEEP_TEEN);
+NT_SPR_SET_FITS(spr_sleep_adult,         SPRITE_SETS, SPR_SLEEP_ADULT);
+NT_SPR_SET_FITS(spr_sick_child,          SPRITE_SETS, SPR_SICK_CHILD);
+NT_SPR_SET_FITS(spr_sick_teen,           SPRITE_SETS, SPR_SICK_TEEN);
+NT_SPR_SET_FITS(spr_sick_adult,          SPRITE_SETS, SPR_SICK_ADULT);
+NT_SPR_SET_FITS(spr_eat_child,           SPRITE_SETS, SPR_EAT_CHILD);
+NT_SPR_SET_FITS(spr_eat_teen,            SPRITE_SETS, SPR_EAT_TEEN);
+NT_SPR_SET_FITS(spr_eat_adult,           SPRITE_SETS, SPR_EAT_ADULT);
 
-#define SPRITE_DATA_BYTES 10623
-// THE BUDGET IS A TRANSITION ALLOWANCE, NOT AN END-STATE REQUIREMENT, and the
-// difference is worth writing down because the first version of this comment got
-// it wrong. One species costs 144 B of art: a 24x24 XBM is ((24+7)/8)*24 = 72 B and
-// every set carries two frames.
+
+// -----------------------------------------------------------------------------
+//  THE ART BUDGET - MEASURED BY THE COMPILER, NOT TYPED BY A HUMAN
 //
-// Of the 10,623 B here today, 9,448 B is the 38 legacy Nottamagochi BODY sets and
-// only 1,175 B is everything else (icons, the emote set, the egg). P9-C3 DELETES
-// those 38 and lands 60 species at 8,640 B, so the END STATE is
+//  THIS USED TO BE `#define SPRITE_DATA_BYTES 10623` GUARDED BY
+//  `static_assert(SPRITE_DATA_BYTES <= 24576)`, WHICH IS A COMPARISON OF TWO
+//  LITERALS. It could not fail from an art change, and it had already failed to:
+//  the number was correct at d21f20f^ and P4-C6 then deleted spr_mood12 (6 x
+//  12x12 = 144 B) without touching it, so it over-stated the atlas by exactly
+//  144 B for two phases while the assert stayed green. docs/budget.md 4.3 and
+//  ESTUDIO_VISUAL.md carried copies of the same stale arithmetic.
 //
-//     1,175 + 8,640 = 9,815 B
+//  sprite_atlas_bytes() walks the real arrays through the real tables, so the
+//  budget assert below now measures the art. SPRITE_DATA_BYTES_DECLARED is the
+//  measured total written down, and the equality assert makes any change to any
+//  bitmap a NAMED build failure that has to be acknowledged in the diff rather
+//  than a number nobody re-derives.
 //
-// which fits the original 14,336 with room to spare. The roster does not need a
-// bigger budget; it needs the swap to happen.
+//  THE BUDGET IS A TRANSITION ALLOWANCE, NOT AN END-STATE REQUIREMENT. One
+//  species costs 144 B: a 24x24 XBM is ((24+7)/8)*24 = 72 B and a set carries
+//  two frames. Of the bytes here, 9,448 is the 38 legacy body/pose/egg sets and
+//  1,031 is the icons, mini-icons, badges and emotes. P9-C3 deletes the 36
+//  non-egg sets (9,160 B) and lands 60 species at 8,640 B, so the END STATE is
 //
-// What needs the headroom is the WINDOW. If species art arrives before the legacy
-// sets go - the natural order, since the new art has to be checked against the real
-// screens before the old art can be safely deleted - the peak is
+//      1,031 + 288 (the two eggs, which survive) + 8,640 = 9,959 B
 //
-//     10,623 + 8,640 = 19,263 B      (both alive at once)
+//  and the PEAK, while both atlases are in the tree at once - the natural order,
+//  since the new art has to be checked on real screens before the old art can
+//  safely go - is 10,479 + 8,640 = 19,119 B. 24,576 covers that peak and is
+//  1.0 % of the 2,400,000 flash cap. P9-C3 SHOULD BRING IT BACK DOWN once the
+//  legacy sets are gone: an allowance left standing after the thing it allowed
+//  for is a budget that stopped meaning anything.
 //
-// and the old 14,336 would have failed that build with no explanation attached.
-// 24,576 covers the peak with margin and is 1.0 % of the 2,400,000 flash cap.
-// P9-C3 SHOULD BRING IT BACK DOWN once the legacy sets are gone: an allowance left
-// standing after the thing it allowed for is a budget that stopped meaning anything.
-// docs/budget.md section 4.3 carries the same arithmetic.
-static_assert(SPRITE_DATA_BYTES <= 24576, "sprite art over the flash budget");
+//  NOTE THE SCOPE: this counts THIS file's atlas only. data/sprites_pebbles.h
+//  carries its own PB_SPRITE_DATA_BYTES, computed the same way, and until P9-C3
+//  merges the two the shared 24,576 ceiling is checked against the sum in
+//  tests/test_sprite_pipeline.cpp, which is the only place both are visible.
+// -----------------------------------------------------------------------------
+constexpr unsigned sprite_atlas_bytes() {
+  unsigned n = 0;
+  for (unsigned i = 0; i < (unsigned)SPRITE_SET_COUNT; ++i)
+    n += spr_set_bytes(SPRITE_SETS[i]);
+  for (unsigned i = 0; i < (unsigned)EMO_COUNT; ++i)
+    n += spr_xbm_bytes(SPRITE_EMOTES[i].w, SPRITE_EMOTES[i].h);
+  return n + (unsigned)sizeof(spr_icon12) + (unsigned)sizeof(spr_mini8)
+           + (unsigned)sizeof(spr_badge12);
+}
+
+#define SPRITE_DATA_BYTES          (sprite_atlas_bytes())
+#define SPRITE_DATA_BYTES_DECLARED 10479u
+#define SPRITE_DATA_BYTES_MAX      24576u
+
+static_assert(SPRITE_DATA_BYTES == SPRITE_DATA_BYTES_DECLARED,
+              "the atlas changed size - re-measure SPRITE_DATA_BYTES_DECLARED "
+              "and say so in the commit (tools/check.sh cannot see art)");
+static_assert(SPRITE_DATA_BYTES <= SPRITE_DATA_BYTES_MAX,
+              "sprite art over the flash budget");
 
 // -----------------------------------------------------------------------------
 //  LOOKUP

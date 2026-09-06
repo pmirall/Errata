@@ -406,15 +406,46 @@ class Content(object):
     #  compiler error inside a generated block.
     # -------------------------------------------------------------------------
     def _check_strings(self):
+        """Every shipped string: legal C, Latin-1, AND NARROW ENOUGH TO DRAW.
+
+        THE WIDTH HALF WAS MISSING UNTIL P9-C1 and it is the half a content edit
+        actually trips. c_str_literal() below refuses a character the font has no
+        glyph for; nothing refused a name that simply does not FIT, so a
+        ten-character species name would have been emitted, compiled, shipped and
+        then clipped by rd_text_fit() at the far end with no diagnostic anywhere
+        in between. The limits come from core/strings_es.h's width budget (128 px
+        panel: 25 chars at 5x8, 21 at t0_11b) narrowed by what each string sits
+        next to on its own screen.
+
+        WHERE TWO RULES DISAGREE THE TIGHTER ONE WINS AND IT IS SAID HERE:
+        tools/content/verify.py allows an attack name of 12, while this
+        generator's own StrId block comment says "<= 10 chars @ t0_11b" because
+        the battle menu draws four of them in a two-column box. 10 is enforced.
+        """
         for s in self.species_all:
             c_str_literal(s["name"], "species %d name" % s["id"])
             c_str_literal(s["flavor_es"], "species %d flavor_es" % s["id"])
+            width_limit(s["name"], 9, "5x8",
+                        "species %d name" % s["id"],
+                        "HOME and BOX draw it next to a level")
+            width_limit(s["flavor_es"], 25, "5x8",
+                        "species %d flavor_es" % s["id"],
+                        "one whole line of the 128 px panel")
         for a in self.attacks:
             c_str_literal(a["name"], "attack %d name" % a["id"])
+            width_limit(a["name"], 10, "t0_11b",
+                        "attack %d name" % a["id"],
+                        "four of them in the battle menu's two-column box")
         for it in self.items:
             c_str_literal(it["name"], "item %d name" % it["id"])
+            width_limit(it["name"], 12, "5x8",
+                        "item %d name" % it["id"],
+                        "the bag list draws it after a 12 px icon")
         for ev in self.specials["EVENTS"]:
             c_str_literal(ev["name"], "special event %d name" % ev["id"])
+            width_limit(ev["name"], 25, "5x8",
+                        "special event %d name" % ev["id"],
+                        "one whole line of the 128 px panel")
 
 
 def die(msg):
@@ -559,6 +590,111 @@ def content_hash(c):
 
 
 # =============================================================================
+#  --selftest: "CONTENT_VERSION CHANGES WHEN THE JSON CHANGES", ACTUALLY CHECKED
+#
+#  THE TEST THAT USED TO CLAIM THIS COULD NOT FAIL. tests/test_content.cpp's
+#  content_version_is_a_real_hash asserted `!= 0`, `!= 1` and `<= 0xFFFF` - it
+#  rejects 2 of 65,536 values, and it was MEASURED doing so: rebuilt with
+#  -DCONTENT_VERSION=0x1234 it passes, with 0xFFFF it passes, with 0x0002 it
+#  passes. Its name asserted the plan's requirement; its body proved the header
+#  was not zeroed.
+#
+#  AND IT COULD NOT HAVE DONE BETTER, WHICH IS THE POINT: a C++ test never sees
+#  tools/content/*.json, so it cannot compare a hash to its input. The property
+#  is only checkable where both halves exist, which is here. So here it is,
+#  ONE SOURCE FILE AT A TIME:
+#
+#    * perturb exactly one file's data and the version MUST move. Asserted per
+#      file rather than in aggregate, because an aggregate assertion is exactly
+#      the shape phase 8 shipped - a required-key mask checked as a sum, which
+#      let five of six keys be dropped one at a time with the suite green. Drop
+#      "encounters" from HASH_FILES and this names encounters.
+#    * perturb a `_`-prefixed NOTE and the version MUST NOT move. That exclusion
+#      is a deliberate design decision (a typo fix in a design comment must not
+#      mark every save on every device as foreign content) and a deliberate
+#      decision with no test is a decision that gets refactored away.
+#    * change the roster size and the version MUST move - two builds shipping
+#      different numbers of species ARE different content from identical JSON.
+# =============================================================================
+def _probe_dict(obj):
+    """The first dict in a JSON tree, so one perturbation works on every file
+    whatever its top-level shape (species.json is a list, balance.json a dict)."""
+    if isinstance(obj, dict):
+        return obj
+    if isinstance(obj, list):
+        for v in obj:
+            d = _probe_dict(v)
+            if d is not None:
+                return d
+    return None
+
+
+def _hash_inputs(c):
+    return {"species": c.species_all, "attacks": c.attacks, "items": c.items,
+            "evolution": c.evo_all, "encounters": c.encounters,
+            "specials": c.specials, "networks": c.networks,
+            "balance": c.balance}
+
+
+def selftest(families):
+    base = content_hash(Content(families))
+    bad = []
+
+    # THE SET IS THE JSON ON DISK, NOT HASH_FILES, and that distinction was
+    # found by mutating this function rather than reasoning about it: iterating
+    # over HASH_FILES meant that deleting "encounters" from HASH_FILES shortened
+    # the loop, so the file that stopped being hashed also stopped being tested
+    # and --selftest printed a happy line. A guard whose subject list is the
+    # thing it is guarding cannot fail. tools/content/*.json is the authoritative
+    # input set: a pack file the generator never loads is a failure here, and so
+    # is one it loads but does not hash.
+    packfiles = sorted(f[:-5] for f in os.listdir(CONTENT) if f.endswith(".json"))
+    if not packfiles:
+        bad.append("tools/content holds no .json at all")
+    for name in packfiles:
+        c = Content(families)
+        inputs = _hash_inputs(c)
+        if name not in inputs:
+            bad.append("%s.json is in the pack but the generator never loads "
+                       "it, so nothing it says can reach CONTENT_VERSION" % name)
+            continue
+        if name not in HASH_FILES:
+            bad.append("%s.json is loaded but is not in HASH_FILES" % name)
+            continue
+        d = _probe_dict(inputs[name])
+        if d is None:
+            bad.append("%s: nothing in it to perturb" % name)
+            continue
+        d["zz_selftest_probe"] = 1
+        if content_hash(c) == base:
+            bad.append("%s: a change to it does not move CONTENT_VERSION "
+                       "(is it in HASH_FILES?)" % name)
+
+        c = Content(families)
+        _probe_dict(_hash_inputs(c)[name])["_zz_selftest_note"] = 1
+        if content_hash(c) != base:
+            bad.append("%s: a change to a `_`-prefixed DESIGN NOTE moved "
+                       "CONTENT_VERSION (strip_notes no longer strips)" % name)
+
+    other = families + 1 if families + 1 <= max(s["family"] for s in
+                                                Content(families).species_all) \
+        else families - 1
+    if other >= 1 and content_hash(Content(other)) == base:
+        bad.append("roster size: shipping %d families instead of %d does not "
+                   "move CONTENT_VERSION" % (other, families))
+
+    if bad:
+        sys.stderr.write("gen_content.py --selftest: %d FAILED\n" % len(bad))
+        for b in bad:
+            sys.stderr.write("    %s\n" % b)
+        return 1
+    print("gen_content.py --selftest: CONTENT_VERSION 0x%04X moves for each of "
+          "the %d tools/content/*.json files and for the roster size, and does "
+          "not move for a design note" % (base, len(packfiles)))
+    return 0
+
+
+# =============================================================================
 #  EMITTERS
 # =============================================================================
 def banner(title, body):
@@ -604,6 +740,27 @@ def c_str_literal(s, what):
                 "glyph for it (accents and n-tilde are fine; em dash, ellipsis, "
                 "curly quotes and arrows are not)" % (what, s, o))
     return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+# Glyph advance in pixels for the two fonts a generated string can be drawn in.
+# u8g2's 5x8 and t0_11b are both fixed-advance, so a character count IS a pixel
+# count and the arithmetic below is exact rather than an estimate.
+FONT_ADVANCE_PX = {"5x8": 5, "t0_11b": 6}
+
+
+def width_limit(text, chars, font, what, why):
+    """A shipped string that does not fit is a named death at generate time.
+
+    LENGTH IS COUNTED IN CODEPOINTS, NOT BYTES, and that distinction is the
+    whole reason this lives here rather than in a shell grep: the roster is
+    Spanish, "Rafagon" with an acute is 7 characters and 8 bytes, and a byte
+    count would reject a name that draws perfectly well.
+    """
+    n = len(text)
+    if n > chars:
+        die("%s: %r is %d characters, the limit is %d (%s, %d px of the 128 px "
+            "panel) - %s. core/strings_es.h carries the width budget"
+            % (what, text, n, chars, font, n * FONT_ADVANCE_PX[font], why))
 
 
 def emit_species(c):
@@ -705,6 +862,25 @@ static_assert(sizeof(SpeciesDef) == 24, "SpeciesDef layout drifted");
     o.append("inline constexpr uint8_t SPECIES_TABLE_COUNT =")
     o.append("    (uint8_t)(sizeof(SPECIES_TABLE) / sizeof(SPECIES_TABLE[0]));")
     o.append("inline constexpr uint8_t SPECIES_FAMILY_COUNT = %d;\n" % c.families)
+
+    o.append("""// HOW BIG THE PACK IS, as against how much of it this build SHIPS. The two
+// numbers are different today and the difference is the whole shape of phase 9:
+// tools/content/*.json holds the full roster and its own gate validates all of
+// it, while gen_content.py emits a PREFIX clamped by ROSTER_FAMILIES because
+// the sprite atlas can only address so many bodies (see the generator's banner).
+//
+// IT IS EMITTED BECAUSE THE PLAN'S ">= 60 SPECIES" ACCEPTANCE HAD NOWHERE TO
+// LIVE. tools/content/verify.py asserts the pack's 60 and passes today while 36
+// ship, so a C++ test asserting SPECIES_TABLE_COUNT >= 60 would have had to be
+// written as a failing test or not written at all. With this constant the two
+// halves can BOTH be asserted from the emitted headers - the pack is complete,
+// and the ship is exactly as large as the atlas allows - which is what
+// tests/test_content.cpp does.""")
+    o.append("inline constexpr uint8_t SPECIES_PACK_COUNT = %d;" % len(c.species_all))
+    o.append("inline constexpr uint8_t SPECIES_PACK_FAMILY_COUNT = %d;\n"
+             % max(s["family"] for s in c.species_all))
+    o.append("static_assert(SPECIES_TABLE_COUNT <= SPECIES_PACK_COUNT,")
+    o.append('              "the roster ships more species than the pack defines");\n')
 
     o.append("""// The BASE-stage species of every family, indexed by (family - 1). Two callers
 // need it and neither should re-derive it: persistence/migration.cpp lands each
@@ -2421,9 +2597,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--check", action="store_true",
                     help="regenerate in memory and diff against the tree")
+    ap.add_argument("--selftest", action="store_true",
+                    help="prove CONTENT_VERSION moves when each source file "
+                         "changes (writes nothing)")
     ap.add_argument("--families", type=int, default=ROSTER_FAMILIES,
                     help="roster size in families of 3 (default %d)" % ROSTER_FAMILIES)
     args = ap.parse_args()
+
+    if args.selftest:
+        return selftest(args.families)
 
     c, h, files = build_all(args.families)
 

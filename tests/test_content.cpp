@@ -33,6 +33,7 @@
 #include "data/items_table.h"
 #include "data/species_table.h"
 #include "data/sprites.h"
+#include "data/sprites_pebbles.h"
 #include "core/version.h"
 #include "game/evolution.h"
 #include "game/species.h"
@@ -47,6 +48,40 @@ static void make_pebble(PebbleInstance& p, uint8_t species, uint8_t level) {
   p.level      = level;
   const SpeciesDef* sp = species_get(species);
   p.hp_cur = sp ? xp_hp_max(sp->base_hp, level) : 0u;
+}
+
+// -----------------------------------------------------------------------------
+//  UTF-8, counted in GLYPHS rather than bytes.
+//
+//  core/strings_es.h is UTF-8 and the roster is Spanish, so "Rafagon" with an
+//  acute is 7 glyphs in 8 bytes and "Nunez" with a tilde is 5 in 6. Every width
+//  rule in this product is a rule about GLYPHS - the fonts are fixed-advance, so
+//  glyphs are pixels - and strlen() would reject names that draw perfectly well
+//  while accepting a 9-glyph name that is 12 bytes. Nothing in the tree counted
+//  them until P9-C1.
+//
+//  It also reports the widest codepoint, because the _tf fonts u8g2 ships carry
+//  ASCII + Latin-1 and nothing above: a string with U+2014 draws as a wrong
+//  glyph or as nothing, and strings_es.h:9-14 calls that a review blocker.
+// -----------------------------------------------------------------------------
+static int utf8_glyphs(const char* str, uint32_t* widest_cp) {
+  const unsigned char* p = (const unsigned char*)str;
+  int n = 0;
+  uint32_t widest = 0;
+  while (*p) {
+    uint32_t cp = 0;
+    int len = 1;
+    if (*p < 0x80u)            { cp = *p;               len = 1; }
+    else if ((*p & 0xE0u) == 0xC0u) { cp = (uint32_t)(*p & 0x1Fu); len = 2; }
+    else if ((*p & 0xF0u) == 0xE0u) { cp = (uint32_t)(*p & 0x0Fu); len = 3; }
+    else                        { cp = (uint32_t)(*p & 0x07u); len = 4; }
+    for (int k = 1; k < len; ++k) cp = (cp << 6) | (uint32_t)(p[k] & 0x3Fu);
+    p += len;
+    ++n;
+    if (cp > widest) widest = cp;
+  }
+  if (widest_cp) *widest_cp = widest;
+  return n;
 }
 
 // =============================================================================
@@ -218,6 +253,47 @@ TEST(the_naive_sprite_sum_would_mis_draw_a_third_of_the_roster) {
   }
   CHECK_EQ((int)not_a_body, 12);
   CHECK_EQ((int)first_bad, 25);
+}
+
+// =============================================================================
+//  THE PLAN'S ">= 60 SPECIES", AND WHY IT IS ASSERTED ABOUT THE PACK
+//
+//  P9-C1's acceptance line asks for ">= 60 species". The shipped table holds 36
+//  and will until P9-C3, so a naive `CHECK(SPECIES_TABLE_COUNT >= 60)` would
+//  have had to be written as a failing test or not written at all - and
+//  tools/content/verify.py's assertion that the PACK holds 60 passes today
+//  while 36 ship, which is exactly the gap that lets "the roster is done" and
+//  "the roster is 36" both be true statements in the same repository.
+//
+//  So the requirement is split into the two halves that are each checkable now,
+//  both of them from the emitted headers (P9-C1 added SPECIES_PACK_COUNT for
+//  this):
+//
+//    * THE CONTENT IS COMPLETE - the pack defines 60 species in 20 families.
+//    * THE SHIP IS CLAMPED BY THE ART, NOT BY THE CONTENT - the roster is
+//      exactly as large as the atlas can address, and no larger.
+//
+//  THE SECOND HALF IS A PIN THAT P9-C3 IS MEANT TO BREAK. When the art pass
+//  lands 60 bodies, `SPECIES_TABLE_COUNT == SPRITE_SET_COUNT - SPR_BABY_BLOB`
+//  fails, and the correct repair is to raise ROSTER_FAMILIES to 20 and re-point
+//  this case at PB_SPRITE_BODY_COUNT - not to delete it. It is the same shape as
+//  the_naive_sprite_sum_would_mis_draw_a_third_of_the_roster above.
+TEST(the_pack_is_complete_and_the_roster_is_clamped_by_the_atlas) {
+  CHECK(SPECIES_PACK_COUNT >= 60);
+  CHECK_EQ((int)SPECIES_PACK_COUNT, (int)SPECIES_PACK_FAMILY_COUNT * 3);
+  CHECK(SPECIES_TABLE_COUNT <= SPECIES_PACK_COUNT);
+  CHECK_EQ((int)SPECIES_TABLE_COUNT, (int)SPECIES_FAMILY_COUNT * 3);
+
+  // The roster may never exceed what the live atlas can draw. Today that is
+  // data/sprites.h's: one body per species from SPR_BABY_BLOB up.
+  CHECK(SPECIES_TABLE_COUNT <= (int)SPRITE_SET_COUNT - (int)SPR_BABY_BLOB);
+  CHECK_EQ((int)SPECIES_TABLE_COUNT, (int)SPRITE_SET_COUNT - (int)SPR_BABY_BLOB);
+  CHECK_EQ((int)SPECIES_TABLE_COUNT, 36);
+
+  // And the atlas P9-C3 replaces it with, the moment it has any bodies at all:
+  // shipping 60 species against 40 drawn bodies is the failure this forbids.
+  CHECK(PB_SPRITE_BODY_COUNT == 0 ||
+        PB_SPRITE_BODY_COUNT >= SPECIES_TABLE_COUNT);
 }
 
 // plan 1.5.2's `sum(spawn_weight) > 0 per category`, and the reason the table
@@ -951,13 +1027,100 @@ TEST(every_builtin_row_respects_the_budgets_the_creator_is_held_to) {
   CHECK(species_get((uint8_t)CREATOR_SPECIES_ID_MIN) == nullptr);
 }
 
-// CONTENT_VERSION is a hash, not a counter: it must not be the "unset" value a
-// zeroed save blob carries, and it must not be the placeholder 1 the firmware
-// shipped before the generator owned it.
-TEST(content_version_is_a_real_hash) {
-  CHECK(CONTENT_VERSION != 0);
-  CHECK(CONTENT_VERSION != 1);
+// =============================================================================
+//  NAMES THAT FIT, AND GLYPHS THE FONT HAS
+//
+//  plan P9-C1: "names <= 9 chars at 5x8 width". THE SCOPE OF THIS CASE, said
+//  plainly rather than oversold: the emitted names come verbatim out of the JSON
+//  through the generator's c_str_literal(), and tools/gen_content.py refuses an
+//  over-long or non-Latin-1 string at GENERATE time (width_limit()), so a
+//  content author is stopped before this file ever runs. What is left for a
+//  runtime case is the part a generate-time guard structurally cannot cover:
+//
+//    * a static_assert - or a Python guard - only fires where it is run. This is
+//      the same argument this file's banner makes about the compile-time table
+//      guards, and it is why the runtime copy exists at all.
+//    * the guard measures the JSON; this measures THE STRING THE DEVICE DRAWS,
+//      after the escaping, the splice into core/strings_es.h and the StrId
+//      indirection. An emitter that truncated, double-escaped or mis-indexed
+//      would satisfy the generator and fail here.
+//    * it covers ALL 576 strings for Latin-1, not just the generated ones. The
+//      hand-written half of ES[] is where an em dash or an ellipsis would be
+//      pasted in, and strings_es.h:9-14 calls that a review blocker - but until
+//      P9-C1 nothing checked it in any build.
+//
+//  The pixel arithmetic is exact rather than an estimate: u8g2's 5x8 and t0_11b
+//  are fixed-advance, so glyphs x advance IS the drawn width.
+// =============================================================================
+TEST(every_shipped_name_fits_the_box_the_screen_gives_it) {
+  const int kAdv5x8   = 5;    // u8g2_font_5x8_tf
+  const int kAdvT011b = 6;    // u8g2_font_t0_11b_tf
+
+  for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
+    const SpeciesDef& sp = SPECIES_TABLE[i];
+    uint32_t cp = 0;
+    const int n = utf8_glyphs(S(sp.name_idx), &cp);
+    CHECK(n >= 1);
+    CHECK(n <= 9);                       // HOME/BOX draw it beside a level
+    CHECK(n * kAdv5x8 <= 45);
+    CHECK(cp <= 0xFFu);
+    const int f = utf8_glyphs(S(sp.flavor_idx), &cp);
+    CHECK(f >= 1);
+    CHECK(f <= 25);                      // one line of the 128 px panel
+    CHECK(f * kAdv5x8 <= 128);
+    CHECK(cp <= 0xFFu);
+  }
+  for (uint8_t i = 0; i < ATTACK_COUNT; ++i) {
+    uint32_t cp = 0;
+    const int n = utf8_glyphs(S(ATTACKS_TABLE[i].name_idx), &cp);
+    CHECK(n >= 1);
+    CHECK(n <= 10);                      // four in the battle menu's two columns
+    CHECK(n * kAdvT011b <= 64);
+    CHECK(cp <= 0xFFu);
+  }
+  for (uint8_t i = 0; i < ITEM_COUNT; ++i) {
+    uint32_t cp = 0;
+    const int n = utf8_glyphs(S(ITEMS_TABLE[i].name_idx), &cp);
+    CHECK(n >= 1);
+    CHECK(n <= 12);                      // the bag list, after a 12 px icon
+    CHECK(cp <= 0xFFu);
+  }
+  // Every string in the product, generated and hand-written alike: the fonts
+  // carry ASCII + Latin-1 and nothing else.
+  for (uint16_t i = 0; i < (uint16_t)STR_COUNT; ++i) {
+    uint32_t cp = 0;
+    (void)utf8_glyphs(S(i), &cp);
+    CHECK(cp <= 0xFFu);
+  }
+}
+
+// =============================================================================
+//  CONTENT_VERSION
+//
+//  WHAT THIS CASE CAN AND CANNOT CHECK, because the version it replaces claimed
+//  more than it did. P9-C1 measured the old one: `!= 0`, `!= 1`, `<= 0xFFFF`
+//  rejects 2 of 65,536 values, and rebuilding this binary with
+//  -DCONTENT_VERSION=0x1234, 0xFFFF or 0x0002 passed every time. Its NAME was
+//  the plan's requirement - "CONTENT_VERSION changes when the JSON changes" -
+//  and its body proved only that the header was not zeroed.
+//
+//  IT COULD NOT HAVE DONE BETTER AND NEITHER CAN THIS ONE: a C++ test never sees
+//  tools/content/*.json, so it cannot compare a hash against its input. That
+//  property is now checked where both halves exist - `tools/gen_content.py
+//  --selftest`, run by tools/check.sh, which perturbs each pack file ONE AT A
+//  TIME and requires the version to move for every one of them, requires it not
+//  to move for a `_`-prefixed design note, and requires the roster size to be in
+//  it. This case is renamed to what it actually asserts: the value is not one of
+//  the two sentinels, and it fits every field it is stamped into.
+// =============================================================================
+TEST(content_version_is_not_a_sentinel_and_fits_every_field_it_is_stamped_into) {
+  CHECK(CONTENT_VERSION != 0);      // what a zeroed save blob carries
+  CHECK(CONTENT_VERSION != 1);      // the placeholder before the generator owned it
+  // BoxHeader.content_version, BattleSetup.content_ver and the session
+  // handshake all carry it as a uint16_t; a wider value would be silently
+  // truncated on the way into a save and compare unequal on the way out.
   CHECK(CONTENT_VERSION <= 0xFFFFu);
+  CHECK_EQ((unsigned)(uint16_t)CONTENT_VERSION, (unsigned)CONTENT_VERSION);
 }
 
 // =============================================================================

@@ -219,25 +219,36 @@ now enforces `GATE_RELEASE_FLASH_MAX` / `GATE_RELEASE_GLOBALS_MAX`.**
 
 ### 4.3 The sprite budget breaks during the phase-9 art swap, not at its end
 
-`data/sprites.h` carries `static_assert(SPRITE_DATA_BYTES <= 14336)` and sits at 10,623 B.
+`data/sprites.h` carries `static_assert(SPRITE_DATA_BYTES <= 24576)` and sits at **10,479 B**.
 One species costs 144 B of art (24x24, two frames).
 
-**A correction to the first version of this section, which had it wrong.** P9-C3 *deletes*
-the 38 legacy Nottamagochi body sets as it lands the new roster, and those are 9,448 B of
-the 10,623 — only 1,175 B is everything else (icons, emotes, the egg). So the END STATE is
-`1,175 + 8,640 = 9,815 B` and it fits the original budget comfortably. The roster does not
-need a bigger budget.
+**Two corrections, both measured at P9-C1.** (1) This section used to say 10,623 B, because
+`SPRITE_DATA_BYTES` was a hand-typed literal guarded by `static_assert(<literal> <= <literal>)`
+— a comparison that cannot fail from an art change, and which had already failed to notice
+P4-C6 deleting `spr_mood12` (144 B). It is now computed by walking the tables, so the number
+above is the compiler's, not anybody's. (2) The 1,175 B of "everything else" double-counted:
+the two egg sets (288 B) are *inside* the 9,448 B of `SPRITE_SETS`, and the survivors —
+icons, mini-icons, badges, emotes — are 1,031 B.
+
+P9-C3 *deletes* the 36 legacy body and pose sets (9,160 B) as it lands the new roster; the
+two eggs survive. So the END STATE is `1,031 + 288 + 8,640 = 9,959 B` and it fits the
+original budget comfortably. The roster does not need a bigger budget.
 
 What needs headroom is the **window**: the natural order is to land the new art, check it
 against the real screens, and only then delete the old sets — and while both are alive the
-total is `10,623 + 8,640 = 19,263 B`, which the old 14,336 would have failed with no
+total is `10,479 + 8,640 = 19,119 B`, which the old 14,336 would have failed with no
 explanation attached to the failure.
 
 | state | total | against 14,336 |
 |---|---|---|
-| today | 10,623 | fits |
-| both rosters alive (the swap window) | 19,263 | **breaks** |
-| after the legacy sets go | 9,815 | fits |
+| today | 10,479 | fits |
+| both rosters alive (the swap window) | 19,119 | **breaks** |
+| after the legacy sets go | 9,959 | fits |
+
+The two atlases are separate headers during the window (`sprites.h` and the generated
+`sprites_pebbles.h`), each asserting its own half at compile time;
+`tests/test_sprite_pipeline.cpp` is where the **sum** is checked against the 24,576, because
+it is the only place both are visible.
 
 **Done: raised to 24,576 as a transition allowance, with the derivation in the header and a
 note that P9-C3 should bring it back down** — an allowance left standing after the thing it
@@ -973,8 +984,9 @@ Against §3's P9-P10 forecast of 25-35 K flash and 0.7-2.0 K globals, the ending
 species, the sprite swap and the corruption mechanic, and its budget line is **flash, not
 globals** — which is the comfortable one here.
 
-* `SPRITE_DATA_BYTES` is **10,623 B today**, of which 9,448 B is the 38 legacy Nottamagochi
-  body sets P9-C3 deletes. 60 species at 144 B each is 8,640 B, so the **end state is 9,815 B**
+* `SPRITE_DATA_BYTES` is **10,479 B today** (measured by the compiler since P9-C1, not typed),
+  of which 9,160 B is the 36 legacy Nottamagochi body and pose sets P9-C3 deletes — the two
+  eggs survive. 60 species at 144 B each is 8,640 B, so the **end state is 9,959 B**
   and the **peak, with both alive at once, is 19,263 B** — inside `sprites.h`'s 24,576 B
   transition allowance with 5,313 B of margin, and §4.3 carries the same arithmetic. The peak
   costs about **+8,640 B of flash against 273,600 free**: 3.2 % of the headroom.

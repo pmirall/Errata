@@ -1,0 +1,28 @@
+# tools/sprites/atlas.txt - THE ATLAS ORDER.
+#
+# One set name per line, in the order they are emitted into
+# Pebblebol/src/data/sprites_pebbles.h. Blank lines and `#` comments ignored.
+# `<name>` here means the file `tools/sprites/<name lowercased>.txt`, and that
+# file must declare `name: <NAME>` - the two are one identity, checked both ways.
+#
+# THE ORDER IS A CONTRACT, not a convenience, which is why it is a committed
+# file and not os.listdir(). Two things depend on it:
+#
+#   1. FIXED SLOTS COME FIRST. EGG_IDLE must be id 0: sprite_set() falls back to
+#      set 0 for any out-of-range id, so slot 0 is the one that may never move.
+#
+#   2. THE SPECIES BLOCK IS THE TAIL, in roster order, with no gaps. The pack's
+#      invariant is `sprite_id == id - 1` (tools/content/species.json,
+#      data/species_table.h), so a body's slot is DETERMINED by its species id:
+#      PB_SPRITE_BODY_FIRST + (id - 1). gen_sprites.py refuses a species block
+#      that is out of order, has a hole, or names a species the pack does not
+#      have - because a body in the wrong slot draws the wrong creature on HOME
+#      and every other check in the tree stays green.
+#
+# P9-C3 appends 60 lines below the eggs, one per species, in id order.
+
+EGG_IDLE
+EGG_CRACK
+
+# --- species bodies, one per roster id, PB_SPRITE_BODY_FIRST + (id - 1) ------
+# (none yet - P9-C3 draws them; see tools/sprites/README.md)

@@ -1,0 +1,277 @@
+// =============================================================================
+//  tests/tools/sprite_dump.cpp - THE ONLY INSTRUMENT FOR THE PROPERTY THAT
+//  MATTERS (P9-C1).
+//
+//  Sixty bodies are about to be drawn by five different hands. Every automated
+//  check this phase can offer is a check about BYTES: that the grid is
+//  rectangular, that an array matches the w/h its table advertises, that a
+//  frame is not empty, that the two frames differ. NONE OF THEM CAN SEE
+//  WHETHER A BODY LOOKS LIKE A CREATURE. A 24x24 of noise passes all of them.
+//
+//  So this binary renders the COMPILED atlas - both of them - as text a person
+//  can read, and as a PBM contact sheet a person can open. It is the review
+//  instrument, and until it existed there was no path at all: fb_dump() prints
+//  only a whole 128x64 screen and only from a FAILING golden, tests/golden
+//  holds full screens of which six would ever contain a body, and
+//  creator_decode prints sprite frames as hex.
+//
+//  IT READS THE HEADERS, NOT THE ASCII SOURCES, and that is the point. A
+//  rendering of tools/sprites/*.txt would only prove the .txt files say what
+//  they say. This walks data/sprites.h's SPRITE_SETS and
+//  data/sprites_pebbles.h's PB_SPRITE_SETS through the same
+//  ((w+7)>>3) / LSB-first decode the device's drawXBM performs, so what appears
+//  here is what the panel will show.
+//
+//  Usage
+//    ./bin/sprite_dump list                 every set in both atlases
+//    ./bin/sprite_dump text [NAME|INDEX]    one set (or all) as '#' and '.'
+//    ./bin/sprite_dump sheet OUT.pbm        contact sheet, frame 0 of every set
+//    ./bin/sprite_dump sheet OUT.pbm 1      contact sheet, frame 1
+//
+//  A name is matched case-insensitively against the enum tag with or without
+//  its prefix: ADULT_BUHO, spr_adult_buho and SPR_ADULT_BUHO all work, and
+//  EGG_IDLE names the set in BOTH atlases (both are printed - which is how the
+//  generated egg is eyeballed against the legacy one).
+//
+//  Built by `make -C tests spritetool`, NOT by `make check`: it writes files and
+//  answers a human, which is what tests/tools/ means. It asserts nothing.
+//  tests/test_sprite_pipeline.cpp is the part that asserts.
+//
+//  All identifiers and comments English.
+// =============================================================================
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>   // strcasecmp / strncasecmp
+
+#include "data/sprites.h"
+#include "data/sprites_pebbles.h"
+
+// The legacy atlas's enum tags, in order. sprites.h is hand-written and its
+// enum carries no string form, so the names are listed once here. A drift
+// between this list and the enum is caught at compile time by the
+// static_assert below, not left to a reader.
+static const char* const kLegacyName[] = {
+  "EGG_IDLE", "EGG_CRACK",
+  "BABY_BLOB", "BABY_ORUGA", "BABY_PAJARO", "BABY_GATO", "BABY_SETA",
+  "BABY_CACTUS", "BABY_PEZ", "BABY_ROBOT",
+  "CHILD_GOOD", "CHILD_POOR", "TEEN_GOOD", "TEEN_POOR",
+  "ADULT_BOLOTA", "ADULT_ZAMPASALTO", "ADULT_BUHO", "ADULT_PUNKI",
+  "ADULT_MOHO", "ADULT_QUIMERA",
+  "SENIOR_BOLOTA", "SENIOR_ZAMPASALTO", "SENIOR_BUHO", "SENIOR_PUNKI",
+  "SENIOR_MOHO", "SENIOR_QUIMERA",
+  "GHOST", "TOMB",
+  "SLEEP_BABY", "SLEEP_CHILD", "SLEEP_TEEN", "SLEEP_ADULT",
+  "SICK_CHILD", "SICK_TEEN", "SICK_ADULT",
+  "EAT_CHILD", "EAT_TEEN", "EAT_ADULT",
+};
+static_assert(sizeof(kLegacyName) / sizeof(kLegacyName[0]) == SPRITE_SET_COUNT,
+              "the legacy name list and SpriteSetId have drifted apart");
+
+// The generated atlas carries its own names (PB_SPRITE_NAMES), emitted by
+// tools/gen_sprites.py from atlas.txt. Nothing is transcribed here, so when
+// P9-C3 lands 60 bodies this tool needs no edit at all.
+
+struct Entry {
+  const char*      atlas;   // "legacy" or "generated"
+  const char*      name;
+  const SpriteSet* set;
+  int              index;
+};
+
+static Entry g_all[SPRITE_SET_COUNT + PB_SPRITE_SET_COUNT];
+static int   g_n = 0;
+
+static void collect(void)
+{
+  for (int i = 0; i < (int)SPRITE_SET_COUNT; ++i) {
+    Entry e = { "legacy", kLegacyName[i], &SPRITE_SETS[i], i };
+    g_all[g_n++] = e;
+  }
+  for (int i = 0; i < (int)PB_SPRITE_SET_COUNT; ++i) {
+    Entry e = { "generated", PB_SPRITE_NAMES[i], &PB_SPRITE_SETS[i], i };
+    g_all[g_n++] = e;
+  }
+}
+
+// THE DECODE, and it is deliberately open-coded rather than routed through a
+// helper: this is the one place a reader can check the bit order against
+// data/sprite_types.h's contract without following a call.
+//   byte n of a row carries pixels 8n..8n+7, LSB = LEFTMOST pixel.
+static int pixel_at(const SpriteSet& s, int frame, int x, int y)
+{
+  const int stride = ((int)s.w + 7) >> 3;
+  const int base   = stride * (int)s.h * frame;
+  const uint8_t b  = s.bits[base + y * stride + (x >> 3)];
+  return (b >> (x & 7)) & 1;
+}
+
+static int ink_count(const SpriteSet& s, int frame)
+{
+  int n = 0;
+  for (int y = 0; y < (int)s.h; ++y)
+    for (int x = 0; x < (int)s.w; ++x) n += pixel_at(s, frame, x, y);
+  return n;
+}
+
+static int frame_diff(const SpriteSet& s)
+{
+  if (s.frames < 2) return -1;
+  int n = 0;
+  for (int y = 0; y < (int)s.h; ++y)
+    for (int x = 0; x < (int)s.w; ++x)
+      if (pixel_at(s, 0, x, y) != pixel_at(s, 1, x, y)) ++n;
+  return n;
+}
+
+static void print_list(void)
+{
+  printf("%-10s %3s  %-18s %5s %6s %7s %8s %9s\n",
+         "atlas", "id", "name", "size", "frames", "bytes", "ink f0", "f0 vs f1");
+  unsigned total = 0;
+  for (int i = 0; i < g_n; ++i) {
+    const SpriteSet& s = *g_all[i].set;
+    const unsigned bytes = spr_set_bytes(s);
+    total += bytes;
+    char size[16];
+    snprintf(size, sizeof size, "%ux%u", (unsigned)s.w, (unsigned)s.h);
+    const int d = frame_diff(s);
+    printf("%-10s %3d  %-18s %5s %6u %7u %8d %9s\n",
+           g_all[i].atlas, g_all[i].index, g_all[i].name, size,
+           (unsigned)s.frames, bytes, ink_count(s, 0),
+           d < 0 ? "-" : (d == 0 ? "IDENTICAL" : "differs"));
+  }
+  printf("\n%d sets, %u B of art in both atlases together\n", g_n, total);
+}
+
+static void print_text(const Entry& e)
+{
+  const SpriteSet& s = *e.set;
+  printf("== %s[%d] %s  %ux%u x%u  (%u B)  ink f0 %d",
+         e.atlas, e.index, e.name, (unsigned)s.w, (unsigned)s.h,
+         (unsigned)s.frames, spr_set_bytes(s), ink_count(s, 0));
+  const int d = frame_diff(s);
+  if (d == 0) printf("   FRAME 1 IS IDENTICAL TO FRAME 0");
+  else if (d > 0) printf("   frames differ in %d px", d);
+  printf("\n");
+
+  // Frames side by side: an idle animation is a PAIR, and a pair read one above
+  // the other is a pair nobody compares.
+  for (int f = 0; f < (int)s.frames; ++f) {
+    printf("   frame %-*d", (int)s.w - 6 > 1 ? (int)s.w - 6 : 1, f);
+    printf("  ");
+  }
+  printf("\n");
+  for (int y = 0; y < (int)s.h; ++y) {
+    for (int f = 0; f < (int)s.frames; ++f) {
+      printf("   ");
+      for (int x = 0; x < (int)s.w; ++x)
+        putchar(pixel_at(s, f, x, y) ? '#' : '.');
+    }
+    printf("\n");
+  }
+  printf("\n");
+}
+
+// ONE PBM, ASCII P1, the same format tests/golden/screens/*.pbm uses - so the
+// sheet opens in any image viewer and diffs as text.
+static int write_sheet(const char* path, int frame)
+{
+  int cell_w = 0, cell_h = 0;
+  for (int i = 0; i < g_n; ++i) {
+    if (g_all[i].set->w > cell_w) cell_w = g_all[i].set->w;
+    if (g_all[i].set->h > cell_h) cell_h = g_all[i].set->h;
+  }
+  const int pad  = 2;
+  const int cols = 8;
+  const int rows = (g_n + cols - 1) / cols;
+  const int W = cols * (cell_w + pad) + pad;
+  const int H = rows * (cell_h + pad) + pad;
+
+  unsigned char* fb = (unsigned char*)calloc((size_t)W * (size_t)H, 1);
+  if (!fb) { fprintf(stderr, "sprite_dump: out of memory\n"); return 2; }
+
+  for (int i = 0; i < g_n; ++i) {
+    const SpriteSet& s = *g_all[i].set;
+    const int f  = frame < (int)s.frames ? frame : 0;
+    const int cx = (i % cols) * (cell_w + pad) + pad;
+    const int cy = (i / cols) * (cell_h + pad) + pad;
+    // Bottom-aligned inside the cell, centred horizontally: the atlas mixes
+    // 24, 28, 32 and 40 px bodies and they all stand on the same floor on
+    // screen (HOME_FLOOR_Y), so a sheet that centred them vertically would
+    // misrepresent how they line up.
+    const int ox = cx + (cell_w - (int)s.w) / 2;
+    const int oy = cy + (cell_h - (int)s.h);
+    for (int y = 0; y < (int)s.h; ++y)
+      for (int x = 0; x < (int)s.w; ++x)
+        if (pixel_at(s, f, x, y)) fb[(size_t)(oy + y) * (size_t)W + (ox + x)] = 1;
+  }
+
+  FILE* fp = fopen(path, "w");
+  if (!fp) { fprintf(stderr, "sprite_dump: cannot write %s\n", path); free(fb); return 2; }
+  fprintf(fp, "P1\n# pebblebol sprite contact sheet, frame %d, %d sets\n%d %d\n",
+          frame, g_n, W, H);
+  for (int y = 0; y < H; ++y) {
+    for (int x = 0; x < W; ++x) fputc(fb[(size_t)y * (size_t)W + x] ? '1' : '0', fp);
+    fputc('\n', fp);
+  }
+  fclose(fp);
+  free(fb);
+  printf("sprite_dump: wrote %s (%dx%d, %d sets, frame %d)\n", path, W, H, g_n, frame);
+  return 0;
+}
+
+static int name_eq(const char* a, const char* b)
+{
+  // Case-insensitive, and tolerant of the "spr_" / "SPR_" / "PBSPR_" prefixes a
+  // reader is likely to paste in from the header.
+  static const char* const kPrefix[] = { "pbspr_", "spr_", "pb_spr_" };
+  for (int p = 0; p < 3; ++p) {
+    const size_t n = strlen(kPrefix[p]);
+    if (strncasecmp(a, kPrefix[p], n) == 0) { a += n; break; }
+  }
+  return strcasecmp(a, b) == 0;
+}
+
+int main(int argc, char** argv)
+{
+  collect();
+  const char* cmd = argc > 1 ? argv[1] : "list";
+
+  if (strcmp(cmd, "list") == 0) { print_list(); return 0; }
+
+  if (strcmp(cmd, "text") == 0) {
+    if (argc < 3) {
+      for (int i = 0; i < g_n; ++i) print_text(g_all[i]);
+      return 0;
+    }
+    int hits = 0;
+    for (int i = 0; i < g_n; ++i) {
+      if (name_eq(argv[2], g_all[i].name)) { print_text(g_all[i]); ++hits; }
+    }
+    if (!hits) {
+      char* end = nullptr;
+      const long idx = strtol(argv[2], &end, 10);
+      if (end && *end == '\0' && idx >= 0 && idx < g_n) {
+        print_text(g_all[idx]);
+        return 0;
+      }
+      fprintf(stderr, "sprite_dump: no set named %s (try `list`)\n", argv[2]);
+      return 1;
+    }
+    return 0;
+  }
+
+  if (strcmp(cmd, "sheet") == 0) {
+    if (argc < 3) { fprintf(stderr, "sprite_dump: sheet needs an output path\n"); return 2; }
+    const int frame = argc > 3 ? atoi(argv[3]) : 0;
+    return write_sheet(argv[2], frame);
+  }
+
+  fprintf(stderr,
+          "usage: sprite_dump list\n"
+          "       sprite_dump text [NAME|INDEX]\n"
+          "       sprite_dump sheet OUT.pbm [FRAME]\n");
+  return 2;
+}

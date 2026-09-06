@@ -163,6 +163,25 @@ inline constexpr uint8_t SPECIES_TABLE_COUNT =
     (uint8_t)(sizeof(SPECIES_TABLE) / sizeof(SPECIES_TABLE[0]));
 inline constexpr uint8_t SPECIES_FAMILY_COUNT = 12;
 
+// HOW BIG THE PACK IS, as against how much of it this build SHIPS. The two
+// numbers are different today and the difference is the whole shape of phase 9:
+// tools/content/*.json holds the full roster and its own gate validates all of
+// it, while gen_content.py emits a PREFIX clamped by ROSTER_FAMILIES because
+// the sprite atlas can only address so many bodies (see the generator's banner).
+//
+// IT IS EMITTED BECAUSE THE PLAN'S ">= 60 SPECIES" ACCEPTANCE HAD NOWHERE TO
+// LIVE. tools/content/verify.py asserts the pack's 60 and passes today while 36
+// ship, so a C++ test asserting SPECIES_TABLE_COUNT >= 60 would have had to be
+// written as a failing test or not written at all. With this constant the two
+// halves can BOTH be asserted from the emitted headers - the pack is complete,
+// and the ship is exactly as large as the atlas allows - which is what
+// tests/test_content.cpp does.
+inline constexpr uint8_t SPECIES_PACK_COUNT = 60;
+inline constexpr uint8_t SPECIES_PACK_FAMILY_COUNT = 20;
+
+static_assert(SPECIES_TABLE_COUNT <= SPECIES_PACK_COUNT,
+              "the roster ships more species than the pack defines");
+
 // The BASE-stage species of every family, indexed by (family - 1). Two callers
 // need it and neither should re-derive it: persistence/migration.cpp lands each
 // legacy v1 family on a base-stage creature, and P7 breeding gives an offspring
