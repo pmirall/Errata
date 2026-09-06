@@ -96,6 +96,22 @@ inline constexpr int32_t CARE_DECAY_MPH[PB_BALANCE_CARE_COUNT] = {
 //    care-quality penalty, no cooldown is charged (game/sim.cpp fail()).
 //    Sized against section 1: a meal buys about 7 h of satiety, a clean about
 //    12 h of cleanliness, so 3-4 touches a day is a well-kept Pebble.
+//
+//    THAT LAST CLAUSE IS OPTIMISTIC AND P9-C4 MEASURED BY HOW MUCH, rather than
+//    deleting a sentence the whole care model was sized against. The arithmetic
+//    in front of it is exact - 30,000 milli / 4,200 mph = 7.1 h - but satiety
+//    falls for all 24 h, i.e. 100.8 points a day, so 3.36 MEALS a day is
+//    break-even and a "touch" also has to cover cleaning, play and petting.
+//    tests/tools/sim_days.cpp, 30 days, the real sim: a player with 8 device-ON
+//    hours who touches the Pebble 3-4 times a day lands 3.3 care actions a day
+//    and its satiety reaches ZERO every night, after which CARE_ZERO_GRACE_S
+//    expires and health bleeds to HEALTH_FLOOR_PCT. THE PEBBLE IS NEVER LOST -
+//    that is spec 27 and it holds - and spec 57's own criterion (eight ignored
+//    hours never drop health below 60 %) holds with margin, measured at 100 %
+//    over all 24 start hours with a live control at 24/48/72 h. So NOTHING IS
+//    TUNED HERE: moving ACT_MEAL_HUNGER or CARE_DECAY_MPH re-records
+//    tests/golden/care_v1.txt and is a care-model change with its own commit,
+//    not a side effect of an XP-curve decision. What is fixed is the claim.
 // =============================================================================
 #define ACT_MEAL_HUNGER         30
 #define ACT_MEAL_CQ             2
@@ -161,16 +177,56 @@ inline constexpr int32_t CARE_DECAY_MPH[PB_BALANCE_CARE_COUNT] = {
 //      * the WHOLE curve sums to 8,845, which also fits u16, so any code that
 //        wants a lifetime total can hold one without a wider type.
 //
-//    THIS CURVE IS NOT THE CONTENT PACK'S, AND THAT IS A P4-C1 DECISION.
-//    tools/content/balance.json ships a second 31-entry XP_TABLE
-//    (25 + 12*(L-1) + 4*(L-1)^2, total 36,453), and adopting it would multiply
-//    time-to-level-30 by 4.12x. gen_content.py deliberately does NOT emit
-//    XP_TABLE: it is not one of the content TABLES of plan 1.5.2, the shipped
-//    curve predates the pack (P3-C2), and swapping it moves a recorded pixel
-//    golden - screen_home.cpp draws the XP rule at 128*xp/xp_next, and
-//    tests/test_screens.cpp sets xp = 2 against XP_TABLE[1], which is 23 px on
-//    11 and 10 px on 25. A whole-game pacing change is its own commit with its
-//    own re-recorded golden, not a side effect of "regenerate the content".
+//    THIS IS NOW THE ONLY XP CURVE IN THE TREE, AND THAT IS P9-C4's DECISION.
+//    tools/content/balance.json used to ship a SECOND 31-entry XP_TABLE
+//    (25 + 12*(L-1) + 4*(L-1)^2, total 36,453). P4-C1 declined to adopt it,
+//    P4-C6 found the choice owned by no chunk, P9-C3 found its instrument did
+//    not exist - three deferrals - and the plan sequenced it here. THE PACK'S
+//    CURVE IS DELETED FROM balance.json. It is not "not adopted", it is gone,
+//    because two curves in two files is a second source of truth and checking
+//    either one cannot catch the pair disagreeing; tools/content/verify.py now
+//    reads THIS table out of THIS file and fails by name if an XP_TABLE key
+//    reappears in the pack.
+//
+//    THE EVIDENCE, from tests/tools/sim_days.cpp - 30 simulated days driving
+//    the real game/sim.cpp, the real game/xp.cpp ledger and the real
+//    game/encounters.cpp roll, under four written-down player profiles:
+//
+//      profile                       XP/day   this curve   the pack's
+//      light     2 device-ON h        18.8     471 d        1,942 d
+//      normal    8 h, 3-4 touches    109.4      81 d          333 d
+//      heavy    14 h                 352.8      25 d          103 d
+//      saturate 16 h, every action  1,031.9      9 d           35 d
+//
+//    The plan's target is "level 30 is 3-4 weeks", i.e. 21-28 days. THIS CURVE
+//    LANDS INSIDE THE BAND FOR A HEAVY PLAYER (25 days) and overshoots it about
+//    3x for a normal one. THE PACK'S CURVE DOES NOT REACH THE BAND UNDER ANY
+//    PROFILE - not even the physically unreachable ceiling, where every care
+//    action is tried every minute for sixteen hours and it still needs five
+//    weeks. That is the decision, and it is a measurement rather than a
+//    preference.
+//
+//    TWO THINGS THAT MEASUREMENT TURNED UP AND THAT ARE NOT FIXED HERE:
+//      * THE FIRST TWENTY LEVELS ARE FREE. game/sim.cpp advances the retired v1
+//        life stage by AGE alone and stage_commit() writes that stage back into
+//        PebbleInstance.level through level_of_stage(), so a Pebble that earns
+//        NO XP AT ALL reaches level 5 at 2 h, 10 at 10 h, 15 at 24 h and 20 at
+//        3.5 days. sim.cpp's own comment says "P3-C2 makes level XP-driven and
+//        this map becomes read-only", and that sentence is false while
+//        stage_commit() still writes. 2,660 of this curve's 8,845 points are
+//        therefore never earned by anybody, and the honest "days to 30" is the
+//        6,185 above the floor.
+//      * A NORMAL PLAYER CANNOT KEEP THE PEBBLE FED - see section 2's note.
+//
+//    THE PIXEL GOLDEN DID NOT MOVE, and that is worth saying because every
+//    previous deferral cited it: screen_home.cpp draws the XP rule at
+//    128*xp/xp_next and tests/test_screens.cpp sets xp = 2 against XP_TABLE[1],
+//    which is 23 px on 11 and would have been 10 px on 25. XP_TABLE[1] is still
+//    11, so golden/screens/*.pbm is untouched by this decision.
+//
+//    gen_content.py still deliberately does NOT emit XP_TABLE: it is not one of
+//    the content TABLES of plan 1.5.2, and the pack no longer carries a curve
+//    for it to emit.
 // =============================================================================
 #define XP_LEVEL_MAX            30
 
@@ -357,7 +413,48 @@ inline constexpr uint8_t TYPE_MUL_DEN[3] = { 5, 1, 4 };
 //    pen     = EVASION_PER_SPD * min(EVASION_MAX_SPD_GAP, max(0, spd_def - spd_atk))
 //    acc_eff = max(ACCURACY_MIN, (int16_t)accuracy - pen)     // SIGNED
 //    hit     = rng(0..99) < acc_eff
-#define EVASION_PER_SPD         2
+//
+// P9-C4 RAISED THIS FROM 2 TO 3, AND IT IS THE ONE TUNING NUMBER THE BALANCE
+// PASS MOVED. The paragraph above already names the failure this rule exists to
+// fix; what the pass found is that the rule was still UNDERSIZED against the
+// engine this file feeds - the pack sized it against tools/content/sim_engine.py,
+// which game/battle.h names as diverging from game/battle.cpp in five ways.
+//
+// THE MEASUREMENT, from tests/tools/balance_matrix.cpp: all 3,600 ordered pairs
+// of the 60-species roster, 1,000 seeded 1v1 battles each at level 15, both
+// sides driven by the real game/battle_ai.cpp. 3.6 M battles, 16 s.
+//
+//   EVASION_PER_SPD    SIGNAL   CORRUPT   SYSTEM   species outside 35-65 %
+//        2 (was)        42.9 %   56.8 %   50.3 %          9 of 60
+//        3 (is)         46.6 %   55.0 %   48.5 %          5 of 60
+//        4              50.1 %   53.1 %   46.8 %          7 of 60
+//        5              53.3 %   51.3 %   45.4 %          7 of 60
+//   (same-stage cross-type battles; SPECIES_TABLE is 20 families x 3 stages with
+//    base-stat totals fixed at 16/22/28, so a same-stage cell is the only one a
+//    roster claim can be about.)
+//
+// WHY A TYPE NUMBER MOVES WHEN A SPD NUMBER DOES, which is not obvious and is
+// the whole reason this is the right lever: the roster's archetypes are
+// CORRELATED WITH TYPE. SIGNAL carries 11 of the 12 speed archetypes (6 EVASIVE
+// + 5 FAST) and CORRUPT carries 13 of the 13 damage ones (7 GLASS + 6 BRUISER),
+// so a rule that underpays SPD does not read to a player as "speed is weak", it
+// reads as "SIGNAL is weak". tools/content/verify.py's own
+// "archetype decorrelated from type" check does not see this: it bounds each
+// archetype at 45 % of a type, and GLASS is 35 % of CORRUPT - it is the PAIR
+// GLASS+BRUISER at 65 % that pays.
+//
+// 3 AND NOT 4, stated because the bigger number tightens the type spread
+// further: at 4 the correction overshoots onto SYSTEM (46.8 %) and two SYSTEM
+// FAST bodies cross 65 % from below. 3 is the measured answer, not the largest
+// available one.
+//
+// THE COST, stated rather than left to be found: the worst-case accuracy
+// penalty goes from -20 to -30 points, so a 55-accuracy move (attack 28 Apuesta)
+// now floors at ACCURACY_MIN against a 5-point speed gap instead of an 8-point
+// one, and tests/golden/battle_v1.txt was re-recorded because every hit roll in
+// it moved. tools/content/balance.json carries the same number and the same
+// measurement; tools/check.sh's balance gate is what keeps the two in step.
+#define EVASION_PER_SPD         3
 #define EVASION_MAX_SPD_GAP     10
 #define ACCURACY_MIN            40
 #define ACCURACY_ROLL_SPAN      100

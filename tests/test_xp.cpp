@@ -61,6 +61,62 @@ TEST(the_curve_rises_strictly_and_fits_a_u16) {
   CHECK_EQ(xp_for_level(200), 0);
 }
 
+// -----------------------------------------------------------------------------
+//  THE CURVE DECISION, PINNED (P9-C4).
+//
+//  the_curve_rises_strictly_and_fits_a_u16 above CANNOT TELL THE TWO CURVES
+//  APART, and that is why this case exists rather than being folded into it.
+//  tools/content/balance.json used to ship a rival 31-entry table -
+//  inc(L) = 25 + 12*(L-1) + 4*(L-1)^2, total 36,453 - and it rises strictly and
+//  fits a u16 just as happily as the shipped one, so swapping the whole table
+//  would have left that case green. P9-C4 chose the shipped curve on
+//  tests/tools/sim_days.cpp's evidence and DELETED the rival from the pack;
+//  this is what stops the choice being silently reversed by a hand edit.
+//
+//  It pins the RULE (10 + L*L), not a transcription of the numbers, so a single
+//  changed entry fails; and it requires the shipped table to DIFFER FROM THE
+//  PACK'S AT EVERY LEVEL, so adopting that curve wholesale fails on all 29.
+// -----------------------------------------------------------------------------
+TEST(the_shipped_curve_is_the_one_p9c4_chose_and_not_the_packs) {
+  // (1) THE RULE. Not a copy of the table - a copy would pass a mutation that
+  // edited both, and this cannot.
+  for (uint8_t lv = 1; lv < (uint8_t)XP_LEVEL_MAX; ++lv) {
+    const uint16_t want = (uint16_t)(10u + (uint16_t)lv * (uint16_t)lv);
+    CHECK_EQ((int)xp_for_level(lv), (int)want);
+  }
+
+  // (2) THE TWO TOTALS P9-C4, data/balance.h and the plan all quote. 2,660 is
+  // the share game/sim.cpp's v1 stage clock gives away for free (it writes
+  // level 20 into PebbleInstance.level after 3.5 days on zero XP), so the
+  // honest cost of reaching 30 is the difference.
+  uint32_t to20 = 0, to30 = 0;
+  for (uint8_t lv = 1; lv < 20u; ++lv) to20 += xp_for_level(lv);
+  for (uint8_t lv = 1; lv < (uint8_t)XP_LEVEL_MAX; ++lv) to30 += xp_for_level(lv);
+  CHECK_EQ((int)to20, 2660);
+  CHECK_EQ((int)to30, 8845);
+  CHECK_EQ((int)(to30 - to20), 6185);
+
+  // (3) IT IS NOT THE PACK'S CURVE, at any level. The rival is computed here
+  // rather than transcribed, for the same reason as (1).
+  int differs = 0;
+  for (uint8_t lv = 1; lv < (uint8_t)XP_LEVEL_MAX; ++lv) {
+    const uint32_t l1   = (uint32_t)lv - 1u;
+    const uint32_t pack = 25u + 12u * l1 + 4u * l1 * l1;
+    CHECK((uint32_t)xp_for_level(lv) != pack);
+    if ((uint32_t)xp_for_level(lv) != pack) ++differs;
+  }
+  CHECK_EQ(differs, (int)XP_LEVEL_MAX - 1);   // the loop really compared all 29
+
+  // (4) THE PIXEL GOLDEN'S ONE INPUT. Every earlier deferral of this decision
+  // cited the recorded HOME snapshot: screen_home.cpp draws the XP rule at
+  // 128 * have / next and tests/test_screens.cpp records it with xp = 2 against
+  // XP_TABLE[1]. On the shipped 11 that is 23 px; on the pack's 25 it is 10.
+  // Pinning the arithmetic here means a future curve edit says WHY the snapshot
+  // moved instead of leaving a reviewer to work it out from a PBM diff.
+  CHECK_EQ((int)xp_for_level(1), 11);
+  CHECK_EQ((int)((128u * 2u) / xp_for_level(1)), 23);
+}
+
 // =============================================================================
 //  LEVELLING
 // =============================================================================

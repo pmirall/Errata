@@ -12,6 +12,86 @@ tag for a phase is cut only when its gate (`tools/check.sh`) and its variant mat
 
 ### Added
 
+- **The balance pass, with two instruments that print numbers a person reads (P9-C4).**
+  `tests/tools/balance_matrix.cpp` fights **all 3,600 ordered pairs of the roster 1,000 times
+  each** — 3.6 M battles in 16.2 s, both sides driven by the real `game/battle_ai.cpp` over the
+  real `game/battle.cpp` — so nothing was sampled and the grid was never shrunk.
+  `tests/tools/sim_days.cpp` runs **30 simulated days** of the real `game/sim.cpp`, the real
+  `game/xp.cpp` ledger and the real `game/encounters.cpp` roll under four written-down player
+  profiles. Neither is in `make check`: they answer a human, which is what `tests/tools/` means.
+  `make -C tests balancetool` builds both.
+- **`EVASION_PER_SPD` 2 → 3, the one tuning number this pass moved**, in `data/balance.h` and
+  `tools/content/balance.json` together. The matrix found a **type** imbalance with a **speed**
+  cause: SIGNAL carries 11 of the 12 speed archetypes and CORRUPT 13 of the 13 damage ones, so a
+  rule that underpays SPD reads as "SIGNAL is weak". Same-stage cross-type win rates
+  **42.9 / 56.8 / 50.3 % → 46.6 / 55.0 / 48.5 %**, species outside the 35-65 % band **9 → 5**,
+  and the type edge itself 59.9 → 59.5 %, still inside the 54-65 % §12 asks for. 4 and 5 were
+  measured and overshoot, so 3 is the measured answer rather than the largest available one.
+- **The dynasty name is host-testable for the first time (P9-C4, §54).** The hash and the two
+  syllable indices moved from `ui/ui.cpp` — which includes `<Arduino.h>`, so no host binary could
+  ever link it — into `game/pebble.cpp` as `pebble_name_syllables()`. The syllable repertoire
+  stays in `core/strings_es.h` and the caller does the lookup, so neither `snprintf` nor the
+  Spanish string block enters the pure layer. `pebble_name_join()` replaces the `snprintf` and
+  **fixes a real defect**: the old join truncated on a BYTE boundary and the repertoire is UTF-8,
+  so `"Ña" + "rrón"` (6 glyphs, 8 bytes) could be cut mid-sequence; the new one truncates on a
+  CHARACTER boundary and always yields a PREFIX of the whole name.
+
+### Changed
+
+- **THE XP CURVE DECISION IS CLOSED AFTER THREE DEFERRALS, AND THE LOSER IS DELETED.**
+  `tools/content/balance.json`'s rival 31-entry curve (`25 + 12*(L-1) + 4*(L-1)^2`, total 36,453)
+  is **gone from the file**, not merely unadopted; `data/balance.h`'s `10 + L*L` / 8,845 is the
+  only XP curve in the tree. `tools/content/verify.py` now reads that curve out of `balance.h`
+  and **fails by name if an `XP_TABLE` key reappears in the pack**, so the second source of truth
+  cannot come back. THE EVIDENCE, days to level 30 at each profile's measured XP/day
+  (shipped / pack): light **471 / 1,942**, normal **81 / 333**, heavy **25 / 103**, saturate
+  **9 / 35**. Against the 21-28 day target the shipped curve lands inside the band for a heavy
+  player; **the pack's reaches it under no profile at all**, including the physically unreachable
+  ceiling. The criterion itself is the PLAN's gloss and not a §57 line — §57 contains no number,
+  no week and no level 30 — and the exit says so.
+- **`tests/golden/battle_v1.txt` re-recorded, and the diff is only the version stamp and the
+  hashes.** All 23 rounds, every event and the RNG cursor are byte-identical. Split with an
+  intermediate build: `CONTENT_VERSION` alone accounts for the whole diff, because
+  `battle_hash_basis()` mixes it in; `EVASION_PER_SPD` moved not one byte of that transcript.
+  **The pixel goldens did not move at all** — `XP_TABLE[1]` is still 11, which is the 23 px the
+  HOME rule records.
+
+### Measured
+
+- Release (`GOD_MODE_ENABLED=0`): flash **1,328,090 → 1,328,580 (+490)**, globals **59,044,
+  unchanged** — the balance pass moved no table, so nothing left `.rodata`. Split with an
+  intermediate build: the balance constant, the regenerated `CONTENT_VERSION` and the
+  JSON/documentation edits are **+4 B**; the nickname move is **+486**, of which **+358 is named
+  `.text`** (`pebble_name_join` 236 B, `pebble_name_syllables` 74, `utf8_fit` 64, and
+  `ui_name_for` shrinking 118 → 102) and the rest is alignment. `pebble_name_join` is the
+  expensive half and it is the half that fixes the UTF-8 truncation.
+- `ALL PASS 50/50`, ASAN 4/4, PAGE TEST 51/51, GATE OK, MATRIX OK on six variants;
+  release caps 1,328,580/1,600,000 flash and 59,044/65,000 globals, i.e. 271,420 B of flash and
+  5,956 B of globals still in front of phase 10.
+
+### Still owed after P9-C4
+
+- **The v1 stage clock gives away the first twenty levels.** `game/sim.cpp` advances the retired
+  life stage by AGE alone and `stage_commit()` writes it back into `PebbleInstance.level`, so a
+  Pebble earning **no XP at all** reaches level 5 at 2 h, 10 at 10 h, 15 at 24 h and **20 at
+  3.5 days**. `sim.cpp`'s own comment says "P3-C2 makes level XP-driven and this map becomes
+  read-only", and that sentence is false while `stage_commit()` still writes. 2,660 of the
+  curve's 8,845 points are never earned by anybody. Measured, named, not fixed: undoing it is a
+  save-visible change to what `level` means.
+- **"3-4 touches a day is a well-kept Pebble" is optimistic and `balance.h` now says by how
+  much.** Satiety falls 100.8 points a day against a 30-point meal, so 3.36 MEALS is break-even
+  and a touch also has to cover cleaning and play. The NORMAL player lands 3.3 care actions a day
+  and satiety reaches zero every night. §27 holds (the Pebble is never lost) and §57's own
+  criterion holds with margin, so no rate was tuned — moving `ACT_MEAL_HUNGER` or
+  `CARE_DECAY_MPH` re-records `tests/golden/care_v1.txt` and is its own commit.
+- **Five species remain outside 35-65 % against their own stage** (ids 12, 23, 25, 26, 29, all
+  high-ATK). Species 26 was swept and **no** one-point redistribution of its fixed 22 points helps
+  — every variant tested made it stronger. The lever is its learnset, and pulling it trades
+  species 26 for species 56 at no net gain, so it was measured and left.
+- **The matrix measures the greedy-vs-greedy metagame only.** `battle_ai.cpp` scores every
+  power-0 move at 0 and cannot see `DRAIN_PCT` at all, so a kit built on status or sustain reads
+  as weak here for a reason that is the AI's and not the roster's.
+
 - **Sixty creature bodies, drawn (P9-C3).** `tools/sprites/*.txt`, 24x24, two frames each, one
   per roster id, in twenty families of three. The atlas is **64 sets / 9,216 B**: the two eggs,
   a `SLEEP` and a `SICK` pose set, and the sixty bodies. Every one of the 120 frames was
@@ -135,6 +215,7 @@ tag for a phase is cut only when its gate (`tools/check.sh`) and its variant mat
 - **`XP_TABLE`.** `data/balance.h` ships one 31-entry curve and `tools/content/balance.json`
   ships a different one; the plan sequences the decision into **P9-C4** and its instrument
   (`tests/tools/sim_days.cpp`) does not exist yet. Two sources of truth, untouched here.
+  **CLOSED BY P9-C4:** the shipped curve won on measured evidence and the pack's is deleted.
 - **Nothing on this list was seen on hardware.** There is no board and no panel in this
   environment. Every judgement about whether a body reads at 1x is a judgement from a rendered
   image on a monitor, and the thin features are the ones at risk: `PLAGON`'s 1-2 px teeth,

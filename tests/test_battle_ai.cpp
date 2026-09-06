@@ -617,14 +617,28 @@ TEST(a_spent_type_edge_stops_the_ai_paying_for_an_advantage_it_can_no_longer_get
 TEST(accuracy_is_part_of_the_score_and_the_ai_takes_the_weaker_move_that_lands)
 {
   // Apuesta is power 100 accuracy 55; Choque is power 50 accuracy 100. On raw
-  // damage Apuesta wins by nearly two to one. Put a defender 15 speed points
-  // ahead and evasion drives Apuesta's accuracy to the ACCURACY_MIN floor while
-  // Choque keeps 80, and the ORDER FLIPS - which only happens if accuracy is in
-  // the score at all.
+  // damage Apuesta wins by nearly two to one. Give the defender a speed lead and
+  // evasion drives Apuesta's accuracy to the ACCURACY_MIN floor while Choque
+  // keeps most of its own, and the ORDER FLIPS - which only happens if accuracy
+  // is in the score at all.
   //
-  // atk_eff 10, def_eff 10 -> divisor 70.
-  //   Apuesta: 100*10/70 = 14 -> half 30; acc 55 - 2*10 = 35 -> floor 40 -> 1200
-  //   Choque :  50*10/70 =  7 -> half 16; acc 100 - 20 = 80          -> 1280
+  // THE FIXTURE MOVED AT P9-C4 AND THE PROPERTY DID NOT. This case used ONE
+  // defender at spd 20 (a 15-point gap, capped to EVASION_MAX_SPD_GAP) and read
+  // the flip off it; that stopped working when EVASION_PER_SPD went 2 -> 3, and
+  // it stopped working for a reason worth writing down rather than patching
+  // around. With hA and hC the two half-point damage figures, the flip needs
+  //     55*hA > 100*hC   (no gap: the power move wins)
+  //     accA*hA < accC*hC (with the gap: the accurate move wins)
+  // and at a FULL-CAP gap accA is floored to 40 while accC is 100 - 3*10 = 70,
+  // so the second line needs hA/hC < 1.75 and the first needs hA/hC > 1.818.
+  // THE BAND IS EMPTY: at the cap, evasion is now strong enough that no pair of
+  // damages can show the flip. A smaller gap re-opens it, so the case is split
+  // into the two things it was always asserting at once - the CAP AND FLOOR of
+  // the accuracy rule, and the ORDERING - each on the gap that can show it.
+  //
+  // atk_eff 10, def_eff 10 -> divisor 70, and both are half-POINT scores:
+  //   Apuesta: 100*10/70 = 14 -> 2*14 + 2 = 30
+  //   Choque :  50*10/70 =  7 -> 2*7  + 2 = 16
   BattleState st;
   fixture(st);
   arm(st.side[0].team[0], TYPE_SIGNAL, 10u, 10u, 5u, 100u,
@@ -635,13 +649,26 @@ TEST(accuracy_is_part_of_the_score_and_the_ai_takes_the_weaker_move_that_lands)
   const AttackDef* apuesta = attack_get(MV_APUESTA);
   const AttackDef* choque  = attack_get(MV_CHOQUE);
   CHECK(apuesta != nullptr && choque != nullptr);
-  // The evasion gap is capped and then floored - both ends of balance.h's rule.
+
+  // (1) THE CAP AND THE FLOOR, both ends of balance.h's rule, at a 15-point gap
+  // that EVASION_MAX_SPD_GAP clamps to 10: penalty 3*10 = 30.
+  CHECK_EQ(battle_accuracy_eff(st.side[0].team[0], st.side[1].team[0], *apuesta),
+           (uint8_t)ACCURACY_MIN);                       // 55 - 30 = 25, floored
+  CHECK_EQ(battle_accuracy_eff(st.side[0].team[0], st.side[1].team[0], *choque),
+           (uint8_t)(100u - EVASION_PER_SPD * EVASION_MAX_SPD_GAP));
+  CHECK_EQ(battle_ai_move_score(st, 0u, 0u), 30u * (uint32_t)ACCURACY_MIN);
+  CHECK_EQ(battle_ai_move_score(st, 0u, 1u),
+           16u * (uint32_t)(100u - EVASION_PER_SPD * EVASION_MAX_SPD_GAP));
+
+  // (2) THE ORDER FLIP, on a 6-point gap: penalty 18, so Apuesta lands at
+  // 55 - 18 = 37 and is STILL floored to 40 while Choque keeps 82.
+  //   Apuesta 30 * 40 = 1200      Choque 16 * 82 = 1312
+  st.side[1].team[0].spd = 11u;
   CHECK_EQ(battle_accuracy_eff(st.side[0].team[0], st.side[1].team[0], *apuesta),
            (uint8_t)ACCURACY_MIN);
-  CHECK_EQ(battle_accuracy_eff(st.side[0].team[0], st.side[1].team[0], *choque), 80u);
-
+  CHECK_EQ(battle_accuracy_eff(st.side[0].team[0], st.side[1].team[0], *choque), 82u);
   CHECK_EQ(battle_ai_move_score(st, 0u, 0u), 1200u);
-  CHECK_EQ(battle_ai_move_score(st, 0u, 1u), 1280u);
+  CHECK_EQ(battle_ai_move_score(st, 0u, 1u), 1312u);
 
   BattleAi ai;
   battle_ai_init(ai, 0u, 0x1111u);
@@ -649,11 +676,12 @@ TEST(accuracy_is_part_of_the_score_and_the_ai_takes_the_weaker_move_that_lands)
   CHECK_EQ(a.kind, (uint8_t)BACT_ATTACK);
   CHECK_EQ(a.index, 1u);
 
-  // THE CONTROL: take the speed gap away and the raw-power move wins again, so
-  // the flip above was evasion and not something about slot 1.
+  // (3) THE CONTROL: take the speed gap away and the raw-power move wins again,
+  // so the flip above was evasion and not something about slot 1.
   st.side[1].team[0].spd = 5u;
   CHECK_EQ(battle_ai_move_score(st, 0u, 0u), 30u * 55u);
   CHECK_EQ(battle_ai_move_score(st, 0u, 1u), 16u * 100u);
+  CHECK(30u * 55u > 16u * 100u);        // the band's first line, as an assertion
   BattleAi ai2;
   battle_ai_init(ai2, 0u, 0x1111u);
   CHECK_EQ(battle_ai_choose(ai2, st).index, 0u);

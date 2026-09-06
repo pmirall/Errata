@@ -20,6 +20,7 @@
 #include "game/pebble.h"
 #include "game/genome.h"
 #include "game/xp.h"
+#include "core/strings_es.h"   // S_SYL_A/B: the repertoire the NAME cases look up
 
 // A genome whose four numeric genes are all `v`. genome_defaults() is not used
 // because these tests need to drive the variation genes to their extremes.
@@ -249,4 +250,202 @@ TEST(hp_max_is_the_same_rule_the_xp_module_owns) {
       CHECK_EQ(s.hp_max, xp_hp_max(sp->base_hp, lv));
     }
   }
+}
+
+// =============================================================================
+//  THE DYNASTY NAME (P9-C4 moved it here out of ui/ui.cpp)
+//
+//  IT HAD NO TEST AND COULD NOT HAVE ONE. ui/ui.cpp includes <Arduino.h>, so no
+//  host binary links ui.o, and the consequence was visible in
+//  tests/test_persistence.cpp, which TRANSCRIBED the hash by hand to reason
+//  about a migrated pet's name - a second implementation of a shipped algorithm
+//  living inside a test. Changing 0x2545F491 in ui.cpp failed nothing anywhere.
+//
+//  These four cases are survey-two's list, and each is written so it can fail:
+//  a pinned word, generation reaching the answer, BOTH indices exercised across
+//  their whole range, and the cap bound aimed at the UTF-8 over-run that the
+//  snprintf() this replaces really had.
+// =============================================================================
+
+// The lookup ui.cpp now does, so a case can compare whole words rather than
+// indices. Exactly ui_name_for()'s two lines, minus the Arduino.
+static void name_of(uint32_t lineage, uint8_t gen, char* out, uint16_t cap) {
+  uint8_t syl[2];
+  pebble_name_syllables(lineage, gen, syl);
+  (void)pebble_name_join(S_SYL_A(syl[0]), S_SYL_B(syl[1]), out, cap);
+}
+
+TEST(the_dynasty_name_is_a_pinned_word_and_not_merely_a_string) {
+  // (1) THE PIN. These are the words the shipped hash produces; they are what a
+  // player has already seen on a device, so they may not move. A mutation of
+  // any constant in pebble_name_syllables() fails HERE, by name.
+  char n[32];
+
+  // Derived independently from the published rule rather than transcribed from
+  // this build's output: h = lineage ^ 0x9E3779B9, h ^= gen * 0x85EBCA6B,
+  // h ^= h>>15, h *= 0x2545F491, h ^= h>>13, then A[h % 12] and B[(h/12) % 12]
+  // over strings_es.h's two twelve-entry rows.
+  name_of(0u, 0u, n, sizeof n);
+  CHECK_STR_EQ(n, "Lazo");
+  name_of(1u, 0u, n, sizeof n);
+  CHECK_STR_EQ(n, "Guri");
+  name_of(0xDEADBEEFu, 3u, n, sizeof n);
+  CHECK_STR_EQ(n, "Kezo");
+  // (2) IT IS A FUNCTION, not a fresh roll: the same input twice is the same
+  // word. Without this the pin above could pass on a generator with state.
+  char again[32];
+  name_of(0xDEADBEEFu, 3u, again, sizeof again);
+  CHECK_STR_EQ(again, n);
+
+  name_of(7u, 1u, n, sizeof n);
+  CHECK_STR_EQ(n, "Masco");
+
+  // (3) THE INDICES ARE WHAT THE WORD IS BUILT FROM, asserted separately so a
+  // broken JOIN and a broken HASH cannot be confused for each other.
+  uint8_t syl[2];
+  pebble_name_syllables(0xDEADBEEFu, 3u, syl);
+  CHECK(syl[0] < PB_NAME_SYLLABLES);
+  CHECK(syl[1] < PB_NAME_SYLLABLES);
+  CHECK_STR_EQ(S_SYL_A(syl[0]), "Ke");
+  CHECK_STR_EQ(S_SYL_B(syl[1]), "zo");
+}
+
+TEST(the_generation_really_reaches_the_dynasty_name) {
+  // Deleting the `generation` term entirely still passes a "returns a non-empty
+  // string" test, so this asserts the thing that would catch it: over a spread
+  // of lineages, consecutive generations must produce different words far more
+  // often than not. (They CAN collide - 144 words and 256 generations - so the
+  // assertion is on the rate, with the exact count printed by a failure.)
+  int differ = 0, total = 0;
+  for (uint32_t lin = 1u; lin < 200u; ++lin) {
+    for (uint8_t g = 0; g < 8u; ++g) {
+      char a[32], b[32];
+      name_of(lin, g, a, sizeof a);
+      name_of(lin, (uint8_t)(g + 1u), b, sizeof b);
+      ++total;
+      if (strcmp(a, b) != 0) ++differ;
+    }
+  }
+  CHECK_EQ(total, 199 * 8);
+  // 143/144 of pairs differ if the term reaches the hash; 0 if it does not.
+  CHECK(differ > (total * 9) / 10);
+}
+
+TEST(both_syllable_indices_are_exercised_over_their_whole_range) {
+  // h % 12 and (h / 12) % 12 are CORRELATED in a way a "returns something" test
+  // cannot see: a mix that collapsed the high bits would leave B constant while
+  // A still looked healthy. Both must reach all twelve.
+  bool seen_a[PB_NAME_SYLLABLES] = { false };
+  bool seen_b[PB_NAME_SYLLABLES] = { false };
+  for (uint32_t lin = 0u; lin < 4000u; ++lin) {
+    uint8_t syl[2];
+    pebble_name_syllables(lin, 0u, syl);
+    CHECK(syl[0] < PB_NAME_SYLLABLES);
+    CHECK(syl[1] < PB_NAME_SYLLABLES);
+    seen_a[syl[0]] = true;
+    seen_b[syl[1]] = true;
+  }
+  int na = 0, nb = 0;
+  for (int i = 0; i < PB_NAME_SYLLABLES; ++i) { if (seen_a[i]) ++na; if (seen_b[i]) ++nb; }
+  CHECK_EQ(na, (int)PB_NAME_SYLLABLES);
+  CHECK_EQ(nb, (int)PB_NAME_SYLLABLES);
+
+  // And every syllable the indices can name is a real, non-empty string, so the
+  // fold above cannot be quietly pointing off the end of the block.
+  for (int i = 0; i < PB_NAME_SYLLABLES; ++i) {
+    CHECK(S_SYL_A(i)[0] != '\0');
+    CHECK(S_SYL_B(i)[0] != '\0');
+  }
+}
+
+// Is `n` bytes of `s` a complete sequence of UTF-8 characters? The property
+// pebble_name_join() owes is exactly this - not "the last byte is not a
+// continuation byte", which is false of every legal two-byte character.
+static bool utf8_well_formed(const char* s, uint16_t n) {
+  uint16_t i = 0;
+  while (i < n) {
+    const uint8_t c = (uint8_t)s[i];
+    uint16_t len;
+    if      ((c & 0x80u) == 0x00u) len = 1u;
+    else if ((c & 0xE0u) == 0xC0u) len = 2u;
+    else if ((c & 0xF0u) == 0xE0u) len = 3u;
+    else if ((c & 0xF8u) == 0xF0u) len = 4u;
+    else return false;                       // a continuation byte where a lead
+                                             // byte belongs: a split
+    if (i + len > n) return false;           // the sequence runs past the end
+    for (uint16_t k = 1u; k < len; ++k)
+      if (((uint8_t)s[i + k] & 0xC0u) != 0x80u) return false;
+    i = (uint16_t)(i + len);
+  }
+  return true;
+}
+
+TEST(the_name_cap_never_splits_a_utf8_sequence) {
+  // THE BUG THIS REPLACES. ui.cpp used snprintf(out, cap, "%s%s", ...), which
+  // truncates on a BYTE boundary. "Ña" + "rrón" is four glyphs and NINE bytes
+  // in the UTF-8 core/strings_es.h ships, so a buffer sized in characters cut a
+  // two-byte sequence in half. This aims straight at that word.
+  const char* A = "Ña";     // 3 bytes: C3 91 61
+  const char* B = "rrón";   // 5 bytes: 72 72 C3 B3 6E
+  char buf[32];
+
+  // Every cap from 0 to past the whole word: the result is always
+  // NUL-terminated, always inside cap, and always WELL-FORMED UTF-8. The last
+  // property is the one that matters and it is not "does not end on a
+  // continuation byte" - the last byte of a legal two-byte character IS a
+  // continuation byte - so it is checked by walking the sequences.
+  for (uint16_t cap = 0; cap <= 12u; ++cap) {
+    memset(buf, 0x7F, sizeof buf);
+    const uint8_t w = pebble_name_join(A, B, buf, cap);
+    if (cap == 0u) { CHECK_EQ((int)w, 0); CHECK_EQ((int)(uint8_t)buf[0], 0x7F); continue; }
+    CHECK(w + 1u <= cap);                        // fits, terminator included
+    CHECK_EQ((int)buf[w], 0);                    // and is terminated
+    for (uint8_t i = 0; i < w; ++i) CHECK((uint8_t)buf[i] != 0x7Fu);  // no gaps
+    CHECK(utf8_well_formed(buf, w));
+    // ...and it is a PREFIX of the whole name, never a different word.
+    CHECK(memcmp(buf, "\xC3\x91" "arr\xC3\xB3" "n", w) == 0);
+  }
+
+  // The named cases, spelled out so a regression says which one moved. "Ñ" is
+  // itself a complete two-byte character, so a two-byte budget legitimately
+  // yields it; what may never happen is half of one.
+  CHECK_EQ((int)pebble_name_join(A, B, buf, 1u), 0);   CHECK_STR_EQ(buf, "");
+  CHECK_EQ((int)pebble_name_join(A, B, buf, 2u), 0);   CHECK_STR_EQ(buf, "");
+  CHECK_EQ((int)pebble_name_join(A, B, buf, 3u), 2);   CHECK_STR_EQ(buf, "Ñ");
+  CHECK_EQ((int)pebble_name_join(A, B, buf, 4u), 3);   CHECK_STR_EQ(buf, "Ña");
+  CHECK_EQ((int)pebble_name_join(A, B, buf, 7u), 5);   CHECK_STR_EQ(buf, "Ñarr");
+  CHECK_EQ((int)pebble_name_join(A, B, buf, 8u), 7);   CHECK_STR_EQ(buf, "Ñarró");
+  CHECK_EQ((int)pebble_name_join(A, B, buf, 9u), 8);   CHECK_STR_EQ(buf, "Ñarrón");
+  CHECK_EQ((int)pebble_name_join(A, B, buf, 32u), 8);  CHECK_STR_EQ(buf, "Ñarrón");
+
+  // THE PREFIX RULE AT ITS EDGE. A budget too small for the first syllable's
+  // first character must write NOTHING, never the second syllable's first
+  // character - which is what the join did before the `na < la` guard and what
+  // would silently show a player the wrong word.
+  CHECK_EQ((int)pebble_name_join(A, B, buf, 2u), 0);
+  CHECK_EQ((int)(uint8_t)buf[0], 0u);
+
+  // THE CONTROL. A join that DID split would have to be caught, so the checker
+  // above is aimed at a deliberately broken string first: without this, an
+  // always-true utf8_well_formed() would make every line above vacuous.
+  char broken[4] = { (char)0xC3, (char)0x91, (char)0xC3, '\0' };   // "Ñ" + a lone lead
+  CHECK(!utf8_well_formed(broken, 3u));
+  CHECK(utf8_well_formed(broken, 2u));
+
+  // A null out and a null syllable are both survivable.
+  CHECK_EQ((int)pebble_name_join(A, B, nullptr, 32u), 0);
+  // A NULL first syllable is an empty one, which FITS WHOLE, so the second is
+  // still reached: the prefix rule is about truncation, not about absence.
+  CHECK_EQ((int)pebble_name_join(nullptr, B, buf, 32u), 5); CHECK_STR_EQ(buf, "rrón");
+  CHECK_EQ((int)pebble_name_join(A, nullptr, buf, 32u), 3); CHECK_STR_EQ(buf, "Ña");
+
+  // AND THE WHOLE POINT: the widest real name still fits the buffer the UI
+  // hands it. Nothing in the repertoire is wider than "Ña" + "rrón".
+  uint16_t widest = 0;
+  for (int a = 0; a < PB_NAME_SYLLABLES; ++a)
+    for (int b = 0; b < PB_NAME_SYLLABLES; ++b) {
+      const uint16_t n = (uint16_t)(strlen(S_SYL_A(a)) + strlen(S_SYL_B(b)));
+      if (n > widest) widest = n;
+    }
+  CHECK_EQ((int)widest, 8);
 }

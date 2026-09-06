@@ -57,10 +57,18 @@ Emitted: `species_table.h`, `attacks_table.h`, `items_table.h`,
 `evolution_table.h`, `encounter_table.h`, `creator_schema.h`,
 `content_version.h`, and the marked block inside `core/strings_es.h`.
 
-NOT emitted, deliberately: `balance.json`'s `XP_TABLE` (the shipped curve in
-`data/balance.h` predates this pack and swapping it is a whole-game pacing
-change with a recorded pixel golden behind it), the battle constants (they are
-hand-placed in `data/balance.h` §5 with their provenance written next to them),
-and the roster beyond `ROSTER_FAMILIES` families — the emitted table is a PREFIX
-of the 60 species here, because `id == index + 1` is a `static_assert`. See the
-banner at the top of `tools/gen_content.py` for why the prefix is 12 families.
+NOT emitted, deliberately: the battle constants (they are hand-placed in
+`data/balance.h` §5 with their provenance written next to them), and the roster
+beyond `ROSTER_FAMILIES` families — the emitted table is a PREFIX of the 60
+species here, because `id == index + 1` is a `static_assert`. `ROSTER_FAMILIES`
+is 20 since P9-C3, so the prefix is currently the whole pack.
+
+**`XP_TABLE` IS NOT HERE AT ALL ANY MORE.** This file used to carry a second
+31-entry curve — `inc(L) = 25 + 12*(L-1) + 4*(L-1)^2`, total 36,453, against the
+shipped `10 + L*L` and 8,845 — and this README used to explain why it was not
+emitted. P9-C4 **deleted it** rather than leaving it unemitted: two curves in two
+files is a second source of truth, and checking either one cannot catch the pair
+disagreeing. `verify.py` now reads the curve out of `Pebblebol/src/data/balance.h`
+and **fails by name if an `XP_TABLE` key reappears here**. The evidence for
+keeping the shipped curve is `tests/tools/sim_days.cpp`'s and is written out in
+`data/balance.h` §4.

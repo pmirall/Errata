@@ -92,4 +92,69 @@ void pebble_derive_stats(const SpeciesDef& sp, uint8_t level, const Genome& g,
 // than invent a maximum.
 bool pebble_stats_of(const PebbleInstance& p, PebbleStats& out);
 
+// =============================================================================
+//  THE DYNASTY NAME (spec section 54, moved out of ui/ui.cpp by P9-C4)
+//
+//  The name of a Pebble with no species row is a PURE FUNCTION of
+//  (lineage_id, generation) - "a given pet is called the same thing on every
+//  device, forever", as ui.cpp put it - and that made it the one shipped
+//  algorithm in this tree that NO TEST COULD REACH: ui/ui.cpp includes
+//  <Arduino.h>, so no host binary links ui.o, and
+//  tests/test_persistence.cpp had to TRANSCRIBE the hash by hand to reason
+//  about a migrated pet's name. Two implementations of one algorithm, and
+//  changing the constant in ui.cpp failed nothing anywhere.
+//
+//  WHAT MOVED, AND WHAT DELIBERATELY DID NOT. Only the hash and the two indices
+//  are here. The SYLLABLE REPERTOIRE stays in core/strings_es.h and the caller
+//  does the lookup, because:
+//    * pebble.h's own banner says this is a pure module - stdint, the species
+//      table and the genome - and pulling the Spanish string block into game/
+//      would put the UI's text repertoire behind a game-layer call. It is legal
+//      (tools/check.sh only forbids Arduino.h, u8g2, gfx.h and render.h in
+//      src/game) and it is still the wrong side of the line strings_es.h draws.
+//    * snprintf() would have come with it. game/ has no stdio today and the
+//      layer banner says "no I/O"; pebble_name_join() below is the six lines
+//      that replace it and it is strictly better than the %s%s it replaces -
+//      see its own comment about UTF-8.
+//
+//  THE OLD CALLER DID `% 12u` AND SO DID S_SYL_A/B. One bound, two copies. The
+//  fold happens exactly once, here, and PB_NAME_SYLLABLES is the number both
+//  sides now agree on through core/strings_es.h's own static_asserts.
+// =============================================================================
+#define PB_NAME_SYLLABLES 12
+
+// The two syllable indices of the dynasty name, each already folded into
+// 0..PB_NAME_SYLLABLES-1. out must have 2 elements; a null out is a no-op.
+//
+// THE HASH IS UNCHANGED, byte for byte, from the one ui.cpp shipped: the
+// golden-ratio word, the murmur constant on the generation, and xorshift-star's
+// 0x2545F491 mix. A different answer here would silently rename every Pebble on
+// every device that ever ran an earlier build, and persistence/migration.cpp
+// reasons about that name in prose.
+void pebble_name_syllables(uint32_t lineage_id, uint8_t generation, uint8_t out[2]);
+
+// Joins two NUL-terminated UTF-8 syllables into `out`, always NUL-terminating
+// inside `cap` bytes, and NEVER SPLITTING A MULTI-BYTE SEQUENCE. Returns the
+// number of bytes written, excluding the terminator, SATURATING at 255 (the
+// widest name in the repertoire is 8 bytes, so it cannot fire here).
+//
+// THE UTF-8 RULE IS THE POINT AND IT IS A FIX, not a transcription: ui.cpp used
+// snprintf(out, cap, "%s%s", ...), which truncates on a BYTE boundary, and the
+// repertoire is not ASCII - core/strings_es.h is UTF-8 with a Latin-1
+// restricted repertoire, so "Ña" + "rrón" is 6 glyphs and EIGHT BYTES, and the
+// widest name in the repertoire is exactly that one. A buffer sized in
+// characters therefore cut a two-byte sequence in half and handed drawUTF8() a
+// broken lead byte.
+//
+// THE RESULT IS ALWAYS A PREFIX OF THE WHOLE NAME, truncated on a CHARACTER
+// boundary - which is the rule the plan's section 65 box asks for ("long
+// nicknames truncated on codepoint boundaries"). The second syllable is
+// therefore only reached when the first fitted whole: otherwise a one-byte
+// budget would drop "Ña" and write the "r" of "rrón", showing the player a
+// word that is not the beginning of their Pebble's name.
+//
+// cap == 0 writes nothing at all (there is nowhere to put a terminator); a null
+// out writes nothing. Either answers 0.
+uint8_t pebble_name_join(const char* a, const char* b, char* out, uint16_t cap);
+
 #endif  // PB_GAME_PEBBLE_H

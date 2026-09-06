@@ -8,7 +8,7 @@ verify_json.py). sim_engine.py is a JSON-only reader, not part of the generator.
     python3 verify.py           # full run, ~6 min (simulation dominates)
     python3 verify.py --fast    # tallies only, no simulation
 """
-import json, os, sys, collections, statistics, random, itertools, unicodedata
+import json, os, re, sys, collections, statistics, random, itertools, unicodedata
 import sim_engine as SE
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -22,6 +22,54 @@ def check(name, cond, detail=""):
     return cond
 
 J = lambda n: json.load(open(os.path.join(HERE, n), encoding="utf-8"))
+
+
+# --- THE ONE THING THIS FILE READS THAT IS NOT JSON -------------------------
+# THE XP CURVE. balance.json used to carry a SECOND 31-entry XP_TABLE - a
+# different curve from the one the firmware compiles, 36,453 points against
+# 8,845 - and P9-C4 deleted it, because two curves in two files is a second
+# source of truth and no amount of checking either one catches the pair
+# disagreeing. The curve now lives in exactly one place, Pebblebol/src/data/
+# balance.h, and the checks that were about it read it FROM THERE.
+#
+# This does not weaken the docstring's claim. That claim is about the
+# GENERATOR: nothing here imports gen_content.py, so a green run still proves
+# the deliverable consistent even if the generator is wrong. balance.h is not
+# the generator - it is a hand-maintained firmware header that tools/check.sh's
+# balance gate already parses with exactly this kind of read, and it is the
+# authority for every number in it.
+#
+# A MISSING HEADER IS A FAILURE, NOT A SKIP. tools/check.sh says in as many
+# words that "a gate that decides not to run must say so", and a curve check
+# that silently passes because it could not find the curve is the exact shape
+# of defect this project keeps shipping.
+_BALANCE_H = os.path.join(HERE, "..", "..", "Pebblebol", "src", "data", "balance.h")
+
+
+def _shipped_xp_table(path=_BALANCE_H):
+    """The 31 entries of XP_TABLE as data/balance.h declares them, or []."""
+    try:
+        src = open(path, encoding="utf-8").read()
+    except OSError:
+        return []
+    i = src.find("XP_TABLE[XP_LEVEL_MAX + 1] = {")
+    if i < 0:
+        return []
+    j = src.find("};", i)
+    if j < 0:
+        return []
+    body = src[i + len("XP_TABLE[XP_LEVEL_MAX + 1] = {"):j]
+    body = re.sub(r"/\*.*?\*/", " ", body, flags=re.S)   # /*  7 */ index labels
+    body = re.sub(r"//[^\n]*", " ", body)                 # trailing prose
+    out = []
+    for tok in body.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        if not tok.isdigit():
+            return []
+        out.append(int(tok))
+    return out
 SPECIES, ATTACKS, ITEMS = J("species.json"), J("attacks.json"), J("items.json")
 EVO, ENC, BAL = J("evolution.json"), J("encounters.json"), J("balance.json")
 NET = J("networks.json")
@@ -406,10 +454,24 @@ check("every classifier output category has encounter rows",
 
 # ============================================================== 10. BALANCE
 P(); P("=" * 78); P("10. BALANCE CONSTANTS  (plan 1.5.1/1.5.2, spec 11, 36)"); P("=" * 78)
-xp = BAL["XP_TABLE"]
+# THE CURVE IS READ FROM data/balance.h, NOT FROM balance.json. See
+# _shipped_xp_table() above for why the pack's second curve was deleted.
+xp = _shipped_xp_table()
+check("data/balance.h's XP_TABLE was found and parsed", len(xp) == 31,
+      "%d entries" % len(xp))
+if not xp:
+    xp = [0] * 31          # keep the rest of the section running and failing
 check("XP_TABLE has 31 entries (level 1..30)", len(xp) == 31)
-check("sum(XP_TABLE) < 65535 (u16 xp field)", sum(xp) < 65535, "%d" % sum(xp))
+check("sum(XP_TABLE) < 65535 (u16 xp field)", 0 < sum(xp) < 65535, "%d" % sum(xp))
 check("max XP increment < 65535", max(xp) < 65535, "%d" % max(xp))
+check("XP_TABLE rises strictly over 1..29 and is 0 at both ends",
+      xp[0] == 0 and xp[30] == 0 and all(xp[i + 1] > xp[i] for i in range(1, 29)))
+# THE DELETION, ENFORCED. P9-C4 removed balance.json's rival curve; without this
+# check nothing would stop the next content edit putting one back, and the two
+# files would silently disagree again exactly as they did for five phases.
+check("balance.json carries NO second XP curve (P9-C4 deleted it)",
+      not any(k in BAL for k in ("XP_TABLE", "XP_TOTAL_TO_MAX")),
+      "the curve lives only in Pebblebol/src/data/balance.h")
 check("TYPE_CHART is the SIGNAL>CORRUPT>SYSTEM>SIGNAL triangle",
       BAL["TYPE_CHART"] == [[0,1,-1],[-1,0,1],[1,-1,0]])
 check("TYPE_MOD_SCALE shipped as a real key (draft_B graft)", "TYPE_MOD_SCALE" in BAL)

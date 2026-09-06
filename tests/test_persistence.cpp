@@ -22,6 +22,7 @@
 #include "game/genome.h"          // gene_set_species(), to drive the map
 #include "game/species.h"         // species_base_of_family()
 #include "game/xp.h"              // xp_hp_max()
+#include "game/pebble.h"          // pebble_name_syllables(): the dynasty hash (P9-C4)
 #include "game/validate.h"        // the load path is a spec 15 consumer (P4-C5)
 #include "game/species_custom.h"   // the creator registry the load path rebuilds (P8-C3)
 #include "data/creator_schema.h"
@@ -1030,15 +1031,28 @@ TEST(v1_without_a_config_arrives_unnamed_so_its_species_can_speak) {
   // (1) NO NICKNAME. Nobody typed one, so nothing pretends anybody did.
   CHECK_EQ(p.nickname[0], '\0');
 
-  // (2) The word the ladder falls back to is still the v1 one. ui.cpp's
-  // ui_name_for() is not host-linkable from here, so the hash it uses is
-  // written out - the same hash migrate_default_name() carried before it was
-  // deleted - and required to produce a non-empty dynasty name for this pet.
-  uint32_t h = p.genome.lineage_id ^ 0x9E3779B9u;
-  h ^= (uint32_t)p.genome.generation * 0x85EBCA6Bu;
-  h ^= h >> 15; h *= 0x2545F491u; h ^= h >> 13;
-  CHECK(S_SYL_A(h % 12u)[0] != '\0');
-  CHECK(S_SYL_B((h / 12u) % 12u)[0] != '\0');
+  // (2) The word the ladder falls back to is still the v1 one. UNTIL P9-C4 THIS
+  // BLOCK TRANSCRIBED THE HASH BY HAND, because ui.cpp's ui_name_for() includes
+  // <Arduino.h> and no host binary could link it - a second implementation of a
+  // shipped algorithm living inside a test, and the reason changing a constant
+  // in ui.cpp failed nothing anywhere. The hash moved to game/pebble.cpp and
+  // this case now CALLS it, so the two cannot drift apart again.
+  uint8_t syl[2];
+  pebble_name_syllables(p.genome.lineage_id, p.genome.generation, syl);
+  CHECK(syl[0] < PB_NAME_SYLLABLES);
+  CHECK(syl[1] < PB_NAME_SYLLABLES);
+  CHECK(S_SYL_A(syl[0])[0] != '\0');
+  CHECK(S_SYL_B(syl[1])[0] != '\0');
+  // And the whole word the v1 UI drew, through the same join ui_name_for() now
+  // uses - a real string comparison where there used to be two non-empty
+  // checks that any hash at all would have satisfied.
+  char dynasty[32];
+  const uint8_t dn = pebble_name_join(S_SYL_A(syl[0]), S_SYL_B(syl[1]),
+                                      dynasty, (uint16_t)sizeof dynasty);
+  CHECK(dn > 0);
+  // Derived independently from the rule for this fixture's genome
+  // (lineage 0x0BADCAFE, generation 0), not transcribed from a run.
+  CHECK_STR_EQ(dynasty, "Nuri");
 
   // (3) And the rung ABOVE that fallback is reachable, which is the whole point
   // of arriving unnamed: the migrated pet has a real roster row, so HOME says

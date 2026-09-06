@@ -76,6 +76,7 @@
 #include "../game/box.h"          // the active slot: level, xp, hp for the view
 #include "../game/box_sim.h"      // and what a swap does to sim's raw pointer
 #include "../data/species_table.h" // and the base_hp hp_max is derived from
+#include "../game/pebble.h"    // pebble_name_syllables(): the dynasty hash (P9-C4)
 #include "../game/xp.h"        // the XP curve HOME draws and the award amounts
 #include "../app/app.h"        // app_award_xp(): the one door for experience
 #include "gfx.h"           // the header bar, the countdown and the list widgets
@@ -263,12 +264,26 @@ static void fmt_apply(char* out, size_t cap, const char* tpl,
 
 // GAME_DESIGN 9.3: the name is a pure function of (lineage_id, generation), so
 // a given pet is called the same thing on every device, forever.
+//
+// THE HASH AND THE INDEX ARITHMETIC LEFT THIS FILE AT P9-C4 and live in
+// game/pebble.cpp, which a host binary can link; this file is now the LOOKUP
+// and nothing else. What that bought is written in pebble.h: the algorithm had
+// no test and could not have one (ui.cpp includes <Arduino.h>), so
+// tests/test_persistence.cpp carried a hand-copied second implementation of the
+// same hash and changing a constant here failed nothing anywhere.
+//
+// snprintf IS GONE TOO, and that is a fix rather than a move. It truncated on a
+// BYTE boundary, and the syllables are UTF-8 with a Latin-1 repertoire, so the
+// widest name in the repertoire - "Ña" + "rrón" - is six glyphs and EIGHT bytes:
+// a buffer sized in characters cut a two-byte sequence in half and handed
+// drawUTF8() a broken lead byte. pebble_name_join() truncates on a CHARACTER
+// boundary and always yields a PREFIX of the whole name.
 void ui_name_for(uint32_t lineage_id, uint8_t generation, char* out, size_t cap) {
   if (!out || cap == 0) return;
-  uint32_t h = lineage_id ^ 0x9E3779B9u;
-  h ^= (uint32_t)generation * 0x85EBCA6Bu;
-  h ^= h >> 15; h *= 0x2545F491u; h ^= h >> 13;
-  snprintf(out, cap, "%s%s", S_SYL_A(h % 12u), S_SYL_B((h / 12u) % 12u));
+  uint8_t syl[2];
+  pebble_name_syllables(lineage_id, generation, syl);
+  const uint16_t room = (cap > 0xFFFFu) ? 0xFFFFu : (uint16_t)cap;
+  (void)pebble_name_join(S_SYL_A(syl[0]), S_SYL_B(syl[1]), out, room);
 }
 
 // THE WORD BESIDE THE BODY, in the order the player earns it (P4-C4a).

@@ -631,6 +631,33 @@ $(BIN)/creator_decode: tools/creator_decode.cpp $(OBJ)/creator_parse.o \
                         $(OBJ)/rng.o | $(BIN)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
 
+# --- the balance instruments (P9-C4) ----------------------------------------
+# THE TWO SIMULATORS THE BALANCE PASS IS DECIDED WITH. Both print a report and
+# answer a human, so neither is in `check` - that is what tests/tools/ means -
+# and neither is picked up by TESTS, which is $(wildcard test_*.cpp).
+#
+# balance_matrix links exactly test_battle_ai's object list and no more: the
+# content tables, type_mod_of() and species_get() are all inline in the
+# generated headers, so a round never leaves them and no species.o is needed.
+.PHONY: balancetool
+balancetool: $(BIN)/balance_matrix $(BIN)/sim_days
+
+$(BIN)/balance_matrix: tools/balance_matrix.cpp $(OBJ)/battle_ai.o $(OBJ)/battle.o \
+                        $(OBJ)/pebble.o $(OBJ)/genome.o $(OBJ)/crc16.o \
+                        $(OBJ)/rng.o | $(BIN)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
+
+# sim_days is the whole care/XP/encounter day, so it links the three modules the
+# app layer wires together and NOT app.cpp itself, which is Arduino-bound:
+# sim.o (care), xp.o + evolution.o (the curve, as the pair they always are),
+# encounters.o + species.o (the roll), box.o (the Box recovery half of the care
+# model) and daylight.o (the sleep window sim.cpp reads).
+$(BIN)/sim_days: tools/sim_days.cpp $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o \
+                        $(OBJ)/xp.o $(OBJ)/evolution.o $(OBJ)/encounters.o \
+                        $(OBJ)/species.o $(OBJ)/genome.o $(OBJ)/crc16.o \
+                        $(OBJ)/rng.o | $(BIN)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
+
 # --- the sprite renderer (P9-C1) --------------------------------------------
 # THE ONLY INSTRUMENT THIS PROJECT HAS FOR "DOES IT LOOK LIKE A CREATURE".
 # Every other check about art is a check about bytes. This one prints the
