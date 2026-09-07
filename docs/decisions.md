@@ -29,7 +29,7 @@
 > | What the owner decided, and what is still open | the table below, then [§ THE STATE AT SHIP](#the-state-at-ship-p10-c5) |
 > | Why a hardware choice was made the way it was | the `D<n> — consequences` sections after the tables |
 > | What a phase actually built, and what it declined to build | the `Phase-<n> exit` sections |
-> | Sizes, per phase, per variant | `docs/budget.md` |
+> | Sizes, per phase, per variant | `docs/budget.md` (§15 is phase 10; **§16 is the final account** at ship, and the six-variant table for the release is also in `README.md` §4 and `CHANGELOG.md`) |
 > | Every byte that reaches flash | `docs/save_schema.md` |
 > | What still needs a board | `docs/bench.md` |
 > | How to build any of it | `README.md` |
@@ -3357,18 +3357,30 @@ passive, so it listens rather than sending probe requests.
 ## What is measured, and what is not
 
 **Measured on the host, by the gate, at this commit:** 58 test binaries
-(~5.8 M assertions), an AddressSanitizer subset over every path that reads bytes
-the device did not write, 51 browser assertions over the phone page, ~129 named
-grep gates, six firmware variants at zero project warnings, and the release
-image against its caps — 1,348,854 / 1,600,000 flash and 59,452 / 65,000
-globals.
+(6,210,627 assertions), an AddressSanitizer subset of 8 over every path that
+reads bytes the device did not write, 51 browser assertions over the phone page,
+159 named gates, six firmware variants at zero project warnings, and the release
+image against its caps — **1,350,840 / 1,600,000 flash and 59,452 / 65,000
+globals**.
 
 **Not measured, at all:** everything that needs a board. **Seventeen §67
-acceptance boxes are open**, sixteen with a written owner step in
-`docs/bench.md` (the seventeenth is the 24 h soak, for which nobody has written
-one); the five performance thresholds of spec §46, which are runnable today and
-gated by nothing; the three save flows of bench §G; and battery life, which
-waits on D11.
+acceptance boxes are open, and every one of them has a written owner step in
+`docs/bench.md`.** The five performance thresholds of spec §46, runnable today
+and gated by nothing; the three save flows of bench §G; spec §64's sound, which
+nothing in this product has ever produced; and battery life, which waits on D11.
+
+> **CORRECTED AT THE P10-C6 EXIT, AND THE CORRECTION IS WORTH MORE THAN THE
+> SENTENCE.** This paragraph said "sixteen with a written owner step (the
+> seventeenth is the 24 h soak, for which nobody has written one)". That was
+> **false when it was written**: bench item C5 IS that procedure and it was
+> added in the *same commit* that closed this file — `README.md` §2 and
+> `CHANGELOG.md` both said so correctly, so three documents were written in one
+> commit and two of them were right. This file is closed and is not rewritten
+> from a later phase's knowledge, but a factual error is not a phase record: it
+> is corrected here rather than left as the permanent last word, because a
+> closed log's final sentence is the one an owner is most likely to act on. The
+> P10-C6 exit also added three more items (C6 the sound, C7 the reset-reason
+> reading, B8 the beacon name), so the file now carries **38**.
 
 **A note on what a green gate is evidence for.** It is evidence that the rules
 behave as written, that no screen draws outside 128×64 at the worst content the
@@ -3379,4 +3391,42 @@ the other.
 
 ---
 
-*`docs/decisions.md` closed at P10-C5. Later changes: `CHANGELOG.md`.*
+### The three decisions the P10-C6 exit touched
+
+None is new and none is reopened; each gains a sentence it needed.
+
+* **D1 (the pin map)** — still open, still the first thing owed, still gating all
+  38 bench items. **The free-GPIO list this file and `README.md` §1 both gave
+  was wrong in two directions**: it offered `3, 4, 6, 7, 10` while GPIO3 is the
+  proposed piezo and GPIO10 is `PIN_BTN_L`, and it omitted GPIO5 (the LED) and
+  GPIO1 entirely, so a reader allocating strictly from it would have believed
+  GPIO5 was free and GPIO10 was. Corrected in `README.md` §1: brought out are
+  `1, 3, 4, 5, 6, 7, 10`; committed are 3 (D8), 5 (LED) and 10 (`PIN_BTN_L`);
+  GPIO0 is reserved for D10; genuinely spare are **1, 4, 6 and 7**, and
+  `PIN_BTN_R` must move off the strapping pin GPIO2 into one of them, which is
+  the assertion that fails today. Nothing checks membership of that set — the
+  seven `static_assert`s test collisions and strapping pins — so a wrong list
+  produces no diagnostic at all.
+* **D8 (the piezo pin)** — still open, and its owner step now points somewhere
+  that exists. It said "then bench §A5 and §F"; §A5 is the 24 h heap soak and §F
+  is first boot, and **neither mentions audio**. Spec §64 had no bench item at
+  all. `docs/bench.md` **C6** is it now: seven effects triggered one at a time,
+  each audible and distinguishable, then the setting toggled and the board
+  power-cycled. `hardware/audio.{h,cpp}` has shipped since P6-C1 and **nothing
+  in this product has ever been heard.**
+* **D3 (product identity)** — closed since P2-C9b, and its closing line said
+  "D3 has nothing open". It closed the NVS namespace, the AP prefix and mDNS —
+  **every name the machine sees** — and never touched the one name the human
+  sees: `STR_APP_NAME` was still `"NOTTAMAGOCHI"` at the P10-C5 release
+  candidate, on the boot splash, the load-save splash and the header bar of the
+  menu ring, while SETTINGS → *Acerca de* two taps away printed `Pebblebol` and
+  the access point was `PEBBLEBOL-XXXX`. The same power-on drew both names
+  within seconds. Fixed at the P10-C6 exit; four goldens re-recorded. The
+  decision is not reopened — the omission was in what "product identity" was
+  taken to cover, and it is recorded here so the scope of a CLOSED decision is
+  never read as wider than what it enumerated.
+
+---
+
+*`docs/decisions.md` closed at P10-C5; one factual correction and three scope
+notes added at the P10-C6 exit, marked as such. Later changes: `CHANGELOG.md`.*

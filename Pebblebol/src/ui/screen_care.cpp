@@ -182,6 +182,27 @@ void care_render(void) {
 // what it does and whether it is consumed, and ui.cpp commits. Nothing about an
 // item's effect is decided here - that was the whole point of giving the pack
 // the target and param columns.
+// WHAT THE USE ACTUALLY DID (P10-C6). game/inventory.cpp fills an ItemEffect
+// and, until this chunk, ui/screen_care.cpp declared one, passed it, and never
+// read a field of it: every successful use of every item in the game answered
+// "Usado" and nothing else. Filling five care bars from empty, curing SICK and
+// CORRUPTED at once, and jumping a Pebble eight levels were the same one word.
+//
+// PURE, AND ORDERED BY WHAT A PLAYER NOTICES FIRST. A level-up outranks the XP
+// that caused it; a cure outranks the bar that moved with it. Nothing is
+// invented: every arm reads a field the pack already filled, so an item whose
+// klass does nothing still falls through to the plain acknowledgement rather
+// than claiming an effect. tests/test_screens.cpp drives every arm.
+static uint16_t item_reaction(const ItemEffect& e) {
+  if (e.evolved)                      return STR_ITEM_EVOLVED;
+  if (e.levels)                       return STR_ITEM_LEVELED;
+  if (e.xp)                           return STR_ITEM_XP;
+  if (e.status_cleared)               return STR_ITEM_CURED;
+  if (e.care_stats)                   return STR_ITEM_FED;
+  if (e.mod_rounds)                   return STR_ITEM_BOOST;
+  return STR_ITEM_USED;
+}
+
 static void bag_use(void) {
   const uint8_t n = care_bag_rows();
   if (s_bag >= n) { s_mode = (uint8_t)CAREM_LIST; s_bag = 0; return; }   // Volver
@@ -194,7 +215,7 @@ static void bag_use(void) {
   ItemEffect eff;
   const uint8_t r = inv_use(ui_inventory(), id, ui_active_pebble(), now_epoch, cal, eff);
   switch ((ItemUse)r) {
-    case IU_OK:        ui_toast(STR_ITEM_USED);     break;
+    case IU_OK:        ui_toast(item_reaction(eff)); break;
     case IU_NOT_HERE:  ui_toast(STR_ITEM_NOT_HERE); break;
     case IU_NO_TARGET: ui_toast(STR_ITEM_NO_PET);   break;
     default:           ui_toast(STR_ITEM_NO_USE);   break;
@@ -210,6 +231,12 @@ void care_input(Gesture g) {
   if (s_mode == (uint8_t)CAREM_BAG) {
     if (g == (Gesture)GST_TAP_R) { s_mode = (uint8_t)CAREM_LIST; s_bag = 0; return; }
     if (g != GST_HOLD_R) {
+      // THE BAG ANSWERS BOTH-BUTTONS TOO (P10-C6). It was the one list in the
+      // product that did not: list_common() was handed a null help table, so
+      // the gesture arrived and nothing happened, on the screen holding items
+      // the game never describes anywhere. One screen-level line, the shape
+      // screen_battle.cpp, screen_box.cpp and screen_link.cpp all use.
+      if (g == GST_BOTH) { ui_help(STR_HLP_BAG); return; }
       const uint8_t n = (uint8_t)(care_bag_rows() + 1u);
       list_common(g, s_bag, n, nullptr);
       return;

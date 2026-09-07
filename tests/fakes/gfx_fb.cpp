@@ -79,6 +79,53 @@ static void note_text(const char* s) {
 uint32_t    fb_bad_utf8(void)       { return s_bad_utf8; }
 const char* fb_bad_utf8_first(void) { return s_bad_utf8_msg; }
 
+// -----------------------------------------------------------------------------
+//  THE FONT REPERTOIRE RECORDER (P10-C6)
+//
+//  The sentence above - "a screen may still draw a name the fonts have no glyph
+//  for; that is a content question" - was where this class of defect lived. It
+//  is not only a content question when the FONT is the reason: GF_TINY is
+//  u8g2_font_4x6_tr, 95 glyphs, ASCII only (ui/render.h), and u8g2's
+//  drawUTF8() emits nothing AND ADVANCES NOTHING for a codepoint the face has
+//  no glyph for. The character does not become a box; it disappears and the
+//  rest of the line closes up.
+//
+//  This fake painted a synthetic glyph for EVERY codepoint at a fixed advance
+//  regardless of font, so five accented Spanish strings drawn in GF_TINY -
+//  three of them on the first-boot flow, the first screens a device ever shows
+//  - rendered correctly in every golden and on no board. The rule was written
+//  down twice in the tree (ui/gfx.h:37, ui/screen_creator.cpp:295) and enforced
+//  nowhere. It is a property of the SEAM now, like the malformed-text recorder
+//  above it, so it holds for a string nobody thought to list.
+//
+//  GF_BIG is the digits-only face; it is recorded on the same rule.
+// -----------------------------------------------------------------------------
+static uint32_t s_no_glyph = 0;
+static char     s_no_glyph_msg[80];
+
+static bool font_has(GfxFont f, uint32_t cp) {
+  switch (f) {
+    case GF_TINY: return cp >= 0x20u && cp < 0x7Fu;             // 4x6_tr
+    case GF_BIG:  return (cp >= (uint32_t)'0' && cp <= (uint32_t)'9')
+                      || cp == (uint32_t)':' || cp == (uint32_t)' ';  // _tn
+    default:      return cp < 0x100u;                            // the _tf faces
+  }
+}
+
+static void note_glyph(GfxFont f, uint32_t cp) {
+  if (font_has(f, cp)) return;
+  if (s_no_glyph == 0) {
+    static const char* kName[GF_COUNT] = { "GF_BODY", "GF_NARR", "GF_HEAD", "GF_TINY", "GF_BIG" };
+    snprintf(s_no_glyph_msg, sizeof s_no_glyph_msg,
+             "%s has no glyph for U+%04lX",
+             (f < GF_COUNT) ? kName[f] : "GF_?", (unsigned long)cp);
+  }
+  s_no_glyph++;
+}
+
+uint32_t    fb_no_glyph(void)       { return s_no_glyph; }
+const char* fb_no_glyph_first(void) { return s_no_glyph_msg; }
+
 // =============================================================================
 //  THE WORK COUNTERS (P10-C2)
 //
@@ -120,6 +167,8 @@ void fb_reset(void) {
   s_px         = 0;
   s_bad_utf8   = 0;
   s_bad_utf8_msg[0] = '\0';
+  s_no_glyph   = 0;
+  s_no_glyph_msg[0] = '\0';
 }
 
 int fb_get(int x, int y) {
@@ -307,6 +356,7 @@ uint16_t gfx_text_w(GfxFont f, const char* s) {
 // out. Deterministic, string-sensitive, and never wider than the advance.
 static void glyph(GfxFont f, int16_t x, int16_t y, uint32_t cp) {
   ++s_ops;
+  note_glyph(f, cp);
   const int adv = gfx_font_adv(f);
   const int asc = gfx_font_asc(f);
   const int w   = adv - 1;

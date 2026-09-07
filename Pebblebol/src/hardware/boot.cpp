@@ -22,6 +22,7 @@
 
 #include "../core/config.h"        // RTC_NONCE_MAGIC
 #include "../core/rng.h"
+#include "boot_reason.h"   // P10-C6: the table, pure and host-swept
 
 // Survives a software reset / panic / deep sleep, is lost on power loss.
 // No initializer: RTC_NOINIT memory must not be written by the startup code.
@@ -35,47 +36,35 @@ static BootKind s_hw_kind     = BOOT_UNKNOWN;
 static BootKind s_kind        = BOOT_UNKNOWN;
 
 // -----------------------------------------------------------------------------
-// The reset-reason table. 'rtc_intact' is the tie-breaker for every reason that
-// does not itself prove a power cut: without the nonce we cannot tell a restart
-// from a brownout that happened to report something odd, and BOOT_UNKNOWN is
-// the honest answer.
+//  THE RESET-REASON TABLE MOVED TO hardware/boot_reason.h AT P10-C6, so that
+//  something could execute it: this file is compiled by NO host binary, and the
+//  fake that stands in for it collapsed seven BootKinds to two. See that header.
+//
+//  WHAT STAYS HERE IS THE MAPPING, ASSERTED AT COMPILE TIME. boot_reason.h
+//  spells ESP-IDF's esp_reset_reason_t by value because the host cannot see the
+//  real enum; these are the assertions that make that a fact rather than a copy
+//  somebody hoped was right. A toolchain that renumbered them fails the FIRMWARE
+//  build by name instead of silently reclassifying every reboot on the device.
 // -----------------------------------------------------------------------------
+static_assert((int)BR_UNKNOWN    == (int)ESP_RST_UNKNOWN,    "esp_reset_reason_t drifted from hardware/boot_reason.h: BR_UNKNOWN");
+static_assert((int)BR_POWERON    == (int)ESP_RST_POWERON,    "esp_reset_reason_t drifted: BR_POWERON - a power cut would stop charging the absence");
+static_assert((int)BR_EXT        == (int)ESP_RST_EXT,        "esp_reset_reason_t drifted: BR_EXT");
+static_assert((int)BR_SW         == (int)ESP_RST_SW,         "esp_reset_reason_t drifted: BR_SW");
+static_assert((int)BR_PANIC      == (int)ESP_RST_PANIC,      "esp_reset_reason_t drifted: BR_PANIC - a crash would be charged as an absence");
+static_assert((int)BR_INT_WDT    == (int)ESP_RST_INT_WDT,    "esp_reset_reason_t drifted: BR_INT_WDT");
+static_assert((int)BR_TASK_WDT   == (int)ESP_RST_TASK_WDT,   "esp_reset_reason_t drifted: BR_TASK_WDT");
+static_assert((int)BR_WDT        == (int)ESP_RST_WDT,        "esp_reset_reason_t drifted: BR_WDT");
+static_assert((int)BR_DEEPSLEEP  == (int)ESP_RST_DEEPSLEEP,  "esp_reset_reason_t drifted: BR_DEEPSLEEP - the v1 defect boot.cpp's own header records, exactly");
+static_assert((int)BR_BROWNOUT   == (int)ESP_RST_BROWNOUT,   "esp_reset_reason_t drifted: BR_BROWNOUT");
+static_assert((int)BR_SDIO       == (int)ESP_RST_SDIO,       "esp_reset_reason_t drifted: BR_SDIO");
+static_assert((int)BR_USB        == (int)ESP_RST_USB,        "esp_reset_reason_t drifted: BR_USB");
+static_assert((int)BR_JTAG       == (int)ESP_RST_JTAG,       "esp_reset_reason_t drifted: BR_JTAG");
+static_assert((int)BR_EFUSE      == (int)ESP_RST_EFUSE,      "esp_reset_reason_t drifted: BR_EFUSE");
+static_assert((int)BR_PWR_GLITCH == (int)ESP_RST_PWR_GLITCH, "esp_reset_reason_t drifted: BR_PWR_GLITCH");
+static_assert((int)BR_CPU_LOCKUP == (int)ESP_RST_CPU_LOCKUP, "esp_reset_reason_t drifted: BR_CPU_LOCKUP");
+
 static BootKind classify(bool rtc_intact, uint8_t reason) {
-  switch (reason) {
-    // Power really was removed. RTC fast memory is meaningless here even if it
-    // happens to look intact after a very short brownout: trust the reason.
-    case ESP_RST_POWERON:
-    case ESP_RST_BROWNOUT:
-    case ESP_RST_PWR_GLITCH:
-    case ESP_RST_EFUSE:
-      return BOOT_POWER_LOSS;
-
-    // The firmware died. Never report this as an absence.
-    case ESP_RST_PANIC:
-    case ESP_RST_INT_WDT:
-    case ESP_RST_TASK_WDT:
-    case ESP_RST_WDT:
-    case ESP_RST_CPU_LOCKUP:
-      return rtc_intact ? BOOT_CRASH : BOOT_UNKNOWN;
-
-    // A timed wake. The pet was asleep, not abandoned, but time DID pass.
-    case ESP_RST_DEEPSLEEP:
-      return rtc_intact ? BOOT_DEEPSLEEP : BOOT_UNKNOWN;
-
-    // Deliberate restart, reset pin, USB/JTAG re-plug, esp_restart().
-    case ESP_RST_SW:
-    case ESP_RST_EXT:
-    case ESP_RST_SDIO:
-    case ESP_RST_USB:
-    case ESP_RST_JTAG:
-      return rtc_intact ? BOOT_SOFT_RESET : BOOT_UNKNOWN;
-
-    case ESP_RST_UNKNOWN:
-    default:
-      // An intact nonce proves the chip never lost power, so this cannot be an
-      // abandonment however unhelpful the reason code is.
-      return rtc_intact ? BOOT_SOFT_RESET : BOOT_UNKNOWN;
-  }
+  return boot_classify(rtc_intact, reason);
 }
 
 static void nonce_new(void) {

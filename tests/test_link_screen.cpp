@@ -456,6 +456,75 @@ static void play(uint32_t dt, int max_ticks) {
 // looks. There is no Session here to answer with - session_init() has not been
 // called - and on the device the radio would not have delivered the frame at
 // all, because nothing is bound.
+// =============================================================================
+//  P10-C6: THE NAME ON THE AIR
+//
+//  The beacon field is LATIN-1 by contract and P10-C4 made ui_pet_name() emit
+//  UTF-8. fill_self() fed one to the other, so every Latin-1 accent (0xC0..0xDF
+//  - exactly the uppercase set screen_setup.cpp's naming ring can type) became
+//  0xC3 plus a byte in 0x80..0x9F, which name_ok() refuses. disc_encode()
+//  answered DE_NAME, link_service() dropped the frame, and a device with an
+//  accented name emitted NO BEACON AT ALL: invisible to every peer, and so the
+//  link could not be offered from either side. Nothing reported it -
+//  beacons_tx stayed 0 by design when a beacon cannot be encoded.
+//
+//  Nothing here could see it, because tests/fakes/link_fake.cpp stood in for
+//  ui_pet_name() with the pre-P10-C4 body. The fake now matches the shipping
+//  file, so this case drives the REAL fill_self() into the REAL disc_encode().
+// =============================================================================
+TEST(a_beacon_reaches_the_air_whatever_the_owner_named_the_device) {
+  // Latin-1, the way Config.pet_name and screen_setup.cpp's ring store it.
+  const char* kNames[6] = {
+    "PACO",              // ASCII, the control
+    "\xD1U",             // N-tilde
+    "\xC1LEX",           // A-acute
+    "SOF\xCD" "A",       // I-acute
+    "JOS\xC9",           // E-acute
+    "\xC1\xC9\xCD\xD3\xDA\xDC\xD1\xC1\xC9\xCD\xD3\xDA"   // twelve, all accented
+  };
+  for (uint8_t k = 0; k < 6u; ++k) {
+    harness_reset(0x11111111u, 0x22222222u);
+    lf_set_pet_name(kNames[k]);
+    const int before = lf_beacons_tx();
+    for (uint8_t i = 0; i < 40u; ++i) tick(100u);
+    // ANTI-VACUITY FIRST: the control must actually put beacons up, or every
+    // comparison below is a statement about a loop that did not run.
+    const int sent = lf_beacons_tx() - before;
+    if (k == 0u) CHECK(sent > 0);
+    CHECK(sent > 0);
+  }
+}
+
+// The stored form is what goes on the wire and the drawn form is what goes on
+// the panel. Asserting only "a beacon went out" would pass with the two halves
+// swapped everywhere, so this names WHICH bytes each one produces.
+TEST(the_name_seam_answers_latin1_for_the_wire_and_utf8_for_the_panel) {
+  harness_reset(0x11111111u, 0x22222222u);
+  lf_set_pet_name("\xD1U");
+  char wire[16];
+  char drawn[16];
+  ui_pet_name_latin1(wire, sizeof wire);
+  ui_pet_name(drawn, sizeof drawn);
+  CHECK_EQ((int)(uint8_t)wire[0], 0xD1);         // one stored byte
+  CHECK_EQ((int)(uint8_t)wire[1], (int)'U');
+  CHECK_EQ((int)strlen(wire), 2);
+  CHECK_EQ((int)(uint8_t)drawn[0], 0xC3);        // two drawn bytes
+  CHECK_EQ((int)(uint8_t)drawn[1], 0x91);
+  CHECK_EQ((int)strlen(drawn), 3);
+  // And the wire form is one disc_encode() accepts, which is the property the
+  // whole thing exists for.
+  DiscBeacon b;
+  memset(&b, 0, sizeof b);
+  b.device_id = 0x11111111u;
+  b.caps      = (uint16_t)DISC_CAP_BATTLE;
+  b.ver       = (uint8_t)PROTOCOL_VERSION;
+  ui_pet_name_latin1(b.name, sizeof b.name);
+  uint8_t buf[64];
+  uint16_t n = 0u;
+  CHECK_EQ((int)disc_encode(b, buf, (uint16_t)sizeof buf, n), (int)DE_OK);
+  CHECK(n > 0u);
+}
+
 TEST(a_peer_in_the_room_does_not_start_a_session_on_its_own) {
   harness_reset(0x11110000u, 0x22220000u);
   see_peer((uint16_t)DISC_CAP_BATTLE, -40, 0u);
@@ -595,17 +664,43 @@ TEST(an_operation_the_peer_cannot_do_is_refused_by_name_and_opens_nothing) {
 // after P7-C4 that is CRIAR and no longer INTERCAMBIO. game/breeding.cpp is
 // complete and tested; no wire driver carries a breeding, and the row says so
 // rather than opening a session that could only ever end in a timeout.
+// P10-C6: DRIVEN AGAINST A PEER A REAL BOARD CAN BE, WHICH IS THE WHOLE POINT.
+// This case used to fabricate a peer advertising DISC_CAP_BREED - a beacon no
+// artefact can produce, since LK_SELF_CAPS is BATTLE|TRADE - so it reached a
+// branch the release build could never take, while the sentence every actual
+// player got ("El otro no puede eso", this device blaming the other player's
+// device for a feature neither has) was asserted nowhere. The refusal is
+// unconditional now: the reason breeding does not run is local and symmetric.
 TEST(a_capability_this_build_has_no_protocol_for_says_so_and_opens_nothing) {
+  // Both peers, the one a board really is and the impossible one, must answer
+  // the same way - otherwise the message is about the peer again.
+  const uint16_t kCaps[2] = {
+    (uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE),                    // a real board
+    (uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE | DISC_CAP_BREED)    // a future one
+  };
+  for (uint8_t c = 0; c < 2u; ++c) {
+    harness_reset(0x11110000u, 0x22220000u);
+    see_peer(kCaps[c], -40, 0u);
+    link_input(GST_HOLD_R);
+    while (link_screen_op() != (uint8_t)LOP_BREED) link_input(GST_TAP_L);
+    g_toast = STR_EMPTY;
+    link_input(GST_HOLD_R);
+    CHECK_EQ(g_toast, STR_UI_SOON);
+    CHECK(g_toast != STR_LK_NO_CAP);
+    CHECK_EQ(lf_binds(), 0);
+    CHECK_EQ(link_screen_session_state(), (uint8_t)SS_IDLE);
+    CHECK_EQ(link_screen_mode(), (uint8_t)LKM_CARD);
+  }
+  // ANTI-VACUITY: STR_LK_NO_CAP is still the answer where it is TRUE - a peer
+  // that really cannot trade. Without this the case above would pass with the
+  // capability check deleted from the whole screen.
   harness_reset(0x11110000u, 0x22220000u);
-  see_peer((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE | DISC_CAP_BREED), -40, 0u);
+  see_peer((uint16_t)DISC_CAP_BATTLE, -40, 0u);
   link_input(GST_HOLD_R);
-  while (link_screen_op() != (uint8_t)LOP_BREED) link_input(GST_TAP_L);
+  while (link_screen_op() != (uint8_t)LOP_TRADE) link_input(GST_TAP_L);
   g_toast = STR_EMPTY;
   link_input(GST_HOLD_R);
-  CHECK_EQ(g_toast, STR_UI_SOON);
-  CHECK_EQ(lf_binds(), 0);
-  CHECK_EQ(link_screen_session_state(), (uint8_t)SS_IDLE);
-  CHECK_EQ(link_screen_mode(), (uint8_t)LKM_CARD);
+  CHECK_EQ(g_toast, STR_LK_NO_CAP);
 }
 
 // =============================================================================

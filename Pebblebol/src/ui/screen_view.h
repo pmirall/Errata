@@ -78,6 +78,15 @@ struct PebbleView {
   // creature. ui/screen_home.cpp paints the same rows now, and home_corrupted
   // is the golden.
   uint8_t  corrupted;               // 1 = PBS_CORRUPTED is set on the Pebble
+  // HOURS LEFT OF THE CORRUPTION, 0..24, ROUNDED UP (P10-C6). Spec section 55
+  // makes corruption a 24 h state and the product had no readout of it at all:
+  // one centred line at onset that a player can walk past, a shimmer on HOME,
+  // and then nothing - no page showing the status, no hours remaining, no
+  // AlertId, and cor_left_s() had no caller outside the tests. A player whose
+  // creature suddenly glitches had no way to learn whether it still was, or
+  // that it wears off. 1 means "less than an hour to go", never 0, so the
+  // reading and the glitch can never disagree.
+  uint8_t  corrupt_h;
 
   uint8_t  present;                 // 0 = there is no active Pebble at all
 };

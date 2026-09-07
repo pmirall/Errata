@@ -135,7 +135,13 @@ uint16_t perf_discards(void);
 //  risk 22 calls FRAME_BUDGET_US and rd_frame_time_us() both dead. Half of that
 //  has been false for eight phases: FRAME_BUDGET_US drives the live overrun
 //  backoff below, which is what stops the loop running at 100 % duty cycle.
-//  Only rd_frame_time_us() was dead, and P10-C2 gives it its first caller.
+//  Only rd_frame_time_us() was dead, and P10-C2 gives
+// it its first caller - THE GD_SYS_PERF CONSOLE PAGE, which is inside
+// #if GOD_MODE_ENABLED, so in the RELEASE artefact the export is still dead and
+// --gc-sections drops it (verified with nm over both .elf files). The shipping
+// build reads the same numbers off the DIAG,perf serial line instead. Said in
+// full because "it has a caller now" is exactly the shape of claim this project
+// keeps finding true of the build in front of you and false of the artefact.
 // -----------------------------------------------------------------------------
 // The next frame deadline. Advance by exactly one period so the cadence does
 // not drift, but RESYNCHRONISE after a long stall rather than firing a burst of

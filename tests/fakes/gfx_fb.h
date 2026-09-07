@@ -40,6 +40,16 @@ const char* fb_oob_first(void);
 uint32_t    fb_bad_utf8(void);
 const char* fb_bad_utf8_first(void);
 
+// fb_no_glyph() counts glyphs drawn in a font whose repertoire has no such
+// codepoint - GF_TINY is ASCII-only (u8g2_font_4x6_tr, 95 glyphs) and GF_BIG is
+// digits-only. On the device drawUTF8() emits NOTHING and ADVANCES NOTHING for
+// such a codepoint, so the character vanishes and the line closes up; this fake
+// used to paint a synthetic glyph for every codepoint at a fixed advance, which
+// is why five accented Spanish strings drawn in GF_TINY were correct in every
+// golden and wrong on every board. fb_no_glyph_first() names font and codepoint.
+uint32_t    fb_no_glyph(void);
+const char* fb_no_glyph_first(void);
+
 // Golden files, ASCII PBM (P1), one 128-character row per line.
 bool fb_write_pbm(const char* path);
 

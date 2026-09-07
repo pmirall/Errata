@@ -1,9 +1,9 @@
-> **ARCHIVADO (P10-C5, b534f26). Documento en espanol, sustituido por `CHANGELOG.md`.**
+> **ARCHIVADO (P10-C5). Documento en espanol, sustituido por `CHANGELOG.md`.**
 > Se conserva sin editar. Borrarlo seria borrar la historia: es el registro
 > de lo que este proyecto fue y de por que dejo de serlo. Cubre Nottamagochi hasta 1.0.0 (2026-08-31). El registro en ingles de la raiz empieza donde este acaba.
 > Nada de este fichero se mantiene desde P10-C5 en adelante.
 >
-> **ARCHIVED (P10-C5, b534f26). Spanish document, superseded by `CHANGELOG.md`.**
+> **ARCHIVED (P10-C5). Spanish document, superseded by `CHANGELOG.md`.**
 > Kept unedited; deleting it would delete the history. Covers Nottamagochi up to 1.0.0 (2026-08-31). The English log at the repository root starts where this one stops.
 > Nothing here is maintained from P10-C5 onwards.
 

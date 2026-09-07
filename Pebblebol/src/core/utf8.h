@@ -73,6 +73,22 @@ bool u8_well_formed(const char* s);
 // cap == 0 writes nothing at all (there is nowhere to put a terminator).
 uint16_t u8_from_latin1(char* dst, uint16_t cap, const char* src);
 
+// UTF-8 IN, LATIN-1 OUT - THE CROSSING BACK, and it exists because one field in
+// this product is Latin-1 by CONTRACT rather than by storage: DiscBeacon.name.
+// networking/discovery.cpp's name_ok() refuses 0x80..0x9F, every receiver draws
+// a peer name through u8_from_latin1(), and every Latin-1 byte in 0xC0..0xDF -
+// which is exactly the uppercase accent set ui/screen_setup.cpp's naming ring
+// can type - encodes to 0xC3 followed by a byte INSIDE that refused window. So
+// a UTF-8 name handed to the encoder is not merely wrong on the wire: it is
+// refused outright and the device never emits a beacon at all.
+//
+// A codepoint above 0xFF has no Latin-1 byte and becomes '?'. It cannot happen
+// from this product's own string table (tests/test_content.cpp requires every
+// string to be cp <= 0xFF) and the substitution is what keeps that a fact
+// rather than an assumption. A malformed sequence stops the copy, the same
+// refusal u8_len() makes. Returns bytes written, not counting the terminator.
+uint16_t u8_to_latin1(char* dst, uint16_t cap, const char* src);
+
 // APPEND, on a codepoint boundary. dst must already be NUL-terminated; cap
 // counts the terminator. Both return the new total length in bytes.
 //

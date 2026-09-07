@@ -316,4 +316,22 @@ void diag_fmt_all(const DiagFields& f, DiagOut& o);
 // (the console's own SYS/INFO page does). Never nullptr.
 const char* diag_field_name(uint8_t id);
 
+// -----------------------------------------------------------------------------
+//  SCREEN NAMES (P10-C6)
+//
+//  The performance receipt prints the screen that owned the worst frame and the
+//  worst loop pass AS A RAW ScreenId INTEGER, and nothing on the device or in
+//  docs/bench.md turned that back into a screen. docs/bench.md A1's whole
+//  method is "walk the screens, then read which one owned the worst frame" -
+//  and the operator got `s17`. Worse, the enum is not stable across phases:
+//  P10-C4 inserted SCR_SETUP_NAME and SCR_SETUP_STARTER IN THE MIDDLE, so any
+//  mapping written down from an older log is wrong, and a capture committed to
+//  docs/bench/ was not interpretable a phase later.
+//
+//  Here rather than in dev/godmode.cpp because this file is pure, host-linked
+//  and driven by tests/test_diag.cpp - the table is index-parallel to ScreenId
+//  with a static_assert on its length, so a screen added without a name fails
+//  the BUILD, the same shape kAudit[] uses for the section 63 audit.
+const char* diag_screen_name(uint8_t scr);
+
 #endif  // PB_DIAG_CORE_H

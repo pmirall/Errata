@@ -79,6 +79,31 @@ void creator_render(void);
 void creator_input(Gesture g);
 void creator_leave(void);
 
+// -----------------------------------------------------------------------------
+//  THE POWER LADDER'S `held` INPUT (P10-C6) - AND THIS IS THE SAME BUG FIX THE
+//  SF_STICKY NOTE ABOVE DESCRIBES, ONE RUNG HIGHER UP.
+//
+//  P8-C2 stopped invariant 3's 20 s navigation auto-return from tearing the
+//  access point down while the owner was looking at a phone. It did not stop
+//  hardware/power.cpp's ladder from doing exactly the same thing at
+//  PWR_IDLE_MS: app/app.cpp feeds `held` from ui_radio_job_busy(), which was
+//  network_screen_busy() || link_screen_busy() and knew nothing about the third
+//  radio owner in the tree. So after 120 s with no BUTTON pressed - and a phone
+//  is precisely what the player is pressing instead - pwr_hook_release() called
+//  ui_home(), sm_goto() ran creator_leave(), and the portal died at 120 s while
+//  CREATOR_IDLE_S_DEFAULT is 300 s and CREATOR_IDLE_S_MAX is 3,600 s. Drawing a
+//  24x24 sprite on a phone takes longer than two minutes. Nothing said so:
+//  no host binary compiles app/app.cpp, ui/ui.cpp or networking/net.cpp, and
+//  tests/test_power.cpp had a case for the SCAN being held and none for this.
+//
+//  networking/discovery.h:254 static_asserts the same invariant for the link
+//  job (LINK_JOB_TIMEOUT_MS < PWR_IDLE_MS) with the reason spelled out. The
+//  portal cannot take that shape - its ceiling is a user setting up to an hour
+//  - so it takes the other one link_hold() takes: it HOLDS the ladder, and its
+//  own D7 idle timer in creator_update() is what ends it, which then runs
+//  creator_leave() and drops the hold. One teardown, as before.
+bool creator_screen_busy(void);
+
 // Which symbol is on screen: 0 = the URL, 1 = "join this network". Exposed for
 // the tests and for the snapshot names.
 uint8_t creator_variant(void);

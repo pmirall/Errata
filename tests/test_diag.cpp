@@ -388,6 +388,67 @@ TEST(the_table_carries_all_twelve_of_spec_66s_commands) {
 // =============================================================================
 //  3. THE PARSER
 // =============================================================================
+// P10-C6: THE TWO RANGE GUARDS IN THIS MODULE THAT HAD NO OUT-OF-RANGE CASE.
+// Removing either bound left 28/28 green AND left an ASAN run green, because
+// nothing ever called them out of range - so the missing thing was the fixture
+// rather than the sanitiser. Both index arrays of POINTERS, so a read past the
+// end is dereferenced and printed: diag_field_name() takes an id that comes off
+// a console page index, and fmt_cal() takes a two-bit calibration field read
+// out of a save that a migration or a corrupt blob can widen.
+// P10-C6: THE PERF RECEIPT'S SCREEN COLUMN IS INTERPRETABLE. It printed a raw
+// ScreenId and nothing anywhere mapped it back - and this enum was renumbered
+// MID-LIST inside this phase (P10-C4 inserted two setup screens), so a mapping
+// somebody wrote down from an older capture is wrong rather than merely stale.
+TEST(every_screen_id_has_a_name_and_they_are_all_different) {
+  for (uint8_t i = 0; i < (uint8_t)SCR_COUNT; ++i) {
+    const char* n = diag_screen_name(i);
+    CHECK(n != nullptr);
+    CHECK(n[0] != '\0');
+    CHECK(strcmp(n, "?") != 0);
+    // ...and no two screens share a name, or a capture would be ambiguous
+    // exactly where it matters - two screens both called HOME is a mapping
+    // that answers every question and settles none.
+    for (uint8_t j = 0; j < i; ++j) CHECK(strcmp(n, diag_screen_name(j)) != 0);
+  }
+  CHECK(strcmp(diag_screen_name((uint8_t)SCR_COUNT), "?") == 0);
+  CHECK(strcmp(diag_screen_name(255u), "?") == 0);
+  // The two the enum insertion moved, named explicitly: if a future edit shifts
+  // the table against the enum, these are the rows that say so first.
+  CHECK(strcmp(diag_screen_name((uint8_t)SCR_HOME), "HOME") == 0);
+  CHECK(strcmp(diag_screen_name((uint8_t)SCR_SETUP_NAME), "SETUP_NAME") == 0);
+  CHECK(strcmp(diag_screen_name((uint8_t)SCR_DIAG), "DIAG") == 0);
+}
+
+TEST(a_field_id_and_a_calibration_state_out_of_range_are_named_not_dereferenced) {
+  CHECK(strcmp(diag_field_name((uint8_t)DGD_FIELD_COUNT), "?") == 0);
+  CHECK(strcmp(diag_field_name(200u), "?") == 0);
+  CHECK(strcmp(diag_field_name(255u), "?") == 0);
+  // ...and every id INSIDE the range answers something else, or the check above
+  // would pass with the whole table returning "?".
+  for (uint8_t i = 0; i < (uint8_t)DGD_FIELD_COUNT; ++i)
+    CHECK(strcmp(diag_field_name(i), "?") != 0);
+
+  // cal_state is two bits in the schema; a wider value must print "?" rather
+  // than walk off a four-entry table.
+  char buf[160];
+  DiagFields f;
+  diag_fields_clear(f);
+  for (uint8_t cal = 4u; cal < 8u; ++cal) {
+    f.cal_state = cal;
+    DiagOut o;
+    diag_out_init(o, buf, (uint16_t)sizeof buf);
+    diag_fmt_field((uint8_t)DGD_CLOCK, f, o);
+    CHECK(strstr(buf, "?") != nullptr);
+  }
+  for (uint8_t cal = 0u; cal < 4u; ++cal) {
+    f.cal_state = cal;
+    DiagOut o;
+    diag_out_init(o, buf, (uint16_t)sizeof buf);
+    diag_fmt_field((uint8_t)DGD_CLOCK, f, o);
+    CHECK(strstr(buf, "?") == nullptr);
+  }
+}
+
 TEST(the_parser_names_every_refusal) {
   DiagParse p;
 
@@ -402,6 +463,19 @@ TEST(the_parser_names_every_refusal) {
   // A name longer than any command reads as unknown, not as a buffer accident.
   diag_parse("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1", p);
   CHECK_EQ((int)p.err, (int)DGP_UNKNOWN);
+  // P10-C6: THE TWO REFUSALS THIS CASE DID NOT DRIVE, and it is named "every
+  // refusal". A token longer than DIAG_TOK_MAX and a NUMBER longer than eleven
+  // characters each have their own arm, and deleting either left 28/28 green.
+  // The token one is harmless in fact - DIAG_TOK_MAX is 16 and the longest
+  // command name is 14, so a truncated token can never match - but nothing in
+  // the tree recorded that. The NUMBER one is a real behaviour change: without
+  // it `seed 000000000005` silently truncates to eleven characters and seeds 0
+  // instead of being refused by name, which is the opposite of the "a console
+  // that teaches rather than one that lies" property parse_u32 claims.
+  diag_parse("aaaaaaaaaaaaaaaaaaaa", p);
+  CHECK_EQ((int)p.err, (int)DGP_UNKNOWN);
+  diag_parse("seed 000000000005", p);
+  CHECK_EQ((int)p.err, (int)DGP_OVERFLOW);
 
   diag_parse("  spawn   12   30  ", p);
   CHECK_EQ((int)p.err, (int)DGP_OK);

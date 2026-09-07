@@ -13,6 +13,7 @@
 #include "networking/protocol.h"
 #include "networking/trade_link.h"
 #include "networking/transport.h"
+#include "core/utf8.h"
 #include "ui/screen_link.h"
 #include "ui/ui.h"
 
@@ -170,9 +171,23 @@ void ui_link_unbind(void) {
 
 uint32_t ui_link_nonce(void) { return g_nonce; }
 
-void ui_pet_name(char* out, size_t cap) {
+// THE TWO HALVES OF THE NAME SEAM, MATCHING ui/ui.cpp EXACTLY (P10-C6).
+//
+// This fake stood in for ui_pet_name() with a plain snprintf - the PRE-P10-C4
+// body - long after the shipping one started emitting UTF-8. Every discovery
+// and link test therefore drove a function the firmware no longer had, and the
+// live defect it hid (an accented device name is refused by disc_encode() and
+// the board emits no beacon at all) was invisible to all 58 binaries.
+//
+// g_name holds the STORED form, Latin-1, the way Config.pet_name does.
+void ui_pet_name_latin1(char* out, size_t cap) {
   if (out == nullptr || cap == 0u) return;
   snprintf(out, cap, "%s", g_name);
+}
+
+void ui_pet_name(char* out, size_t cap) {
+  if (out == nullptr || cap == 0u) return;
+  (void)u8_from_latin1(out, (uint16_t)((cap > 0xFFFFu) ? 0xFFFFu : cap), g_name);
 }
 
 // The battle screen's six, forwarded to the real ui/screen_link.cpp. Both

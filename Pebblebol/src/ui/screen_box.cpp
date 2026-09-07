@@ -164,8 +164,17 @@ static void draw_card(void) {
     const int16_t x = (int16_t)(2 + (i / 3) * 64);
     const int16_t y = (int16_t)(UI_HDR_H + 10 + (i % 3) * 10);
     const uint8_t pct = care_pct(p->care[i]);
-    gfx_text_fit(GF_TINY, x, (int16_t)(y + 6), 30, S(kCareLabel[i]));
-    gfx_bar((int16_t)(x + 32), (int16_t)(y + 1), 22, 6, pct);
+    // GF_BODY AND NOT GF_TINY, AND THE COLUMN IS WIDER FOR IT (P10-C6).
+    // GF_TINY is u8g2_font_4x6_tr, 95 glyphs, ASCII only (ui/render.h and
+    // ui/gfx.h:37 both say so) and drawUTF8() emits NOTHING and ADVANCES
+    // NOTHING for a codepoint the face lacks - so "Ánimo" read "nimo" and
+    // "Energía" read "Energa" on every board while every golden was correct,
+    // because tests/fakes/gfx_fb.cpp painted a synthetic glyph for any
+    // codepoint at a fixed advance. The recorder in that fake now refuses it.
+    // 35 px is "Energía" at GF_BODY's 5 px advance; the bar moves to x + 37 so
+    // the second column still ends at 125 of OLED_W's 128.
+    gfx_text_fit(GF_BODY, x, (int16_t)(y + 6), 35, S(kCareLabel[i]));
+    gfx_bar((int16_t)(x + 37), (int16_t)(y + 1), 22, 6, pct);
   }
 
   gfx_countdown(ui_idle_ms());

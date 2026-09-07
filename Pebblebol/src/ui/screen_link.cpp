@@ -158,7 +158,10 @@ static void fill_self(DiscBeacon& b) {
   b.device_id = ui_device_seed();
   b.caps      = (uint16_t)LK_SELF_CAPS;
   b.ver       = (uint8_t)PROTOCOL_VERSION;
-  ui_pet_name(b.name, sizeof b.name);
+  // LATIN-1, NOT THE DRAWN FORM. DiscBeacon.name is Latin-1 by contract
+  // (discovery.h) and name_ok() refuses 0x80..0x9F, which is where every UTF-8
+  // accent lands. See ui.h and the note above ui_pet_name_latin1().
+  ui_pet_name_latin1(b.name, sizeof b.name);
 }
 
 // -----------------------------------------------------------------------------
@@ -817,10 +820,27 @@ static void choose_op(void) {
       return;
     case LOP_BREED:
       // CRIAR IS STILL AN ENTRY POINT AND NOT AN OPERATION. game/breeding.cpp
-      // is complete and tested, and no wire driver carries a breeding: P7-C5's
-      // breed_link.cpp is not built, and the plan says so in the one place that
-      // should. Nothing is opened and no radio state changes.
-      ui_toast(op_offered(s_op) ? STR_UI_SOON : STR_LK_NO_CAP);
+      // is complete and tested, and no wire driver carries a breeding: the
+      // networking/breed_link.cpp P7-C5 planned WAS NEVER WRITTEN (it is not
+      // "not built" - no such file has ever existed in this tree), and
+      // DISC_CAP_BREED is therefore not claimed. Nothing is opened here and no
+      // radio state changes.
+      //
+      // THE ANSWER IS UNCONDITIONAL, AND THAT IS THE P10-C6 FIX. It used to be
+      // op_offered(s_op) ? STR_UI_SOON : STR_LK_NO_CAP - and LK_SELF_CAPS does
+      // not include DISC_CAP_BREED, so no Pebblebol running any build of this
+      // firmware ever advertises it, op_offered(LOP_BREED) is false against
+      // every real peer, and the only sentence a player could ever get was
+      // "El otro no puede eso": this device blaming the other player's device
+      // for a feature NEITHER has. Two owners with two identical boards would
+      // each conclude the other one was broken or out of date. The honest
+      // branch, STR_UI_SOON, was unreachable in the release artefact, and the
+      // test that covered it reached it only by fabricating a peer claiming a
+      // capability no artefact can broadcast.
+      //
+      // The reason breeding does not run is LOCAL and SYMMETRIC, so the message
+      // says so whatever the peer advertises.
+      ui_toast(STR_UI_SOON);
       return;
     default:
       break;

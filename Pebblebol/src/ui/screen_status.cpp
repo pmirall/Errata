@@ -80,9 +80,30 @@ void status_a_render(void) {
   }
   {
     const int16_t x = 65, y = (int16_t)(UI_HDR_H + 1 + 3 * 11);
-    const SpriteRef r = sprite_mini(MIC_CLOCK);
+    // THE EIGHTH CELL IS THE AGE - UNLESS THE PEBBLE IS CORRUPTED (P10-C6).
+    //
+    // Spec section 55 makes corruption a 24 h state and the product had NO
+    // readout of it: one centred line at onset that a player can walk past, an
+    // intermittent shimmer on HOME (7 frames in 40 at the worst), and then
+    // nothing. Neither STATUS page showed the status, there is no AlertId for
+    // it, and cor_left_s() had no caller in src/ at all - the header said so
+    // itself ("the screens do not draw it yet"). A player whose creature
+    // suddenly starts glitching could not find out whether it still was, for
+    // how much longer, or that it wears off by itself.
+    //
+    // It replaces the age rather than taking a ninth cell because the grid has
+    // eight and the age is the one thing on this page that is still true on the
+    // page next door - and a 24 h state is worth more than a number that has
+    // not changed since yesterday. It goes back to the age when it expires.
+    const SpriteRef r = sprite_mini(v->corrupted ? MIC_ALERT : MIC_CLOCK);
     gfx_xbm(x, y, r.w, r.h, r.bits);
-    gfx_text_fit(GF_TINY, (int16_t)(x + 10), (int16_t)(y + 6), 51, v->age_txt);
+    if (v->corrupted) {
+      char c[24];
+      snprintf(c, sizeof c, "%s %uh", S(STR_ST_CORRUPT), (unsigned)v->corrupt_h);
+      gfx_text_fit(GF_BODY, (int16_t)(x + 10), (int16_t)(y + 6), 51, c);
+    } else {
+      gfx_text_fit(GF_TINY, (int16_t)(x + 10), (int16_t)(y + 6), 51, v->age_txt);
+    }
   }
 
   gfx_countdown(ui_idle_ms());

@@ -291,8 +291,18 @@ TEST(a_dissolve_eats_the_sprite_from_the_end_its_direction_names) {
 
   // AE_DIS_NONE skips nothing, ever - it is the "draw it solid" arm every film
   // uses before its dissolve starts.
+  //
+  // P10-C6: SWEPT OVER ALL SIXTEEN DITHER PHASES, and the previous form pinned
+  // (3,5) only. ae_bayer(3,5) is 7, one below the >= 8 threshold, so deleting
+  // the `dir == AE_DIS_NONE` guard changed nothing here: AE_DIS_NONE is 0 and
+  // AE_DIS_DOWN is 2, so without the guard NONE falls into the DOWN arm with
+  // front 0, marks rows 0 and 1 as the crumbling band and drops half their
+  // pixels on every frame a film draws "solid". The matrix is a set of sixteen
+  // phases and the case sampled the one that could not see it.
   for (uint8_t row = 0; row < h; ++row)
-    CHECK_EQ(ae_dissolve_skip(AE_DIS_NONE, row, 0, 3, 5), 0u);
+    for (uint8_t px = 0; px < 4u; ++px)
+      for (uint8_t py = 0; py < 4u; ++py)
+        CHECK_EQ(ae_dissolve_skip(AE_DIS_NONE, row, 0, px, py), 0u);
 }
 
 TEST(the_crumbling_frontier_is_two_rows_deep_and_about_half_of_it) {

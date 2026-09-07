@@ -889,22 +889,29 @@ TEST(the_exit_table_covers_every_screen_id) {
   // And ERROR is covered for EVERY kind it can hold, not just for the one a
   // reader happened to think of. ERRK_SAVE_NEWER was the kind nobody thought
   // of: three kinds, three rows, and ERRK_NONE never puts the screen up.
-  // ui/screen_error.h's enum has no _COUNT, so the three are named here and
-  // the assertion below is what fails if a fourth is added without a row.
-  const uint8_t kinds[3] = { ERRK_SAVE_CORRUPT, ERRK_SAVE_NEWER, ERRK_DISPLAY };
-  for (uint8_t k = 0; k < 3u; ++k) {
+  // P10-C6: DERIVED FROM THE ENUM, NOT FROM A LIST SOMEBODY TYPED. The three
+  // were named in an array here and the assertion below counted ROWS IN kExits
+  // - so adding a fourth ErrKind with no row left err_rows at 3, the array at
+  // three members, and the whole suite green with GATE OK printed. The comment
+  // said the assertion "is what fails if a fourth is added without a row"; it
+  // was what fails if a fourth ROW is added, which is the harmless direction -
+  // and it fired on the CORRECT fix rather than on the bug. ui/screen_error.h
+  // has an ERRK_COUNT now and this walks it.
+  for (uint8_t k = (uint8_t)ERRK_SAVE_CORRUPT; k < (uint8_t)ERRK_COUNT; ++k) {
     bool found = false;
     for (size_t i = 0; i < sizeof kExits / sizeof kExits[0]; ++i)
-      if (kExits[i].scr == (uint8_t)SCR_ERROR && kExits[i].err == kinds[k]) found = true;
+      if (kExits[i].scr == (uint8_t)SCR_ERROR && kExits[i].err == k) found = true;
     if (!found) fprintf(stderr, "  ERROR kind %u has no row in kExits - a state "
                                 "the device can reach with no answer to spec 47\n",
-                        (unsigned)kinds[k]);
+                        (unsigned)k);
     CHECK(found);
   }
   uint8_t err_rows = 0;
   for (size_t i = 0; i < sizeof kExits / sizeof kExits[0]; ++i)
     if (kExits[i].scr == (uint8_t)SCR_ERROR) ++err_rows;
-  CHECK_EQ((int)err_rows, 3);
+  // ERRK_NONE never puts the screen up, so the table holds one row per OTHER
+  // kind. Both directions fail now: a kind with no row, and a row with no kind.
+  CHECK_EQ((int)err_rows, (int)ERRK_COUNT - 1);
 }
 
 // THE SHARP HALF, AND THE ONE THE MUTATION RUN IS ABOUT. SF_LOCK_INPUT turns

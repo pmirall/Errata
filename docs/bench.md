@@ -5,14 +5,25 @@ one person should run it, with two boards, a phone and a serial terminal. Nothin
 to-do: every item is a claim the firmware makes that no host binary, no gate and no browser
 harness can settle, because settling it needs hardware.
 
-**What this file is not.** It is not a summary of what is tested. `tools/check.sh` is green on 55
-host binaries, an AddressSanitizer subset, 51 browser assertions and about thirty greps, and none
-of that is evidence for a single line below.
+**What this file is not.** It is not a summary of what is tested. `tools/check.sh` is green on 58
+host binaries, an AddressSanitizer subset of 8, 51 browser assertions and 159 named gates, and
+none of that is evidence for a single line below.
 
 **Why it exists as one document.** These items were spread across seven phase records, and a list
 distributed over seven records is a list nobody runs. Written by P10-C2; sections F (first boot)
-and G (the save) added by P10-C4 and P10-C5. **This is the file the release hands to whoever has
-the hardware**, and `README.md` §2 points at it.
+and G (the save) added by P10-C4 and P10-C5; C6, C7 and B8 added at the P10-C6 exit. **This is
+the file the release hands to whoever has the hardware.** `README.md` §2 carries the same list in
+dependency order, one line per item, and is where an owner should start; this file has the
+keystrokes and the acceptance numbers.
+
+**THREE ITEMS HERE COULD NOT HAVE PASSED BEFORE THE P10-C6 EXIT, AND THAT IS WORTH KNOWING
+BEFORE YOU SPEND A DAY ON THEM.** B1-B6 were dead for any device whose owner typed an accented
+name at first boot: the beacon carried the drawn (UTF-8) form of the name into a field that is
+Latin-1 by wire contract, `disc_encode()` refused it, and the board emitted **no beacon at all** -
+silently, since an unencodable beacon is dropped by design. D2 and D4/D5 were dead for everyone:
+the power ladder tore the access point down after 120 s of no BUTTON press, which is exactly what
+using a phone looks like, 180 s before D7's own timer. Both are fixed and both now fail by name
+in the host suite if they come back.
 
 ---
 
@@ -20,12 +31,25 @@ the hardware**, and `README.md` §2 points at it.
 
 | | |
 |---|---|
-| **Hardware** | 2 x ESP32-C3 with the §68 pin map, 2 x SSD1306/SH1106 128x64 on I2C 0x3C, 2 x piezo on `PIN_PIEZO`, one phone with a camera and a browser, one USB serial console at 115200. |
-| **Blocked on** | **decision D1 (the pin map) is still open and `PB_PINS_CONFIRMED` is never defined.** Nothing below can run until a board is wired to a decided map. This is the first thing the owner owes, and it gates all twenty items. |
-| **Variants** | `tools/build_matrix.sh` builds six. Only two matter here: **`release`** (`GOD_MODE_ENABLED=0`) is the artefact that ships and the one every acceptance claim must be made about; **`baseline`** has the god console and is the only build with a DIAG screen at all. **Every item below names its variant. A reading taken on the wrong one is not a reading** — `docs/budget.md` §8 records a phase-7 exit that quoted a dev build against a shipping one. |
-| **The serial line** | The release artefact prints `DIAG#,heap` and `DIAG#,perf` headers at boot and one row of each every 60 s (`GOD_HEAP_PERIOD_MS`), for ever, on every screen, with no console and no god mode. It also answers four typed commands: `help`, `info`, `show_save`, `stall <ms>`. That is the whole of the shipping build's diagnostics and it is what most of section A is read from. |
+| **Hardware** | 2 x ESP32-C3 wired to the map decision **D1** settles on (`Pebblebol/src/core/config.h` §2 today; `docs/legacy/README.es.md` §2 documents the other, contradicting one. **Neither spec has a pin map** - §68 is twenty prose rules for the coding agent and the hardware spec ends at §33 - so an earlier version of this line pointing at "the §68 pin map" pointed at nothing), 2 x SSD1306/SH1106 128x64 on I2C 0x3C, 2 x piezo on `PIN_PIEZO`, one phone with a camera and a browser, one USB serial console at 115200. |
+| **Blocked on** | **decision D1 (the pin map) is still open and `PB_PINS_CONFIRMED` is never defined.** Nothing below can run until a board is wired to a decided map. This is the first thing the owner owes, and it gates all **thirty-eight** items. |
+| **Variants** | `tools/build_matrix.sh` builds six. Only two matter here: **`release`** (`GOD_MODE_ENABLED=0`) is the artefact that ships and the one every acceptance claim must be made about; **`baseline`** has the god console and is the only build with a DIAG screen at all. **Every item below names its variant, or inherits one from its section heading, and where a
+reading only exists on a console page the item ALSO gives the release-side cross-check that
+section I's recording rule requires. A reading taken on the wrong variant is not a reading** — `docs/budget.md` §8 records a phase-7 exit that quoted a dev build against a shipping one. |
+| **The serial line** | The release artefact prints `DIAG#,heap`, `DIAG#,perf` and `DIAG#,link` headers at boot, plus a one-off `DIAG#,screens` line mapping every `ScreenId` to its name (added at P10-C6: the perf rows name the worst screen as a raw integer, and that enum was renumbered mid-list inside phase 10, so a capture without the map is not interpretable a phase later). One `heap` and one `perf` row every 60 s (`GOD_HEAP_PERIOD_MS`), for ever, on every screen, with no console and no god mode. It also answers four typed commands: `help`, `info`, `show_save`, `stall <ms>`. That is the whole of the shipping build's diagnostics and it is what most of section A is read from. |
 
-Capture every session: `arduino-cli monitor -p <port> -c baudrate=115200 | tee docs/bench/$(date +%F)-$(git rev-parse --short HEAD).log`
+Capture every session — **the `mkdir` is not optional**, `docs/bench/` is not in the repository
+and `tee` exits 1 without it, which on a 24 h soak is a lost day:
+
+```sh
+mkdir -p docs/bench
+arduino-cli monitor -p <port> -c baudrate=115200 \
+  | tee docs/bench/$(date +%F)-$(git rev-parse --short HEAD).log
+```
+
+**Buttons are L and R** everywhere below, matching `PIN_BTN_L` / `PIN_BTN_R` and `README.md` §8.
+Some strings on the device say "A" for the left button and "B" for the right; which physical
+button is which is part of what decision D1 settles.
 
 ---
 
@@ -165,53 +189,94 @@ otherwise, because a peer link is a claim about the artefact that ships.
 beacons at 500 ms above `LINK_RSSI_MIN`. This is also the modem-sleep check P7-C1 owes: confirm
 the beacon count does not collapse after the radio has been idle.
 
-**B2. The consent gate, on the air.** Press A on ONE board only. The other must stay on its peer
-list, show nothing and start nothing; the first must reach "CONEXIÓN PERDIDA" after about nine
-seconds. This is the half no host binary can see — that an unbound device's receive callback
-really does drop the initiator's unicast (`espnow_stats().rx_wrong_peer` rising on the silent
-board). *Closes: nothing on its own; it is the precondition for B3-B6.*
+**B2. The consent gate, on the air. — either variant; the counters ship in both.** Press L on ONE
+board only. The other must stay on its peer list: no session opens, nothing binds, no screen
+changes. **The instrument is `DIAG,link` on the silent board's serial line** — a row every 60 s
+whose `rx_wrong_peer` column counts unicast frames from a device it is not talking to. Until the
+P10-C6 exit this item named `espnow_stats().rx_wrong_peer` with **no way to read it**:
+`espnow_stats()` was declared, defined, and called by no screen, no page, no serial line and no
+test, which is the dead-export shape this phase recorded three times. The line is silent on a
+board whose radio has never come up, so a soak capture is not padded with zeros.
 
-**B3. §67 "Local multiplayer works".** Press A on both, fight a whole battle. Both panels must
+Read both halves: `rx_wrong_peer` rising on the silent board proves the frame ARRIVED and was
+refused, which is what distinguishes a working consent gate from a packet that never came. If the
+column stays at 0 while the pressing board's `tx_ok` climbs, the frames are going somewhere else -
+check the channel before concluding anything about consent.
+
+**B3. §67 "Local multiplayer works". — variant `release`, both boards.** Press A on both, fight a whole battle. Both panels must
 show the same round numbers, the same HP pair and complementary outcomes — one "¡GANASTE!", one
 "Has perdido" — and exactly one device toasts the XP line.
 
-**B4. The nine-second move clock, felt rather than measured.** Have one player wait through a
+**B4. The nine-second move clock, felt rather than measured. — variant `release`.** Have one player wait through a
 round. Both boards must reach the neutral "Enlace interrumpido" and NEITHER may pay. If nine
 seconds is too short in play, the remedy is `PROTO_RETX_MAX` / `PROTO_RETX_MS` in
 `networking/session.h` and the cost is that every other wait in the protocol lengthens with it —
 decide it in writing.
 
-**B5. The radio after a linked battle.** Leave with LONG_BOTH and confirm on `baseline`'s DIAG
-RADIO page that the radio is off and the ladder is no longer clamped at DIM. Failure mode: a
+**B5. The radio after a linked battle. — variant `release` for the box, `baseline` to see the
+ladder.** Leave with LONG_BOTH. On `release`, `info`'s Wi-Fi field must read `mode=0` with `ap=-`;
+that is the reading section I lets you tick "Wi-Fi shuts down after use" from. On `baseline` you
+can additionally confirm on the DIAG RADIO page that the ladder is no longer clamped at DIM. Failure mode: a
 battery draining in a pocket. *Also closes half of §67 "Wi-Fi shuts down after use".*
 
-**B6. §67 "Trade is atomic" — the cross-pair half.** Trade between the two boards, then do it
+**B6. §67 "Trade is atomic" — the cross-pair half. — variant `release`, both boards.** Trade between the two boards, then do it
 again and **pull the battery on one board between the two A presses**. After both reboot, each
 Box holds either the outgoing Pebble or the incoming one — never both, never neither. The
 within-device half is swept exhaustively on the host (every flash write, ten per committed trade,
 plus nine points inside the resolver); two parties over a lossy link with no third party cannot
 make an exchange atomic, so this run is the residual and it is what the box waits for.
 
-**B7. §67 "Breeding compatibility works" and "Generated Pebbles remain balanced".** These need
+**B7. §67 "Breeding compatibility works" and "Generated Pebbles remain balanced". — no variant:
+nothing to run.** These need
 `networking/breed_link.cpp` **built and `DISC_CAP_BREED` claimed**, which no phase did. The
 compat matrix is swept over all roster pairs on the host and the 10,000-pair gene ceiling is
 measured; neither is a sentence about two Pebblebols. **These two boxes are not merely unrun —
 they are unbuildable today**, and that is the honest state of them.
 
+**B8. A beacon goes out whatever the device is called. ADDED AT THE P10-C6 EXIT, because until
+that commit B1-B6 could not have passed for a large class of owners and nothing would have said
+why.** `DiscBeacon.name` is Latin-1 by wire contract and `ui_pet_name()` had been emitting UTF-8
+since P10-C4, so every accented character the first-boot naming ring can type became a byte
+`disc_encode()` refuses. The board emitted **no beacon at all** - and `link_service()` drops an
+unencodable beacon by design, so `beacons_tx` stayed 0 and the LINK screen simply searched for
+ever. A device called `ÑU` was invisible to every peer, and because the peer never saw it the
+link could not be offered from either side either.
+
+Name one board with an accent at first boot (F2 already has you do this), put both on LINK, and
+confirm the accented one appears in the other's list **with its accent drawn correctly**. Then
+swap: name the second board `ÁLEX` and repeat. On `baseline`, `show_save` prints the stored name
+so you can compare what was typed, what is stored and what is drawn. Failure mode if it returns:
+`DIAG,link`'s `beacons_tx` column stays at 0 on the accented board.
+
 ---
 
 ## C. Radio and power — one board
 
-**C1. §67 "Wi-Fi scanning works".** NETWORK -> scan -> a real access point in the list ->
+All on **`release`** unless an item says otherwise, because every §67 box in this section is a
+claim about the artefact that ships. Where a reading only exists on a console page, the item says
+so AND gives the release-side cross-check, per section I's rule.
+
+**C1. §67 "Wi-Fi scanning works". — variant `release`.** NETWORK -> scan -> a real access point in the list ->
 encounter, within about 5 s. Every scan in every host test came from a fake `WifiScanDriver`; no
 radio has ever returned an access point in this repository.
 
-**C2. §67 "Wi-Fi shuts down after use".** After C1 and after B5, confirm the radio is down on
+**C2. §67 "Wi-Fi shuts down after use". — variant `release` for the box, `baseline` only to see
+more.** THE READING THAT CLOSES THE BOX IS ON `release`: type `info` on the serial line and read
+the Wi-Fi field, which prints `mode=… phase=… err=… ap=…` and is one of the four always-compiled
+commands (`dev/diag_core.cpp` static_asserts that they cannot mutate anything). `mode=0` with
+`ap=-` is the radio down. Section I forbids ticking a §67 box from a `baseline` row and this item
+used to have no release-side reading at all, which made it a closed loop. On `baseline` you can
+additionally confirm on
 DIAG RADIO (`baseline`) on every exit path: done, failed, timed out, cancelled. The job releases
 it exactly once by construction and six host cases prove that against a fake driver; nobody has
 watched an antenna.
 
-**C3. §67 "Device sleeps correctly".** Leave the board untouched and watch the DIAG ENERGIA page
+**C3. §67 "Device sleeps correctly". — variant `baseline` for the loop counter, `release` for the
+box.** The ladder's rungs are only drawn on the console page, so read those on `baseline`; the
+§67 box itself is closed on `release` by the `DIAG,perf` line, whose `passes` column stops
+climbing at the sleeping rate and whose `pass_worst_us` must NOT jump to the sleep slice (that
+would be the `perf_note_pass()` ordering defect, which `tools/check.sh` also gates by line
+number). On `baseline`, watch the DIAG ENERGIA page
 walk ACT -> DIM -> IDL -> SLP. **Acceptance number: loop rate in IDLE <= 10/s.** Then press a
 button and confirm the wake is counted as activity and the ladder climbs straight back. Note the
 deepest rung is a **light** sleep, because `PIN_BTN_L` is outside the C3's deep-sleep wake domain
@@ -219,12 +284,12 @@ deepest rung is a **light** sleep, because `PIN_BTN_L` is outside the C3's deep-
 DROPPED-TICK counters, not the `stall` serial command): a healthy board reads `stall 0 x 0s` for
 its whole run, because `PWR_SLEEP_SLICE_MS` (8,000) is below `NT_TICK_MAX_OWED_S`.
 
-**C4. The uncalibrated cooldown table across a sleep.** While `CAL_UNSET`, cooldowns live in
+**C4. The uncalibrated cooldown table across a sleep. — variant `release`.** While `CAL_UNSET`, cooldowns live in
 `.bss` on `millis()`. A light-sleep wake re-runs `setup()`, so ten idle minutes free all 32
 networks with no keystroke. Confirm whether that reproduces; the three ways out are written in
 the P6 carry-forward.
 
-**C5. §67 "No obvious memory leak" — the 24 h soak. ADDED AT P10-C5, because this was the one
+**C5. §67 "No obvious memory leak" — the 24 h soak. — variant `release`. ADDED AT P10-C5, because this was the one
 §67 box in the product with no owner step anywhere.** It is the oldest owed item in the file:
 P2-C12 named it, P10-C2 named it again and said plainly that what it could run was one whole
 SIMULATED day of the pure loop with the allocation counter armed and requiring zero — a different
@@ -249,32 +314,94 @@ completely different allocators. The screen the board was left on goes in the lo
 
 ---
 
+**C6. §67 §64 — THE SOUND. ADDED AT THE P10-C6 EXIT, because spec §64 had no bench item at all
+and the closed decision log sent the owner to two sections that do not mention audio.** — variant
+`release`, and it needs the piezo decision **D8** settled first.
+
+`hardware/audio.{h,cpp}` has shipped since P6-C1: a seven-effect tone engine behind a
+two-function-pointer sink, driven note by note on the host by `tests/test_sound.cpp`. **Nothing
+has ever been heard.** D8 (which pin the piezo is on) is open, so this item is blocked with D1.
+
+Trigger each of the seven and confirm each is audible and distinguishable from its neighbours:
+feed (CARE → *Comida*), clean (CARE → LIMPIAR), a hit and a faint (a practice battle from the
+BATTLE screen), a protect beat (needs a species that knows one — species 1 does not, which is why
+this effect went five phases without a picture either), a level-up (use a *Megadulce* from the
+bag), and an error tone (a refused care action — feed a full Pebble). Then SETTINGS → *Sonido* →
+off, **power-cycle**, and confirm the piezo is silent and stays silent. The persistence half is
+host-proved through the real `save_manager` into the fake NVS; the audible half is this item.
+
+Acceptance: seven distinguishable sounds, and the setting survives a reboot in both directions.
+A board with no buzzer fitted must run the whole game unchanged — `audio_device_sink()` answers
+`nullptr` and the engine no-ops, which is host-driven but not the same as a board with an empty
+pad.
+
+**C7. The reset reason really becomes the right `BootKind`. ADDED AT THE P10-C6 EXIT.** — variant
+`release`, and it costs three reboots.
+
+Whether a reboot charges elapsed game time to the pet is decided by
+`hardware/boot_reason.h`'s table, and until P10-C6 **nothing anywhere had ever turned a real
+`esp_reset_reason()` into a `BootKind`**: `hardware/boot.cpp` is compiled by no host binary and
+the fake that stood in for it collapsed seven kinds to two. The table is pure and swept over all
+256 reason values now, and the ESP-IDF mapping is asserted at compile time — but a `BootKind`
+produced by a real reset has still never existed. `boot.cpp`'s own header names the historical
+instance: v1 folded `ESP_RST_DEEPSLEEP` into `BOOT_SOFT_RESET` and lost every sleep.
+
+The artefact prints `[nt] boot=<kind> nvs=<n> load=<r>` on every boot, above every guard. With a
+played board, provoke three reboots and read the number each time (`BootKind`:
+0 FIRST_RUN, 1 POWER_LOSS, 2 CRASH, 3 SOFT_RESET, 4 DEEPSLEEP, 5 UNKNOWN):
+
+1. **Unplug and replug** after five minutes → expect `boot=1`, and the pet's care bars must have
+   moved by five minutes' worth. This is the one that matters: if it reads 3, no absence is ever
+   charged and the pet stops ageing while the device is off.
+2. **Press the reset pin** → expect `boot=3`, and the bars must NOT jump.
+3. **Let the idle ladder reach SLEEP** (ten minutes untouched) and wake it with a button →
+   expect the device to come back with time charged over the sleep.
+
+Acceptance: three different numbers, each matching the list, and care moving only on 1 and 3's
+sleep. Record them in the capture; it is four characters and it closes the last unmeasured link
+in §67's "Time-based calculations work across reboot".
+
+---
+
 ## D. The phone — spec §67, the creator block
+
+All on **`release`** unless an item says otherwise. **`tools/creator_smoke.sh` takes `--variant`
+as a LABEL for the record; it does not build or flash anything** — flash the board yourself first.
+
+> **THE WHOLE OF THIS SECTION WAS UNRUNNABLE UNTIL THE P10-C6 EXIT AND IT WOULD HAVE LOOKED LIKE
+> A FIRMWARE FAULT.** `ui_radio_job_busy()` — the power ladder's `held` input — named the scan
+> job and the link job and not the portal, so after 120 s with no BUTTON pressed the ladder
+> reached `PWR_IDLE`, `pwr_hook_release()` navigated home, and `creator_leave()` took the access
+> point down. Using a phone is precisely what "no button pressed" looks like. D2 polls for
+> `IDLE_S + 60` = 360 s without touching the device and would have watched the portal die at 120;
+> D4 and D5 ask you to draw a 24x24 sprite, which takes longer than two minutes. Fixed, and
+> `tests/test_screens.cpp` now fails by name if the hold is removed.
 
 One command does most of it: `tools/creator_smoke.sh --variant release --pin NNNN`. It refuses to
 run without `--variant` on purpose.
 
-**D1. §67 "PIN required".** Phase 3 of the smoke script: five failures, the sixth refused as
+**D1. §67 "PIN required". — variant `release`.** Phase 3 of the smoke script: five failures, the sixth refused as
 locked, the lockout refusing the CORRECT PIN as well, and the counter cleared afterwards so the
 device is not left armed. Since P8-C6 it also sends an **unauthenticated POST with a valid body**
 (403, and the Box count must not move), which is the case nothing in the repository had ever
 exercised.
 
-**D2. §67 "Wi-Fi activates only when necessary" and "Inactivity timeout works".** Phase 4 polls
+**D2. §67 "Wi-Fi activates only when necessary" and "Inactivity timeout works". — variant
+`release`.** Phase 4 polls
 the one ungated route every 15 s for the whole `creator_idle_s` budget and asserts both halves —
 still serving at `creator_idle_s − 60`, gone by `creator_idle_s + 60` — and the operator confirms
 the screen has left CREATOR with it.
 
-**D3. §67 "QR connection works".** Point a phone camera at the CREATOR screen's QR. It is a 62 px
+**D3. §67 "QR connection works". — variant `release`.** Point a phone camera at the CREATOR screen's QR. It is a 62 px
 symbol on a 128x64 panel; the encoder is validated module-by-module against the Python `qrcode`
 reference on the host and the drawn symbol is pinned by a golden. None of that is a phone.
 
-**D4. §67 "Mobile editor works".** The page is driven end to end in headless Chromium at
+**D4. §67 "Mobile editor works". — variant `release`.** The page is driven end to end in headless Chromium at
 390x844 by `tools/page_test.mjs` (51 assertions, inside `tools/check.sh`). A desktop browser has
 one exact pixel of contact, no palm, no glove, no sunlight, no one-handed reach and no on-screen
 keyboard eating half the viewport. This box is a thumb on glass.
 
-**D5. §67 "Sprite editor works".** Same, with one specific thing to look at: at 24 cells across a
+**D5. §67 "Sprite editor works". — variant `release`.** Same, with one specific thing to look at: at 24 cells across a
 390 px phone a grid cell is about 16 CSS px where every button on the page is 44. The geometry is
 `CustomSpeciesRec`'s and cannot change; the mitigations are the full-width grid, the live `x , y`
 readout under the thumb, and DESHACER as a first-class tool. Whether that is enough is what this
@@ -324,8 +451,11 @@ is worth writing) and **BLE reads `none (removed in P8-C0, decision D2)`**.
 > now.** The section was drafted as H and renumbered to F when it landed; the item
 > prefixes did not move with it. Nothing outside this file cited them, which is exactly
 > why it went unnoticed - and `README.md` cites F4 now, so it would not have again.
+> **Two of the renamed references were still `H1` and `H2` in this very paragraph's own
+> section until the P10-C6 exit**, which is the same defect one level down: a correction
+> that did not correct itself.
 
-Everything below **H1** can be checked on the host and is (`tests/test_onboarding.cpp` drives the
+Everything below **F1** can be checked on the host and is (`tests/test_onboarding.cpp` drives the
 step through the real save pipeline; `tests/test_screens.cpp` drives both screens, all six
 gestures and the goldens). What cannot be checked here is the only thing that matters about an
 onboarding flow: **whether a person who has never seen the device can get through it.** That
@@ -337,17 +467,18 @@ on the screen itself (`STR_SU_HELLO`), because the toast band is rows 45–55 an
 lines live there. **If a toast covers the bottom two lines, that is the defect P10-C4 fixed
 coming back.**
 
-**F2. Type a name with an accent in it.** Walk the ring to `Ñ` and accept. Then read the name back
+**F2. Type a name with an accent in it. — variant `release`. See also B8, which is the same name
+on the air, and which was broken until the P10-C6 exit.** Walk the ring to `Ñ` and accept. Then read the name back
 on HOME and on the creator portal (`GET /api/state`). All three must show the same character. A
 name that renders as one wrong glyph, or that loses the character *after* the accent, is the
 Latin-1/UTF-8 seam (`core/utf8.h`) failing on the panel's own decoder — which is the half no host
 test can see, because the host fake is not u8g2.
 
-**F3. The date, then the starter.** HOLD L on the date must go **forward** to ELIGE PEBBLE, not
+**F3. The date, then the starter. — variant `release`.** HOLD L on the date must go **forward** to ELIGE PEBBLE, not
 back. Pick the third creature. On HOME the Pebble must be that creature, at level 1, with the name
-from H2.
+from F2.
 
-**F4. THE POWER CUT, and this is the item worth the trip.** Repeat F1, type a name, accept it, and
+**F4. THE POWER CUT, and this is the item worth the trip. — variant `release`.** Repeat F1, type a name, accept it, and
 **pull the power while the date screen is up**. On the next boot the device must come back **on the
 date screen with the name already stored** — not at PONLE NOMBRE, and not on HOME. Repeat with the
 cut after the date is accepted: it must come back on ELIGE PEBBLE. Then finish the flow, power
@@ -381,14 +512,14 @@ page allocator that can run out, a partition table that has to have been flashed
 `initArduino()` that erases things before `setup()` runs. Nothing in this repository has ever
 written a byte to one.
 
-**G1. Factory reset really empties both partitions.** SETTINGS -> *Reset de fábrica* -> both
+**G1. Factory reset really empties both partitions. — variant `release`.** SETTINGS -> *Reset de fábrica* -> both
 confirmations. The device must come back on the first-boot flow (section F), naming, clock and
 starter all asked again. Then power-cycle: it must still be a fresh device, not the old one
 returning. *The failure mode this looks for is a reset that clears `nvs` and leaves `nvs2`, so
 the next boot restores the checkpoint of the creature the owner just deleted* — the two-partition
 wipe is one line in `save_factory_reset()` and it is the line that matters.
 
-**G2. Checkpoint restore after a real `nvs` erase.** This is the flow `nvs2` exists for, and it
+**G2. Checkpoint restore after a real `nvs` erase. — variant `release`.** This is the flow `nvs2` exists for, and it
 is worth doing deliberately because the accident it models is the Arduino core's own:
 
 ```bash
@@ -403,7 +534,8 @@ starter. Check `show_save` on the serial line before and after — `save slots=`
 (`0x310000`): that is the copy under test.* Then reboot a second time: the recovered state was
 committed back to `nvs`, so the second boot must be ordinary.
 
-**G3. The schema upgrade, on a device that has been played.** The one item here that needs two
+**G3. The schema upgrade, on a device that has been played. — variant `release`, twice (the
+previous image, then this one).** The one item here that needs two
 firmware images, and the one that would have been catastrophic to get wrong:
 
 1. Check out the previous commit (`git log` — the parent of the P10-C5 commit), build `release`,

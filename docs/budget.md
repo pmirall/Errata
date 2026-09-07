@@ -1,4 +1,4 @@
-# Flash and RAM budget through phase 10
+# Flash and RAM budget through phase 10 — closed at the v1.0.0-rc1 exit
 
 Written after the phase-4 exit (`v0.4.0-battle`, `ab7b8d3`), to answer one question:
 **does everything that is left fit?** Every figure below was produced by a build run at
@@ -1097,6 +1097,15 @@ and it held in all six variants at every chunk.
 
 ### 14.4 What phase 10 has left
 
+> **THIS IS THE PHASE-9 HANDOVER FIGURE AND IT WAS THE LAST LINE OF THIS FILE UNTIL THE P10-C6
+> EXIT.** It is still exactly true of the moment it describes - what phase 9 handed on - and it is
+> no longer true of the tree: §15 below is phase 10 chunk by chunk and §16 is the final account.
+> The measured figure at ship is **249,160 B of flash and 5,548 B of globals**. The sections in
+> this file are a dated log and are not rewritten from a later phase's knowledge (see
+> `docs/decisions.md`'s convention); a pointer forward is the correct repair, and its absence was
+> a real defect, because this file's own title says "through phase 10" and a reader entering here
+> landed on a present-tense number that was 18,882 B stale.
+
 **270,028 B of flash and 5,956 B of globals**, on the `release` variant, against the caps
 `tools/build_matrix.sh` enforces. Phase 9 was handed 273,600 / 5,604 and hands on **3,572 B less
 flash and 352 B MORE globals** than it received.
@@ -1114,3 +1123,120 @@ things are worth knowing before spending it:
   four effect sets. An animation pass that wants a POSE set per species does not fit, and
   `data/sprites.h`'s LOOKUP banner already prices that conversation: 60 sleep + 60 sick bodies
   would be 17,280 B, and a per-FAMILY pose (20) rather than per-species (60) is 2,880 B.
+
+---
+
+## 15. Phase 10 — polish (measured 2026-09-07, at the P10-C6 exit)
+
+### 15.1 Chunk by chunk, release variant (`GOD_MODE_ENABLED=0`)
+
+| Chunk | Flash | Δ | Globals | Δ | What it bought |
+|---|---:|---:|---:|---:|---|
+| phase-9 exit `093cc89` | 1,329,972 | — | 59,044 | — | the roster and the atlas |
+| **P10-C1** diagnostics | 1,338,062 | **+8,090** | 59,116 | **+72** | §49's twelve fields, §66's commands, and the first diagnostics the **shipping** artefact has ever had |
+| **P10-C2** performance | 1,339,458 | +1,396 | 59,196 | +80 | `core/perf.{h,cpp}`, the `DIAG,perf` receipt, §47's driven exit table |
+| **P10-C3** animation | 1,343,358 | +3,900 | 59,284 | +88 | four films, the derived sleeping pose, `ui/anim_ease.cpp` |
+| **P10-C4** onboarding | 1,348,166 | +4,808 | 59,452 | +168 | the first-boot flow, `core/utf8.cpp`, the §63 audit |
+| **P10-C5** release | 1,348,854 | +688 | 59,452 | +0 | schema v2→v3 with a version-tolerant reader |
+| **P10-C6** exit | **1,350,840** | +1,986 | **59,452** | +0 | the fifteen fixes below |
+| **phase 10 total** | | **+20,868** | | **+408** | |
+
+The single largest item is P10-C1's 8,090 B, and it is the one worth defending: before it, the
+artefact that ships had **no diagnostics at all** beyond one heap line a minute — `SCR_DIAG`
+unreachable, no serial reader running, and `godmode.cpp`'s own claim that a stall was reachable
+"on a freshly flashed board" false of the artefact. Every bench item in `docs/bench.md` that reads
+a number off a release board is reading it through those 8,090 B.
+
+### 15.2 All six variants at the phase-10 exit
+
+| Variant | P9 exit | P10-C6 | Δ flash / globals |
+|---|---|---|---|
+| `release` / `no-god` | 1,329,972 / 59,044 | **1,350,840 / 59,452** | +20,868 / +408 |
+| `baseline` | 1,342,344 / 59,220 | 1,367,774 / 59,548 | +25,430 / +328 |
+| `sh1106` | 1,342,344 / 59,220 | 1,367,774 / 59,548 | +25,430 / +328 |
+| `no-web` | 1,228,490 / 54,820 | 1,254,122 / 55,172 | +25,632 / +352 |
+| `all-off` | 584,186 / 26,260 | 605,298 / 26,724 | +21,112 / +464 |
+
+`baseline` grew 4,562 B more than `release`: that difference is the god console's share of the
+phase — the seventh and eighth SYS pages, the thirteen-gene editor's new rows and the console
+half of the command table — and it is flash nobody who flashes the product pays for.
+
+### 15.3 Where P10-C6's 1,986 B went, by symbol
+
+Measured with `riscv32-esp-elf-nm -C --size-sort` over both release `.elf` files:
+
+| Δ | Symbol | Why |
+|---:|---|---|
+| +266 | `pet_name_stored()` | the name ladder, written once in the stored encoding |
+| +164 | `u8_to_latin1()` | the crossing back — the beacon field is Latin-1 by contract |
+| +130 | `ui_fill_view()` | the corruption hours reaching `SCR_STATUS` |
+| **−112** | `ui_pet_name()` | it is now four lines over `pet_name_stored()` |
+| **−102** | `ui_name_for()` | the compiler split its cold half out |
+| +98 / +86 | `god_begin()` / `god_service()` | the `DIAG#,screens` map and the `DIAG,link` row |
+| +96 | `care_input()` | the bag answers both-buttons like every other list |
+| +80 / +30 | `cor_left_s()` / `cor_is_corrupted()` | corruption had **no reader in `src/` at all** |
+| +58 | `status_a_render()` | the corruption readout |
+| +32 | `diag_screen_name()` | so a perf capture is interpretable |
+| +14/+10/+8 | `creator_screen_busy/enter/leave` | the portal's radio hold |
+| +10 | `espnow_stats()` | it had no reader anywhere; now it has one |
+| +8 | `ui_radio_job_busy()` | the third radio owner |
+
+The named symbols account for about half. The remainder is `.rodata`: seven new Spanish strings
+and their table pointers (the six item reactions plus the corruption label), the 29 screen names
+and their pointer array, and four `Serial.printf` format literals.
+
+**The globals line did not move at all** — 59,452 before and after. `nm` attributes **+117 B** of
+new statics (`kScreenName`'s 116 B pointer array and `screen_creator.cpp`'s one-byte
+`s_holding`), and the reported figure is unchanged because the two are measured differently:
+`arduino-cli` reports the DRAM segment total, which carries alignment slack. The honest sentence
+is that 117 B of existing slack was consumed and the number a cap is applied to did not change.
+
+---
+
+## 16. THE FINAL ACCOUNT — what v1.0.0-rc1 costs
+
+**Measured at this commit, `release` variant (`GOD_MODE_ENABLED=0`), the artefact that ships.**
+
+| | Used | Cap | Free | Headroom |
+|---|---:|---:|---:|---:|
+| **Flash** (`GATE_RELEASE_FLASH_MAX`) | 1,350,840 | 1,600,000 | **249,160** | 15.6 % |
+| **Globals** (`GATE_RELEASE_GLOBALS_MAX`) | 59,452 | 65,000 | **5,548** | 8.5 % |
+| Sprite atlas (`SPRITE_DATA_BYTES_MAX`) | 10,247 | 11,264 | 1,017 | 9.0 % |
+| Pebble atlas (`PB_SPRITE_DATA_BYTES_MAX`) | 9,216 | 10,240 | 1,024 | 10.0 % |
+| `app0` partition | 1,350,840 | 3,145,728 | 1,794,888 | 57.1 % |
+
+Both caps are enforced by `tools/build_matrix.sh` and, since P10-C5, by CI — which they had never
+been in eight phases before that.
+
+**The two atlas rows are quoted separately on purpose.** They are close enough to be confused and
+have been: `data/sprites.h` prices the POSE_SICK conversation against 1,024 B (the **pebble**
+atlas, where twenty family bodies would go) and §14.4 above prices it against 1,017 B (the
+**aggregate**). Both are right about different caps and neither said which. Twenty family sick
+bodies are 2,880 B and overrun both.
+
+### 16.1 What a future phase would have to spend
+
+* **Flash is not the constraint and has not been since P8-C0.** 249 KB is more than three times
+  the whole creator page, or 1,700 more Spanish strings, or 27 more species with art.
+* **Globals are the constraint.** 5,548 B against a phase-10 spend of 408 B — thirteen more
+  phases at that rate, which sounds comfortable and is not, because counters are where globals
+  go and every phase's diagnostics accumulate. Two pieces are droppable if a later phase needs
+  the room, both named in advance: `core/perf.cpp`'s `uint16_t frame_max[SCR_COUNT]` is **58 B**
+  (the bench walk then reads one all-time worst instead of a figure per screen, and
+  `docs/bench.md` A1 becomes 19 readings rather than one), and `dev/diag_core.cpp`'s
+  `kScreenName` pointer array is **116 B** (the perf capture goes back to raw ids, and
+  `docs/bench.md` would need the mapping table pasted into it instead).
+* **The art caps are the tight ones.** 1,017 B of aggregate margin is seven more 24×24×2 sets.
+  **A per-family sleeping or sick body does not fit** and needs `PB_DATA_BYTES_MAX` and
+  `SPRITE_DATA_BYTES_MAX` re-planned together — said out loud rather than discovered. P10-C3
+  spent 0 B on the sleeping pose by DERIVING it from each species' own idle body with the blink's
+  own eye-lid machinery, which is the technique to reach for first.
+* **What flash cannot buy.** Breeding over the air (item 29 of the README's bench list) is a
+  networking module, not bytes: `networking/breed_link.cpp` does not exist. The battery readout
+  (spec §26) is a divider and decision **D10**, not code. Neither is a budget question.
+
+### 16.2 The one number in this file that has never been measured
+
+Every figure above comes from `tools/build_matrix.sh` reading `arduino-cli`'s output on a build
+that has never been flashed. **Nothing here says the image boots.** `docs/bench.md` §0 and
+`README.md` §2 item 1 are what would.

@@ -25,11 +25,27 @@
 
 #include "../core/nt_types.h"
 
+// ERRK_COUNT EXISTS BECAUSE A COMPLETENESS CLAIM NEEDS SOMETHING TO COUNT
+// AGAINST (P10-C6). tests/test_statemachine.cpp claimed in a comment that its
+// assertion "is what fails if a fourth kind is added without a row" - and the
+// assertion counted ROWS IN kExits, not MEMBERS OF THIS ENUM, so adding a
+// fourth kind with no row changed nothing anywhere: the whole suite stayed
+// green and tools/check.sh printed GATE OK. That is the phase-8 defect (a gate
+// counting a thing adjacent to the thing it guards) inside the very instrument
+// this project wrote against it.
+//
+// SCR_ERROR is three states wearing one ScreenId, which is why the exit table
+// carries a row per KIND; ERRK_NONE never puts the screen up, so the table has
+// ERRK_COUNT - 1 rows and the test now says so in those terms. err_render()'s
+// if/else chain also falls through to the SAVE_CORRUPT body and offers the
+// factory reset, so a fourth kind added silently would show a player a
+// save-corruption screen and offer to erase their collection.
 enum ErrKind : uint8_t {
   ERRK_NONE = 0,
   ERRK_SAVE_CORRUPT,
   ERRK_SAVE_NEWER,
-  ERRK_DISPLAY
+  ERRK_DISPLAY,
+  ERRK_COUNT
 };
 
 // The screen-table hooks.

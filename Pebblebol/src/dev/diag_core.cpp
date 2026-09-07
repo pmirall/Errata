@@ -669,6 +669,32 @@ const char* diag_field_name(uint8_t id)
   return (id < (uint8_t)DGD_FIELD_COUNT) ? kFieldName[id] : "?";
 }
 
+// -----------------------------------------------------------------------------
+//  SCREEN NAMES (P10-C6). See dev/diag_core.h for why: the perf receipt printed
+//  a raw ScreenId and the enum has been renumbered mid-list within this phase.
+//  Index-parallel to ScreenId, with a static_assert on its length, so a screen
+//  added to the enum without a name here fails the BUILD by name.
+// -----------------------------------------------------------------------------
+static const char* const kScreenName[] = {
+  "BOOT", "LOAD_SAVE", "HOME", "MENU", "CARE", "PLAY", "GAME", "BOX",
+  "STATUS", "STATUS_B", "NETWORK", "LINK", "CREATOR", "SETTINGS", "TIME",
+  "SETUP_NAME", "SETUP_STARTER", "CONFIRM", "ALERT", "ENCOUNTER", "CAPTURE",
+  "BATTLE", "TRADE", "BREED", "EVOLUTION", "ITEM_REWARD", "ERROR", "SLEEP",
+  "DIAG"
+};
+static_assert(sizeof(kScreenName) / sizeof(kScreenName[0]) == (size_t)SCR_COUNT,
+              "spec section 46's performance receipt names the screen that owned "
+              "the worst frame. A ScreenId was added to the enum without a name "
+              "here, so a bench capture would print a number nothing can map - "
+              "and this enum has already been renumbered mid-list once (P10-C4 "
+              "inserted SCR_SETUP_NAME and SCR_SETUP_STARTER), which is what "
+              "makes an out-of-date mapping worse than no mapping at all.");
+
+const char* diag_screen_name(uint8_t scr)
+{
+  return (scr < (uint8_t)SCR_COUNT) ? kScreenName[scr] : "?";
+}
+
 void diag_fields_clear(DiagFields& f)
 {
   memset(&f, 0, sizeof f);

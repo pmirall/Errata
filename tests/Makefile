@@ -88,8 +88,17 @@ ASAN_BIN   := bin_asan
 # fixes IS an over-read. Its heap-exact case mallocs each name at exactly its
 # own length, so a lead byte believed without its continuation bytes is a heap
 # error rather than a read into the next static array.
+#
+# P10-C6 ADDS test_perf AND test_diag, AND EACH WAS ADDED BECAUSE A MUTATION
+# FAILED TO FIRE. core/perf.cpp's per-screen array is indexed by a ScreenId and
+# guarded by a bounds check whose out-of-range path nothing could observe:
+# deleting the guard left test_perf green, because the read past the end of a
+# 29-entry .bss array landed on a zero neighbour, which is exactly what the
+# assertion was checking for. dev/diag_core.cpp has the same shape twice, in
+# diag_field_name() and fmt_cal(), on arrays of POINTERS - so the read past the
+# end is dereferenced and printed. Both are cheap, pure, arithmetic binaries.
 ASAN_SET   := test_creator_api test_creator_gate test_validate test_persistence \
-              test_soak test_utf8
+              test_soak test_utf8 test_perf test_diag
 ASAN_CXX   := -std=c++17 -Wall -Wextra -Werror -O1 -g -fno-omit-frame-pointer \
               -fsanitize=address -MMD -MP
 
@@ -664,7 +673,13 @@ MG_FRAME_OBJS := $(OBJ)/minigame.o \
                  $(OBJ)/buffer_logic.o       $(OBJ)/buffer_draw.o \
                  $(OBJ)/delete_logic.o       $(OBJ)/delete_draw.o
 
-$(BIN)/test_screens:    $(SCREEN_OBJS) $(MG_FRAME_OBJS) $(OBJ)/alloc_count.o
+# power.o JOINS THIS BINARY AT P10-C6. It is the only host binary that compiles
+# both hardware/power.cpp (the ladder) and ui/screen_creator.cpp (the third
+# radio owner), which is what the portal-hold case needs to drive: the ladder
+# tore the access point down at PWR_IDLE_MS because ui_radio_job_busy() did not
+# know the portal existed, and no binary could see it because ui/ui.cpp and
+# app/app.cpp are compiled by none.
+$(BIN)/test_screens:    $(SCREEN_OBJS) $(MG_FRAME_OBJS) $(OBJ)/alloc_count.o $(OBJ)/power.o
 
 # P7-C2/C3: THE LINK SCREEN, ITS CONSENT GATE AND THE BATTLE OVER THE LINK.
 #

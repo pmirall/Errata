@@ -616,6 +616,13 @@ uint8_t  ui_fps(void);
 // tell the player their creature had become something else.
 void     ui_pet_name(char* out, size_t cap);
 
+// THE SAME LADDER, IN THE STORED (LATIN-1) ENCODING. For the one caller that
+// does not draw: screen_link.cpp's fill_self(), whose DiscBeacon.name field is
+// Latin-1 by wire contract. Handing it the UTF-8 form made disc_encode() answer
+// DE_NAME for every accented name the first-boot ring can type, so the device
+// emitted no beacon at all - see the note above the implementation.
+void     ui_pet_name_latin1(char* out, size_t cap);
+
 // FIRST BOOT: replace the Pebble app/app.cpp minted with one of the chosen
 // species, keeping the slot, the active flag, the genome and the creation seed.
 //

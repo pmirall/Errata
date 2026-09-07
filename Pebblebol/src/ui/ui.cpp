@@ -61,6 +61,7 @@
 #include "../hardware/audio.h"   // the P6-C1 tone engine: cues, never policy
 #include "ceremony.h"  // the hatch / evolution show (P2-C11c)
 #include "dialog.h"    // the CONFIRM / ALERT / HELP overlays (P2-C11c)
+#include "../game/corruption.h"   // cor_left_s(): the STATUS readout
 #include "screen_creator.h"   // CreatorInfo, for the radio seam below
 #include "screen_diag.h"
 #include "screen_evolution.h"
@@ -301,24 +302,63 @@ void ui_name_for(uint32_t lineage_id, uint8_t generation, char* out, size_t cap)
 //      an unfiled egg, a creator custom (200..209), or a save from a build with
 //      more families than this one. ui_name_for() keeps its job; it is the
 //      FALLBACK now rather than the answer.
-void ui_pet_name(char* out, size_t cap) {
+// THE LADDER IS WRITTEN ONCE, IN THE STORED ENCODING, AND CROSSED ONCE - which
+// is the P10-C6 fix and the reason this is two functions rather than one.
+//
+// P10-C4 made ui_pet_name() emit UTF-8, correctly, because everything that
+// DRAWS a name goes through drawUTF8(). But one caller does not draw: screen_
+// link.cpp's fill_self() puts this name into DiscBeacon.name, which is LATIN-1
+// by wire contract - networking/discovery.cpp's name_ok() refuses 0x80..0x9F,
+// and every Latin-1 byte in 0xC0..0xDF (exactly the uppercase accent set the
+// first-boot naming ring can type) becomes 0xC3 followed by a byte inside that
+// window. disc_encode() answered DE_NAME and link_service() dropped the frame,
+// so a device called "NUNO" with an n-tilde emitted NO BEACON AT ALL: invisible
+// to every peer, and because the peer never saw it the link could not be
+// offered from either side. LINK, trade and P2P battle, all dead, silently -
+// beacons_tx stayed 0 and nothing reported it.
+//
+// It was invisible to the suite for the phase-9 reason: no host binary compiles
+// this file, and tests/fakes/link_fake.cpp stood in for this function with the
+// PRE-P10-C4 body, so every discovery test drove the old one. The fake now
+// implements both halves the way this file does, and there is a case that puts
+// an accented name on the air through the real disc_encode().
+static void pet_name_stored(char* out, size_t cap) {
   if (!out || cap == 0) return;
-  // THE NAME IS STORED AS LATIN-1 AND DRAWN AS UTF-8, and this is the crossing
-  // for the Config rung (core/utf8.h). It had no writer at all until P10-C4's
-  // first-boot naming step, so this line was dead code on every v2-native
-  // device; it is live now, and a name with an n-tilde in it is one 0xF1 byte
-  // that drawUTF8() would otherwise open a four-byte state on.
+  const uint16_t c16 = (uint16_t)((cap > 0xFFFFu) ? 0xFFFFu : cap);
+  // Rung 1: Config.pet_name is already the stored encoding - a raw copy.
   if (s_cfg && s_cfg->pet_name[0] != '\0') {
-    (void)u8_from_latin1(out, (uint16_t)((cap > 0xFFFFu) ? 0xFFFFu : cap), s_cfg->pet_name);
+    size_t i = 0;
+    while (s_cfg->pet_name[i] != '\0' && i + 1u < cap) { out[i] = s_cfg->pet_name[i]; ++i; }
+    out[i] = '\0';
     return;
   }
   const SimView* p = pet();
-  if (!p) { snprintf(out, cap, "%s", S(STR_EGG_TITLE)); return; }
-  const uint8_t slot = box_active();
-  const PebbleInstance* pb = (slot == BOX_ACTIVE_NONE) ? nullptr : box_peek(slot);
-  const char* species = pb ? pet_species_name(pb->species_id) : nullptr;
-  if (species) { snprintf(out, cap, "%s", species); return; }
-  ui_name_for(p->genome.lineage_id, p->genome.generation, out, cap);
+  // Rungs 2 and 3 come from the string table and the dynasty generator, which
+  // are UTF-8; they cross BACK so the ladder answers one encoding whichever
+  // rung it lands on. A caller that got UTF-8 from one rung and Latin-1 from
+  // another would be a bug that only shows up for players with no set name.
+  char utf[64];
+  if (!p) {
+    snprintf(utf, sizeof utf, "%s", S(STR_EGG_TITLE));
+  } else {
+    const uint8_t slot = box_active();
+    const PebbleInstance* pb = (slot == BOX_ACTIVE_NONE) ? nullptr : box_peek(slot);
+    const char* species = pb ? pet_species_name(pb->species_id) : nullptr;
+    if (species) snprintf(utf, sizeof utf, "%s", species);
+    else         ui_name_for(p->genome.lineage_id, p->genome.generation, utf, sizeof utf);
+  }
+  (void)u8_to_latin1(out, c16, utf);
+}
+
+// THE STORED FORM. For the wire and for anything else that is not a draw.
+void ui_pet_name_latin1(char* out, size_t cap) { pet_name_stored(out, cap); }
+
+// THE DRAWN FORM. Stored, then the one crossing (core/utf8.h).
+void ui_pet_name(char* out, size_t cap) {
+  if (!out || cap == 0) return;
+  char stored[64];
+  pet_name_stored(stored, sizeof stored);
+  (void)u8_from_latin1(out, (uint16_t)((cap > 0xFFFFu) ? 0xFFFFu : cap), stored);
 }
 
 // GAME_DESIGN 6.3's score -> face table. The ladder lives in ui/pet_view.cpp
@@ -1494,7 +1534,13 @@ void ui_note_power_dim(bool on) {
 // is the shape of defect this project keeps finding: the NETWORK screen's scan
 // and the LINK screen's discovery job and session both hold it.
 bool ui_radio_job_busy(void) {
-  return network_screen_busy() || link_screen_busy();
+  // ALL THREE RADIO OWNERS, AND THE THIRD WAS MISSING UNTIL P10-C6. The
+  // creator portal was not in this predicate, so the ladder reached PWR_IDLE
+  // at 120 s and pwr_hook_release() navigated home - tearing the access point
+  // down under a phone that was still drawing on it, 180 s before D7's own
+  // timer would have. See ui/screen_creator.h for the whole account; the gate
+  // in tools/check.sh is on this line naming all three.
+  return network_screen_busy() || link_screen_busy() || creator_screen_busy();
 }
 
 // Defined with the rest of the seams in section 20; ui_begin() binds it.
@@ -2373,6 +2419,16 @@ static const PebbleView* ui_fill_view(void) {
     // reads the same bit off PetView.corrupted in ui/pet_view.cpp; this is the
     // one a golden can see.
     s_view.corrupted  = (uint8_t)((pb->status & PBS_CORRUPTED) != 0u);
+    // ...and how much longer, for SCR_STATUS's readout (P10-C6). Rounded UP so
+    // a corrupted creature never reports 0 h left while it is still shimmering.
+    s_view.corrupt_h  = 0u;
+    if (s_view.corrupted) {
+      uint32_t ep = 0; uint8_t cal = 0;
+      ui_explore_clock(&ep, nullptr, &cal);
+      const uint32_t left = cor_left_s(*pb, ep, cal);
+      const uint32_t h = (left + 3599u) / 3600u;
+      s_view.corrupt_h = (uint8_t)((h > 255u) ? 255u : ((h == 0u) ? 1u : h));
+    }
     s_view.xp         = pb->xp;
     s_view.hp_cur     = pb->hp_cur;
     const SpeciesDef* sp = species_get(pb->species_id);

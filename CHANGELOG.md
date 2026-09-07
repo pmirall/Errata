@@ -10,8 +10,16 @@ tag for a phase is cut only when its gate (`tools/check.sh`) and its variant mat
 
 **This log restarts at `1.0.0-rc1` (P10-C5).** The ten `0.x` sections below it
 are the build, one per phase, and they stay: they are where every decision in
-this firmware was argued and they are the only record of thirty-six instruments
-that could not fail until somebody broke them. The Spanish changelog that
+this firmware was argued and they are the only record of the instruments that
+could not fail until somebody broke them. **The count that used to sit here —
+"thirty-six" — is gone**: no enumeration of it exists anywhere in the
+repository, phase 9 closed at thirty-five, and phase 10 alone added at least
+eight (the `gfx_xbm` opacity divergence, `pair_write()`'s converging upgrade,
+`build_matrix.sh` never running in CI, the `rd_u8g2()` gate that could never
+have run, the film call-site count, the `ErrKind` row count, the never-resident
+name list, and the pure-layer allocator gate a test's banner claimed existed).
+A precise number nobody can check is the same defect this project keeps finding,
+one level up. The Spanish changelog that
 covered the Nottamagochi codebase this replaced is archived unedited at
 `docs/legacy/CHANGELOG.es.md`.
 
@@ -21,34 +29,179 @@ carries the developer console and ships to nobody. A number quoted without its
 variant is not a number — `docs/budget.md` §8 records a phase exit that compared
 one with the other.
 
-## [1.0.0-rc1] — 2026-09-06
+## [1.0.0-rc1] — 2026-09-07
 
-The release build and the English documents. Phase 10, five chunks. **Not
-`1.0.0`, and the suffix is the honest part**: the gate is green, the six-variant
-matrix is green, the release image fits its caps with 251 KB of flash to spare,
-and **no line of this firmware has ever run on hardware**. Seventeen §67
-acceptance boxes are open, sixteen of them for want of a board; decision D1 (the
-pin map) is open and `PB_PINS_CONFIRMED` has never been defined. See
-`README.md` §2 and `docs/bench.md`.
+Phase 10, **six chunks**, and this entry now records all six rather than only
+the last. **Not `1.0.0`, and the suffix is the honest part**: the gate is green,
+the six-variant matrix is green, the release image fits its caps with 249 KB of
+flash to spare, and **no line of this firmware has ever run on hardware**.
+Seventeen §67 acceptance boxes are open — fifteen for want of a board, one for
+want of decision D1, and two for want of a networking module that was planned
+and never written. `PB_PINS_CONFIRMED` has never been defined. See `README.md`
+§2, which carries all 38 bench items in dependency order, and `docs/bench.md`,
+which has the keystrokes.
+
+> **The four middle chunks of this phase had no entry here at all until the
+> P10-C6 exit.** This section documented P10-C5 and cited "P10-C3's record" for
+> a price that existed only in the plan. That is the wrong way round for a log
+> that restarts at the release: phase 10 is the phase a reader most needs, and
+> `README.md` §11 sends people here for the instrument failures. They are below
+> now, one paragraph each.
+
+### Added — P10-C1, the diagnostics the shipping build did not have
+
+- **`dev/diag_core.{h,cpp}`, and the split is the point.** `dev/godmode.cpp`
+  includes `Arduino.h` and is compiled by **zero** host binaries, so even its
+  `GOD_MODE_ENABLED 0` stubs were untested by construction. Everything with a
+  right answer — the command table, the parser, the range checks, the taint
+  decision, §49's twelve field formatters and every command that touches only
+  pure modules — moved into a pure module driven by `tests/test_diag.cpp`, the
+  first host binary ever to execute any part of `dev/`.
+- **The release artefact had no diagnostics at all**: `SCR_DIAG` unreachable,
+  no serial reader running (`cmd_service` was below the `#if`), and the whole
+  of it one heap line a minute plus six boot lines. A read-only surface ships
+  now — `help`, `info`, `show_save`, `stall` — with `DCF_ALWAYS ⇒ NOT
+  DCF_MUTATES` static_asserted and tested.
+- **The taint is a table column applied by `diag_exec()`, not a call remembered
+  per arm**, because `box_new_pebble()` memsets flags and `genome_genesis()`
+  clears the taint bit: a naive `spawn` would mint a CLEAN Pebble inside god
+  mode that `taint_gate_ok()` would let into an honest dynasty.
+
+### Added — P10-C2, a performance instrument that measures no time
+
+- **`core/perf.{h,cpp}`**, pure and host-tested, in every variant including
+  `release`, plus a `DIAG,perf` serial line the shipping build prints. **None of
+  spec §46's five thresholds is gated and that IS the deliverable**: no host
+  binary compiles `render.cpp`, `ui.cpp`, `app.cpp` or `petfx.cpp`, `micros()`
+  and I2C do not exist here, and the dominant frame term is a fixed ~24 ms
+  `sendBuffer()` over an absent bus. A green BENCH OK would have been a verdict
+  about a firmware nobody flashes. They went to `docs/bench.md` instead.
+- **§47 as a driven table.** `kExits[]` names how every state and every ERROR
+  kind ends and drives it. The sweep found a state with **no way out at all**:
+  `SCR_ERROR` with `ERRK_SAVE_NEWER` — `SF_STICKY|SF_LOCK_INPUT`, so the router
+  returns before the universal escape, and `err_input()` had no `LONG_BOTH`
+  case. Insert a card from a newer firmware and the device parks there
+  permanently under a strip advertising two dead actions.
+- **What IS gated and has been seen to fire**: zero allocations per screen
+  render, and a compositing ceiling that catches eight whole-panel XORs — an
+  identity every pixel golden passes.
+
+### Added — P10-C3, the animation pass, and the drawing seam was lying
+
+- **`gfx_xbm()` is OPAQUE on the device** (`render.cpp` leaves the panel in
+  `setBitmapMode(0)`) **and the host fake painted only the 1-bits.** The two
+  backends had disagreed about every blit in the firmware since P2-C11 and
+  nothing could see it. Correcting the fake moved **zero** of the 65 goldens,
+  which is the receipt that it was unobserved by luck of composition. This
+  chunk ends the luck — an item icon crosses its own label — so the seam is
+  explicit: `gfx_xbm` opaque, `gfx_xbm_t` transparent, both backends, both
+  gated, both asserted by name.
+- **The sleeping pose is DERIVED, at 0 B of art.** `pf_build_sleep()` shuts a
+  species' own eyes with the blink's own lid machinery, merges its top ink rows
+  and splays its bottom four — against 5,760 B, forty drawings and a re-plan of
+  both art caps for the alternative. It runs on **both** of HOME's body paths,
+  because deriving on one alone is the phase-9 blink defect with the sign
+  flipped, and a gate fails by name if either call disappears.
+- Battle PROTECT, capture success and item pickup, in the pure
+  `screen_encounter.cpp` rather than in `actfx.cpp`, which no host binary
+  compiles; the motion maths lifted into a pure `ui/anim_ease.cpp` whose first
+  host execution found a false documented invariant and a silent `uint32_t`
+  overflow.
+
+### Added — P10-C4, onboarding that survives a power cut
+
+- **The first-boot step is a persisted field, not an inference.** Two bits of
+  `Config.flags`, with **`OB_DONE` as ZERO** so every save written by any
+  earlier firmware decodes as "already set up" — written the natural way round,
+  every device on the planet would be handed a setup wizard on the next flash,
+  which is indistinguishable from data loss to the person holding it.
+- **And the answers had to reach flash in a way nothing in this tree had ever
+  stated**: `load_all_inner()` answers `LOAD_FRESH` the moment the Box pair is
+  missing and **returns before it reads the config**, so a config written on its
+  own is a config discarded. Had the test been written the usual way — set the
+  bits, read the bits back — it would have passed, and the first power cut on a
+  real board would have thrown away the name the player had just typed.
+- **`core/utf8.{h,cpp}`: one codepoint rule where there were three.**
+  `render.cpp`, `gfx_fb.cpp` and `pebble.cpp` each read a lead byte and trusted
+  it, none ever executed against a malformed sequence — and `p += 4` on a lone
+  `0xF1` walks past the terminator, while `0xF1` is a **legal nickname byte**.
+- **Spec §63 as a completeness claim**: `kAudit[]` has one row per `ScreenId`
+  with a `static_assert` on its length, so a screen added without a worst-case
+  fixture fails the **build** by name.
+
+### Added — P10-C5, the release build
+
+### Fixed — P10-C6, the exit
+
+- **A device with an accented name emitted no beacon at all.** `DiscBeacon.name`
+  is Latin-1 by wire contract — `discovery.cpp`'s `name_ok()` refuses
+  `0x80..0x9F` — and P10-C4 correctly made `ui_pet_name()` emit UTF-8 for
+  everything that draws. `fill_self()` went on handing it to `disc_encode()`,
+  and **every** Latin-1 accent the first-boot naming ring can type encodes to
+  `0xC3` plus a byte inside that refused window. `link_service()` drops an
+  unencodable beacon by design, so `beacons_tx` stayed 0 and the LINK screen
+  searched for ever; the peer never saw it, so the link could not be offered
+  from either side either. **LINK, trade and P2P battle, dead, silently, for
+  anyone who typed a Spanish name in a Spanish product.** Invisible to all 58
+  binaries because `ui/ui.cpp` is compiled by none of them **and the fake stood
+  in for that function with the pre-P10-C4 body** — every discovery test drove a
+  function the firmware no longer had.
+- **The creator portal died after 120 s.** `ui_radio_job_busy()` — the power
+  ladder's `held` input — named the scan job and the link job and not the
+  portal, the third radio owner. After two minutes with no *button* pressed the
+  ladder reached `PWR_IDLE`, `pwr_hook_release()` navigated home and
+  `creator_leave()` took the access point down — 180 s before decision D7's own
+  timer, and using a phone is exactly what "no button pressed" looks like.
+  Drawing a 24×24 sprite takes longer than two minutes, so the mobile editor,
+  the sprite editor and bench D2 were all unusable.
+- **The device called itself NOTTAMAGOCHI.** `STR_APP_NAME` was the boot splash,
+  the load-save splash and the main menu's header bar, while SETTINGS →
+  *Acerca de* two taps away printed `Pebblebol` and the AP was `PEBBLEBOL-XXXX`.
+  The same power-on drew both names within seconds. Decision D3 is recorded
+  CLOSED with "D3 has nothing open" — it closed every name the *machine* sees
+  and never touched the one the human does.
+- **Five accented Spanish strings were drawn in an ASCII-only font**, three of
+  them on the first-boot flow. `u8g2`'s `drawUTF8()` emits no glyph **and no
+  advance** for a codepoint the face lacks, so the character vanishes and the
+  line closes up; the host fake painted a synthetic glyph for every codepoint at
+  a fixed advance, so all of it was correct in every golden. The fix is at the
+  seam: the fake records `fb_no_glyph()` per font and every snapshot asserts it.
+- **Using an item said "Usado" for every item in the game**, discarding a whole
+  `ItemEffect` one line after receiving it; and **corruption, a 24 h state, had
+  no readout at all** — `cor_left_s()` had no caller in `src/`, and rendering
+  STATUS_A with and without the bit differed by zero pixels.
+- **The README's build recipe could not produce the artefact**, and an operator
+  working around the error would have flashed the *baseline* image believing it
+  was `release`.
+- Instruments: the never-resident exemption is derived from the exit table
+  rather than retyped; the `ErrKind` completeness claim counts the **enum**
+  instead of the rows; the film call-site counts exclude the definition they
+  were accidentally counting; `perf_note_pass()` must be called **exactly
+  once**; the pure layers are gated against `malloc`/`free`/`new` (the gate
+  `tests/test_soak.cpp`'s banner had claimed existed and did not); and
+  `hardware/boot_reason.h` lifts the reset-reason table out of a device-only
+  file so something can execute it.
 
 ### Measured
 
 | Variant | Defines | Flash | Globals |
 |---|---|---|---|
-| **release** | `GOD_MODE_ENABLED=0` | **1,348,854** | **59,452** |
-| baseline | — | 1,365,776 | 59,548 |
-| no-web | `FEATURE_WEB=0` | 1,252,116 | 55,172 |
-| no-god | `GOD_MODE_ENABLED=0` | 1,348,854 | 59,452 |
-| sh1106 | `DISPLAY_IS_SH1106=1` | 1,365,776 | 59,548 |
-| all-off | web + ESP-NOW + god mode off | 603,304 | 26,692 |
+| **release** | `GOD_MODE_ENABLED=0` | **1,350,840** | **59,452** |
+| baseline | — | 1,367,774 | 59,548 |
+| no-web | `FEATURE_WEB=0` | 1,254,122 | 55,172 |
+| no-god | `GOD_MODE_ENABLED=0` | 1,350,840 | 59,452 |
+| sh1106 | `DISPLAY_IS_SH1106=1` | 1,367,774 | 59,548 |
+| all-off | web + ESP-NOW + god mode off | 605,298 | 26,724 |
 
 Release caps `GATE_RELEASE_FLASH_MAX` 1,600,000 and
 `GATE_RELEASE_GLOBALS_MAX` 65,000, enforced by `tools/build_matrix.sh`:
-**251,146 B of flash and 5,548 B of globals free.** Six variants, 0 project
-warnings each, `--warnings all`.
+**249,160 B of flash and 5,548 B of globals free.** Six variants, 0 project
+warnings each, `--warnings all`. `docs/budget.md` §16 is the final account
+against every cap, including the two sprite atlases.
 
-`ALL PASS 58/58` host binaries (~5.8 M assertions), `ASAN OK 6/6`,
-`PAGE TEST OK 51/51`, `GATE OK`, `MATRIX OK`.
+`ALL PASS 58/58` host binaries (6,210,627 assertions), `ASAN OK 8/8`,
+`PAGE TEST OK 51/51`, `GATE OK`, `MATRIX OK` — all five from a clean
+`git archive` export of this commit.
 
 The whole build, phase by phase, on the release variant:
 
@@ -57,12 +210,13 @@ The whole build, phase by phase, on the release variant:
 | 7 (social) | 1,269,468 | 56,820 | `docs/budget.md` §7 |
 | 8 (creator) | 1,326,400 | 59,396 | `docs/budget.md` §13 |
 | 9 (content) | 1,329,972 | 59,044 | `docs/budget.md` §14 |
-| 10 (polish) | **1,348,854** | **59,452** | this commit |
+| 10 (polish) | **1,350,840** | **59,452** | this commit |
 
-Phase 10 cost **18,882 B of flash and 408 B of globals** for diagnostics in the
+Phase 10 cost **20,868 B of flash and 408 B of globals** for diagnostics in the
 shipping artefact, an error-recovery sweep, a performance instrument, six
 animation films, a first-boot flow, one codepoint rule where there were three,
-and the schema bump below.
+the schema bump below, and the exit's fifteen fixes. `docs/budget.md` §15 is the
+chunk-by-chunk account and §15.3 attributes the exit symbol by symbol.
 
 ### Added
 
@@ -163,24 +317,107 @@ and the schema bump below.
   ceilings so far above the artefact that they could not fail. The release caps
   had been enforced only on a developer's machine, by hand, for eight phases.
 
+### THE HANDOVER — what a person picking this repository up needs to know
+
+Not a phase-11 handover: there is no phase 11. This is what is true of the thing
+on disk.
+
+**PROVED, on the host, by something that fails by name if you break it.** The
+game rules — care, XP, evolution, the battle engine and its type chart, capture,
+encounters, items, breeding compatibility, corruption, the activity meter, the
+cooldown table. The save: pair discipline, tri-state load, the `nvs2`
+checkpoint, fault injection at every write a trade performs, and a v2 image read
+by this firmware and re-sealed at v3. The wire: one validator with 27 named
+reject codes running independently on both ends, driven under a sanitiser. The
+screens: all 29 drawn at the worst content the product allows — a twelve-
+character all-multi-byte name, level 30, a full Box — with zero out-of-bounds
+draws, zero malformed UTF-8, zero allocations and now zero glyphs the font
+cannot draw. 58 binaries, 6.2 M assertions, 159 named gates.
+
+**BOUNDED — measured, with the bound written down, and not the same as proved.**
+Trade atomicity *across the pair*: 800 trials over four fault arms with zero
+splits, over a loopback, which is not a radio. Session security: an off-path
+device that reads one frame can inject well-formed ones, and its power is
+bounded to denial (both ends close, nothing written, `paid == 0`); closing that
+needs a key exchange spec §15 does not contain. The compositing ceiling and the
+per-frame allocation count: exact on the host, and the host's font is
+fixed-advance while the device's is not.
+
+**ASSUMED, and each one is a thing to check first.** That the committed pin map
+is right — it is a *proposal* and it fails this repository's own
+`static_assert`s. That `esp_light_sleep_start()` returns on a
+`GPIO_INTR_LOW_LEVEL` from two buttons with internal pull-ups. That a real NVS
+behaves like `tests/fakes/kv_mem.cpp` — real NVS has wear levelling, a page
+allocator that can run out, and an `initArduino()` that erases things before
+`setup()`. That `esp_reset_reason()` produces the values
+`hardware/boot_reason.h` maps (asserted at compile time; never observed). That a
+62 px QR on a 0.96" panel is readable by a phone camera.
+
+**NEVER RUN ON HARDWARE — all of it.** No byte has reached a real flash chip, no
+radio has been switched on, no pixel has been lit, and **no sound has ever been
+produced**. `README.md` §2 is the 38-item list in dependency order.
+
+**SIX `ui/` TRANSLATION UNITS AND `app/app.cpp` ARE COMPILED BY NO HOST BINARY**
+— `ui.cpp`, `petfx.cpp`, `actfx.cpp`, `ceremony.cpp`, `render.cpp`,
+`gfx_u8g2.cpp`, plus `net.cpp`, `creator_server.cpp`, `webui.cpp`,
+`transport_espnow.cpp`, `kv_nvs.cpp`, `boot.cpp`, `registry.cpp` and
+`godmode.cpp`. Sixteen files, about 3,200 lines of device-only networking and
+boot code. Anything in them is untested by construction, and **both of this
+exit's blocking defects lived there.**
+
+**THE FIRST THING TO BUILD, AND IT IS THE SHAPE OF THIS EXIT'S OWN WORST BUG.**
+Forty-nine shipping symbols are *shadowed* by host fakes — 11 `boot_*`, 18
+`gfx_*`, 5 `kv_*`, 15 `ui_*` — and every one of the four shadowed source files
+is in the list above, so **for all 49 the fake IS the only executed body.**
+Nothing in this tree compares a fake against the function it stands in for.
+That is exactly how the beacon bug survived: P10-C4 changed one function in
+`ui.cpp`, the fake was not touched, all 58 binaries stayed green, and LINK died
+for every Spanish name. Two of the 49 were closed at this exit (`ui_pet_name`,
+and the boot classifier lifted out from under its fake entirely); **47 remain,
+each one edit away from the same outcome.** The gate is a manifest: extract both
+bodies with `awk`, strip comments with `cpp -fpreprocessed`, compare a
+normalised hash, and fail by pair name — the same shape as the eight
+function-body gates `tools/check.sh` already carries.
+
+**AND THE PROJECT'S RECURRING DEFECT, IN THE SHAPE IT TOOK IN PHASE 10.** Every
+instance across ten phases is now the same sentence: *the guard is keyed to an
+enumeration narrower than the real state space.* One radio owner out of three.
+`ScreenId` rather than `ScreenId × ErrKind`. `ScreenId` rather than
+`ScreenId × render mode` (`kAudit[]` is still one row per screen, and eight
+screens branch inside their render hook — an open gap). The shipping symbol
+rather than the pair {symbol, fake}. When you add a guard, the question to ask
+is not "can this fail?" but "what is it enumerating, and is that the whole set?"
+
 ### Not verified, and named so it is not assumed
 
 - **Nothing has run on hardware.** Seventeen §67 acceptance boxes are open, and
-  every one of them now has a written owner step in `docs/bench.md`. **Two did
-  not until this commit**, which is the sort of gap a bench list acquires by
+  every one of them has a written owner step in `docs/bench.md`. **Two had none
+  until P10-C5**, which is the sort of gap a bench list acquires by
   being written a phase at a time: *device-side validation works* — the box with
   the strongest host evidence in the repository (27 named reject codes, driven
   under AddressSanitizer on every commit) and no item of its own, because
   "validation works" is a sentence about a socket and `creator_server.cpp` is
   compiled by no host binary — and *no obvious memory leak*, the 24 h soak,
   named as owed by P2-C12 and again by P10-C2 and never given a procedure.
-  Bench D6 and C5.
+  Bench D6 and C5. **Three more items were added at the P10-C6 exit** and none
+  of them is a §67 box the others cover: C6 (spec §64's sound — the engine has
+  shipped since P6-C1 and nothing has ever been heard, and decision D8's owner
+  step pointed at two sections that do not mention audio), C7 (the reset reason
+  really becoming the right `BootKind`, which nothing had ever produced) and B8
+  (a beacon goes out whatever the device is called).
 - **The tag is not cut.** `v1.0.0` is the plan's acceptance and it belongs to
   whoever runs the bench list, because the tag is a claim about a device.
 - **`POSE_SICK` is one body for sixty species**, and `POSE_EAT` has no art at
-  all. Decided rather than left unmentioned; the price is in P10-C3's record.
-- **Six `ui/` translation units and `app/app.cpp` are compiled by no host
-  binary.** Anything in them is untested by construction.
+  all. Decided rather than left unmentioned; the price is in P10-C3's record
+  above and in `PEBBLEBOL_IMPLEMENTATION_PLAN.md`.
+- **Sixteen translation units are compiled by no host binary**, about 3,200
+  lines of device-only networking, rendering and boot code. Anything in them is
+  untested by construction, and both of this exit's blocking defects lived
+  there. See the handover above.
+- **`networking/breed_link.cpp` does not exist.** It was planned in P7-C5 and
+  never written — earlier documents said "not built", which reads as "the module
+  exists and nothing links it" and sends an owner looking for a file to wire in.
+  Two §67 boxes wait on writing it.
 
 ## [0.9.0-content] — Unreleased
 

@@ -27,7 +27,7 @@
 // THERE IS NOTHING TO FILL IN HERE ANY MORE, and that is the point (P5-C1).
 // The device NEVER joins a Wi-Fi network. It listens for the networks around
 // it - that is the exploration sensor - and it brings up its OWN network,
-// NOTTAMAGOCHI-XXXX, when you want to open the creator page from a phone.
+// PEBBLEBOL-XXXX, when you want to open the creator page from a phone.
 // CFG_WIFI_SSID and CFG_WIFI_PASS used to live here; the code that would have
 // used them is gone and tools/check.sh fails the build if it comes back.
 

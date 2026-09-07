@@ -276,3 +276,128 @@ TEST(walking_a_name_that_ends_in_a_lone_lead_byte_stays_inside_its_allocation) {
     free(heap);
   }
 }
+
+// =============================================================================
+//  P10-C6: THE THREE WRITERS, AT THE BOUNDARY, INTO A HEAP-EXACT DESTINATION
+//
+//  This file drove the READ path against a malloc sized to the string and
+//  never drove the WRITE path against anything. u8_cat(), u8_cat_n() and
+//  u8_cat_latin1() are the functions that copy an untrusted peer name or a
+//  creator nickname into a fixed UI row, and their whole content is the room
+//  arithmetic - `room = cap - 1u - n`, where cap counts the terminator.
+//
+//  Changing that to `cap - n` in either function is a one-past-the-end WRITE of
+//  the NUL, and it survived the entire suite: ALL PASS 58/58, ASAN OK 6/6,
+//  GATE OK. The three functions ARE executed at runtime by four screen
+//  binaries through their shipped call sites - screen_box.cpp, screen_link.cpp,
+//  screen_battle.cpp - so reaching a function is not testing it: every fixture
+//  in the tree happens to hand them a destination with slack, so the stray byte
+//  landed inside the caller's array and nothing reported it.
+//
+//  These cases walk every cap from 1 to the source length + 2 with the
+//  destination malloc'd to exactly that cap, so the mutation is a
+//  heap-buffer-overflow ASAN reports by line. test_utf8 is in ASAN_SET.
+// =============================================================================
+static void cat_at_every_cap(const char* seed, const char* src, bool latin1,
+                             uint16_t max_chars, bool bounded) {
+  const size_t need = strlen(seed) + strlen(src) + 2u;
+  for (uint16_t cap = 1u; cap <= (uint16_t)need; ++cap) {
+    char* d = (char*)malloc(cap);              // EXACTLY cap bytes, no slack
+    CHECK(d != nullptr);
+    if (!d) return;
+    // Seed the destination the way a caller does: snprintf'd, then appended to.
+    size_t k = 0;
+    while (seed[k] != '\0' && k + 1u < (size_t)cap) { d[k] = seed[k]; ++k; }
+    d[k] = '\0';
+    uint16_t r;
+    if (bounded)      r = u8_cat_n(d, cap, src, max_chars);
+    else if (latin1)  r = u8_cat_latin1(d, cap, src);
+    else              r = u8_cat(d, cap, src);
+    // The contract: the return value IS the new length, the result is always
+    // terminated inside the block, and it is always well-formed UTF-8.
+    CHECK_EQ((int)r, (int)strlen(d));
+    CHECK(r < cap);
+    // WELL-FORMEDNESS IS CONDITIONAL ON THE SOURCE, and this assertion was
+    // wrong before the code was: the sweep feeds a lone lead byte on purpose
+    // (a name off the air can be anything), and an appender copying a
+    // malformed source faithfully is correct, not broken. What it may never do
+    // is SPLIT a sequence that was whole - which is what this says.
+    if (u8_well_formed(seed) && u8_well_formed(src)) CHECK(u8_well_formed(d));
+    if (bounded) CHECK(u8_count(d) <= (uint16_t)(u8_count(seed) + max_chars));
+    free(d);
+  }
+}
+
+TEST(the_three_appenders_never_write_past_a_destination_sized_to_the_byte) {
+  static const char* kSeeds[] = { "", "1 ", "9 *", "ABCDEFGH" };
+  static const char* kUtf8[]  = { "", "A", "ABCDEFGH", "\xC3\x91U",
+                                  "\xC3\x81\xC3\x89\xC3\x8D\xC3\x93\xC3\x9A",
+                                  "\xC3" };                    // a lone lead
+  static const char* kL1[]    = { "", "A", "ABCDEFGH", "\xD1U",
+                                  "\xC1\xC9\xCD\xD3\xDA\xDC\xD1\xC1\xC9\xCD\xD3\xDA" };
+  for (size_t si = 0; si < sizeof kSeeds / sizeof kSeeds[0]; ++si) {
+    for (size_t i = 0; i < sizeof kUtf8 / sizeof kUtf8[0]; ++i) {
+      cat_at_every_cap(kSeeds[si], kUtf8[i], false, 0u, false);
+      for (uint16_t mc = 0u; mc <= 4u; ++mc)
+        cat_at_every_cap(kSeeds[si], kUtf8[i], false, mc, true);
+    }
+    for (size_t i = 0; i < sizeof kL1 / sizeof kL1[0]; ++i)
+      cat_at_every_cap(kSeeds[si], kL1[i], true, 0u, false);
+  }
+}
+
+// AND THE BOUNDARY ITSELF, NAMED. A cap of exactly seed + src + 1 must take the
+// whole source; one byte less must take one character less and never a partial
+// sequence. This is the case the mutation `room = cap - n` fails on arithmetic
+// alone, without needing a sanitiser to be linked.
+TEST(one_byte_of_cap_is_one_byte_of_text_and_the_terminator_is_not_text) {
+  char d[16];
+  snprintf(d, sizeof d, "%s", "AB");
+  CHECK_EQ((int)u8_cat(d, 6u, "CDEFGH"), 5);   // cap 6 -> "ABCDE" + NUL
+  CHECK_EQ((int)strlen(d), 5);
+  snprintf(d, sizeof d, "%s", "AB");
+  CHECK_EQ((int)u8_cat(d, 3u, "CDEFGH"), 2);   // cap 3 -> no room at all
+  CHECK_EQ((int)strlen(d), 2);
+  // A two-byte character is taken whole or not at all: cap 5 leaves room for
+  // two text bytes after "AB", which is exactly one accented character.
+  snprintf(d, sizeof d, "%s", "AB");
+  CHECK_EQ((int)u8_cat_latin1(d, 5u, "\xD1\xD1"), 4);
+  CHECK(u8_well_formed(d));
+  snprintf(d, sizeof d, "%s", "AB");
+  CHECK_EQ((int)u8_cat_latin1(d, 4u, "\xD1\xD1"), 2);   // no whole char fits
+  CHECK(u8_well_formed(d));
+}
+
+// THE CROSSING BACK (P10-C6). u8_to_latin1() is what puts a name on the wire;
+// see core/utf8.h for why the beacon field is Latin-1 and what went wrong when
+// it was handed UTF-8.
+TEST(the_crossing_back_is_the_inverse_of_the_crossing_out) {
+  for (unsigned b = 1u; b < 256u; ++b) {
+    char l1[2]  = { (char)b, '\0' };
+    char utf[8];
+    char back[8];
+    (void)u8_from_latin1(utf, (uint16_t)sizeof utf, l1);
+    CHECK(u8_well_formed(utf));
+    CHECK_EQ((int)u8_to_latin1(back, (uint16_t)sizeof back, utf), 1);
+    CHECK_EQ((int)(unsigned char)back[0], (int)b);      // every byte survives
+  }
+  // A codepoint with no Latin-1 byte becomes '?' rather than half a sequence.
+  char out[8];
+  CHECK_EQ((int)u8_to_latin1(out, (uint16_t)sizeof out, "\xE2\x82\xAC"), 1);
+  CHECK_EQ((int)out[0], (int)'?');
+  // A truncated sequence stops the copy inside the block rather than walking
+  // past the terminator - the same refusal u8_len() makes.
+  const char* lead = "A\xC3";
+  const size_t n = strlen(lead);
+  char* heap = (char*)malloc(n + 1u);
+  CHECK(heap != nullptr);
+  if (heap) {
+    memcpy(heap, lead, n + 1u);
+    char dst[8];
+    (void)u8_to_latin1(dst, (uint16_t)sizeof dst, heap);
+    free(heap);
+  }
+  // cap 1 has room for the terminator and nothing else.
+  CHECK_EQ((int)u8_to_latin1(out, 1u, "ABC"), 0);
+  CHECK_EQ((int)out[0], 0);
+}

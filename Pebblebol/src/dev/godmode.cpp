@@ -33,6 +33,7 @@
 #include "../hardware/gametime.h"
 #include "../hardware/kv_nvs.h"
 #include "../networking/net.h"
+#include "../networking/transport_espnow.h"  // P10-C6: espnow_stats(), which had no reader
 #include "../persistence/game_state.h"
 #include "../persistence/save_manager.h"
 #include "../ui/screen_network.h"    // network_screen_seen/fresh/phase
@@ -62,6 +63,50 @@ static void heap_trend_begin(void)
   Serial.printf("DIAG#,perf,uptime_s,scr,frames,frame_max_us,frame_worst_us,"
                 "frame_worst_scr,frame_over,frame_sat,passes,pass_worst_us,"
                 "pass_worst_scr,pass_over,discards\r\n");
+  Serial.printf("DIAG#,link,uptime_s,rx_session,rx_beacon,rx_wrong_peer,"
+                "rx_malformed,rx_ring_ovf,rx_beacon_ovf,tx_ok,tx_fail,"
+                "tx_refused,tx_no_mem,beacons_tx\r\n");
+  // THE ScreenId MAP, ONCE, SO A CAPTURE IS SELF-DESCRIBING (P10-C6). The perf
+  // row's scr / frame_worst_scr / pass_worst_scr columns are raw enum values,
+  // docs/bench.md A1's method is "walk the screens, then read which one owned
+  // the worst frame", and nothing turned s17 back into a screen. The enum is
+  // not stable across phases either - P10-C4 inserted two setup screens IN THE
+  // MIDDLE - so a mapping written down from an older log is wrong rather than
+  // merely old. Emitting it into the capture itself is the only version that
+  // cannot rot: 29 short names, printed once at boot, in the same file the
+  // numbers are in.
+  Serial.printf("DIAG#,screens");
+  for (uint8_t i = 0; i < (uint8_t)SCR_COUNT; ++i) {
+    Serial.printf(",%u=%s", (unsigned)i, diag_screen_name(i));
+  }
+  Serial.printf("\r\n");
+}
+
+// P10-C6. THE ESP-NOW COUNTERS, WHICH HAD NO READER OF ANY KIND: espnow_stats()
+// was declared, defined, and called by no screen, no page, no serial line and
+// no test. docs/bench.md B2 - the consent gate on the air, and the precondition
+// for every other two-board item - names `rx_wrong_peer` rising on the silent
+// board as its acceptance instrument, and there was no way to read it. That is
+// the dead-export shape this phase has now recorded three times.
+//
+// SILENT UNTIL THERE IS SOMETHING TO SAY. A board that has never brought the
+// radio up prints nothing here, so the 24 h soak capture (docs/bench.md C5,
+// radio off) is not padded with a row of zeros every minute.
+static void link_trend_service(uint32_t now_ms)
+{
+  const EspNowStats& s = espnow_stats();
+  const uint32_t any = s.rx_session | s.rx_beacon | s.rx_wrong_peer |
+                       s.rx_malformed | s.tx_ok | s.tx_fail | s.beacons_tx;
+  if (any == 0u) return;
+  Serial.printf("DIAG,link,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu\r\n",
+                (unsigned long)(now_ms / 1000UL),
+                (unsigned long)s.rx_session,   (unsigned long)s.rx_beacon,
+                (unsigned long)s.rx_wrong_peer,(unsigned long)s.rx_malformed,
+                (unsigned long)s.rx_ring_overflow,
+                (unsigned long)s.rx_beacon_overflow,
+                (unsigned long)s.tx_ok,        (unsigned long)s.tx_fail,
+                (unsigned long)s.tx_refused,   (unsigned long)s.tx_no_mem,
+                (unsigned long)s.beacons_tx);
 }
 
 // P10-C2. THE PERFORMANCE RECEIPT, AND IT IS A SEPARATE LINE ON PURPOSE.
@@ -107,6 +152,7 @@ static void heap_trend_service(void)
                 (unsigned long)ESP.getFreeHeap(),
                 (unsigned long)ESP.getMinFreeHeap());
   perf_trend_service(now);
+  link_trend_service(now);
 }
 
 // =============================================================================

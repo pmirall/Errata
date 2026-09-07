@@ -37,6 +37,7 @@
 #include "ui/dialog.h"
 #include "ui/screen.h"
 #include "ui/screen_care.h"
+#include "hardware/power.h"
 #include "ui/screen_creator.h"
 #include "ui/screen_diag.h"
 #include "ui/screen_evolution.h"
@@ -655,6 +656,18 @@ static void snapshot_fn(void (*render)(void), const char* name) {
             name, (unsigned)fb_bad_utf8(), fb_bad_utf8_first());
   }
   CHECK_EQ(fb_bad_utf8(), 0u);
+
+  // (a1b) AND NO GLYPH MAY BE DRAWN IN A FONT THAT HAS NO SUCH GLYPH (P10-C6).
+  // GF_TINY is ASCII-only and u8g2's drawUTF8() emits nothing and advances
+  // nothing for a codepoint the face lacks: the character vanishes and the line
+  // closes up. This fake used to paint every codepoint at a fixed advance, so
+  // an accented Spanish string in GF_TINY was correct in every golden and wrong
+  // on every board. It is a property of the seam now.
+  if (fb_no_glyph() != 0) {
+    fprintf(stderr, "  %s: %u glyph(s) the font cannot draw, first %s\n",
+            name, (unsigned)fb_no_glyph(), fb_no_glyph_first());
+  }
+  CHECK_EQ(fb_no_glyph(), 0u);
 
   // (a2) and nothing may allocate. A screen render is a pure function of the
   // model into a fixed buffer; the day one is not, the device's per-frame heap
@@ -1533,6 +1546,71 @@ TEST(snapshot_status_a_maxed) {
   snapshot(SCR_STATUS, "status_a_maxed");
 }
 
+// P10-C6: THE CORRUPTION READOUT. Spec section 55's 24 h state had no readout
+// anywhere in the product - one line at onset, an intermittent shimmer, and no
+// page a player could go to and ask. cor_left_s() had no caller in src/ at all.
+TEST(snapshot_status_a_corrupted) {
+  seams2_reset();
+  g_view.corrupted = 1u;
+  g_view.corrupt_h = 18u;
+  status_a_enter();
+  snapshot(SCR_STATUS, "status_a_corrupted");
+}
+
+TEST(the_status_page_says_a_pebble_is_corrupted_and_for_how_much_longer) {
+  // The page is DIFFERENT when the status is set - which is the whole finding:
+  // rendering STATUS_A with and without the bit gave a diff of exactly zero.
+  seams2_reset();
+  g_view.corrupted = 0u;
+  g_view.corrupt_h = 0u;
+  status_a_enter();
+  fb_reset();
+  status_a_render();
+  static uint8_t clean[OLED_W * OLED_H];
+  for (int y = 0; y < OLED_H; ++y)
+    for (int x = 0; x < OLED_W; ++x) clean[y * OLED_W + x] = (uint8_t)fb_get(x, y);
+
+  g_view.corrupted = 1u;
+  g_view.corrupt_h = 18u;
+  fb_reset();
+  status_a_render();
+  int diff = 0;
+  for (int y = 0; y < OLED_H; ++y)
+    for (int x = 0; x < OLED_W; ++x)
+      if (clean[y * OLED_W + x] != (uint8_t)fb_get(x, y)) ++diff;
+  CHECK(diff > 0);
+  CHECK_EQ(fb_oob(), 0u);
+  CHECK_EQ(fb_bad_utf8(), 0u);
+  CHECK_EQ(fb_no_glyph(), 0u);
+
+  // ...and the HOURS are on the page, not just the word: a readout that could
+  // not count down would say no more than the shimmer already does. Every hour
+  // from 1 to 24 draws something, and two different hours draw differently.
+  fb_reset();
+  g_view.corrupt_h = 1u;
+  status_a_render();
+  static uint8_t one_h[OLED_W * OLED_H];
+  for (int y = 0; y < OLED_H; ++y)
+    for (int x = 0; x < OLED_W; ++x) one_h[y * OLED_W + x] = (uint8_t)fb_get(x, y);
+  fb_reset();
+  g_view.corrupt_h = 24u;
+  status_a_render();
+  int hdiff = 0;
+  for (int y = 0; y < OLED_H; ++y)
+    for (int x = 0; x < OLED_W; ++x)
+      if (one_h[y * OLED_W + x] != (uint8_t)fb_get(x, y)) ++hdiff;
+  CHECK(hdiff > 0);
+  for (uint8_t h = 1u; h <= 24u; ++h) {
+    fb_reset();
+    g_view.corrupt_h = h;
+    status_a_render();
+    CHECK_EQ(fb_oob(), 0u);
+    CHECK_EQ(fb_no_glyph(), 0u);
+  }
+  g_view.corrupted = 0u;
+  g_view.corrupt_h = 0u;
+}
+
 TEST(snapshot_status_b) {
   seams2_reset();
   status_b_enter();
@@ -2164,6 +2242,95 @@ TEST(creator_gives_up_when_the_access_point_never_comes_up) {
 
 // ...and it does NOT give up while the access point is up, however long the
 // user leaves it there, because that is the case the idle timer owns.
+// =============================================================================
+//  P10-C6: THE PORTAL AND THE POWER LADDER
+//
+//  creator_waits_indefinitely_once_the_access_point_is_up, immediately below,
+//  was a TRUE statement about creator_update() and a FALSE statement about the
+//  device. The screen does not give up - and hardware/power.cpp took the radio
+//  away from it anyway.
+//
+//  app/app.cpp feeds PowerInput.held from ui/ui.cpp's ui_radio_job_busy(),
+//  which was network_screen_busy() || link_screen_busy(). The portal is the
+//  THIRD radio owner in this tree and was in neither. `held` clamps the ladder
+//  at DIM (hardware/power.cpp:63); without it the ladder reached PWR_IDLE at
+//  120,000 ms, called hook_release(), and app.cpp's pwr_hook_release() ran
+//  ui_home() - whose sm_goto() runs creator_leave(), the one teardown. The
+//  portal died at two minutes while CREATOR_IDLE_S_DEFAULT is 300 s, and
+//  drawing a sprite on a phone takes longer than two minutes. Neither the
+//  mobile editor nor the sprite editor could be used, and docs/bench.md D2 -
+//  which polls for IDLE_S + 60 seconds without pressing a button - could not
+//  pass as written.
+//
+//  This is the only host binary that compiles the ladder AND the screen.
+//  g_idle here is the ladder's OWN input, not a UI countdown: no button is
+//  pressed for the whole run, which is exactly the bench operator's situation.
+// =============================================================================
+// THE SPLIT, SAID OUT LOUD. ui_radio_job_busy() lives in ui/ui.cpp, which no
+// host binary compiles, so this case drives creator_screen_busy() - the half
+// with a right answer - straight into the real ladder, and tools/check.sh
+// holds the other half: that ui_radio_job_busy() names all THREE owners. A
+// test here that re-wrote the disjunction would be asserting a copy of the one
+// line that decides, which is the defect this whole phase keeps finding.
+static int  s_pwr_releases = 0;
+static void pwr_t_dim(bool)     {}
+static void pwr_t_panel(bool)   {}
+static void pwr_t_release(void) { ++s_pwr_releases; }
+static void pwr_t_persist(void) {}
+
+TEST(the_portal_holds_the_power_ladder_off_the_rung_that_would_close_it) {
+  static const PowerHooks kH = { pwr_t_dim, pwr_t_panel, pwr_t_release, pwr_t_persist };
+  pwr_bind(&kH);
+  seams2_reset();
+  g_ap_up = 1;
+  g_now = 100000u;
+  creator_enter();
+  CHECK(creator_screen_busy());                 // the screen owns the radio
+
+  pwr_begin();
+  s_pwr_releases = 0;
+  // Ten minutes of a player looking at a phone: no gesture, so idle_ms only
+  // grows. PWR_IDLE_MS is 120 s and PWR_SLEEP_MS is 600 s; both are passed.
+  for (uint32_t t = 1000u; t <= 600000u; t += 1000u) {
+    PowerInput in;
+    in.idle_ms = t;
+    in.held    = creator_screen_busy() ? 1u : 0u;
+    (void)pwr_service(in);
+  }
+  CHECK_EQ(s_pwr_releases, 0);                  // the AP is still up
+  CHECK_EQ((int)pwr_state(), (int)PWR_DIM);     // clamped exactly one rung down
+
+  // ANTI-VACUITY, AND IT IS THE HALF THAT MATTERS: the same ten minutes with
+  // the screen left says the ladder really does fire. A test that only proved
+  // "no release happened" would pass with the ladder switched off entirely.
+  creator_leave();
+  CHECK(!creator_screen_busy());
+  pwr_begin();
+  s_pwr_releases = 0;
+  for (uint32_t t = 1000u; t <= 600000u; t += 1000u) {
+    PowerInput in;
+    in.idle_ms = t;
+    in.held    = creator_screen_busy() ? 1u : 0u;
+    (void)pwr_service(in);
+  }
+  CHECK(s_pwr_releases > 0);
+}
+
+// The ladder's rung and the portal's own ceiling, side by side, so the
+// relationship that made this a defect is written down as arithmetic rather
+// than as a comment. networking/discovery.h:254 states the LINK half the other
+// way round - LINK_JOB_TIMEOUT_MS is BELOW the rung, so that job never needs to
+// hold. The portal's ceiling is a user setting of up to an hour and can never
+// fit under 120 s, so holding is the only answer available to it.
+TEST(the_portals_own_timeout_is_the_ceiling_and_it_is_above_the_idle_rung) {
+  CHECK((uint32_t)CREATOR_IDLE_S_DEFAULT * 1000u > (uint32_t)PWR_IDLE_MS);
+  CHECK((uint32_t)CREATOR_IDLE_S_MAX * 1000u > (uint32_t)PWR_IDLE_MS);
+  // ...and the OTHER exit, the one for an access point that never came up,
+  // must fire BEFORE the rung, because that wait is not held by anything the
+  // player can see and spec 47 wants it bounded.
+  CHECK((uint32_t)CREATOR_AP_WAIT_MS < (uint32_t)PWR_IDLE_MS);
+}
+
 TEST(creator_waits_indefinitely_once_the_access_point_is_up) {
   seams2_reset();
   g_ap_up = 1;
@@ -3449,6 +3616,22 @@ TEST(any_gesture_skips_a_film_and_the_screen_answers_at_once) {
   capture_leave();
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
 
+  // AND THE FIFTH CALL SITE, capture_enter(), WHICH NEITHER INSTRUMENT COULD
+  // SEE UNTIL P10-C6. Deleting its enc_film_cancel() left the whole suite green
+  // AND printed GATE OK - the count gate has a spare unit because the FUNCTION
+  // DEFINITION matches the same pattern as the five call sites, so any one of
+  // them could go. It is unreachable on today's navigation (encounter_input()
+  // cancels nine lines above the only ui_push(SCR_CAPTURE)), which is exactly
+  // why nothing noticed; a screen reached from a second place later would find
+  // the redundancy gone. The state is driven directly here, and the gate is
+  // exact now rather than "at least five".
+  item_fixture(1u);
+  CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
+  capture_enter();
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
+  capture_leave();
+  encounter_leave();
+
   // ...and CAPTURE's every gesture skips it too. A film that only the ENCOUNTER
   // screen could interrupt would leave the player watching a creature dissolve
   // with both buttons dead.
@@ -3624,6 +3807,114 @@ TEST(the_exploration_screens_render_without_drawing_off_the_panel) {
 //  empty - which is the exact shape of defect this phase spent its content
 //  budget closing on item 9.
 // =============================================================================
+// =============================================================================
+//  P10-C6: THE ITEM SAYS WHAT IT DID
+//
+//  bag_use() declared an ItemEffect, handed it to inv_use(), and never read a
+//  field of it. Every successful use of every item in the game answered
+//  "Usado": filling five care bars from empty, curing SICK and CORRUPTED at
+//  once and jumping a Pebble eight levels were the same single word, on the
+//  half of the care loop that carries the rewards from exploring - and there is
+//  no item description anywhere in the product, so the bag row ("NAME xN") is
+//  all a player ever learns about what they are holding.
+//
+//  Driven through the REAL inv_use() over the REAL pack, not by handing
+//  item_reaction() a struct: the point is that the fields the pack fills are
+//  the fields the screen reads.
+// =============================================================================
+TEST(using_an_item_says_which_thing_it_did_and_not_just_that_it_was_used) {
+  // TWO ACCEPTABLE ANSWERS PER KLASS, BECAUSE THE LADDER IS ORDERED AND THE
+  // PACK DECIDES WHICH RUNG IT LANDS ON - and my first draft of this case got
+  // that wrong twice: "Parche" heals a Pebble whose status bits are set, so it
+  // reports the CURE rather than the bar, and "Bit Dulce" on a level-5 Pebble
+  // crosses a level boundary, so it reports the LEVEL rather than the XP. Both
+  // times the code was right and the expectation was a guess. What the case
+  // states is the property that matters: the answer is a REACTION to what the
+  // pack recorded, never the old catch-all.
+  struct Arm { uint8_t klass; uint16_t a; uint16_t b; };
+  static const Arm kArms[] = {
+    { (uint8_t)ITEM_KLASS_CARE,       STR_ITEM_FED,      STR_ITEM_CURED   },
+    { (uint8_t)ITEM_KLASS_XP_CANDY,   STR_ITEM_XP,       STR_ITEM_LEVELED },
+    { (uint8_t)ITEM_KLASS_BATTLE_MOD, STR_ITEM_BOOST,    STR_ITEM_BOOST   },
+  };
+  uint8_t seen = 0;
+  for (size_t a = 0; a < sizeof kArms / sizeof kArms[0]; ++a) {
+    uint8_t id = 0;
+    for (uint8_t i = 0; i < ITEM_COUNT; ++i)
+      if (ITEMS_TABLE[i].klass == kArms[a].klass && id == 0) id = ITEMS_TABLE[i].id;
+    if (id == 0) continue;                       // no such klass in the pack
+    seams2_reset();
+    explore_reset();
+    PebbleInstance pet;
+    memset(&pet, 0, sizeof pet);
+    pet.magic = (uint16_t)PEBBLE_MAGIC;
+    pet.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+    pet.species_id = 1; pet.id = 0x5EED1000u + a; pet.level = 5;
+    for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) pet.care[i] = 0;
+    g_active_p = &pet;
+    CHECK_EQ(inv_add(g_inv, id, 1), 1);
+    care_enter();
+    while (care_cursor() != (uint8_t)CARE_BAG) care_input(GST_TAP_L);
+    care_input(GST_HOLD_R);                      // into the bag
+    CHECK_EQ(care_mode(), (uint8_t)CAREM_BAG);
+    g_toast = STR_EMPTY;
+    care_input(GST_HOLD_R);                      // use the only row
+    CHECK(g_toast == kArms[a].a || g_toast == kArms[a].b);
+    CHECK(g_toast != (uint16_t)STR_ITEM_USED);   // ...and NOT the old one word
+    ++seen;
+    care_leave();
+  }
+  CHECK(seen >= 3u);                             // anti-vacuity on the pack
+
+  // A LEVEL-UP OUTRANKS THE XP THAT CAUSED IT. Enough candy to cross a level
+  // boundary must say so; the same candy that does not must say the other
+  // thing. Without this the ladder could collapse to one arm and still pass.
+  uint8_t candy = 0;
+  for (uint8_t i = 0; i < ITEM_COUNT; ++i)
+    if (ITEMS_TABLE[i].klass == (uint8_t)ITEM_KLASS_XP_CANDY && candy == 0)
+      candy = ITEMS_TABLE[i].id;
+  if (candy != 0) {
+    seams2_reset();
+    explore_reset();
+    PebbleInstance pet;
+    memset(&pet, 0, sizeof pet);
+    pet.magic = (uint16_t)PEBBLE_MAGIC;
+    pet.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+    pet.species_id = 1; pet.id = 0x5EED2000u; pet.level = 1; pet.xp = 0;
+    g_active_p = &pet;
+    CHECK_EQ(inv_add(g_inv, candy, 1), 1);
+    care_enter();
+    while (care_cursor() != (uint8_t)CARE_BAG) care_input(GST_TAP_L);
+    care_input(GST_HOLD_R);
+    g_toast = STR_EMPTY;
+    care_input(GST_HOLD_R);
+    // A level-1 Pebble handed a candy either levels or does not; whichever it
+    // is, the toast must be the one that matches what the pack recorded.
+    CHECK(g_toast == (uint16_t)STR_ITEM_LEVELED || g_toast == (uint16_t)STR_ITEM_XP);
+    CHECK_EQ(g_toast == (uint16_t)STR_ITEM_LEVELED, pet.level > 1u);
+    care_leave();
+  }
+}
+
+// AND THE BAG ANSWERS BOTH-BUTTONS, which it was the one list in the product
+// not to do - on the screen holding items the game describes nowhere else.
+TEST(the_bag_answers_both_buttons_like_every_other_list_in_the_product) {
+  seams2_reset();
+  explore_reset();
+  care_enter();
+  while (care_cursor() != (uint8_t)CARE_BAG) care_input(GST_TAP_L);
+  g_help = STR_EMPTY;
+  care_input(GST_BOTH);
+  const uint16_t on_the_row = g_help;
+  CHECK(on_the_row != (uint16_t)STR_EMPTY);      // the row that opens it: covered
+  care_input(GST_HOLD_R);
+  CHECK_EQ(care_mode(), (uint8_t)CAREM_BAG);
+  g_help = STR_EMPTY;
+  care_input(GST_BOTH);
+  CHECK_EQ(g_help, (uint16_t)STR_HLP_BAG);       // ...and INSIDE it, which was 0
+  care_leave();
+}
+
 TEST(the_bag_lists_what_is_held_uses_one_and_walks_back_out) {
   seams2_reset();
   explore_reset();
@@ -3675,7 +3966,9 @@ TEST(the_bag_lists_what_is_held_uses_one_and_walks_back_out) {
 
   while (care_bag_cursor() != care_row) care_input(GST_TAP_L);
   care_input(GST_HOLD_R);
-  CHECK_EQ(g_toast, (uint16_t)STR_ITEM_USED);
+  // P10-C6: the toast now says WHAT HAPPENED. This is a CARE item on a Pebble
+  // whose bars are all empty, so the reaction is the one for a bar that moved.
+  CHECK_EQ(g_toast, (uint16_t)STR_ITEM_FED);
   CHECK_EQ(inv_count(g_inv, care_id), 1);
   CHECK(pet.care[0] > 0);
   CHECK(g_saves > 0);

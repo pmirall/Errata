@@ -135,11 +135,20 @@ static void build(const CreatorInfo& in) {
 // -----------------------------------------------------------------------------
 //  HOOKS
 // -----------------------------------------------------------------------------
+// THE RADIO HOLD. Set while this screen owns the access point and cleared by
+// the ONE teardown, so it can never outlive the portal it speaks for. See the
+// long note in screen_creator.h: without it the ladder took the AP down at
+// 120 s and D7's 300 s timeout could never be reached, let alone observed.
+static uint8_t s_holding = 0;
+
+bool creator_screen_busy(void) { return s_holding != 0u; }
+
 void creator_enter(void) {
   // The screen that wants the station is the screen that asks for it; there is
   // no radio policy in the entry point any more (plan section 2 row G4). It is
   // released again in creator_leave().
   ui_creator_radio(true);
+  s_holding = 1u;                     // the ladder is clamped at DIM from here
 
   CreatorInfo in;
   ui_creator_info(in);
@@ -157,6 +166,7 @@ void creator_leave(void) {
   // leaving it gives back the ~50 KB of heap and the largest current draw on
   // the board instead of holding the radio powered until the next reboot.
   ui_creator_radio(false);
+  s_holding = 0u;                     // ...and released here, once, with it
   s_size   = 0;
   s_key[0] = '\0';
 }

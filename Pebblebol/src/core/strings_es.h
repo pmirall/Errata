@@ -831,6 +831,23 @@ enum StrId : uint16_t {
   STR_AF_CHAR,
   STR_AF_OTHER,
 
+  // P10-C6. Using an item said "Usado" and nothing else, for every item in the
+  // game: game/inventory.cpp fills a whole ItemEffect (XP, levels, how many
+  // care stats moved, which status bits cleared, the battle stage and its
+  // rounds, whether an evolution fired) and ui/screen_care.cpp discarded it one
+  // line later. Filling five care bars from empty, curing SICK and CORRUPTED at
+  // once and jumping a Pebble eight levels all read the same single word, on
+  // the half of the care loop that carries the rewards from exploring.
+  STR_ITEM_FED,
+  STR_ITEM_CURED,
+  STR_ITEM_XP,
+  STR_ITEM_LEVELED,
+  STR_ITEM_BOOST,
+  STR_ITEM_EVOLVED,
+  // ...and the corruption readout, spec section 55. The state lasted 24 h with
+  // one line of onset text and no way to check it afterwards.
+  STR_ST_CORRUPT,
+
   STR_COUNT
 };
 
@@ -848,7 +865,7 @@ inline constexpr const char* const ES[] = {
   /* STR_EMPTY */                 "",
 
   /* --- 1. boot / system --- */
-  /* STR_APP_NAME */              "NOTTAMAGOCHI",
+  /* STR_APP_NAME */              "PEBBLEBOL",
   /* STR_BOOT_DIZZY */            "Me he mareado un momento.",
   /* STR_BOOT_FIRST */            "Hola. Soy nuevo aquí.",
 
@@ -1150,7 +1167,7 @@ inline constexpr const char* const ES[] = {
   /* STR_CLK_DAY */               "Día",
   /* STR_CLK_HOUR */              "Hora",
   /* STR_CLK_MIN */               "Minuto",
-  /* STR_CLK_HOLD */              "Mantén IZQ: guardar",
+  /* STR_CLK_HOLD */              "Mantener A: guardar",
   /* STR_CLK_SAVED */             "Hora guardada.",
   /* STR_CLK_BAD */               "Fecha imposible.",
   /* STR_HLP_CLOCK */             "Pon la fecha y la hora.",
@@ -1530,13 +1547,23 @@ inline constexpr const char* const ES[] = {
   // --- P10-C4. FIRST BOOT ---------------------------------------------------
   , /* STR_SU_HELLO */             "Hola. Empecemos."
   , /* STR_SU_NAME_TITLE */        "PONLE NOMBRE"
-  , /* STR_SU_NAME_HINT */         "Mantén IZQ: aceptar"
+  , /* STR_SU_NAME_HINT */         "Mantener A: aceptar"
   , /* STR_SU_PICK_TITLE */        "ELIGE PEBBLE"
-  , /* STR_SU_PICK_HINT */         "Mantén IZQ: elegir"
+  , /* STR_SU_PICK_HINT */         "Mantener A: elegir"
   , /* STR_SU_SKIP */              "A+B: saltar"
   , /* STR_SU_DONE */              "Listo. Encantado de conocerte."
   , /* STR_AF_CHAR */              "LETRA"
   , /* STR_AF_OTHER */             "OTRO"
+  // P10-C6, the item reactions. One per ItemEffect shape rather than one for
+  // all of them; ui/screen_care.cpp's item_reaction() is a pure function of the
+  // struct and tests/test_screens.cpp drives every arm.
+  , /* STR_ITEM_FED */            "Se encuentra mejor"
+  , /* STR_ITEM_CURED */          "Ya está curado"
+  , /* STR_ITEM_XP */             "Ha ganado experiencia"
+  , /* STR_ITEM_LEVELED */        "¡Ha subido de nivel!"
+  , /* STR_ITEM_BOOST */          "Listo para el combate"
+  , /* STR_ITEM_EVOLVED */        "¡Algo está cambiando!"
+  , /* STR_ST_CORRUPT */          "Corrupto"
 };
 
 // -----------------------------------------------------------------------------

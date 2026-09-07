@@ -1874,4 +1874,245 @@ if grep -qE '^#define[[:space:]]+SAVE_SCHEMA_INPLACE_MIN[[:space:]]+[0-9]+' \
   [ "${n:-0}" -ge 1 ] || fail "tests/test_persistence.cpp does not pin SAVE_SCHEMA_VERSION at $sv ($n) - the number moved and the test that makes moving it deliberate did not"
 fi
 
+# =============================================================================
+#  P10-C6 - THE EXIT GATES
+#
+#  Every one of these was broken and watched fail by name before it was kept.
+#  They exist because the thing they guard lives in a file NO HOST BINARY
+#  COMPILES - ui/ui.cpp, app/app.cpp, ui/petfx.cpp, dev/godmode.cpp - or in a
+#  place a count can be satisfied by something adjacent to the thing that
+#  matters, which is this project's oldest recurring defect.
+# =============================================================================
+if printf '' | cpp -fpreprocessed -dD -E -P - >/dev/null 2>&1; then
+  strip_comments12() { cpp -fpreprocessed -dD -E -P - 2>/dev/null; }
+else
+  strip_comments12() { sed 's://.*::'; }
+fi
+# ...and for the allocator gate, STRING LITERALS TOO. cpp does not touch them,
+# and game/battle.cpp carries a static_assert whose MESSAGE contains "a new one
+# would resolve as", which is prose about a battle slot and not an allocation.
+strip_code12() { strip_comments12 | sed 's/"[^"]*"/""/g'; }
+
+# -----------------------------------------------------------------------------
+# 1. THE NAME ON THE WIRE IS THE STORED ENCODING, NOT THE DRAWN ONE.
+#
+#    DiscBeacon.name is LATIN-1 by contract: networking/discovery.cpp's
+#    name_ok() refuses 0x80..0x9F, and every Latin-1 accent (0xC0..0xDF, exactly
+#    the uppercase set ui/screen_setup.cpp's naming ring can type) encodes to
+#    0xC3 plus a byte inside that window. P10-C4 made ui_pet_name() emit UTF-8 -
+#    correctly, for everything that DRAWS - and fill_self() went on handing it
+#    to disc_encode(), which answered DE_NAME. A device with an accented name
+#    emitted NO BEACON AT ALL: invisible to every peer, LINK/trade/P2P battle
+#    dead, and silent, because link_service() drops an unencodable beacon by
+#    design. The host suite could not see it: ui/ui.cpp is compiled by no
+#    binary and the fake stood in with the pre-P10-C4 body.
+body=$( awk '/^static void fill_self\(DiscBeacon& b\) \{/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/ui/screen_link.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "ui/screen_link.cpp has no fill_self() body - nothing fills the beacon this device puts on the air"
+n=$( printf '%s\n' "$body" | { grep -cE '\bui_pet_name_latin1[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "fill_self() does not call ui_pet_name_latin1() ($n) - DiscBeacon.name is LATIN-1 by contract and discovery.cpp's name_ok() refuses 0x80..0x9F, so a UTF-8 name makes disc_encode() answer DE_NAME and the device emits NO BEACON AT ALL for any accented name (ui/ui.h)"
+n=$( printf '%s\n' "$body" | { grep -cE '\bui_pet_name[[:space:]]*\(' || true; } )
+[ "${n:-0}" -eq 0 ] || fail "fill_self() calls ui_pet_name() ($n) - that is the DRAWN form, UTF-8, and the beacon field is Latin-1 (core/utf8.h)"
+# ...AND THE FAKE THAT STANDS IN FOR IT MUST NOT BE THE OLD BODY. That is what
+# hid this for a whole chunk: tests/fakes/link_fake.cpp defined its own
+# ui_pet_name() as a plain snprintf, so every discovery and link test drove a
+# function the firmware no longer had.
+n=$( strip_comments12 < "$ROOT/tests/fakes/link_fake.cpp" | { grep -cE '\bui_pet_name_latin1[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "tests/fakes/link_fake.cpp does not implement ui_pet_name_latin1() ($n) - it shadows ui/ui.cpp's name seam, so the link tests would be driving a body the firmware does not have (the P10-C6 defect exactly)"
+n=$( strip_comments12 < "$ROOT/tests/fakes/link_fake.cpp" | { grep -cE '\bu8_from_latin1[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "tests/fakes/link_fake.cpp's ui_pet_name() does not cross to UTF-8 ($n) - it would be the pre-P10-C4 body again and no test could see the difference"
+
+# -----------------------------------------------------------------------------
+# 2. ALL THREE RADIO OWNERS ARE IN THE POWER LADDER'S `held` INPUT.
+#
+#    app/app.cpp feeds PowerInput.held from ui_radio_job_busy(). The creator
+#    portal is the third radio owner and was in neither term, so the ladder
+#    reached PWR_IDLE at 120,000 ms and pwr_hook_release() ran ui_home(), whose
+#    sm_goto() runs creator_leave() - the AP torn down under a phone that was
+#    still drawing on it, 180 s before decision D7's own timer. Neither the
+#    mobile editor nor the sprite editor could be used, and docs/bench.md D2
+#    could not pass as written. networking/discovery.h:254 static_asserts the
+#    same invariant for the link job; nothing held the portal.
+body=$( awk '/^bool ui_radio_job_busy\(void\) \{/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/ui/ui.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "ui/ui.cpp has no ui_radio_job_busy() body - the power ladder's `held` input would be gone"
+for owner in network_screen_busy link_screen_busy creator_screen_busy; do
+  n=$( printf '%s\n' "$body" | { grep -cE "\\b${owner}[[:space:]]*\\(" || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "ui_radio_job_busy() does not name ${owner}() ($n) - that radio owner is not held, so hardware/power.cpp's PWR_IDLE rung takes the radio away from it at 120 s while the screen believes it still has it (ui/screen_creator.h)"
+done
+n=$( strip_comments12 < "$SKETCH/src/app/app.cpp" | { grep -cE '\bui_radio_job_busy[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "app/app.cpp does not feed PowerInput.held from ui_radio_job_busy() ($n) - every radio owner would be dropped at the idle rung and no host binary compiles this file to say so"
+# The portal's hold is set and cleared by the ONE teardown, so it can never
+# outlive the access point it speaks for.
+for fn in creator_enter creator_leave; do
+  body=$( awk "/^void ${fn}\\(void\\) \\{/{f=1} f{print} f&&/^\\}/{exit}" \
+            "$SKETCH/src/ui/screen_creator.cpp" | strip_comments12 )
+  [ -n "$body" ] || fail "ui/screen_creator.cpp has no ${fn}() body"
+  n=$( printf '%s\n' "$body" | { grep -cE '\bs_holding[[:space:]]*=' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "${fn}() does not move the portal's radio hold ($n) - set in enter and cleared in leave, or it outlives the access point (ui/screen_creator.h)"
+done
+
+# -----------------------------------------------------------------------------
+# 3. GF_TINY IS ASCII-ONLY AND NO SPANISH PROSE MAY BE DRAWN IN IT.
+#
+#    RD_FONT_TINY is u8g2_font_4x6_tr: 95 glyphs, ASCII. u8g2's drawUTF8()
+#    emits NOTHING and ADVANCES NOTHING for a codepoint the face lacks, so the
+#    character vanishes and the line closes up. Five accented strings were
+#    drawn in it - three on the first-boot flow, the first screens a device
+#    ever shows - and every golden was correct, because tests/fakes/gfx_fb.cpp
+#    painted a synthetic glyph for any codepoint at a fixed advance. The rule
+#    was written down twice in the tree (ui/gfx.h, ui/screen_creator.cpp) and
+#    enforced nowhere.
+#
+#    THE FAKE'S RECORDER IS THE REAL INSTRUMENT and it holds for a string
+#    nobody thought to list. This is the backstop: it can only see a LITERAL
+#    S(STR_X) at a GF_TINY call site, which is the form all five took.
+tiny_ids=$( grep -rhoE 'gfx_text[a-z_]*\([[:space:]]*GF_TINY[^;]*S\([[:space:]]*(STR_[A-Z0-9_]+)' \
+              "$SKETCH/src/ui" "$SKETCH/src/minigames" --include='*.cpp' 2>/dev/null \
+            | grep -oE 'STR_[A-Z0-9_]+$' | sort -u )
+for id in $tiny_ids; do
+  line=$( grep -E "/\\* ${id} \\*/" "$SKETCH/src/core/strings_es.h" | head -1 )
+  [ -n "$line" ] || continue
+  if printf '%s' "$line" | LC_ALL=C grep -q '[^ -~]'; then
+    fail "$id is drawn in GF_TINY and holds a byte outside ASCII - RD_FONT_TINY is the 95-glyph 4x6 face (ui/render.h) and drawUTF8() emits NO GLYPH AND NO ADVANCE for a codepoint it lacks, so the character disappears on the panel and the line closes up, while every host golden renders it correctly"
+  fi
+done
+n=$( strip_comments12 < "$ROOT/tests/fakes/gfx_fb.cpp" | { grep -cE '\bnote_glyph[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 2 ] || fail "tests/fakes/gfx_fb.cpp does not record glyphs the font cannot draw ($n) - the recorder is the only instrument that sees this class for a string nobody listed (tests/fakes/gfx_fb.h)"
+n=$( { grep -cE '\bfb_no_glyph[[:space:]]*\(' "$ROOT/tests/test_screens.cpp" || true; } )
+[ "${n:-0}" -ge 3 ] || fail "tests/test_screens.cpp does not assert fb_no_glyph() ($n) - the recorder would record and nothing would read it"
+
+# -----------------------------------------------------------------------------
+# 4. THE NEVER-RESIDENT EXEMPTION IS DERIVED FROM THE TABLE, NOT RETYPED.
+#
+#    tests/test_statemachine.cpp's kExits answers XK_NOT_RESIDENT for a screen
+#    nothing navigates to, and that answer asserts only sm_current() != scr -
+#    trivially true for a screen nothing has pushed YET. The real content is
+#    "nothing in the firmware ever navigates there", and it was delegated to a
+#    HARDCODED LIST OF FOUR NAMES in this file. A new XK_NOT_RESIDENT row was
+#    therefore an unverified assertion: a screen with SF_STICKY|SF_LOCK_INPUT
+#    and a live ui_goto() passed the whole suite and printed GATE OK while
+#    being a true dead end. The list comes out of the table now.
+nr=$( awk '/^static const ExitRow kExits/,/^};/' "$ROOT/tests/test_statemachine.cpp" \
+        | grep 'XK_NOT_RESIDENT' | sed -n 's/.*{[[:space:]]*\(SCR_[A-Z_0-9]*\).*/\1/p' | sort -u )
+[ -n "$nr" ] || fail "tests/test_statemachine.cpp's kExits has no XK_NOT_RESIDENT row - the derived exemption list below would be empty and this gate would pass vacuously"
+for scr in $nr; do
+  n=$( cat "$SKETCH/src/ui"/*.cpp "$SKETCH/src/app"/*.cpp 2>/dev/null | strip_comments12 \
+       | { grep -cE "\\bui_(goto|push)[[:space:]]*\\([[:space:]]*${scr}[[:space:]]*\\)" || true; } )
+  [ "${n:-0}" -eq 0 ] || fail "$scr is navigated to from src/ui or src/app ($n) - kExits exempts it as never-resident, so its exit is asserted by nothing and it now needs a real timeout and a user-visible exit (spec section 47)"
+done
+
+# -----------------------------------------------------------------------------
+# 5. THE FILM CALL-SITE COUNTS ARE EXACT, AND THE DEFINITION IS NOT A CALL.
+#
+#    Both counts were one short: `grep -c enc_film_cancel` over the stripped
+#    file matches the FUNCTION DEFINITION as well as the five call sites, so
+#    the >= 5 threshold had a spare unit and any one call site could be
+#    deleted with GATE OK printed. The gate's own comment claimed "THE COUNT IS
+#    FIVE AND IT IS EXACT". It is exact now: definitions are excluded and the
+#    comparison is -eq.
+enc="$SKETCH/src/ui/screen_encounter.cpp"
+n=$( strip_comments12 < "$enc" \
+     | { grep -E '\benc_film_cancel[[:space:]]*\([[:space:]]*\)[[:space:]]*;' || true; } \
+     | { grep -vcE '^void[[:space:]]+enc_film_cancel[[:space:]]*\(' || true; } )
+[ "${n:-0}" -eq 5 ] || fail "ui/screen_encounter.cpp has $n enc_film_cancel() CALL SITES, not 5 - the five are encounter_leave, encounter_input, capture_enter, capture_leave and capture_input, and the count excludes the definition now because including it left a spare unit that let any one of them be deleted with GATE OK printed"
+n=$( strip_comments12 < "$enc" \
+     | { grep -E '\benc_film_phase[[:space:]]*\([[:space:]]*\)' || true; } \
+     | { grep -vcE '^uint8_t[[:space:]]+enc_film_phase[[:space:]]*\(' || true; } )
+[ "${n:-0}" -eq 3 ] || fail "ui/screen_encounter.cpp has $n enc_film_phase() USES, not 3 (the definition is excluded now) - the two render call sites and the guard are what draw the films at all"
+
+# -----------------------------------------------------------------------------
+# 6. THE PASS STAMP IS ABOVE THE YIELD **AND THERE IS EXACTLY ONE OF IT**.
+#
+#    P10-C2 gated the ORDER by line number, and the mutation that beats a line
+#    comparison is not a move but an ADDITION: a second perf_note_pass() below
+#    pwr_yield() leaves the first one above it, so the gate stays green while
+#    the worst pass reads PWR_SLEEP_SLICE_MS on a healthy sleeping board -
+#    which is the exact silent lie the original gate exists to prevent.
+n=$( strip_comments12 < "$SKETCH/src/app/app.cpp" | { grep -cE '\bperf_note_pass[[:space:]]*\(' || true; } )
+[ "${n:-0}" -eq 1 ] || fail "app/app.cpp calls perf_note_pass() $n times, not exactly once - a second stamp below pwr_yield() would record the deliberate nap as work and read up to PWR_SLEEP_SLICE_MS on a healthy sleeping board, with every test and the line-order gate still green (core/perf.h)"
+
+# -----------------------------------------------------------------------------
+# 7. NO HEAP IN THE PURE LAYERS - THE GATE tests/test_soak.cpp SAID EXISTED.
+#
+#    That file's banner claimed "tools/check.sh already forbids new/malloc
+#    inside src/game/** by grep". It did not: the only src/game gate was the
+#    #include purity one, and a balanced malloc/free pair in sim_tick() ran
+#    86,400 times inside the armed window with both cases green, because the
+#    counter replaces operator new only. AddressSanitizer catches the LEAKING
+#    shape; a balanced pair is allocator churn that fragments a real heap and
+#    nothing could see it. Now the claim is true.
+# Comments are stripped PER FILE, because three of the matches this gate first
+# produced were prose - "brand new creature", "a new one would resolve as", "a
+# new Pebble is a well one" - two of them trailing comments and one a string
+# literal inside a static_assert. A line-position filter cannot see those.
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  n=$( strip_code12 < "$f" | { grep -cE '\b(malloc|calloc|realloc|strdup|aligned_alloc|free)[[:space:]]*\(' || true; } )
+  [ "${n:-0}" -eq 0 ] || fail "${f#$SKETCH/src/} calls a C allocator ($n) - the pure layers allocate nothing at all, and tests/test_soak.cpp's zero is a count of operator new only, so a balanced malloc/free pair would be invisible to it AND to AddressSanitizer (which sees a leak, not churn)"
+  n=$( strip_code12 < "$f" | { grep -cE '(^|[^_[:alnum:]:])new[[:space:]]+[A-Za-z_(]' || true; } )
+  [ "${n:-0}" -eq 0 ] || fail "${f#$SKETCH/src/} uses operator new ($n) - no heap in game logic (the red line in PEBBLEBOL_IMPLEMENTATION_PLAN.md section 2)"
+done <<EOF
+$(find "$SKETCH/src/game" "$SKETCH/src/minigames" -name '*.cpp' -o -name '*.h' 2>/dev/null)
+$SKETCH/src/ui/petfx_core.cpp
+$SKETCH/src/ui/anim_ease.cpp
+$SKETCH/src/ui/corrupt_fx.cpp
+$SKETCH/src/core/crc16.cpp
+$SKETCH/src/core/rng.cpp
+$SKETCH/src/core/utf8.cpp
+$SKETCH/src/core/perf.cpp
+$SKETCH/src/dev/diag_core.cpp
+$SKETCH/src/networking/protocol.cpp
+$SKETCH/src/networking/session.cpp
+EOF
+
+# -----------------------------------------------------------------------------
+# 8. THE ERROR SCREEN'S KINDS ARE COUNTED AGAINST THE ENUM.
+#
+#    tests/test_statemachine.cpp claimed its assertion "is what fails if a
+#    fourth kind is added without a row" and counted ROWS IN kExits. Adding a
+#    fourth ErrKind with no row left the whole suite green and printed GATE OK.
+# COMMENTS STRIPPED, AND THE MUTATION IS WHY. Written as a plain grep over the
+# header this gate printed GATE OK with ERRK_COUNT renamed away, because the
+# nine-line comment ABOVE the enum explains what ERRK_COUNT is for and the grep
+# counted that. A gate satisfied by prose about the thing it guards is this
+# project's oldest defect, reproduced inside the gate written against it.
+n=$( strip_comments12 < "$SKETCH/src/ui/screen_error.h" | { grep -cE '\bERRK_COUNT\b' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "ui/screen_error.h has no ERRK_COUNT ($n) - SCR_ERROR is three states wearing one ScreenId and the completeness claim about them would have nothing to count against"
+n=$( strip_comments12 < "$ROOT/tests/test_statemachine.cpp" | { grep -cE '\bERRK_COUNT\b' || true; } )
+[ "${n:-0}" -ge 2 ] || fail "tests/test_statemachine.cpp does not derive its ERROR-kind sweep from ERRK_COUNT ($n) - it would be a hand-typed list again, and a fourth kind with no exit row would pass"
+
+# -----------------------------------------------------------------------------
+# 8b. THE RESET-REASON TABLE IS THE ONE THE HOST SWEPT.
+#
+#     §67's "Time-based calculations work across reboot" was ticked on the
+#     arithmetic that decides what a BootKind MEANS, and nothing had ever
+#     turned an esp_reset_reason() into one: hardware/boot.cpp is compiled by
+#     no host binary and tests/fakes/boot_host.cpp collapsed seven kinds to
+#     two. The table is pure and host-swept now; this holds the two halves
+#     together - boot.cpp must go through it rather than keeping a second copy,
+#     and the ESP-IDF mapping must still be asserted where the real enum is in
+#     scope.
+n=$( strip_comments12 < "$SKETCH/src/hardware/boot.cpp" | { grep -cE '\bboot_classify[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "hardware/boot.cpp does not call boot_classify() ($n) - the reset-reason table would be a second copy again, in a file no host binary compiles, deciding whether a reboot charges elapsed game time at all (hardware/boot_reason.h)"
+n=$( strip_comments12 < "$SKETCH/src/hardware/boot.cpp" | { grep -cE 'static_assert\(\(int\)BR_' || true; } )
+[ "${n:-0}" -ge 16 ] || fail "hardware/boot.cpp asserts only $n of the 16 esp_reset_reason_t values against hardware/boot_reason.h - the host sweeps BR_* by VALUE because it cannot see the real enum, and those static_asserts are what make that a fact rather than a hopeful copy"
+n=$( strip_comments12 < "$SKETCH/src/hardware/boot_reason.h" | { grep -cE '(Arduino\.h|esp_system\.h|esp_attr\.h)' || true; } )
+[ "${n:-0}" -eq 0 ] || fail "hardware/boot_reason.h includes a device header ($n) - it exists to be host-linkable (tests/test_clock.cpp)"
+n=$( { grep -cE '\bboot_classify[[:space:]]*\(' "$ROOT/tests/test_clock.cpp" || true; } )
+[ "${n:-0}" -ge 5 ] || fail "tests/test_clock.cpp does not sweep boot_classify() ($n) - the classifier that feeds the whole absence path would be executed by nothing again"
+
+# -----------------------------------------------------------------------------
+# 9. THE PERF RECEIPT'S SCREEN COLUMN IS INTERPRETABLE, AND THE ITEM SAYS WHAT
+#    IT DID. Two dead-data findings, both in the shipping artefact.
+n=$( strip_comments12 < "$SKETCH/src/dev/godmode.cpp" | { grep -cE '\bdiag_screen_name[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "dev/godmode.cpp does not emit the ScreenId map ($n) - the DIAG,perf row's scr columns are raw enum values, docs/bench.md A1 reads them, and this enum was renumbered mid-list inside phase 10 (dev/diag_core.h)"
+n=$( strip_comments12 < "$SKETCH/src/dev/godmode.cpp" | { grep -cE '\bespnow_stats[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "dev/godmode.cpp has no reader for espnow_stats() ($n) - docs/bench.md B2 names rx_wrong_peer as its acceptance instrument and it was a dead export with no reader anywhere in the tree"
+body=$( awk '/^static void bag_use\(void\) \{/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/ui/screen_care.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "ui/screen_care.cpp has no bag_use() body"
+n=$( printf '%s\n' "$body" | { grep -cE '\bitem_reaction[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "bag_use() does not report the ItemEffect ($n) - game/inventory.cpp fills the whole struct and the screen would discard it again, answering one word for every item in the game (game/inventory.h)"
+
 echo "GATE OK"

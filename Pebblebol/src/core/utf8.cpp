@@ -92,6 +92,35 @@ uint16_t u8_from_latin1(char* dst, uint16_t cap, const char* src)
   return o;
 }
 
+// UTF-8 -> LATIN-1. The inverse of u8_from_latin1(), for DiscBeacon.name, which
+// is Latin-1 by wire contract (see the header). u8_len() decides how many bytes
+// a character occupies and refuses a lead byte whose continuations are not
+// there, so a truncated name stops the copy rather than walking past its own
+// terminator. Codepoints above 0xFF have no Latin-1 byte and become '?'.
+uint16_t u8_to_latin1(char* dst, uint16_t cap, const char* src)
+{
+  if (dst == nullptr || cap == 0u) return 0u;
+  uint16_t o = 0u;
+  if (src != nullptr) {
+    const uint8_t* p = (const uint8_t*)src;
+    while (*p != 0u) {
+      const uint8_t step = u8_len((const char*)p);
+      uint32_t cp;
+      if (step == 1u)      cp = p[0];
+      else if (step == 2u) cp = (uint32_t)(((uint32_t)(p[0] & 0x1Fu) << 6) | (uint32_t)(p[1] & 0x3Fu));
+      else                 cp = 0x100u;          // 3- and 4-byte: not Latin-1
+      // A lead byte whose continuations are missing comes back as step 1 from
+      // u8_len(), so a malformed tail is copied byte by byte rather than
+      // walking off the end. That is the same refusal every other reader makes.
+      if ((uint32_t)o + 1u + 1u > (uint32_t)cap) break;
+      dst[o++] = (char)((cp <= 0xFFu) ? (uint8_t)cp : (uint8_t)'?');
+      p += step;
+    }
+  }
+  dst[o] = '\0';
+  return o;
+}
+
 static uint16_t dst_len(const char* dst, uint16_t cap)
 {
   uint16_t n = 0u;
