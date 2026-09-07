@@ -390,6 +390,7 @@ static uint8_t first_legal(uint8_t n, bool (*ok)(uint8_t)) {
 static bool ev_is_beat(uint8_t kind) {
   switch (kind) {
     case RLE_SWITCH: case RLE_SKIPPED: case RLE_MISS:  case RLE_HIT:
+    case RLE_TYPE_EDGE:
     case RLE_STAGE:  case RLE_PROTECT: case RLE_DOT:   case RLE_CORRUPT:
     case RLE_STUN:   case RLE_CLEANSE: case RLE_FAINT: case RLE_BATTLE_END:
       return true;
@@ -465,6 +466,14 @@ static void build_message(void) {
       break;
     case RLE_MISS:
       snprintf(s_msg, sizeof s_msg, "%s %s", who, S(STR_BT_MISS));
+      break;
+    // ITS OWN BEAT, ahead of the hit it caused. The cap is one per combatant
+    // per battle (data/balance.h TYPE_MOD_MAX_HITS), so this line appears at
+    // most once per creature and its absence afterwards is the information:
+    // the same move that read "explota la debilidad" this round will not next
+    // round, and nothing else in the fight says so.
+    case RLE_TYPE_EDGE:
+      snprintf(s_msg, sizeof s_msg, "%s %s", who, S(STR_BT_EDGE));
       break;
     case RLE_HIT: {
       // The MOVE's own name, out of the attacker's own slot: an attack the

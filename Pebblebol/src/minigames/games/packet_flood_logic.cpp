@@ -22,15 +22,32 @@
 //  MISROUTING COSTS MORE THAN ROUTING PAYS (3 against 2), which is not a
 //  punishment (spec 27 forbids those) but the thing that makes the only real
 //  decision real: a fair guess is worth 2*(1/2) - 3*(1/2) = -0.5 a packet, so
-//  LETTING AN UNREADABLE PACKET FALL IS STRICTLY BETTER THAN GUESSING. The
-//  floor is zero; a run can be worth nothing, never less than nothing.
+//  letting a packet fall beats guessing at it. The floor is zero; a run can be
+//  worth nothing, never less than nothing.
+//
+//  AND THAT ASYMMETRY IS ONLY HONEST IF THERE IS TIME TO READ, which is the fix
+//  this commit makes. The pay-off above is correct and it was being applied to
+//  a schedule that squeezed the late run hard enough that the player was
+//  guessing anyway - so the game's answer to "I could not read that one" was
+//  "then you should not have played", which is a game teaching inaction.
+//
+//  THE CAUSE IS THE GAP, NOT THE PAY-OFF, so the gap is what moved:
+//  PF_GAP_MIN_MS went from 500 ms to 650, thirty percent more time per packet
+//  at the tightest point of the run, and the pay-off is untouched. Reading
+//  still beats guessing; it is now reading that the schedule leaves room for.
+//
+//  WHAT THIS DOES NOT CLAIM: that nobody ever guesses. The information is
+//  always on screen - the packet carries its digit and both mouths carry
+//  theirs - so a guess is a choice about time, and a wider window makes that
+//  choice rarer without making it impossible. Only a person with the board can
+//  say whether 650 ms is enough.
 // =============================================================================
 #include "games.h"
 
 #define PF_PACKETS       18u     // see the anti-mash note at the bottom
 #define PF_GAP0_MS      750u     // gap before packet 1
 #define PF_GAP_DEC_MS    25u     // each gap is one step shorter than the last
-#define PF_GAP_MIN_MS   500u     // ... down to this floor, from i = 10 on
+#define PF_GAP_MIN_MS   650u     // ... down to this floor, from i = 4 on
 #define PF_LIFE_MS     1800u     // a packet's life at the router, untouched
 #define PF_SWAP_AT        9u     // the packet whose spawn exchanges the mouths
 #define PF_SWAP_STEPS    24u     // 600 ms of both-mouths-inverted highlight
@@ -86,8 +103,11 @@ static constexpr uint32_t pf_spawn_ms(uint8_t n)
   return n ? pf_spawn_ms((uint8_t)(n - 1u)) + pf_gap_ms((uint8_t)(n - 1u)) : 0u;
 }
 
-// 6375 + 3500 + 1800 = 11,675 ms = 467 steps, with nobody pressing anything.
-// That is the figure, not a bound - the fastest possible run is 9,875 ms.
+// Gaps are 750, 725, 700, 675 and then 650 from i = 4 on: 2,850 + 13 * 650 =
+// 11,300 ms of schedule plus a last life of 1,800 = 13,100 ms = 524 steps, with
+// nobody pressing anything. That is the figure, not a bound. It was 11,675 ms
+// on the 500 ms floor; the extra 1,425 ms is the reading time this commit buys
+// and it still clears MG_MAX_MS by 1,900 ms.
 static_assert(pf_spawn_ms(PF_PACKETS - 1u) + PF_LIFE_MS < MG_MAX_MS,
               "the packet_flood schedule must end inside the section 29 ceiling");
 static_assert(PF_LIFE_MS / PF_GAP_MIN_MS + 1u <= PF_MAX_ALIVE,

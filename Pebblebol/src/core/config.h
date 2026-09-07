@@ -256,7 +256,13 @@ static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
 // 6. UI NAVIGATION
 // =============================================================================
 #define UI_AUTORETURN_MS        20000UL      // every screen except S0 and S4
-#define UI_COUNTDOWN_MS         5000UL       // 3 px bar shows for the last 5 s
+#define UI_COUNTDOWN_MS        10000UL       // 3 px bar shows for the last 10 s
+// The last stretch, where the bar BLINKS instead of only shrinking. A drain bar
+// is a shape you have to be looking at; a change is something peripheral vision
+// catches. The auto-return itself is unchanged at 20 s - what was wrong was that
+// a 3 px bar appearing 5 s out is not a warning anybody sees while reading.
+#define UI_COUNTDOWN_URGENT_MS  3000UL       // ... and blinks for the last 3 s
+#define UI_COUNTDOWN_BLINK_MS    150UL       // half a blink period, ~3.3 Hz
 #define UI_MODAL_HELP_MS        3000UL       // BOTH on a list = 1 line of help
 #define UI_TOAST_MS             1800UL
 #define UI_EVOLVE_FREEZE_MS     4000UL

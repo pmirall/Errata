@@ -590,9 +590,15 @@ uint16_t battle_damage_pre_roll(const BattleCombatant& u, const BattleCombatant&
   return (uint16_t)dmg;
 }
 
+// `spent` reports the modifier this call ACTUALLY applied - 0 when there was no
+// type relation or when the cap had already been used up. An out-parameter
+// rather than a second call to type_mod_of() at the call site: the cap is spent
+// here, so only here knows whether it was.
 static uint16_t compute_damage(BattleState& st, BattleCombatant& u,
-                               const BattleCombatant& f, const AttackDef& a)
+                               const BattleCombatant& f, const AttackDef& a,
+                               int8_t* spent)
 {
+  if (spent != nullptr) *spent = 0;
   int8_t m = type_mod_of(a.type, f.type);
   if (m != 0) {
     // The cap zeroes a DISADVANTAGE as well as an advantage (sim_engine.py
@@ -602,7 +608,10 @@ static uint16_t compute_damage(BattleState& st, BattleCombatant& u,
     // THE ENGINE'S ALONE: battle_damage_pre_roll() only reads the modifier it is
     // handed, which is what lets the AI predict a hit without paying for one.
     if (u.type_edge_left == 0u) m = 0;
-    else                        u.type_edge_left = (uint8_t)(u.type_edge_left - 1u);
+    else {
+      u.type_edge_left = (uint8_t)(u.type_edge_left - 1u);
+      if (spent != nullptr) *spent = m;
+    }
   }
   uint32_t dmg = (uint32_t)battle_damage_pre_roll(u, f, a, m);
 
@@ -764,8 +773,18 @@ static void resolve_one(BattleState& st, uint8_t side, BattleLog* log)
 
   uint16_t dealt = 0u;
   if (a->power > 0u) {
-    dealt = compute_damage(st, u, f, *a);
+    int8_t edge = 0;
+    dealt = compute_damage(st, u, f, *a, &edge);
     hp_take(f, dealt);
+    // BEFORE the hit, so a transcript reads "the weakness was exploited" and
+    // then the number it produced. b is what is LEFT, which with
+    // TYPE_MOD_MAX_HITS at 1 is always 0 - the field is there so the day the cap
+    // moves the log says so without this line changing.
+    if (edge != 0) {
+      log_push(log, (uint8_t)RLE_TYPE_EDGE, side, me.active,
+               (uint8_t)((edge > 0) ? 1u : 2u), (uint16_t)u.type_edge_left,
+               st.round, 0u);
+    }
     log_push(log, (uint8_t)RLE_HIT, side, me.active, me.pending_index, dealt, st.round, 0u);
     log_push(log, (uint8_t)RLE_HP, (uint8_t)(side ^ 1u), you.active, 0u, f.hp_cur, st.round, 0u);
   } else {

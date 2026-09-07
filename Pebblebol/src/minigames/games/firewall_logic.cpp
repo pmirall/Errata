@@ -12,7 +12,7 @@
 //  There is no partial credit, no proximity term and no overlap window, and
 //  the score is a pure function of an EVENT COUNT:
 //
-//      c.score == fw_blocked(c) * FW_ROUND_MAX
+//      c.score == max(0, fw_blocked(c) - FW_LUCK_FLOOR) * FW_ROUND_MAX
 //
 //  written as that product rather than accumulated with +=, so the identity is
 //  true by construction. tests/test_minigames.cpp asserts it at every step of
@@ -20,10 +20,27 @@
 //  someone adds "the shield is close, give a little" here, or "an event
 //  happened, add a fixed amount" there, a test fails the same day.
 //
-//  STANDING STILL SCORES EXACTLY ZERO, structurally rather than statistically:
-//  a packet's lane is drawn from the four lanes the shield is NOT in, at the
-//  instant of the spawn. Every packet demands at least one press. Under naive
-//  uniform spawning an idle run would block about one in five.
+//  STANDING STILL SCORES ZERO IN EXPECTATION, AND THE DRAW IS HONEST. It was
+//  neither until this commit: a packet's lane was drawn from the four lanes the
+//  shield was NOT in, so the packet dodged the player. That produced the right
+//  number - an idle run scored exactly nothing - by making the game cheat, and a
+//  player who noticed would be right to stop trusting it.
+//
+//  THE DRAW IS NOW UNIFORM OVER ALL FIVE LANES and the luck is subtracted
+//  instead. An idle run blocks FW_PACKETS / FW_LANES packets by chance, so that
+//  many blocks are not paid for:
+//
+//      score == max(0, blocked - FW_LUCK_FLOOR) * FW_ROUND_MAX
+//
+//  FW_LUCK_FLOOR IS DERIVED, NOT CHOSEN - it IS that expectation - which is why
+//  FW_PACKETS is 10 rather than 8: ten packets over five lanes puts the floor at
+//  exactly 2, leaves 8 scoring blocks, and keeps FW_ROUND_MAX at the same 125 a
+//  perfect run has always been worth. Pick any other packet count and either the
+//  floor stops being the expectation or the perfect run stops being MG_SCORE_MAX.
+//
+//  WHAT THIS COSTS, SAID PLAINLY: a lucky idle run can still block 4 or 5 and
+//  score. The floor removes the MEAN, not the variance. What it buys is that the
+//  packet no longer knows where the shield is.
 //
 //  NO PUNISHMENT (spec 27): a leaked packet costs 125 points and nothing else,
 //  ctx.note is never written, and a press into a wall is drawn rather than
@@ -33,31 +50,42 @@
 #include "games.h"
 
 #define FW_LANES        5u
-#define FW_PACKETS      8u
+#define FW_PACKETS     10u      // 10 / 5 lanes puts FW_LUCK_FLOOR at exactly 2
+#define FW_LUCK_FLOOR  (FW_PACKETS / FW_LANES)      // what chance alone blocks
 #define FW_FALL_MAX  1600u      // packet 0 falls for this long
 #define FW_FALL_STEP  100u      // each packet is one notch faster
 #define FW_GAP_MS     250u      // the outcome pause after every impact
-#define FW_ROUND_MAX (MG_SCORE_MAX / FW_PACKETS)   // 125
+// The PAID blocks are the ones above the luck floor, so the denominator is the
+// scoring range and not the packet count. 1000 / (10 - 2) = 125, unchanged.
+#define FW_ROUND_MAX (MG_SCORE_MAX / (FW_PACKETS - FW_LUCK_FLOOR))   // 125
+static_assert(FW_LUCK_FLOOR * FW_LANES == FW_PACKETS,
+              "FW_LUCK_FLOOR must BE the idle expectation, not a number near it");
+static_assert((FW_PACKETS - FW_LUCK_FLOOR) * FW_ROUND_MAX == MG_SCORE_MAX,
+              "a perfect firewall run must still be worth exactly MG_SCORE_MAX");
 
 struct FwState {
   uint16_t spawn_t0;   // ctx.t_ms when the current packet spawned
-  uint8_t  lane;       // its lane, 0..FW_LANES-1; never the shield's at spawn
+  uint8_t  lane;       // its lane, 0..FW_LANES-1; a uniform draw over all five
   uint8_t  shield;     // CARRIES OVER between packets - that is the game
   uint8_t  outcome;    // 0 in flight, 1 blocked, 2 leaked; also the once-latch
   uint8_t  blocked;    // the multiplicand in the score identity
-  uint8_t  history;    // bit i = packet i was blocked, for the pips
+  uint16_t history;    // bit i = packet i was blocked, for the pips
 };
 static_assert(sizeof(FwState) <= MG_STATE_BYTES, "FwState must fit MgCtx::state");
 
-static_assert(MG_SCORE_MAX % FW_PACKETS == 0u,
+static_assert(MG_SCORE_MAX % (FW_PACKETS - FW_LUCK_FLOOR) == 0u,
               "perfect firewall play must reach exactly MG_SCORE_MAX");
-static_assert(FW_PACKETS <= 8u, "FwState::history is a byte mask");
+// Was <= 8 while history was a uint8_t. FW_PACKETS went to 10 so FW_LUCK_FLOOR
+// could BE the idle expectation; the mask widened with it rather than the packet
+// count being bent back to fit a field.
+static_assert(FW_PACKETS <= 16u, "FwState::history is a 16-bit mask");
 static_assert(FW_FALL_MAX > (FW_PACKETS - 1u) * FW_FALL_STEP,
               "the fall ramp must not underflow on the last packet");
 static_assert(FW_FALL_MAX % MG_STEP_MS == 0u && FW_FALL_STEP % MG_STEP_MS == 0u &&
               FW_GAP_MS % MG_STEP_MS == 0u,
               "every firewall boundary must land on a step");
-// 2000 + 10000 = 12,000 ms = 480 steps. Best case, worst case and idle case are
+// sum(1600 - 100i, i=0..9) + 10 gaps of 250 = 11,500 + 2,500 = 14,000 ms =
+// 560 steps, against MG_MAX_MS 15,000. Best case, worst case and idle case are
 // the same number: a press moves the shield and can neither resolve a packet
 // early nor extend one.
 static_assert(FW_PACKETS * FW_GAP_MS
@@ -110,9 +138,11 @@ uint8_t fw_pip(const MgCtx& c, uint8_t i)
 static void fw_spawn(MgCtx& c)
 {
   FwState& s = mg_state<FwState>(c);
-  // A uniform draw over exactly the four lanes the shield is NOT in.
-  const uint8_t pick = (uint8_t)rng_next_below(c.rng, (uint32_t)(FW_LANES - 1u));
-  s.lane     = (uint8_t)((pick >= s.shield) ? pick + 1u : pick);
+  // A UNIFORM DRAW OVER ALL FIVE LANES, INCLUDING THE SHIELD'S. It excluded the
+  // shield's lane until this commit, which is the difference between a hard game
+  // and a rigged one. The luck that buys is taken back by FW_LUCK_FLOOR at the
+  // score, not here - see the banner.
+  s.lane     = (uint8_t)rng_next_below(c.rng, (uint32_t)FW_LANES);
   s.outcome  = 0u;
   s.spawn_t0 = (uint16_t)c.t_ms;
 }
@@ -137,7 +167,13 @@ static void fw_step(MgCtx& c)
       s.outcome  = 1u;
       s.history  = (uint8_t)(s.history | (uint8_t)(1u << c.round));
       ++s.blocked;
-      c.score    = (uint16_t)(s.blocked * FW_ROUND_MAX);
+      // The paid blocks only. Written as the product of a clamped difference,
+      // never accumulated, so the identity in the banner is true by
+      // construction at every step - the property tests/test_minigames.cpp
+      // asserts on every tape.
+      const uint8_t paid = (s.blocked > (uint8_t)FW_LUCK_FLOOR)
+                             ? (uint8_t)(s.blocked - (uint8_t)FW_LUCK_FLOOR) : 0u;
+      c.score    = (uint16_t)(paid * FW_ROUND_MAX);
     } else {
       s.outcome = 2u;
     }
@@ -179,13 +215,16 @@ extern const MgLogic MG_FIREWALL = {
 
 // -----------------------------------------------------------------------------
 //  THE CHEAPEST CHEAT is oscillating - alternating L and R as fast as the
-//  button edges allow so the shield sweeps two adjacent lanes. At spawn the
-//  packet is drawn from the four lanes the shield is not in, so it lands in the
-//  oscillator's partner lane one time in four, and the single sampled impact
-//  catches the sweep on the right side of that pair about half the time: one
-//  packet in eight, about 125 of 1000, against 1000 for real play and 0 for
-//  standing still. There is no anti-mash penalty, no lockout and no cooldown -
-//  scoring 125 instead of 1000 is cost enough, and spec 27 forbids the rest.
+//  button edges allow so the shield sweeps two adjacent lanes. With the uniform
+//  draw a packet lands in one of those two lanes 2 times in 5, and the single
+//  sampled impact catches the sweep on the right side of the pair about half the
+//  time: one packet in five, so about 2 blocks in 10 - WHICH IS EXACTLY
+//  FW_LUCK_FLOOR. The oscillator now scores what standing still scores, nothing,
+//  and it gets there through the same subtraction rather than through a rule
+//  written against it. Under the old rigged draw it scored 125 of 1000.
+//
+//  There is still no anti-mash penalty, no lockout and no cooldown: spec 27
+//  forbids them and, with the floor doing this work, none is needed.
 //
 //  The collapse risk in reverse, worth naming: a future "make it easier" that
 //  widens the shield to two lanes or pays for adjacency turns the score from a

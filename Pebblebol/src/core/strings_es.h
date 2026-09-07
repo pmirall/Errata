@@ -706,6 +706,7 @@ enum StrId : uint16_t {
   STR_BT_HELP,
   STR_BT_ENTER,
   STR_BT_MISS,
+  STR_BT_EDGE,
   STR_BT_FAINT,
   STR_BT_PROTECT,
   STR_BT_DOT,
@@ -1466,6 +1467,7 @@ inline constexpr const char* const ES[] = {
   , /* STR_BT_HELP */             "A elige, B vuelve. Cambiar cuesta el turno."
   , /* STR_BT_ENTER */            "entra"
   , /* STR_BT_MISS */             "falla"
+  , /* STR_BT_EDGE */             "explota la debilidad"
   , /* STR_BT_FAINT */            "cae"
   , /* STR_BT_PROTECT */          "se protege"
   , /* STR_BT_DOT */              "daño"
