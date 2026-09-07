@@ -99,7 +99,10 @@ if [ "$pad" -ne 0 ]; then
 fi
 
 [ $(( n % 4 )) -eq 0 ] || fail "page count $n is not a multiple of 4; cannot saddle-stitch"
-[ "$n" -ge 16 ] && [ "$n" -le 32 ] || fail "page count $n outside the agreed 16-32 range"
+# The range is a saddle-stitch sanity check, not a budget: 4 pages could not
+# hold the legal block and past ~64 the spine stops folding flat. The BUDGET is
+# docs/manual/README.md, which prices the extent per unit.
+[ "$n" -ge 16 ] && [ "$n" -le 64 ] || fail "page count $n outside the bindable 16-64 range"
 
 # --- 4. the print PDF must carry a TrimBox ------------------------------------
 # Bleed with no TrimBox is bleed the printer cannot trim to. Typst writes one
@@ -116,6 +119,15 @@ if [ "$WANT_PNG" -eq 1 ]; then
   typst compile --root "$MANUAL" --format png --ppi 150 \
     --input "draft=$DRAFT_FLAG" --input "pad=$pad" \
     "$MANUAL/manual.typ" "$OUT/p{0p}.png" || fail "png render"
+fi
+
+# --- 5. orphan pages ----------------------------------------------------------
+# A section that overruns its page by two lines leaves the next page 99% white.
+# It is invisible in the source, invisible in the page count, and obvious the
+# moment anyone holds the booklet. Only measurable once rendered, so it lives
+# here rather than in the gate.
+if [ "$WANT_PNG" -eq 1 ]; then
+  python3 "$ROOT/tools/page_fill.py" "$OUT" || fail "orphan page(s); rebalance the section before them"
 fi
 
 echo "manual: $NAME.pdf, $n pages (pad $pad), A6 105x148 mm + 3 mm bleed"

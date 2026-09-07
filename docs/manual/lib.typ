@@ -150,9 +150,11 @@
 // 19" silently became wrong. Label a section, point at the label.
 #let pg(lbl) = context str(counter(page).at(lbl).first())
 
+// breakable: false because a warning split across a page break reads as two
+// half-warnings, and the page-count pad absorbs the leftover space anyway.
 #let warnbox(body) = block(
   width: 100%, inset: 2.2mm, stroke: 1pt + black, radius: 0.6mm,
-  above: 2mm, below: 2mm, body,
+  above: 2mm, below: 2mm, breakable: false, body,
 )
 
 // Placeholder for the three drawings that cannot come from a screenshot.

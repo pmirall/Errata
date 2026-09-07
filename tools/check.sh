@@ -2538,6 +2538,35 @@ if [ -f "$ROOT/tools/pbm2svg.py" ] && [ -d "$ROOT/docs/manual" ]; then
         | { grep -vE '^[^:]+:[0-9]+: *//' || true; } | wc -l )
   [ "$n" -eq 0 ] || fail "hard-coded page number in the manual; use pg(<label>) ($n)"
 
+  # A SECTION THAT LOST ITS BODY. Editing the manual by replacing spans of
+  # .typ left "= Tu privacidad" standing with nothing under it: a heading alone
+  # on a page, and the privacy statement - which the legal block cross-refers
+  # to - silently gone from a booklet that was still building, still passing
+  # every other gate, and still 44 pages long. Nothing could see it.
+  n=$( python3 - "$ROOT/docs/manual/content" <<'PY' || true
+import pathlib, re, sys
+bad = []
+for f in sorted(pathlib.Path(sys.argv[1]).glob("*.typ")):
+    for chunk in re.split(r"(?m)^= ", f.read_text(encoding="utf-8"))[1:]:
+        title, _, body = chunk.partition("\n")
+        real = [l for l in body.splitlines()
+                if l.strip() and not l.strip().startswith(("//", "#pagebreak"))]
+        if len(real) < 2:
+            bad.append(f"{f.name}: {title.strip()}")
+print("\n".join(bad))
+PY
+)
+  [ -z "$n" ] || fail "a manual section has no content: $n"
+
+  # NO MANUAL SCREEN MAY BE A PLACEHOLDER. The link page illustrated trading
+  # with soon_trade - the "PROXIMAMENTE, fase 7" card - beside prose saying
+  # trading works. SCR_TRADE is not reachable from anywhere in the firmware;
+  # that golden exists to test the SOON frame, not to show a player a screen.
+  # A manual that illustrates a feature with its own "not built yet" card is
+  # worse than one that omits it.
+  n=$( { grep -oE 'screen\("soon_[a-z_]+"' "$ROOT/docs/manual/content/guide.typ" || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "the manual illustrates a screen with a SOON placeholder ($n)"
+
   # No legal fact may be typed into the manual either. Every company name,
   # address, URL, e-mail and registration number comes from
   # product_facts.toml through fact(), so filling the manual in is editing one

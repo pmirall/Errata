@@ -83,20 +83,54 @@
   Al poner las pilas el aparato arranca solo. Verás el nombre del producto y la
   versión del firmware.
 
-  La primera vez te pedirá la *hora*. Ajústala: el Pebble duerme de noche y
-  come de día, y sin hora correcta su ritmo no cuadra con el tuyo.
+  Después te pedirá la *hora*. Ajústala: tu Pebble duerme de noche y come de
+  día, y sin hora correcta su ritmo no cuadra con el tuyo. Sin fecha tampoco
+  puedes explorar.
 
-  Con *A* cambias de digito. Con *B mantenido* sumas uno. Cuando la hora sea
-  correcta, mantén *B* sobre el último campo para guardarla.
+  Con *A* cambias de dígito. Con *B mantenido* sumas uno.
 ][
   The device starts as soon as the cells go in. You will see the product name
   and the firmware version.
 
-  The first time, it asks for the *time*. Set it: the Pebble sleeps at night
-  and eats by day, and with the wrong time its rhythm will not match yours.
+  Then it asks for the *time*. Set it: your Pebble sleeps at night and eats by
+  day, and with the wrong time its rhythm will not match yours. Without a date
+  you cannot explore either.
 
-  *A* moves between digits. *Hold B* adds one. When the time is right, hold *B*
-  on the last field to save it.
+  *A* moves between digits. *Hold B* adds one.
+]
+
+// --- 5. First boot: name and starter -----------------------------------------
+#pagebreak()
+= Tu primer Pebble / Your first Pebble
+
+#grid(columns: (1fr, 1fr), column-gutter: 3mm,
+  screen("setup_name"),
+  screen("setup_starter"),
+)
+
+#v(1.5mm)
+#bi[
+  La primera vez, y solo la primera, el aparato te deja ponerle *nombre* a tu
+  Pebble y *elegir* con cuál empiezas.
+
+  Para escribir el nombre, *A* recorre las letras y *B mantenido* pasa a la
+  siguiente. Cuando te guste, *mantén A* para aceptar.
+
+  Luego eliges Pebble: *A* pasa de uno a otro, *mantén A* para quedártelo.
+
+  Si prefieres saltarte todo esto, pulsa *A + B*. El aparato elige por ti y no
+  vuelve a preguntar.
+][
+  The first time, and only the first time, the device lets you *name* your
+  Pebble and *choose* which one you start with.
+
+  To type the name, *A* walks the letters and *hold B* moves to the next one.
+  When you like it, *hold A* to accept.
+
+  Then you pick a Pebble: *A* moves between them, *hold A* keeps one.
+
+  If you would rather skip all of this, press *A + B*. The device chooses for
+  you and does not ask again.
 ]
 
 // --- 5. THE TWO BUTTONS - the most important page in the manual --------------
@@ -182,6 +216,54 @@
   Menus are rings: past the last item you are back at the first.
 ]
 
+// --- Pebble states -----------------------------------------------------------
+#pagebreak()
+= Cómo está tu Pebble / How your Pebble is
+
+#bi[
+  No hace falta abrir ningún menú: la pantalla de inicio ya te lo dice.
+][
+  You do not have to open a menu: the home screen already tells you.
+]
+
+#v(2mm)
+#grid(columns: (1fr, 1fr, 1fr), column-gutter: 2mm,
+  screen("home_sleeping", width: 30mm), screen("home_sick", width: 30mm),
+  screen("home_corrupted", width: 30mm),
+)
+
+#v(1.5mm)
+#set text(size: 6.8pt)
+#table(
+  columns: (0.8fr, 1fr, 1fr),
+  stroke: 0.3pt + luma(50%), inset: 1.2mm,
+  [*Lo que ves*], [*Qué pasa*], [#text(fill: luma(25%))[*What is happening*]],
+
+  [Ojos cerrados], [Duerme. De noche gasta mucho menos. Déjalo.],
+  [#text(fill: luma(25%))[Asleep. It uses far less at night. Leave it be.]],
+
+  [Postura caída], [Está enfermo. Usa #scr[SALUD] o un *Parche*.],
+  [#text(fill: luma(25%))[Sick. Use #scr[SALUD] or a *Parche*.]],
+
+  [Píxeles que bailan], [*Corrupto.* Dura 24 h y se pasa solo. Un *Antivirus* lo quita antes.],
+  [#text(fill: luma(25%))[*Corrupted.* It lasts 24 h and clears itself. An *Antivirus* ends it sooner.]],
+
+  [Ranura vacía], [No llevas ninguno seleccionado. Elige uno en #scr[CAJA].],
+  [#text(fill: luma(25%))[None selected. Pick one from #scr[CAJA].]],
+)
+
+#v(1.5mm)
+#set text(size: 8pt)
+#warnbox[
+  #set text(size: 7pt)
+  La corrupción no es una avería y no se cura sola con comida: es un estado que
+  dura 24 h, cambia su aspecto y afecta al combate. También abre dos evoluciones
+  que no existen de otra forma. \
+  #text(fill: luma(25%))[Corruption is not a fault and food does not fix it: it
+  is a 24-hour state that changes how it looks and how it fights. It also opens
+  two evolutions that exist no other way.]
+]
+
 // --- 7. Care -----------------------------------------------------------------
 #pagebreak()
 = Cuidar / Care
@@ -212,7 +294,87 @@
   their own, slowly, over about 24 hours.
 ]
 
-// --- 8. Play -----------------------------------------------------------------
+// --- The bag ------------------------------------------------------------------
+#pagebreak()
+= La mochila / The bag
+
+#grid(columns: (1fr, 1fr), column-gutter: 3mm,
+  screen("care_bag_two"),
+  screen("care_bag_empty"),
+)
+
+#v(1.5mm)
+#bi[
+  Explorando encuentras objetos. Están en #scr[MOCHILA], dentro de
+  #scr[CUIDAR]. Cada uno hace una cosa concreta.
+][
+  Exploring turns up items. They live in #scr[MOCHILA], inside #scr[CUIDAR].
+  Each one does one specific thing.
+]
+
+#v(1.5mm)
+#set text(size: 6.8pt)
+#table(
+  columns: (0.75fr, 1fr, 1fr),
+  stroke: 0.3pt + luma(50%), inset: 1.1mm,
+  [*Objeto / Item*], [*Para qué*], [#text(fill: luma(25%))[*What for*]],
+  [Bit Dulce \ Byte Dulce \ Megadulce], [Comida, de menos a más.],
+    [#text(fill: luma(25%))[Food, small to large.]],
+  [Cebo], [Hace más probable el próximo encuentro.],
+    [#text(fill: luma(25%))[Makes the next encounter likelier.]],
+  [Jaula Hash], [Sube la probabilidad de capturar.],
+    [#text(fill: luma(25%))[Raises your capture chance.]],
+  [Parche], [Cura. Quita el estado enfermo.],
+    [#text(fill: luma(25%))[Heals. Clears the sick state.]],
+  [Antivirus], [Lo único que corta la corrupción antes de las 24 h.],
+    [#text(fill: luma(25%))[The only thing that ends corruption before 24 h.]],
+  [Turbo Chip \ Escudo RAM], [Mejoran una estadística durante unas rondas de combate.],
+    [#text(fill: luma(25%))[Buff one stat for a few battle rounds.]],
+  [Llave Raíz], [Desbloquea evoluciones que piden un objeto.],
+    [#text(fill: luma(25%))[Unlocks evolutions that require an item.]],
+)
+
+#v(1.5mm)
+#set text(size: 8pt)
+#bi[
+  Si un objeto no sirve en ese momento, el aparato te lo dice
+  (#scr[Ahora no hace nada]) y no lo gasta.
+][
+  If an item would do nothing right now, the device says so
+  (#scr[Ahora no hace nada]) and does not spend it.
+]
+
+// --- The card -----------------------------------------------------------------
+#pagebreak()
+= La ficha / The card
+
+#grid(columns: (1fr, 1fr), column-gutter: 3mm,
+  screen("status_a_starter"),
+  screen("status_b_genome"),
+)
+
+#v(1.5mm)
+#bi[
+  #scr[ESTADO], dentro de #scr[CUIDAR], abre la ficha completa. Son *dos
+  páginas*: *A* pasa de una a otra.
+
+  La primera trae nivel, experiencia, tipo y estadísticas. La segunda trae el
+  *genoma* y los *rasgos*: los datos internos que hacen que dos Pebbles de la
+  misma especie no sean iguales.
+
+  El *tipo* decide el triángulo del combate.
+][
+  #scr[ESTADO], inside #scr[CUIDAR], opens the full card. There are *two
+  pages*: *A* moves between them.
+
+  The first has level, experience, type and stats. The second has the *genome*
+  and the *traits*: the internal data that makes two Pebbles of the same
+  species different from each other.
+
+  *Type* decides the battle triangle.
+]
+
+// --- 8. Play ------------------------------------------------------------------
 #pagebreak()
 = Jugar / Play
 
@@ -220,16 +382,186 @@
 
 #v(2mm)
 #bi[
-  Los minijuegos suben la felicidad y dan algo de experiencia. Duran poco a
-  propósito: el Pebblebol esta pensado para ratos sueltos, no para sesiones
-  largas.
+  Hay *seis* minijuegos. Suben la felicidad y dan experiencia. Cada partida
+  dura entre *5 y 15 segundos* y ninguno pide reflejos fuera de la propia
+  partida.
 
-  Ningún minijuego pide reflejos rápidos fuera del propio minijuego.
+  Después de jugar hay *dos minutos* de espera antes de la siguiente. No es un
+  castigo: evita que el juego se convierta en pulsar el mismo botón sin parar.
+
+  Todos se manejan con los mismos dos botones. Las dos páginas siguientes
+  explican cada uno.
 ][
-  Minigames raise happiness and give a little experience. They are short on
-  purpose: the Pebblebol is built for odd moments, not long sessions.
+  There are *six* minigames. They raise happiness and give experience. A round
+  lasts *5 to 15 seconds* and none of them asks for reflexes outside the round
+  itself.
 
-  No minigame asks for fast reactions outside the minigame itself.
+  After playing there is a *two minute* wait before the next one. It is not a
+  punishment: it stops the game becoming one button pressed forever.
+
+  All six use the same two buttons. The next two pages explain each one.
+]
+
+// --- The six games, one page per pair -------------------------------------------
+// Two games per page, and the pair is not arbitrary: each page holds the two
+// that are easiest to confuse with each other, so the contrast does the
+// explaining. PING/SECUENCIA are the two "watch then press" games,
+// CORTAFUEGOS/BUFFER the two "hold a position" games, and PAQUETES/BORRAR the
+// two where the right move is often to do nothing.
+#pagebreak()
+= PING y SECUENCIA / PING and SEQUENCE
+
+#grid(columns: (1fr, 1fr), column-gutter: 3mm,
+  screen("mg_ping_lit", width: 42mm), screen("mg_sequence_show", width: 42mm),
+)
+
+#v(2mm)
+#bi[
+  *PING.* Se enciende un lado y tienes que pulsar *ese* lado. Cinco rondas.
+
+  Antes de encenderse hay una espera al azar, así que mantener los dos botones
+  no vale de nada: pulsar antes de tiempo no puntúa. Espera a ver la luz.
+][
+  *PING.* One side lights up and you press *that* side. Five rounds.
+
+  The light comes after a random wait, so holding both buttons gains nothing:
+  pressing early scores nothing. Wait until you see it.
+]
+
+#v(2mm)
+#bi[
+  *SECUENCIA.* El aparato enseña una serie de *A* y *B* y tú la repites. Tres
+  niveles, de 3, 4 y 5 símbolos.
+
+  Mira la secuencia entera antes de contestar. Hay un tiempo límite para
+  responder, pero es más que suficiente si no te precipitas.
+][
+  *SEQUENCE.* The device shows a run of *A* and *B* and you repeat it. Three
+  levels, of 3, 4 and 5 symbols.
+
+  Watch the whole sequence before answering. There is a deadline to reply, but
+  it is generous if you do not rush.
+]
+
+#pagebreak()
+= PAQUETES / PACKETS
+
+#grid(columns: (1fr, 1fr), column-gutter: 3mm,
+  screen("mg_packet_flood_run", width: 42mm),
+  screen("mg_packet_flood_reroute", width: 42mm),
+)
+
+#v(2mm)
+#bi[
+  Cada paquete lleva un *número*, y ese número está escrito en una de las dos
+  bocas. Hay que leerlo y mandarlo a la suya.
+
+  No es un juego de reflejos: la respuesta nunca está donde está el estímulo.
+  Tienes que apartar la vista del paquete, buscar el número y volver.
+
+  A mitad de partida *las bocas se cambian de sitio*. Los números no se mueven;
+  las puertas sí. Todo lo que habías memorizado deja de valer y no queda más
+  remedio que volver a leer.
+][
+  Each packet carries a *number*, and that number is printed on one of the two
+  mouths. You read it and send it to its own.
+
+  This is not a reaction game: the answer is never where the stimulus is. You
+  have to look away from the packet, find the number, and come back.
+
+  Halfway through, *the mouths swap sides*. The numbers do not move; the doors
+  do. Everything you had memorised stops being true and the only way back is to
+  start reading again.
+]
+
+#v(2mm)
+#warnbox[
+  #set text(size: 7pt)
+  *Fallar cuesta más que acertar.* Si no llegas a leer un paquete, déjalo caer:
+  adivinar sale peor que no hacer nada. Nunca puedes bajar de cero. \
+  #text(fill: luma(25%))[*Getting it wrong costs more than getting it right.*
+  If you cannot read a packet in time, let it fall: guessing is worse than
+  doing nothing. You can never go below zero.]
+]
+
+#pagebreak()
+= CORTAFUEGOS y BUFFER / FIREWALL and BUFFER
+
+#grid(columns: (1fr, 1fr), column-gutter: 3mm,
+  screen("mg_firewall_run", width: 42mm),
+  screen("mg_buffer_run", width: 42mm),
+)
+
+#v(2mm)
+#bi[
+  *CORTAFUEGOS.* Cinco carriles y un escudo que mueves con los dos botones.
+  Llegan ocho paquetes, uno a uno, y el escudo tiene que estar *en ese carril*
+  en el instante del impacto.
+
+  Quedarse a un carril vale lo mismo que quedarse en la pared: nada. Y quedarse
+  quieto puntúa *cero*, siempre, porque el paquete nunca elige el carril donde
+  ya estás.
+][
+  *FIREWALL.* Five lanes and a shield you move with the two buttons. Eight
+  packets arrive, one at a time, and the shield must be *in that lane* at the
+  instant of impact.
+
+  One lane away is worth what the far wall is worth: nothing. And standing
+  still scores *zero*, always, because a packet never picks the lane you are
+  already in.
+]
+
+#v(2mm)
+#bi[
+  *BUFFER.* Una zona segura que se mueve y un cursor que mantienes dentro. No
+  hay rondas ni objetivos: puntúa la *fracción de tiempo* que pasas dentro.
+
+  Es el que más despista, y por una razón concreta: el botón no coloca el
+  cursor, *lo empuja*. Es pilotar, no apuntar. La primera corrección siempre se
+  pasa de largo.
+][
+  *BUFFER.* A safe zone that drifts and a cursor you keep inside it. No rounds
+  and no targets: you score the *fraction of the time* you spend inside.
+
+  It is the one that catches people, for a specific reason: the button does not
+  place the cursor, it *pushes* it. Flying, not pointing. Your first correction
+  always overshoots.
+]
+
+#pagebreak()
+= BORRAR / DELETE
+
+#grid(columns: (1fr, 1fr), column-gutter: 3mm,
+  screen("mg_delete_run", width: 42mm),
+  screen("mg_delete_purged", width: 42mm),
+)
+
+#v(2mm)
+#bi[
+  Cinco huecos. Aparecen bloques con una mecha visible y se van solos. Unos
+  están sanos y otros corruptos.
+
+  Un botón *mueve* el cursor, el otro *gasta* una de siete cargas de borrado
+  sobre lo que tengas debajo.
+
+  Las siete cargas no se recuperan, y siempre habrá más de un bloque corrupto a
+  la vez, así que no puedes con todos: hay que elegir. Borra solo los rotos,
+  porque cada bloque sano que borres es una carga tirada.
+
+  Da igual lo rápido que vayas. Solo cuenta cuántos rotos aciertas.
+][
+  Five slots. Blocks appear on a visible fuse and vanish on their own. Some are
+  healthy and some are corrupted.
+
+  One button *walks* the caret, the other *spends* one of seven purge charges
+  on whatever is under it.
+
+  The seven charges never come back, and there will always be more than one
+  corrupted block at once, so you cannot get them all: you have to choose.
+  Purge only the broken ones, because every healthy block you purge is a charge
+  thrown away.
+
+  Speed does not matter. Only how many broken ones you get.
 ]
 
 // --- 9-10. Explore (spread) --------------------------------------------------
@@ -259,12 +591,81 @@
 ]
 
 #pagebreak()
+= Qué te da una red / What a network gives
+
+#grid(columns: (1fr, 1fr), column-gutter: 3mm, row-gutter: 2mm,
+  screen("encounter_wild"), screen("encounter_item"),
+)
+
+#v(1.5mm)
+#bi[
+  De mirar una red sale una de cinco cosas: un Pebble salvaje, uno raro, un
+  objeto, un suceso especial, o nada. Que salga nada es normal y no es un
+  fallo.
+
+  Un *suceso especial* puede dejar a tu Pebble *corrupto durante 24 h*. No es
+  una avería: cambia su aspecto, cambia cómo combate, y abre dos evoluciones
+  que no puedes conseguir de otra forma.
+
+  Después de mirarla, esa red concreta se agota durante *dos horas exactas*.
+  Otras redes siguen valiendo, así que lo que hay que hacer es moverse, no
+  esperar.
+][
+  Checking a network gives one of five things: a wild Pebble, a rare one, an
+  item, a special event, or nothing. Nothing is a normal outcome, not a fault.
+
+  A *special event* can leave your Pebble *corrupted for 24 h*. It is not a
+  fault: it changes how it looks, changes how it fights, and opens two
+  evolutions you cannot get any other way.
+
+  Once checked, that particular network goes quiet for *exactly two hours*.
+  Other networks still work, so the thing to do is move, not wait.
+]
+
+#v(1.5mm)
+#align(center, screen("encounter_special", width: 46mm))
+
+#pagebreak()
+= Capturar / Catching
+
+#grid(columns: (1fr, 1fr), column-gutter: 3mm,
+  screen("capture_ready", width: 42mm),
+  screen("capture_caught_seal", width: 42mm),
+)
+
+#v(1.5mm)
+#bi[
+  Ante un Pebble salvaje puedes capturarlo o dejarlo marchar. Dejarlo marchar
+  es una opción legítima, no una derrota.
+
+  *Tienes dos intentos.* Si los dos fallan, se va. No hay un tercero.
+
+  La probabilidad depende sobre todo de la *diferencia de nivel*: cuanto más
+  fuerte sea comparado con el tuyo, más difícil. Nunca es imposible, y nunca
+  está garantizado.
+
+  Una *Jaula Hash* sube esa probabilidad. Úsala antes de tirar, no después de
+  fallar.
+][
+  Facing a wild Pebble you can catch it or let it go. Letting it go is a
+  legitimate choice, not a loss.
+
+  *You get two attempts.* If both fail, it leaves. There is no third.
+
+  The odds depend mostly on the *level gap*: the stronger it is, the harder.
+  Never impossible, never certain.
+
+  A *Jaula Hash* raises those odds. Use it before you throw, not after you
+  miss.
+]
+
+#pagebreak()
 = Tu privacidad / Your privacy
 
 #warnbox[
   #set text(size: 7pt)
-  *El Pebblebol nunca se conecta a esas redes.* Solo mira que nombres hay en el
-  aire, igual que hace tu móvil cuando abres la lista de Wi-Fi. \
+  *El Pebblebol nunca se conecta a esas redes.* Solo mira qué nombres hay en el
+  aire, igual que hace tu móvil cuando abres la lista de Wi-Fi. \\
   #text(fill: luma(25%))[*The Pebblebol never connects to those networks.* It
   only looks at what names are in the air, the same way your phone does when
   you open its Wi-Fi list.]
@@ -297,81 +698,207 @@
 
 // --- 11. Capture and the Box -------------------------------------------------
 #pagebreak()
-= Capturar y la Caja / Capture and the Box
+= La Caja / The Box
 
-#grid(columns: (1fr, 1fr), column-gutter: 3mm, row-gutter: 2mm,
-  screen("box_list"), screen("box_card"),
-  screen("box_actions"), screen("box_empty"),
+#grid(columns: (1fr, 1fr, 1fr), column-gutter: 2mm,
+  screen("box_list", width: 30mm), screen("box_card", width: 30mm),
+  screen("box_list_full", width: 30mm),
 )
 
 #v(1.5mm)
 #bi[
-  Cuando aparece un Pebble salvaje puedes intentar capturarlo. No siempre sale:
-  cuanto más raro, más cuesta.
+  La Caja guarda hasta *diez* Pebbles. Desde #scr[CAJA] puedes leer la ficha de
+  cada uno, cambiar cuál llevas seleccionado, o soltarlo.
 
-  La *Caja* guarda hasta *diez* Pebbles. Desde #scr[CAJA] puedes ver la ficha
-  de cada uno, cambiar cual llevas seleccionado, o soltarlo.
+  El seleccionado es el que llevas encima, el que cuidas y el que crece. Los
+  demás se recuperan solos, poco a poco, mientras están guardados.
 
-  El Pebble seleccionado es el que llevas encima, el que cuidas y el que crece.
+  Con la Caja llena no puedes capturar nada. Suelta algo antes de salir.
 ][
-  When a wild Pebble appears you can try to capture it. It does not always
-  work: the rarer it is, the harder it gets.
+  The Box holds up to *ten* Pebbles. From #scr[CAJA] you can read each one's
+  card, change which one you carry, or release it.
 
-  The *Box* holds up to *ten* Pebbles. From #scr[CAJA] you can read each one's
-  card, change which one you are carrying, or release it.
+  The selected one is the one you carry, care for and grow. The rest recover on
+  their own, slowly, while they are stored.
 
-  The selected Pebble is the one you carry, the one you care for and the one
-  that grows.
+  With a full Box you cannot catch anything. Release something before you go
+  out.
 ]
 
-// --- 12. Evolution -----------------------------------------------------------
+// --- 12. Evolution ------------------------------------------------------------
 #pagebreak()
 = Evolución / Evolution
 
-#align(center, screen("evolution_egg", width: 54mm))
+#grid(columns: (1fr, 1fr, 1fr), column-gutter: 2mm,
+  screen("evolution_egg", width: 30mm), screen("evolution_egg_cold", width: 30mm),
+  screen("confirm_evolve", width: 30mm),
+)
 
-#v(2mm)
+#v(1.5mm)
 #bi[
-  Un Pebble que sube de nivel puede evolucionar. La evolución cambia su
-  aspecto, sus estadísticas y a veces sus ataques.
+  Al subir de nivel, un Pebble puede quedar *listo para evolucionar*. El
+  aparato te avisa y te pregunta: la evolución no ocurre a tus espaldas.
 
-  Cada evolución vuelve al Pebble un poco más... suyo. No esperes que se
-  vuelvan más bonitos.
+  Que esté listo *no significa que vaya a evolucionar*. El nivel es solo una de
+  las condiciones. Otras evoluciones piden además felicidad, un objeto como la
+  *Llave Raíz*, o haber jugado lo suficiente. Y dos solo se abren si tu Pebble
+  está *corrupto*.
+
+  Si falta alguna condición, sigue esperando hasta que se cumpla. No se pierde
+  nada.
+
+  Evolucionar cambia aspecto, estadísticas y a veces ataques. Un huevo, además,
+  necesita que lo lleves encima: frío quiere decir abandonado.
 ][
-  A Pebble that levels up may evolve. Evolution changes its look, its stats and
-  sometimes its attacks.
+  On levelling up, a Pebble may become *ready to evolve*. The device tells you
+  and asks: evolution never happens behind your back.
 
-  Each evolution makes the Pebble a little more itself. Do not expect them to
-  get prettier.
+  Ready *does not mean it will evolve*. Level is only one of the conditions.
+  Other evolutions also want happiness, an item such as the *Llave Raíz*, or
+  enough time played. And two open only while your Pebble is *corrupted*.
+
+  If a condition is missing it simply keeps waiting until it is met. Nothing is
+  lost.
+
+  Evolving changes looks, stats and sometimes attacks. An egg also needs
+  carrying: cold means neglected.
 ]
 
-// --- 13. Battle, trade, link -------------------------------------------------
+// --- Battle, in full ----------------------------------------------------------
 #pagebreak()
-= Combate y enlace / Battle and link
+= Combate: preparar / Battle: setting up
 
-#align(center, screen("link_peers", width: 54mm))
+#grid(columns: (1fr, 1fr), column-gutter: 3mm,
+  screen("battle_pick"),
+  screen("battle_intro"),
+)
+
+#v(1.5mm)
+#bi[
+  Dos Pebblebol cerca pueden combatir. No hace falta internet ni router.
+
+  Cada jugador lleva *hasta tres* Pebbles, pero pelea *uno a uno*. Eliges el
+  equipo antes de empezar; con uno basta.
+
+  El combate va por *rondas*: los dos elegís acción y luego se resuelven las
+  dos, primero la del más rápido. No es por turnos alternos.
+][
+  Two Pebblebols nearby can fight. No internet and no router needed.
+
+  Each player brings *up to three* Pebbles but fights *one at a time*. You pick
+  the team before you start; one is enough.
+
+  A battle runs in *rounds*: you both choose an action and then both resolve,
+  the faster one first. It is not alternating turns.
+]
 
 #v(2mm)
 #bi[
-  Con #scr[ENLACE] dos Pebblebol se encuentran sin necesidad de internet ni de
-  router. Solo tienen que estar cerca.
-
-  *Combate.* Cada jugador lleva hasta tres Pebbles. Se pelea de uno en uno, por
-  turnos, con cuatro ataques por Pebble y un triángulo de tres tipos. Cambiar
-  de Pebble cuesta el turno.
-
-  *Intercambio y cría.* También puedes intercambiar Pebbles con otro jugador, o
-  criar dos compatibles.
+  *El triángulo de tipos.* Cada Pebble y cada ataque tienen un tipo:
 ][
-  With #scr[ENLACE] two Pebblebols find each other with no internet and no
-  router. They just have to be close.
+  *The type triangle.* Every Pebble and every attack has a type:
+]
 
-  *Battle.* Each player brings up to three Pebbles. You fight one at a time, in
-  turns, with four attacks per Pebble and a three-type triangle. Switching
-  Pebble costs you the turn.
+#v(1mm)
+#align(center, block(stroke: 0.5pt + black, inset: 2mm, radius: 0.6mm)[
+  #set text(size: 8pt, weight: "bold")
+  SEÑAL #sym.arrow.r CORRUPTO #sym.arrow.r SISTEMA #sym.arrow.r SEÑAL
+])
 
-  *Trade and breed.* You can also trade Pebbles with another player, or breed
-  two compatible ones.
+#v(1mm)
+#warnbox[
+  #set text(size: 7pt)
+  *La regla que nadie adivina:* la ventaja de tipo se aplica *una sola vez por
+  Pebble y combate*. Gastarla en un golpe flojo la desperdicia. \
+  #text(fill: luma(25%))[*The rule nobody guesses:* a type advantage applies
+  *once per Pebble per battle*. Spending it on a weak hit wastes it.]
+]
+
+#pagebreak()
+= Combate: pelear / Battle: fighting
+
+#grid(columns: (1fr, 1fr), column-gutter: 3mm, row-gutter: 2mm,
+  screen("battle_menu"), screen("battle_hit"),
+  screen("battle_protect"), screen("battle_faint"),
+)
+
+#v(1.5mm)
+#bi[
+  En tu turno eliges entre *cuatro ataques*, *protegerte*, usar un objeto o
+  *cambiar* de Pebble.
+
+  *Cambiar cuesta la ronda entera*: entras y encajas el golpe del rival sin
+  devolverlo. A veces compensa; casi nunca por costumbre.
+
+  *Protegerse* anula el golpe de esa ronda. No abuses: es una ronda que no
+  haces daño.
+
+  Cuando un Pebble *cae*, sacas otro. Cuando caen los tres, se acaba.
+][
+  On your turn you choose between *four attacks*, *protect*, an item, or
+  *switching* Pebble.
+
+  *Switching costs the whole round*: you come in and take the opponent's hit
+  without answering. Sometimes worth it; almost never as a habit.
+
+  *Protect* cancels that round's hit. Do not lean on it: it is a round in which
+  you deal no damage.
+
+  When a Pebble *faints* you send out another. When all three are down, it is
+  over.
+]
+
+#v(1.5mm)
+#align(center, screen("battle_result", width: 46mm))
+
+#v(1mm)
+#bi[
+  Ganar da experiencia. Perder no te quita nada ni mata a nadie.
+][
+  Winning gives experience. Losing costs you nothing and kills no one.
+]
+
+// --- Link, trade, breed ---------------------------------------------------------
+#pagebreak()
+= Enlace e intercambio / Link and trade
+
+#grid(columns: (1fr, 1fr, 1fr), column-gutter: 2mm,
+  screen("link_searching", width: 30mm), screen("link_peers", width: 30mm),
+  screen("link_card", width: 30mm),
+)
+
+#v(1.5mm)
+#bi[
+  #scr[ENLACE] busca otros Pebblebol cerca y te enseña quién hay. Los dos
+  tenéis que aceptar: nadie puede conectarse contigo sin que lo veas.
+
+  Al elegir a alguien salen tres opciones: #scr[COMBATE], #scr[INTERCAMBIO] y
+  #scr[CRIAR].
+
+  *Intercambiar* manda un Pebble y recibe otro. Si el enlace se corta a medias,
+  el aparato lo repara solo: no se pierde ni se duplica ninguno.
+][
+  #scr[ENLACE] looks for other Pebblebols nearby and shows you who is there.
+  Both of you must accept: nobody can connect to you without you seeing it.
+
+  Choosing someone offers three options: #scr[COMBATE], #scr[INTERCAMBIO] and
+  #scr[CRIAR].
+
+  *Trading* sends one Pebble and receives another. If the link drops halfway
+  through, the device repairs it on its own: none is lost and none is
+  duplicated.
+]
+
+#v(1.5mm)
+#warnbox[
+  #set text(size: 7pt)
+  *Criar todavía no funciona.* En esta versión, #scr[CRIAR] responde
+  #scr[Próximamente] y no hace nada más. No es un fallo del aparato ni del otro
+  jugador: la función no está terminada en este firmware. \
+  #text(fill: luma(25%))[*Breeding does not work yet.* In this version,
+  #scr[CRIAR] answers #scr[Próximamente] and does nothing else. It is not a
+  fault in your device or the other player's: the feature is unfinished in this
+  firmware.]
 ]
 
 // --- 14. The creator ---------------------------------------------------------
@@ -404,15 +931,19 @@
 #pagebreak()
 = Ajustes y pilas / Settings and battery
 
-#grid(columns: (1fr, 1fr), column-gutter: 3mm,
-  screen("settings_list"),
-  screen("settings_info"),
+#grid(columns: (1fr, 1fr, 1fr), column-gutter: 2mm,
+  screen("settings_list", width: 30mm), screen("settings_info", width: 30mm),
+  screen("menu_settings_countdown", width: 30mm),
 )
 
 #v(1.5mm)
 #bi[
   En #scr[AJUSTES] están la hora, el sonido, el brillo y la información del
   aparato.
+
+  *Las pantallas se cierran solas.* Si dejas el aparato quieto veinte segundos
+  vuelve al inicio, y antes avisa con la barrita fina de abajo. Toca cualquier
+  botón y se queda donde estaba.
 
   *Para que las pilas duren:*
 
@@ -425,6 +956,10 @@
 ][
   #scr[AJUSTES] holds the clock, sound, brightness and device information.
 
+  *Screens close by themselves.* Leave the device for twenty seconds and it
+  returns home, warning you first with the thin bar along the bottom. Press any
+  button and it stays where it was.
+
   *To make the cells last:*
 
   - turn the brightness down;
@@ -433,6 +968,38 @@
   - take the cells out if you will not play for weeks.
 
   The radio is by far the biggest drain.
+]
+
+// --- When something goes wrong -------------------------------------------------
+#pagebreak()
+= Cuando algo va mal / When something goes wrong
+
+#grid(columns: (1fr, 1fr, 1fr), column-gutter: 2mm,
+  screen("error_save_corrupt", width: 30mm), screen("error_save_newer", width: 30mm),
+  screen("help_line", width: 30mm),
+)
+
+#v(1.5mm)
+#bi[
+  El aparato guarda la partida *dos veces*. Si al arrancar encuentra una
+  copia dañada -- casi siempre por quitar las pilas mientras guardaba --
+  recupera la anterior él solo y te lo dice. No pierdes la colección.
+
+  Si encuentra una partida de una versión *más nueva* que su firmware, se
+  niega a tocarla en vez de estropearla. Eso es deliberado.
+
+  *En cualquier pantalla, pulsa A + B para ver qué hacen los botones ahí.* Es
+  la ayuda del propio aparato y sirve en todas.
+][
+  The device saves your game *twice*. If it finds a damaged copy at startup --
+  almost always from pulling the cells mid-save -- it restores the earlier one
+  by itself and tells you. Your collection survives.
+
+  If it finds a save from a *newer* version than its firmware, it refuses to
+  touch it rather than damage it. That is deliberate.
+
+  *On any screen, press A + B to see what the buttons do there.* That is the
+  device's own help and it works everywhere.
 ]
 
 // --- 16. Troubleshooting -----------------------------------------------------
@@ -506,7 +1073,7 @@
 
   *Genoma* -- los datos internos que hacen a cada Pebble distinto.
 
-  *Rasgo* -- una peculiaridad heredada que cambia cómo se comporta.
+  *Rasgo* -- una peculiaridad interna que cambia cómo se comporta.
 
   *Corrupción* -- el desgaste que un Pebble acumula. Cambia su aspecto.
 
@@ -522,7 +1089,7 @@
 
   *Genome* -- the internal data that makes each Pebble different.
 
-  *Trait* -- an inherited quirk that changes how it behaves.
+  *Trait* -- an internal quirk that changes how it behaves.
 
   *Corruption* -- the wear a Pebble builds up. It changes how it looks.
 

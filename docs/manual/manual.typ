@@ -30,8 +30,16 @@
 #set page(
   width: 105mm, height: 148mm,
   bleed: 3mm,                 // writes a TrimBox; the printer needs both
-  margin: (inside: 12mm, outside: 9mm, top: 9mm, bottom: 11mm),
+  // A6 is small, so the margins earn their keep or go. 5 mm is the safety
+  // distance from the trim; everything beyond that was habit. The spine keeps
+  // 11 mm because the fold eats into it and `binding` adds no room of its own.
+  margin: (inside: 11mm, outside: 8mm, top: 7.5mm, bottom: 8.5mm),
   binding: left,              // +3mm at the spine for the saddle stitch
+  header: context { if sys.inputs.at("debug", default: "0") == "1" {
+    set text(size: 5pt, fill: red)
+    let hs = query(selector(heading).before(here()))
+    if hs.len() > 0 { align(right, hs.last().body) }
+  } },
   footer: context {
     let n = counter(page).get().first()
     let total = counter(page).final().first()

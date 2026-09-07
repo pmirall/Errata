@@ -42,8 +42,7 @@
     estanco.
   - No lo desmonte, modifique ni repare. En su interior no hay piezas que el
     usuario pueda sustituir, salvo las pilas.
-  - No lo utilice ni lo guarde por debajo de 0 °C ni por encima de 40 °C, ni lo
-    deje al sol dentro de un vehículo.
+  - No lo use ni lo guarde por debajo de 0 °C ni por encima de 40 °C.
   - No lo deje caer ni lo aplaste. Si la carcasa se agrieta, deje de usarlo y
     retire las pilas.
   - El aparato emite destellos y sonidos. Una proporción muy pequeña de
@@ -66,8 +65,7 @@
     waterproof.
   - Do not disassemble, modify or repair it. There are no user-serviceable
     parts inside other than the batteries.
-  - Do not use or store it below 0 °C or above 40 °C, and do not leave it in
-    direct sun inside a vehicle.
+  - Do not use or store it below 0 °C or above 40 °C.
   - Do not drop or crush it. If the enclosure cracks, stop using it and remove
     the batteries.
   - The device produces flashes and sounds. A very small number of people may
@@ -180,14 +178,13 @@
   El número de lote figura impreso en el compartimento de las pilas con el
   formato #fact("product.batch_format").
 
-  *Notificación de incidentes de seguridad.* Si este producto le ha causado o
-  ha estado a punto de causarle un daño, comuníquelo a
-  #fact("contact.safety_email"). Atendemos y registramos todos los avisos.
+  *Incidentes de seguridad.* Si este producto le ha causado o ha estado a punto
+  de causarle un daño, comuníquelo a #fact("contact.safety_email"). Atendemos y
+  registramos todos los avisos.
 
-  *Sustancias.* El producto cumple la Directiva 2011/65/UE (RoHS) sobre
-  restricciones de sustancias peligrosas y el Reglamento (CE) 1907/2006
-  (REACH). Si desea información sobre sustancias extremadamente preocupantes
-  presentes por encima del 0,1 % en peso, escriba a #fact("contact.email").
+  *Sustancias.* Cumple la Directiva 2011/65/UE (RoHS) y el Reglamento (CE)
+  1907/2006 (REACH). Para información sobre sustancias extremadamente
+  preocupantes por encima del 0,1 % en peso: #fact("contact.email").
 ][
   *Manufacturer and EU responsible person* (Regulation (EU) 2023/988, arts. 16
   and 19):
@@ -205,10 +202,9 @@
   to it, report it to #fact("contact.safety_email"). We answer and log every
   report.
 
-  *Substances.* The product complies with Directive 2011/65/EU (RoHS) on
-  restricted hazardous substances and with Regulation (EC) 1907/2006 (REACH).
-  For information on substances of very high concern present above 0.1 % by
-  weight, write to #fact("contact.email").
+  *Substances.* Complies with Directive 2011/65/EU (RoHS) and Regulation (EC)
+  1907/2006 (REACH). For information on substances of very high concern above
+  0.1 % by weight: #fact("contact.email").
 ]
 
 // --- 22. Disposal ------------------------------------------------------------
@@ -261,35 +257,29 @@
 #seq[
   *Aparato (RAEE).* Al final de su vida útil, deposite el Pebblebol en un punto
   limpio, en la tienda donde lo compró o en cualquier punto de recogida de
-  residuos de aparatos eléctricos y electrónicos. La recogida separada evita
-  daños al medio ambiente y permite recuperar materiales. Directiva 2012/19/UE
-  y Real Decreto 110/2015.
+  RAEE. Directiva 2012/19/UE y RD 110/2015.
 
   Número de productor RII-AEE: #fact("registers.rii_aee") \
   Sistema de responsabilidad ampliada: #fact("registers.scrap")
 
   *Pilas.* *Retire siempre las pilas antes de desechar el aparato* y
-  deposítelas en un contenedor de pilas. Las pilas contienen sustancias que no
-  deben acabar en el medio ambiente. Reglamento (UE) 2023/1542 y Real Decreto
-  710/2015. Las pilas de este producto son sustituibles y extraíbles por el
-  usuario final sin herramientas.
+  deposítelas en un contenedor de pilas. Reglamento (UE) 2023/1542 y Real
+  Decreto 710/2015. Son sustituibles y extraíbles por el usuario final sin
+  herramientas.
 
   Número RII-PYA: #fact("registers.rii_pya")
 ][
   *Device (WEEE).* At the end of its life, take the Pebblebol to a civic
-  amenity site, to the shop where you bought it, or to any collection point for
-  waste electrical and electronic equipment. Separate collection prevents harm
-  to the environment and lets materials be recovered. Directive 2012/19/EU and
-  Spanish Royal Decree 110/2015.
+  amenity site, to the shop where you bought it, or to any WEEE collection
+  point. Directive 2012/19/EU and Spanish RD 110/2015.
 
   RII-AEE producer number: #fact("registers.rii_aee") \
   Extended producer responsibility scheme: #fact("registers.scrap")
 
   *Batteries.* *Always remove the batteries before disposing of the device* and
-  put them in a battery collection bin. Batteries contain substances that must
-  not reach the environment. Regulation (EU) 2023/1542 and Royal Decree
-  710/2015. The batteries in this product are replaceable and removable by the
-  end user without tools.
+  put them in a battery collection bin. Regulation (EU) 2023/1542 and Royal
+  Decree 710/2015. They are replaceable and removable by the end user without
+  tools.
 
   RII-PYA number: #fact("registers.rii_pya")
 ]
@@ -311,11 +301,11 @@
   #fact("contact.website").
 
   *Privacidad.* El Pebblebol funciona sin cuenta, sin registro y sin conexión a
-  internet. No recoge ni transmite datos personales. Analiza los nombres de las
-  redes Wi-Fi cercanas únicamente como sensor de juego, sin conectarse a ellas,
-  sin almacenarlos más de lo necesario y sin comunicarlos a nadie. La página
-  del creador se sirve desde el propio aparato, en su propia red, y no envía
-  nada al exterior. Consultas sobre protección de datos: #fact("contact.email").
+  internet. No recoge ni transmite datos personales. Lee los nombres de las
+  redes Wi-Fi cercanas solo como sensor de juego, sin conectarse a ellas, sin
+  almacenarlos más de lo necesario y sin comunicarlos a nadie. La página del
+  creador se sirve desde el propio aparato y no envía nada al exterior.
+  Protección de datos: #fact("contact.email").
 
   *Seguridad del producto con elementos digitales.* Punto único de contacto:
   #fact("contact.safety_email"). Política de divulgación coordinada de
@@ -337,11 +327,11 @@
   a reason, under Directive 2011/83/EU. Terms at #fact("contact.website").
 
   *Privacy.* The Pebblebol works with no account, no sign-up and no internet
-  connection. It neither collects nor transmits personal data. It reads the
-  names of nearby Wi-Fi networks purely as a game sensor, without joining them,
-  without keeping them longer than needed and without passing them to anyone.
-  The creator page is served by the device itself, on its own network, and
-  sends nothing outside. Data protection enquiries: #fact("contact.email").
+  connection. It neither collects nor transmits personal data. It reads nearby
+  Wi-Fi network names purely as a game sensor, without joining them, without
+  keeping them longer than needed and without passing them to anyone. The
+  creator page is served by the device itself and sends nothing outside. Data
+  protection: #fact("contact.email").
 
   *Security of a product with digital elements.* Single point of contact:
   #fact("contact.safety_email"). Coordinated vulnerability disclosure policy:

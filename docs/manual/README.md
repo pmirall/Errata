@@ -79,18 +79,26 @@ content file where they can be translated.
 drafting and every hard-coded "see page 19" silently became wrong. Sections
 carry labels and references go through `pg(<sec-batteries>)`.
 
+**No section may lose its body, and no page may be left nearly empty.** Both
+happened while the manual was being written and neither was visible: editing by
+replacing spans of `.typ` left `= Tu privacidad` standing with nothing under
+it, and several sections overran their page by two lines, leaving the next one
+99% white. `tools/check.sh` fails on an empty section; `tools/page_fill.py`,
+run by `--png`, fails on an orphan page.
+
 ## Print specification
 
 | | |
 |---|---|
 | Trim | 105 × 148 mm (A6) |
 | Bleed | 3 mm on all four sides, TrimBox written into the PDF |
-| Safety margin | 5 mm from trim; 12 mm at the spine for the fold |
-| Extent | 28 pages — **must** stay a multiple of 4 (the build enforces it) |
+| Safety margin | 5 mm from trim; 11 mm at the spine for the fold |
+| Extent | 40 pages — **must** stay a multiple of 4 (the build enforces it) |
 | Binding | Saddle stitch, 2 staples, self-cover |
 | Colour | **One ink, black.** The product's identity is monochrome pixel art; colour would double the cost and add nothing |
 | Paper | 90-115 g/m² offset |
 | Type | Guide 8/11.2 pt; legal 6.5/9.1 pt. **Never below 6 pt** |
+| Cost | 5 A4 sheets, about €0.36 a unit against a €8.99 bill of materials |
 | Delivery | Single pages, in reading order. **Do not impose** — the printer imposes, that is what they want, and hand-imposition is where booklets go wrong |
 
 ## Still to do
