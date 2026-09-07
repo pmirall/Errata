@@ -53,6 +53,44 @@ uint8_t ob_starter_species(uint8_t index)
 }
 
 // -----------------------------------------------------------------------------
+//  THE ORDER THE QUESTIONS ARE ASKED IN, WHICH IS NOT THE ORDER THEY ARE
+//  NUMBERED IN - and this table is the whole reason it can be changed at all.
+//
+//  It used to be `step + 1`, which welded the ASKING ORDER to the PERSISTED
+//  VALUES. Those values live in two bits of Config.flags (onboarding.h), all
+//  four are spoken for, and OB_DONE has to stay 0 for every save written before
+//  this feature to decode as "already set up" - so reordering by renumbering
+//  would have cost a save migration for what is a presentation decision.
+//
+//  AND THE ORDER CHANGED: PICK, THEN NAME, THEN TIME. Naming the device before
+//  the player has met the creature meant typing a name for nothing in
+//  particular - and then, two screens later, being shown three bugs one of
+//  which is now called that. Choosing first makes the name a name FOR the thing
+//  on the panel, which is what the naming screen was always trying to be. The
+//  clock stays last because it is the one question with no character in it.
+// -----------------------------------------------------------------------------
+static constexpr uint8_t kOrder[OB_STEP_COUNT - 1] = {
+  (uint8_t)OB_STARTER,   // meet it
+  (uint8_t)OB_NAME,      // name it
+  (uint8_t)OB_TIME       // and tell it what day it is
+};
+
+// EVERY REAL STEP APPEARS EXACTLY ONCE AND OB_DONE APPEARS NOWHERE. A table
+// with a repeat is a wizard with a loop in it, and a table that dropped a step
+// is a question the player is never asked - both of which compile.
+static_assert([]{
+  uint8_t seen = 0;
+  for (uint8_t i = 0; i < (uint8_t)(OB_STEP_COUNT - 1); ++i) {
+    if (kOrder[i] == (uint8_t)OB_DONE) return false;
+    if (kOrder[i] >= (uint8_t)OB_STEP_COUNT) return false;
+    const uint8_t bit = (uint8_t)(1u << kOrder[i]);
+    if (seen & bit) return false;
+    seen = (uint8_t)(seen | bit);
+  }
+  return true;
+}(), "the onboarding order repeats a step, drops one, or asks OB_DONE");
+
+// -----------------------------------------------------------------------------
 //  THE PERSISTED STEP
 // -----------------------------------------------------------------------------
 uint8_t ob_step(const Config& c)
@@ -78,7 +116,7 @@ uint8_t ob_boot_step(bool first_run, bool readonly, const Config& c)
   // resumes whatever hardware/boot.cpp thinks happened.
   const uint8_t stored = ob_step(c);
   if (stored != (uint8_t)OB_DONE) return stored;
-  return first_run ? (uint8_t)OB_NAME : (uint8_t)OB_DONE;
+  return first_run ? (uint8_t)kOrder[0] : (uint8_t)OB_DONE;
 }
 
 ScreenId ob_screen_for(uint8_t step)
@@ -94,8 +132,9 @@ ScreenId ob_screen_for(uint8_t step)
 uint8_t ob_next(uint8_t step)
 {
   // OB_DONE is not a step and has no successor: asking what follows "finished"
-  // is a caller error, and answering OB_NAME would restart the wizard.
-  if (step == (uint8_t)OB_DONE || step + 1u >= (uint8_t)OB_STEP_COUNT)
-    return (uint8_t)OB_DONE;
-  return (uint8_t)(step + 1u);
+  // is a caller error, and answering the first question would restart the
+  // wizard.
+  for (uint8_t i = 0; i + 1u < (uint8_t)(OB_STEP_COUNT - 1); ++i)
+    if (step == kOrder[i]) return kOrder[i + 1u];
+  return (uint8_t)OB_DONE;
 }

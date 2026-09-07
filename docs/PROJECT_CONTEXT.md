@@ -402,7 +402,7 @@ reproduces.
 
 | Variant | Flash | Globals |
 |---|---|---|
-| **release** (`GOD_MODE_ENABLED=0`) | **1,350,840** | **59,452** |
+| **release** (`GOD_MODE_ENABLED=0`) | **1,354,812** | **59,468** |
 | baseline | 1,367,774 | 59,548 |
 | no-web | 1,254,122 | 55,172 |
 | all-off | 605,298 | 26,724 |

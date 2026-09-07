@@ -5036,31 +5036,11 @@ TEST(a_typed_name_is_trimmed_at_both_ends) {
   CHECK_EQ(strcmp(g_cfg.pet_name, "A"), 0);
 }
 
-TEST(the_flow_walks_name_time_starter_and_re_roots_at_every_step) {
-  // NAME -> TIME
-  flow_begin(OB_NAME);
-  setup_name_enter();
-  setup_name_input(GST_TAP_R);
-  setup_name_input(GST_HOLD_L);
-  CHECK_EQ((int)ob_step(g_cfg), (int)OB_TIME);
-  CHECK_EQ((int)g_root, (int)SCR_TIME);            // RE-ROOTED, not pushed
-  CHECK_EQ((int)g_push, 0xFF);
-  CHECK_EQ(g_backs, 0);
-  CHECK(g_cfg_silent > 0);                         // and persisted, with no toast
-  CHECK_EQ((int)g_toast, (int)STR_EMPTY);
-
-  // TIME -> STARTER, through the P2-C6 screen, unchanged except for the branch.
-  flow_begin(OB_TIME);
-  time_enter();
-  g_clock_ok = true;
-  time_input(GST_HOLD_L);                          // commit the date
-  CHECK_EQ((int)ob_step(g_cfg), (int)OB_STARTER);
-  CHECK_EQ((int)g_root, (int)SCR_SETUP_STARTER);
-  CHECK_EQ(g_backs, 0);                            // NOT ui_back(): it would
-                                                   // return to the naming step
-  CHECK_EQ((int)g_toast, (int)STR_EMPTY);          // no "hora guardada" over it
-
-  // STARTER -> HOME, and the chosen species really is handed over.
+TEST(the_flow_walks_starter_name_time_and_re_roots_at_every_step) {
+  // STARTER -> NAME, and the chosen species really is handed over. The pick is
+  // FIRST now: naming the device before the player has met the creature meant
+  // typing a name for nothing in particular, and then being shown three bugs
+  // one of which was suddenly called that.
   flow_begin(OB_STARTER);
   setup_pick_enter();
   CHECK_EQ((int)setup_pick_cursor(), 0);
@@ -5069,8 +5049,32 @@ TEST(the_flow_walks_name_time_starter_and_re_roots_at_every_step) {
   setup_pick_input(GST_HOLD_L);
   CHECK_EQ((int)g_starter_calls, 1);
   CHECK_EQ((int)g_starter, (int)ob_starter_species(1));
+  CHECK_EQ((int)ob_step(g_cfg), (int)OB_NAME);
+  CHECK_EQ((int)g_root, (int)SCR_SETUP_NAME);      // RE-ROOTED, not pushed
+  CHECK_EQ((int)g_push, 0xFF);
+  CHECK_EQ(g_backs, 0);
+  CHECK(g_cfg_silent > 0);                         // and persisted, with no toast
+  CHECK_EQ((int)g_toast, (int)STR_EMPTY);
+
+  // NAME -> TIME
+  flow_begin(OB_NAME);
+  setup_name_enter();
+  setup_name_input(GST_TAP_R);
+  setup_name_input(GST_HOLD_L);
+  CHECK_EQ((int)ob_step(g_cfg), (int)OB_TIME);
+  CHECK_EQ((int)g_root, (int)SCR_TIME);
+  CHECK_EQ(g_backs, 0);
+  CHECK_EQ((int)g_toast, (int)STR_EMPTY);
+
+  // TIME -> HOME, through the P2-C6 screen, unchanged except for the branch.
+  flow_begin(OB_TIME);
+  time_enter();
+  g_clock_ok = true;
+  time_input(GST_HOLD_L);                          // commit the date
   CHECK_EQ((int)ob_step(g_cfg), (int)OB_DONE);
   CHECK_EQ((int)g_root, (int)SCR_HOME);
+  CHECK_EQ(g_backs, 0);                            // NOT ui_back(): it would
+                                                   // return to the naming step
   CHECK_EQ((int)g_toast, (int)STR_SU_DONE);
   CHECK(!setup_in_flow());
 }
@@ -5221,6 +5225,168 @@ TEST(snapshot_setup_starter) {
   setup_pick_input(GST_TAP_R);                     // the middle of the three
   CHECK_EQ((int)setup_pick_cursor(), 1);
   snapshot(SCR_SETUP_STARTER, "setup_starter");
+}
+
+// =============================================================================
+//  THE FIRST-BOOT INTRO
+//
+//  Sixteen seconds of pseudo-C typing itself, a compile that fails, and three
+//  bugs climbing out of the failure to stand exactly where the picker draws
+//  them. It is a PHASE of SCR_SETUP_STARTER rather than a screen of its own,
+//  which is what makes the last claim below checkable at all.
+// =============================================================================
+static void intro_fixture(void) {
+  flow_begin(OB_STARTER);
+  setup_pick_enter();
+  setup_intro_arm();
+}
+
+TEST(the_intro_walks_its_five_beats_and_the_clock_ends_it) {
+  intro_fixture();
+  CHECK_EQ((int)setup_intro_phase(), (int)SU_IN_TYPE);
+  g_now += 5999u;
+  CHECK_EQ((int)setup_intro_phase(), (int)SU_IN_TYPE);
+  g_now += 2u;                                     // 6001
+  CHECK_EQ((int)setup_intro_phase(), (int)SU_IN_BUILD);
+  g_now += 3200u;                                  // 9201
+  CHECK_EQ((int)setup_intro_phase(), (int)SU_IN_FAIL);
+  g_now += 1400u;                                  // 10601
+  CHECK_EQ((int)setup_intro_phase(), (int)SU_IN_BUGS);
+  g_now += 3300u;                                  // 13901
+  CHECK_EQ((int)setup_intro_phase(), (int)SU_IN_HOLD);
+  // THE CLOCK ENDS IT. Not one cancel, not one input, not one leave hook.
+  g_now += 1600u;                                  // 15501
+  CHECK_EQ((int)setup_intro_phase(), (int)SU_IN_NONE);
+  setup_intro_cancel();
+}
+
+// A PRESS SKIPS AND ONLY SKIPS. The impatient player's very first act on the
+// device must not be a permanent choice they did not know they were making, and
+// it must not spin the cursor either.
+TEST(a_press_during_the_intro_skips_it_and_chooses_nothing) {
+  static const Gesture kAll[5] = { GST_TAP_L, GST_TAP_R, GST_HOLD_L,
+                                   GST_HOLD_R, GST_BOTH };
+  for (uint8_t i = 0; i < 5u; ++i) {
+    intro_fixture();
+    g_now += 2000u;
+    CHECK(setup_intro_phase() != (uint8_t)SU_IN_NONE);
+    setup_pick_input(kAll[i]);
+    CHECK_EQ((int)setup_intro_phase(), (int)SU_IN_NONE);
+    CHECK_EQ((int)g_starter_calls, 0);             // nothing was chosen
+    CHECK_EQ((int)setup_pick_cursor(), 0);         // and the cursor did not move
+    CHECK_EQ((int)ob_step(g_cfg), (int)OB_STARTER);// the flow did not advance
+  }
+  // ...and the very next press, with the intro gone, does all three.
+  setup_pick_input(GST_TAP_R);
+  CHECK_EQ((int)setup_pick_cursor(), 1);
+  setup_pick_input(GST_HOLD_L);
+  CHECK_EQ((int)g_starter_calls, 1);
+}
+
+// THE CLAIM THE WHOLE DESIGN IS FOR: the last frame of the animation is the
+// first frame of the screen it hands over to. Both ask pick_geometry() where
+// the three bodies stand, so every pixel the intro's last beat lights inside
+// the picker's band is lit by the picker too - the only thing that appears at
+// the cut is the selection frame around one of them.
+//
+// Moving either drawing off the shared geometry fails here by name.
+TEST(the_last_frame_of_the_intro_is_the_first_frame_of_the_picker) {
+  intro_fixture();
+  g_now += 14500u;                                 // SU_IN_HOLD
+  CHECK_EQ((int)setup_intro_phase(), (int)SU_IN_HOLD);
+  fb_reset();
+  setup_pick_render();
+  uint8_t held[FB_H][FB_W];
+  int ink = 0;
+  for (int y = 0; y < FB_H; ++y)
+    for (int x = 0; x < FB_W; ++x) {
+      held[y][x] = (uint8_t)fb_get(x, y);
+      if (y >= 12 && y <= 42) ink += held[y][x];   // SU_BAND_TOP..SU_BAND_BOT
+    }
+
+  setup_intro_cancel();
+  CHECK_EQ((int)setup_intro_phase(), (int)SU_IN_NONE);
+  fb_reset();
+  setup_pick_render();
+  int lost = 0;
+  for (int y = 12; y <= 42; ++y)
+    for (int x = 0; x < FB_W; ++x)
+      if (held[y][x] == 1u && (uint8_t)fb_get(x, y) == 0u) ++lost;
+
+  CHECK_EQ(lost, 0);
+  CHECK(ink > 150);                                // anti-vacuity: three bodies
+}
+
+// CONTAINMENT, driven every 20 ms of the whole sixteen seconds. Nothing leaves
+// the panel, and nothing before the bugs arrive touches the affordance strip -
+// which is the row the compile bar and the tear are one arithmetic slip away
+// from, and the strip is redrawn by another module on every frame.
+TEST(no_frame_of_the_intro_draws_off_the_panel_or_into_the_affordance_strip) {
+  intro_fixture();
+  const uint32_t t0 = g_now;
+  int frames = 0, moved = 0;
+  uint8_t prev[FB_H][FB_W];
+  memset(prev, 0, sizeof prev);
+  for (uint32_t t = 0; t < 15400u; t += 20u) {
+    g_now = t0 + t;
+    fb_reset();
+    setup_pick_render();
+    CHECK_EQ(fb_oob(), 0u);
+    ++frames;
+    if (t < 13900u) {                              // before the affordance is drawn
+      for (int y = (int)UI_AFFORD_Y; y < FB_H; ++y)
+        for (int x = 0; x < FB_W; ++x)
+          if (fb_get(x, y) != 0) {
+            fprintf(stderr, "  INTRO t=%u: pixel (%d,%d) is under the "
+                            "affordance strip\n", (unsigned)t, x, y);
+            CHECK(false);
+          }
+    }
+    for (int y = 0; y < FB_H; ++y)
+      for (int x = 0; x < FB_W; ++x) {
+        const uint8_t now = (uint8_t)fb_get(x, y);
+        if (now != prev[y][x]) ++moved;
+        prev[y][x] = now;
+      }
+  }
+  CHECK_EQ(frames, 770);
+  CHECK(moved > 2000);                             // anti-vacuity
+  setup_intro_cancel();
+  g_now = t0;
+}
+
+// The four beats, as pictures. The pair that matters is intro_bugs and
+// setup_starter: the bodies are in the same place in both.
+TEST(snapshot_intro_type) {
+  intro_fixture();
+  g_now += 3000u;                                  // half the listing typed
+  CHECK_EQ((int)setup_intro_phase(), (int)SU_IN_TYPE);
+  snapshot(SCR_SETUP_STARTER, "intro_type");
+  setup_intro_cancel();
+}
+
+TEST(snapshot_intro_build) {
+  intro_fixture();
+  g_now += 8000u;                                  // the bar most of the way up
+  CHECK_EQ((int)setup_intro_phase(), (int)SU_IN_BUILD);
+  snapshot(SCR_SETUP_STARTER, "intro_build");
+  setup_intro_cancel();
+}
+
+TEST(snapshot_intro_fail) {
+  intro_fixture();
+  g_now += 9900u;
+  CHECK_EQ((int)setup_intro_phase(), (int)SU_IN_FAIL);
+  snapshot(SCR_SETUP_STARTER, "intro_fail");
+  setup_intro_cancel();
+}
+
+TEST(snapshot_intro_bugs) {
+  intro_fixture();
+  g_now += 12400u;                                 // two standing, one climbing
+  CHECK_EQ((int)setup_intro_phase(), (int)SU_IN_BUGS);
+  snapshot(SCR_SETUP_STARTER, "intro_bugs");
+  setup_intro_cancel();
 }
 
 // THE HEADER BAR SURVIVES THE THREE BODIES, and this is the P10-C3 seam biting

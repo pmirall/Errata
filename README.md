@@ -829,16 +829,16 @@ conclusion, and `docs/bench.md` §I refuses a `baseline` row for any §67 box.
 
 | Variant | Defines | Flash | Globals |
 |---|---|---|---|
-| **release** | `GOD_MODE_ENABLED=0` | **1,350,840** | **59,452** |
-| baseline | — | 1,367,774 | 59,548 |
-| no-web | `FEATURE_WEB=0` | 1,254,122 | 55,172 |
-| no-god | `GOD_MODE_ENABLED=0` | 1,350,840 | 59,452 |
-| sh1106 | `DISPLAY_IS_SH1106=1` | 1,367,774 | 59,548 |
-| all-off | web, ESP-NOW and god mode off | 605,298 | 26,724 |
+| **release** | `GOD_MODE_ENABLED=0` | **1,354,812** | **59,468** |
+| baseline | — | 1,371,966 | 59,564 |
+| no-web | `FEATURE_WEB=0` | 1,258,252 | 55,188 |
+| no-god | `GOD_MODE_ENABLED=0` | 1,354,812 | 59,468 |
+| sh1106 | `DISPLAY_IS_SH1106=1` | 1,371,966 | 59,564 |
+| all-off | web, ESP-NOW and god mode off | 609,080 | 26,740 |
 
 The release caps are **1,600,000 flash** and **65,000 globals**
 (`GATE_RELEASE_*` in `config.h`, enforced by `build_matrix.sh` and, since
-P10-C5, by CI). That leaves **249,160 B of flash and 5,548 B of globals free.**
+P10-C5, by CI). That leaves **245,188 B of flash and 5,532 B of globals free.**
 `docs/budget.md` §15 is the per-chunk account of phase 10 and §16 is the final
 one: what the v1.0 artefact costs, against every cap, subsystem by subsystem.
 
@@ -1018,12 +1018,28 @@ What a genuinely fresh device does, in order:
    the bottom two lines, that defect is back. (This section claimed the toast
    as expected behaviour until the P10-C6 exit — it documented, as correct, the
    exact thing the bench item is written to catch.)
-5. **Three questions, in this order: name the device, set the date and time,
-   pick one of three starters** (Paketo, Buggo, Daemi — one per corner of the
-   type chart). L taps to move on, L held accepts, R changes the thing under the
+5. **The intro. About sixteen seconds, and only on a true first run.** Pseudo-C
+   types itself onto the panel, a compile bar fills, the build dies at 92 %, the
+   content band tears into scanlines, and **three bugs climb out of the
+   failure** — and stop exactly where the picker draws them. It is a phase of
+   `SCR_SETUP_STARTER`, not a screen of its own, which is what makes "the last
+   frame of the animation is the first frame of the picker" a structural fact:
+   both ask the same `pick_geometry()` where the bodies stand. **Any press
+   skips it and only skips it** — a press that also chose a starter would make
+   an impatient player's first act a permanent accident. A flow *resumed* after
+   a power cut never plays it: the cinematic is a first impression, not a gate.
+6. **Three questions, in this order: pick one of three starters (Paketo, Buggo,
+   Daemi — one per corner of the type chart), name the device, set the date and
+   time.** L taps to move on, L held accepts, R changes the thing under the
    cursor, R held repeats. Any question can be skipped, and holding both buttons
    ends the flow.
-6. HOME.
+
+   > **The order used to be name, time, starter**, and it changed because naming
+   > the device before the player has met the creature meant typing a name for
+   > nothing in particular. The interesting half is that it cost **no save
+   > migration**: `ob_next()` was `step + 1`, which welded the asking order to
+   > the persisted values, and it is a table now. The values did not move.
+7. HOME.
 
 **The step is persisted, not inferred.** Two bits of the config say which
 question the device is on, so naming it and then pulling the power comes back on
@@ -1032,7 +1048,8 @@ save written by any earlier firmware decodes as "already set up" — a device th
 has been played for months must never be handed a setup wizard.
 
 Bench item **F4** is the one that has to be tried on a board: pull the power
-mid-flow and confirm the device comes back on the question it was on.
+mid-flow and confirm the device comes back on the question it was on — and, with
+the intro added, that it comes back **on the question and not on the cinematic**.
 
 ---
 

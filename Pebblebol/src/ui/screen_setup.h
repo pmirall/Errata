@@ -50,6 +50,59 @@ void setup_pick_update(uint32_t now_ms);
 void setup_pick_render(void);
 void setup_pick_input(Gesture g);
 
+// =============================================================================
+//  THE FIRST-BOOT INTRO
+//
+//  WHY IT IS A PHASE OF THE STARTER SCREEN AND NOT A ScreenId OF ITS OWN.
+//  The brief was "the animation's last frame is that screen's first". A
+//  separate screen can only approximate that - two enter hooks, two renders and
+//  a cut between them - while a phase of THIS screen gets it structurally: the
+//  three bodies climb out of the compile failure and stop exactly where
+//  setup_pick_render() draws them, because BOTH ask the same pick_geometry()
+//  where that is. The frame, the species name and the hint are the only things
+//  that appear at the cut.
+//
+//  IT PLAYS ON A TRUE FIRST RUN AND NOWHERE ELSE. app/app.cpp arms it, and only
+//  when boot == BOOT_FIRST_RUN, so a flow RESUMED after a power cut goes
+//  straight to the question - the step is already stored, the cinematic is a
+//  first impression rather than a gate, and making somebody watch it twice
+//  because their battery died is the opposite of what it is for. That is also
+//  why the intro is not an ObStep: the four two-bit values are all spoken for
+//  (onboarding.h), and buying a fifth would cost a save migration for a beat
+//  that must not be resumable in the first place.
+//
+//  THE INTERRUPTION CONTRACT IS ui/screen_encounter.h's, and for its reasons:
+//  ANY press skips it, and THE CLOCK ENDS IT ANYWAY. setup_intro_phase() is a
+//  pure function of (ui_now_ms() - t0) and answers SU_IN_NONE past the end, so
+//  even with every explicit cancel deleted no intro can outlive its own length.
+//  A press SKIPS AND ONLY SKIPS: a press that also chose a starter would make
+//  the impatient player's very first act on the device an accident.
+//
+//  ABOUT SIXTEEN SECONDS, which is the number the whole thing was cut to. The
+//  brief was "cinematic plus onboarding under two minutes", and the onboarding
+//  is three questions the player answers at their own pace - so the only part
+//  of that budget this file can actually spend is this one.
+// =============================================================================
+enum SuIntroPhase : uint8_t {
+  SU_IN_NONE = 0,
+  SU_IN_TYPE,      // pseudo-C types itself onto the panel, one character at a time
+  SU_IN_BUILD,     // the header says COMPILANDO and a bar fills
+  SU_IN_FAIL,      // the bar stalls, the band tears, the header says ERROR: 3 BUGS
+  SU_IN_BUGS,      // three bodies climb out of the tear, one at a time
+  SU_IN_HOLD,      // all three standing where the picker will draw them
+  SU_IN_PHASE_COUNT
+};
+
+// Arm it. app/app.cpp's ONLY call, on a true first run. Deliberately NOT done
+// in setup_pick_enter(), which also runs on a resumed flow.
+void setup_intro_arm(void);
+
+// End it. Idempotent, and NOT the thing that bounds it - see the contract above.
+void setup_intro_cancel(void);
+
+// The phase AT ui_now_ms(). Pure in the clock.
+uint8_t setup_intro_phase(void);
+
 // -----------------------------------------------------------------------------
 //  WHAT THE TESTS READ. The two screens hold their working state in file-scope
 //  statics like every other screen here; these are how a test says "the cursor

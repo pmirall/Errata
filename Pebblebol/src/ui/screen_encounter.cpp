@@ -371,20 +371,11 @@ static uint8_t enc_body_frame(void) {
 //           Without it the creature simply vanishes and the menu appears, which
 //           reads as a dropped frame rather than as an answer.
 //
-//  NO RNG. Every bar comes out of enc_noise(), a pure function of the step
+//  NO RNG. Every bar comes out of ae_noise(), a pure function of the step
 //  number, because a film that drew from a real generator would record a
 //  different golden every time - and a golden nobody can reproduce is a
 //  picture, not a test.
 // -----------------------------------------------------------------------------
-
-// A deterministic 8-bit scramble. NOT a random number generator, and it is
-// never asked to be one: it is asked to make six numbers that do not look
-// related, from a step counter, identically on every machine.
-static uint8_t enc_noise(uint8_t a, uint8_t b) {
-  uint8_t h = (uint8_t)((uint8_t)(a * 37u) + (uint8_t)(b * 97u) + 0x5Au);
-  h = (uint8_t)(h ^ (uint8_t)(h >> 3));
-  return (uint8_t)((uint8_t)(h * 5u) + 1u);
-}
 
 #define ENC_BAND_H  ((int16_t)(ENC_STAGE_Y1 - ENC_STAGE_Y0 + 1))
 
@@ -394,9 +385,9 @@ static void enc_tear(uint32_t t, uint8_t bars) {
   const uint8_t step = (uint8_t)((t / ENC_WILD_STEP_MS) & 0xFFu);
   for (uint8_t i = 0; i < bars; ++i) {
     const int16_t y = (int16_t)(ENC_STAGE_Y0 +
-                                (int16_t)(enc_noise(step, i) % (uint8_t)ENC_BAND_H));
-    const int16_t x = (int16_t)(enc_noise(step, (uint8_t)(i + 64u)) % 80u);
-    const int16_t w = (int16_t)(12u + (enc_noise(step, (uint8_t)(i + 128u)) % 44u));
+                                (int16_t)(ae_noise(step, i) % (uint8_t)ENC_BAND_H));
+    const int16_t x = (int16_t)(ae_noise(step, (uint8_t)(i + 64u)) % 80u);
+    const int16_t w = (int16_t)(12u + (ae_noise(step, (uint8_t)(i + 128u)) % 44u));
     enc_hline(x, y, w);
   }
 }
@@ -431,7 +422,7 @@ static void draw_wild_film(void) {
   // One pixel of horizontal tear while it is still assembling, stepped on the
   // bars' clock rather than on the frame clock.
   const int16_t dx = (ph == (uint8_t)ENC_FILM_WILD_FORM)
-                       ? (int16_t)((int16_t)(enc_noise((uint8_t)((t / ENC_WILD_STEP_MS) & 0xFFu),
+                       ? (int16_t)((int16_t)(ae_noise((uint8_t)((t / ENC_WILD_STEP_MS) & 0xFFu),
                                                        200u) % 3u) - 1)
                        : (int16_t)0;
   enc_blit((int16_t)(ENC_BODY_X + dx), (int16_t)ENC_BODY_Y, enc_wild_sprite(enc_body_frame()),
