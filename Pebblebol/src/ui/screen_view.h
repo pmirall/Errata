@@ -21,21 +21,22 @@
 #include <stdint.h>
 
 #include "../core/nt_types.h"
-#include "../persistence/save_schema.h"    // PB_NICKNAME_CAP
-
-// XP per level until P3-C2 lands XP_TABLE[31] in data/balance.h. The HOME bar
-// and the PEBBLE page both draw xp / xp_next, so the placeholder lives in ONE
-// place and is a plain constant rather than a curve.
-#define PB_XP_PER_LEVEL_PLACEHOLDER  100u
+#include "../persistence/save_schema.h"    // PB_NAME_DRAW_CAP
 
 struct PebbleView {
   // Identity
-  char     name[PB_NICKNAME_CAP];   // nickname, else the deterministic name
+  // ALREADY UTF-8 AND ALREADY TRUNCATED ON A CODEPOINT BOUNDARY. ui.cpp's
+  // ui_pet_name() fills it, and the nickname rung it can take is stored as
+  // Latin-1 (core/utf8.h), so this is the DRAW cap and not the schema one.
+  char     name[PB_NAME_DRAW_CAP];
   Genome   genome;
   uint8_t  species_id;
   uint8_t  level;                   // 1..30
   uint16_t xp;                      // inside the current level
-  uint16_t xp_next;                 // what the current level costs
+  // What the current level costs to leave, from XP_TABLE[31] (data/balance.h).
+  // ZERO means XP_LEVEL_MAX: the curve is finished, and a screen must draw that
+  // as "done" rather than dividing by it.
+  uint16_t xp_next;
 
   // Battle numbers (spec section 8 "HP / health"). hp_max is derived, never
   // stored, and stays a placeholder until the Phase 4 stat block exists.
@@ -45,7 +46,14 @@ struct PebbleView {
   // Care, as PERCENTAGES already smoothed for display, indexed by StatId.
   uint8_t  care_pct[ST_COUNT];
   uint8_t  mood_pct;                // 0..100, the care-quality score
-  uint8_t  mood_face;               // enum Mood, the 12x12 badge index
+  // NO mood_face (P4-C6). ui.cpp:1939 wrote it every frame and no screen ever
+  // drew it: its consumer, sprite_mood_face(), had had zero references in the
+  // whole tree since the last caller went away at P2-C11b, and the 144 B of
+  // 12x12 art behind it (spr_mood12) was gc-sectioned out of every build. The
+  // whole chain is deleted rather than carried; recover the art with
+  // `git show 250f73e:Pebblebol/src/data/sprites.h` if P10 designs a screen
+  // that wants a mood badge. The mood WORD ladder is untouched and live -
+  // ui.cpp's mood_of() still gates the HOME heart on MOOD_FELIZ.
 
   // Body
   uint8_t  stage;                   // enum Stage, for the sprite lookup
@@ -58,6 +66,27 @@ struct PebbleView {
   // formatter is hardware/gametime.cpp's and a pure screen may not reach it.
   // 24 bytes, matching GT_ELAPSED_BUF.
   char     age_txt[24];
+
+  // §55's status, as a bit rather than as a PBS_ mask: a pure screen may not
+  // reach game/corruption.h's PebbleInstance, and the ONE thing HOME does with
+  // it is decide whether to XOR ui/corrupt_fx.cpp's glitch rows over the body.
+  //
+  // IT IS HERE BECAUSE THE STILL BODY PATH IS THE ONE A GOLDEN CAN SEE (P10-C3).
+  // The glitch shipped at P9-C5 with its geometry in a pure, host-tested module
+  // and its PAINTING in ui/petfx.cpp - a translation unit no host binary
+  // compiles - so no snapshot in this repository had ever drawn a corrupted
+  // creature. ui/screen_home.cpp paints the same rows now, and home_corrupted
+  // is the golden.
+  uint8_t  corrupted;               // 1 = PBS_CORRUPTED is set on the Pebble
+  // HOURS LEFT OF THE CORRUPTION, 0..24, ROUNDED UP (P10-C6). Spec section 55
+  // makes corruption a 24 h state and the product had no readout of it at all:
+  // one centred line at onset that a player can walk past, a shimmer on HOME,
+  // and then nothing - no page showing the status, no hours remaining, no
+  // AlertId, and cor_left_s() had no caller outside the tests. A player whose
+  // creature suddenly glitches had no way to learn whether it still was, or
+  // that it wears off. 1 means "less than an hour to go", never 0, so the
+  // reading and the glitch can never disagree.
+  uint8_t  corrupt_h;
 
   uint8_t  present;                 // 0 = there is no active Pebble at all
 };

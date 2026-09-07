@@ -13,7 +13,7 @@
 //
 //  Public interface, exactly:
 //    gt_begin, gt_set_epoch, gt_cal_state, gt_is_valid, gt_now, gt_skew_add,
-//    gt_elapsed_since, gt_format_elapsed, gt_local_tm
+//    gt_elapsed_since, gt_format_elapsed, gt_local_tm, gt_mono32
 //
 //  There is NO SNTP and no radio in this module (plan section 2 row G4): the
 //  clock is calibrated by whoever knows the time - the on-device time screen
@@ -173,6 +173,33 @@ const char* gt_format_elapsed(uint32_t seconds, char* buf, size_t buflen);
 //   allowed outside sim.cpp.
 // -----------------------------------------------------------------------------
 uint32_t gt_elapsed_since(uint32_t then, uint32_t now);
+
+// -----------------------------------------------------------------------------
+// gt_mono32()
+//   THE MONOTONIC MILLISECOND CLOCK THAT SURVIVES A SLEEP (plan P6-C3).
+//
+//   Milliseconds since power-on, truncated to 32 bits so it drops straight into
+//   every existing consumer of millis(). Monotonic, never moved by a
+//   calibration, and - the point of it - it keeps counting across a light
+//   sleep, a deep sleep and a soft reset, because on the target it is the RTC
+//   counter (gametime.cpp, "Defence 2") and not esp_timer's uptime. It restarts
+//   only when power is actually removed, which is the same event that loses the
+//   RTC nonce and makes hardware/boot.cpp report BOOT_POWER_LOSS.
+//
+//   WHO MUST USE THIS RATHER THAN millis(), and the rule is simple: anything
+//   whose answer decides a GAME outcome. Today that is game/cooldowns.cpp's
+//   per-boot RAM table, whose until_ms deadlines are the only thing standing
+//   between an uncalibrated device and free encounters, and the save wear
+//   filter, which must not defer a write across a sleep it cannot see.
+//   PRESENTATION TIMING KEEPS millis(): animation phase, modal lifetimes, the
+//   frame scheduler, the navigation idle timer. Those want "how long has this
+//   CPU been awake", they cost nothing to get wrong, and millis() is free.
+//
+//   It wraps every 49.7 days exactly as millis() does. Every consumer already
+//   compares two of these with an unsigned or signed difference, which is
+//   correct across the wrap for any gap under half the range.
+// -----------------------------------------------------------------------------
+uint32_t gt_mono32(void);
 
 // -----------------------------------------------------------------------------
 // gt_local_tm(out)

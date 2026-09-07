@@ -8,10 +8,13 @@
 #include <string.h>
 
 #include "../core/strings_es.h"
+#include "../core/utf8.h"
 #include "../game/box.h"
 #include "../game/genome.h"
 #include "gfx.h"
+#include "pet_art.h"     // pet_species_name(): the roster's own Spanish name
 #include "screen.h"
+#include "screen_link.h"   // link_arm_intent(): the section 9 entry points
 #include "ui.h"
 
 #define BOX_LIST_ROWS   ((uint8_t)(BOX_SLOTS + 1u))   // ten slots plus "Volver"
@@ -44,7 +47,20 @@ void box_leave(void) { s_mode = BOXM_LIST; }
 //  "1 CANTO" plus a right-aligned "Nv7", and a leading '*' on the Pebble that
 //  is out walking. A slot with no nickname shows its SPECIES: inventing a name
 //  here would disagree with the one HOME shows for the same Pebble.
+//
+//  AND IT SHOWS THE SPECIES IT ACTUALLY IS (P4-C4a). Both rows used to read
+//  S_SPECIES(gene_species(genome)) - the sixteen-word genome vocabulary
+//  (BLOB / ORUGA / PAJARO / GATO / SETA / ...) that predates the roster - so ten
+//  slots holding ten different creatures could all be called SETA, and an
+//  evolution never changed a word. The roster carries all 36 names; the genome
+//  word is the fallback for a Pebble with no species row, which is the same
+//  ladder ui_pet_name() walks.
 // -----------------------------------------------------------------------------
+static const char* slot_species_name(const PebbleInstance& p) {
+  const char* sp = pet_species_name(p.species_id);
+  return sp ? sp : S_SPECIES(gene_species(p.genome));
+}
+
 static void slot_row(uint8_t slot, char* out, size_t cap, char* val, size_t vcap) {
   const PebbleInstance* p = box_peek(slot);
   if (!p) {
@@ -52,10 +68,14 @@ static void slot_row(uint8_t slot, char* out, size_t cap, char* val, size_t vcap
     val[0] = '\0';
     return;
   }
-  const char* name = (p->nickname[0] != '\0') ? p->nickname
-                                              : S_SPECIES(gene_species(p->genome));
-  snprintf(out, cap, "%u %s%s", (unsigned)(slot + 1u),
-           (slot == box_active()) ? S(STR_BOX_ACTIVE) : "", name);
+  // THE NAME IS APPENDED, NOT PRINTED. snprintf("%s") cuts on a BYTE, and the
+  // only wide part of this row is the name - so once a name can hold a
+  // two-byte character (a nickname is stored as Latin-1: core/utf8.h) the cut
+  // lands inside a sequence and hands drawUTF8() a broken lead byte.
+  snprintf(out, cap, "%u %s", (unsigned)(slot + 1u),
+           (slot == box_active()) ? S(STR_BOX_ACTIVE) : "");
+  if (p->nickname[0] != '\0') (void)u8_cat_latin1(out, (uint16_t)cap, p->nickname);
+  else                        (void)u8_cat(out, (uint16_t)cap, slot_species_name(*p));
   snprintf(val, vcap, "%s%u", S(STR_ST_LEVEL), (unsigned)p->level);
 }
 
@@ -126,8 +146,10 @@ static void draw_card(void) {
 
   char tag[10];
   snprintf(tag, sizeof tag, "%s%u", S(STR_ST_LEVEL), (unsigned)p->level);
-  const char* name = (p->nickname[0] != '\0') ? p->nickname
-                                              : S_SPECIES(gene_species(p->genome));
+  char name[PB_NAME_DRAW_CAP];
+  name[0] = '\0';
+  if (p->nickname[0] != '\0') (void)u8_cat_latin1(name, (uint16_t)sizeof name, p->nickname);
+  else                        (void)u8_cat(name, (uint16_t)sizeof name, slot_species_name(*p));
   gfx_header(name, tag);
 
   char line[32];
@@ -142,8 +164,17 @@ static void draw_card(void) {
     const int16_t x = (int16_t)(2 + (i / 3) * 64);
     const int16_t y = (int16_t)(UI_HDR_H + 10 + (i % 3) * 10);
     const uint8_t pct = care_pct(p->care[i]);
-    gfx_text_fit(GF_TINY, x, (int16_t)(y + 6), 30, S(kCareLabel[i]));
-    gfx_bar((int16_t)(x + 32), (int16_t)(y + 1), 22, 6, pct);
+    // GF_BODY AND NOT GF_TINY, AND THE COLUMN IS WIDER FOR IT (P10-C6).
+    // GF_TINY is u8g2_font_4x6_tr, 95 glyphs, ASCII only (ui/render.h and
+    // ui/gfx.h:37 both say so) and drawUTF8() emits NOTHING and ADVANCES
+    // NOTHING for a codepoint the face lacks - so "Ánimo" read "nimo" and
+    // "Energía" read "Energa" on every board while every golden was correct,
+    // because tests/fakes/gfx_fb.cpp painted a synthetic glyph for any
+    // codepoint at a fixed advance. The recorder in that fake now refuses it.
+    // 35 px is "Energía" at GF_BODY's 5 px advance; the bar moves to x + 37 so
+    // the second column still ends at 125 of OLED_W's 128.
+    gfx_text_fit(GF_BODY, x, (int16_t)(y + 6), 35, S(kCareLabel[i]));
+    gfx_bar((int16_t)(x + 37), (int16_t)(y + 1), 22, 6, pct);
   }
 
   gfx_countdown(ui_idle_ms());
@@ -216,8 +247,20 @@ static void choose_action(void) {
       break;
     case BOXA_TRADE:
     case BOXA_BREED:
-      // Spec section 9 lists both; the peer protocol they need is P7-C2.
-      ui_toast(STR_UI_SOON);
+      // Spec section 9's "initiate breeding; initiate trade" (P7-C2). The BOX
+      // is where the player is already looking at the Pebble they mean, so this
+      // row PRE-SELECTS it and opens LINK with that intent rather than making
+      // them find the same creature again from the other side.
+      //
+      // IT CONSENTS TO NOTHING. link_arm_intent() sets a pre-selection and
+      // touches no radio; the session still needs A on the LINK card and A on
+      // the other device (ui/screen_link.h). And the OPERATIONS themselves are
+      // P7-C4 and P7-C5: the card will say so. That is deliberately better than
+      // the toast this used to be - the entry point is what P7-C2 owes, and a
+      // player who takes it now sees the peer list and the real menu.
+      link_arm_intent((uint8_t)((s_cur == (uint8_t)BOXA_TRADE) ? LOP_TRADE : LOP_BREED),
+                      s_slot);
+      ui_push(SCR_LINK);
       break;
     default: to_list(); break;
   }
@@ -248,7 +291,6 @@ void box_input(Gesture g) {
     case GST_HOLD_L:
       if (s_mode != BOXM_CARD) s_cur = ring_next(s_cur, mode_rows());
       break;
-    case GST_DBL_L: s_cur = 0; break;
     case GST_HOLD_R:
       switch (s_mode) {
         case BOXM_LIST:    choose_slot();        break;

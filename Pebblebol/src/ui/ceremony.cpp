@@ -15,6 +15,7 @@
 #include "../core/nt_types.h"
 #include "../core/strings_es.h"
 #include "../data/sprites.h"
+#include "../hardware/audio.h"
 #include "petfx.h"
 #include "render.h"
 #include "ui.h"
@@ -71,6 +72,7 @@ bool ceremony_begin(uint8_t kind, uint32_t now_ms) {
     s_phase = CP_FLASH;
     s_t0    = (uint32_t)(now_ms - HATCH_T_FLASH);
     rd_flash(HATCH_FLASH_MS);
+    audio_play(SFX_CHIRP);   // the CP_CRACK edge that arms it is never crossed
   } else {
     s_phase = CP_WOBBLE;
     s_t0    = now_ms;
@@ -81,11 +83,58 @@ bool ceremony_begin(uint8_t kind, uint32_t now_ms) {
 
 // -----------------------------------------------------------------------------
 //  PHASE EDGES
+//
+//  WHERE THE SOUND GOES (spec section 18's fourth item). P2-C11c marked this
+//  function as the place and P6-C1 filled it in: it is the ONE place a phase
+//  edge is crossed, so every cue below is armed EXACTLY ONCE per show. Doing it
+//  from ceremony_draw() would re-trigger on every frame - which is precisely
+//  the bug the shake and the flash were put here to avoid, and a tone engine
+//  re-armed at 20 fps would never advance past its first step.
+//
+//  FOUR EDGES CARRY A CUE AND THREE DO NOT, which is a choice rather than an
+//  omission:
+//    CP_CRACK   one SFX_BUZZ per jolt, beside the rd_shake() it belongs to.
+//               The shell gives way in three steps and it should sound like it.
+//    CP_FLASH   SFX_CHIRP, the bright moment.
+//    CP_GROW    SFX_RISE, the body coming up out of the dither.
+//    CP_NAME    SFX_DOUBLE_BEEP - named, done.
+//    CP_SHARDS  SILENT: it is HATCH_FLASH_MS (80 ms) after the flash, closer
+//               together than the shortest effect in the vocabulary, so a cue
+//               here would only queue behind the one the player is still
+//               hearing.
+//    CP_WOBBLE / CP_LOOK  SILENT: nothing changes state at those edges.
+//
+//  The EVOLVE arm starts the clock at CP_FLASH, so an evolution gets the last
+//  three cues and no jolts - which is the same asymmetry the visuals already
+//  have, for the same reason: there is no shell.
+//
+//  Nothing here checks CF_MUTE. audio_play() is the one place that asks, so a
+//  muted device runs the identical code path and queues nothing.
 // -----------------------------------------------------------------------------
+//  TIME-DRIVEN, NOT PASS-DRIVEN, SINCE THE FINAL REVIEW.
+//  Every `case` below sets s_phase and breaks, so before this loop the show
+//  advanced AT MOST ONE PHASE PER CALL and its wall-clock length was
+//  max(HATCH_TOTAL_MS, 7 x loop period). Measured against the shipping ladder:
+//  at PWR_IDLE the loop period is 1,000 ms and the 4,480 ms show took 8,000;
+//  at PWR_SLEEP it is 8,000 ms and the show took SIXTY SECONDS. The `held`
+//  clamp in app/app.cpp now keeps the ladder at DIM for the duration, which is
+//  the fix that matters - but a stall has other causes (a long save, a slow
+//  HTTP request, a serial batch) and a timeline that stretches under one is a
+//  timeline that is not measured in time. So: run the machine until it stops
+//  moving, and a late loop CATCHES UP instead of stretching the show.
+//
+//  This is safe by construction rather than by inspection. Every edge effect is
+//  armed exactly once already - the three jolts by the s_jolts counter, the two
+//  head turns by s_look, and every cue by the `s_phase = X` compare that got us
+//  into the arm - so replaying the switch cannot double a shake or a sound. The
+//  loop terminates because the phases are strictly ordered and CP_NONE breaks.
 void ceremony_service(uint32_t now_ms) {
   if (!ceremony_active()) return;
   const uint32_t el = elapsed(now_ms);
 
+  uint8_t before;
+  do {
+    before = (uint8_t)s_phase;
   switch (s_phase) {
     case CP_WOBBLE:
       if (el >= HATCH_T_CRACK) s_phase = CP_CRACK;
@@ -99,8 +148,13 @@ void ceremony_service(uint32_t now_ms) {
       while (s_jolts < want && s_jolts < 3u) {
         ++s_jolts;
         rd_shake(HATCH_JOLT_PX, HATCH_JOLT_MS);
+        audio_play(SFX_BUZZ);
       }
-      if (el >= HATCH_T_FLASH) { s_phase = CP_FLASH; rd_flash(HATCH_FLASH_MS); }
+      if (el >= HATCH_T_FLASH) {
+        s_phase = CP_FLASH;
+        rd_flash(HATCH_FLASH_MS);
+        audio_play(SFX_CHIRP);
+      }
       break;
     }
 
@@ -109,7 +163,7 @@ void ceremony_service(uint32_t now_ms) {
       break;
 
     case CP_SHARDS:
-      if (el >= HATCH_T_GROW) s_phase = CP_GROW;
+      if (el >= HATCH_T_GROW) { s_phase = CP_GROW; audio_play(SFX_RISE); }
       break;
 
     case CP_GROW:
@@ -126,7 +180,11 @@ void ceremony_service(uint32_t now_ms) {
         s_look = 2;
         petfx_face_point(OLED_W - 1);
       }
-      if (el >= HATCH_T_NAME) { s_phase = CP_NAME; petfx_face_point(OLED_W / 2); }
+      if (el >= HATCH_T_NAME) {
+        s_phase = CP_NAME;
+        petfx_face_point(OLED_W / 2);
+        audio_play(SFX_DOUBLE_BEEP);
+      }
       break;
 
     case CP_NAME:
@@ -142,6 +200,7 @@ void ceremony_service(uint32_t now_ms) {
     default:
       break;
   }
+  } while ((uint8_t)s_phase != before);
 }
 
 // -----------------------------------------------------------------------------
@@ -225,7 +284,27 @@ bool ceremony_draw(uint32_t now_ms) {
     return true;
   }
 
-  if (!p) return true;
+  // A CEREMONY WITH NO BODY ENDS, IT DOES NOT SHOW 2.6 SECONDS OF BLACK.
+  // ceremony.h used to promise "a NULL answer means 'no pet', and the phases
+  // that need a body simply hold the last frame". It did not hold anything:
+  // this returned true having drawn NOTHING, and rd_begin_frame() clears the
+  // buffer at the start of every frame - so from CP_GROW onwards the panel went
+  // fully black for the last 2,600 ms and then jumped to HOME. The header now
+  // says what happens instead, and this makes it happen.
+  //
+  // Not reachable today - ceremony_start() refuses a null pet and
+  // ui_input_locked() holds every gesture for the whole show, and I could not
+  // construct a path that makes the binder go null mid-ceremony. It is written
+  // down and made safe because a later change to ceremony_body() (releasing the
+  // active Pebble, a read-only session where pet() can answer null) would
+  // otherwise turn a birth into 2.6 s of black screen with nobody having
+  // touched this file.
+  if (!p) {
+    s_phase = CP_NONE;
+    s_kind  = CEREMONY_NONE;
+    petfx_freeze(0);
+    return false;                 // no frame: let the screen under it draw
+  }
 
   // ---- 5..7: the body is out. petfx owns where it is from here on ---------
   petfx_draw_body(*p, POSE_IDLE, frame, 0);
@@ -256,7 +335,16 @@ bool ceremony_draw(uint32_t now_ms) {
   }
 
   if (s_phase == CP_NAME) {
-    char name[16], line[64];
+    // NAME_MAX_LEN * 2 + 1, NOT 16, SINCE THE FINAL REVIEW. The stored name is
+    // up to NAME_MAX_LEN (12) LATIN-1 bytes and ui_pet_name() hands back the
+    // UTF-8 form, so twelve accented characters are 24 bytes. u8_from_latin1()
+    // takes a character whole or stops, so the old 16-byte buffer did not
+    // corrupt anything - it silently dropped the name to SEVEN characters, on
+    // the one screen where the name is the whole point, in a Spanish product
+    // whose naming ring offers the accented capitals and the tilde-N. This was
+    // the only name buffer in the tree that was not sized from NAME_MAX_LEN;
+    // ui.cpp's own are 64.
+    char name[NAME_MAX_LEN * 2 + 1], line[64];
     ui_pet_name(name, sizeof(name));
     // {n} is the only key the template has; one substitution, no String.
     const char* tpl = S(STR_EGG_NAMED);
@@ -270,7 +358,18 @@ bool ceremony_draw(uint32_t now_ms) {
       line[o++] = tpl[i++];
     }
     line[o] = '\0';
-    rd_text_center(52, RD_FONT_NARR, line);
+    // NARR IF IT FITS, BODY IF IT DOES NOT, AND THIS IS THE SECOND HALF OF THE
+    // BUFFER FIX ABOVE. "Se llama " is 9 glyphs; twelve more and a full stop is
+    // 22, and 22 x RD_ADV_NARR (6) is 132 px against a 128 px panel. A centred
+    // string wider than the panel gets a NEGATIVE x, and rd_text_center() then
+    // drops leading codepoints one at a time (render.cpp draw_utf8) - so the
+    // longest legal name would have eaten the "S" of "Se llama" and left the
+    // line looking mistyped rather than truncated. RD_FONT_BODY is 5 px, so the
+    // same 22 glyphs are 110 px and the whole sentence stands.
+    rd_text_center(52,
+                   (rd_text_width(RD_FONT_NARR, line) <= (uint16_t)OLED_W)
+                     ? RD_FONT_NARR : RD_FONT_BODY,
+                   line);
     rd_text_center(61, RD_FONT_BODY, S(STR_HATCH_WELCOME));
     return true;
   }

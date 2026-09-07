@@ -2,12 +2,20 @@
 //  PEBBLEBOL - ui/petfx.cpp
 //  The creature layer. Three things live here and they only barely touch:
 //
-//   1. A pixel core (mirroring, ink bounds, eyelids). Pure bit twiddling on
-//      XBM rows, no U8G2, no globals from the sim. It is fenced between the
-//      PIXEL CORE markers below because scratchpad/petfx/mkharness.py slices
-//      exactly those lines out and compiles them on the host: that is how the
-//      28 px mirror case and the blink masks are actually verified, since the
-//      whole sketch cannot be built without hardware headers.
+//   1. A pixel core (ink bounds, eyelids). Pure bit twiddling on XBM rows, no
+//      U8G2, no globals from the sim. It is fenced between the PIXEL CORE
+//      markers below because scratchpad/petfx/mkharness.py slices exactly
+//      those lines out and compiles them on the host, since the whole sketch
+//      cannot be built without hardware headers.
+//
+//      P4-C4 CORRECTED THIS PARAGRAPH AND MOVED THE MIRROR OUT. It used to say
+//      the harness is "how the 28 px mirror case and the blink masks are
+//      actually verified"; scratchpad/ IS NOT IN THIS REPOSITORY, so nothing
+//      in the tree has ever executed either. The MIRROR is now ui/xbm_mirror.h,
+//      a pure module ui/battle_renderer.cpp shares and tests/ compiles and
+//      drives - including the 28 px case. The eyelid masks below are still
+//      verified by nothing that ships here, and that is now said rather than
+//      implied.
 //
 //   2. A behaviour automaton. Deterministic integer hash PRNG seeded from
 //      PetView.identity, so the same pet always moves the same way and its
@@ -22,14 +30,34 @@
 
 #include <string.h>
 
+#include "corrupt_fx.h"
+#include "petfx_core.h"
 #include "render.h"
+#include "xbm_mirror.h"
 #include "../data/sprites.h"
 
-// The eyelid table below is indexed by SpriteSetId and holds hand-verified row
-// numbers read out of the art. If the art is regenerated the ids and the row
-// numbers move together and the blink would land on a cheek, so make that a
-// build error rather than a bug report.
-static_assert(SPRITE_REV == 1, "petfx eyelid table was measured against SPRITE_REV 1 - re-verify it");
+// THE EYELID TABLE IS NO LONGER IN THIS FILE, and the assert that froze it is
+// gone with it (P9-C3).
+//
+// It was 24 hand-measured rows indexed by SpriteSetId, 1,100 lines from the
+// pixels it described, held in step with them by
+// `static_assert(SPRITE_REV == 1, "re-verify it")` - a guard that worked
+// exactly as intended and that sixty bodies would have turned into sixty rows
+// of the same hand work. tools/gen_sprites.py derives the band from the same
+// .txt file as the pixels now (PB_SPRITE_EYES in data/sprites_pebbles.h) by one
+// stated rule, so the two cannot drift and there is nothing left to freeze.
+// SPRITE_REV is itself derived now - it is the art hash - so the old assert
+// would have had to be re-typed after every art edit, which is the failure mode
+// it existed to prevent.
+//
+// THAT FIRST DERIVATION WAS WRONG AND THE P9 EXIT REPLACED IT. The rule was
+// "any enclosed hole in the top 60 % of the ink box", and its own docstring
+// called the failure "an ugly blink on one body, not a corrupted frame". It was
+// four bodies and it was not ugly, it was solid: the band became the bounding
+// box of every hole up there, pf_build_lids() fills every interior run on every
+// row of the band, and DENYRA gained 79 px on a 283 px body for the length of
+// each blink. See tools/gen_sprites.py's eye_band() for the rule that replaced
+// it and for what THAT one cannot do.
 
 // Every horizontal limit in this file comes from PETFX_STAGE_L / PETFX_STAGE_R
 // (petfx.h) and from nothing else. There is deliberately no softer, second
@@ -49,242 +77,34 @@ static_assert(SPRITE_REV == 1, "petfx eyelid table was measured against SPRITE_R
 // bodies and walls; it never goes looking in the sim for what the walls are.
 #define PF_OBST_MAX     4
 
-// Geometry of the biggest body we will ever cache: ADULT is 40x40, stride 5.
-#define PF_MAX_W        40
-#define PF_MAX_H        40
-#define PF_MAX_STRIDE   5
-#define PF_FRAME_BYTES  (PF_MAX_STRIDE * PF_MAX_H)   // 200 B
-#define PF_EYE_MAX_H    12                           // ADULT_BUHO needs 11
-#define PF_STRIP_BYTES  (PF_MAX_STRIDE * PF_EYE_MAX_H)
-
-// =============================================================================
-// ---8<--- PETFX PIXEL CORE BEGIN ---8<---
-// Everything between these markers is host-testable: it depends on sprites.h
-// and stdint only. Do not reach for U8G2, millis() or the sim in here.
-// =============================================================================
-
-// Bit-reversal LUT. XBM rows are LSB-first (LSB = leftmost pixel), so
-// mirroring a row is "reverse the byte order AND reverse the bits in each
-// byte". 256 B in flash beats a per-pixel loop by ~8x.
-static const uint8_t PF_REV8[256] = {
-  0x00, 0x80, 0x40, 0xC0, 0x20, 0xA0, 0x60, 0xE0, 0x10, 0x90, 0x50, 0xD0, 0x30, 0xB0, 0x70, 0xF0,
-  0x08, 0x88, 0x48, 0xC8, 0x28, 0xA8, 0x68, 0xE8, 0x18, 0x98, 0x58, 0xD8, 0x38, 0xB8, 0x78, 0xF8,
-  0x04, 0x84, 0x44, 0xC4, 0x24, 0xA4, 0x64, 0xE4, 0x14, 0x94, 0x54, 0xD4, 0x34, 0xB4, 0x74, 0xF4,
-  0x0C, 0x8C, 0x4C, 0xCC, 0x2C, 0xAC, 0x6C, 0xEC, 0x1C, 0x9C, 0x5C, 0xDC, 0x3C, 0xBC, 0x7C, 0xFC,
-  0x02, 0x82, 0x42, 0xC2, 0x22, 0xA2, 0x62, 0xE2, 0x12, 0x92, 0x52, 0xD2, 0x32, 0xB2, 0x72, 0xF2,
-  0x0A, 0x8A, 0x4A, 0xCA, 0x2A, 0xAA, 0x6A, 0xEA, 0x1A, 0x9A, 0x5A, 0xDA, 0x3A, 0xBA, 0x7A, 0xFA,
-  0x06, 0x86, 0x46, 0xC6, 0x26, 0xA6, 0x66, 0xE6, 0x16, 0x96, 0x56, 0xD6, 0x36, 0xB6, 0x76, 0xF6,
-  0x0E, 0x8E, 0x4E, 0xCE, 0x2E, 0xAE, 0x6E, 0xEE, 0x1E, 0x9E, 0x5E, 0xDE, 0x3E, 0xBE, 0x7E, 0xFE,
-  0x01, 0x81, 0x41, 0xC1, 0x21, 0xA1, 0x61, 0xE1, 0x11, 0x91, 0x51, 0xD1, 0x31, 0xB1, 0x71, 0xF1,
-  0x09, 0x89, 0x49, 0xC9, 0x29, 0xA9, 0x69, 0xE9, 0x19, 0x99, 0x59, 0xD9, 0x39, 0xB9, 0x79, 0xF9,
-  0x05, 0x85, 0x45, 0xC5, 0x25, 0xA5, 0x65, 0xE5, 0x15, 0x95, 0x55, 0xD5, 0x35, 0xB5, 0x75, 0xF5,
-  0x0D, 0x8D, 0x4D, 0xCD, 0x2D, 0xAD, 0x6D, 0xED, 0x1D, 0x9D, 0x5D, 0xDD, 0x3D, 0xBD, 0x7D, 0xFD,
-  0x03, 0x83, 0x43, 0xC3, 0x23, 0xA3, 0x63, 0xE3, 0x13, 0x93, 0x53, 0xD3, 0x33, 0xB3, 0x73, 0xF3,
-  0x0B, 0x8B, 0x4B, 0xCB, 0x2B, 0xAB, 0x6B, 0xEB, 0x1B, 0x9B, 0x5B, 0xDB, 0x3B, 0xBB, 0x7B, 0xFB,
-  0x07, 0x87, 0x47, 0xC7, 0x27, 0xA7, 0x67, 0xE7, 0x17, 0x97, 0x57, 0xD7, 0x37, 0xB7, 0x77, 0xF7,
-  0x0F, 0x8F, 0x4F, 0xCF, 0x2F, 0xAF, 0x6F, 0xEF, 0x1F, 0x9F, 0x5F, 0xDF, 0x3F, 0xBF, 0x7F, 0xFF,
-};
-
-static inline uint8_t pf_stride(uint8_t w) { return (uint8_t)((w + 7u) >> 3); }
-
-static inline uint8_t pf_get(const uint8_t* row, uint8_t x) {
-  return (uint8_t)((row[x >> 3] >> (x & 7u)) & 1u);
-}
-
-static inline void pf_set(uint8_t* row, uint8_t x) {
-  row[x >> 3] = (uint8_t)(row[x >> 3] | (uint8_t)(1u << (x & 7u)));
-}
-
-// -----------------------------------------------------------------------------
-//  pf_mirror_frame - horizontal flip of a whole XBM frame.
+// The geometry constants (PF_MAX_W/H, PF_FRAME_BYTES, PF_STRIP_BYTES) and the
+// PIXEL CORE - pf_stride/pf_get/pf_set, pf_scan_ink and pf_build_lids - MOVED
+// TO ui/petfx_core.{h,cpp} AT P9-C6, unchanged.
 //
-//  THE TRAP, and it is a real one: w = 24, 32 and 40 are multiples of 8 and
-//  fall out clean, but CHILD is 28 px wide. Its stride is 4 bytes = 32 bit
-//  slots, so every row carries 4 slots of padding ABOVE the sprite. Reversing
-//  the 32 slots puts the sprite at slots 4..31 instead of 0..27 - the body
-//  comes out shifted 4 px to the right and the last 4 px of the silhouette
-//  fall off the row. After reversing you MUST shift the row down by
-//  pad = stride*8 - w bit slots.
+// The block they lived in was headed "everything between these markers is
+// host-testable: it depends on sprites.h and stdint only". That was true of the
+// code and false of the build - this file includes render.h, so no host binary
+// has ever compiled a line of it - and the P9 exit review found what the gap
+// cost: pf_build_lids() was filling a third of four bodies solid on every
+// blink, a frame nothing in the tree had ever drawn. petfx_core.h says the rest
+// and tests/test_sprite_pipeline.cpp now drives the shipped function.
 //
-//  In this layout "shift down by k" means new_bit[i] = old_bit[i + k], which
-//  in byte terms is dst[j] = (tmp[j] >> k) | (tmp[j+1] << (8-k)) - it looks
-//  like a right shift and reads like a left shift; that inversion is exactly
-//  what makes this easy to get wrong. The padding bits themselves land in the
-//  low nibble of tmp[0] and are shifted out, so the source padding never has
-//  to be masked.
-// -----------------------------------------------------------------------------
-static void pf_mirror_frame(const uint8_t* src, uint8_t* dst, uint8_t w, uint8_t h) {
-  const uint8_t stride = pf_stride(w);
-  const uint8_t pad    = (uint8_t)((uint8_t)(stride * 8u) - w);
-  uint8_t tmp[PF_MAX_STRIDE + 1];
-
-  for (uint8_t y = 0; y < h; y++) {
-    const uint8_t* s = src + (uint16_t)y * stride;
-    uint8_t*       d = dst + (uint16_t)y * stride;
-    for (uint8_t i = 0; i < stride; i++) tmp[i] = PF_REV8[s[stride - 1u - i]];
-    tmp[stride] = 0;
-    if (pad == 0) {
-      for (uint8_t i = 0; i < stride; i++) d[i] = tmp[i];
-    } else {
-      for (uint8_t i = 0; i < stride; i++)
-        d[i] = (uint8_t)((uint8_t)(tmp[i] >> pad) | (uint8_t)(tmp[i + 1u] << (8u - pad)));
-    }
-  }
-}
-
-// -----------------------------------------------------------------------------
-//  pf_scan_ink - tightest box that contains a lit pixel.
-//  The art has empty margins (spr_adult_bolota is 40x40 with ink only in rows
-//  1..36) and they are not the same on every body, so the floor, the shadow
-//  and the coat pattern all have to be measured, never assumed.
-//  Returns 0 when the frame is blank; the callers then fall back to the box.
-// -----------------------------------------------------------------------------
-static uint8_t pf_scan_ink(const uint8_t* bits, uint8_t w, uint8_t h,
-                           uint8_t* top, uint8_t* bot, uint8_t* left, uint8_t* right) {
-  const uint8_t stride = pf_stride(w);
-  uint8_t t = 0xFF, b = 0, l = 0xFF, r = 0;
-  for (uint8_t y = 0; y < h; y++) {
-    const uint8_t* row = bits + (uint16_t)y * stride;
-    for (uint8_t x = 0; x < w; x++) {
-      if (!pf_get(row, x)) continue;
-      if (t == 0xFF) t = y;
-      b = y;
-      if (x < l) l = x;
-      if (x > r) r = x;
-    }
-  }
-  if (t == 0xFF) return 0;
-  *top = t; *bot = b; *left = l; *right = r;
-  return 1;
-}
-
-// -----------------------------------------------------------------------------
-//  EYELIDS
+// WHERE THE EYE BAND COMES FROM. data/sprites_pebbles.h's PB_SPRITE_EYES, read
+// through sprite_eyes(), derived by tools/gen_sprites.py from the same .txt
+// file as the pixels. It was a 24-row hand-measured table HERE until P9-C3;
+// the argument for that, recorded so the trade is legible, was that the
+// heuristic of the day ("fill every interior run of zeros in the top 55 % of
+// the ink") got 30 of 38 legacy sets right - decorative silhouette gaps were
+// geometrically identical to eye sockets. P9-C6 replaced that rule with one
+// stated in terms of the drawing rather than of a percentage of the box: the
+// eyes are the largest group of enclosed holes that can be closed together
+// WITHOUT CLOSING ANYTHING THAT IS NOT A HOLE, and the generator verifies that
+// against pf_build_lids()'s own row-wise fill before it emits a band.
 //
-//  Verified fact about this art: the eyes are HOLES in the silhouette, with
-//  the pupil as a lit island inside the hole. spr_adult_bolota rows 15-20:
-//      .######......##############......######.
-//      .######..##..##############..##..######.
-//  So "close the eye" = fill the hole (the socket goes solid, the pupil was
-//  already solid) and then carve one dark row back out as the lash line.
-//
-//  WHY THIS IS A TABLE AND NOT A HEURISTIC.
-//  The obvious rule - "fill every interior run of zeros in the top 55 % of the
-//  ink" - was implemented and run against all 38 sets (scratchpad/petfx/
-//  eyes.py, eyes2.py). It is wrong on this art for two independent reasons:
-//    * decorative silhouette gaps are geometrically identical to eye sockets.
-//      BABY_CACTUS spines, ADULT_PUNKI's mohawk, TEEN_POOR's spikes and
-//      BABY_SETA's cap notches all read as "a pair of interior runs high up in
-//      the body" and win the vote over the real eyes.
-//    * the 55 % cut is simply false for some bodies. BABY_SETA's face is on
-//      the STEM, at 67-79 % of the ink height; a 55 % or 60 % band cannot
-//      reach it, and widening the band to 80 % starts swallowing mouths.
-//  Refining the heuristic (pupil-split detection, symmetry scoring) got 30 of
-//  38 sets right, which is worse than useless for a cosmetic effect: seven
-//  bodies would blink with their spikes. So the rows were read off the decoded
-//  art by hand, once, and frozen with the SPRITE_REV assert above. 192 B of
-//  flash buys an exact answer.
-//
-//  x0/x1 clip the band horizontally. Some bodies have a hole in the eye rows
-//  that is not an eye - ADULT_QUIMERA has a 2 px seam between its two heads at
-//  x19, BABY_PEZ has a tail notch, BABY_ROBOT has an armpit - and filling
-//  those would fuse body parts for 90 ms. The window keeps the fill on the
-//  face. Coordinates are in UNMIRRORED sprite space; the mirror flips them.
-// -----------------------------------------------------------------------------
-struct PfEyeBand { uint8_t y0, y1, x0, x1; };
-
-#define PF_EYE_FIRST  SPR_BABY_BLOB
-#define PF_EYE_LAST   SPR_SENIOR_QUIMERA
-#define PF_EYE_SETS   (PF_EYE_LAST - PF_EYE_FIRST + 1)
-
-// [set - PF_EYE_FIRST][frame]
-static const PfEyeBand PF_EYE[PF_EYE_SETS][2] = {
-  /* BABY_BLOB         */ { {  8, 12,  5, 18 }, { 11, 12,  5, 18 } },
-  /* BABY_ORUGA        */ { {  9, 13,  5, 18 }, { 11, 12,  5, 18 } },
-  /* BABY_PAJARO       */ { {  8, 12,  5, 18 }, { 10, 11,  5, 18 } },
-  /* BABY_GATO         */ { {  8, 12,  4, 19 }, { 10, 11,  3, 19 } },
-  /* BABY_SETA         */ { { 16, 19,  9, 13 }, { 16, 19,  9, 13 } },  // f1 already blinks
-  /* BABY_CACTUS       */ { { 12, 14,  8, 15 }, { 13, 13,  8, 15 } },
-  /* BABY_PEZ          */ { {  9, 12,  4,  6 }, {  9, 12,  4,  6 } },  // one eye, faces left
-  /* BABY_ROBOT        */ { {  9, 12,  6, 20 }, {  9, 12,  6, 20 } },
-  /* CHILD_GOOD        */ { { 11, 15,  7, 20 }, { 13, 14,  7, 20 } },
-  /* CHILD_POOR        */ { { 11, 15,  6, 20 }, { 13, 15,  6, 20 } },
-  /* TEEN_GOOD         */ { {  9, 13,  9, 22 }, { 11, 12,  9, 22 } },
-  /* TEEN_POOR         */ { {  9, 13,  8, 23 }, { 11, 12,  8, 22 } },
-  /* ADULT_BOLOTA      */ { { 15, 20,  7, 32 }, { 16, 17,  7, 32 } },
-  /* ADULT_ZAMPASALTO  */ { {  9, 13, 11, 26 }, { 11, 12, 11, 26 } },
-  /* ADULT_BUHO        */ { {  9, 19,  5, 34 }, {  9, 19,  5, 34 } },  // 11 rows of owl
-  /* ADULT_PUNKI       */ { { 12, 19,  7, 29 }, { 12, 19,  6, 28 } },
-  /* ADULT_MOHO        */ { { 14, 17,  8, 33 }, { 13, 16,  8, 33 } },
-  /* ADULT_QUIMERA     */ { { 12, 17,  6, 13 }, { 14, 17,  6, 13 } },  // left head only
-  /* SENIOR_BOLOTA     */ { {  9, 11,  5, 22 }, { 11, 12,  5, 22 } },
-  /* SENIOR_ZAMPASALTO */ { {  8, 10,  6, 19 }, { 10, 11,  6, 19 } },
-  /* SENIOR_BUHO       */ { {  5, 11,  5, 26 }, {  5, 11,  5, 26 } },
-  /* SENIOR_PUNKI      */ { {  8, 11,  6, 23 }, {  9, 10,  6, 23 } },
-  /* SENIOR_MOHO       */ { {  8, 10,  7, 22 }, {  8, 10,  7, 22 } },
-  /* SENIOR_QUIMERA    */ { {  8, 10,  5,  9 }, {  9, 11,  5,  9 } },  // left head only
-};
-
-// -----------------------------------------------------------------------------
-//  pf_build_lids - turn one eye band into two little XBM strips.
-//
-//    fill : every interior hole inside the window, drawn with colour 1, so the
-//           socket goes solid.
-//    lid  : the holes of the band's FIRST row, placed on the band's MIDDLE row
-//           and drawn with colour 0. The first row is the un-split socket
-//           outline (lower rows are cut in two by the pupil), so re-opening it
-//           one row down gives a continuous slit instead of two notches.
-//
-//  Both strips are full sprite width so they can be blitted at (x, y + y0)
-//  with a plain drawXBM. Returns the band height, 0 when there is nothing to
-//  do (blank band - BABY_SETA frame 1 is already drawn blinking).
-// -----------------------------------------------------------------------------
-static uint8_t pf_build_lids(const uint8_t* bits, uint8_t w, uint8_t h,
-                             uint8_t y0, uint8_t y1, uint8_t x0, uint8_t x1,
-                             uint8_t* fill, uint8_t* lid) {
-  const uint8_t stride = pf_stride(w);
-  if (y1 >= h || y1 < y0) return 0;
-  uint8_t bh = (uint8_t)(y1 - y0 + 1u);
-  if (bh > PF_EYE_MAX_H) bh = PF_EYE_MAX_H;
-  if (x1 >= w) x1 = (uint8_t)(w - 1u);
-
-  memset(fill, 0, (uint16_t)stride * bh);
-  memset(lid,  0, (uint16_t)stride * bh);
-
-  uint8_t any = 0;
-  for (uint8_t r = 0; r < bh; r++) {
-    const uint8_t* row = bits + (uint16_t)(y0 + r) * stride;
-    uint8_t*       out = fill + (uint16_t)r * stride;
-
-    // last lit pixel of the row bounds the search: a run of zeros is only
-    // "interior" when there is ink on BOTH sides of it.
-    uint8_t last = 0, seen = 0;
-    for (uint8_t x = 0; x < w; x++) if (pf_get(row, x)) { last = x; seen = 1; }
-    if (!seen) continue;
-
-    uint8_t x = 0;
-    while (x < last && !pf_get(row, x)) x++;   // skip the left margin
-    while (x < last) {
-      if (pf_get(row, x)) { x++; continue; }
-      const uint8_t s = x;
-      while (x <= last && !pf_get(row, x)) x++;
-      // [s, x) is bounded by ink on both sides by construction
-      if (s >= x0 && (uint8_t)(x - 1u) <= x1) {
-        for (uint8_t k = s; k < x; k++) { pf_set(out, k); any = 1; }
-      }
-    }
-  }
-  if (!any) return 0;
-
-  // The lash line: copy the top row's mask onto the middle row. A one-row band
-  // gets no lash (it would undo the whole fill).
-  if (bh >= 2) memcpy(lid + (uint16_t)(bh / 2u) * stride, fill, stride);
-  return bh;
-}
-
-// =============================================================================
-// ---8<--- PETFX PIXEL CORE END ---8<---
-// =============================================================================
+// x0/x1 clip the band horizontally, because a body can have a hole in its eye
+// rows that is not an eye and filling it would fuse two body parts for the
+// length of a blink. Coordinates are in UNMIRRORED sprite space; the mirror
+// flips them.
 
 // =============================================================================
 //  PRNG
@@ -333,7 +153,21 @@ struct PfTemper {
   uint8_t  hop_amp;              // px at the apex
 };
 
-static const PfTemper PF_TEMPER[TEMPER_COUNT] = {
+// THE LAST ROW IS NOT A TEMPERAMENT AND NO GENOME SELECTS IT. It is the
+// CORRUPTED behaviour (spec section 55), and it is one table row rather than a
+// POSE_GLITCH sprite set because the alternative is 60 more 24x24 bodies -
+// ui/corrupt_fx.h argues that at length. Corruption overrides the genome for as
+// long as the status is set and not one tick longer: cfx_temper_index() is the
+// only thing that picks this row, pf_derive() re-runs when the bit flips, and
+// tests/test_corruption.cpp is what proves the pet's own row comes back.
+//
+// What it reads as: 6/64 left for STAND against GOTICO's 36, dwell times a
+// fifth of NERVIOSO's, the highest turn weight in the table and the jitter flag
+// on. The creature stutters back and forth instead of settling - which is the
+// point, and is also why it is deliberately NOT simply "faster": speed 22
+// against NERVIOSO's 18 is a small part of it and the 26/64 turn weight is the
+// rest.
+static const PfTemper PF_TEMPER[CFX_TEMPER_ROWS] = {
   /* SOLAR     hops often and short, changes its mind cheerfully */
   {  500, 1600,  500, 1500, 13, 18, 14, 10,  4,  6, 0, 6 },
   /* TRANQUILO long stops, slow walk, little amplitude            */
@@ -342,7 +176,24 @@ static const PfTemper PF_TEMPER[TEMPER_COUNT] = {
   {  250,  900,  250,  800, 18, 20, 10, 20,  2,  4, 1, 5 },
   /* GOTICO    nearly immobile, drifts to a corner and stays      */
   { 3500,11000, 1200, 3200,  4, 10,  1,  3, 16,  6, 0, 2 },
+  /* CORRUPTED not a gene: stutters, turns constantly, twitches   */
+  {  150,  700,  150,  600, 22, 14,  6, 26,  8,  4, 1, 4 },
 };
+
+// The two tables must stay the same shape. Add a fifth genome temperament and
+// this fails HERE, at the line that would otherwise have handed the corrupted
+// pet the new temperament's dwell times by silent off-by-one.
+static_assert((int)CFX_TEMPER_CORRUPT == (int)TEMPER_COUNT,
+              "corrupt_fx.h's behaviour row is no longer one past the last "
+              "genome temperament - see core/nt_types.h");
+static_assert((int)CFX_TEMPER_ROWS == (int)TEMPER_COUNT + 1,
+              "PF_TEMPER must hold every temperament plus the corrupted row");
+// The out-of-range fold moved into cfx_temper_index() with the corruption
+// override. This is what stops the move from silently changing WHICH body a
+// garbage genome nibble animates as - pf_derive() folded to TRANQUILO and this
+// keeps it there.
+static_assert((int)CFX_TEMPER_FALLBACK == (int)TEMPER_TRANQUILO,
+              "the out-of-range temperament fold moved - see ui/corrupt_fx.h");
 
 // gene_pattern -> coat dither, as an ERASE level out of 16.
 //
@@ -404,6 +255,13 @@ static uint32_t s_last_ms     = 0;
 
 // --- character, derived from the genome once per reset ---
 static uint8_t  s_temper      = TEMPER_TRANQUILO;
+// The corruption bit AS THE AUTOMATON LAST SAW IT. pf_derive() runs from
+// petfx_reset(), which ui.cpp calls on an IDENTITY change - and a Pebble that
+// gets corrupted is the same Pebble, so nothing would ever re-derive without
+// this latch and the altered behaviour would first appear on the next hatch.
+// It is also what bounds the effect in the other direction: the moment the
+// status ends, the pet's own temperament row is derived again.
+static uint8_t  s_corrupt     = 0;
 static uint16_t s_speed_q4    = 96;    // 1/16 px per second
 static uint8_t  s_hop_amp     = 4;
 static int16_t  s_anchor      = 64;    // preferred body-centre x
@@ -460,13 +318,16 @@ static int16_t  s_ink_x0 = 44, s_ink_y0 = 12, s_ink_x1 = 83, s_ink_y1 = 51;
 // carry a PetView into a query. Written where set_id is derived, three lines
 // below, so the two cannot drift apart.
 static uint8_t  s_qry_ok      = 0;
-static uint8_t  s_qry_species = 0;
 static uint8_t  s_qry_stage   = 0;
 static uint8_t  s_qry_form    = 0;
 
 // --- sprite cache: mirrored body + ink bounds + eyelid strips, per frame ---
 static uint8_t  s_cache_set   = 0xFF;
 static uint8_t  s_cache_mir   = 0xFF;
+// P10-C3: the third component of the cache key. A derived SLEEP frame and the
+// idle frame it is derived FROM have the same set id, so without this a pet
+// that fell asleep would keep whichever of the two the cache happened to hold.
+static uint8_t  s_cache_slp   = 0xFF;
 static uint8_t  s_cache_w     = 0;
 static uint8_t  s_cache_h     = 0;
 static uint8_t  s_cache_bits[2][PF_FRAME_BYTES];
@@ -513,13 +374,21 @@ static inline int16_t pf_stage_hi(uint8_t w) {
 // live pose instead would fix the overlap but move the wall in the middle of a
 // stroll, which is the same jump wearing a different hat; the maximum is stable
 // for as long as the stage is, which is what a clamp has to be.
+//
+// P9-C3 MADE THE ANSWER CONSTANT AND THE LOOP IS KEPT ANYWAY. Every set in the
+// generated atlas is 24x24 - the two poses included - so this returns 24 for
+// every input today and the senior-jump defect above is impossible by
+// construction. The loop stays because it is the STATEMENT of the rule, not an
+// optimisation: an atlas that ever grows a wider pose set again would move the
+// clamp without anyone editing this function, which is exactly what did not
+// happen the first time. It is four sprite_set() reads on a stage change, not
+// per frame.
 static uint8_t pf_width_of(const PetView& p) {
   static const uint8_t kPoses[] = { POSE_IDLE, POSE_SLEEP, POSE_SICK, POSE_EAT };
-  const uint8_t species = p.gene_species;
-  const uint8_t form    = p.form;
+  const uint8_t form = p.form;
   uint8_t w = 0;
   for (uint8_t i = 0; i < (uint8_t)(sizeof(kPoses) / sizeof(kPoses[0])); i++) {
-    const uint8_t id = sprite_set_id(species, p.stage, form, kPoses[i]);
+    const uint8_t id = sprite_set_id(p.stage, form, kPoses[i]);
     const uint8_t sw = sprite_set(id).w;
     if (sw > w) w = sw;
   }
@@ -596,45 +465,114 @@ static uint16_t pf_stretch(uint16_t ms) {
 //  Rebuilt only when the set or the orientation changes - a few times a
 //  minute, ~600 byte operations. Never in the steady-state frame path.
 // =============================================================================
-static void pf_cache_sync(uint8_t set_id, uint8_t mirrored) {
-  if (set_id == s_cache_set && mirrored == s_cache_mir) return;
+// `sleeping` asks for the DERIVED sleeping body rather than the frame as
+// authored: the species' own silhouette with its eyes shut and its weight
+// settled (ui/petfx_core.h). It is the third component of the cache key because
+// the derived frame and the frame it comes from share a set id.
+//
+// THE FALLBACK IS DECIDED ONCE FOR THE WHOLE SET AND NOT PER FRAME. A set whose
+// frame 0 cannot be derived - a blank frame, or one wider than the cache - uses
+// the authored PBSPR_SLEEP body for BOTH frames; deciding per frame would flip
+// between a species and a generic blob every UI_ANIM_FRAME_MS. No body in
+// today's atlas takes this path, and tests/test_sprite_pipeline.cpp is what
+// says so over all sixty.
+static void pf_cache_sync(uint8_t set_id, uint8_t mirrored, uint8_t sleeping) {
+  if (set_id == s_cache_set && mirrored == s_cache_mir && sleeping == s_cache_slp)
+    return;
 
-  const SpriteSet s = sprite_set(set_id);
-  const uint8_t   stride = pf_stride(s.w);
-  const uint16_t  fbytes = (uint16_t)stride * s.h;
+  // The band, in the orientation the cache holds. Shared by the derivation and
+  // by the lids, so the two cannot disagree about where the eyes are.
+  auto band_of = [&](uint8_t id, uint8_t frame, uint8_t w) {
+    SpriteEyeBand b = sprite_eyes(id, frame);
+    if (mirrored && b.y1 >= b.y0) {
+      const uint8_t nx0 = (uint8_t)(w - 1u - b.x1);
+      const uint8_t nx1 = (uint8_t)(w - 1u - b.x0);
+      b.x0 = nx0; b.x1 = nx1;
+    }
+    return b;
+  };
 
+  // THE KEY IS WHAT WAS ASKED FOR, not what ended up in the buffers: a set that
+  // cannot be derived falls back to the authored blob below, and recording the
+  // blob's id here would re-run the whole failed derivation on every frame.
   s_cache_set = set_id;
   s_cache_mir = mirrored;
-  s_cache_w   = s.w;
-  s_cache_h   = s.h;
+  s_cache_slp = sleeping;
 
-  for (uint8_t f = 0; f < 2; f++) {
-    const uint8_t  src_f = (uint8_t)((f < s.frames) ? f : 0u);
-    const uint8_t* src   = s.bits + (uint32_t)fbytes * src_f;
-    uint8_t*       dst   = s_cache_bits[f];
+  // TWO PASSES AT MOST, and the second only ever runs for a set the derivation
+  // refuses - a blank frame, or one wider than the cache. No body in today's
+  // atlas takes it and tests/test_sprite_pipeline.cpp says so over all sixty.
+  //
+  // THE FALLBACK IS DECIDED FOR THE WHOLE SET AND NOT PER FRAME: flipping
+  // between a species and a generic blob every UI_ANIM_FRAME_MS would be worse
+  // than either. So a refusal on ANY frame restarts the whole pass on
+  // PBSPR_SLEEP.
+  //
+  // THERE IS EXACTLY ONE pf_build_sleep() CALL IN THIS FILE AND THAT IS
+  // DELIBERATE. The first draft probed frame 0 before the loop and derived
+  // inside it, which is two call sites - and tools/check.sh's gate, which can
+  // only ask whether the function is CALLED here, was satisfied by the probe
+  // while the derivation that actually draws had been deleted. The mutation run
+  // found that: the device stopped deriving, the whole suite stayed green and
+  // the gate said GATE OK. One call site makes the gate exact.
+  uint8_t use_id = set_id;
+  uint8_t derive = sleeping;
+  for (uint8_t pass = 0; pass < 2u; ++pass) {
+    const SpriteSet s = sprite_set(use_id);
+    const uint8_t   stride = pf_stride(s.w);
+    const uint16_t  fbytes = (uint16_t)stride * s.h;
+    s_cache_w = s.w;
+    s_cache_h = s.h;
 
-    if (mirrored) pf_mirror_frame(src, dst, s.w, s.h);
-    else          memcpy(dst, src, fbytes);
+    uint8_t refused = 0;
+    for (uint8_t f = 0; f < 2; f++) {
+      const uint8_t  src_f = (uint8_t)((f < s.frames) ? f : 0u);
+      const uint8_t* src   = s.bits + (uint32_t)fbytes * src_f;
+      uint8_t*       dst   = s_cache_bits[f];
 
-    if (!pf_scan_ink(dst, s.w, s.h, &s_ink_t[f], &s_ink_b[f], &s_ink_l[f], &s_ink_r[f])) {
-      s_ink_t[f] = 0; s_ink_b[f] = (uint8_t)(s.h - 1u);
-      s_ink_l[f] = 0; s_ink_r[f] = (uint8_t)(s.w - 1u);
-    }
+      if (mirrored) xbm_mirror_frame(src, dst, s.w, s.h);
+      else          memcpy(dst, src, fbytes);
 
-    s_lid_h[f] = 0;
-    s_lid_y[f] = 0;
-    if (set_id >= PF_EYE_FIRST && set_id <= PF_EYE_LAST) {
-      const PfEyeBand& b = PF_EYE[set_id - PF_EYE_FIRST][src_f];
-      uint8_t x0 = b.x0, x1 = b.x1;
-      if (mirrored) {                       // the window mirrors with the art
-        const uint8_t nx0 = (uint8_t)(s.w - 1u - b.x1);
-        const uint8_t nx1 = (uint8_t)(s.w - 1u - b.x0);
-        x0 = nx0; x1 = nx1;
+      const SpriteEyeBand b = band_of(use_id, src_f, s.w);
+
+      if (derive) {
+        // THE SAME pf_build_sleep() ui/screen_home.cpp's still body path calls,
+        // over the same atlas, with the same band. Two derivations would be two
+        // sleeping bodies and only one of them would ever appear in a golden.
+        uint8_t tmp[PF_FRAME_BYTES];
+        if (s.w > PF_MAX_W || s.h > PF_MAX_H ||
+            pf_build_sleep(dst, s.w, s.h, b.y0, b.y1, b.x0, b.x1, tmp) == 0u) {
+          refused = 1;
+          break;
+        }
+        memcpy(dst, tmp, fbytes);
       }
-      s_lid_y[f] = b.y0;
-      s_lid_h[f] = pf_build_lids(dst, s.w, s.h, b.y0, b.y1, x0, x1,
-                                 s_lid_fill[f], s_lid_cut[f]);
+
+      if (!pf_scan_ink(dst, s.w, s.h, &s_ink_t[f], &s_ink_b[f], &s_ink_l[f], &s_ink_r[f])) {
+        s_ink_t[f] = 0; s_ink_b[f] = (uint8_t)(s.h - 1u);
+        s_ink_l[f] = 0; s_ink_r[f] = (uint8_t)(s.w - 1u);
+      }
+
+      s_lid_h[f] = 0;
+      s_lid_y[f] = 0;
+      // The band comes out of the atlas beside the pixels. `y1 < y0` is the
+      // generator's way of saying THIS BODY DOES NOT BLINK - a body with no
+      // enclosed hole in its upper face - and pf_build_lids() already answers 0
+      // for it, so there is no extra branch here.
+      //
+      // A SLEEPING BODY BUILDS NO LIDS AT ALL: its eyes are already shut in the
+      // cached frame, and petfx_draw_body()'s `no_eyes` suppresses the blink on
+      // PF_ASLEEP anyway. Building them would be work with two ways to be wrong
+      // and no way to be seen.
+      if (!derive) {
+        s_lid_y[f] = b.y0;
+        s_lid_h[f] = pf_build_lids(dst, s.w, s.h, b.y0, b.y1, b.x0, b.x1,
+                                   s_lid_fill[f], s_lid_cut[f]);
+      }
     }
+    if (!refused) return;
+    use_id = (uint8_t)PBSPR_SLEEP;
+    derive = 0;
   }
 }
 
@@ -646,8 +584,11 @@ static void pf_cache_sync(uint8_t set_id, uint8_t mirrored) {
 // the player is looking; unsociable ones pick a side and hug it. The side is
 // chosen from the lineage, not from a coin toss, so it is part of the pet.
 static void pf_derive(const PetView& p) {
-  s_temper = p.temper;
-  if (s_temper >= TEMPER_COUNT) s_temper = TEMPER_TRANQUILO;
+  // The out-of-range fold moved into cfx_temper_index() with the corruption
+  // override, so there is ONE expression that answers "which behaviour row",
+  // and it is in a translation unit a host binary can link.
+  s_temper  = cfx_temper_index(p.temper, p.corrupted);
+  s_corrupt = (uint8_t)(p.corrupted != 0u);
   const PfTemper& T = PF_TEMPER[s_temper];
 
   const uint8_t bs  = p.body_size;            // 0..7
@@ -665,7 +606,11 @@ static void pf_derive(const PetView& p) {
     s_anchor = (p.lineage_bits & 1u) ? 22 : 106;
     s_roam   = (uint8_t)(10u + soc * 2u);
   }
-  if (s_temper == TEMPER_GOTICO) {            // drifts to a corner and stays
+  // Keyed on the ROW, not on p.temper, so a corrupted GOTICO stops hugging its
+  // corner for as long as the status lasts and goes back to it afterwards. That
+  // is the intended reading of "altered behaviour": the corruption overrides
+  // the gene rather than layering on top of it.
+  if (s_temper == (uint8_t)TEMPER_GOTICO) {   // drifts to a corner and stays
     s_anchor = (p.lineage_bits & 2u) ? 14 : 114;
     s_roam   = 12;
   }
@@ -823,6 +768,7 @@ void petfx_begin(void) {
   s_began      = 1;
   s_cache_set  = 0xFF;
   s_cache_mir  = 0xFF;
+  s_cache_slp  = 0xFF;
   s_state      = PF_STAND;
   s_state_len  = 900;
   s_x_q4       = (int32_t)((OLED_W - 32) / 2) * 16;
@@ -836,6 +782,7 @@ void petfx_begin(void) {
   s_jitter     = 0;
   s_identity   = 0;
   s_seeded     = 0;
+  s_corrupt    = 0;
   s_obst_n     = 0;
   s_obst_w     = 0;
 }
@@ -875,6 +822,7 @@ void petfx_reset(const PetView& p) {
   s_last_input  = s_now;
   s_cache_set   = 0xFF;          // the body probably changed too
   s_cache_mir   = 0xFF;
+  s_cache_slp   = 0xFF;
   pf_enter(PF_STAND, 700);
   pf_schedule_blink();
 }
@@ -887,6 +835,18 @@ void petfx_service(const PetView& p, uint32_t now_ms) {
   s_energy_pct = p.care_pct[CARE_ENERGY];
   const uint32_t id = p.identity;
   if (!s_seeded || id != s_identity) { petfx_reset(p); return; }
+
+  // CORRUPTION ARRIVES AND LEAVES MID-LIFE AND CHANGES NO IDENTITY, so the
+  // reseed above never fires for it. Re-derive on the EDGE, not every tick: the
+  // derivation is cheap but it is not free, and running it unconditionally
+  // would also re-run pf_clamp_anchor()'s effects sixty times a second for a
+  // pet whose genes have not moved. NOT a petfx_reset(): that reseeds the PRNG
+  // and teleports the body to its anchor, and a Pebble catching a virus must
+  // not jump across the panel.
+  // No pf_clamp_anchor() here: the four lines below re-clamp unconditionally
+  // with a freshly measured body width, which is the call that has to happen
+  // anyway and is strictly better than one made against last frame's.
+  if ((uint8_t)(p.corrupted != 0u) != s_corrupt) pf_derive(p);
 
   uint32_t dt = (uint32_t)(now_ms - s_last_ms);
   s_last_ms = now_ms;
@@ -1069,24 +1029,37 @@ void petfx_draw_body(const PetView& p, uint8_t pose, uint8_t frame, int16_t dy,
   const uint8_t pinned  = (uint8_t)(no_face || s_freeze);
 
   uint8_t set_id;
+  uint8_t sleeping = 0;
   if (p.stage == STAGE_EGG) {
     // Same rule ui.cpp uses, kept in sync deliberately: the egg starts
     // cracking a minute before it hatches.
-    set_id = (uint8_t)(((uint32_t)p.age_s + 60u >= AGE_EGG_S) ? SPR_EGG_CRACK : SPR_EGG_IDLE);
+    set_id = (uint8_t)(((uint32_t)p.age_s + 60u >= AGE_EGG_S)
+                       ? (uint8_t)PBSPR_EGG_CRACK : (uint8_t)PBSPR_EGG_IDLE);
   } else {
-    // sprite_form_of() is the ONLY correct source of `form`: the adult body
-    // comes from the species gene and child/teen variants live in minor_form.
-    s_qry_species = p.gene_species;
+    // PetView.form is the ONLY source of the body, and since P4-C4a it is the
+    // SPECIES' design: ui/pet_view.cpp puts the species row's sprite_id there
+    // (or, for a Pebble with no row, the genome nibble). Since P9-C3 there is
+    // no fold left - one 24x24 body per species - so `form` IS the art key.
+    // This module does not know what a species is and must not learn - see the
+    // banner in ui/pet_art.h.
     s_qry_stage   = p.stage;
     s_qry_form    = p.form;
     s_qry_ok      = 1;
-    set_id = sprite_set_id(s_qry_species, s_qry_stage, s_qry_form, pose);
+    // SLEEP IS DERIVED FROM THE SPECIES BODY SINCE P10-C3 (ui/petfx_core.h), so
+    // the set asked for is the IDLE one and pf_cache_sync() composites the pose.
+    // ui/screen_home.cpp's still body path does exactly the same thing, and
+    // tools/check.sh gates both call sites: deriving on only one of HOME's two
+    // body paths is how the device and every golden in the suite come to show
+    // two different creatures with the build green.
+    sleeping = (uint8_t)((pose == (uint8_t)POSE_SLEEP) ? 1u : 0u);
+    set_id = sprite_set_id(s_qry_stage, s_qry_form,
+                           sleeping ? (uint8_t)POSE_IDLE : pose);
   }
   if (p.stage == STAGE_EGG) s_qry_ok = 0;   // an egg has no poses to ask about
 
   // no_face, not pinned: a frozen pet keeps whatever way it is facing.
   const uint8_t mirrored = (uint8_t)((!no_face && s_facing > 0) ? 1u : 0u);
-  pf_cache_sync(set_id, mirrored);
+  pf_cache_sync(set_id, mirrored, sleeping);
 
   const uint8_t w      = s_cache_w;
   const uint8_t h      = s_cache_h;
@@ -1324,6 +1297,38 @@ void petfx_draw_body(const PetView& p, uint8_t pose, uint8_t frame, int16_t dy,
     }
   }
 
+  // --- the corruption glitch (spec section 55) ---------------------------------
+  // XOR-noise rows over the body, on roughly one 60 ms slot in eight.
+  //
+  // THE FRAMEBUFFER, NOT THE DECODE CACHE. s_cache_bits[] is mutable and would
+  // have been the shorter patch, and it is the wrong seam twice over:
+  // pf_cache_sync() returns early on an unchanged (set, mirror) pair, so a
+  // poisoned cache would persist across frames instead of flickering, and
+  // pf_scan_ink() / pf_build_lids() derive the ink bounds, the blink masks and
+  // every prop anchor from the same buffer - so noise in it would move the
+  // eyelids and drag the food bowl around. Draw colour 2 is render.h's
+  // documented shimmer and touches nothing but the panel.
+  //
+  // WHERE IT MAY DRAW IS ui/corrupt_fx.cpp'S DECISION, NOT THIS BLOCK'S, and
+  // that is deliberate: this translation unit includes render.h and therefore
+  // Arduino.h, so nothing here can be executed by a host test. The rectangle
+  // handed over is the INK box this function has just published - s_ink_* -
+  // which is clamped to the stage and to PETFX_FLOOR_Y - 1 above, so the noise
+  // cannot reach the HUD badge columns, the floor line or the shadow rows.
+  if (p.corrupted && cfx_glitch_on(s_now, s_seed)) {
+    CfxRect box;
+    box.x0 = s_ink_x0; box.y0 = s_ink_y0; box.x1 = s_ink_x1; box.y1 = s_ink_y1;
+    CfxRow rows[CFX_ROWS_MAX];
+    const uint8_t n = cfx_rows(box, s_now, s_seed, rows);
+    if (n) {
+      u.setDrawColor(2);                        // GFX_XOR / render.h's shimmer
+      for (uint8_t i = 0; i < n; ++i)
+        rd_dither_rect_phase(rows[i].x, rows[i].y, (int16_t)rows[i].w, 1,
+                             rows[i].level, rows[i].phase);
+      u.setDrawColor(1);
+    }
+  }
+
   // --- blink --------------------------------------------------------------------
   // Gated on no_eyes, not on `pinned`: a pet held still by a ceremony is
   // paused, not switched off, and a body that never blinks reads as dead.
@@ -1394,7 +1399,7 @@ uint8_t petfx_body_h(void) { return s_draw_h; }
 void petfx_pose_ink_x(uint8_t pose, int16_t* x0, int16_t* x1) {
   int16_t lo = s_ink_x0, hi = s_ink_x1;      // the honest fallback: what is drawn
   if (s_qry_ok) {
-    const uint8_t   id = sprite_set_id(s_qry_species, s_qry_stage, s_qry_form, pose);
+    const uint8_t   id = sprite_set_id(s_qry_stage, s_qry_form, pose);
     const SpriteSet s  = sprite_set(id);
     const uint8_t   st = pf_stride(s.w);
     const uint16_t  fb = (uint16_t)((uint16_t)st * s.h);
@@ -1433,6 +1438,17 @@ void petfx_pose_ink_x(uint8_t pose, int16_t* x0, int16_t* x1) {
     // x-1 or x+1 depending on the facing and on whether the stage edge flipped
     // it, and the clear box covers whichever it was; guessing which costs a
     // column of gap if it is wrong and a hole in the prop if it is not.
+    //
+    // AND IT IS WHY THE DERIVED SLEEP NEEDED NO CHANGE HERE (P10-C3). This
+    // function is asked about a pose by name and answers from the AUTHORED set
+    // - for POSE_SLEEP that is still the PBSPR_SLEEP blob, not the composited
+    // body. The derived sleeping body is the IDLE body splayed by exactly one
+    // column on each side (ui/petfx_core.h: PF_SLEEP_SPREAD dilates by one, and
+    // one is chosen to match this line), and callers take the maximum over the
+    // poses a stage can reach, POSE_IDLE included. So the span this returns
+    // already contains the sleeping body's. Widen PF_SLEEP_SPREAD's dilation to
+    // two columns and that stops being true, which is the reason it is written
+    // down in both files rather than in neither.
     lo = (int16_t)(lo - 1);
     hi = (int16_t)(hi + 1);
   }

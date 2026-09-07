@@ -22,7 +22,12 @@
 #if defined(ARDUINO)
   #include <Arduino.h>        // millis()
   #include <sys/time.h>       // settimeofday()
-  #include "esp_timer.h"      // esp_timer_get_time() - the exact 64-bit uptime
+  // esp_rtc_get_time_us() - THE RTC COUNTER, and the reason this include names
+  // the target: the declaration lives in the chip's own soc/<target>/rtc.h.
+  // The target-agnostic alternative is esp_clk_rtc_time() in
+  // esp_private/esp_clk.h, which is the same counter behind a private header;
+  // this file takes the public one. See gt_mono_ms() for what it buys.
+  #include "soc/esp32c3/rtc.h"
   #include "../persistence/save_manager.h"    // save_last_seen() - read only
   #include "../persistence/game_state.h"     // gs_boot_tz() - read only
 #else
@@ -64,7 +69,7 @@ static uint32_t s_ms32_last    = 0;
 static uint32_t s_ms32_wraps   = 0;
 
 // =============================================================================
-//  MONOTONIC UPTIME - the 49.7-day millis() rollover, handled and proven
+//  THE MONOTONIC CLOCK - the 49.7-day rollover, and the sleep gap (P6-C3)
 // =============================================================================
 //  millis() is uint32_t milliseconds since boot. It wraps at 2^32 ms =
 //  4,294,967,296 ms = 49.710269... days. A Nottamagochi left plugged in on a
@@ -90,44 +95,75 @@ static uint32_t s_ms32_wraps   = 0;
 //    it would be a >49.7-day stall inside one loop() iteration, which the task
 //    watchdog would have killed 49.7 days earlier.
 //
-//  DEFENCE 2 - self-healing from the exact source (ESP32 only).
-//    On this core millis() is *literally* esp_timer_get_time()/1000
-//    (esp32-hal-misc.c:202), and esp_timer_get_time() is an int64_t microsecond
-//    counter: 2^63 us = 292,471 years, so it cannot wrap in the life of the
-//    device. We therefore recompute the true 64-bit millisecond uptime from it
-//    and, if the extended value ever disagrees, repair s_ms32_wraps from the
-//    authoritative high word. This makes the precondition of Defence 1
-//    unnecessary on hardware: even a hypothetical multi-month gap between calls
-//    self-corrects on the very next call instead of silently losing 49.7 days.
+//  DEFENCE 2 - THE RTC COUNTER, not the uptime (ESP32 only; changed by P6-C3).
+//    On the target this function no longer reads millis() at all. It reads
+//    esp_rtc_get_time_us(), the RTC slow-clock counter in microseconds: a
+//    64-bit value (2^63 us = 292,471 years, so it cannot wrap in the life of
+//    the device) which makes Defence 1's precondition unnecessary on hardware.
+//
+//    IT ALSO SURVIVES A SLEEP, AND THAT IS WHY P6-C3 CHANGED IT. millis() is
+//    esp_timer_get_time()/1000 (esp32-hal-misc.c:202) and esp_timer is UPTIME:
+//    it is resynchronised from the RTC on the way out of a light sleep, but it
+//    restarts near zero after a deep-sleep wake, which is a reset. The RTC
+//    counter runs through both. Every millisecond deadline that decides
+//    anything in the game - the estimated wall clock below, the uncalibrated
+//    cooldown table's until_ms (game/cooldowns.h), the save wear filter - is
+//    measured against THIS clock, so a sleep gap is charged rather than lost.
+//    That is the whole of plan P6-C3's "monotonic source that survives sleep".
+//
+//    NOT gettimeofday(), AND THE DIFFERENCE IS LOAD-BEARING. The wall clock is
+//    RTC-backed too, but gt_set_epoch() MOVES it with settimeofday(): the
+//    first calibration is a forward jump of about 1.7e9 seconds. Reading the
+//    cooldown table's monotonic deadlines against a clock that can jump like
+//    that would expire all thirty-two rows at the instant the owner finishes
+//    typing the date - exactly the catastrophic farm game/cooldowns.h refuses.
+//    esp_rtc_get_time_us() is the counter, not the clock: settimeofday() moves
+//    an offset applied on top of it and never the counter itself.
+//
+//    THE ACCURACY COST, SAID PLAINLY: sdkconfig has CONFIG_RTC_CLK_SRC_INT_RC,
+//    so the RTC slow clock is the internal ~136 kHz RC oscillator calibrated at
+//    boot, not a crystal. Time measured across a long sleep carries that
+//    oscillator's drift and temperature coefficient. Good enough to charge
+//    care and expire a cooldown; not good enough to agree with a phone to the
+//    second - which is what gt_set_epoch() is for. The read is documented as
+//    taking up to one RTC_SLOW_CLK cycle (~7 us at 136 kHz); this is called a
+//    few times per loop() pass, so the cost is well under a millisecond per
+//    second of run time. NEITHER FIGURE HAS BEEN MEASURED ON HARDWARE.
 //
 //  Host builds keep Defence 1 only - which is exactly the code path the unit
-//  test drives across a synthetic 0xFFFFFF00 -> 0x00000100 boundary.
+//  test drives across a synthetic 0xFFFFFF00 -> 0x00000100 boundary, and the
+//  path tests/test_clock.cpp drives a simulated sleep gap through.
 // =============================================================================
 static uint64_t gt_mono_ms(void)
 {
 #if defined(ARDUINO)
-  const uint32_t m32 = millis();
+  // Defence 2. No wrap extension is needed or wanted here: the source is
+  // already 64-bit. The two wrap words are kept in step anyway so that a
+  // debugger, and gt_test_reset()'s contract, still read the same thing on
+  // both targets.
+  const uint64_t ext = (uint64_t)(esp_rtc_get_time_us() / 1000ULL);
+  s_ms32_last  = (uint32_t)ext;
+  s_ms32_wraps = (uint32_t)(ext >> 32);
+  return ext;
 #else
   const uint32_t m32 = gt_host_millis32();
-#endif
 
   if (m32 < s_ms32_last) {
     s_ms32_wraps++;             // Defence 1: exactly one boundary crossed
   }
   s_ms32_last = m32;
 
-  uint64_t ext = ((uint64_t)s_ms32_wraps << 32) | (uint64_t)m32;
-
-#if defined(ARDUINO)
-  // Defence 2: repair from the wrap-free 64-bit source.
-  const uint64_t exact = (uint64_t)(esp_timer_get_time() / 1000);
-  if (exact != ext) {
-    s_ms32_wraps = (uint32_t)(exact >> 32);
-    ext = exact;
-  }
+  return ((uint64_t)s_ms32_wraps << 32) | (uint64_t)m32;
 #endif
+}
 
-  return ext;
+// -----------------------------------------------------------------------------
+// gt_mono32() - the same clock, truncated to the 32-bit millisecond form every
+// existing consumer takes. See gametime.h.
+// -----------------------------------------------------------------------------
+uint32_t gt_mono32(void)
+{
+  return (uint32_t)gt_mono_ms();
 }
 
 // -----------------------------------------------------------------------------

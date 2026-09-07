@@ -70,9 +70,27 @@ void gfx_fill(int16_t x, int16_t y, int16_t w, int16_t h) {
   for (int16_t r = 0; r < h; r++) gfx_hline(x, (int16_t)(y + r), w);
 }
 
+// OPAQUE. render.cpp:368 leaves the panel in setBitmapMode(0) for the whole
+// session, so this paints the ENTIRE w*h box: the 1-bits in the draw colour and
+// the 0-bits in the inverse. Nothing is set here, deliberately - a call that
+// set the mode itself would be a second opinion about the panel's state, and
+// ui/ui.cpp:790 and ui/petfx.cpp:1306 both already promise to hand it back as
+// render.cpp set it.
 void gfx_xbm(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t* bits) {
   if (bits == nullptr || w <= 0 || h <= 0) return;
   rd_u8g2().drawXBM((u8g2_uint_t)x, (u8g2_uint_t)y, (u8g2_uint_t)w, (u8g2_uint_t)h, bits);
+}
+
+// TRANSPARENT. The mode is flipped and PUT BACK, which is the same contract
+// gfx_color() states for the draw colour: whoever changes it restores it. This
+// is the blit a film uses - a sprite drawn over the body, the floor or a filled
+// panel must not erase a w*h hole to stand in.
+void gfx_xbm_t(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t* bits) {
+  if (bits == nullptr || w <= 0 || h <= 0) return;
+  U8G2& u = rd_u8g2();
+  u.setBitmapMode(1);
+  u.drawXBM((u8g2_uint_t)x, (u8g2_uint_t)y, (u8g2_uint_t)w, (u8g2_uint_t)h, bits);
+  u.setBitmapMode(0);
 }
 
 uint16_t gfx_text_w(GfxFont f, const char* s)                          { return rd_text_width(font_of(f), s); }
@@ -91,6 +109,11 @@ uint8_t gfx_text_wrap(GfxFont f, int16_t x, int16_t y, int16_t w,
 
 void gfx_dither_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t level) {
   rd_dither_rect(x, y, w, h, level);
+}
+
+void gfx_dither_rect_phase(int16_t x, int16_t y, int16_t w, int16_t h,
+                           uint8_t level, uint8_t phase) {
+  rd_dither_rect_phase(x, y, w, h, level, phase);
 }
 
 void gfx_invert_rect(int16_t x, int16_t y, int16_t w, int16_t h) {

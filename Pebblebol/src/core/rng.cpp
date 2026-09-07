@@ -2,7 +2,7 @@
 //  Pebblebol - rng.cpp
 //  xorshift32 streams. The step function is byte-for-byte the legacy
 //  genome.cpp / sim.cpp generator, so a stream seeded with the same value
-//  reproduces the pre-refactor sequence (tests/golden/sim_v1.txt depends on it).
+//  reproduces the pre-refactor sequence (tests/golden/care_v2.txt depends on it).
 // =============================================================================
 #include "rng.h"
 

@@ -1,0 +1,362 @@
+[
+  {
+    "category": "UNKNOWN",
+    "outcome": "WILD",
+    "weight": 38,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 38,
+    "_note": "Cajón de sastre: lo común de todas partes."
+  },
+  {
+    "category": "UNKNOWN",
+    "outcome": "WILD",
+    "weight": 10,
+    "rarity_min": 1,
+    "rarity_max": 1,
+    "_pct": 10,
+    "_note": ""
+  },
+  {
+    "category": "UNKNOWN",
+    "outcome": "WILD",
+    "weight": 2,
+    "rarity_min": 2,
+    "rarity_max": 2,
+    "_pct": 2,
+    "_note": ""
+  },
+  {
+    "category": "UNKNOWN",
+    "outcome": "ITEM",
+    "weight": 14,
+    "rarity_min": 0,
+    "rarity_max": 1,
+    "_pct": 14,
+    "_note": "resolved through BALANCE.ITEM_DROPS[UNKNOWN]"
+  },
+  {
+    "category": "UNKNOWN",
+    "outcome": "SPECIAL",
+    "weight": 4,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 4,
+    "_note": "no species: XP burst or the corruption event (P5-C3)"
+  },
+  {
+    "category": "UNKNOWN",
+    "outcome": "NOTHING",
+    "weight": 32,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 32,
+    "_note": ""
+  },
+  {
+    "category": "HOME",
+    "outcome": "WILD",
+    "weight": 40,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 40,
+    "_note": "Doméstico y generoso en objetos: es la red que más se repite."
+  },
+  {
+    "category": "HOME",
+    "outcome": "WILD",
+    "weight": 12,
+    "rarity_min": 1,
+    "rarity_max": 1,
+    "_pct": 12,
+    "_note": ""
+  },
+  {
+    "category": "HOME",
+    "outcome": "WILD",
+    "weight": 2,
+    "rarity_min": 2,
+    "rarity_max": 2,
+    "_pct": 2,
+    "_note": ""
+  },
+  {
+    "category": "HOME",
+    "outcome": "ITEM",
+    "weight": 15,
+    "rarity_min": 0,
+    "rarity_max": 1,
+    "_pct": 15,
+    "_note": "resolved through BALANCE.ITEM_DROPS[HOME]"
+  },
+  {
+    "category": "HOME",
+    "outcome": "SPECIAL",
+    "weight": 4,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 4,
+    "_note": "no species: XP burst or the corruption event (P5-C3)"
+  },
+  {
+    "category": "HOME",
+    "outcome": "NOTHING",
+    "weight": 27,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 27,
+    "_note": ""
+  },
+  {
+    "category": "PUBLIC",
+    "outcome": "WILD",
+    "weight": 36,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 36,
+    "_note": "Redes llenas de gente: paquetes, spam, señuelos."
+  },
+  {
+    "category": "PUBLIC",
+    "outcome": "WILD",
+    "weight": 17,
+    "rarity_min": 1,
+    "rarity_max": 1,
+    "_pct": 17,
+    "_note": ""
+  },
+  {
+    "category": "PUBLIC",
+    "outcome": "WILD",
+    "weight": 4,
+    "rarity_min": 2,
+    "rarity_max": 2,
+    "_pct": 4,
+    "_note": ""
+  },
+  {
+    "category": "PUBLIC",
+    "outcome": "WILD",
+    "weight": 1,
+    "rarity_min": 3,
+    "rarity_max": 3,
+    "_pct": 1,
+    "_note": ""
+  },
+  {
+    "category": "PUBLIC",
+    "outcome": "ITEM",
+    "weight": 14,
+    "rarity_min": 0,
+    "rarity_max": 1,
+    "_pct": 14,
+    "_note": "resolved through BALANCE.ITEM_DROPS[PUBLIC]"
+  },
+  {
+    "category": "PUBLIC",
+    "outcome": "SPECIAL",
+    "weight": 5,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 5,
+    "_note": "no species: XP burst or the corruption event (P5-C3)"
+  },
+  {
+    "category": "PUBLIC",
+    "outcome": "NOTHING",
+    "weight": 23,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 23,
+    "_note": ""
+  },
+  {
+    "category": "BUSINESS",
+    "outcome": "WILD",
+    "weight": 25,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 25,
+    "_note": "Infraestructura: daemons, cortafuegos, memoria, cifrado."
+  },
+  {
+    "category": "BUSINESS",
+    "outcome": "WILD",
+    "weight": 21,
+    "rarity_min": 1,
+    "rarity_max": 1,
+    "_pct": 21,
+    "_note": ""
+  },
+  {
+    "category": "BUSINESS",
+    "outcome": "WILD",
+    "weight": 8,
+    "rarity_min": 2,
+    "rarity_max": 2,
+    "_pct": 8,
+    "_note": ""
+  },
+  {
+    "category": "BUSINESS",
+    "outcome": "WILD",
+    "weight": 2,
+    "rarity_min": 3,
+    "rarity_max": 3,
+    "_pct": 2,
+    "_note": ""
+  },
+  {
+    "category": "BUSINESS",
+    "outcome": "ITEM",
+    "weight": 16,
+    "rarity_min": 1,
+    "rarity_max": 2,
+    "_pct": 16,
+    "_note": "resolved through BALANCE.ITEM_DROPS[BUSINESS]"
+  },
+  {
+    "category": "BUSINESS",
+    "outcome": "SPECIAL",
+    "weight": 6,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 6,
+    "_note": "no species: XP burst or the corruption event (P5-C3)"
+  },
+  {
+    "category": "BUSINESS",
+    "outcome": "NOTHING",
+    "weight": 22,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 22,
+    "_note": ""
+  },
+  {
+    "category": "OPEN",
+    "outcome": "WILD",
+    "weight": 33,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 33,
+    "_note": "Abiertas y de paso: la mejor tabla de objetos."
+  },
+  {
+    "category": "OPEN",
+    "outcome": "WILD",
+    "weight": 16,
+    "rarity_min": 1,
+    "rarity_max": 1,
+    "_pct": 16,
+    "_note": ""
+  },
+  {
+    "category": "OPEN",
+    "outcome": "WILD",
+    "weight": 5,
+    "rarity_min": 2,
+    "rarity_max": 2,
+    "_pct": 5,
+    "_note": ""
+  },
+  {
+    "category": "OPEN",
+    "outcome": "WILD",
+    "weight": 2,
+    "rarity_min": 3,
+    "rarity_max": 3,
+    "_pct": 2,
+    "_note": ""
+  },
+  {
+    "category": "OPEN",
+    "outcome": "ITEM",
+    "weight": 18,
+    "rarity_min": 0,
+    "rarity_max": 2,
+    "_pct": 18,
+    "_note": "resolved through BALANCE.ITEM_DROPS[OPEN]"
+  },
+  {
+    "category": "OPEN",
+    "outcome": "SPECIAL",
+    "weight": 5,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 5,
+    "_note": "no species: XP burst or the corruption event (P5-C3)"
+  },
+  {
+    "category": "OPEN",
+    "outcome": "NOTHING",
+    "weight": 21,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 21,
+    "_note": ""
+  },
+  {
+    "category": "HIDDEN",
+    "outcome": "WILD",
+    "weight": 12,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 12,
+    "_note": "Redes ocultas: lo raro, lo oscuro y los tres especiales."
+  },
+  {
+    "category": "HIDDEN",
+    "outcome": "WILD",
+    "weight": 17,
+    "rarity_min": 1,
+    "rarity_max": 1,
+    "_pct": 17,
+    "_note": ""
+  },
+  {
+    "category": "HIDDEN",
+    "outcome": "WILD",
+    "weight": 13,
+    "rarity_min": 2,
+    "rarity_max": 2,
+    "_pct": 13,
+    "_note": ""
+  },
+  {
+    "category": "HIDDEN",
+    "outcome": "WILD",
+    "weight": 12,
+    "rarity_min": 3,
+    "rarity_max": 3,
+    "_pct": 12,
+    "_note": ""
+  },
+  {
+    "category": "HIDDEN",
+    "outcome": "ITEM",
+    "weight": 12,
+    "rarity_min": 1,
+    "rarity_max": 2,
+    "_pct": 12,
+    "_note": "resolved through BALANCE.ITEM_DROPS[HIDDEN]"
+  },
+  {
+    "category": "HIDDEN",
+    "outcome": "SPECIAL",
+    "weight": 10,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 10,
+    "_note": "no species: XP burst or the corruption event (P5-C3)"
+  },
+  {
+    "category": "HIDDEN",
+    "outcome": "NOTHING",
+    "weight": 24,
+    "rarity_min": 0,
+    "rarity_max": 0,
+    "_pct": 24,
+    "_note": ""
+  }
+]

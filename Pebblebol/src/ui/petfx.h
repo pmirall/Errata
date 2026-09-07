@@ -196,17 +196,25 @@ void petfx_body_ink(int16_t* x0, int16_t* y0, int16_t* x1, int16_t* y1);
 // ink box on its first frame and then FREEZES it, because a bowl that shuffled
 // sideways every UI_ANIM_FRAME_MS would read as a bug. But the pose changes
 // halfway through the film - POSE_IDLE while the bowl slides in, POSE_EAT once
-// the animal leans over it - and sprite_set_id() maps POSE_EAT onto one shared
-// per-band set whose ink is WIDER than the idle it replaces in fifteen of the
-// sixteen species: 1-3 px for an adult, and 9-12 px for a senior, whose idle
-// body is 32 px and whose SPR_EAT_ADULT is 40. petfx_draw_body() then clears
-// that new, wider ink box in colour 0 every frame and punches a rectangular
-// hole out of the prop parked in it - measured at up to 43 of a bowl's 63
-// pixels. So the prop has to be parked against the WIDEST wall the film can
-// produce, and only this module can say where that is.
+// the animal leans over it - and the pose can change the INK, so the prop has
+// to be parked against the WIDEST wall the film can produce and only this module
+// can say where that is.
+//
+// P9-C3 NARROWED THE PROBLEM WITHOUT REMOVING IT, and the difference is worth
+// stating rather than deleting the function over. The old atlas mapped POSE_EAT
+// onto one shared per-band set whose BOX was wider than the idle it replaced in
+// fifteen of the sixteen species: 1-3 px for an adult, and 9-12 px for a senior,
+// whose idle body was 32 px and whose SPR_EAT_ADULT was 40. Every set is 24x24
+// now and POSE_EAT has no art at all - it falls through to the species body - so
+// the BOX never changes. The INK still does: sleeping and ill are different
+// drawings from the idle, the mirror is a different span from the one the body
+// was authored with, and a fat or squashing body draws a 1 px dilation beside
+// itself. petfx_draw_body() clears the live ink box in colour 0 every frame and
+// would punch a rectangular hole out of a prop parked inside it.
 //
 // The answer is deliberately generous, and covers ALL of:
-//   * both animation frames (24 of the 38 sets differ between frame 0 and 1);
+//   * both animation frames (every set in the atlas differs between 0 and 1 -
+//     tests/test_sprite_pipeline.cpp fails on one that does not);
 //   * both facings, because the pet turns to look at its dinner mid-film and a
 //     mirrored ink span is not the span it was authored with;
 //   * the 1 px dilation copy a fat or squashing body draws beside itself.

@@ -1,0 +1,72 @@
+{
+  "_doc": "THE SPECIAL PAYLOAD TABLE - the hole P4-C1's completeness pass found and P5-C3 fills. encounters.json has a SPECIAL row for every network category (4-10 % of every scan) and until this file existed the pack carried nothing behind it: no roster, no ids, no per-category weights. It is shaped EXACTLY like ITEM_DROPS - a roster plus per-category weights summing to 100 - so encounters.cpp resolves SPECIAL with the same two-stage pick it uses for ITEM, and both get the same generated guards. Roster and weights live in ONE file on purpose: items.json and balance.json's ITEM_DROPS are the same table split across two files, and nobody can read that one whole.",
+  "_kinds_doc": "Exactly the two outcomes the plan's own P5-C3 bullet promises, and no third invented here: XP_BURST pays SPECIAL_XP_SCALE * value experience, CORRUPTION sets PBS_CORRUPTED on the active Pebble for CORRUPTION.duration_s. Several EVENTS may share a kind - that is what stops HIDDEN's 10 % slice being one repeated line - but a kind with no event is a branch encounters.cpp could never reach, and gen_content.py refuses it.",
+  "EVENTS": [
+    {
+      "id": 1,
+      "name": "Caché Suelta",
+      "kind": "XP_BURST",
+      "value": 5,
+      "_xp": 40,
+      "_flavor_es": "Datos olvidados en el aire."
+    },
+    {
+      "id": 2,
+      "name": "Nodo Fantasma",
+      "kind": "XP_BURST",
+      "value": 12,
+      "_xp": 96,
+      "_flavor_es": "Una red que ya no existe."
+    },
+    {
+      "id": 3,
+      "name": "Núcleo Roto",
+      "kind": "XP_BURST",
+      "value": 25,
+      "_xp": 200,
+      "_flavor_es": "Algo grande se rompió aquí."
+    },
+    {
+      "id": 4,
+      "name": "Virus Errante",
+      "kind": "CORRUPTION",
+      "value": 0,
+      "_flavor_es": "Se te ha pegado algo."
+    }
+  ],
+  "_weights_doc": "Per network category, summing to exactly 100, same rule as ITEM_DROPS and encounters.json - so a SPECIAL is a plain 0..99 draw with no normalisation step to get wrong. A zero weight is not written as 0: the row is left out, which is what the generated guard checks.",
+  "WEIGHTS": {
+    "UNKNOWN": {
+      "1": 55,
+      "2": 30,
+      "4": 15
+    },
+    "HOME": {
+      "1": 60,
+      "2": 30,
+      "4": 10
+    },
+    "PUBLIC": {
+      "1": 50,
+      "2": 35,
+      "4": 15
+    },
+    "BUSINESS": {
+      "1": 35,
+      "2": 40,
+      "3": 10,
+      "4": 15
+    },
+    "OPEN": {
+      "1": 45,
+      "2": 35,
+      "4": 20
+    },
+    "HIDDEN": {
+      "1": 20,
+      "2": 30,
+      "3": 20,
+      "4": 30
+    }
+  }
+}

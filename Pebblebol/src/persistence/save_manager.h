@@ -30,6 +30,7 @@
 #include <stddef.h>
 
 #include "save_schema.h"
+#include "../game/validate.h"   // VReject: the load path is a section 15 consumer
 #include "../core/config.h"       // SAVE_FULL_PERIOD_S, SAVE_LASTSEEN_PERIOD_S
 
 // -----------------------------------------------------------------------------
@@ -76,7 +77,32 @@ void save_bind(GameState& gs);
 // LOAD_FOREIGN_NEWER nothing is written to flash and 'gs' is left in the
 // defaults, so the ERROR screen can offer recovery or a factory reset without
 // anything having been destroyed first.
+//
+// "RUNTIME VALIDATION" IS THE QUARANTINE BELOW, AND UNTIL P4-C5 THIS SENTENCE
+// WAS WIDER THAN THE TREE: `grep -c valid save_manager.cpp` inside the old
+// save_load_all() was 0, and blob_ok() - magic, CRC and a version byte - was the
+// whole of it. Spec section 15 names the load path as a consumer of the shared
+// validator, so the stage is real now rather than advertised.
 LoadResult save_load_all(GameState& gs);
+
+// -----------------------------------------------------------------------------
+// QUARANTINE (spec section 15, P4-C5). After every load, every occupied slot is
+// run through game/validate.h's validate_pebble(). A slot that fails is FLAGGED
+// AND KEPT, never repaired and never dropped:
+//
+//   * repairing is the failure spec section 15's first sentence is written
+//     against, and validate_pebble() takes a const Pebble so this module could
+//     not repair even if it wanted to;
+//   * refusing the Box would brick a device on a content-pack change, since
+//     VR_UNKNOWN_SPECIES is exactly what an older save legitimately produces.
+//
+// A quarantined Pebble may be shown to its owner. It may NOT enter a battle or
+// a trade - that is P7's obligation and this header is where it is written
+// down. The mask is in RAM only: nothing about the quarantine is persisted, so
+// a content pack that brings a species back clears it on the next boot by
+// itself.
+uint16_t save_quarantine_mask(void);          // bit s set = slot s failed
+VReject  save_quarantine_reason(uint8_t slot); // VR_OK for a slot that passed
 
 // -----------------------------------------------------------------------------
 // WRITING. Each of these seals the blob (magic, version, seq, CRC), writes the
@@ -94,6 +120,28 @@ bool save_pebble(uint8_t slot, const PebbleInstance& p, bool force);
 // to inherit this module's cadence instead of inventing a second one.
 bool save_pebble_landed(void);
 
+// A SLOT WRITE THAT IS NEVER FILTERED AND NEVER DEFERRED, for the one caller
+// that cannot survive either: game/trade.cpp's apply step.
+//
+// WHY IT HAS TO EXIST. The trade writes TWO slots microseconds apart (B1 clears
+// the outgoing one, B2 files the incoming one) and box_add() fills the lowest
+// free slot, which is USUALLY THE SLOT B1 JUST RELEASED - so the sequence writes
+// one key twice inside SAVE_MIN_GAP_MS. save_pebble(force=true) defers the
+// second write and RETURNS TRUE, which is the right answer for the care loop
+// (save_service() flushes it a second later) and a lie for a caller whose whole
+// contract is "the bytes landed": the trade would then write the Box header and
+// CLEAR ITS JOURNAL over a slot that is still empty on flash, and the boot
+// resolver - the last line of defence - would have nothing left to repair.
+//
+// force=true is deliberately NOT widened to mean this. persistence/
+// game_state.cpp calls it on every care action and RELIES on the deferral for
+// flash wear; changing what force means would take that away from it.
+//
+// The wear argument does not apply here: this runs a handful of times per
+// TRADE, not per tick. Returns whether the bytes reached flash and read back
+// equal - there is no third answer, which is the whole point.
+bool save_pebble_now(uint8_t slot, const PebbleInstance& p);
+
 bool save_box_header(const BoxHeader& b);
 bool save_config(ConfigV2& c);            // seals into the caller's struct
 bool save_inventory(const Inventory& i);
@@ -104,13 +152,25 @@ bool save_trade_journal(const PendingTrade& t);
 // custom species is content, not state, and a bad CRC costs a sprite rather
 // than a Pebble (save_schema.h section 6). The slot comes from c.slot.
 bool save_custom_species(const CustomSpeciesRec& c);
-bool save_load_custom_species(uint8_t slot, CustomSpeciesRec& out);
+// 'found_ver', when given, receives the schema version the record was STORED
+// with, which may be older than this firmware's (P10-C5). The record itself is
+// handed back exactly as it was read; re-sealing it is the caller's job, and
+// save_load_all() does it - see custom_species_install_all().
+bool save_load_custom_species(uint8_t slot, CustomSpeciesRec& out,
+                              uint8_t* found_ver = nullptr);
 
 // Flushes writes that SAVE_MIN_GAP_MS deferred. Safe to call every loop.
 void save_service(void);
 
 // Writes the Box header, every occupied slot and the config to KV_CKPT, which
 // the Arduino core's wholesale erase of "nvs" cannot reach (decision D6).
+//
+// IT DELIBERATELY DOES NOT CHECKPOINT THE TRADE JOURNAL, and that is a decision
+// rather than an omission (P7-C4). The checkpoint is a snapshot of a CONSISTENT
+// Box, and game/trade.h's write order takes one immediately AFTER the journal
+// has been cleared. A mid-trade checkpoint would be a second, stale source of
+// truth for the same transaction, and the boot resolver would then have to
+// choose between two records that disagree. The "tr" key lives in KV_MAIN only.
 bool save_checkpoint_all(void);
 
 // The checkpoint CADENCE. Safe to call every tick with the wall clock: it

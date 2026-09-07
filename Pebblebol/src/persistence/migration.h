@@ -46,34 +46,57 @@ bool migration_needed(uint8_t found);
 //   stat_rem[]     -> care_rem[]  same reorder; milli-points and remainders
 //                                 both carry over unchanged
 //   Genome         copied whole
-//   pet_name       -> nickname, or the deterministic dynasty name when empty
+//   pet_name       -> nickname; NO name at all when v1 had none, so the
+//                  species name reaches HOME (P4-C4 follow-up)
 //   birth_epoch    -> birth_epoch
 //   last_seen      -> last_updated_epoch
 //   age_s          -> age_s
-//   flags          SICK/ASLEEP/LIGHT_ON -> status, GOD_TAINTED -> flags
+//   flags          SICK/ASLEEP -> status, GOD_TAINTED -> flags; LIGHT_ON is
+//                  dropped (P3-C2b deleted the light mechanic)
 //   minigames_won  -> minigames_won
 //   Config.tz/brightness/mute/statusbar -> ConfigV2
 //   the "gl" gain ledger is NOT touched: it keeps its own key and layout
 MigrateResult migrate_v1_to_v2(const uint8_t* petsave128, const uint8_t* cfg256,
                                GameState& out);
 
-// Reads whatever the older firmware left in KV_MAIN and runs every step from
-// 'from' up to SAVE_SCHEMA_VERSION. Writes nothing: committing the result and
-// erasing the legacy keys is save_manager's job, so a power cut in the middle
-// of a migration leaves the v1 save intact and the migration simply runs again.
+// Runs every step from 'from' up to SAVE_SCHEMA_VERSION. Writes nothing:
+// committing the result and erasing the legacy keys is save_manager's job, so a
+// power cut in the middle of a migration leaves the old save intact and the
+// migration simply runs again.
+//
+// A STEP TAKES ONE OF TWO SHAPES and 'out' is what tells them apart. The v1 hop
+// READS KV_MAIN's legacy keys and fills 'out' from nothing, because v1 is a
+// different set of keys holding differently shaped structs. Every hop from v2
+// onwards TRANSFORMS 'out' IN PLACE, because those generations share every key
+// and every layout and the caller has already loaded them - so 'out' must
+// already hold the loaded state when 'from' is 2 or more, and is ignored on
+// entry when 'from' is 1. persistence/save_manager.cpp's upgrade_in_place() is
+// the only caller of the second shape.
 MigrateResult migrate_run(uint8_t from, GameState& out);
 
 // True when KV_MAIN still holds a legacy v1 "save" blob (magic and version only
 // - the CRC is checked by the migration itself).
 bool migrate_v1_present(void);
 
-// The deterministic dynasty name: a pure function of (lineage_id, generation),
-// so a pet is called the same thing on every device, forever. This is the same
-// hash and the same syllable tables the v1 UI used, kept here so a migrated
-// pet does not silently get renamed. 'out' receives at most cap-1 characters
-// plus a NUL.
-void migrate_default_name(uint32_t lineage_id, uint8_t generation,
-                          char* out, size_t cap);
+// migrate_default_name() was here and is deleted (P4-C4 follow-up). It wrote
+// the v1 dynasty name into a nickname the owner had never typed, which pinned
+// every migrated device to the first rung of ui_pet_name()'s ladder and stopped
+// the species name from ever appearing.
+//
+// THIS USED TO END "ui.cpp's ui_name_for() still produces exactly that word as
+// the ladder's LAST rung, so nothing is lost" (P4-C6 struck the same sentence
+// from migration.cpp and left its twin here - both were born in ee75076).
+// IT IS FALSE, and the tree already says so in three other places
+// (docs/save_schema.md section 8, and two cases in tests/test_persistence.cpp).
+// ui_pet_name() reaches ui_name_for() only when pet_species_name(species_id)
+// is nullptr, and migrate_species_of() always returns a real roster id: it
+// indexes SPECIES_BASE_OF_FAMILY with (legacy & 7) % 12, so the eight
+// destinations it can reach are {1, 4, 7, 10, 13, 16, 19, 22} and every one of
+// them is a shipped stage-0 row - so a migrated pet NEVER reaches that rung.
+// The v1 dynasty word is gone from the device for good, and V1 has no rename
+// screen to type it back.
+// It is still the right trade, and the trade is argued where it is made: the
+// nickname block in migration.cpp.
 
 // Legacy family (gene species & 7) -> v2 species id. Exposed so the test can
 // assert the map instead of re-deriving it.

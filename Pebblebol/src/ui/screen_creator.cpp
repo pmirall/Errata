@@ -24,6 +24,32 @@
 #define CR_MANUAL_MS    10000UL
 #define CR_REBUILD_MS    1000UL
 
+// The spec section 34 stack, as BASELINES in the right-hand column. Named
+// because the two that matter are load-bearing and a magic number in the middle
+// of a render function is where a layout silently walks off a 64-row panel:
+//   CR_ROW_PIN_VAL is a GF_BIG baseline and that face has a 16 px ascent, so it
+//   occupies rows CR_ROW_PIN_VAL-15 .. CR_ROW_PIN_VAL; and
+//   CR_ROW_HINT + 1 must stay above UI_AFFORD_Y or the last line lands in the
+//   affordance strip.
+// The static_asserts below are what hold both, so the panel is checked at
+// compile time and not only by tests/golden/screens/creator_portal.pbm.
+#define CR_ROW_SCAN         7
+#define CR_ROW_WHAT        15
+#define CR_ROW_PIN_LBL     24
+#define CR_ROW_PIN_VAL     44
+#define CR_ROW_HINT        53
+#define CR_ROW_WAIT        26      // the "not up yet" branch: one block, no stack
+
+static_assert(CR_ROW_PIN_VAL - GFX_ASC_BIG + 1 > CR_ROW_PIN_LBL,
+              "the big PIN digits overlap the PIN label");
+static_assert(CR_ROW_HINT - GFX_ASC_BODY + 1 > CR_ROW_PIN_VAL,
+              "the hint line overlaps the big PIN digits");
+static_assert(CR_ROW_HINT < UI_AFFORD_Y,
+              "the hint line lands in the affordance strip");
+static_assert(CR_ROW_SCAN - GFX_ASC_BODY + 1 >= 0, "the headline is off the top of the panel");
+static_assert(CR_ROW_WAIT + 2 * GFX_LINE_BODY < UI_AFFORD_Y,
+              "the three wrapped \"Conectando...\" lines reach the affordance strip");
+
 static uint8_t  s_mod[QR_BUF_BYTES];
 static uint8_t  s_size     = 0;
 static uint8_t  s_variant  = 0;          // 0 = the URL, 1 = join-the-AP
@@ -35,6 +61,18 @@ static char     s_key[CREATOR_TEXT_MAX]; // the payload the cached symbol encode
 uint8_t creator_variant(void) { return s_variant; }
 void    creator_set_variant(uint8_t v) { s_variant = (uint8_t)(v ? 1u : 0u); s_key[0] = '\0'; }
 
+// THE EXACT BYTES THE SYMBOL ON SCREEN ENCODES. Exported for the same reason
+// creator_variant() is - a host test has no scanner - but it buys something
+// creator_variant() cannot: spec section 39 says the QR carries no secret, and
+// the only way to hold that is to read the payload back and look. The gate in
+// tools/check.sh greps src/networking for a formatted query parameter, which
+// catches net_url() growing a "?k=" again and CANNOT see this file at all: a
+// PIN appended HERE, in the one function that decides what is encoded, would
+// pass every check in the tree. tests/test_screens.cpp's
+// creator_payload_carries_no_pin_for_any_pin is what closes that, and this is
+// the seam it reads through. Empty when nothing has been encoded.
+const char* creator_payload(void) { return s_key; }
+
 // -----------------------------------------------------------------------------
 //  THE PAYLOAD
 // -----------------------------------------------------------------------------
@@ -43,9 +81,39 @@ static void build(const CreatorInfo& in) {
   text[0] = '\0';
 
   if (s_variant == 1 && in.ap_up) {
-    // Open network. "WIFI:S:<ssid>;;" is 26 B and fits QR version 2 (25
-    // modules -> 62 px at 2 px/module). Adding "T:nopass" makes it 35 B, which
-    // forces version 3 -> 29 modules -> 70 px, and 70 does not fit in 64 rows.
+    // OPEN NETWORK, AND P8-C2 DECIDED THAT RATHER THAN INHERITING IT.
+    //
+    // "WIFI:S:PEBBLEBOL-A1B2;;" is 23 B and fits QR version 2 (25 modules ->
+    // 25*2 + 2*3*2 = 62 px at 2 px/module, exactly QR_BOX_SIZE). Every addition
+    // breaks it: "T:nopass" alone makes it 35 B, which forces version 3 -> 29
+    // modules -> 70 px, and 70 does not fit in 64 rows.
+    //
+    // THE PLAN ASKED FOR A GENERATED ConfigV2.ap_pass AND A WPA ACCESS POINT.
+    // The arithmetic refuses it, for every passphrase length and every SSID
+    // this product may use:
+    //     "WIFI:T:WPA;S:" 13 + SSID 14 + ";P:" 3 + pass + ";;" 2
+    //   = 32 B of fixed text before a single passphrase character, against a
+    //     32 B version-2-L byte budget (ui/qr.cpp: data_cw - 2).
+    //   WPA2-PSK's own minimum passphrase is 8 characters, so the shortest
+    //   legal payload is 40 B -> version 3 -> 29 modules -> 70 px on a 64-row
+    //   panel. Dropping the "-XXXX" suffix does not save it (35 B), and
+    //   dropping the "PEBBLEBOL-" prefix would break decision D3.
+    // Turning WPA on anyway would have produced TWO silent failures no host
+    // test can see: draw_symbol() clamps px to 1 and paints a 35 px symbol at
+    // one pixel per module on a 0.96" panel, and snprintf() here truncates the
+    // payload to CREATOR_TEXT_MAX-1 = 39 characters without reporting it, so
+    // the symbol would encode a valid-looking WIFI: string with a mangled
+    // passphrase.
+    // So the access point stays OPEN and the PIN stays the authorisation
+    // layer, which is what spec section 39 asks for in as many words ("Do not
+    // put secrets into the QR beyond what is necessary. The PIN remains the
+    // user-facing authorization layer"). What makes that safe is not the
+    // network: it is that the portal exists only while this screen is open,
+    // that it dies after ConfigV2.creator_idle_s, and that the PIN gate locks
+    // for 60 s after five failures - which bounds an in-range attacker to
+    // about nine guesses per portal session out of 10,000.
+    // Reopening this needs a bench call (a redesigned CREATOR layout, or the
+    // join symbol dropped for on-screen text), not a code change.
     snprintf(text, sizeof(text), "WIFI:S:%s;;", in.ssid);
   } else {
     snprintf(text, sizeof(text), "%s", in.url);
@@ -67,11 +135,20 @@ static void build(const CreatorInfo& in) {
 // -----------------------------------------------------------------------------
 //  HOOKS
 // -----------------------------------------------------------------------------
+// THE RADIO HOLD. Set while this screen owns the access point and cleared by
+// the ONE teardown, so it can never outlive the portal it speaks for. See the
+// long note in screen_creator.h: without it the ladder took the AP down at
+// 120 s and D7's 300 s timeout could never be reached, let alone observed.
+static uint8_t s_holding = 0;
+
+bool creator_screen_busy(void) { return s_holding != 0u; }
+
 void creator_enter(void) {
   // The screen that wants the station is the screen that asks for it; there is
   // no radio policy in the entry point any more (plan section 2 row G4). It is
   // released again in creator_leave().
   ui_creator_radio(true);
+  s_holding = 1u;                     // the ladder is clamped at DIM from here
 
   CreatorInfo in;
   ui_creator_info(in);
@@ -89,6 +166,7 @@ void creator_leave(void) {
   // leaving it gives back the ~50 KB of heap and the largest current draw on
   // the board instead of holding the radio powered until the next reboot.
   ui_creator_radio(false);
+  s_holding = 0u;                     // ...and released here, once, with it
   s_size   = 0;
   s_key[0] = '\0';
 }
@@ -99,6 +177,28 @@ void creator_update(uint32_t now_ms) {
 
   CreatorInfo in;
   ui_creator_info(in);
+
+  // ---- THE TWO EXITS (P8-C2) ------------------------------------------------
+  // This screen is SF_STICKY, so invariant 3's 20 s auto-return does not apply
+  // and these are the only ways out other than a B press. Both call ui_back(),
+  // which runs creator_leave() - the ONE teardown - so a timeout and a button
+  // leave the device in the same state.
+  //
+  // 1. The access point never came up. spec section 47: every radio wait has an
+  //    exit. net_request_portal() can fail outright (NERR_AP_FAILED, or a scan
+  //    holding the radio), and without this the user would sit on "Conectando"
+  //    with the radio drawing current until they pressed a button.
+  // 2. The portal has been idle for ConfigV2.creator_idle_s (decision D7,
+  //    default 300 s). "Idle" means no request that PASSED THE PIN GATE:
+  //    networking/creator_gate.cpp is deliberate about that, because otherwise
+  //    anyone in radio range could hold the access point up forever by fetching
+  //    one unauthenticated URL every 299 s.
+  if (!in.ap_up) {
+    if ((uint32_t)(now_ms - s_open_ms) >= CREATOR_AP_WAIT_MS) { ui_back(); return; }
+  } else if (in.idle_expired) {
+    ui_back();
+    return;
+  }
 
   // In AP-provisioning mode the two symbols alternate: join the network first,
   // then open the page. A manual tap pins the choice for CR_MANUAL_MS.
@@ -172,30 +272,69 @@ void creator_render(void) {
   const int16_t rx = CR_COL_X;
   const int16_t rw = CR_COL_W;
 
-  gfx_text_fit(GF_BODY, rx, 8, rw, S(STR_CREATOR_TITLE));
-  gfx_text_fit(GF_TINY, rx, 15, rw, S(STR_CREATOR_PHASE));
-
-  char pin[16];
-  snprintf(pin, sizeof(pin), "%04u", (unsigned)(in.pin % 10000u));
-
+  // ---- THE SPEC SECTION 34 SCREEN -------------------------------------------
+  //
+  //      SCAN ME / [QR CODE] / PIN: 1234 / Scan with your phone
+  //
+  // and, in the same breath, "do not clutter this screen with unrelated UI".
+  // The four lines are stacked in the 62 px column beside the symbol because
+  // the symbol is 62 px tall on a 64-row panel and there is nowhere else for
+  // them to go; the ORDER and the CONTENT are the spec's.
+  //
+  // WHAT WAS REMOVED TO GET THERE, because a removal is the part of a layout
+  // change nobody can see afterwards:
+  //   * "Creador - Fase 8" (STR_CREATOR_PHASE, now deleted). It said the page
+  //     this screen points at did not exist yet. It does.
+  //   * "Conectate a la red:" above the SSID. The line under ESCANEAME is the
+  //     SSID or the address, and which one it is says which symbol is up.
+  //   * The IP printed alongside the SSID at all times. Both were on screen
+  //     together while the symbol could only be one of them, so the pair
+  //     contradicted the picture every five seconds.
+  //
+  // THE PIN IS DRAWN HERE AND IS NOT IN THE SYMBOL (spec section 39). A QR is
+  // photographed, forwarded and posted; a four-digit number a person reads off
+  // a screen they are standing in front of is the authorisation layer. build()
+  // above encodes in.url or the SSID and nothing else, and
+  // tests/test_screens.cpp's creator_payload_carries_no_pin_for_any_pin holds
+  // that for all 9,999 PINs cg_mint_pin() can produce.
   if (in.ap_up) {
-    gfx_text_wrap(GF_BODY, rx, 24, rw, GFX_LINE_BODY, 2, S(STR_WEB_AP_HINT));
-    gfx_text_fit(GF_TINY, rx, 41, rw, in.ssid);
-    gfx_text_fit(GF_TINY, rx, 48, rw, in.ip);
-    // The PIN used to be drawn only in the STA branch, while this screen tells
-    // the user to open the address by hand - so a hand-typed URL hit the PIN
-    // prompt with the PIN shown nowhere.
-    {
-      char line[24];
-      snprintf(line, sizeof(line), "%s %s", S(STR_WEB_PIN), pin);
-      gfx_text_fit(GF_BODY, rx, 55, rw, line);
+    gfx_text_fit(GF_BODY, rx, CR_ROW_SCAN, rw, S(STR_CREATOR_SCAN));
+
+    // WHICH SYMBOL IS ON SCREEN, in the words of the thing it encodes: the
+    // network name while the "join me" symbol is up, the address while the URL
+    // symbol is up. GF_TINY is the ASCII-only 4x6 and both of these are ASCII
+    // by construction (AP_SSID_PREFIX plus hex; a dotted quad), which is the
+    // one thing that font is for - no Spanish prose is drawn in it.
+    gfx_text_fit(GF_TINY, rx, CR_ROW_WHAT, rw,
+                 (s_variant == 1) ? in.ssid : in.ip);
+
+    gfx_text_fit(GF_BODY, rx, CR_ROW_PIN_LBL, rw, S(STR_WEB_PIN));
+
+    // THE DIGITS AT 9x19 SO THEY CAN BE READ AT ARM'S LENGTH, which is the
+    // posture this screen is used in: the device is on the table and the phone
+    // is in your hands. GF_BIG is logisoso16_tn - DIGITS ONLY, 18 glyphs - so
+    // the sentinel is NOT drawn in it: web_pin() answers 0 for "none issued
+    // yet" and "----" in a digits-only face is four missing glyphs. The body
+    // font draws the sentinel instead, exactly as ui_info_lines() does on the
+    // DIAG screen, and for the same reason: four zeros would be a screen
+    // stating a PIN that does not exist.
+    if (in.pin == 0u) {
+      gfx_text_fit(GF_BODY, rx, CR_ROW_PIN_VAL, rw, "----");
+    } else {
+      char pin[CREATOR_PIN_DIGITS + 1];
+      snprintf(pin, sizeof(pin), "%04u", (unsigned)(in.pin % (unsigned)WEB_PIN_MAX));
+      gfx_text_fit(GF_BIG, rx, CR_ROW_PIN_VAL, rw, pin);
     }
-  } else if (in.sta_up) {
-    gfx_text_fit(GF_TINY, rx, 23, rw, in.ip);
-    gfx_text(GF_TINY, rx, 30, S(STR_WEB_PIN));
-    gfx_text(GF_BIG, rx, 48, pin);          // 9x19 digits: readable at arm's length
+
+    gfx_text_fit(GF_BODY, rx, CR_ROW_HINT, rw, S(STR_CREATOR_WITH_PHONE));
   } else {
-    gfx_text_wrap(GF_BODY, rx, 26, rw, GFX_LINE_BODY, 3, S(STR_WEB_CONNECTING));
+    // The station branch was here: address, PIN label, big PIN. It is gone with
+    // the station itself (P5-C1). Two states remain - the access point is up,
+    // or it is not yet - and both are reachable. There is nothing to scan
+    // before it comes up, so this branch says what it is doing and nothing
+    // else; CREATOR_AP_WAIT_MS is what stops it saying it forever.
+    gfx_text_fit(GF_BODY, rx, CR_ROW_SCAN, rw, S(STR_CREATOR_TITLE));
+    gfx_text_wrap(GF_BODY, rx, CR_ROW_WAIT, rw, GFX_LINE_BODY, 3, S(STR_WEB_CONNECTING));
   }
 
   // Invariant 6, relocated: the symbol box owns the affordance rows, so the

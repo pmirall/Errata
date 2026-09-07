@@ -7,11 +7,11 @@
 //  LAYERING
 //  --------
 //  ui owns NO game state. Everything it shows comes from sim_view() /
-//  sim_*() / ble_peer(); everything it changes goes through
+//  sim_*() / the discovery job's peer list; everything it changes goes through
 //  sim_apply_action(), gs_save_cfg() or net_request().
-//  It never includes WiFi.h / BLEDevice.h / WebServer.h (net.h and
-//  ble_social.h are deliberately network-header-free) and it never constructs
-//  a U8G2: the single instance comes from rd_u8g2().
+//  It never includes WiFi.h / esp_now.h / WebServer.h (net.h and discovery.h
+//  are deliberately network-header-free) and it never constructs a U8G2: the
+//  single instance comes from rd_u8g2().
 //
 //  TIME
 //  ----
@@ -30,6 +30,9 @@
 
 #include "../core/config.h"
 #include "../core/nt_types.h"
+// P5-C3: the exploration seams below hand out references to two persisted
+// blobs and a Genome by value. Types only - ui.h still names no hardware.
+#include "../persistence/save_schema.h"
 
 // -----------------------------------------------------------------------------
 //  Geometry the module contracts against (render.h owns the strip constants).
@@ -116,6 +119,40 @@ void     ui_bind_config(Config* cfg);
 // (a mute toggle, a captive-portal write) would otherwise snap the sleeping panel
 // back to full brightness and leave it there until the pet woke up.
 void     ui_note_brightness(uint8_t contrast);
+
+// THE POWER LADDER'S DIM (P6-C3, hardware/power.h). An override on top of the
+// user's brightness and the asleep-pet dim, applied by the same
+// bright_service() the other two go through, so the contrast base keeps having
+// exactly one owner and no two writers race each other through
+// rd_contrast_ramp(). ui.cpp takes the LOWER of the two dims when both are on.
+void     ui_note_power_dim(bool on);
+
+// Is a screen holding a radio job right now? The power ladder's `held` input:
+// while this is true the ladder is clamped at DIM and will not drop the radio.
+// It is a query, not a handle - the release itself is a navigation, so it runs
+// the owning screen's leave() hook and cancels through wifi_scan_cancel() or
+// link_cancel(). BOTH radio screens are folded in here since P7-C2: the NETWORK
+// screen's scan and the LINK screen's discovery job and session.
+bool     ui_radio_job_busy(void);
+
+// Is a SHOW running that the player is watching but not pressing anything for?
+// The power ladder's second `held` input, added at the final review, and it is
+// the same shape as the one above with a different owner.
+//
+// The ladder is driven by g_input_ms, which only a BUTTON moves - so a 4,480 ms
+// ceremony nobody has to press for is indistinguishable from an idle device. A
+// first boot ends with an EGG on SCR_EVOLUTION and AGE_EGG_S is 900 s, so the
+// ordinary case is: the owner picks a starter (the last press), puts the board
+// down, and the birth arrives with the ladder already at PWR_SLEEP. The panel
+// has been off since 120 s, rd_end_frame() skips sendBuffer() while it is, and
+// ceremony_service() advances at most one phase per call - so the 4.48 s show
+// took 60 s and put zero frames on the glass. ui_fps()'s own defence ("a 4 fps
+// hatch is not a hatch") was already dead: app.cpp clamps it through pwr_fps().
+//
+// Reporting true here clamps the ladder at PWR_DIM, which is exactly the three
+// things the show needs and nothing more: the panel stays ON, pwr_fps() stops
+// clamping the rate, and pwr_slice_ms() stays 0 so no pass light-sleeps.
+bool     ui_show_busy(void);
 
 // Drain one sim_take_events() bitmask into the UI: evolution freeze, hatch,
 // alerts, poop/sick toasts.
@@ -248,6 +285,13 @@ void     ui_back(void);
 void     ui_home(void);
 void     ui_note_input(void);
 
+// RE-ROOT the navigation: empty the back stack and land on `s`. The first-boot
+// flow (app/onboarding.h) is what needs it - each setup step REPLACES the one
+// before it rather than stacking on it, so B can never walk backwards into a
+// question already answered and HOME at the end of the flow is a root and not a
+// return. sm_replace_root()'s own doc-comment names exactly this case.
+void     ui_replace_root(ScreenId s);
+
 // Ask the frame scheduler for one more frame. A modal that appears between two
 // FPS_LOW frames would otherwise wait up to 250 ms to be seen.
 void     ui_request_frame(void);
@@ -257,6 +301,21 @@ void     ui_request_frame(void);
 Config*  ui_cfg(void);
 void     ui_cfg_changed(void);
 
+// EVERYTHING THE FIRST-BOOT FLOW HAS ANSWERED SO FAR, ONTO FLASH, WITH NO
+// TOAST. Two things and not one, and the second is what makes the answers
+// survive:
+//
+//   * the Config, silently - ui_cfg_changed() raises STR_SET_SAVED, and a
+//     "guardado" banner landing on top of the NEXT question is the same defect
+//     as the boot greeting that used to cover the TIME screen's only
+//     instruction (ui/screen_setup.h);
+//   * the BOX and the active Pebble - because persistence/save_manager.cpp's
+//     load_all_inner() returns LOAD_FRESH the moment the Box pair is missing,
+//     BEFORE it ever looks at the config. A first boot that wrote only a config
+//     and then lost power would come back with the config DISCARDED and the
+//     flow restarted, and the step field would have been a decoration.
+void     ui_setup_persist(void);
+
 // The user's brightness choice, through ui.cpp's arbiter rather than straight
 // to the panel: while the pet is asleep the dim override still wins and the new
 // setting takes effect on waking.
@@ -265,12 +324,14 @@ void     ui_apply_brightness(uint8_t contrast);
 // sim_apply_action() plus the toast, the choreography and the save.
 // ui_act_and_show() additionally sends the player HOME to watch a film that
 // actually started (BRIEF D); both return whether the action was accepted.
+// No screen calls ui_do_action() since P3-C2b took the light switch away - it
+// was the one action with no film - but it stays as the seam for an action
+// that must NOT move the player, and the screens' tests still drive it.
 bool     ui_do_action(uint8_t action);
 bool     ui_act_and_show(uint8_t action);
 
 // The MENU's "do that again": replays the last accepted action, or explains
 // that there is not one yet.
-void     ui_repeat_last_action(void);
 
 // The modal layer. ui_help() is the one-line hint BOTH opens on a list row;
 // ui_confirm_medicine() opens the confirmation the medicine costs.
@@ -280,11 +341,19 @@ void     ui_confirm_medicine(void);
 // -----------------------------------------------------------------------------
 //  THE CREATOR SCREEN'S RADIO SEAM (P2-C11c)
 //
-//  CREATOR is the one screen that owns the Wi-Fi station. It is a pure
-//  translation unit, so it cannot call net_request() itself: it asks through
-//  these two instead. ui_creator_radio(true) is a REQUEST, not a promise - the
-//  station may still be settling when it returns, which is why the screen
-//  re-reads ui_creator_info() every second rather than caching one answer.
+//  CREATOR is the one screen that owns the Wi-Fi access point. It is a pure
+//  translation unit, so it cannot call net_request_portal() itself: it asks
+//  through these two instead. ui_creator_radio(true) is a REQUEST, not a
+//  promise - the access point may still be coming up when it returns, which is
+//  why the screen re-reads ui_creator_info() every second rather than caching
+//  one answer, and why CREATOR_AP_WAIT_MS exists at all.
+//
+//  ui_creator_radio(false) IS THE ONE TEARDOWN (P8-C2): the socket, then the
+//  radio. Leaving the screen, the D7 idle timeout and the "the access point
+//  never came up" exit all reach it, so no path can leave half the portal up.
+//  CreatorInfo.idle_expired is how the timeout reaches a pure screen; the
+//  decision itself is networking/creator_gate.cpp's, where a host binary drives
+//  it.
 // -----------------------------------------------------------------------------
 struct CreatorInfo;
 void     ui_creator_info(CreatorInfo& out);
@@ -299,6 +368,239 @@ void     ui_request_hatch(void);
 // cooldown or the energy floor says no. The GAME screen itself is still
 // ui.cpp's until P3-C4.
 void     ui_start_minigame(uint8_t idx);
+
+// -----------------------------------------------------------------------------
+//  THE BATTLE SCREEN'S SEAMS (P4-C4)
+//
+//  ui/screen_battle.cpp is a pure translation unit and owns the whole fight -
+//  the 212 B BattleState, the AI, the log ring and every decision in it. What
+//  it cannot do for itself is exactly three things, and each gets one line
+//  here rather than a hole in the layering.
+// -----------------------------------------------------------------------------
+
+// Arm and open a battle. `entry` is BT_ENTRY_PRACTICE (the PLAY row) or
+// BT_ENTRY_DIAG (the console's test_battle). ui.cpp draws the seed - practice
+// from rng_u32(RNG_BATTLE), the diagnostic from the fixed BT_DIAG_SEED spec
+// section 49's "deterministic RNG seed" asks for - and then pushes SCR_BATTLE,
+// because a named RNG stream and the navigation machine are both outside a pure
+// screen's reach.
+void     ui_start_battle(uint8_t entry);
+
+// THE ONE PATH A BATTLE RESULT CAN TAKE, and it is called exactly once per
+// VISIT to SCR_BATTLE however the player leaves the screen (ui/
+// screen_battle.cpp's report_once(), which is minigames/manager.cpp's
+// mgr_abort() in miniature - and per visit rather than per battle, which is
+// only a difference for a visit in which no battle started: that one reports
+// won = 0 and is dropped on the line below).
+//
+// `won` IS THE ENGINE'S OUTCOME, not "did the player sit through the result
+// screen": a battle is decided while its victory transcript is still playing,
+// and a leave inside that window has to pay the same as a leave after it.
+//
+// A practice win awards XP_BATTLE_WIN through app_award_xp() - metered by
+// game/xp.h's ledger like every other source - and persists. A DIAG battle
+// awards nothing: entering god mode already taints the genome, and a
+// diagnostic that pays XP is a cheat.
+//
+// WHO IS PAID: THE ACTIVE PEBBLE, which is not necessarily one that fought.
+// app_award_xp() pays box_slot(box_active()), and the pick list only requires
+// box_occupied(), so a player who fields slots 2-4 while slot 1 is active earns
+// the XP and the level-up hp rescale on the Pebble that stayed home. That is
+// consistent with every other source in the game (all of them pay the active
+// pet) and it is stated here rather than left to be discovered, because "a
+// practice win awards XP_BATTLE_WIN" does not say to whom. Per-combatant XP
+// needs a per-Pebble ledger and belongs with P4-C5's real battles.
+void     ui_battle_result(uint8_t entry, uint8_t won);
+
+// -----------------------------------------------------------------------------
+//  THE PEER LINK'S SEAMS (P7-C2/C3)
+//
+//  ui/screen_link.cpp is a PURE translation unit that owns the discovery job
+//  and the Session; what it cannot do for itself is reach the radio and draw a
+//  nonce. Four calls for the first and one for the second, and it makes no
+//  others. networking/net.cpp is the ONE radio owner on the other side of all
+//  of them, exactly as it is for ui_scan_driver().
+// -----------------------------------------------------------------------------
+struct LinkRadioDriver;
+struct Transport;
+
+// The four-function seam networking/discovery.h drives: bring the link up,
+// beacon, drain, put the radio back. A host test hands the same screen a fake.
+const LinkRadioDriver& ui_link_driver(void);
+
+// The Transport networking/session.h runs over, unicast to the peer bound
+// below. It is a REFERENCE to one object because a device has one radio; a host
+// test binds a loopback endpoint to it instead.
+const Transport& ui_link_transport(void);
+
+// Open / close the unicast peer the transport talks to. The slot is a
+// DiscPeer::slot - the transport's own opaque handle - and NOT anything that
+// identifies a piece of hardware (networking/discovery.h, spec 43/44).
+// THE BIND IS HALF OF THE CONSENT GATE: until it happens the radio delivers
+// nothing from that device to this firmware at all.
+bool ui_link_bind(uint8_t slot);
+void ui_link_unbind(void);
+
+// One draw from RNG_MISC ("tokens, nonces, PINs, canaries"), which is what
+// SessionCfg.nonce is and which a pure screen may not reach for itself.
+uint32_t ui_link_nonce(void);
+
+// -----------------------------------------------------------------------------
+//  THE TRADE'S TWO SEAMS (P7-C4)
+//
+//  ui/screen_link.cpp owns the trade the same way it owns the battle: it holds
+//  the Session and the caller-owned TradeLink, and it drives them. What a PURE
+//  screen cannot do is write flash or read the load path's quarantine mask, so
+//  those two arrive through here and networking/trade_link.cpp's TradeHooks is
+//  the shape they arrive in.
+//
+//  FORWARD-DECLARED AND RETURNED BY POINTER on purpose: `struct TradeHooks`
+//  lives in networking/trade_link.h, which drags networking/session.h and
+//  game/battle.h behind it, and ui.h is included by every screen in the tree.
+//  A pointer to an incomplete type costs those screens nothing.
+//
+//  A BUILD MAY ANSWER nullptr, and ui/screen_link.cpp treats that as "this
+//  device cannot trade" rather than as a fault.
+// -----------------------------------------------------------------------------
+struct TradeHooks;
+const TradeHooks* ui_trade_hooks(void);
+
+// persistence/save_manager.h's save_quarantine_mask(). game/trade.h takes it as
+// a PARAMETER and not an include, because the RULE ("a quarantined Pebble may
+// not enter a trade") is a game rule and the DATUM belongs to the load path.
+uint16_t ui_trade_quarantine(void);
+
+// -----------------------------------------------------------------------------
+//  THE LINKED BATTLE'S SEAMS (P7-C3)
+//
+//  ui/screen_battle.cpp runs the ENGINE; the SESSION that keeps two engines
+//  identical lives on ui/screen_link.cpp - the screen the two players agreed on
+//  it from, and the screen that owns the radio. The battle screen reaches it
+//  through the calls below rather than by including screen_link.h, so
+//  tests/test_battle_screen.cpp still links the battle screen and the things it
+//  drives and nothing else.
+// -----------------------------------------------------------------------------
+// What the SESSION says happened. UI_LKB_WON is answered where and only where
+// session_rewards_authorised() is true - both endpoints agreed the outcome AND
+// the final hash - so a local engine that won a fight the peer never confirmed
+// is UI_LKB_BROKEN and pays nothing. UI_LKB_BROKEN is deliberately NOT
+// UI_LKB_LOST: a desync is not a defeat, and printing one as the other is the
+// same mistake as calling BO_ABORT a draw.
+#define UI_LKB_NONE     0u
+#define UI_LKB_RUNNING  1u
+#define UI_LKB_WON      2u
+#define UI_LKB_LOST     3u
+#define UI_LKB_DRAW     4u
+#define UI_LKB_BROKEN   5u
+
+uint8_t  ui_link_battle_status(void);
+// Which side of the shared BattleSetup is ours. It is the SESSION's answer
+// (networking/session.cpp fixes it from the two device ids) and not a constant:
+// the linked battle is the first fight in this firmware the player is not
+// always side 0 of.
+uint8_t  ui_link_battle_side(void);
+void     ui_link_battle_pump(uint32_t now_ms);
+bool     ui_link_battle_wants_action(void);
+void     ui_link_battle_submit(uint8_t kind, uint8_t index);
+// Milliseconds before the session's retransmission ladder gives up on a round
+// nobody has advanced - the player's real move clock. See the note at
+// link_battle_move_ms_left() in ui/screen_link.cpp for why it is nine seconds
+// and why neither screen papers over it.
+uint32_t ui_link_battle_move_ms_left(uint32_t now_ms);
+// SCR_BATTLE IS GONE, WHEREVER IT WENT. ui/screen_battle.cpp's leave() hook is
+// the only thing that runs on EVERY route off that screen - B, the result page,
+// and LONG_BOTH, which goes straight HOME and never runs the LINK screen's own
+// leave() at all - so this is where the session is closed and the radio given
+// back. Without it a linked battle abandoned with the HOME gesture would leave
+// the radio up, the session unpumped and the power ladder clamped at DIM for
+// ever, because ui/screen_link.cpp deliberately does not release when it is
+// pushed aside. Idempotent.
+void     ui_link_battle_done(void);
+
+// -----------------------------------------------------------------------------
+//  THE EXPLORATION SEAMS (P5-C3/C4)
+//
+//  ui/screen_network.cpp and ui/screen_encounter.cpp are pure translation
+//  units - they run whole on the host, which is the only way the scan timeout,
+//  the cancel and the capture roll get a test at all. What they cannot do for
+//  themselves is exactly six things, and each gets one line here rather than a
+//  hole in the layering.
+// -----------------------------------------------------------------------------
+
+// THE RADIO. networking/net.cpp fills in the four-function WifiScanDriver seam
+// and is the ONLY route from the game to a scan; a host test hands the same
+// screen a fake driver through this call.
+struct WifiScanDriver;
+const WifiScanDriver& ui_scan_driver(void);
+
+// THE CLOCK, all three facts at once and in the shape game/cooldowns.h takes
+// them: the wall clock, a monotonic millisecond count and HOW the clock came to
+// hold its value. The third is what decides whether a cooldown is persisted or
+// per-boot, and whether a SPECIAL XP burst is paid at all.
+void     ui_explore_clock(uint32_t* now_epoch, uint32_t* now_ms, uint8_t* cal);
+
+// gs_device_id(): stable per device, persisted, never 0. It salts the encounter
+// seed so two units standing side by side do not see the same creature.
+uint32_t ui_device_seed(void);
+
+// One draw from RNG_ENCOUNTER. The capture roll is REAL randomness and must be
+// - re-entering an encounter and getting the same failure again is not a game -
+// which is why it is drawn here and not folded into the deterministic
+// encounter seed.
+uint32_t ui_explore_roll(void);
+
+// The two persisted blobs the exploration path reads and writes. References
+// into the one live GameState; ui_explore_commit() is what puts a changed
+// cooldown table, a changed bag or a changed Pebble on flash, and it polls
+// cd_take_dirty() rather than saving after every arm (game/cooldowns.h says
+// why: cd_ready() can dirty the table too).
+//
+// THE SLOT ARGUMENT EXISTS BECAUSE THE SENTENCE ABOVE WAS WIDER THAN THE TREE.
+// It said "a changed Pebble" and the body wrote gs_save_active(), which commits
+// THE ACTIVE SLOT AND NOTHING ELSE. A capture is filed by box_new_pebble() into
+// first_free(), which is the active slot only when the Box was empty - so the
+// FIRST creature caught survived a power cut and every one after it did not,
+// while box.slot_mask (written by the header on the same commit) went on
+// claiming a slot whose blob had never been written.
+//
+// So a caller that mutated a slot OTHER than the active one now has to say
+// which, and BOX_SLOT_NONE is how a caller says it mutated none. A second
+// entry point would have been the other option and it is the worse one: the
+// bug was a call site that forgot, and adding a function to forget does not
+// fix that.
+CooldownTable& ui_cooldowns(void);
+Inventory&     ui_inventory(void);
+void           ui_explore_commit(uint8_t mutated_slot);
+
+// A fresh sealed genome for a captured Pebble. It draws through RNG_BREEDING
+// (game/genome.cpp), which is a named global stream and therefore out of a pure
+// screen's reach - and the trap worth naming: a caller that wanted a
+// deterministic capture must NOT reseed that stream, because every later
+// breeding roll in the boot would move with it.
+Genome   ui_fresh_genome(void);
+
+// XP from an exploration source, through app_award_xp() so the ledger and the
+// level-up choreography are the same ones every other source uses.
+void     ui_award_xp(uint16_t amount, uint8_t src);
+
+// The Pebble the player is carrying, or NULL. A screen that only wants to point
+// an item at it should not have to bind the Box to do so.
+PebbleInstance* ui_active_pebble(void);
+
+// -----------------------------------------------------------------------------
+//  THE THREE render.h EFFECTS A PURE SCREEN CANNOT REACH (P4-C4)
+//
+//  ui_hold_fps() is the one that is load-bearing rather than decorative:
+//  rd_set_fps() only moves the REQUEST and rd_fps() caps that request at
+//  FPS_LOW for RENDER_WEB_BUSY_MS after every web hit, so a screen animating a
+//  transcript has to hold the rate the way actfx does. The hold is
+//  SELF-EXTINGUISHING (capped at RD_FPS_HOLD_MAX_MS) and must be renewed from
+//  the screen's update hook, which is what makes it impossible to leave the
+//  panel pinned at 20 fps by forgetting to release it.
+// -----------------------------------------------------------------------------
+void     ui_hold_fps(uint8_t fps, uint16_t ms);
+void     ui_flash(uint16_t ms);
+void     ui_shake(uint8_t amp_px, uint16_t ms);
 
 // The undocumented god-mode entry hold, 0..100, painted by the PEBBLE screen's
 // genome page. 0 whenever no hold is in progress, which is almost always.
@@ -339,9 +641,30 @@ bool     ui_input_locked(void);
 // web-busy cap if it wants to.
 uint8_t  ui_fps(void);
 
-// The living pet's display name: Config.pet_name when the user set one,
-// otherwise the deterministic dynasty name. Always NUL-terminates.
+// The living pet's display name, in order: Config.pet_name when the user set
+// one, then the SPECIES the active Pebble is (the roster's Spanish name), then
+// the deterministic dynasty name for a Pebble with no species row. Always
+// NUL-terminates. P4-C4a put the species in the middle: the dynasty name says
+// the same word before and after an evolution, so on its own it could never
+// tell the player their creature had become something else.
 void     ui_pet_name(char* out, size_t cap);
+
+// THE SAME LADDER, IN THE STORED (LATIN-1) ENCODING. For the one caller that
+// does not draw: screen_link.cpp's fill_self(), whose DiscBeacon.name field is
+// Latin-1 by wire contract. Handing it the UTF-8 form made disc_encode() answer
+// DE_NAME for every accented name the first-boot ring can type, so the device
+// emitted no beacon at all - see the note above the implementation.
+void     ui_pet_name_latin1(char* out, size_t cap);
+
+// FIRST BOOT: replace the Pebble app/app.cpp minted with one of the chosen
+// species, keeping the slot, the active flag, the genome and the creation seed.
+//
+// IT REFUSES OUTSIDE THE FLOW, and the refusal is not a comment: ui.cpp checks
+// the persisted step (app/onboarding.h) and game/box.cpp's box_reroll_starter()
+// independently refuses any Pebble that has earned or been named anything. Two
+// locks, because this is the one call in the tree that destroys the ACTIVE
+// Pebble - box_release() will not, by rule B4.
+bool     ui_set_starter(uint8_t species_id);
 
 // hash(lineage_id, generation) -> two Spanish syllables.
 // Deterministic across devices; never empty. cap >= 16 recommended.
@@ -350,8 +673,12 @@ void     ui_name_for(uint32_t lineage_id, uint8_t generation, char* out, size_t 
 // =============================================================================
 //  MODULE SEAMS ui.cpp CONSUMES (declared by their owners, not here)
 //
-//  webui.h   uint16_t web_pin(void)          - the QR payload and the
-//                                              4-digit PIN printed beside it.
+//  webui.h   uint16_t web_pin(void)          - the 4-digit PIN printed beside
+//                                              the symbol. IT IS NOT IN THE QR
+//                                              PAYLOAD ANY MORE (spec 39).
+//            void     web_portal_open/close  - the CREATOR session
+//            bool     web_portal_idle_expired
+//                                            - the D7 grace period
 //  godmode.h bool     god_active(void)
 //            GodEvt   god_handle(Gesture)    - returns what ui must do next
 //            void     god_draw(void)         - owns the whole GOD frame

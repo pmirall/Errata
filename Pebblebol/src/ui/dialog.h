@@ -49,7 +49,12 @@ enum ConfirmId : uint8_t {
   // The Box release, spec section 9. Two dialogs for the same reason the wipe
   // has two: it is destructive and there is no undo (invariant B4).
   CFM_BOX_REL1,
-  CFM_BOX_REL2
+  CFM_BOX_REL2,
+  // Spec section 18: an evolution is OFFERED, never imposed. Invariant 5 puts
+  // the cursor on NO, so a stray press declines - and a decline costs nothing
+  // and leaves EVO_STATE_PENDING set, because section 27 forbids punishing the
+  // player and a "no" now is not a "no" for ever.
+  CFM_EVOLVE
 };
 
 typedef void (*DialogCommitFn)(uint8_t confirm_id);

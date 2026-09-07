@@ -9,6 +9,12 @@
 #include <stdio.h>
 #include <string.h>
 
+// P10-C2. The frame scheduler's arithmetic and the frame-time record live in a
+// PURE module, because this file is compiled by no host binary and every rule
+// left inside it is a rule no test in this repository can execute.
+#include "../core/perf.h"
+#include "../core/utf8.h"
+
 // -----------------------------------------------------------------------------
 // THE display object. BRIEF risk #2 - the single most dangerous line in the
 // project. Argument order is (rotation, reset, clock = SCL, data = SDA);
@@ -109,15 +115,12 @@ static const int8_t RD_SIN16[16] = {
 //  Small internal helpers
 // =============================================================================
 
-// Length in bytes of the UTF-8 sequence starting with byte c. A stray
-// continuation byte counts as 1 so a malformed string can never loop forever.
-static inline uint8_t u8_seq_len(uint8_t c) {
-  if (c < 0x80)          return 1;
-  if ((c & 0xE0) == 0xC0) return 2;
-  if ((c & 0xF0) == 0xE0) return 3;
-  if ((c & 0xF8) == 0xF0) return 4;
-  return 1;
-}
+// THE CODEPOINT RULE LEFT THIS FILE AT P10-C4 and lives in core/utf8.cpp, which
+// a host binary can link. What was here read the LEAD BYTE ONLY and trusted it,
+// so `p += u8_seq_len(*p)` on a lone 0xF1 - a legal nickname byte, because a
+// stored name is raw Latin-1 (core/utf8.h says where that comes from) - stepped
+// four bytes over a one-byte string and past its terminator. u8_len() checks
+// that the continuation bytes are actually there before it believes the lead.
 
 // Clip a rectangle to the panel. Returns false when nothing is left.
 static bool clip_rect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
@@ -139,7 +142,7 @@ static uint16_t draw_utf8(int16_t x, int16_t y, const char* s) {
   if (y < 0 || y >= (int16_t)(OLED_H + 16)) return 0;
   while (x < 0 && *s != '\0') {
     char gl[5];
-    const uint8_t n = u8_seq_len((uint8_t)*s);
+    const uint8_t n = u8_len(s);
     uint8_t i = 0;
     while (i < n && s[i] != '\0') { gl[i] = s[i]; i++; }
     gl[i] = '\0';
@@ -159,11 +162,12 @@ static uint16_t draw_utf8(int16_t x, int16_t y, const char* s) {
 static uint16_t fit_copy(char* dst, size_t dst_sz, const char* s, int16_t max_w) {
   size_t len = 0;
   if (s != NULL) {
-    while (s[len] != '\0' && len + 1 < dst_sz) len++;
-    // if the copy was cut short, back off to a codepoint boundary
-    if (s[len] != '\0') {
-      while (len > 0 && ((uint8_t)s[len] & 0xC0) == 0x80) len--;
-    }
+    // u8_fit() WALKS FORWARD over whole sequences, which is stricter than what
+    // was here: backing off CONTINUATION bytes after a blind cut leaves a lone
+    // LEAD byte standing whenever the cut landed just after one, and a lone
+    // lead byte is precisely what hands drawUTF8() a broken glyph.
+    const size_t room = (dst_sz > 0u) ? (dst_sz - 1u) : 0u;
+    len = u8_fit(s, (room > 0xFFFFu) ? 0xFFFFu : (uint16_t)room);
     if (dst != s) memmove(dst, s, len);
   }
   dst[len] = '\0';
@@ -452,13 +456,47 @@ void rd_hold_fps(uint8_t fps, uint16_t ms) {
   if (fps == 0u || ms == 0u) { s_hold_fps_armed = false; return; }
   if (fps > 60u) fps = 60u;
   if (ms > RD_FPS_HOLD_MAX_MS) ms = (uint16_t)RD_FPS_HOLD_MAX_MS;
+
+  // *** ONLY ON A RAISE, SINCE THE FINAL REVIEW. ***
+  // This used to end in an UNCONDITIONAL rd_request_frame(), which sets
+  // s_next_frame_ms = millis() - i.e. "a frame is due now". The header tells
+  // callers to renew the hold EVERY TICK for as long as their film lasts, and
+  // both callers do: sm_service() runs the screen's update() on every app_loop()
+  // pass, so screen_battle.cpp's battle_update() re-armed the hold on every pass
+  // while SCR_BATTLE was up, and actfx_service() re-armed it on every pass while
+  // a film ran. Every renewal moved the deadline to now, rd_begin_frame()'s
+  // `(int32_t)(now - s_next_frame_ms) < 0` was therefore NEVER true, and a frame
+  // was drawn on EVERY LOOP PASS - so the hold's VALUE was irrelevant and a
+  // caller asking for 5 fps free-ran exactly like one asking for 20. Measured
+  // against a modelled 28 ms drawing pass: 20 fps requested, 35.7 fps delivered,
+  // frames/passes 1.00 against 0.08 on an idle HOME.
+  //
+  // Three consequences on the board, all in the two states docs/bench.md A1 sits
+  // in: app.cpp's `delay(1)` is gated on `!drew`, so with drew always true stage
+  // 7 became a no-op and audit risk 16 ("the loop must not run at 100 % duty
+  // cycle") was broken exactly there; the loop period became the whole frame
+  // (~28 ms of I2C) instead of ~2 ms, so audio_service() ran ~36 times a second
+  // instead of ~500 and every 40 ms step of SFX_RISE/SFX_FALL took ~56 ms (the
+  // five-step SFX_FALL on a faint runs ~280 ms instead of 200); and roughly
+  // double the sendBuffer() traffic on a battery pet with the radio also up.
+  //
+  // The request is what makes an ARMING take effect inside the current period -
+  // without it up to 250 ms of the film still plays at 4 fps, which is most of a
+  // phase. A RENEWAL has nothing to bring forward, so it must not touch the
+  // deadline. Ask only when this call actually raises the rate.
+  // THE RULE ITSELF IS IN core/perf.cpp, where tests/test_perf.cpp sweeps it -
+  // this file is compiled by no host binary and the rule was wrong here for ten
+  // phases with nothing able to see it. rd_fps_hold_live() and not
+  // s_hold_fps_armed, because the flag is cleared LAZILY on the way past: a
+  // hold whose deadline has passed but which nobody has asked about since still
+  // reads as armed, and re-arming after an expiry IS an arming.
+  const bool raises = perf_hold_raises(rd_fps_hold_live(), s_hold_fps_val, fps);
+
   s_hold_fps_val   = fps;
   s_hold_fps_until = millis() + ms;
   s_hold_fps_armed = true;
-  // Without this the raise would not take effect until the CURRENT period
-  // elapsed - i.e. up to 250 ms of the film would still play at 4 fps, which is
-  // most of a phase.
-  rd_request_frame();
+
+  if (raises) rd_request_frame();
 }
 
 uint8_t rd_fps(void) {
@@ -506,8 +544,7 @@ bool rd_begin_frame(void) {
   // Advance the deadline by exactly one period so the cadence does not drift,
   // but resynchronise after a long stall instead of firing a burst of catch-up
   // frames (a 2000-step offline catch-up can eat several seconds).
-  s_next_frame_ms += period;
-  if ((int32_t)(now - s_next_frame_ms) > (int32_t)period) s_next_frame_ms = now + period;
+  s_next_frame_ms = perf_advance_deadline(now, s_next_frame_ms, period);
 
   s_in_frame      = true;
   s_frame_start_us = micros();
@@ -531,15 +568,28 @@ void rd_end_frame(void) {
     s_u8g2.sendBuffer();
   }
 
-  s_last_frame_us = micros() - s_frame_start_us;
+  const uint32_t frame_end_us = micros();
+  s_last_frame_us = frame_end_us - s_frame_start_us;
+
+  // P10-C2. s_last_frame_us was overwritten and forgotten twenty times a
+  // second, and rd_frame_time_us() - its only export - had no caller anywhere
+  // in the tree. It is KEPT now: core/perf.cpp holds the per-screen maximum and
+  // the all-time worst, and the console's GD_SYS_PERF page prints the live
+  // value through rd_frame_time_us() beside them, which is the reader that
+  // export never had.
+  //
+  // perf is handed the two STAMPS rather than the span, so the micros() wrap is
+  // its problem and not this file's. The quantity is unchanged and it is the
+  // right one: clearBuffer -> the whole screen -> fx_apply() -> the full
+  // sendBuffer(), which is the ~24 ms of I2C the comment above attributes to
+  // the panel.
+  perf_note_frame(s_frame_start_us, frame_end_us);
 
   // Overrun guard: if this frame blew the budget, push the next deadline out by
-  // the overrun so the scheduler cannot run the loop at 100 % duty cycle.
-  if (s_last_frame_us > FRAME_BUDGET_US) {
-    uint32_t over_ms = (s_last_frame_us - FRAME_BUDGET_US) / 1000u;
-    if (over_ms > 250u) over_ms = 250u;
-    s_next_frame_ms += over_ms;
-  }
+  // the overrun so the scheduler cannot run the loop at 100 % duty cycle. The
+  // arithmetic moved to core/perf.cpp at P10-C2 so a host binary could drive
+  // it; the behaviour is identical, down to the strictly-greater boundary.
+  s_next_frame_ms += perf_overrun_backoff_ms(s_last_frame_us);
 }
 
 uint32_t rd_frame_time_us(void) { return s_last_frame_us; }
@@ -616,7 +666,7 @@ uint8_t rd_text_wrap(int16_t x, int16_t y, int16_t w, uint8_t line_h,
 
     // measure the next word
     const char* wstart = p;
-    while (*p != '\0' && *p != ' ' && *p != '\n') p += u8_seq_len((uint8_t)*p);
+    while (*p != '\0' && *p != ' ' && *p != '\n') p += u8_len(p);
     size_t wlen = (size_t)(p - wstart);
     if (wlen == 0) break;
 

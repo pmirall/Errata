@@ -29,7 +29,8 @@
 #include <stddef.h>
 
 #include "../core/nt_types.h"     // Genome (copied whole into a Pebble)
-#include "../core/version.h"      // SAVE_SCHEMA_VERSION, CONTENT_VERSION, ...
+#include "../core/version.h"      // SAVE_SCHEMA_VERSION, PROTOCOL_VERSION, ...
+#include "../data/content_version.h"   // CONTENT_VERSION (generated hash)
 
 // -----------------------------------------------------------------------------
 // 0. Shared constants
@@ -38,6 +39,16 @@
 #define PB_CARE_COUNT            5      // HUNGER HAPPINESS HEALTH CLEANLINESS ENERGY
 #define PB_MOVE_COUNT            4
 #define PB_NICKNAME_CAP         13      // NAME_MAX_LEN 12 + NUL
+// THE SAME NAME, SIZED FOR DRAWING RATHER THAN FOR STORING (P10-C4).
+//
+// A stored name is raw LATIN-1 - networking/creator_parse.cpp converts UTF-8
+// down to it on the way in, game/validate.cpp admits the high bytes one at a
+// time, networking/discovery.cpp accepts them off the air - and everything that
+// DRAWS goes through drawUTF8(). So twelve stored bytes can be twelve accented
+// characters and twenty-four drawn ones, and a display buffer sized in STORED
+// bytes cuts such a name in half, character by character. core/utf8.h holds the
+// one crossing (u8_from_latin1) and this is the cap on its output.
+#define PB_NAME_DRAW_CAP        (2 * (PB_NICKNAME_CAP - 1) + 1)   // 25
 #define PB_LEVEL_MAX            30      // spec section 11: levels 1..30
 #define CUSTOM_SPECIES_SLOTS    10      // cs0..cs9
 #define COOLDOWN_SLOTS          32
@@ -98,7 +109,11 @@ enum PebbleOrigin : uint8_t {
 #define PBS_ASLEEP              0x02u
 #define PBS_CORRUPTED           0x04u     // spec section 55
 #define PBS_FAINTED             0x08u
-#define PBS_LIGHT_ON            0x10u
+// Bit 0x10 was PBS_LIGHT_ON. P3-C2b deleted the light mechanic, so the bit is
+// RESERVED: nothing writes it and nothing reads it, and it is deliberately NOT
+// recycled for a new meaning - a v2 save written before that commit may still
+// carry it set, and the 128 B layout is pinned by offsetof asserts either way.
+#define PBS_RESERVED_LIGHT      0x10u
 
 // PebbleInstance.flags
 #define PBF_CUSTOM              0x01u
@@ -142,7 +157,27 @@ struct NT_PACKED PebbleInstance {
   char     nickname[PB_NICKNAME_CAP];    //  96  NUL-terminated, may be empty
   uint8_t  custom_sprite;                // 109  PB_CUSTOM_SPRITE_NONE or a cs slot
   uint32_t seq;                          // 110  pair sequence number
-  uint8_t  reserved[12];                 // 114  must be 0
+  // THE CORRUPTION DEADLINE (P5-C3, spec sections 22 and 55). Four of the
+  // twelve reserved bytes, spent deliberately.
+  //
+  // PBS_CORRUPTED existed with NOWHERE TO PUT ITS EXPIRY, which meant the
+  // status could only ever be set and never time out - a 24 h effect with no
+  // 24 h in it, clearable only by item 7. Nothing set the bit before this
+  // commit (measured: no writer anywhere in src/), so no save in existence
+  // carries a stale one and this needs no migration: an old blob reads 0,
+  // which is exactly "not corrupted".
+  //
+  // IT IS NOT ON THE WIRE and it must never become so. networking/protocol.h's
+  // 48 B record has its own field list, reserved[12] is not in it, and
+  // PBW_STATUS_MASK already refuses PBS_CORRUPTED outright because the bit is
+  // EVOC_CORRUPTED's input. A peer therefore cannot send either half.
+  //
+  // NO VALIDATOR RULE, and game/validate.h already states the reason for the
+  // whole class: every epoch in this struct is "checked against NOTHING here,
+  // because no rule exists to check them against". A deadline in the past is
+  // simply an expired one, and game/corruption.cpp clears it on the next tick.
+  uint32_t corrupt_until_epoch;          // 114  0 = not corrupted
+  uint8_t  reserved[8];                  // 118  must be 0
   uint16_t crc16;                        // 126  over bytes 0..125
 };
 NT_PACK_POP
@@ -155,6 +190,10 @@ static_assert(offsetof(PebbleInstance, moves)      ==  62, "PebbleInstance.moves
 static_assert(offsetof(PebbleInstance, genome)     ==  80, "PebbleInstance.genome moved");
 static_assert(offsetof(PebbleInstance, nickname)   ==  96, "PebbleInstance.nickname moved");
 static_assert(offsetof(PebbleInstance, seq)        == 110, "PebbleInstance.seq moved");
+static_assert(offsetof(PebbleInstance, corrupt_until_epoch) == 114,
+              "PebbleInstance.corrupt_until_epoch moved - it was carved out of "
+              "reserved[12] and every byte after it must stay where it was");
+static_assert(offsetof(PebbleInstance, reserved)   == 118, "PebbleInstance.reserved moved");
 static_assert(offsetof(PebbleInstance, crc16)      == 126, "PebbleInstance.crc16 moved");
 static_assert(PEBBLE_CRC_BYTES == sizeof(PebbleInstance) - 2, "PebbleInstance CRC span drifted");
 
@@ -213,6 +252,8 @@ static_assert(BOX_SLOTS <= 16, "slot_mask is 16 bits");
 #define CFGV2_F_WEB             0x0010u   // the creator server is opt-in (radio off
                                           // by default, spec section 68 r5)
 #define CFGV2_F_BLE             0x0020u   // the short-range radio may be brought up
+#define CFGV2_F_SETUP_MASK      0x00C0u   // first-boot step, 2 bits at shift 6
+#define CFGV2_F_SETUP_SH        6         // 0 = finished (app/onboarding.h)
 
 struct ConfigV2 {
   uint16_t magic;                        //   0  CFGV2_MAGIC
@@ -221,15 +262,32 @@ struct ConfigV2 {
   uint32_t device_id;                    //   4  spec section 43, generated once
   uint32_t time_cal_epoch;               //   8  when the clock was last set
   uint32_t last_known_epoch;             //  12  mirrors the 60 s "t" cadence
-  uint32_t pin_lock_until;               //  16  creator lockout deadline
+  uint32_t pin_lock_until;               //  16  creator lockout MIRROR, wall
+                                         //      clock, DIAG only - never read
+                                         //      back as a deadline. See
+                                         //      networking/creator_gate.h.
   uint32_t seq;                          //  20  pair sequence number
   uint16_t creator_pin;                  //  24  0 = no PIN issued yet
-  uint16_t creator_idle_s;               //  26  D7 idle timeout for the server
+  uint16_t creator_idle_s;               //  26  D7 idle timeout, seconds.
+                                         //      0 = never set -> the compiled
+                                         //      default, NOT an instant
+                                         //      shutdown (cg_idle_seconds).
   uint16_t flags;                        //  28  CFGV2_F_*
   uint8_t  brightness;                   //  30  OLED contrast
-  uint8_t  pin_fail_count;               //  31
+  uint8_t  pin_fail_count;               //  31  0 or CREATOR_PIN_FAIL_MAX only:
+                                         //      the ARMED EDGE, not a running
+                                         //      count (cg_persist_fails)
   char     device_name[CFGV2_NAME_CAP];  //  32
-  char     ap_pass[CFGV2_AP_PASS_CAP];   //  45
+  char     ap_pass[CFGV2_AP_PASS_CAP];   //  45  STILL HAS NO PRODUCER, and
+                                         //      P8-C2 decided that on purpose
+                                         //      rather than by omission: the
+                                         //      soft AP stays OPEN because a
+                                         //      WPA passphrase cannot be
+                                         //      carried by the join QR at ANY
+                                         //      length. The arithmetic is in
+                                         //      ui/screen_creator.cpp next to
+                                         //      the payload that would have to
+                                         //      hold it.
   char     tz[CFGV2_TZ_CAP];             //  62  POSIX TZ, no network needed
   uint8_t  reserved[152];                // 102  must be 0
   uint16_t crc16;                        // 254  over bytes 0..253
@@ -254,6 +312,16 @@ static_assert(CFGV2_CRC_BYTES == sizeof(ConfigV2) - 2, "ConfigV2 CRC span drifte
 //    is kept and the slot count is what gives: 32 - 18 B of fixed fields = 14 B
 //    = seven item kinds. Spec section 24 asks for "no enormous inventory", which
 //    seven satisfies; widening it later is a reserved-free schema bump.
+//
+//    NOTE ON THE XP LEDGER. P3-C2 filled these two fields in, and what they
+//    hold is the budget STILL SPENDABLE per metered XpSource plus the epoch the
+//    snapshot was taken at - not "granted today", which the layout comment
+//    guessed at before game/xp.h existed. The two are the same information, but
+//    the spendable form is the one that reconstructs correctly across a power
+//    cut: left = min(cap, saved + elapsed / refill_step), which can only
+//    under-report. Four buckets is what fits, so the four sources a player can
+//    repeat at will are metered and the later ones (capture, item) are
+//    farm-proof by construction instead. See game/xp.h.
 // -----------------------------------------------------------------------------
 #define INV_MAGIC               0x5649u   // bytes 'I','V'
 #define INV_CRC_BYTES           30
@@ -269,8 +337,8 @@ struct Inventory {
   uint8_t  version;                      //  2  SAVE_SCHEMA_VERSION
   uint8_t  slots;                        //  3  == INVENTORY_SLOTS
   uint32_t seq;                          //  4  pair sequence number
-  uint32_t ledger_epoch;                 //  8  start of the current XP day
-  uint8_t  xp_ledger[XP_LEDGER_SLOTS];   // 12  XP already granted today, by source
+  uint32_t ledger_epoch;                 //  8  when xp_ledger was snapshotted
+  uint8_t  xp_ledger[XP_LEDGER_SLOTS];   // 12  XP still SPENDABLE, by source
   InvSlot  items[INVENTORY_SLOTS];       // 16
   uint16_t crc16;                        // 30  over bytes 0..29
 };
@@ -290,6 +358,47 @@ static_assert(INV_CRC_BYTES == sizeof(Inventory) - 2, "Inventory CRC span drifte
 //    the u32 rows on an odd 4-byte boundary. The same six reserved bytes are
 //    kept, split 4 before the rows and 2 after, so the rows stay naturally
 //    aligned and the blob is still exactly 272 B.
+//
+//    THE ACTIVITY DAY BUCKET (P6-C2, spec section 25). The four bytes that were
+//    reserved_a[4] are now act_day + act_score, carved out exactly the way
+//    PebbleInstance.corrupt_until_epoch was carved out of reserved[12] at
+//    P5-C3, and with the same argument: an old blob reads 0 in both, and 0 is
+//    exactly "no activity day has been opened yet", which is the correct state
+//    for a save written before this commit. NO SCHEMA BUMP, and the reason is
+//    written down rather than assumed - see the four points below and
+//    docs/save_schema.md section 5.
+//
+//    WHY HERE AND NOT IN Inventory, WHICH THE PLAN'S BULLET ASKED FOR:
+//    Inventory is 32 B with ZERO padding and ZERO reserved bytes (measured,
+//    not merely asserted: 2+1+1+4+4+4+14+2 = 32), so the day bucket has
+//    literally nowhere to land in it. Growing it is a SAVE_SCHEMA_VERSION bump,
+//    and a bump is not a row in migrate_run()'s step table: pair_load() sorts
+//    any non-equal version into `bad` and load_all_inner() returns LOAD_CORRUPT
+//    before the migration branch is ever reached, so every v2 save on every
+//    device - box, cfg, inv, cd, cs and tr alike, five of which did not change -
+//    would need a version-tolerant reader written first. That is the right
+//    price for a real widening (INVENTORY_SLOTS 7 -> 12, say). It is the wrong
+//    price for four bytes that are already reserved.
+//
+//    WHY NOT DERIVE THE DAY FROM Inventory.ledger_epoch, the plan's option (a):
+//    ledger_epoch is re-stamped every time XP is SPENT (app.cpp's XP funnel),
+//    so ledger_epoch / 86400 is "the day of the last XP spend", not "the day
+//    these counters belong to". Two different facts, and deriving one from the
+//    other would give one fact two owners - the same reason EncounterInput does
+//    not carry the cooldown state.
+//
+//    WHY THIS BLOB AND NOT ConfigV2.reserved[152]: the day bucket is
+//    EXPLORATION state and it changes on the same events the rows below do, so
+//    it rides the cd_take_dirty() cadence that already exists instead of
+//    dirtying a 256 B config blob once a minute. ConfigV2's 152 B stays the
+//    tree's one large reserve.
+//
+//    WHAT IS AND IS NOT IN THESE FOUR BYTES. act_score is the whole persisted
+//    half: it is the day's TOTAL, already capped per term at the moment each
+//    increment was made, and it is what every reward is computed from. The four
+//    per-term counters and the distinct-network set are per-boot RAM in
+//    game/activity.cpp - see that header for what a power cycle can and cannot
+//    buy with them, stated rather than implied.
 // -----------------------------------------------------------------------------
 #define CD_MAGIC                0x4443u   // bytes 'C','D'
 #define CD_CRC_BYTES            270
@@ -305,7 +414,8 @@ struct CooldownTable {
   uint8_t     version;                   //   2  SAVE_SCHEMA_VERSION
   uint8_t     n;                         //   3  rows in use, <= COOLDOWN_SLOTS
   uint32_t    seq;                       //   4  pair sequence number
-  uint8_t     reserved_a[4];             //   8  must be 0
+  uint16_t    act_day;                   //   8  activity day index, 0 = none yet
+  uint16_t    act_score;                 //  10  that day's score, <= ACT_SCORE_MAX
   CooldownRow rows[COOLDOWN_SLOTS];      //  12
   uint8_t     reserved_b[2];             // 268  must be 0
   uint16_t    crc16;                     // 270  over bytes 0..269
@@ -313,6 +423,10 @@ struct CooldownTable {
 
 static_assert(sizeof(CooldownTable) == 272, "CooldownTable layout drifted");
 static_assert(offsetof(CooldownTable, seq)   ==   4, "CooldownTable.seq moved");
+static_assert(offsetof(CooldownTable, act_day)   ==  8,
+              "CooldownTable.act_day moved - it was carved out of reserved_a[4] "
+              "and every byte after it must stay where it was");
+static_assert(offsetof(CooldownTable, act_score) == 10, "CooldownTable.act_score moved");
 static_assert(offsetof(CooldownTable, rows)  ==  12, "CooldownTable.rows moved");
 static_assert(offsetof(CooldownTable, crc16) == 270, "CooldownTable.crc16 moved");
 static_assert(CD_CRC_BYTES == sizeof(CooldownTable) - 2, "CooldownTable CRC span drifted");
@@ -327,6 +441,13 @@ static_assert(CD_CRC_BYTES == sizeof(CooldownTable) - 2, "CooldownTable CRC span
 #define CS_CRC_BYTES            190
 #define CS_SPRITE_BYTES         72        // 24x24 XBM, 3 B per row
 #define CS_SPRITE_FRAMES        2
+// SPEC SECTION 35's "sprite dimensions", which had no name anywhere until
+// P8-C3 needed to SERVE them to the phone page. They are not new geometry: the
+// atlas has drawn 24x24 bodies since P2 and the byte count above was derived
+// from them in a comment. Naming them is what lets the assert below exist and
+// what lets data/creator_schema_json.h quote a number rather than a literal.
+#define CS_SPRITE_W             24
+#define CS_SPRITE_H             24
 #define CS_NAME_CAP             13
 #define CS_BASE_COUNT           4         // hp, atk, def, spd
 
@@ -334,9 +455,21 @@ struct CustomSpeciesRec {
   uint16_t magic;                                     //   0  CS_MAGIC
   uint8_t  version;                                   //   2  SAVE_SCHEMA_VERSION
   uint8_t  slot;                                      //   3  0..9, must match the key
-  uint16_t budget_used;                               //   4  spec section 36
+  uint16_t budget_used;                               //   4  spec section 36:
+                                                      //      THE ATTACK BUDGET,
+                                                      //      sum(budget_cost) over
+                                                      //      moves[]. Recomputed and
+                                                      //      REFUSED on disagreement
+                                                      //      by validate_custom_species()
+                                                      //      - a page that prices its
+                                                      //      own Pebble prices it at 0
   uint8_t  type;                                      //   6  PebbleType
-  uint8_t  compat_group;                              //   7  breeding, spec section 17
+  uint8_t  compat_group;                              //   7  breeding, spec section 17.
+                                                      //      ALWAYS 0 for a creator
+                                                      //      species: it has no family,
+                                                      //      so a pairing has no child
+                                                      //      species to derive. See
+                                                      //      game/species_custom.h
   uint8_t  base[CS_BASE_COUNT];                       //   8  hp, atk, def, spd
   uint8_t  moves[PB_MOVE_COUNT];                      //  12  learnset
   char     name[CS_NAME_CAP];                         //  16
@@ -345,6 +478,9 @@ struct CustomSpeciesRec {
   uint16_t crc16;                                     // 190  over bytes 0..189
 };
 
+static_assert(CS_SPRITE_BYTES == (((CS_SPRITE_W + 7) / 8) * CS_SPRITE_H),
+              "the sprite byte count and the sprite dimensions disagree: an XBM "
+              "row is ceil(w/8) bytes");
 static_assert(sizeof(CustomSpeciesRec) == 192, "CustomSpeciesRec layout drifted");
 static_assert(offsetof(CustomSpeciesRec, name)   ==  16, "CustomSpeciesRec.name moved");
 static_assert(offsetof(CustomSpeciesRec, sprite) ==  46, "CustomSpeciesRec.sprite moved");

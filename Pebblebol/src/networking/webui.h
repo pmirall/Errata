@@ -9,9 +9,19 @@
 //    top of exactly this shell (spec S38: bind only when needed, stop when
 //    inactive, minimal endpoints, validate everything).
 //
-//  ROUTE TABLE
+//  ROUTE TABLE - ALL SEVEN OF SPEC SECTION 38 SINCE P8-C3
 //    GET  /            index_html.h, served with the 4-arg send_P, no-cache
-//    *    anything else  captive-portal 302 to http://<ip>/, else 404
+//    POST /api/ping    the keep-alive. PIN-gated, and the ONLY thing that
+//                      extends the portal's life (P8-C2).
+//    GET  /api/schema  } the five creator routes, registered by
+//    GET  /api/state   } networking/creator_server.cpp, which also owns the
+//    POST /api/validate} raw-body cap every POST route stands on. Its header
+//    POST /api/pebble  } is where the hostile-input posture is written down.
+//    POST /api/time    }
+//    *    anything else  captive-portal 302 to http://<ip>/, else 404 - and
+//                      since P8-C3 it is a REGISTERED catch-all rather than
+//                      onNotFound(), because only a registered handler gets
+//                      the core's bounded raw path (creator_server.h says why).
 //
 //  LAYERING
 //    webui is integration-layer code: it may include WebServer.h, render.h,
@@ -21,8 +31,13 @@
 //    web_pin() for the QR screen without inheriting the WiFi stack.
 //
 //  OWNERSHIP
-//    - webui owns the web PIN. net_url(buf, cap, pin) (net.h) takes it as an
-//      argument, so the QR screen cannot be drawn until web_pin() exists.
+//    - webui owns the RUNTIME half of the creator PIN: it loads or mints it at
+//      web_portal_open() and holds the live CreatorGate. The RULES are
+//      networking/creator_gate.h's (pure, host-tested) and the PERSISTED half
+//      is persistence/game_state.h's (gs_creator_load / gs_creator_store).
+//      The PIN NO LONGER TRAVELS IN THE QR: net_url() emits "http://<ip>/" and
+//      the user types the four digits the device shows into an X-Pin header
+//      (spec section 39).
 //    - webui does NOT own the radio. It never calls WiFi.*, never starts the
 //      captive DNSServer (net.cpp owns that); it only answers the HTTP half of
 //      the captive-portal probe with a redirect.
@@ -43,21 +58,53 @@
 //  LIFECYCLE
 // -----------------------------------------------------------------------------
 
-// Registers every route, rolls the boot PIN (rng_below(RNG_MISC, WEB_PIN_MAX))
-// if it has not been rolled yet, calls server.enableDelay(false) (WebServer.h -
+// Registers every route, registers the request headers the PIN gate needs
+// (WebServer drops every header that was not asked for - see webui.cpp), calls
+// server.enableDelay(false) (WebServer.h -
 // without it handleClient() burns 1 ms of every idle loop()) and starts
 // listening on `port`. Idempotent: a second call on the same port is a no-op,
 // a call with a different port rebinds. Returns false only when FEATURE_WEB is
 // compiled out.
 //
-// The socket only opens once net_phase() is NPH_STA_UP or NPH_AP_PORTAL:
-// binding before lwIP exists aborts the firmware inside FreeRTOS.
+// The socket only opens once net_phase() is NPH_AP_PORTAL: binding before lwIP
+// exists aborts the firmware inside FreeRTOS, and since P5-C1 the access point
+// is the only WiFi phase that has an address at all.
 //
 // GATED ON CF_WEB_ENABLED when a Config is bound: with the flag clear the
 // routes are still registered (once, for the lifetime of the firmware) but no
 // socket is opened, and web_running() stays false. The port is remembered, so
 // web_service() opens it the moment the user turns the SETTINGS "WEB" toggle back on.
 bool     web_begin(uint16_t port = WEB_PORT);
+
+// -----------------------------------------------------------------------------
+//  THE PORTAL SESSION (P8-C2)
+//
+//  web_begin() is BOOT wiring; these three are the CREATOR screen's session.
+//  ui_creator_radio() calls open on the way in and close on the way out, and
+//  the screen polls idle_expired through CreatorInfo once a second.
+//
+//  web_portal_open()
+//    Loads ConfigV2's creator_pin / pin_fail_count / creator_idle_s and arms
+//    the gate. MINTS AND PERSISTS THE PIN ON FIRST CREATOR ENTRY, before the
+//    screen can display it, so a device that loses power between showing a PIN
+//    and being asked for it still knows the number on the user's phone.
+//    Idempotent: entering CREATOR again re-arms the idle timer and keeps the
+//    PIN, which is what makes a QR already scanned stay valid.
+//
+//  web_portal_close()
+//    Stops the listening socket and disarms the gate. It does NOT touch the
+//    radio: ui_creator_radio(false) owns that half, so there is exactly one
+//    teardown and leaving the screen and timing out run the same one.
+//
+//  web_portal_idle_expired()
+//    True once ConfigV2.creator_idle_s (D7, default 300) has passed with no
+//    AUTHORISED request. False whenever the portal is not open, and false in a
+//    FEATURE_WEB=0 build - where the screen's CREATOR_AP_WAIT_MS timeout is
+//    what gets the user back out, since no access point ever appears.
+// -----------------------------------------------------------------------------
+void     web_portal_open(void);
+void     web_portal_close(void);
+bool     web_portal_idle_expired(void);
 
 // Pump. Call once per loop(), unconditionally, right after net_service().
 // Never blocks: handleClient() returns immediately when no client is queued
@@ -78,12 +125,50 @@ bool     web_running(void);
 uint16_t web_port(void);
 
 // -----------------------------------------------------------------------------
-//  PIN  (boot PIN, cleartext on the wire, say so in the README)
-//    0000..9999. Nothing is PIN-gated yet because nothing mutates yet; spec S34
-//    requires the creator API of Phase 8 to be. The QR screen embeds it via
-//    net_url(buf, cap, web_pin()).
+//  PIN
+//    THE ISSUED PIN, 1..9999, or 0 FOR "NONE ISSUED YET" - the same encoding
+//    ConfigV2.creator_pin uses, and 0 is never minted so the sentinel is
+//    unambiguous. A PURE READ since P8-C1: it no longer rolls anything, because
+//    a getter that mints is a getter whose value depends on who asked first.
+//    web_portal_open() is the one mint site.
+//
+//    It is PERSISTED, so it is the same number across reboots until a factory
+//    reset - which is what lets the user keep a scanned QR and a written-down
+//    PIN. It is cleartext on the wire (this is an HTTP server on a soft AP);
+//    creator_gate.h says exactly what that is and is not worth.
 // -----------------------------------------------------------------------------
 uint16_t web_pin(void);
+
+// -----------------------------------------------------------------------------
+//  THE SEAM networking/creator_server.cpp USES, AND NOTHING ELSE MAY.
+//
+//  The shell stays here - the WebServer object, the token bucket, the render
+//  hint and the live CreatorGate - and the creator routes live one file over,
+//  so these six functions are how a route reaches the shell without a second
+//  copy of any of it. They are declared in webui.h rather than a private header
+//  because webui.h is already the file that promises to pull in NO network
+//  header: creator_server.cpp includes both, ui.cpp includes only this one.
+//
+//  web_rate_take()      one bucket for the whole server; the cost is the
+//                       caller's (WEB_COST_READ / WEB_COST_MUTATE).
+//  web_note_request()   the render hint. CALL IT AFTER THE RATE LIMIT: a
+//                       refused client must not be able to drop the renderer to
+//                       FPS_LOW, which is what it could do until P8-C3.
+//  web_pin_present()    was an X-Pin header sent at all? A route with a body
+//                       falls back to the body's "pin" when it was not.
+//  web_pin_ok()         verify the X-Pin header. Answers the client on refusal.
+//  web_pin_ok_u16()     verify a PIN that arrived some other way - today, a
+//                       JSON body field. SAME GATE, SAME COUNTER: it formats
+//                       the number and runs the one cg_verify() call, so there
+//                       is no second lockout to get out of step.
+//  web_send_throttled() 429 with an empty body.
+// -----------------------------------------------------------------------------
+bool web_rate_take(uint8_t cost_tokens);
+void web_note_request(void);
+bool web_pin_present(void);
+bool web_pin_ok(void);
+bool web_pin_ok_u16(uint16_t supplied);
+void web_send_throttled(void);
 
 // -----------------------------------------------------------------------------
 //  CONFIG BINDING

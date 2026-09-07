@@ -39,16 +39,18 @@ static int count_of(Gesture g) {
   return n;
 }
 
-TEST(input_tap_left_is_emitted_only_after_the_double_tap_window) {
+// THE LATENCY TEST (P3-C4a). A TAP must land at RELEASE, not a double-tap
+// window later. The old recogniser took DOUBLE_TAP_WINDOW_MS (280 ms) to
+// classify every single press in the product; the acceptance number is 30 ms,
+// which is one debounce interval (25 ms) plus a poll.
+TEST(input_tap_left_lands_within_30ms_of_release) {
   fresh();
   press(INPUT_BTN_L);
   run_ms(100);
-  CHECK_EQ(s_n, 0);                          // nothing on the press edge
+  CHECK_EQ(s_n, 0);                          // still nothing on the press edge
   release(INPUT_BTN_L);
-  run_ms(DOUBLE_TAP_WINDOW_MS - 10);
-  CHECK_EQ(s_n, 0);                          // still waiting for a second tap
-  run_ms(40);
-  CHECK_EQ(s_n, 1);
+  run_ms(30);
+  CHECK_EQ(s_n, 1);                          // ... and everything by 30 ms after
   CHECK_EQ(s_got[0], GST_TAP_L);
   run_ms(1000);
   CHECK_EQ(s_n, 1);                          // and nothing else, ever
@@ -73,15 +75,52 @@ TEST(input_two_taps_in_a_row_keep_their_order) {
   CHECK_EQ(s_got[1], GST_TAP_R);
 }
 
-TEST(input_double_tap_emits_dbl_only) {
+// There is no double tap any more (P3-C4a). Two quick presses of the same
+// button are simply two taps - which is the behaviour the six list screens
+// that used to own a "jump to first/last" shortcut now rely on, and the reason
+// a fast double press no longer swallows the first press.
+TEST(input_two_quick_presses_are_two_taps_not_one_shortcut) {
   fresh();
   press(INPUT_BTN_L);  run_ms(60);  release(INPUT_BTN_L);
-  run_ms(100);                               // inside DOUBLE_TAP_WINDOW_MS
+  run_ms(100);                               // what used to be "inside the window"
   press(INPUT_BTN_L);  run_ms(60);  release(INPUT_BTN_L);
   run_ms(800);
-  CHECK_EQ(s_n, 1);
-  CHECK_EQ(s_got[0], GST_DBL_L);
-  CHECK_EQ(count_of(GST_TAP_L), 0);
+  CHECK_EQ(s_n, 2);
+  CHECK_EQ(s_got[0], GST_TAP_L);
+  CHECK_EQ(s_got[1], GST_TAP_L);
+  CHECK_EQ(count_of(GST_TAP_L), 2);
+}
+
+// The press EDGE seam the minigames run on. It reports the physical press, is
+// consumed by the read, and is independent of the gesture queue.
+TEST(input_pressed_edge_reports_each_press_exactly_once) {
+  fresh();
+  CHECK(!input_pressed_edge(INPUT_BTN_L));   // nothing yet
+  press(INPUT_BTN_L);
+  run_ms(30);
+  CHECK(input_pressed_edge(INPUT_BTN_L));    // the press is visible...
+  CHECK(!input_pressed_edge(INPUT_BTN_L));   // ...exactly once
+  CHECK(!input_pressed_edge(INPUT_BTN_R));   // and never on the other button
+  release(INPUT_BTN_L);
+  run_ms(200);
+  CHECK(!input_pressed_edge(INPUT_BTN_L));   // a RELEASE is not a press edge
+  CHECK_EQ(count_of(GST_TAP_L), 1);          // the gesture still came out too
+
+  // It survives a press that the recogniser goes on to swallow: a chord is
+  // still two physical presses, and a game must see both.
+  fresh();
+  press(INPUT_BTN_L);  run_ms(10);  press(INPUT_BTN_R);  run_ms(30);
+  CHECK(input_pressed_edge(INPUT_BTN_L));
+  CHECK(input_pressed_edge(INPUT_BTN_R));
+
+  // input_flush() drops the ones in flight, so a game cannot inherit a press
+  // from before it started.
+  fresh();
+  press(INPUT_BTN_R);
+  run_ms(30);
+  input_flush();
+  CHECK(!input_pressed_edge(INPUT_BTN_R));
+  CHECK_EQ(input_pressed_edge(9), false);    // out of range
 }
 
 TEST(input_hold_left_fires_once_then_repeats) {

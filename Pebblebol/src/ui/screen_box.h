@@ -35,8 +35,12 @@ enum BoxAction : uint8_t {
   BOXA_ACTIVATE,
   BOXA_SWAP,
   BOXA_RELEASE,
-  BOXA_TRADE,        // stubbed until P7-C2
-  BOXA_BREED,        // stubbed until P7-C2
+  // Spec section 9's "initiate breeding; initiate trade". Since P7-C2 both rows
+  // PRE-SELECT this Pebble and open SCR_LINK with that intent (link_arm_intent);
+  // the protocols behind them are P7-C4 and P7-C5, and the LINK card is where
+  // that is said. Neither row consents to anything or touches the radio.
+  BOXA_TRADE,
+  BOXA_BREED,
   BOXA_BACK,
   BOXA_COUNT
 };

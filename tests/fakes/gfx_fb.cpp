@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "core/utf8.h"
 #include "ui/gfx.h"
 
 static uint8_t     s_fb[FB_H][FB_W];
@@ -35,11 +36,139 @@ static void oob(const char* what, int x, int y, int w, int h) {
 uint32_t    fb_oob(void)       { return s_oob; }
 const char* fb_oob_first(void) { return s_oob_msg; }
 
+// =============================================================================
+//  THE MALFORMED-TEXT RECORDER (P10-C4, spec section 65)
+//
+//  The out-of-bounds recorder answers "did a screen draw off the panel". This
+//  one answers the other half of the same question: "did a screen hand the font
+//  a string it cannot decode". They are the same KIND of instrument - a
+//  property every snapshot gets for free, rather than a check somebody has to
+//  remember to write at each of the eighty-odd text call sites.
+//
+//  IT IS HERE BECAUSE OF WHAT A NAME IS. A nickname, a device name and a peer
+//  name are all stored as raw LATIN-1 (core/utf8.h says where each comes from)
+//  and every draw goes through drawUTF8(). One 0xF1 byte reaching the panel is
+//  not a cosmetic problem: on the device u8g2's decoder opens a four-byte state
+//  and SWALLOWS the next character, so "Nino" with an n-tilde loses the "o" as
+//  well. And every list row in this UI is composed with snprintf("%s"), which
+//  cuts on a BYTE - so a long name in a bounded row can leave half a sequence
+//  behind even when every source string was well formed.
+//
+//  A screen may still draw a name the fonts have no glyph for; that is a
+//  content question. What it may not do is hand over a byte sequence that is
+//  not a sequence.
+// -----------------------------------------------------------------------------
+static uint32_t s_bad_utf8 = 0;
+static char     s_bad_utf8_msg[80];
+
+static void note_text(const char* s) {
+  if (s == nullptr || u8_well_formed(s)) return;
+  if (s_bad_utf8 == 0) {
+    size_t o = 0;
+    for (const unsigned char* p = (const unsigned char*)s;
+         *p != 0 && o + 5u < sizeof s_bad_utf8_msg; ++p) {
+      if (*p >= 0x20u && *p < 0x7Fu) s_bad_utf8_msg[o++] = (char)*p;
+      else o += (size_t)snprintf(s_bad_utf8_msg + o, sizeof s_bad_utf8_msg - o,
+                                 "<%02X>", (unsigned)*p);
+    }
+    s_bad_utf8_msg[o] = '\0';
+  }
+  s_bad_utf8++;
+}
+
+uint32_t    fb_bad_utf8(void)       { return s_bad_utf8; }
+const char* fb_bad_utf8_first(void) { return s_bad_utf8_msg; }
+
+// -----------------------------------------------------------------------------
+//  THE FONT REPERTOIRE RECORDER (P10-C6)
+//
+//  The sentence above - "a screen may still draw a name the fonts have no glyph
+//  for; that is a content question" - was where this class of defect lived. It
+//  is not only a content question when the FONT is the reason: GF_TINY is
+//  u8g2_font_4x6_tr, 95 glyphs, ASCII only (ui/render.h), and u8g2's
+//  drawUTF8() emits nothing AND ADVANCES NOTHING for a codepoint the face has
+//  no glyph for. The character does not become a box; it disappears and the
+//  rest of the line closes up.
+//
+//  This fake painted a synthetic glyph for EVERY codepoint at a fixed advance
+//  regardless of font, so five accented Spanish strings drawn in GF_TINY -
+//  three of them on the first-boot flow, the first screens a device ever shows
+//  - rendered correctly in every golden and on no board. The rule was written
+//  down twice in the tree (ui/gfx.h:37, ui/screen_creator.cpp:295) and enforced
+//  nowhere. It is a property of the SEAM now, like the malformed-text recorder
+//  above it, so it holds for a string nobody thought to list.
+//
+//  GF_BIG is the digits-only face; it is recorded on the same rule.
+// -----------------------------------------------------------------------------
+static uint32_t s_no_glyph = 0;
+static char     s_no_glyph_msg[80];
+
+static bool font_has(GfxFont f, uint32_t cp) {
+  switch (f) {
+    case GF_TINY: return cp >= 0x20u && cp < 0x7Fu;             // 4x6_tr
+    case GF_BIG:  return (cp >= (uint32_t)'0' && cp <= (uint32_t)'9')
+                      || cp == (uint32_t)':' || cp == (uint32_t)' ';  // _tn
+    default:      return cp < 0x100u;                            // the _tf faces
+  }
+}
+
+static void note_glyph(GfxFont f, uint32_t cp) {
+  if (font_has(f, cp)) return;
+  if (s_no_glyph == 0) {
+    static const char* kName[GF_COUNT] = { "GF_BODY", "GF_NARR", "GF_HEAD", "GF_TINY", "GF_BIG" };
+    snprintf(s_no_glyph_msg, sizeof s_no_glyph_msg,
+             "%s has no glyph for U+%04lX",
+             (f < GF_COUNT) ? kName[f] : "GF_?", (unsigned long)cp);
+  }
+  s_no_glyph++;
+}
+
+uint32_t    fb_no_glyph(void)       { return s_no_glyph; }
+const char* fb_no_glyph_first(void) { return s_no_glyph_msg; }
+
+// =============================================================================
+//  THE WORK COUNTERS (P10-C2)
+//
+//  READ THE LIMIT BEFORE READING THE NUMBER. THESE ARE NOT A FRAME TIME AND
+//  MAY NOT BE TURNED INTO ONE. On the device gfx_fill() writes into a RAM
+//  buffer and the frame's dominant cost is a FIXED ~24 ms of I2C in
+//  sendBuffer(), charged once however much was drawn (ui/render.cpp says so at
+//  the top of rd_end_frame()). So pixels-touched is a proxy for the SMALL half
+//  of a frame; a "frame <= 50 ms" gate built on it would be measuring the
+//  minor term and calling it performance, which is precisely the shape of
+//  defect this repository keeps finding.
+//
+//  WHAT THEY ARE FOR: a COMPOSITING RUNAWAY detector. A screen that fills the
+//  same region under three other layers, or loops over all sixty species in a
+//  render hook, blows the pixel count while the golden may not move at all -
+//  and a golden cannot report "identical picture, three times the work".
+//
+//  AND ONE MORE LIMIT, which is the load-bearing one. ui/petfx.cpp, ui/actfx.cpp
+//  and ui/ceremony.cpp include render.h and are compiled by NO host binary, so
+//  HOME's number here is a count of a composition that does not ship:
+//  home_render() draws the pet through s_body, which is home_body() (ui.cpp) on
+//  the device and NULL here, so the wandering automaton, the action films and
+//  the emotes are all absent. BATTLE, BOX, MENU and the list screens are pure
+//  gfx.h and host-linked, so their numbers are honest. tests/test_screens.cpp
+//  says which is which where it asserts the ceiling.
+// -----------------------------------------------------------------------------
+static uint32_t s_ops = 0;
+static uint32_t s_px  = 0;
+
+uint32_t fb_ops(void)    { return s_ops; }
+uint32_t fb_pixels(void) { return s_px; }
+
 void fb_reset(void) {
   memset(s_fb, 0, sizeof(s_fb));
   s_color      = GFX_DRAW;
   s_oob        = 0;
   s_oob_msg[0] = '\0';
+  s_ops        = 0;
+  s_px         = 0;
+  s_bad_utf8   = 0;
+  s_bad_utf8_msg[0] = '\0';
+  s_no_glyph   = 0;
+  s_no_glyph_msg[0] = '\0';
 }
 
 int fb_get(int x, int y) {
@@ -52,6 +181,7 @@ int fb_get(int x, int y) {
 // interesting unit, not "480 pixels off the edge".
 static void put(int x, int y) {
   if (x < 0 || y < 0 || x >= FB_W || y >= FB_H) return;
+  ++s_px;
   if      (s_color == GFX_ERASE) s_fb[y][x] = 0;
   else if (s_color == GFX_XOR)   s_fb[y][x] = (uint8_t)(s_fb[y][x] ? 0 : 1);
   else                           s_fb[y][x] = 1;
@@ -67,24 +197,28 @@ static bool inside(int x, int y, int w, int h) {
 void gfx_color(uint8_t c) { s_color = c; }
 
 void gfx_pixel(int16_t x, int16_t y) {
+  ++s_ops;
   if (!inside(x, y, 1, 1)) oob("pixel", x, y, 1, 1);
   put(x, y);
 }
 
 void gfx_hline(int16_t x, int16_t y, int16_t w) {
   if (w <= 0) return;
+  ++s_ops;
   if (!inside(x, y, w, 1)) oob("hline", x, y, w, 1);
   for (int16_t i = 0; i < w; i++) put(x + i, y);
 }
 
 void gfx_vline(int16_t x, int16_t y, int16_t h) {
   if (h <= 0) return;
+  ++s_ops;
   if (!inside(x, y, 1, h)) oob("vline", x, y, 1, h);
   for (int16_t i = 0; i < h; i++) put(x, y + i);
 }
 
 void gfx_rect(int16_t x, int16_t y, int16_t w, int16_t h) {
   if (w <= 0 || h <= 0) return;
+  ++s_ops;
   if (!inside(x, y, w, h)) oob("rect", x, y, w, h);
   for (int16_t i = 0; i < w; i++) { put(x + i, y); put(x + i, y + h - 1); }
   for (int16_t i = 0; i < h; i++) { put(x, y + i); put(x + w - 1, y + i); }
@@ -92,33 +226,87 @@ void gfx_rect(int16_t x, int16_t y, int16_t w, int16_t h) {
 
 void gfx_fill(int16_t x, int16_t y, int16_t w, int16_t h) {
   if (w <= 0 || h <= 0) return;
+  ++s_ops;
   if (!inside(x, y, w, h)) oob("fill", x, y, w, h);
   for (int16_t r = 0; r < h; r++)
     for (int16_t c = 0; c < w; c++) put(x + c, y + r);
 }
 
-void gfx_xbm(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t* bits) {
+// =============================================================================
+//  THE TWO BLITS, AND WHY THIS FILE USED TO BE WRONG ABOUT THE FIRST ONE
+//
+//  Until P10-C3 there was one gfx_xbm() here and it drew ONLY the 1-bits, while
+//  the device's drawXBM under render.cpp:368's setBitmapMode(0) paints the
+//  WHOLE w*h box - the 0-bits in the inverse of the draw colour. So the two
+//  backends disagreed about every blit in the firmware and no test in the tree
+//  could see it, because every call site at that commit happened to draw onto
+//  blank ground (where the inverse writes 0 over 0) or, in ui/dialog.cpp:130, in
+//  GFX_ERASE onto a solid slab (where the inverse writes 1 over 1). All 65
+//  goldens were correct BY LUCK OF COMPOSITION.
+//
+//  P10-C3 is the chunk that would have ended that luck silently: every film it
+//  adds draws a sprite on top of the body, the floor or a filled panel, and the
+//  first one to do so would have had the device erase a w*h hole that the
+//  golden did not show. So the fake tells the truth now and the seam is
+//  explicit. tests/test_screens.cpp drives both by name over prior ink.
+//
+//  THE INVERSE OF GFX_XOR IS GFX_XOR. No call site draws an opaque XBM in XOR
+//  mode - it is not a picture anybody wants - and u8g2's own behaviour there is
+//  undefined enough that guessing it here would be inventing a device fact.
+//  Stated rather than silently folded into `else`.
+// =============================================================================
+static uint8_t inverse_of(uint8_t c) {
+  if (c == GFX_DRAW)  return GFX_ERASE;
+  if (c == GFX_ERASE) return GFX_DRAW;
+  return GFX_XOR;
+}
+
+static void blit(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t* bits,
+                 bool opaque, const char* what) {
   if (bits == nullptr || w <= 0 || h <= 0) return;
-  if (!inside(x, y, w, h)) oob("xbm", x, y, w, h);
+  ++s_ops;
+  if (!inside(x, y, w, h)) oob(what, x, y, w, h);
+  const uint8_t keep = s_color;
+  const uint8_t inv  = inverse_of(keep);
   const int stride = (w + 7) / 8;
   for (int16_t r = 0; r < h; r++) {
     for (int16_t c = 0; c < w; c++) {
       const uint8_t byte = bits[r * stride + (c >> 3)];
-      if (byte & (uint8_t)(1u << (c & 7))) put(x + c, y + r);
+      if (byte & (uint8_t)(1u << (c & 7))) { s_color = keep; put(x + c, y + r); }
+      else if (opaque)                     { s_color = inv;  put(x + c, y + r); }
+    }
+  }
+  s_color = keep;
+}
+
+void gfx_xbm(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t* bits) {
+  blit(x, y, w, h, bits, true, "xbm");
+}
+
+void gfx_xbm_t(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t* bits) {
+  blit(x, y, w, h, bits, false, "xbm_t");
+}
+
+void gfx_dither_rect_phase(int16_t x, int16_t y, int16_t w, int16_t h,
+                           uint8_t level, uint8_t phase) {
+  if (level == 0 || w <= 0 || h <= 0) return;
+  ++s_ops;
+  if (!inside(x, y, w, h)) oob("dither", x, y, w, h);
+  // Same masking render.cpp does, and for the same reason: a genome nibble is
+  // passed in raw, so only the low 4 bits are meaningful.
+  const int dx = (int)(phase & 3u);
+  const int dy = (int)((phase >> 2) & 3u);
+  for (int16_t r = 0; r < h; r++) {
+    for (int16_t c = 0; c < w; c++) {
+      const int px = x + c, py = y + r;
+      if (px < 0 || py < 0) continue;
+      if (FB_BAYER[(((py + dy) & 3) * 4) + ((px + dx) & 3)] < level) put(px, py);
     }
   }
 }
 
 void gfx_dither_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t level) {
-  if (level == 0 || w <= 0 || h <= 0) return;
-  if (!inside(x, y, w, h)) oob("dither", x, y, w, h);
-  for (int16_t r = 0; r < h; r++) {
-    for (int16_t c = 0; c < w; c++) {
-      const int px = x + c, py = y + r;
-      if (px < 0 || py < 0) continue;
-      if (FB_BAYER[((py & 3) * 4) + (px & 3)] < level) put(px, py);
-    }
-  }
+  gfx_dither_rect_phase(x, y, w, h, level, 0u);
 }
 
 void gfx_invert_rect(int16_t x, int16_t y, int16_t w, int16_t h) {
@@ -131,13 +319,15 @@ void gfx_invert_rect(int16_t x, int16_t y, int16_t w, int16_t h) {
 // -----------------------------------------------------------------------------
 //  Text. UTF-8 in, one fixed-advance cell per codepoint out.
 // -----------------------------------------------------------------------------
-static uint8_t seq_len(uint8_t c) {
-  if (c < 0x80) return 1;
-  if ((c & 0xE0) == 0xC0) return 2;
-  if ((c & 0xF0) == 0xE0) return 3;
-  if ((c & 0xF8) == 0xF0) return 4;
-  return 1;                                   // malformed: step one byte
-}
+// THE SEQUENCE LENGTH IS core/utf8.cpp's NOW, AND THE MOVE IS A BUG FIX.
+// What was here read the LEAD BYTE ONLY: seq_len(0xF1) answered 4, count_cps()
+// did `p += 4`, and on the five-byte string "Ni\xF1o" that steps one byte PAST
+// the terminator. AddressSanitizer reported it as a heap-buffer-overflow, READ
+// of size 1, and 0xF1 is not a hypothetical byte - game/validate.cpp's
+// creator_name_char_ok() admits it as a legal nickname character because a
+// stored name is raw Latin-1 (core/utf8.h). ui/render.cpp carried the identical
+// step over a buffer the FIRMWARE owns. Both call u8_len() now, which does not
+// believe a lead byte until it has seen the continuation bytes.
 
 static uint32_t decode(const char* s, uint8_t len) {
   const uint8_t* p = (const uint8_t*)s;
@@ -152,18 +342,21 @@ static uint32_t decode(const char* s, uint8_t len) {
 
 static uint16_t count_cps(const char* s) {
   uint16_t n = 0;
-  for (const char* p = s; *p; p += seq_len((uint8_t)*p)) n++;
+  for (const char* p = s; *p; p += u8_len(p)) n++;
   return n;
 }
 
 uint16_t gfx_text_w(GfxFont f, const char* s) {
   if (s == nullptr || *s == '\0') return 0;
+  note_text(s);
   return (uint16_t)(count_cps(s) * gfx_font_adv(f));
 }
 
 // One glyph: the baseline row always, plus the rows the codepoint's bits pick
 // out. Deterministic, string-sensitive, and never wider than the advance.
 static void glyph(GfxFont f, int16_t x, int16_t y, uint32_t cp) {
+  ++s_ops;
+  note_glyph(f, cp);
   const int adv = gfx_font_adv(f);
   const int asc = gfx_font_asc(f);
   const int w   = adv - 1;
@@ -179,10 +372,11 @@ static void glyph(GfxFont f, int16_t x, int16_t y, uint32_t cp) {
 
 uint16_t gfx_text(GfxFont f, int16_t x, int16_t y, const char* s) {
   if (s == nullptr || *s == '\0') return 0;
+  note_text(s);
   const int adv = gfx_font_adv(f);
   int16_t cx = x;
   for (const char* p = s; *p; ) {
-    const uint8_t n = seq_len((uint8_t)*p);
+    const uint8_t n = u8_len(p);
     glyph(f, cx, y, decode(p, n));
     cx = (int16_t)(cx + adv);
     p += n;
@@ -209,7 +403,7 @@ static size_t fit_bytes(GfxFont f, const char* s, int16_t max_w) {
   int16_t w = 0;
   for (const char* p = s; *p; ) {
     if ((int16_t)(w + adv) > max_w) break;
-    const uint8_t n = seq_len((uint8_t)*p);
+    const uint8_t n = u8_len(p);
     w = (int16_t)(w + adv);
     used += n;
     p += n;
@@ -252,7 +446,7 @@ uint8_t gfx_text_wrap(GfxFont f, int16_t x, int16_t y, int16_t w,
     }
 
     const char* wstart = p;
-    while (*p != '\0' && *p != ' ' && *p != '\n') p += seq_len((uint8_t)*p);
+    while (*p != '\0' && *p != ' ' && *p != '\n') p += u8_len(p);
     const size_t wlen = (size_t)(p - wstart);
     if (wlen == 0) break;
 

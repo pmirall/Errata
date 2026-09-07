@@ -80,9 +80,30 @@ void status_a_render(void) {
   }
   {
     const int16_t x = 65, y = (int16_t)(UI_HDR_H + 1 + 3 * 11);
-    const SpriteRef r = sprite_mini(MIC_CLOCK);
+    // THE EIGHTH CELL IS THE AGE - UNLESS THE PEBBLE IS CORRUPTED (P10-C6).
+    //
+    // Spec section 55 makes corruption a 24 h state and the product had NO
+    // readout of it: one centred line at onset that a player can walk past, an
+    // intermittent shimmer on HOME (7 frames in 40 at the worst), and then
+    // nothing. Neither STATUS page showed the status, there is no AlertId for
+    // it, and cor_left_s() had no caller in src/ at all - the header said so
+    // itself ("the screens do not draw it yet"). A player whose creature
+    // suddenly starts glitching could not find out whether it still was, for
+    // how much longer, or that it wears off by itself.
+    //
+    // It replaces the age rather than taking a ninth cell because the grid has
+    // eight and the age is the one thing on this page that is still true on the
+    // page next door - and a 24 h state is worth more than a number that has
+    // not changed since yesterday. It goes back to the age when it expires.
+    const SpriteRef r = sprite_mini(v->corrupted ? MIC_ALERT : MIC_CLOCK);
     gfx_xbm(x, y, r.w, r.h, r.bits);
-    gfx_text_fit(GF_TINY, (int16_t)(x + 10), (int16_t)(y + 6), 51, v->age_txt);
+    if (v->corrupted) {
+      char c[24];
+      snprintf(c, sizeof c, "%s %uh", S(STR_ST_CORRUPT), (unsigned)v->corrupt_h);
+      gfx_text_fit(GF_BODY, (int16_t)(x + 10), (int16_t)(y + 6), 51, c);
+    } else {
+      gfx_text_fit(GF_TINY, (int16_t)(x + 10), (int16_t)(y + 6), 51, v->age_txt);
+    }
   }
 
   gfx_countdown(ui_idle_ms());
@@ -117,6 +138,15 @@ void status_b_render(void) {
   const Genome& g = v->genome;
   char line[48];
 
+  // THE GENOME'S WORD, ON PURPOSE, AND IT IS THE ONLY SCREEN THAT STILL USES IT
+  // (recorded in P4-C6). P4-C4a moved HOME and the BOX off S_SPECIES() onto the
+  // roster's Spanish names, because a species that evolves has to be able to
+  // say so. This page is the GENOME page: the badge and the word both describe
+  // the sixteen-value cosmetic nibble the creature was BORN with, which an
+  // evolution does not move. The consequence, stated rather than discovered: a
+  // Paketo and the Fragmar it becomes print the same word here, and that is the
+  // page working. pet_species_name() is what a screen showing the CREATURE
+  // wants; ui/screen_box.cpp uses it and falls back to this word.
   const SpriteRef badge = sprite_species_badge(gene_species(g));
   gfx_xbm(2, 13, badge.w, badge.h, badge.bits);
   gfx_text_fit(GF_NARR, 17, 20, 108, S_SPECIES(gene_species(g)));
@@ -165,7 +195,11 @@ void status_input(Gesture g) {
       s_hex_ms = 0;
       ui_goto(s_page ? SCR_STATUS : SCR_STATUS_B);
       break;
-    case GST_DBL_R: {
+    // The genome as hex. It lived on a double tap until P3-C4a took the double
+    // tap away; HOLD_R is where it belongs anyway - the router calls HOLD_R
+    // "B secondary", TAP_R is BACK and TAP_L flips the page, so this is the
+    // only gesture STATUS has left and the only one that means "secondary".
+    case GST_HOLD_R: {
       const PebbleView* v = ui_view();
       if (v && v->present) {
         genome_to_hex32(v->genome, s_hex);

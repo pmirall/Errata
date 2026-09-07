@@ -1,20 +1,44 @@
 // =============================================================================
-//  net.h - Nottamagochi radio state machine.
+//  net.h - Pebblebol radio state machine.
 //
 //  THE ONLY MODULE ALLOWED TO TOUCH RADIO LIFECYCLE.
-//  Nothing else in the firmware may call WiFi.mode(), WiFi.begin(),
-//  WiFi.softAP(), DNSServer::start(), BLEDevice::init() or
-//  BLEDevice::deinit(). Consumers ask for a RadioMode and poll the accessors.
+//  Nothing else in the firmware may call WiFi.mode(), the station association
+//  entry point, WiFi.softAP(), WiFi.scanNetworks() or DNSServer::start().
+//  Consumers ask for a RadioMode and poll the accessors.
 //
-//  INVARIANT (binding): exactly one radio stack is resident.
-//    RADIO_OFF  -> no WiFi, no Bluedroid. Simulation + OLED only.
-//    RADIO_WIFI -> WiFi STA (or the AP provisioning portal). Bluedroid down.
-//    RADIO_BLE  -> Bluedroid up. WiFi driver deinitialised (WIFI_MODE_NULL).
-//  Therefore net_is_sta_up() == true implies BLEDevice::getInitialized()
-//  == false: a consumer that has the station up needs no separate BLE check.
+//  THIS FIRMWARE NEVER JOINS A NETWORK (P5-C1, spec section 68 r5). The station
+//  path - credentials, association, retry backoff, link-loss re-association -
+//  was DELETED, not disabled: there is no call site left anywhere under src/,
+//  and tools/check.sh counts them and fails the build at anything but zero.
+//  That gate is a literal grep for the association call's name, which is why
+//  the sentence above spells the rule out instead of naming the function: a
+//  comment naming it would fail the gate that enforces it. What Wi-Fi is FOR is
+//  the passive scan (networking/wifi_scanner.h) and the creator's own access
+//  point, and neither one associates to anything.
+//
+//  WHAT THE GATE IS, EXACTLY (narrowed at the phase-5 exit): ONE grep for ONE
+//  spelling of ONE call. It catches the regression that actually happens - the
+//  line comes back - and it is not a proof that nothing can associate. Two ways
+//  past it were tried on this tree: spaces around the dot compile and pass, and
+//  the IDF entry point is not declared in this translation unit at all (no WiFi
+//  library header pulls in esp_wifi.h), so reaching it needs a deliberate second
+//  act - adding that include to a file no gate forbids it in. What makes the rule
+//  STRUCTURAL is the deletion itself: there are no credentials to associate with,
+//  no NPH_STA_* phase to enter and no retry state to re-enter it from. The gate
+//  guards the deletion; it does not replace it.
+//
+//  THERE IS ONE RADIO STACK (P8-C0). The invariant used to be "exactly one is
+//  resident" and it was a real constraint: Bluedroid and the Wi-Fi driver could
+//  not both be up, so every transition between them cost a RADIO_SETTLE_MS
+//  window in NPH_SETTLING. BLE is deleted, so what is left is:
+//    RADIO_OFF  -> nothing resident. Simulation + OLED only.
+//    RADIO_WIFI -> Wi-Fi up as a scanner, as the peer link, or as the AP.
+//  A Wi-Fi to Wi-Fi transition never settled even when BLE was here, which is
+//  why NPH_SETTLING and its timer went with it rather than being kept "just in
+//  case": a phase nothing can enter is a phase nobody maintains.
 //
 //  This header deliberately pulls in NO network headers (no WiFi.h, no
-//  BLEDevice.h, no WebServer.h) so ui/render/qr may include it without
+//  WebServer.h) so ui/render/qr may include it without
 //  breaking the layering rule. The IP is exposed as a dotted-quad string.
 //
 //  All user-facing text is Spanish and lives in strings_es.h; every
@@ -26,7 +50,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "../core/nt_types.h"     // -> config.h  (RadioMode, SSID_MAX_LEN, BLE_SESSION_CAP)
+#include "../core/nt_types.h"     // -> config.h  (RadioMode, SSID_MAX_LEN)
 
 // NOT #include "strings_es.h". The only thing this header needs from the string
 // table is the TYPE of net_last_err_str()'s return value, and every consumer of
@@ -41,12 +65,11 @@ enum StrId : uint16_t;
 // -----------------------------------------------------------------------------
 enum NetPhase : uint8_t {
   NPH_OFF = 0,          // RADIO_OFF, nothing resident
-  NPH_STA_CONNECTING,   // WiFi.begin() issued, waiting for association
-  NPH_STA_UP,           // WL_CONNECTED, IP valid
-  NPH_STA_RETRY_WAIT,   // backoff between association attempts
-  NPH_AP_PORTAL,        // softAP + captive DNS up (provisioning fallback)
-  NPH_BLE_UP,           // Bluedroid initialised
-  NPH_SETTLING,         // one stack torn down, waiting RADIO_SETTLE_MS for the other
+  NPH_SCANNING,         // WIFI_STA enabled for a passive scan. NEVER associated.
+  NPH_AP_PORTAL,        // softAP + captive DNS up (the creator's own network)
+  NPH_LINK,             // WIFI_STA on PB_LINK_CHANNEL with ESP-NOW up. NEVER
+                        // associated either: ESP-NOW's whole "association" is
+                        // its peer table and its channel (P7-C1, decision D2).
   NPH_COUNT
 };
 
@@ -56,15 +79,13 @@ enum NetPhase : uint8_t {
 enum NetErr : uint8_t {
   NERR_NONE = 0,
   NERR_BAD_ARG,           // mode out of range
-  NERR_BUSY,              // the other stack refused to go down
+  NERR_BUSY,              // reserved: nothing can refuse to go down any more
   NERR_WIFI_DISABLED,     // built with no WiFi consumer enabled
-  NERR_BLE_DISABLED,      // built with FEATURE_BLE == 0
-  NERR_BLE_SESSION_CAP,   // BLE_SESSION_CAP init/deinit cycles used this boot
-  NERR_BLE_INIT_FAILED,   // BLEDevice::init() did not take
-  NERR_NO_CREDENTIALS,    // no SSID -> went straight to the AP portal
-  NERR_STA_TIMEOUT,       // association timed out WIFI_MAX_FAILS times
+  NERR_SCAN_FAILED,       // the driver refused to start a scan
   NERR_AP_FAILED,         // softAP() returned false
   NERR_DNS_FAILED,        // captive DNSServer::start() returned false
+  NERR_ESPNOW_DISABLED,   // built with FEATURE_ESPNOW == 0
+  NERR_ESPNOW_FAILED,     // the ESP-NOW bring-up or its broadcast peer did not take
   NERR_COUNT
 };
 
@@ -95,30 +116,30 @@ void        net_begin(void);
 // The stack that is resident right now.
 RadioMode   net_mode(void);
 
-// Ask for a stack. Tears the other one down first (BLE: stop advertising,
-// stop scan, clearResults, deinit(false); WiFi: DNS stop, softAP
-// down, WIFI_MODE_NULL). Returns false and sets net_last_err() when the
-// request cannot be honoured (BLE session cap, feature disabled, ...).
+// Ask for the stack. RADIO_OFF tears Wi-Fi down (DNS stop, softAP down,
+// WIFI_MODE_NULL). Returns false and sets net_last_err() when the request
+// cannot be honoured (feature disabled, the driver refused, ...).
 //
-// NEVER BLOCKS, so the bring-up may be DEFERRED. When the other stack had to
-// be torn down first, the driver needs RADIO_SETTLE_MS to itself: the phase
-// becomes NPH_SETTLING, the request returns true, and net_service() finishes
-// the bring-up when the timer expires. A caller that needs the stack resident
-// (SOCIAL before ble_begin(), god mode's GBS_RADIO) must therefore POLL
-// net_mode() rather than assume the call was enough. RADIO_WIFI has always
-// only *started* associating - poll net_is_sta_up() / net_phase().
+// NEVER BLOCKS. It no longer DEFERS either: the deferral existed to give the
+// other stack RADIO_SETTLE_MS to itself, and there is no other stack (P8-C0).
+// POLLING net_mode() REMAINS THE CONTRACT ANYWAY - a bring-up can still fail
+// inside the driver, and a caller that assumes the call was enough is wrong for
+// that reason rather than for the timer's.
 // RADIO_OFF is the exception: it is always immediate and always succeeds.
+//
+// RADIO_WIFI brings up the AP PORTAL. The scan is a different intent on the
+// same stack and has its own entry point below, so a screen cannot get one by
+// asking for the other.
 bool        net_request(RadioMode want);
 
 // Pump. Call once per loop(). Never blocks: drives the settle timer, the
 // association timeout, the retry backoff and the AP provisioning fallback.
 void        net_service(void);
 
-// Dotted-quad of the active interface, "0.0.0.0" when down. Never NULL.
+// Dotted-quad of the access point, "0.0.0.0" when down. Never NULL.
+// NOT station-only and therefore NOT part of the P5-C1 deletion: the creator
+// portal is what serves this address (net_ap_ssid(), webui.cpp).
 const char *net_ip(void);
-
-// True only in STA mode with WL_CONNECTED and a routable IP.
-bool        net_is_sta_up(void);
 
 // -----------------------------------------------------------------------------
 // Extended interface
@@ -128,35 +149,117 @@ bool        net_is_ap_up(void);          // provisioning portal is serving
 NetErr      net_last_err(void);
 StrId       net_last_err_str(void);      // Spanish line for the UI
 
-// "NOTTAMAGOCHI-XXXX", derived from the STA MAC. Never NULL.
+// "PEBBLEBOL-XXXX", derived from the STA MAC. Never NULL. (The prefix was
+// "NOTTAMAGOCHI-" until P8-C2 closed decision D3's last open piece.)
 const char *net_ap_ssid(void);
 
-// Builds "http://<ip>/?k=NNNN" for the QR screen.
+// Builds "http://<ip>/" for the QR screen.
 // Returns the number of characters written, 0 if it did not fit or no IP.
-size_t      net_url(char *out, size_t cap, uint16_t pin);
+//
+// THE PIN CAME OUT OF THIS STRING IN P8-C1 AND THE ARGUMENT WENT WITH IT. The
+// old form was "http://<ip>/?k=NNNN", which put the authorisation secret into a
+// symbol anyone can photograph from across a room, into the phone's URL bar,
+// into its history and into any Referer the page later sends. Spec section 39
+// is explicit: "Do not put secrets into the QR beyond what is necessary. The
+// PIN remains the user-facing authorization layer" - a PIN that travels in the
+// QR is not a layer. It is typed by the user from the device screen into an
+// X-Pin header instead (networking/creator_gate.h).
+size_t      net_url(char *out, size_t cap);
+
+// -----------------------------------------------------------------------------
+// net_request_portal() - THE CREATOR SCREEN'S OWN BRING-UP (P8-C2).
+//
+// net_request(RADIO_WIFI) is not enough and the reason is worth writing down:
+// its body answers `already on the WiFi track` for ANY non-OFF phase, so a
+// caller that asks for the portal while a scan or a peer link still holds the
+// radio is told `true` and never gets an access point. This entry point names
+// the intent instead - AP ONLY, no scan, no link, and there has never been a
+// station to ask for - and it takes the radio back from a Wi-Fi phase that is
+// not the portal rather than reporting success it did not deliver.
+//
+// Refuses (NERR_BUSY) while a scan or link INTENT is set, because those jobs
+// own their own teardown and stealing the radio from underneath one would
+// leave a driver waiting for a result that can no longer arrive.
+// -----------------------------------------------------------------------------
+bool        net_request_portal(void);
 
 // Last heap census, and a way to force one (ble calls this around its
 // allocations so the debug screen shows the real peak).
 const NetHeapStats &net_heap_last(void);
 void        net_heap_log(const char *tag);
 
-// BLEDevice::deinit(false)/init() leaks ~672 B per cycle -> hard cap.
-uint8_t     net_ble_sessions_used(void);
-uint8_t     net_ble_sessions_left(void);
+// -----------------------------------------------------------------------------
+// THE SCANNER'S RADIO (P5-C1, spec sections 20, 40, 44).
+//
+// net_scan_driver() hands back the WifiScanDriver that networking/
+// wifi_scanner.h drives: start a passive asynchronous scan, poll it, read the
+// results as ScanResult rows, and put the radio back to OFF. It is the ONLY
+// route from the game to WiFi.scanNetworks(), and the only place a beacon's
+// name or hardware address is ever touched - both die inside the read loop,
+// which hands out a salted hash and an abstract category (spec 44).
+//
+// net_scan_salt_set(device_id) must be called once, from the entry point, with
+// gs_device_id(): the hash is salted per device so the same access point reads
+// differently on two units and identically across reboots on one. Without it
+// the salt is 0, which is a usable hash but not a private one.
+// -----------------------------------------------------------------------------
+struct WifiScanDriver;
+const WifiScanDriver &net_scan_driver(void);
+void        net_scan_salt_set(uint32_t device_id);
 
-// Runtime credentials (from Config in NVS). Pass NULL/"" to clear. Applied on
-// the next STA bring-up; if called while WiFi is up with a different SSID the
-// station is restarted.
-void        net_set_credentials(const char *ssid, const char *pass);
-bool        net_has_credentials(void);
+// -----------------------------------------------------------------------------
+// THE PEER LINK'S RADIO (P7-C1, decision D2 = ESP-NOW; spec sections 42, 43).
+//
+// net_link_driver() hands back the LinkRadioDriver that networking/discovery.h
+// drives: bring WIFI_STA up on PB_LINK_CHANNEL with ESP-NOW resident, put one
+// broadcast beacon on the air, drain what came back, and put the radio back to
+// OFF. It is a THIRD INTENT ON THE SAME WI-FI STACK, exactly like the scan and
+// the creator portal, which is why RadioMode does not gain a value.
+//
+// IT STILL NEVER ASSOCIATES. WiFi.mode(WIFI_STA) is the whole residency ESP-NOW
+// needs - nothing in esp_now.h mentions credentials, an access point, an IP or
+// a netif - so the P5-C1 deletion above is untouched and the gate that counts
+// association call sites still reads zero.
+// -----------------------------------------------------------------------------
+struct LinkRadioDriver;
+const LinkRadioDriver &net_link_driver(void);
 
-// 0 when not associated.
-int8_t      net_rssi(void);
+// -----------------------------------------------------------------------------
+// THE SESSION'S SIDE OF THE SAME LINK (P7-C2/C3).
+//
+// net_link_transport() is the networking/transport.h seam the section 15
+// session runs over, unicast to whichever peer net_link_bind() opened. A
+// REFERENCE and not a value because a device has one radio; the port object
+// behind it is this module's, exactly as the scan driver's state is.
+//
+// THE SLOT IS AN OPAQUE INDEX AND NOT AN ADDRESS. It is a DiscPeer::slot handed
+// out by the discovery job, and the six bytes it stands for never leave
+// networking/transport_espnow.cpp (spec sections 43/44). A caller that has not
+// bound gets a transport that refuses to send and never receives, which is
+// exactly what "consent is not implied by proximity" needs from the radio.
+// -----------------------------------------------------------------------------
+struct Transport;
+const Transport &net_link_transport(void);
+bool        net_link_bind(uint8_t slot);
+void        net_link_unbind(void);
 
 // Compile-time sanity on the constants this module contracts against.
-static_assert(RADIO_COUNT == 3, "RadioMode must stay OFF/WIFI/BLE");
-static_assert(NPH_COUNT == 7, "NetPhase gained or lost a phase");
-static_assert(BLE_SESSION_CAP > 0 && BLE_SESSION_CAP <= 255, "BLE_SESSION_CAP must fit uint8_t");
-static_assert(SSID_MAX_LEN == 32 && PASS_MAX_LEN == 64, "WiFi credential caps drifted");
+// Was 3 (OFF/WIFI/BLE) until P8-C0 deleted RADIO_BLE. BOTH ASSERTIONS ARE
+// RESTATED RATHER THAN DELETED EVERY TIME THEIR SUBJECT MOVES, which is the
+// third time for one and the fourth for the other: their job is to make a mode
+// or a phase appearing or vanishing a DELIBERATE act, and that job outlives any
+// particular count.
+static_assert(RADIO_COUNT == 2, "RadioMode must stay OFF/WIFI");
+// Was 7 before P5-C1 deleted the station path, 5 after it, 6 when P7-C1 added
+// NPH_LINK - the peer link is a PHASE of the Wi-Fi stack, not a second
+// RadioMode, which is why that change moved this line and not the one above -
+// and 4 now that NPH_BLE_UP and NPH_SETTLING have gone with BLE.
+static_assert(NPH_COUNT == 4, "NetPhase gained or lost a phase");
+// Was `SSID_MAX_LEN == 32 && PASS_MAX_LEN == 64, "WiFi credential caps"`. There
+// are no credentials any more, so that assertion lost its subject; what these
+// two constants still size is this module's ACCESS POINT name buffer and the
+// frozen Config padding (core/nt_types.h). Restated in those terms, not
+// dropped, so the file still pins what it depends on.
+static_assert(SSID_MAX_LEN >= 15, "s_ap_ssid must hold AP_SSID_PREFIX + 4 hex digits");
 
 #endif  // NT_NET_H

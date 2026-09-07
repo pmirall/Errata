@@ -10,6 +10,7 @@
 #include "kv_store.h"
 #include "migration.h"
 #include "../core/crc16.h"
+#include "../game/species_custom.h"   // the creator species registry (P8-C3)
 
 // The widest blob in the schema; every scratch buffer here is one of these.
 #define SAVE_BLOB_MAX  sizeof(CooldownTable)
@@ -75,9 +76,18 @@ const char* key_ck_pebble(uint8_t slot, char* out) {
 // One description per blob, so the pair machinery below needs no templates and
 // no per-type duplication: magic, where the version and the seq live, and how
 // many bytes the CRC covers.
+//
+// min_version IS P10-C5's FIELD AND IT IS THE ONE THAT MAKES A BUMP SURVIVABLE.
+// Before it, every read here was `stored == o.version` and nothing else, so the
+// moment core/version.h said 3 a v2 save became two BAD copies - LOAD_CORRUPT,
+// SAVE ERROR, on every played device, on the first flash. See core/version.h.
+// It is the OLDEST version this firmware will read straight into the live
+// struct; anything older needs a real transform under a different key, which is
+// what v1 has.
 struct BlobOps {
   uint16_t magic;
   uint8_t  version;      // the value this firmware writes
+  uint8_t  min_version;  // the oldest it will read IN PLACE (core/version.h)
   size_t   size;
   size_t   ver_off;
   size_t   seq_off;      // SIZE_MAX for the single-key blobs, which carry none
@@ -85,24 +95,36 @@ struct BlobOps {
 
 #define NO_SEQ ((size_t)-1)
 
-static const BlobOps OPS_PEBBLE = { PEBBLE_MAGIC, PEBBLE_LAYOUT_VER, sizeof(PebbleInstance),
+// THE PEBBLE IS ON ITS OWN VERSION AXIS and must not be folded into the
+// schema's. PebbleInstance.layout_ver is PEBBLE_LAYOUT_VER, which has not
+// moved since the format was written; BoxHeader.schema_version and the rest
+// carry SAVE_SCHEMA_VERSION. A loader that averaged the two would report a v3
+// save as v1 on the strength of a Pebble that is exactly what it should be.
+static const BlobOps OPS_PEBBLE = { PEBBLE_MAGIC, PEBBLE_LAYOUT_VER, PEBBLE_LAYOUT_VER,
+                                    sizeof(PebbleInstance),
                                     offsetof(PebbleInstance, layout_ver),
                                     offsetof(PebbleInstance, seq) };
-static const BlobOps OPS_BOX    = { BOX_MAGIC, SAVE_SCHEMA_VERSION, sizeof(BoxHeader),
+static const BlobOps OPS_BOX    = { BOX_MAGIC, SAVE_SCHEMA_VERSION, SAVE_SCHEMA_INPLACE_MIN,
+                                    sizeof(BoxHeader),
                                     offsetof(BoxHeader, schema_version),
                                     offsetof(BoxHeader, seq) };
-static const BlobOps OPS_CFG    = { CFGV2_MAGIC, SAVE_SCHEMA_VERSION, sizeof(ConfigV2),
+static const BlobOps OPS_CFG    = { CFGV2_MAGIC, SAVE_SCHEMA_VERSION, SAVE_SCHEMA_INPLACE_MIN,
+                                    sizeof(ConfigV2),
                                     offsetof(ConfigV2, version),
                                     offsetof(ConfigV2, seq) };
-static const BlobOps OPS_INV    = { INV_MAGIC, SAVE_SCHEMA_VERSION, sizeof(Inventory),
+static const BlobOps OPS_INV    = { INV_MAGIC, SAVE_SCHEMA_VERSION, SAVE_SCHEMA_INPLACE_MIN,
+                                    sizeof(Inventory),
                                     offsetof(Inventory, version),
                                     offsetof(Inventory, seq) };
-static const BlobOps OPS_CD     = { CD_MAGIC, SAVE_SCHEMA_VERSION, sizeof(CooldownTable),
+static const BlobOps OPS_CD     = { CD_MAGIC, SAVE_SCHEMA_VERSION, SAVE_SCHEMA_INPLACE_MIN,
+                                    sizeof(CooldownTable),
                                     offsetof(CooldownTable, version),
                                     offsetof(CooldownTable, seq) };
-static const BlobOps OPS_CS     = { CS_MAGIC, SAVE_SCHEMA_VERSION, sizeof(CustomSpeciesRec),
+static const BlobOps OPS_CS     = { CS_MAGIC, SAVE_SCHEMA_VERSION, SAVE_SCHEMA_INPLACE_MIN,
+                                    sizeof(CustomSpeciesRec),
                                     offsetof(CustomSpeciesRec, version), NO_SEQ };
-static const BlobOps OPS_TRADE  = { TR_MAGIC, SAVE_SCHEMA_VERSION, sizeof(PendingTrade),
+static const BlobOps OPS_TRADE  = { TR_MAGIC, SAVE_SCHEMA_VERSION, SAVE_SCHEMA_INPLACE_MIN,
+                                    sizeof(PendingTrade),
                                     offsetof(PendingTrade, version), NO_SEQ };
 
 static uint16_t u16_at(const void* p, size_t off) {
@@ -123,6 +145,22 @@ static bool blob_intact(const void* blob, const BlobOps& o) {
 static bool blob_ok(const void* blob, const BlobOps& o) {
   if (!blob_intact(blob, o)) return false;
   return ((const uint8_t*)blob)[o.ver_off] == o.version;
+}
+
+// FOUR ANSWERS, NOT TWO, and the third one is the whole of P10-C5's item 1.
+// BC_OLD is a blob this firmware can read as it stands and must then re-seal;
+// BC_FOREIGN is intact data from a newer firmware, which is refused and never
+// touched; BC_BAD covers damage AND a version too old to reinterpret, because
+// reading a moved field out of an old layout is worse than saying "corrupt".
+enum BlobClass : uint8_t { BC_BAD = 0, BC_CURRENT, BC_OLD, BC_FOREIGN };
+
+static BlobClass blob_class(const void* blob, const BlobOps& o) {
+  if (!blob_intact(blob, o)) return BC_BAD;
+  const uint8_t v = ((const uint8_t*)blob)[o.ver_off];
+  if (v == o.version)      return BC_CURRENT;
+  if (v >  o.version)      return BC_FOREIGN;
+  if (v >= o.min_version)  return BC_OLD;
+  return BC_BAD;
 }
 
 static void blob_seal(void* blob, const BlobOps& o) {
@@ -241,8 +279,20 @@ struct PairStat {
   uint8_t  good;         // copies that passed magic + CRC + version
   uint8_t  bad;          // copies that exist but did not pass
   uint8_t  foreign;      // copies that are intact but from a newer schema
+  // COPIES THAT COULD NOT BE ASKED ABOUT AT ALL, because the partition is not
+  // open. Not `present` and not `bad`: with the store shut both copies answer
+  // KV_CLOSED, and counting that as damage put a board with no usable "nvs" on
+  // the corrupt-save screen offering to wipe an undamaged save. See
+  // persistence/kv_store.h's KV_CLOSED.
+  uint8_t  closed;
   uint8_t  best_copy;    // 0/1, valid when good > 0
   uint32_t best_seq;
+  // THE VERSION OF THE COPY THAT WON, and it is deliberately not the minimum
+  // over both copies. The boot after an upgrade has one copy at the new version
+  // (freshly written, higher seq) and one still at the old one, which is
+  // exactly what the pair is for; a minimum would see the stale copy and
+  // migrate again on every boot for ever.
+  uint8_t  best_ver;
 };
 
 // Reads both copies of 'prefix' and leaves the best one in 'out'.
@@ -250,6 +300,7 @@ static void pair_load(KvPart part, const char* prefix, const BlobOps& o,
                       void* out, PairStat& st) {
   memset(&st, 0, sizeof st);
   st.best_copy = 0xFF;
+  st.best_ver  = o.version;      // never drags a caller's "oldest" down when good == 0
 
   uint8_t tmp[SAVE_BLOB_MAX];
   for (uint8_t copy = 0; copy < 2; ++copy) {
@@ -257,18 +308,29 @@ static void pair_load(KvPart part, const char* prefix, const BlobOps& o,
     key_pair(prefix, copy, key);
     const int n = kv_get(part, key, tmp, o.size);
     if (n == 0) continue;                       // absent: not a fault
+    // NOR IS A CLOSED STORE. With the partition shut every key answers
+    // KV_CLOSED, so counting it as present-and-bad made a board with no usable
+    // "nvs" report TWO CORRUPT COPIES of the Box - LOAD_CORRUPT, a read-only
+    // session, and the ERROR screen offering to wipe a save that was never
+    // damaged, before the checkpoint branch below was even reached. A store
+    // that is not there is evidence about the store, not about this key.
+    if (n == KV_CLOSED) { st.closed++; continue; }
     st.present++;
     if (n != (int)o.size) { st.bad++; continue; }
-    if (!blob_intact(tmp, o)) { st.bad++; continue; }
-    // A HIGHER version is intact data this firmware does not understand; a
-    // lower one is a migration's job, not this primitive's.
-    if (tmp[o.ver_off] > o.version) { st.foreign++; continue; }
-    if (tmp[o.ver_off] != o.version) { st.bad++; continue; }
+    // A HIGHER version is intact data this firmware does not understand; one
+    // within [min_version, version) is READABLE AS IT STANDS and the caller
+    // re-seals it (P10-C5); anything below that is damage as far as this
+    // primitive is concerned, because reinterpreting a layout that moved is
+    // worse than refusing it.
+    const BlobClass bc = blob_class(tmp, o);
+    if (bc == BC_FOREIGN) { st.foreign++; continue; }
+    if (bc == BC_BAD)     { st.bad++;     continue; }
 
     const uint32_t seq = (o.seq_off == NO_SEQ) ? 0u : u32_at(tmp, o.seq_off);
     if (st.good == 0 || seq > st.best_seq) {
       st.best_seq  = seq;
       st.best_copy = copy;
+      st.best_ver  = tmp[o.ver_off];
       memcpy(out, tmp, o.size);
     }
     st.good++;
@@ -282,11 +344,24 @@ static bool pair_write(KvPart part, const char* prefix, const BlobOps& o, void* 
   bool     valid[2] = { false, false };
   uint32_t seq[2]   = { 0u, 0u };
 
+  // THE WRITER MUST ACCEPT EXACTLY WHAT THE READER ACCEPTS, and P10-C5 is where
+  // that stopped being free. This loop used blob_ok() - current version only -
+  // so on the upgrade boot BOTH copies looked unusable: the seq restarted at 1
+  // while the untouched copy kept its old and much higher one, and pair_load()
+  // takes the highest seq. The copy the migration had just written was
+  // therefore the copy the next boot would NOT read; it read the old one and
+  // migrated the whole save a second time. NOT DATA LOSS - the migration is a
+  // no-op, so both copies hold the same fields, and it converges on the third
+  // boot - but "upgraded" has to mean upgraded, and a seq counter that silently
+  // restarts at 1 beside a copy holding 99 has broken the one invariant the
+  // pair has. Pinned by the_upgrade_converges_on_one_boot_instead_of_migrating
+  // _for_ever, which fails "2 != 0" with this loop reverted.
   for (uint8_t copy = 0; copy < 2; ++copy) {
     char key[KV_KEY_CAP];
     key_pair(prefix, copy, key);
     if (kv_get(part, key, tmp, o.size) != (int)o.size) continue;
-    if (!blob_ok(tmp, o)) continue;
+    const BlobClass bc = blob_class(tmp, o);
+    if (bc != BC_CURRENT && bc != BC_OLD) continue;
     valid[copy] = true;
     seq[copy]   = (o.seq_off == NO_SEQ) ? 0u : u32_at(tmp, o.seq_off);
   }
@@ -294,6 +369,14 @@ static bool pair_write(KvPart part, const char* prefix, const BlobOps& o, void* 
   // Target: an unusable copy first, otherwise the older one. On a tie copy 1 is
   // the target, because pair_load() picks copy 0 when the seqs are equal - the
   // copy a reader would choose is never the copy a writer touches.
+  //
+  // THERE IS NO SEPARATE "PREFER THE DOWNLEVEL COPY" RULE and the first draft
+  // had one. It could not be made to fail: once the loop above counts a
+  // downlevel copy as valid, `best` includes its seq, so the upgraded copy is
+  // always written with the HIGHEST seq - and the comparison here therefore
+  // already targets the copy still at the old version, on every pair, every
+  // time. A branch no mutation can kill is a branch that is not doing anything;
+  // the reason it is unreachable belongs in this comment, not in the code.
   uint8_t target;
   if (!valid[0])      target = 0;
   else if (!valid[1]) target = 1;
@@ -327,10 +410,16 @@ static bool single_write(KvPart part, const char* key, const BlobOps& o, void* b
   return memcmp(tmp, blob, o.size) == 0;
 }
 
-static bool single_load(KvPart part, const char* key, const BlobOps& o, void* out) {
+// 'found_ver', when given, receives the version byte the blob was stored with -
+// which may be older than this firmware's. The caller re-seals; this primitive
+// never edits what it read.
+static bool single_load(KvPart part, const char* key, const BlobOps& o, void* out,
+                        uint8_t* found_ver = nullptr) {
   uint8_t tmp[SAVE_BLOB_MAX];
   if (kv_get(part, key, tmp, o.size) != (int)o.size) return false;
-  if (!blob_ok(tmp, o)) return false;
+  const BlobClass bc = blob_class(tmp, o);
+  if (bc != BC_CURRENT && bc != BC_OLD) return false;
+  if (found_ver) *found_ver = tmp[o.ver_off];
   memcpy(out, tmp, o.size);
   return true;
 }
@@ -360,6 +449,29 @@ bool save_pebble(uint8_t slot, const PebbleInstance& p, bool force) {
   prefix[0] = 'p'; prefix[1] = 'b'; prefix[2] = (char)('0' + slot); prefix[3] = '\0';
   if (!pair_write(KV_MAIN, prefix, OPS_PEBBLE, &blob)) return false;
 
+  s_last_write_ms[slot] = now_ms();
+  s_have_written[slot]  = true;
+  s_pending_mask &= (uint16_t)~(1u << slot);
+  s_landed = true;
+  return true;
+}
+
+// No filter, no deferral, no third answer. See save_manager.h for why the trade
+// cannot use save_pebble() and why force=true was not widened to mean this.
+bool save_pebble_now(uint8_t slot, const PebbleInstance& p) {
+  s_landed = false;
+  if (slot >= BOX_SLOTS) return false;
+
+  PebbleInstance blob = p;
+  char prefix[KV_KEY_CAP];
+  prefix[0] = 'p'; prefix[1] = 'b'; prefix[2] = (char)('0' + slot); prefix[3] = '\0';
+  if (!pair_write(KV_MAIN, prefix, OPS_PEBBLE, &blob)) return false;
+
+  // The throttle's bookkeeping is updated exactly as save_pebble() updates it.
+  // Clearing the pending bit COSTS ONE FEWER FLASH WRITE and nothing more: a
+  // deferred flush that did fire would write s_state->pebbles[slot], which is
+  // the same RAM this call just persisted, so the claim here is wear and not
+  // correctness. Said plainly because the wider claim was tempting and false.
   s_last_write_ms[slot] = now_ms();
   s_have_written[slot]  = true;
   s_pending_mask &= (uint16_t)~(1u << slot);
@@ -418,11 +530,11 @@ bool save_custom_species(const CustomSpeciesRec& c) {
   return single_write(KV_MAIN, key, OPS_CS, &blob);
 }
 
-bool save_load_custom_species(uint8_t slot, CustomSpeciesRec& out) {
+bool save_load_custom_species(uint8_t slot, CustomSpeciesRec& out, uint8_t* found_ver) {
   if (slot >= CUSTOM_SPECIES_SLOTS) return false;
   char key[KV_KEY_CAP];
   key_custom(slot, key);
-  if (!single_load(KV_MAIN, key, OPS_CS, &out)) return false;
+  if (!single_load(KV_MAIN, key, OPS_CS, &out, found_ver)) return false;
   return out.slot == slot;      // a record filed under the wrong key is not ours
 }
 
@@ -479,9 +591,16 @@ bool save_checkpoint_service(uint32_t now_epoch, bool force) {
 }
 
 // Fills 'gs' from the checkpoint. False when there is no usable checkpoint.
-static bool checkpoint_load(GameState& gs) {
+// 'found_ver' receives the oldest SCHEMA version among the records that served,
+// so a checkpoint written by an older firmware is upgraded by the caller rather
+// than committed back at a version it never carried. The per-Pebble records are
+// deliberately not folded in: they carry PEBBLE_LAYOUT_VER, a different axis.
+static bool checkpoint_load(GameState& gs, uint8_t& found_ver) {
+  found_ver = (uint8_t)SAVE_SCHEMA_VERSION;
   BoxHeader box;
-  if (!single_load(KV_CKPT, KEY_CK_BOX, OPS_BOX, &box)) return false;
+  uint8_t v = (uint8_t)SAVE_SCHEMA_VERSION;
+  if (!single_load(KV_CKPT, KEY_CK_BOX, OPS_BOX, &box, &v)) return false;
+  if (v < found_ver) found_ver = v;
 
   gs.box = box;
   uint16_t mask = 0;
@@ -504,7 +623,36 @@ static bool checkpoint_load(GameState& gs) {
   box_seal(gs.box);
 
   ConfigV2 cfg;
-  if (single_load(KV_CKPT, KEY_CK_CFG, OPS_CFG, &cfg)) gs.cfg = cfg;
+  v = (uint8_t)SAVE_SCHEMA_VERSION;
+  if (single_load(KV_CKPT, KEY_CK_CFG, OPS_CFG, &cfg, &v)) {
+    gs.cfg = cfg;
+    if (v < found_ver) found_ver = v;
+  }
+  return true;
+}
+
+// The one place an older-but-readable save is carried forward. It runs the
+// migration chain (persistence/migration.cpp's step table - a v3 firmware
+// reading a v2 save runs step_v2_to_v3, which changes no field and re-seals
+// every blob at the new version) and then writes the whole state back.
+//
+// IT IS DELIBERATELY NOT "STAMP THE VERSION BYTE AND CARRY ON". The point of
+// spec section 31 is that the machinery is exercised: if the next bump has real
+// work to do, the row it adds to MIGRATE_STEPS[] is already on this path, and
+// the static_assert in migration.cpp fails the BUILD if that row is missing.
+static bool upgrade_in_place(GameState& gs, uint8_t found) {
+  if (found >= (uint8_t)SAVE_SCHEMA_VERSION) return true;
+  if (migrate_run(found, gs) != MIGRATE_OK) return false;
+  // THE FLAG IS ABOUT THE SAVE, NOT ABOUT WHICH DOOR READ IT. A checkpoint
+  // restored across a schema bump was migrated as surely as a Box pair was, and
+  // it is also the only thing on the checkpoint path that OBSERVES this call:
+  // checkpoint_load() re-seals the Box on its way out and commit_all() seals
+  // the config into the caller's struct, so with today's NO-OP transform the
+  // version bytes come out right whether this ran or not. That is exactly why
+  // the call has to be here and has to be visible - the next bump will not be a
+  // no-op, and a path that silently skipped the transform would commit a state
+  // that had never been through it.
+  s_migrated = true;
   return true;
 }
 
@@ -567,6 +715,20 @@ static bool commit_all(GameState& gs) {
   ok = save_config(gs.cfg) && ok;
   ok = save_inventory(gs.inv) && ok;
   ok = save_cooldowns(gs.cds) && ok;
+  // THE TRADE JOURNAL, AND IT WAS MISSING (found by P7-C4's survey, fixed here).
+  // This function rewrites a whole state that flash does not hold - after a
+  // migration and after "Recuperar" on the SAVE ERROR screen - and it wrote
+  // five of the six blobs. save_restore_checkpoint() calls state_defaults(),
+  // which sets tmp.trade to IDLE in RAM, so before this line RAM said IDLE and
+  // FLASH still held the old "tr" record: the next boot read the flash copy and
+  // resolved a trade against a Box restored from a checkpoint that predates it.
+  // The v1 migration branch had the same hole from the other direction.
+  //
+  // IT WRITES A SEALED IDLE RECORD RATHER THAN kv_erase()ing THE KEY, on
+  // purpose: an absent key and a rotted key look identical to single_load()
+  // (both fail), and what the resolver wants to know is "there is nothing
+  // pending", which only a record can say.
+  ok = save_trade_journal(gs.trade) && ok;
   return ok;
 }
 
@@ -575,7 +737,10 @@ bool save_restore_checkpoint(GameState& gs) {
   // task's stack. Nothing here re-enters.
   static GameState tmp;
   state_defaults(tmp);
-  if (!checkpoint_load(tmp)) return false;      // nothing written, nothing lost
+  uint8_t found = (uint8_t)SAVE_SCHEMA_VERSION;
+  s_migrated = false;                               // this restore's verdict, not the boot's
+  if (!checkpoint_load(tmp, found)) return false;   // nothing written, nothing lost
+  if (!upgrade_in_place(tmp, found)) return false;  // ... and still nothing lost
   gs = tmp;
   save_bind(gs);
   s_pending_mask = 0;
@@ -583,7 +748,87 @@ bool save_restore_checkpoint(GameState& gs) {
   return commit_all(gs);
 }
 
-LoadResult save_load_all(GameState& gs) {
+// -----------------------------------------------------------------------------
+//  THE SAVE PATH IS THE SHARED VALIDATOR'S SECOND LIVE CALL SITE (spec 15).
+//
+//  IT QUARANTINES. It does not refuse the Box and it does not repair one byte.
+//  Refusing would brick a device on a content-pack change, because
+//  VR_UNKNOWN_SPECIES is exactly what an older save legitimately produces; and
+//  repairing is the failure spec 15's first sentence is written against, so
+//  game/validate.h takes its Pebble CONST and this file could not repair even
+//  if it wanted to. A quarantined Pebble is loaded, drawn and reported with its
+//  named VReject, and P7 must keep it out of a battle and out of a trade.
+//
+//  It runs on EVERY load outcome, after migration and after a checkpoint
+//  restore, because those two paths build Pebbles too. On LOAD_CORRUPT and
+//  LOAD_FOREIGN_NEWER the Box is still at its defaults and every slot is empty,
+//  so the scan is a no-op rather than a special case.
+// -----------------------------------------------------------------------------
+static uint16_t s_quarantine_mask = 0;
+static uint8_t  s_quarantine_why[BOX_SLOTS] = { 0 };
+
+static void quarantine_scan(const GameState& gs) {
+  s_quarantine_mask = 0;
+  for (uint8_t slot = 0; slot < BOX_SLOTS; ++slot) {
+    s_quarantine_why[slot] = (uint8_t)VR_OK;
+    if (pebble_is_empty(gs.pebbles[slot])) continue;
+    const VReject r = validate_pebble(gs.pebbles[slot]);
+    if (r != VR_OK) {
+      s_quarantine_mask     |= (uint16_t)(1u << slot);
+      s_quarantine_why[slot] = (uint8_t)r;
+    }
+  }
+}
+
+uint16_t save_quarantine_mask(void) { return s_quarantine_mask; }
+
+VReject save_quarantine_reason(uint8_t slot) {
+  if (slot >= (uint8_t)BOX_SLOTS) return VR_OK;
+  return (VReject)s_quarantine_why[slot];
+}
+
+// -----------------------------------------------------------------------------
+//  THE CREATOR SPECIES REGISTRY, REBUILT ON EVERY LOAD (P8-C3).
+//
+//  IT MUST RUN BEFORE quarantine_scan(), and that ordering is the whole point
+//  of the function. A creator Pebble carries species_id 200..209, which
+//  species_get() resolves through game/species_custom.cpp - so a scan that ran
+//  first would answer VR_UNKNOWN_SPECIES for every custom Pebble in the Box and
+//  quarantine the user's own creature on the first power cycle after it was
+//  made. That defect was already waiting in the tree before this chunk: the
+//  resolver simply did not exist.
+//
+//  A RECORD THAT DOES NOT VALIDATE LEAVES ITS SLOT EMPTY, which is deliberate
+//  and is why csp_install() returns a bool nobody has to check here. The
+//  consequence is stated rather than hidden: the Pebble that pointed at that
+//  slot is then quarantined by NAME (VR_UNKNOWN_SPECIES) instead of being
+//  resolved to a species whose stats survived a CRC and nothing else.
+//  save_manager.h's own policy line - "a custom species is content, not state,
+//  and a bad CRC costs a sprite rather than a Pebble" - is about the CRC half;
+//  this is the rules half, and a species with a 400-point stat total is not a
+//  sprite problem.
+// -----------------------------------------------------------------------------
+static void custom_species_install_all(void) {
+  csp_reset();                      // also binds the resolver into species_get()
+  for (uint8_t slot = 0; slot < (uint8_t)CUSTOM_SPECIES_SLOTS; ++slot) {
+    CustomSpeciesRec rec;
+    uint8_t ver = (uint8_t)SAVE_SCHEMA_VERSION;
+    if (!save_load_custom_species(slot, rec, &ver)) continue;  // absent or rotten
+    // THE REGISTRY IS NOT PART OF GameState, so the migration chain above cannot
+    // reach it and its upgrade is here. It is not optional: game/validate.cpp's
+    // validate_custom_species() refuses `c.version != SAVE_SCHEMA_VERSION` by
+    // name (VR_CS_BAD_HEADER), so without this a schema bump would delete every
+    // creature the owner made in the creator portal and quarantine the Pebbles
+    // that point at them - VR_UNKNOWN_SPECIES, on the first boot after a flash.
+    if (ver != (uint8_t)SAVE_SCHEMA_VERSION) {
+      custom_species_seal(rec);            // the no-op transform, one record at a time
+      (void)save_custom_species(rec);      // ... written back, so it happens once
+    }
+    (void)csp_install(rec);                                 // refused -> stays empty
+  }
+}
+
+static LoadResult load_all_inner(GameState& gs) {
   state_defaults(gs);
   save_bind(gs);
   s_migrated      = false;
@@ -592,6 +837,10 @@ LoadResult save_load_all(GameState& gs) {
   for (uint8_t slot = 0; slot < BOX_SLOTS; ++slot) s_have_written[slot] = false;
 
   if (scan_foreign()) return LOAD_FOREIGN_NEWER;
+
+  // THE SAVE'S GENERATION, taken from the copies that actually won. Only the
+  // blobs that carry SAVE_SCHEMA_VERSION feed it (see OPS_PEBBLE's note).
+  uint8_t found = (uint8_t)SAVE_SCHEMA_VERSION;
 
   BoxHeader box;
   PairStat  bst;
@@ -612,7 +861,13 @@ LoadResult save_load_all(GameState& gs) {
       s_migrated = true;
       return LOAD_MIGRATED;
     }
-    if (checkpoint_load(gs)) {
+    uint8_t ck_ver = (uint8_t)SAVE_SCHEMA_VERSION;
+    if (checkpoint_load(gs, ck_ver)) {
+      // A checkpoint written by an older firmware is upgraded before it is
+      // committed, for the same reason the main path does it: commit_all()
+      // seals at THIS version, so without the step the bytes would say v3 while
+      // the state in RAM still carried v2's version fields.
+      if (!upgrade_in_place(gs, ck_ver)) return LOAD_CORRUPT;
       commit_all(gs);
       return LOAD_RECOVERED_CKPT;
     }
@@ -621,6 +876,7 @@ LoadResult save_load_all(GameState& gs) {
 
   // --- the Box is readable --------------------------------------------------
   gs.box = box;
+  if (bst.best_ver < found) found = bst.best_ver;
   uint8_t repaired = bst.bad;                    // one copy served for the other
 
   uint16_t truth_mask = 0;
@@ -660,27 +916,46 @@ LoadResult save_load_all(GameState& gs) {
   // --- the rest of the blobs: absent means defaults, never an error ---------
   ConfigV2 cfg; PairStat cst;
   pair_load(KV_MAIN, KEY_CFG_PREFIX, OPS_CFG, &cfg, cst);
-  if (cst.good > 0) gs.cfg = cfg;
+  if (cst.good > 0) { gs.cfg = cfg; if (cst.best_ver < found) found = cst.best_ver; }
   repaired += cst.bad;
 
   Inventory inv; PairStat ist;
   pair_load(KV_MAIN, KEY_INV_PREFIX, OPS_INV, &inv, ist);
-  if (ist.good > 0) gs.inv = inv;
+  if (ist.good > 0) { gs.inv = inv; if (ist.best_ver < found) found = ist.best_ver; }
   repaired += ist.bad;
 
   CooldownTable cds; PairStat dst;
   pair_load(KV_MAIN, KEY_CD_PREFIX, OPS_CD, &cds, dst);
-  if (dst.good > 0) gs.cds = cds;
+  if (dst.good > 0) { gs.cds = cds; if (dst.best_ver < found) found = dst.best_ver; }
   repaired += dst.bad;
 
   PendingTrade tr;
-  if (single_load(KV_MAIN, KEY_TRADE, OPS_TRADE, &tr)) gs.trade = tr;
+  uint8_t tr_ver = (uint8_t)SAVE_SCHEMA_VERSION;
+  if (single_load(KV_MAIN, KEY_TRADE, OPS_TRADE, &tr, &tr_ver)) {
+    gs.trade = tr;
+    if (tr_ver < found) found = tr_ver;
+  }
 
   uint64_t seen = 0;
   if (kv_get(KV_MAIN, KEY_LASTSEEN, &seen, sizeof seen) == (int)sizeof seen) {
     if ((uint32_t)seen > s_lastseen) s_lastseen = (uint32_t)seen;
   }
   if (gs.box.saved_epoch > s_lastseen) s_lastseen = gs.box.saved_epoch;
+
+  // --- an older schema, read whole: carry it forward and re-seal it ---------
+  // This comes BEFORE the repair block on purpose: commit_all() rewrites every
+  // blob, so it subsumes the repair writes, and "the save was upgraded" is the
+  // more informative of the two answers for the screen that reports it
+  // (ui/screen_error.cpp maps LOAD_MIGRATED to STR_SAVE_UPDATED, not an error).
+  if (found < (uint8_t)SAVE_SCHEMA_VERSION) {
+    box_seal(gs.box);                       // slot_mask/active_slot may have healed
+    if (!upgrade_in_place(gs, found)) return LOAD_CORRUPT;
+    // Unchecked exactly as the v1 branch above leaves it: the state in RAM is
+    // complete and correct, and a write that did not land is reported by the
+    // save policy, not by turning a good load into a corrupt one.
+    commit_all(gs);
+    return LOAD_MIGRATED;                   // s_migrated is upgrade_in_place()'s
+  }
 
   // Repairs are written only now, once the outcome is known to be recoverable.
   if (repaired || mask_healed || active_healed) {
@@ -702,12 +977,28 @@ LoadResult save_load_all(GameState& gs) {
   return LOAD_OK;
 }
 
+// The whole pipeline of plan 1.5.4, with runtime validation as its last stage.
+// The scan runs on every outcome so no return path can forget it.
+LoadResult save_load_all(GameState& gs) {
+  const LoadResult r = load_all_inner(gs);
+  // ORDER IS LOAD -> RESOLVE -> SCAN, and the middle step is P8-C3's. See
+  // custom_species_install_all(): a scan that runs first quarantines every
+  // creator Pebble the device made.
+  custom_species_install_all();
+  quarantine_scan(gs);
+  return r;
+}
+
 // =============================================================================
 //  PART 7 - factory reset
 // =============================================================================
 bool save_factory_reset(void) {
   const bool a = kv_wipe(KV_MAIN);
   const bool b = kv_wipe(KV_CKPT);
+  // The cs* records went with the partition, so the registry must go with them:
+  // an id that still resolved after a reset would hand the fresh save a species
+  // whose record no longer exists.
+  csp_reset();
   for (uint8_t slot = 0; slot < BOX_SLOTS; ++slot) s_have_written[slot] = false;
   s_pending_mask  = 0;
   s_lastseen      = 0;
@@ -715,5 +1006,21 @@ bool save_factory_reset(void) {
   s_migrated      = false;
   s_ckpt_epoch    = 0;
   s_ckpt_known    = true;      // the partition was just wiped: nothing to read
-  return a && b;
+
+  // THE MAIN STORE IS THE RESET THAT MATTERS, and this used to be `a && b`.
+  // kv_wipe(KV_CKPT) returns false when the checkpoint partition never opened,
+  // and hardware/kv_nvs.h says in its own words that an absent "nvs2" is "not
+  // fatal ... it loses D6's recovery, nothing else". But a reset is not a
+  // checkpoint write, so on a board flashed without the sketch's partitions.csv
+  // - which README section 4 warns is exactly what the Arduino IDE board menu
+  // produces - a completely successful reset of KV_MAIN returned FALSE, and god
+  // mode's wipe confirms with `toast(ok ? STR_GOD_DONE : STR_ERR_NVS)`. The
+  // owner saw "No consigo recordar nada." after a reset that worked, on bench
+  // item 36, which reads as a broken reset or dying flash and is neither.
+  //
+  // The checkpoint half is still reported - it is in kv_healthy(KV_CKPT) and in
+  // kv_error()'s KV_E_OPEN_CKPT bit, both on the DIAG line - so nothing is
+  // hidden; it is just not allowed to fail the reset it was not part of.
+  (void)b;   // reported through kv_healthy(KV_CKPT) / kv_error(), not through here
+  return a;
 }

@@ -14,16 +14,16 @@
 //    * ZERO floating point anywhere in this file
 // =============================================================================
 #include "sim.h"
+#include "daylight.h"
 #include "genome.h"
 #include "../core/rng.h"
 #include "../core/strings_es.h"
+#include "../data/balance.h"   // every care rate, gain, cooldown and cap
 
 #include <string.h>
 
-// Sub-step grid. Every cadence in the design (60 s stage check, 600 s sickness
-// roll, 600 s care-quality tick) is a multiple of this, so the event grid is
-// identical whether the caller ticks 1 s at a time or hands us 1800 s at once.
-#define SIM_SUBSTEP_S            60u
+// SIM_SUBSTEP_S, the sub-step grid, is declared in sim.h: the chunk-size
+// equivalence it buys is a contract tests state, not a private detail.
 
 // Auto-wake thresholds (see the note on "collapse" in sleep_machine()).
 #define SIM_WAKE_DAY_ENERGY_PCT  60
@@ -126,7 +126,15 @@ struct CareCtx {
   uint32_t acc_sick;
   uint32_t acc_minute;
   uint32_t poop_timer;
+  // Sub-second remainder of poop_timer, in thousandths of a second. The
+  // advance is fractional while the pebble sleeps (x0.35), so it is carried
+  // rather than truncated - see poop_step().
+  uint16_t poop_rem;
   int32_t  hapavg_rem;
+  // How long at least one CORE stat has been pinned at zero. Health bleeds
+  // only past CARE_ZERO_GRACE_S of this (spec section 27); it is RAM-only, so
+  // a reboot forgives the dwell, which is the player-favouring direction.
+  uint32_t zero_dwell_s;
 
   // --- PER-PEBBLE: alerts ---------------------------------------------------
   uint8_t  alert;
@@ -143,6 +151,18 @@ struct CareCtx {
   uint8_t  pet_n;
   uint32_t mg_last_s;
   uint8_t  mg_seen;
+
+  // --- PER-PEBBLE: the sleep window (P3-C2b) --------------------------------
+  // hold_s is when the player was last busy with this creature: bedtime waits
+  // SLEEP_RELAPSE_S past it, and so does the relapse after a nudge woke the
+  // pet in the middle of the night. hold_seen is 0 until the player does
+  // ANYTHING, so a boot at 03:00 shows a sleeping pebble at once instead of
+  // holding it awake for five minutes.
+  uint32_t hold_s;
+  uint8_t  hold_seen;
+  // The nudge counter: nudge_n gestures refused since nudge_t0_s.
+  uint32_t nudge_t0_s;
+  uint8_t  nudge_n;
 
   // --- PER-PEBBLE: the v1 mechanics SaveSchema v2 does not carry ------------
   int32_t  bond;                    // ST_BOND, milli-points
@@ -217,11 +237,12 @@ static inline void stat_rem_set(uint8_t id, int16_t v)
 static void status_sync(void)
 {
   if (!g.pb) return;
-  uint8_t st = (uint8_t)(g.pb->status &
-                         (uint8_t)~(PBS_SICK | PBS_ASLEEP | PBS_LIGHT_ON));
+  // PBS_RESERVED_LIGHT (bit 0x10) is deliberately absent from both the clear
+  // mask and the set: P3-C2b retired it, so whatever an older save carries
+  // there is left exactly as it was and nothing new is ever written into it.
+  uint8_t st = (uint8_t)(g.pb->status & (uint8_t)~(PBS_SICK | PBS_ASLEEP));
   if (g.view.flags & PF_SICK)     st |= (uint8_t)PBS_SICK;
   if (g.view.flags & PF_ASLEEP)   st |= (uint8_t)PBS_ASLEEP;
-  if (g.view.flags & PF_LIGHT_ON) st |= (uint8_t)PBS_LIGHT_ON;
   g.pb->status = st;
   if (g.view.flags & PF_GOD_TAINTED) g.pb->flags |= (uint8_t)PBF_GOD_TAINTED;
 }
@@ -246,7 +267,7 @@ static inline uint32_t rnd(void)
 }
 
 // Modulo on purpose: the legacy sim reduced its draws this way, and the care
-// golden (tests/golden/sim_v1.txt) pins that exact sequence of outcomes.
+// golden (tests/golden/care_v2.txt) pins that exact sequence of outcomes.
 static inline uint32_t rnd_below(uint32_t n)
 {
   return (n == 0u) ? 0u : (rnd() % n);
@@ -301,12 +322,20 @@ static uint16_t today_stamp(void)
 }
 
 // =============================================================================
-// 3. STAGE / PAYOUT TABLES
+// 3. PAYOUT TABLES
+//    There is no stage multiplier table any more (P3-C1): decay depends on the
+//    species and the genome, never on the creature's age.
+//
+//    CARE_DECAY_MPH is indexed by CareId, so pin that order here - balance.h is
+//    a plain data header and cannot see the enum.
 // =============================================================================
-static const uint16_t STAGE_MULT[STAGE_COUNT] = {
-  STAGE_MULT_EGG, STAGE_MULT_BABY, STAGE_MULT_CHILD, STAGE_MULT_TEEN,
-  STAGE_MULT_ADULT, STAGE_MULT_SENIOR
-};
+static_assert((int)CARE_HUNGER      == 0 &&
+              (int)CARE_HAPPINESS   == 1 &&
+              (int)CARE_HEALTH      == 2 &&
+              (int)CARE_CLEANLINESS == 3 &&
+              (int)CARE_ENERGY      == 4 &&
+              (int)CARE_COUNT       == PB_BALANCE_CARE_COUNT,
+              "CARE_DECAY_MPH is indexed by CareId and the order moved");
 
 static const uint16_t PLAY_DECAY[PLAY_DECAY_STEPS] = {
   PLAY_DECAY_0, PLAY_DECAY_1, PLAY_DECAY_2, PLAY_DECAY_3,
@@ -376,8 +405,7 @@ static uint16_t cd_for(uint8_t action)
     case ACT_CLEAN:        return ACT_CD_CLEAN_S;
     case ACT_MEDICINE:     return ACT_CD_MED_S;
     case ACT_PLAY:         return ACT_CD_PLAY_S;
-    case ACT_SLEEP_TOGGLE:
-    case ACT_LIGHT_TOGGLE: return ACT_CD_SLEEP_S;
+    case ACT_SLEEP_TOGGLE: return ACT_CD_SLEEP_S;
     default:               return 0;
   }
 }
@@ -429,21 +457,29 @@ void sim_gain_snapshot(uint8_t out_pts[ST_COUNT])
 uint8_t sim_gain_restore(const uint8_t* pts, uint8_t n,
                          uint32_t saved_epoch, uint32_t now_epoch)
 {
-  // No snapshot, or no trustworthy clock at either end of the interval: there is
-  // no elapsed time to reconstruct from. Seed 0 - the pre-PH4 behaviour, which
-  // is merely unkind - rather than `cap`, which would be the exploit.
+  // THE ELAPSED TERM IS GONE (P7-C6). It read `saved_epoch` and `now_epoch`,
+  // BOTH of which are wall clocks a player types on the time screen, and one
+  // hour of "elapsed" refilled the whole cap - so (clock +1 h, reboot) x100
+  // from a fully SPENT ledger manufactured 4,000 happiness gain points against
+  // a cap of 40 an hour, in zero real seconds. This is the same hole
+  // xp_ledger_restore() lost at P6-C4 and it is closed the same way: the
+  // restore hands back exactly the bytes of the last snapshot, and every point
+  // past that has to be refilled by gain_refill() out of seconds this device
+  // watched pass (boot_absence()'s catch-up is where they come from).
+  //
+  // THE HONEST COST, WHICH IS REAL AND IS PAID BY EVERY HONEST PLAYER: off-time
+  // no longer refills the hourly budget. A player who leaves the device off for
+  // an hour comes back to whatever the ledger held when it was switched off,
+  // and cannot feed a full meal for up to 29 minutes - which is the exact
+  // complaint app/app.cpp says this restore was added to fix. It is paid
+  // knowingly: an unkind hour is recoverable and a farmable stat budget is not.
+  //
+  // Both epochs still have to be real dates. They no longer buy anything, but
+  // they are what says the blob came from a device that knew what time it was,
+  // and without that the safe seed is ZERO rather than the snapshot.
   const uint8_t trust = (pts != 0 && n != 0 &&
                          saved_epoch >= (uint32_t)NT_EPOCH_SANE_MIN &&
                          now_epoch   >= (uint32_t)NT_EPOCH_SANE_MIN) ? 1u : 0u;
-
-  uint32_t elapsed = 0;
-  if (trust && now_epoch > saved_epoch) {
-    elapsed = now_epoch - saved_epoch;
-  }
-  // One hour refills the whole cap, so clamping here loses nothing and is what
-  // keeps the multiply below inside int32 for an elapsed of years (or of a clock
-  // that jumped): cap <= 90000 milli, elapsed <= 3600 => 324e6 < 2^31.
-  if (elapsed > (uint32_t)SEC_PER_HOUR) elapsed = (uint32_t)SEC_PER_HOUR;
 
   for (uint8_t i = 0; i < ST_COUNT; ++i) {
     int32_t cap = gain_cap_milli(i);
@@ -451,11 +487,9 @@ uint8_t sim_gain_restore(const uint8_t* pts, uint8_t n,
 
     int32_t v = 0;
     if (trust) {
-      int32_t saved = (i < n) ? ((int32_t)pts[i] * 1000) : 0;
-      if (saved > cap) saved = cap;                 // a foreign/edited blob cannot exceed the cap
-      if (saved < 0)   saved = 0;
-      v = saved + (int32_t)((cap * (int32_t)elapsed) / (int32_t)SEC_PER_HOUR);
-      if (v > cap) v = cap;
+      v = (i < n) ? ((int32_t)pts[i] * 1000) : 0;
+      if (v > cap) v = cap;                 // a foreign/edited blob cannot exceed the cap
+      if (v < 0)   v = 0;
     }
     g.gain_budget[i] = v;
     g.gain_rem[i]    = 0;
@@ -597,31 +631,51 @@ static uint8_t compute_alert(void)
   return AL_NONE;
 }
 
+// Is the sun down where the player probably is? P3-C2b replaced the fixed
+// SLEEP_HOUR_START/END pair with the interpolated daylight table of
+// data/balance.h: bedtime is sunset + SLEEP_AFTER_DUSK_MIN, morning is
+// sunrise, both moving with the day of the year. With no trustworthy clock
+// there is no window at all, exactly as before.
+static uint8_t is_night(void)
+{
+  if (!g.env.clock_valid) return 0;
+  return daylight_is_night(g.env.day_of_year, (uint16_t)(g.sod / 60u));
+}
+
+// The player has been quiet long enough for the creature to (go back to)
+// sleep. Before the FIRST interaction there is nothing to wait for, so a boot
+// inside the night window puts the pebble straight to bed.
+static uint8_t settled_enough(void)
+{
+  if (!g.hold_seen) return 1;
+  const uint32_t gone = (g.uptime_s > g.hold_s) ? (g.uptime_s - g.hold_s) : 0u;
+  return (gone >= (uint32_t)SLEEP_RELAPSE_S) ? 1u : 0u;
+}
+
 static void sleep_machine(void)
 {
-  uint8_t asleep = (g.view.flags & PF_ASLEEP) ? 1u : 0u;
-  uint8_t light  = (g.view.flags & PF_LIGHT_ON) ? 1u : 0u;
-
-  uint8_t night = 0;
-  if (g.env.clock_valid) {
-    uint32_t h = g.sod / 3600u;
-    night = (h >= (uint32_t)SLEEP_HOUR_START || h < (uint32_t)SLEEP_HOUR_END) ? 1u : 0u;
-  }
+  const uint8_t asleep = (g.view.flags & PF_ASLEEP) ? 1u : 0u;
+  const uint8_t night  = is_night();
 
   if (!asleep) {
-    // Auto-sleep only at night with the light off. Energy hitting zero is a
-    // COLLAPSE, not sleep: GAME_DESIGN 1.5 keeps the -1.5/h energy damage
-    // running for as long as energy stays at zero, which a regenerating sleep
-    // would cancel. Collapse is a render state, not a stat state.
-    if (night && !light) {
+    // Bedtime, and the relapse after a nudge woke it, are the SAME rule: it is
+    // dark and nobody has touched the device for SLEEP_RELAPSE_S. Energy
+    // hitting zero is a COLLAPSE, not sleep: GAME_DESIGN 1.5 keeps the energy
+    // damage running for as long as energy stays at zero, which a regenerating
+    // sleep would cancel. Collapse is a render state, not a stat state.
+    if (night && settled_enough()) {
       g.view.flags |= PF_ASLEEP;
       g.events |= SIM_EV_SLEEP;
     }
   } else {
-    uint8_t wake = 0;
-    if (stat_v(ST_ENERGY) >= STAT_MILLI_MAX) wake = 1;
-    if (!night && pct_milli(ST_ENERGY) >= SIM_WAKE_DAY_ENERGY_PCT) wake = 1;
-    if (wake) {
+    // NOTHING WAKES IT WHILE THE WINDOW IS OPEN except the player (the nudge
+    // counter in sim_apply_action, or the explicit ACT_SLEEP_TOGGLE). The old
+    // "wake as soon as energy is full" rule predates a real window: energy
+    // refills in 5 h and a winter night is 13 h long, so it woke the creature
+    // at 00:30 and the bedtime rule immediately put it back - a SLEEP/WAKE
+    // event pair every substep until dawn. By day the rule stands: a nap ends
+    // once the battery is back up.
+    if (!night && pct_milli(ST_ENERGY) >= SIM_WAKE_DAY_ENERGY_PCT) {
       g.view.flags &= (uint16_t)~PF_ASLEEP;
       g.events |= SIM_EV_WAKE;
     }
@@ -632,7 +686,6 @@ static void decay_stats(uint32_t dt)
 {
   const Genome& gen = g.pb->genome;
 
-  uint16_t m_stage   = STAGE_MULT[g.view.stage];
   uint16_t m_app     = gene_appetite_mult(gen);
   uint16_t m_met     = gene_metabolism_mult(gen);
   uint16_t m_soc     = gene_sociability_mult(gen);
@@ -653,57 +706,61 @@ static void decay_stats(uint32_t dt)
 
   // --- hunger (satiety) ---
   {
-    const uint16_t m[4] = { m_stage, m_app, m_sleep, m_off };
-    accum_stat(ST_HUNGER, rate_chain(RATE_HUNGER_MPH, m, 4), dt);
+    const uint16_t m[3] = { m_app, m_sleep, m_off };
+    accum_stat(ST_HUNGER, rate_chain(CARE_DECAY_MPH[CARE_HUNGER], m, 3), dt);
   }
   // --- happiness ---
   {
-    const uint16_t m[5] = { m_stage, m_lonely, m_soc, m_sleep, m_off };
-    accum_stat(ST_HAPPINESS, rate_chain(RATE_HAPPINESS_MPH, m, 5), dt);
+    const uint16_t m[4] = { m_lonely, m_soc, m_sleep, m_off };
+    accum_stat(ST_HAPPINESS, rate_chain(CARE_DECAY_MPH[CARE_HAPPINESS], m, 4), dt);
   }
   // --- energy ---
   if (g.view.flags & PF_ASLEEP) {
-    uint16_t m_light = (g.view.flags & PF_LIGHT_ON)
-                         ? (uint16_t)MULT_LIGHT_ON_SLEEP : (uint16_t)MULT_ONE;
-    const uint16_t m[2] = { m_light, m_off };
-    accum_stat(ST_ENERGY, rate_chain(RATE_ENERGY_ASLEEP_MPH, m, 2), dt);
+    const uint16_t m[1] = { m_off };
+    accum_stat(ST_ENERGY, rate_chain(CARE_ENERGY_ASLEEP_MPH, m, 1), dt);
   } else {
-    const uint16_t m[3] = { m_stage, m_met, m_off };
-    accum_stat(ST_ENERGY, rate_chain(RATE_ENERGY_AWAKE_MPH, m, 3), dt);
+    const uint16_t m[2] = { m_met, m_off };
+    accum_stat(ST_ENERGY, rate_chain(CARE_DECAY_MPH[CARE_ENERGY], m, 2), dt);
   }
   // --- hygiene (base + per-poop) ---
   {
-    int32_t base = RATE_HYGIENE_MPH
-                 + (int32_t)g.view.poop_count * RATE_HYGIENE_POOP_MPH;
-    const uint16_t m[3] = { m_stage, m_sleep, m_off };
-    accum_stat(ST_HYGIENE, rate_chain(base, m, 3), dt);
+    int32_t base = CARE_DECAY_MPH[CARE_CLEANLINESS]
+                 + (int32_t)g.view.poop_count * CARE_HYGIENE_POOP_MPH;
+    const uint16_t m[2] = { m_sleep, m_off };
+    accum_stat(ST_HYGIENE, rate_chain(base, m, 2), dt);
   }
   // --- bond (flat) ---
   {
     const uint16_t m[1] = { m_off };
-    accum_stat(ST_BOND, rate_chain(RATE_BOND_MPH, m, 1), dt);
+    accum_stat(ST_BOND, rate_chain(CARE_BOND_MPH, m, 1), dt);
   }
 }
 
-// HEALTH is the one stat with a floor. It bleeds only while a CORE stat is
-// pinned at zero - illness merely blocks regeneration - and never falls below
-// HEALTH_FLOOR_PCT, so total neglect ends in a miserable pebble and never in a
-// dead one (spec section 27, "inconveniently unhappy at worst").
+// HEALTH is the one stat with a floor. It bleeds only while a CORE stat has
+// been pinned at zero for CARE_ZERO_GRACE_S - illness merely blocks
+// regeneration - and never falls below HEALTH_FLOOR_PCT, so total neglect ends
+// in a miserable pebble and never in a dead one (spec section 27,
+// "inconveniently unhappy at worst").
+//
+// P3-C1 replaced the four per-stat damage rates with ONE rate behind a two-hour
+// grace: a player who lets a bar touch bottom on the way home has done no
+// damage at all, and a player who never comes back still needs 45 h of bleeding
+// to reach a floor the model then refuses to cross.
 static void health_step(uint32_t dt)
 {
   uint16_t m_hardy = gene_hardiness_mult(g.pb->genome);
   uint16_t m_off   = g.offline ? (uint16_t)MULT_OFFLINE_DECAY : (uint16_t)MULT_ONE;
 
-  int32_t src = 0;
-  if (stat_v(ST_HUNGER)    <= 0) src += DMG_HUNGER_ZERO_MPH;
-  if (stat_v(ST_HYGIENE)   <= 0) src += DMG_HYGIENE_ZERO_MPH;
-  if (stat_v(ST_HAPPINESS) <= 0) src += DMG_HAPPINESS_ZERO_MPH;
-  if (stat_v(ST_ENERGY)    <= 0) src += DMG_ENERGY_ZERO_MPH;
+  uint8_t any_zero = 0;
+  for (uint8_t i = 0; i < ST_CORE_COUNT; ++i) {
+    if (stat_v(i) <= 0) { any_zero = 1; break; }
+  }
+  g.zero_dwell_s = any_zero ? sat_add_u32(g.zero_dwell_s, dt) : 0u;
 
   int32_t total = 0;
-  if (src > 0) {
+  if (any_zero && g.zero_dwell_s >= (uint32_t)CARE_ZERO_GRACE_S) {
     const uint16_t md[2] = { m_hardy, m_off };
-    total = rate_chain(src, md, 2);
+    total = rate_chain(CARE_HEALTH_BLEED_MPH, md, 2);
   }
 
   // ---- regeneration -------------------------------------------------------
@@ -717,7 +774,7 @@ static void health_step(uint32_t dt)
       uint16_t m_sen = (g.view.stage == STAGE_SENIOR)
                          ? (uint16_t)SENIOR_REGEN_MULT : (uint16_t)MULT_ONE;
       const uint16_t mr[2] = { m_sen, m_off };
-      regen = rate_chain(RATE_HEALTH_REGEN_MPH, mr, 2);
+      regen = rate_chain(CARE_HEALTH_REGEN_MPH, mr, 2);
     }
   }
 
@@ -754,8 +811,21 @@ static void poop_step(uint32_t dt)
   // runs at. Without this, an 8 h night produces 5 poops and GAME_DESIGN 1.5's
   // "overnight is free, sleeping the pet before bed is a real strategy" is
   // simply false: the hygiene collapse alone would cost ~7 h of decay.
-  uint32_t adv = dt;
-  if (g.view.flags & PF_ASLEEP) adv = (dt * (uint32_t)MULT_SLEEP) / 1000u;
+  //
+  // That x0.35 is FRACTIONAL, so it carries its remainder exactly the way
+  // accum() does. Truncating it per sub-step was not a rounding error, it was
+  // a hole: the live device ticks the sim one second at a time
+  // (app.cpp -> sim_step_seconds() -> 1), and (1 * 350) / 1000 is 0 every
+  // time, so a sleeping pebble never advanced its timer at all and could not
+  // poop overnight, ever - while the offline catch-up over the same night
+  // (60 s sub-steps, where 60 * 350 / 1000 is an exact 21) produced two.
+  // Same night, same pebble, two different models. dt is at most
+  // SIM_SUBSTEP_S, so dt * 1000 + 999 cannot overflow.
+  const uint32_t mult  = (g.view.flags & PF_ASLEEP) ? (uint32_t)MULT_SLEEP
+                                                    : (uint32_t)MULT_ONE;
+  const uint32_t milli = dt * mult + (uint32_t)g.poop_rem;
+  const uint32_t adv   = milli / 1000u;
+  g.poop_rem           = (uint16_t)(milli % 1000u);
 
   g.poop_timer += adv;
   while (g.poop_timer >= period) {
@@ -876,11 +946,23 @@ static void events_step(void)
   }
 }
 
+// One subtraction below is only enough while a sub-step cannot overshoot the
+// period by more than the period itself. Both are 60 today and the comment used
+// to say so and stop there; pin it, or a sub-step grid coarser than the stage
+// cadence would leave acc_stage growing without bound.
+static_assert((uint32_t)SIM_SUBSTEP_S <= (uint32_t)STAGE_CHECK_PERIOD_S,
+              "stage_step() carries with one subtraction: a sub-step may not "
+              "exceed STAGE_CHECK_PERIOD_S");
+
 static void stage_step(uint32_t dt)
 {
   g.acc_stage += dt;
   if (g.acc_stage < (uint32_t)STAGE_CHECK_PERIOD_S) return;
-  g.acc_stage = 0;
+  // Carry, do not discard: `= 0` loses whatever dt overshot the period by,
+  // which is the same class of leak poop_step() used to have. dt is at most
+  // SIM_SUBSTEP_S, which the static_assert above pins at or below the period,
+  // so one subtraction is enough.
+  g.acc_stage -= (uint32_t)STAGE_CHECK_PERIOD_S;
 
   while (g.view.stage < STAGE_SENIOR && g.pb->age_s >= stage_enter_s((uint8_t)(g.view.stage + 1))) {
     g.view.stage = (uint8_t)(g.view.stage + 1);
@@ -920,6 +1002,7 @@ static void hatch_now(void)
   g.view.minor_form   = 0;
   g.view.poop_count   = 0;
   g.poop_timer   = 0;
+  g.poop_rem     = 0;
   for (uint8_t i = 0; i < ST_COUNT; ++i) {
     stat_set(i, STAT_MILLI_MAX);
     stat_rem_set(i, 0);
@@ -1038,6 +1121,7 @@ const SimView* sim_view(void)
 const PebbleInstance* sim_pebble(void) { return g.pb; }
 
 uint32_t sim_take_events(void)       { uint32_t e = g.events; g.events = 0; return e; }
+void     sim_post_event(uint32_t m)  { g.events |= m; }
 uint8_t  sim_alert(void)             { return g.alert; }
 uint8_t  sim_is_asleep(void)         { return (g.pb && (g.view.flags & PF_ASLEEP)) ? 1u : 0u; }
 uint8_t  sim_is_sick(void)           { return (g.pb && (g.view.flags & PF_SICK)) ? 1u : 0u; }
@@ -1104,7 +1188,9 @@ static void reset_pebble_state(uint8_t fresh)
   g.events = 0;
   g.acc_stage = g.acc_cq = g.acc_sick = g.acc_minute = 0;
   g.poop_timer = 0;
+  g.poop_rem   = 0;
   g.hapavg_rem = 0;
+  g.zero_dwell_s = 0;
   g.alert = AL_NONE;
   g.alert_age_s = 0;
   // Cooldowns: "seen right now". On a reload or a Box swap that means the
@@ -1121,6 +1207,10 @@ static void reset_pebble_state(uint8_t fresh)
   g.pet_n = 0;
   g.mg_last_s = g.uptime_s;
   g.mg_seen = fresh ? 0u : 1u;
+  g.hold_s = g.uptime_s;
+  g.hold_seen = 0;              // a boot inside the night window sleeps at once
+  g.nudge_t0_s = 0;
+  g.nudge_n = 0;
   g.suppress_until_s = 0;
   g.cq_good_today = 0;
   g.cq_game_today = 0;
@@ -1153,7 +1243,6 @@ static void derive_view(void)
   g.view.flags = 0;
   if (g.pb->status & PBS_SICK)         g.view.flags |= PF_SICK;
   if (g.pb->status & PBS_ASLEEP)       g.view.flags |= PF_ASLEEP;
-  if (g.pb->status & PBS_LIGHT_ON)     g.view.flags |= PF_LIGHT_ON;
   if (g.pb->flags  & PBF_GOD_TAINTED)  g.view.flags |= PF_GOD_TAINTED;
 
   g.view.stage      = stage_of_level(g.pb->level);
@@ -1179,6 +1268,19 @@ static void clamp_care(void)
 void sim_bind(PebbleInstance& pebble)
 {
   g.pb = &pebble;
+  // THE STEP SIZE HAS A DEFAULT HERE, AND THIS IS THE ONLY PLACE IT GETS ONE.
+  // g.scale is a zero-initialised static and sim_step_seconds() returns it raw;
+  // app.cpp's logic_tick() multiplies it by the seconds owed. Until P6-C4 the
+  // ONLY writer was sim_set_time_scale(), whose only two callers are both inside
+  // dev/godmode.cpp's `#if GOD_MODE_ENABLED` half - so on the RELEASE artefact
+  // (GOD_MODE_ENABLED=0) the scale stayed 0, every tick was sim_tick(0), and the
+  // whole simulation - care decay, ageing, the XP carry drip, the activity
+  // carried minute - stood still for as long as the device was switched on.
+  // A default that lives inside a dev feature is not a default. It lives here,
+  // where the module goes live, and god mode is now an OVERRIDE rather than the
+  // thing that starts the clock. Set only when unset, so binding a second Pebble
+  // does not cancel an acceleration the player is watching.
+  if (g.scale == 0u) g.scale = 1u;
   sim_env_defaults(g.env);
   g.uptime_s = 0;
   reset_pebble_state(0);        // PH3 #4: a reload re-earns its ledgers
@@ -1253,7 +1355,7 @@ void sim_new_pet(const Genome& gn, uint32_t now_epoch, uint8_t cold)
   g.bond                   = STAT_MILLI_MAX;
   g.bond_rem               = 0;
   g.happiness_avg          = 0;
-  g.view.flags             = PF_LIGHT_ON;
+  g.view.flags             = 0;
   if (cold) g.view.flags |= PF_COLD_EGG;
   if (gene_tainted(gn)) g.view.flags |= PF_GOD_TAINTED;
 
@@ -1300,8 +1402,36 @@ static void fail(ActionResult& out, uint8_t err, uint16_t cd)
   out.str_id     = (uint16_t)(STR_AERR_NONE + err);
 }
 
+// One refused gesture against a sleeping pebble. Returns 1 when this is the
+// WAKE_NUDGES-th inside the window, having woken the creature.
+static uint8_t nudge(uint32_t now_s)
+{
+  const uint32_t gone = (now_s > g.nudge_t0_s) ? (now_s - g.nudge_t0_s) : 0u;
+  if (g.nudge_n == 0u || gone > (uint32_t)WAKE_NUDGE_WINDOW_S) {
+    g.nudge_t0_s = now_s;
+    g.nudge_n    = 1;
+  } else if (g.nudge_n < 0xFFu) {
+    g.nudge_n++;
+  }
+  if (g.nudge_n < (uint8_t)WAKE_NUDGES) return 0;
+
+  g.nudge_n = 0;
+  g.view.flags &= (uint16_t)~PF_ASLEEP;
+  g.events |= SIM_EV_WAKE;
+  // Hold it awake for SLEEP_RELAPSE_S even if the action that woke it then
+  // fails on a cooldown: the player asked for the pebble, not for a race.
+  g.hold_s    = now_s;
+  g.hold_seen = 1;
+  status_sync();
+  return 1;
+}
+
 static void note_interaction(uint8_t action)
 {
+  // Any interaction at all - including the two toggles - postpones bedtime.
+  g.hold_s    = g.uptime_s;
+  g.hold_seen = 1;
+
   g.act_last[action] = g.uptime_s;
   g.act_seen[action] = 1;
   g.last_any_act_s   = g.uptime_s;
@@ -1309,8 +1439,8 @@ static void note_interaction(uint8_t action)
 
   // GAME_DESIGN 7.1: only a MEANINGFUL interaction (feed / clean / play /
   // medicine / mimo) resets the loneliness clock.
-  // Flipping the light or the sleep switch is housekeeping, not company.
-  if (action == ACT_LIGHT_TOGGLE || action == ACT_SLEEP_TOGGLE) return;
+  // Flipping the sleep switch is housekeeping, not company.
+  if (action == ACT_SLEEP_TOGGLE) return;
 
   g.last_interact_epoch = g.now;
   g.alert = AL_NONE;               // any real interaction addresses the alert
@@ -1350,10 +1480,18 @@ bool sim_apply_action(ActionId action, ActionResult& out)
 
   if (g.view.stage == STAGE_EGG)   { fail(out, AERR_IS_EGG, 0); return false; }
 
-  if ((g.view.flags & PF_ASLEEP) &&
-      action != ACT_SLEEP_TOGGLE && action != ACT_LIGHT_TOGGLE) {
-    fail(out, AERR_ASLEEP, 0);
-    return false;
+  // ASLEEP: THE PLAYER CAN INSIST (P3-C2b). The first gesture does not act -
+  // it says the pebble is asleep and counts as one nudge - but WAKE_NUDGES of
+  // them inside WAKE_NUDGE_WINDOW_S wake it, and then this very gesture goes
+  // through like any other. The window is what keeps idle taps hours apart
+  // from ever adding up, and waking costs NO stat: spec section 27 forbids
+  // punishing the player, and the energy that now drains awake is cost enough.
+  // ACT_SLEEP_TOGGLE is the explicit switch and never needs a nudge.
+  if ((g.view.flags & PF_ASLEEP) && action != ACT_SLEEP_TOGGLE) {
+    if (!nudge(g.uptime_s)) {
+      fail(out, AERR_ASLEEP, 0);
+      return false;
+    }
   }
 
   uint16_t cd = sim_action_cooldown_s(action);
@@ -1377,6 +1515,7 @@ bool sim_apply_action(ActionId action, ActionResult& out)
       stat_add(ST_HUNGER, ACT_MEAL_HUNGER);
       cq_add(ACT_MEAL_CQ);
       g.poop_timer = 0;                       // next poop 90 min after the meal
+      g.poop_rem   = 0;
       str_id = STR_RX_MEAL;
       break;
     }
@@ -1442,12 +1581,6 @@ bool sim_apply_action(ActionId action, ActionResult& out)
       stat_add(ST_HAPPINESS, (bonus > 0) ? ACT_PET_HAPPINESS : 0);
       pet_window_push();
       str_id = STR_RX_PET;
-      break;
-    }
-
-    case ACT_LIGHT_TOGGLE: {
-      g.view.flags ^= PF_LIGHT_ON;
-      str_id = (g.view.flags & PF_LIGHT_ON) ? STR_RX_LIGHT_ON : STR_RX_LIGHT_OFF;
       break;
     }
 

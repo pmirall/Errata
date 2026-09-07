@@ -12,6 +12,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run host test suite
         run: make -C tests check
+      # THE HALF OF THE GATE NO CI JOB REACHED (found by the P10-C4 survey).
+      # `make -C tests check` bypasses tools/check.sh entirely, and the firmware
+      # job runs it with --no-tests - which switches OFF the whole `if
+      # [ $DO_TESTS -eq 1 ]` block. So three things this repository built
+      # deliberately have never run in CI once: the AddressSanitizer set (the
+      # one target that can catch the class of over-read core/utf8.h is about),
+      # the five review instruments under tests/tools/ (added to the gate at
+      # P9-C6 precisely so they could not rot), and every grep gate that lives
+      # inside that block. --no-build is the other half of --no-tests, so the
+      # two jobs together now cover the whole file with no duplicated work.
+      - name: Gate (tests, sanitiser, instruments, grep gates)
+        run: tools/check.sh --no-build
 
   firmware:
     name: firmware (arduino-cli, esp32c3)
@@ -38,3 +50,25 @@ jobs:
           arduino-cli lib install "U8g2@2.35.30"
       - name: Gate (build + size caps)
         run: tools/check.sh --no-tests
+
+      # THE CAPS THAT MATTER HAD NEVER RUN IN CI (found by the P10-C5 survey,
+      # and it is the more useful half of that chunk's CI item).
+      #
+      # The step above builds ONE variant - the baseline, with the developer
+      # console in it - and checks it against GATE_FLASH_MAX 2,400,000 and
+      # GATE_GLOBALS_MAX 90,000. Those are ceilings so far above the artefact
+      # (1.36 MB / 59.5 KB) that they cannot fail. The caps every acceptance
+      # claim in this project is actually made against are
+      # GATE_RELEASE_FLASH_MAX 1,600,000 and GATE_RELEASE_GLOBALS_MAX 65,000,
+      # and they live in tools/build_matrix.sh, which NO CI job had ever run.
+      # For eight phases the release budget was policed only on a developer's
+      # machine, by hand.
+      #
+      # It also compiles the five other feature variants at --warnings all, so
+      # a change that only breaks `no-web` or `all-off` - the configurations
+      # nobody builds by accident - fails here instead of at the next phase
+      # exit. It is six arduino-cli compiles on a warm cache, so it runs after
+      # the gate rather than instead of it, and it reuses the core and the
+      # library this job already installed.
+      - name: Variant matrix + release size caps
+        run: tools/build_matrix.sh

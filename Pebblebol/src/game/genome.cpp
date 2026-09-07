@@ -330,9 +330,9 @@ uint16_t gene_weight_ideal_dg(const Genome& g) {
 
 // The design says numeric genes roll 4..12 out of 0..15 ("gen 0 is never
 // extreme"). luck is a 3-bit gene (0..7), so the same proportional band is
-// applied to it: 2..6.
-#define GENESIS_LUCK_MIN 2
-#define GENESIS_LUCK_MAX 6
+// applied to it: 2..6. BOTH PAIRS NOW LIVE IN core/nt_types.h - GENESIS_LUCK_*
+// moved there in P7-C5 so game/breeding.cpp's envelope clamp and this roll read
+// ONE definition of the band instead of two that can drift apart.
 
 static uint32_t rnd_nonzero_u32(void) {
   uint32_t v = genome_rand();

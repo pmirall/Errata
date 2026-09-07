@@ -139,12 +139,22 @@ static void draw_alert(void) {
   gfx_affordance(S(STR_AF_OK), nullptr);
 }
 
+// THE HELP STRIP IS gfx_banner() NOW, AND THAT IS A BUG FIX, NOT A MOVE.
+// What was here centred the string with no fit and no wrap in a fixed 12 px
+// slab. Measured over every id that reaches ui_help(): SIX of the twenty-five
+// are wider than the 128 px panel at GF_BODY - STR_LK_HELP is 220 px - and each
+// is one GST_BOTH press away (screen_link.cpp, screen_battle.cpp,
+// screen_encounter.cpp x2, screen_network.cpp, screen_soon.cpp,
+// screen_care.cpp's kCareHelp). ui/render.cpp's draw_utf8() drops leading
+// codepoints on a negative x, so the player was shown the MIDDLE of the
+// sentence with both ends missing. snapshot_help drove STR_HLP_MEAL, the one
+// that fits at 100 px.
+//
+// The slab grows to hold the sentence instead. A one-line help strip is
+// pixel-for-pixel what it was except that it sits one row lower: the banner's
+// 11 px geometry is the TOAST's, and the two are one picture now.
 static void draw_help(void) {
-  const int16_t y = (int16_t)(UI_AFFORD_Y - 12);
-  gfx_fill(0, y, OLED_W, 12);
-  gfx_color(GFX_ERASE);
-  gfx_text_center(GF_BODY, (int16_t)(y + 9), S(s_modal_str));
-  gfx_color(GFX_DRAW);
+  (void)gfx_banner(S(s_modal_str));
 }
 
 void dialog_render(void) {

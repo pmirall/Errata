@@ -34,11 +34,33 @@ enum KvPart : uint8_t {
   KV_PART_COUNT
 };
 
+// A STORE THAT NEVER OPENED IS NOT A DAMAGED KEY, AND THE DIFFERENCE IS THE
+// WHOLE OF KV_CLOSED. Added at the FINAL REVIEW, for a defect that turned a
+// missing partition into a corrupt-save screen.
+//
+// kv_get() used to answer -1 for both "this key would not read" and "there is no
+// store to read it from". save_manager.cpp's pair_load() counts a negative as
+// PRESENT AND BAD - which is right for a damaged blob and wrong for a closed
+// partition, because with the partition shut EVERY key answers negative. Both
+// copies of the Box therefore came back present-and-bad, load_all_inner()
+// returned LOAD_CORRUPT, game_state.cpp set s_readonly, and ui/screen_error.cpp
+// sent the device to ERROR/ERRK_SAVE_CORRUPT - whose R button offers to WIPE a
+// save that was never damaged. It also returned before the checkpoint branch, so
+// a board with a perfect nvs2 backup and a closed nvs still showed the corrupt
+// screen. kv_nvs.h and this header both promise the opposite in writing: "the
+// firmware still runs, RAM-only; the UI shows ERR_NVS".
+//
+// Distinct value rather than a new out-parameter because every other caller in
+// the tree compares kv_get()'s answer against an exact expected size, so they
+// are unaffected by construction.
+#define KV_CLOSED (-2)
+
 // Reads at most 'cap' bytes of 'key' into 'buf'.
-// Returns the number of bytes read, 0 when the key is absent, and a negative
-// value on a store error (partition closed, read failure). A stored value
-// LARGER than 'cap' is an error, not a truncation: a short read of a blob is
-// indistinguishable from a corrupt one and must never be handed to a CRC check.
+// Returns the number of bytes read, 0 when the key is absent, KV_CLOSED when the
+// partition is not open at all, and -1 on a read error against an open store. A
+// stored value LARGER than 'cap' is an error, not a truncation: a short read of
+// a blob is indistinguishable from a corrupt one and must never be handed to a
+// CRC check.
 int  kv_get(KvPart part, const char* key, void* buf, size_t cap);
 
 // Writes exactly 'n' bytes. Returns false on any short or failed write; the

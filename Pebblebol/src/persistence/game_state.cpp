@@ -16,6 +16,7 @@
 #include "../core/config.h"
 #include "../core/crc16.h"
 #include "../core/rng.h"           // the device id of spec section 43
+#include "../data/balance.h"       // GAIN_CAP_*: the ledger the caps are asserted against
 
 // The single live game state. 1,936 B of .bss, exactly the sum of the persisted
 // blobs (save_schema.h section 8).
@@ -81,13 +82,28 @@ static void cfg_from_v2(const ConfigV2& v2, Config& out) {
   uint8_t f = 0;
   if (v2.flags & CFGV2_F_MUTE) f |= CF_MUTE;
   if (v2.flags & CFGV2_F_WEB)  f |= CF_WEB_ENABLED;
-  if (v2.flags & CFGV2_F_BLE)  f |= CF_BLE_ENABLED;
+  if (v2.flags & CFGV2_F_BLE)  f |= CF_RESERVED_BLE;
+  // The first-boot step (app/onboarding.h). Two bits, and BOTH ZERO MEANS
+  // FINISHED - so a blob written by any earlier firmware decodes as "already
+  // set up" and no played device is ever handed a setup wizard.
+  f |= (uint8_t)((((uint8_t)((v2.flags & CFGV2_F_SETUP_MASK) >> CFGV2_F_SETUP_SH))
+                  << CF_SETUP_SH) & CF_SETUP_MASK);
   out.flags = f;
 
   // The pet's display name. v2 keeps it on the Pebble; the v1 UI reads it from
   // Config, so the two are held in step until P2-C11 moves the UI over. The
   // config copy wins when it has one: it is the field SETTINGS writes, so a
   // rename must not be undone by the nickname the last save mapped.
+  //
+  // SLOT 0, NOT THE ACTIVE SLOT, AND P5 IS WHERE THAT STARTS TO MATTER (found
+  // by the P4-C6 sweep, left as it is on purpose). Today the only writer of any
+  // nickname in the whole tree is migration.cpp mapping a TYPED v1 pet_name,
+  // and that Pebble is in slot 0 AND is the active one, so the two readings
+  // cannot differ and changing the line now would change no behaviour and be
+  // untestable. Once P5-C4 capture puts other Pebbles in the Box and the player
+  // moves the active slot, HOME will call the new Pebble by slot 0's name -
+  // Config.pet_name wins over everything downstream. The fix belongs in the
+  // chunk that can write the failing test: read box_active() here.
   const char* name = (v2.device_name[0] != '\0') ? v2.device_name
                                                  : s_gs.pebbles[0].nickname;
   size_t i = 0;
@@ -104,10 +120,13 @@ static void cfg_to_v2(const Config& c, ConfigV2& v2) {
   v2.tz[i] = '\0';
 
   uint16_t f = (uint16_t)(v2.flags & (uint16_t)~(CFGV2_F_MUTE | CFGV2_F_WEB |
-                                                 CFGV2_F_BLE | CFGV2_F_SBAR_MASK));
+                                                 CFGV2_F_BLE | CFGV2_F_SBAR_MASK |
+                                                 CFGV2_F_SETUP_MASK));
   if (c.flags & CF_MUTE)        f |= CFGV2_F_MUTE;
   if (c.flags & CF_WEB_ENABLED) f |= CFGV2_F_WEB;
-  if (c.flags & CF_BLE_ENABLED) f |= CFGV2_F_BLE;
+  if (c.flags & CF_RESERVED_BLE) f |= CFGV2_F_BLE;
+  f |= (uint16_t)((((uint16_t)((c.flags & CF_SETUP_MASK) >> CF_SETUP_SH))
+                   << CFGV2_F_SETUP_SH) & CFGV2_F_SETUP_MASK);
   f |= (uint16_t)(((uint16_t)c.statusbar_mode << CFGV2_F_SBAR_SH) & CFGV2_F_SBAR_MASK);
   v2.flags = f;
 
@@ -128,10 +147,11 @@ void gs_cfg_defaults(Config& c) {
 
   // CF_WEB_ENABLED is DELIBERATELY CLEAR on a fresh device (plan section 2 row
   // G4): the radio is off by default and the creator server is opt-in.
+  // CF_RESERVED_BLE (0x04) is DELIBERATELY CLEAR on a fresh device now that BLE
+  // is deleted (P8-C0). The bit is still carried through both directions of the
+  // v1/v2 conversion above, because a save written before the deletion has it
+  // set and round-tripping a stored byte is not the same as minting one.
   uint8_t f = 0;
-#if FEATURE_BLE
-  f |= CF_BLE_ENABLED;
-#endif
   c.flags          = f;
   c.brightness     = (uint8_t)OLED_CONTRAST_DEFAULT;
   c.statusbar_mode = (uint8_t)SBAR_ICONS;
@@ -163,13 +183,25 @@ LoadResult gs_load(Config& cfg) {
     return r;
   }
 
-  // --- the identity and the fields no screen owns yet -----------------------
-  // Creator PIN state is zeroed until P8 brings the creator server back: a
-  // stale lockout deadline or fail count from a firmware that no longer has a
-  // PIN screen could lock a user out of a feature they cannot reach.
-  s_gs.cfg.creator_pin    = 0;
-  s_gs.cfg.pin_fail_count = 0;
-  s_gs.cfg.pin_lock_until = 0;
+  // --- the identity ---------------------------------------------------------
+  // THE THREE LINES THAT ZEROED THE CREATOR PIN STATE HERE ARE GONE (P8-C1).
+  // They read:
+  //     s_gs.cfg.creator_pin = 0; pin_fail_count = 0; pin_lock_until = 0;
+  // and their comment said "until P8 brings the creator server back: a stale
+  // lockout deadline or fail count from a firmware that no longer has a PIN
+  // screen could lock a user out of a feature they cannot reach". That was the
+  // right guard while nothing produced the fields and is the wrong one now: a
+  // PIN that does not survive gs_load() is a PIN that changes on every boot,
+  // and the user's phone and the QR they scanned would both be stale by the
+  // time they typed it.
+  //
+  // The concern it named is answered rather than ignored. A restored
+  // pin_fail_count leaves the gate ARMED but NOT LOCKED - cg_open() never
+  // restores a deadline, because no clock survives the power cut that lost it
+  // (networking/creator_gate.h) - so a stale count costs exactly one wrong
+  // guess before the 60 s throttle, and the correct PIN, which this device
+  // prints on its own screen, is accepted immediately either way. Nobody can
+  // be locked out of a feature they are standing in front of.
 
   // Spec section 43: one identity per device, drawn once from the rng service
   // app_setup() seeded with esp_random(), then persisted forever. Never on a
@@ -281,6 +313,36 @@ static bool gain_at_cap(const uint8_t pts[GS_GAIN_SLOTS]) {
          pts[ST_HYGIENE]   == (uint8_t)GAIN_CAP_HYGIENE_H;
 }
 
+// -----------------------------------------------------------------------------
+// The XP ledger, inside the inventory pair. save_load_all() has already checked
+// the blob's magic, version and CRC, so what is in s_gs.inv is either what was
+// stored or inventory_defaults()' zeros - and a ledger_epoch of 0 is exactly
+// what xp_ledger_restore() refuses to trust.
+// -----------------------------------------------------------------------------
+bool gs_load_xp_ledger(uint8_t pts[XP_LEDGER_SLOTS], uint32_t& epoch) {
+  memset(pts, 0, (size_t)XP_LEDGER_SLOTS);
+  epoch = 0;
+  if (s_gs.inv.ledger_epoch < (uint32_t)NT_EPOCH_SANE_MIN) return false;
+  memcpy(pts, s_gs.inv.xp_ledger, (size_t)XP_LEDGER_SLOTS);
+  epoch = s_gs.inv.ledger_epoch;
+  return true;
+}
+
+bool gs_save_xp_ledger(const uint8_t pts[XP_LEDGER_SLOTS], uint32_t epoch) {
+  if (s_readonly) return false;
+  // An epoch that is not a wall clock describes no interval, so it is stored as
+  // 0 - which retires the last trusted snapshot instead of leaving a never-synced
+  // unit replaying an intact budget on every reboot (the "gl" reasoning).
+  const uint32_t wire = (epoch >= (uint32_t)NT_EPOCH_SANE_MIN) ? epoch : 0u;
+  if (memcmp(s_gs.inv.xp_ledger, pts, (size_t)XP_LEDGER_SLOTS) == 0 &&
+      s_gs.inv.ledger_epoch == wire) {
+    return true;                        // the blob would be byte-identical
+  }
+  memcpy(s_gs.inv.xp_ledger, pts, (size_t)XP_LEDGER_SLOTS);
+  s_gs.inv.ledger_epoch = wire;
+  return save_inventory(s_gs.inv);
+}
+
 static void gain_commit(void) {
   if (!s_gain_fn) return;
 
@@ -368,6 +430,28 @@ bool gs_save_cfg(Config& c) {
   cfg_seal(c);
   if (s_readonly) return false;
   cfg_to_v2(c, s_gs.cfg);
+  return save_config(s_gs.cfg);
+}
+
+void gs_creator_load(uint16_t& pin, uint8_t& fail_count, uint16_t& idle_s) {
+  pin        = s_gs.cfg.creator_pin;
+  fail_count = s_gs.cfg.pin_fail_count;
+  idle_s     = s_gs.cfg.creator_idle_s;   // 0 = never set; the gate resolves it
+}
+
+bool gs_creator_store(uint16_t pin, uint8_t fail_count, uint32_t lock_until) {
+  if (s_readonly) return false;
+  // Nothing changed -> no write. See the header: the caller is reachable from
+  // an unauthenticated HTTP request, so an unconditional write here would be a
+  // flash-wear lever a remote client controls.
+  if (s_gs.cfg.creator_pin    == pin &&
+      s_gs.cfg.pin_fail_count == fail_count &&
+      s_gs.cfg.pin_lock_until == lock_until) {
+    return true;
+  }
+  s_gs.cfg.creator_pin    = pin;
+  s_gs.cfg.pin_fail_count = fail_count;
+  s_gs.cfg.pin_lock_until = lock_until;
   return save_config(s_gs.cfg);
 }
 

@@ -25,15 +25,92 @@ CPPFLAGS := -DNT_HOST -I$(SRC_ROOT) -I. -DNT_TESTS_DIR=\"$(CURDIR)\"
 
 TESTS := $(patsubst %.cpp,$(BIN)/%,$(sort $(wildcard test_*.cpp)))
 
-.PHONY: all check clean golden screens fixtures
+# core/utf8.cpp IS LINKED INTO EVERY BINARY, and it is the one object here that
+# is named once rather than per link line. It holds THE codepoint rule (see
+# core/utf8.h): ui/render.cpp, tests/fakes/gfx_fb.cpp and game/pebble.cpp each
+# carried a private copy until P10-C4 and the three disagreed, so the fix is
+# worth nothing if a binary can quietly link none of them. It is pure, it is
+# ~90 lines, and it has no dependencies at all - the same standing crc16.o would
+# have if it were used this widely.
+$(TESTS): $(OBJ)/utf8.o
+
+# AND THE REVIEW INSTRUMENTS UNDER tests/tools/ TOO, which is not a detail: they
+# are NOT in $(TESTS) ($(wildcard test_*.cpp) does not reach them) and they are
+# not in `check`, so nothing but tools/check.sh's instrument build ever links
+# them. Leaving them out here is exactly the rot P9-C6 added that build to
+# prevent - and it happened: adding utf8.o to $(TESTS) alone left
+# bin/balance_matrix with three undefined references to u8_fit(), and the CI job
+# that would have caught it did not exist until this same commit.
+TOOL_BINS := $(BIN)/balance_matrix $(BIN)/sim_days $(BIN)/sprite_dump \
+             $(BIN)/corrupt_view $(BIN)/creator_decode
+$(TOOL_BINS): $(OBJ)/utf8.o
+
+.PHONY: all check clean golden screens fixtures asan
 all: $(TESTS)
 
 check: all
 	@set -e; for t in $(TESTS); do echo "== $$t"; ./$$t $(ARGS); done; \
 	echo "ALL PASS $(words $(TESTS))/$(words $(TESTS))"
 
+# --- THE SANITISER RUN (added at the phase-8 exit) --------------------------
+# THREE TEST NAMES IN test_creator_api.cpp CLAIM A PROPERTY NO PLAIN BUILD CAN
+# CHECK: every_truncation_of_a_valid_document_errors_and_never_over_reads,
+# byte_flip_fuzz_over_a_valid_document_never_produces_a_bad_record and
+# random_bodies_error_and_never_crash. The harness is BUILT for it - HeapBody
+# mallocs every fuzz body at exactly its own length, so a one-byte over-read is
+# a heap overflow rather than a read into the rest of a static array - but
+# nothing ever compiled with a sanitiser, so the instrument that makes those
+# names true was never run.
+#
+# MEASURED AT THE EXIT. `cp_skip_ws()`'s `while (c.i < c.n)` changed to `<=` -
+# a one-byte over-read on every whitespace skip, in the reader whose whole
+# design is "length-bounded, never NUL-bounded" - printed ALL PASS 49/49 on the
+# plain build and, under this target, AddressSanitizer: heap-buffer-overflow at
+# creator_parse.cpp:62 in cp_skip_ws. That is the difference this target is.
+#
+# THE SET IS THE OUTSIDE-INPUT PATH, not the whole suite: the four binaries
+# that read bytes this device did not write (an HTTP body, a PIN, a stored cs
+# record) plus the validator they all end in. Whole-suite ASAN takes minutes
+# and buys nothing the gate needs on every commit.
+#
+# -fsanitize=undefined IS DELIBERATELY ABSENT AND THE REASON IS PRE-EXISTING:
+# UBSan instruments the null check at data/evolution_table.h:112, which makes
+# evo_rules_are_well_formed()'s pointer comparison non-constant and fails a
+# static_assert in a GENERATED header. Verified against an unmodified
+# species_table.h, so it is not phase 8's. A UBSan subset
+# (signed-integer-overflow,shift,bounds,alignment,integer-divide-by-zero,
+# unreachable,return) does compile and run clean, and is one flag away here if
+# a later phase wants it in the gate.
+ASAN_BIN   := bin_asan
+# test_utf8 JOINED THE SET AT P10-C4 and it is here for the reason the set
+# exists: core/utf8.cpp walks bytes that arrived from outside the device (a
+# nickname off the creator portal, a peer name off the air) and the defect it
+# fixes IS an over-read. Its heap-exact case mallocs each name at exactly its
+# own length, so a lead byte believed without its continuation bytes is a heap
+# error rather than a read into the next static array.
+#
+# P10-C6 ADDS test_perf AND test_diag, AND EACH WAS ADDED BECAUSE A MUTATION
+# FAILED TO FIRE. core/perf.cpp's per-screen array is indexed by a ScreenId and
+# guarded by a bounds check whose out-of-range path nothing could observe:
+# deleting the guard left test_perf green, because the read past the end of a
+# 29-entry .bss array landed on a zero neighbour, which is exactly what the
+# assertion was checking for. dev/diag_core.cpp has the same shape twice, in
+# diag_field_name() and fmt_cal(), on arrays of POINTERS - so the read past the
+# end is dereferenced and printed. Both are cheap, pure, arithmetic binaries.
+ASAN_SET   := test_creator_api test_creator_gate test_validate test_persistence \
+              test_soak test_utf8 test_perf test_diag
+ASAN_CXX   := -std=c++17 -Wall -Wextra -Werror -O1 -g -fno-omit-frame-pointer \
+              -fsanitize=address -MMD -MP
+
+asan:
+	@$(MAKE) --no-print-directory CXXFLAGS="$(ASAN_CXX)" BIN=$(ASAN_BIN) \
+	  $(addprefix $(ASAN_BIN)/,$(ASAN_SET))
+	@set -e; for t in $(ASAN_SET); do echo "== $(ASAN_BIN)/$$t"; \
+	  ASAN_OPTIONS=detect_leaks=1:abort_on_error=0 ./$(ASAN_BIN)/$$t >/dev/null; done; \
+	echo "ASAN OK $(words $(ASAN_SET))/$(words $(ASAN_SET))"
+
 clean:
-	rm -rf $(BIN)
+	rm -rf $(BIN) $(ASAN_BIN)
 
 $(BIN) $(OBJ):
 	mkdir -p $@
@@ -59,7 +136,36 @@ $(OBJ)/%.o: $(SRC_ROOT)/ui/%.cpp Makefile | $(OBJ)
 $(OBJ)/%.o: $(SRC_ROOT)/app/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
+# dev/ (P10-C1). ONE file in that directory is host-compilable and it is
+# dev/diag_core.cpp; dev/godmode.cpp includes <Arduino.h> and U8g2 through
+# ui/render.h, so no link line here may ever ask for it. That is the whole
+# reason diag_core exists as a separate translation unit - see its banner and
+# the red-line gate in tools/check.sh.
+$(OBJ)/%.o: $(SRC_ROOT)/dev/%.cpp Makefile | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(OBJ)/%.o: $(SRC_ROOT)/minigames/%.cpp Makefile | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+# Both halves of every game. games/*_logic.cpp is pure; games/*_draw.cpp draws,
+# but only through the gfx.h seam, so it compiles here against tests/fakes/gfx_fb
+# exactly as a migrated screen does - which is how test_screens.cpp snapshots a
+# run frame at the real 128x64 (spec section 63). THE INVARIANT IS NOT "no draw
+# object anywhere", it is that test_minigames links none: see its line below.
+$(OBJ)/%.o: $(SRC_ROOT)/minigames/games/%.cpp Makefile | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
 $(OBJ)/%.o: $(SRC_ROOT)/persistence/%.cpp Makefile | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+# networking/ (P4-C5). NOTHING under src/networking could link on the host
+# before this rule existed - `grep -c networking Makefile` was 0 - so the
+# section 15 codec had no way to be tested at all. The rule is generic and the
+# LINK LINES are what select: ble_social.cpp, net.cpp and webui.cpp are device
+# modules that include Arduino.h and no test asks for them, so they are never
+# compiled here. tools/check.sh gates the purity of the pure ones BY FILENAME
+# for exactly that reason.
+$(OBJ)/%.o: $(SRC_ROOT)/networking/%.cpp Makefile | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # Host fakes for the device seams (kv_store, later gfx).
@@ -71,6 +177,24 @@ $(OBJ)/%.o: fakes/%.cpp fakes/%.h Makefile | $(OBJ)
 $(OBJ)/gametime_nevervalid.o: $(SRC_ROOT)/hardware/gametime.cpp | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -DGT_HOST_NEVER_VALID -c $< -o $@
 
+# THE DEVICE BRANCH OF gametime.cpp, COMPILED ON THE HOST (P7-C6).
+# gt_mono_ms() has two bodies and until now only the host one was ever compiled
+# here: the DEVICE one - the one that reads esp_rtc_get_time_us() instead of
+# millis(), which is the whole point of P6-C3's move off uptime - was guarded
+# by a grep in tools/check.sh and by nothing else. -DARDUINO plus the fake
+# include directory in FRONT of the system ones builds it, and
+# tests/test_clock.cpp drives a deep-sleep wake through it.
+#
+# fakes/arduino/ IS FOR THIS OBJECT AND NOTHING ELSE. Two headers, one symbol
+# each; tools/check.sh fails the build if a second rule reaches for it, because
+# a wider fake would become a second Arduino core that can drift from the real
+# one in silence.
+$(OBJ)/gametime_arduino.o: $(SRC_ROOT)/hardware/gametime.cpp | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -DARDUINO -Ifakes/arduino -c $< -o $@
+
+$(OBJ)/arduino_clocks.o: fakes/arduino_clocks.cpp fakes/arduino/Arduino.h | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
 $(OBJ)/host_shims.o: host_shims.cpp host_shims.h | $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
@@ -78,23 +202,424 @@ $(OBJ)/host_shims.o: host_shims.cpp host_shims.h | $(OBJ)
 $(BIN)/test_crc16:      $(OBJ)/crc16.o
 $(BIN)/test_rng:        $(OBJ)/rng.o
 $(BIN)/test_genome:     $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
-$(BIN)/test_sim_golden: $(OBJ)/sim.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
-$(BIN)/test_care:       $(OBJ)/sim.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+$(BIN)/test_care_golden: $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
+# box.o comes along for the "seven days stored comes back full" case: box_recover
+# is the OTHER half of the care model (spec section 9) and P3-C1 tunes both.
+$(BIN)/test_care:       $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+# daylight.cpp is pure arithmetic over the balance.h table: no clock, no state.
+$(BIN)/test_daylight:   $(OBJ)/daylight.o
 $(BIN)/test_box:        $(OBJ)/box.o
+# xp.cpp is pure: the curve, the level carry and the anti-farm ledger, with
+# species_table.h (header-only) for the base_hp the hp rescale needs.
+# evolution.o comes with it because the two call each other: xp_add() asks
+# evolution_level_ready() whether to raise EVO_STATE_PENDING, and
+# evolution_apply() calls back into xp_hp_rescale() so there is ONE rescale.
+# activity.o joins them in P6-C4. The activity farm is a CROSS-MODULE property -
+# the day is game/activity.cpp's and the budget that bounds what a day is worth
+# is game/xp.cpp's - and neither file's own test binary could see it, which is
+# exactly why it shipped. This is the binary where the two meet.
+$(BIN)/test_xp:         $(OBJ)/xp.o $(OBJ)/evolution.o $(OBJ)/activity.o
+# The other half of that pair. Both objects, for the same reason.
+$(BIN)/test_evolution:  $(OBJ)/evolution.o $(OBJ)/xp.o
+# The generated content tables (P4-C1). species.o is the accessor layer AND the
+# one translation unit that includes every generated header, so linking it here
+# is what makes their compile-time guards fire in this build and not only in the
+# firmware one. evolution.o + xp.o come as a pair (they call each other) because
+# test_content drives evolution_apply() through a failing CONDITION.
+$(BIN)/test_content:    $(OBJ)/species.o $(OBJ)/evolution.o $(OBJ)/xp.o
+# THE PIXEL HALF OF petfx, HOST-LINKED FOR THE FIRST TIME (P9-C6). petfx_core.o
+# is ui/, and it is here for the same reason corrupt_fx.o and xbm_mirror.o are:
+# ui/petfx.cpp includes render.h -> Arduino.h, so every rule inside it is a rule
+# no test in this repository can execute. pf_build_lids() is what composites the
+# BLINK frame - a picture that is in neither authored frame of the atlas - and
+# it was drawing over the body on four species while every byte check passed.
+# P10-C3: petfx_core.o JOINS THE SCREEN LINK LINE. ui/screen_home.cpp derives
+# the sleeping body with pf_build_sleep() on the STILL body path - the one a
+# golden can see - because HOME has two body paths and the animated one lives in
+# ui/petfx.cpp, which no host binary compiles. Deriving in only that file would
+# have made the device show a species while every snapshot kept showing the
+# authored blob, with the suite green throughout: the phase-9 blink defect with
+# the sign flipped.
+# P10-C3: ui/anim_ease.cpp is the motion maths lifted out of ui/actfx.cpp - five
+# functions that seven shipped films have run on since P6-C3 and that no host
+# binary had ever compiled, because actfx.cpp includes render.h.
+$(BIN)/test_anim: $(OBJ)/anim_ease.o
+
+$(BIN)/test_sprite_pipeline: $(OBJ)/petfx_core.o
+# Derived stats. genome.o drags crc16.o and rng.o, exactly as test_genome does.
+$(BIN)/test_stats:      $(OBJ)/pebble.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 # The Box <-> sim seam: the real box.cpp and the real sim.cpp together, which
 # is the only way to see a swap move sim's raw pointer off its creature.
 $(BIN)/test_box_sim:    $(OBJ)/box_sim.o $(OBJ)/box.o $(OBJ)/sim.o \
+                        $(OBJ)/daylight.o $(OBJ)/genome.o $(OBJ)/crc16.o \
+                        $(OBJ)/rng.o
+# THE BATTLE ENGINE (P4-C2). battle.cpp is PURE, so it compiles here exactly as
+# it does in the firmware; pebble.o is the one stat derivation it calls, and
+# genome.o drags crc16.o and rng.o just as test_stats does. NO ui/ object and no
+# species.o: type_mod_of() and species_get() are inline in the generated
+# headers, so a round never leaves the data tables.
+$(BIN)/test_battle:     $(OBJ)/battle.o $(OBJ)/pebble.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
+$(BIN)/test_battle_replay: $(OBJ)/battle.o $(OBJ)/pebble.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
+$(BIN)/test_battle_golden: $(OBJ)/battle.o $(OBJ)/pebble.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
+# THE LOCAL OPPONENT (P4-C3). battle_ai.o on top of the SAME objects the engine
+# tests link, and no others: the AI reads the battle through game/battle.h's
+# const queries and needs no privileged access to anything.
+$(BIN)/test_battle_ai:  $(OBJ)/battle_ai.o $(OBJ)/battle.o $(OBJ)/pebble.o \
                         $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
+# THE SHARED VALIDATOR (P4-C5, spec section 15). validate.cpp is PURE, so it
+# compiles here exactly as it does in the firmware. pebble.o is the one stat
+# derivation it calls (hp_max through the SAME function battle.cpp uses),
+# evolution.o + xp.o come as the pair they always do (they call each other), and
+# genome.o drags crc16.o and rng.o. battle.o is here for the CONTAINMENT case:
+# the claim "validate_team accepts => battle_init does not refuse for any reason
+# but BR_MEMBER_FAINTED" is only checkable with the real engine in the binary.
+# species_custom.o SINCE P8-C3, and it is the point of the creator cases rather
+# than a convenience: "a creator Pebble validates" is only a claim about the
+# SHIPPING firmware if species_get() really resolves the id through the real
+# registry. A fixture that stubbed the resolver would have proved that the stub
+# resolves.
+$(BIN)/test_validate:   $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o \
+                        $(OBJ)/rng.o $(OBJ)/battle.o $(OBJ)/box.o \
+                        $(OBJ)/species_custom.o
+
+# THE SECTION 15 CODEC (P4-C5). protocol.o on top of the validator's objects,
+# because pbw_decode() IS a decode in front of validate_pebble(). rng.o is also
+# the fuzzer's source: every fuzz frame is a pure function of one printable u32
+# drawn through core/rng.h, so a failure reproduces from the seed alone.
+$(BIN)/test_protocol:   $(OBJ)/protocol.o $(OBJ)/validate.o $(OBJ)/pebble.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
+
+# THE SESSION FSM, THE LOCKSTEP AND THE FAULT-INJECTING LOOPBACK (P4-C5, the
+# second half). Everything the codec test links, plus the three new pure
+# networking modules and the REAL battle engine and the REAL local AI: the two
+# endpoints each run their own game/battle_ai.cpp over their own side, so a
+# trial is a whole battle between two engines and not a script. box.o comes
+# along for nothing else than the shared fixture builder the validator test
+# already uses.
+$(BIN)/test_session:    $(OBJ)/session.o $(OBJ)/battle_link.o \
+                        $(OBJ)/trade_link.o \
+                        $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
+                        $(OBJ)/validate.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
+                        $(OBJ)/pebble.o $(OBJ)/evolution.o $(OBJ)/xp.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
+# P5-C1: THE SCANNER, THE CLASSIFIER AND THE SALTED IDENTITY. Two objects and
+# NO OTHERS - net_classify.cpp and wifi_scanner.cpp are pure translation units,
+# and the scan job reaches the radio through a struct of function pointers, so
+# this binary drives every path a real scan can take with no radio and no
+# net.cpp (which is a device module tests/Makefile never compiles). If this link
+# line ever needs a third object, something has leaked into the pure half.
+$(BIN)/test_exploration_hash: $(OBJ)/net_classify.o $(OBJ)/wifi_scanner.o
+
+# P5-C2: THE COOLDOWN TABLE. cooldowns.cpp is pure and takes its clock as a
+# struct, so the uncalibrated path and a calibration landing mid-session are
+# driven directly. The persistence objects are here for ONE claim the module
+# cannot make on its own - that an armed cooldown survives a reboot - and they
+# are the same set tests/test_persistence.cpp links, for the same reason:
+# save_manager.cpp ends in the shared validator.
+$(BIN)/test_cooldowns:  $(OBJ)/cooldowns.o $(OBJ)/save_manager.o \
+                        $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/crc16.o \
+                        $(OBJ)/genome.o $(OBJ)/rng.o $(OBJ)/species.o \
+                        $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/species_custom.o
+
+# P5-C3: THE ENCOUNTER ROLL. encounters.cpp is pure and deterministic from its
+# inputs - no clock, no global RNG stream - so this binary is the roll and the
+# generated tables and nothing else. species.o is the accessor layer the WILD
+# and ITEM pickers go through; rng.o is the local Rng the seed drives.
+$(BIN)/test_encounters: $(OBJ)/encounters.o $(OBJ)/species.o $(OBJ)/rng.o \
+                        $(OBJ)/corruption.o
+# corruption.o because the SPECIAL outcome's second kind IS the corruption
+# status: the encounter is the only writer of PBS_CORRUPTED in the tree, so
+# the status and its 24 h deadline are tested where they are produced.
+
+# P9-C5: THE EFFECTS HALF OF CORRUPTION. Deliberately a WIDE link line, because
+# the claim under test is not about one module: "it never destroys" is a claim
+# about a Pebble that goes through the save validator, the wire codec, the real
+# breeding path and a real Box, and "the modifier does not stack" is a claim
+# about the engine. Every one of those is the SHIPPED object, not a fake.
+#
+# corrupt_fx.o is ui/, and it is here because it is the only part of the visual
+# half a host binary can execute: ui/petfx.cpp includes render.h and therefore
+# Arduino.h. gfx_fb.o is the host framebuffer whose out-of-bounds recorder is
+# the instrument for the glitch bound - the same one every screen golden uses.
+#
+# save_manager.o + migration.o + kv_mem.o are here for one case and it is the
+# load-bearing one: PebbleInstance.corrupt_until_epoch was carved out of
+# reserved[12] with NO schema bump, so "the deadline survives a reboot" is a
+# claim about the WRITER, the CRC and the migration - and a memcpy dressed up as
+# a save cannot check any of them. A lost deadline leaves the bit set with
+# nothing to end it, which is the one way this mechanic could destroy a Pebble.
+# P10-C1: THE DIAGNOSTICS SURFACE. diag_core.o is dev/, and it is here for the
+# same reason corrupt_fx.o and petfx_core.o are ui/: dev/godmode.cpp includes
+# Arduino.h, so every rule inside the console is a rule no test in this
+# repository can execute - including its GOD_MODE_ENABLED 0 stubs, which is
+# worse, because a stub that returned garbage would still print ALL PASS.
+#
+# THE LINK LINE IS WIDE ON PURPOSE and it is the same argument test_corruption's
+# makes. "spawn taints" is not a claim about a flag: it is a claim about
+# box_new_pebble()'s real constructor, genome_genesis()'s real taint clear and
+# game/taint.h's real gate, so all three are the SHIPPED objects. sim.o (with
+# daylight.o) is here because `heal` is the first caller sim_god_set_sick() has
+# ever had outside a test; activity.o because set_activity has to answer for a
+# score it can only derive; encounters.o + species.o because test_encounter
+# rolls the real table.
+$(BIN)/test_diag:       $(OBJ)/diag_core.o $(OBJ)/box.o $(OBJ)/sim.o \
+                        $(OBJ)/daylight.o $(OBJ)/inventory.o \
+                        $(OBJ)/activity.o $(OBJ)/encounters.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/species.o \
+                        $(OBJ)/pebble.o $(OBJ)/corruption.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
+$(BIN)/test_corruption: $(OBJ)/corruption.o $(OBJ)/corrupt_fx.o \
+                        $(OBJ)/battle.o $(OBJ)/pebble.o \
+                        $(OBJ)/breeding.o $(OBJ)/box.o \
+                        $(OBJ)/inventory.o $(OBJ)/protocol.o \
+                        $(OBJ)/validate.o $(OBJ)/species.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o \
+                        $(OBJ)/save_manager.o $(OBJ)/migration.o \
+                        $(OBJ)/kv_mem.o $(OBJ)/species_custom.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
+                        $(OBJ)/gfx_fb.o
+
+# P5-C4: CAPTURE. The REAL box.cpp, because the whole point of the case set is
+# that a captured Pebble comes out of the tree's one constructor and passes the
+# tree's one validator - a fake Box would prove neither. validate.o drags the
+# pair it always drags (evolution.o + xp.o call each other) and genome.o drags
+# crc16.o and rng.o, exactly as tests/test_validate.cpp does.
+$(BIN)/test_capture:    $(OBJ)/capture.o $(OBJ)/encounters.o $(OBJ)/box.o \
+                        $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
+
+# The Box-full branches of the same path, kept in their own binary for the
+# reason tests/test_battle_screen.cpp is: it links what it drives and nothing
+# else, so it cannot start passing because another module happened to be there.
+$(BIN)/test_box_full_capture: $(OBJ)/capture.o $(OBJ)/encounters.o $(OBJ)/box.o \
+                        $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
+
+# P5-C4: THE INVENTORY AND WHAT AN ITEM DOES. xp.o + evolution.o are the two
+# consumers inv_use() routes to (a candy really levels a Pebble, the evolution
+# key really asks game/evolution.h), corruption.o is the status half a CARE
+# item's `clears` column reaches, and species.o is the accessor layer.
+$(BIN)/test_inventory:  $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/xp.o \
+                        $(OBJ)/evolution.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
+# P6-C1: THE TONE ENGINE AND THE MOTION CAPABILITY. audio.cpp keeps its LEDC
+# half behind `#if defined(ARDUINO)` exactly as input.cpp keeps its
+# digitalRead(), so ONE object and no others is the whole binary: the queue, the
+# step clock and both halves of CF_MUTE are decided above the sink, and the test
+# binds a recorder in place of a piezo. If this link line ever needs a second
+# object, something device-shaped has leaked below the seam.
+$(BIN)/test_audio:      $(OBJ)/audio.o
+$(BIN)/test_motion:     $(OBJ)/motion_null.o
+
+# P6-C2: THE DAILY ACTIVITY SCORE. activity.cpp is pure and takes its clock as a
+# struct, exactly as cooldowns.cpp does, so the uncalibrated path, a clock rolled
+# backwards and a device power-cycled thirty times are all driven directly with
+# no device and no save manager. ONE OBJECT AND NO OTHERS is the point of this
+# line: the score reaches no content table, no RNG and no persistence code, so
+# if it ever needs a second object something has leaked into the pure half.
+$(BIN)/test_activity:   $(OBJ)/activity.o
+
+# P6-C3: THE IDLE LADDER. power.cpp is host-compilable by construction (every
+# ESP-IDF call is behind #if defined(ARDUINO)), and wifi_scanner.o comes with it
+# for ONE reason worth naming: the carried radio debt is only a real property if
+# the case holds a REAL WifiScanJob while the ladder drops the radio. A fake job
+# would have proved that the fake behaves, which is the shape of test this
+# project keeps finding.
+$(BIN)/test_power:      $(OBJ)/power.o $(OBJ)/wifi_scanner.o
+
+# P7-C1: THE BEACON CODEC, THE PEER TABLE AND THE DISCOVERY JOB. discovery.cpp
+# is pure and reaches the radio through a LinkRadioDriver of function pointers,
+# so the fake driver at the bottom of the test drives every path a real link can
+# take - including the two that are hardest to provoke on hardware, the section
+# 47 ceiling and a bring-up that does not take.
+#
+# activity.o IS THE POINT OF THIS LINK LINE AND NOT A CONVENIENCE. The rule
+# "act_note_peer() once per peer that passes the gate, never once per beacon"
+# is a property of the peer table and the activity score TOGETHER, and P6-C2
+# learned - from an XP farm that shipped - that neither module's own binary can
+# see a cross-module property. crc16.o is what the beacon is sealed with.
+$(BIN)/test_discovery:  $(OBJ)/discovery.o $(OBJ)/activity.o $(OBJ)/crc16.o
+
+# P7-C1: THE RING THE RADIO CALLBACK POSTS INTO, AND THE SEAM OVER IT.
+# Two halves in one binary, deliberately. The first drives rxring.cpp directly:
+# overflow, oversize, wrap and the invariant that a pop returns 0 only when the
+# ring is empty. The second runs a WHOLE BATTLE between two real sessions over
+# a Transport whose recv() is rxring_pop() and whose send() is rxring_push() -
+# the same ring code networking/transport_espnow.cpp fills from the Wi-Fi task -
+# so the claim "the session runs over the radio's ring with NO change to
+# session.cpp" is a thing this binary demonstrates rather than a sentence in a
+# header. That is why the session's whole object set is here.
+$(BIN)/test_link_transport: $(OBJ)/rxring.o $(OBJ)/session.o $(OBJ)/battle_link.o \
+                        $(OBJ)/trade_link.o \
+                        $(OBJ)/protocol.o $(OBJ)/validate.o $(OBJ)/battle.o \
+                        $(OBJ)/battle_ai.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
+# P7-C5: BREEDING. The REAL game/genome.cpp (breeding is a thin policy over it),
+# the REAL game/box.cpp (the child is filed by the tree's one constructor) and
+# the REAL game/validate.cpp (it is run on the child before the slot is kept).
+# species.o is the accessor layer species_base_of_family() lives in, and it is
+# also the translation unit that instantiates every generated table's guards.
+# NO networking object: game/breeding.cpp is pure and the shared seed arrives as
+# a uint32_t, which is the whole reason the determinism case can run two
+# "devices" in one process.
+$(BIN)/test_breeding:   $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/validate.o \
+                        $(OBJ)/species.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
+# P7-C4: THE ATOMIC TRADE. The whole binary is REAL SHIPPING CODE and one fake:
+# game/trade.cpp drives the journal, persistence/save_manager.cpp performs the
+# writes, tests/fakes/kv_mem.cpp is the store that can be killed at write k, and
+# game/box.cpp is the Box the invariant is asserted on. The networking half -
+# session.o, trade_link.o, protocol.o and the loopback - is here because the
+# five WIRE steps and the three JOURNAL phases are one property, and the only
+# way to see the pair invariant is to run both endpoints over a real link.
+#
+# migration.o comes with save_manager.o as it always does; validate.o drags the
+# pair it always drags (evolution.o + xp.o call each other); species.o is the
+# accessor layer AND the translation unit that instantiates every generated
+# table's compile-time guards.
+$(BIN)/test_trade:      $(OBJ)/trade.o $(OBJ)/box.o $(OBJ)/save_manager.o \
+                        $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/species_custom.o \
+                        $(OBJ)/trade_link.o $(OBJ)/session.o \
+                        $(OBJ)/battle_link.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
+                        $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
+                        $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
+
+# P8-C1/C2: THE CREATOR PIN AND THE PORTAL IDLE TIMER. creator_gate.cpp is pure
+# and caller-owned - the clock, the persisted failure count and the candidate
+# PIN all arrive as arguments - so ONE OBJECT AND NO OTHERS is the whole binary.
+# That is the same argument test_activity's line makes, and it has the same
+# tripwire: if this line ever needs a second object, something device-shaped has
+# leaked into the rules and webui.cpp has started deciding things again.
+$(BIN)/test_creator_gate: $(OBJ)/creator_gate.o
+
+# P8-C3: THE RAW-BODY CAP, THE FIXED-SCHEMA READER AND THE CREATOR PIPELINE.
+#
+# THREE PURE MODULES AND THE REAL VALIDATOR, AND NO DEVICE OBJECT AT ALL.
+# networking/creator_server.cpp is where the sockets are and tests/Makefile
+# never compiles it (it includes Arduino.h and WebServer.h), so everything this
+# binary drives is the half that DECIDES: creator_body.o is the cap, with the
+# core's HTTP_RAW_BUFLEN chunking reproduced by the fixture; creator_parse.o is
+# the document reader; creator_gate.o is the PIN parser the reader shares;
+# validate.o + species_custom.o + box.o are the rules and the pipeline the
+# accepted document runs through, so the end-to-end case files a REAL Pebble in
+# a REAL Box through the tree's one constructor and runs the tree's one
+# validator on it.
+#
+# THE FIXTURE STATES WHERE IT DIFFERS FROM app_setup(), in its own banner: there
+# is no socket, so the chunk sizes and the RAW_* sequence are reproduced from
+# the pinned core rather than delivered by it, and the response codes are
+# creator_server.cpp's one-line mapping of the states this binary asserts.
+$(BIN)/test_creator_api: $(OBJ)/creator_body.o $(OBJ)/creator_parse.o \
+                        $(OBJ)/creator_gate.o $(OBJ)/validate.o \
+                        $(OBJ)/species_custom.o $(OBJ)/box.o $(OBJ)/species.o \
+                        $(OBJ)/pebble.o $(OBJ)/evolution.o $(OBJ)/xp.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
+# The minigame contract and the PURE logic of every game. No draw objects and
+# no ui/: if this link line ever needs one, a game has leaked drawing into its
+# logic and the determinism argument has gone with it.
+# registry.o AND THE SIX DRAW HALVES SINCE THE FINAL REVIEW, and it is the whole
+# of a defect. minigames/registry.cpp pairs each MgId's logic with its drawing
+# half, and its only guard was a static_assert on the ROW COUNT: swapping two
+# rows compiled clean under -Werror and passed the whole gate, and MG_PING then
+# drew SEQUENCE's frame from PING's context. It was invisible because this file
+# was compiled by no host binary, and tests/test_screens.cpp re-derives the
+# pairing by hand at its six mg_snapshot() call sites - so the eleven minigame
+# goldens proved the pairing THAT FILE wrote, not the one that ships.
+#
+# registry.cpp's banner called it a "DEVICE translation unit", which was the
+# stated reason it was not here; it reaches no ui/ header at all. The draw
+# halves come with it because they are what it names.
+$(BIN)/test_minigames: $(OBJ)/minigame.o $(OBJ)/manager.o $(OBJ)/ping_logic.o \
+                        $(OBJ)/sequence_logic.o $(OBJ)/packet_flood_logic.o \
+                        $(OBJ)/firewall_logic.o $(OBJ)/buffer_logic.o \
+                        $(OBJ)/delete_logic.o $(OBJ)/rng.o \
+                        $(OBJ)/registry.o $(OBJ)/ping_draw.o \
+                        $(OBJ)/sequence_draw.o $(OBJ)/packet_flood_draw.o \
+                        $(OBJ)/firewall_draw.o $(OBJ)/buffer_draw.o \
+                        $(OBJ)/delete_draw.o $(OBJ)/gfx_fb.o $(OBJ)/utf8.o \
+                        $(OBJ)/gfx_widgets.o $(OBJ)/anim_ease.o
 $(BIN)/test_qr:         $(OBJ)/qr.o
 $(BIN)/test_clock:      $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o
+# THE SAME MODULE, COMPILED FOR THE DEVICE (P7-C6). A separate binary and not a
+# second object in test_clock: two gametime.o would be two definitions of every
+# symbol in it. game_state.o + save_manager.o + kv_mem.o are here because
+# gt_load_seed()'s device branch really reads save_last_seen(), gs_boot_cal()
+# and gs_boot_tz() - stubbing them would be testing a gametime the board does
+# not have.
+$(BIN)/test_clock_device: $(OBJ)/gametime_arduino.o $(OBJ)/arduino_clocks.o \
+                        $(OBJ)/cooldowns.o $(OBJ)/game_state.o \
+                        $(OBJ)/save_manager.o $(OBJ)/migration.o $(OBJ)/kv_mem.o \
+                        $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/genome.o $(OBJ)/rng.o \
+                        $(OBJ)/species.o $(OBJ)/validate.o $(OBJ)/pebble.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/species_custom.o
 $(BIN)/test_overflow:   $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o \
-                        $(OBJ)/sim.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+                        $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o
 $(BIN)/test_fixtures:   $(OBJ)/crc16.o
+# genome.o + species.o since P4-C1: the legacy family map case drives
+# gene_set_species() and reads back through species_base_of_family(), which is
+# the only way to prove that every v1 family lands on a BASE-stage creature
+# rather than on nothing. genome.o drags rng.o.
+# validate.o + its pair since P4-C5: save_load_all() ends in the shared
+# validator (the quarantine), so the load path drags the section 15 rules the
+# same way the wire path does.
 $(BIN)/test_persistence: $(OBJ)/save_manager.o $(OBJ)/migration.o \
-                        $(OBJ)/kv_mem.o $(OBJ)/crc16.o
+                        $(OBJ)/kv_mem.o $(OBJ)/crc16.o \
+                        $(OBJ)/genome.o $(OBJ)/rng.o $(OBJ)/species.o \
+                        $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/species_custom.o
+# P10-C4. THE FIRST-BOOT STEP, THROUGH THE REAL SAVE PIPELINE. It links
+# game_state.o and save_manager.o for the reason the file's banner gives: the
+# step is two bits of Config, Config is not what reaches flash, and "does the
+# answer survive a power cut" is a question only the real mapping can answer.
+$(BIN)/test_onboarding: $(OBJ)/onboarding.o $(OBJ)/game_state.o \
+                        $(OBJ)/save_manager.o $(OBJ)/migration.o \
+                        $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o \
+                        $(OBJ)/rng.o $(OBJ)/validate.o $(OBJ)/pebble.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
+                        $(OBJ)/species_custom.o
+
 $(BIN)/test_game_state: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
-                        $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o
+                        $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o \
+                        $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/species_custom.o
+
+# THE FIRST BINARY IN THIS PROJECT THAT LINKS game/box.cpp AND
+# persistence/game_state.cpp TOGETHER. box.h says "the Box does no I/O of its
+# own - persistence decides when a mutated slot reaches flash", and until the
+# final review nothing held either half of that to account: test_box proved the
+# RAM mutation and test_game_state proved the flash round trip, with the seam
+# between them - "does the creature I just caught survive a power cut" -
+# untested. It was not a hypothetical gap: a capture landed in first_free() and
+# was committed with gs_save_active(), which writes the ACTIVE slot only.
+# capture.o and encounters.o come along so the case can drive the real
+# cap_attempt() rather than a hand-rolled stand-in.
+$(BIN)/test_box_persist: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
+                        $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o \
+                        $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/species_custom.o \
+                        $(OBJ)/box.o $(OBJ)/capture.o $(OBJ)/encounters.o \
+                        $(OBJ)/species.o $(OBJ)/corruption.o $(OBJ)/activity.o
 # The screen table's migrated rows are pure translation units, so they compile
 # here exactly as they do in the firmware; gfx_fb.o is the host end of gfx.h
 # and gfx_widgets.o is the SHARED half of it, linked into both.
@@ -106,29 +631,297 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/screen_menu.o $(OBJ)/screen_care.o \
                $(OBJ)/screen_status.o $(OBJ)/screen_settings.o \
                $(OBJ)/screen_time.o $(OBJ)/screen_view.o \
+               $(OBJ)/screen_setup.o $(OBJ)/onboarding.o \
                $(OBJ)/screen_link.o $(OBJ)/screen_diag.o \
+               $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/battle_link.o \
+               $(OBJ)/trade_link.o $(OBJ)/trade.o \
+               $(OBJ)/protocol.o $(OBJ)/link_fake.o \
                $(OBJ)/screen_evolution.o $(OBJ)/screen_creator.o \
+               $(OBJ)/screen_network.o $(OBJ)/screen_encounter.o \
+               $(OBJ)/wifi_scanner.o $(OBJ)/net_classify.o \
+               $(OBJ)/cooldowns.o $(OBJ)/activity.o \
+               $(OBJ)/encounters.o $(OBJ)/capture.o \
+               $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/species.o \
+               $(OBJ)/validate.o $(OBJ)/evolution.o $(OBJ)/xp.o \
                $(OBJ)/dialog.o $(OBJ)/qr.o $(OBJ)/box.o \
+               $(OBJ)/anim_ease.o \
+               $(OBJ)/anim_ease.o \
                $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o \
-               $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+               $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
+               $(OBJ)/audio.o \
+               $(OBJ)/screen_battle.o $(OBJ)/battle_renderer.o \
+               $(OBJ)/xbm_mirror.o $(OBJ)/petfx_core.o $(OBJ)/corrupt_fx.o \
+               $(OBJ)/battle.o $(OBJ)/battle_ai.o $(OBJ)/pebble.o
 
-$(BIN)/test_screens:    $(SCREEN_OBJS)
+# P7-C2 added the peer link's four: ui/screen_link.cpp owns a REAL LinkJob and a
+# REAL Session over a REAL codec, and the screen binaries link all of it because
+# a screen test against a fake session would prove nothing about the thing that
+# ships. The RADIO is still a fake - net.cpp is never compiled here - and so is
+# the transport: the screen reaches both through ui.h seams that
+# tests/test_screens.cpp and tests/test_link_screen.cpp fill in themselves.
+#
+# P6-C2 added activity.o: ui/screen_network.cpp hands the WHOLE scan array to
+# the daily score before it walks the cooldowns, and reads the rare-encounter
+# permille back out of it for EncounterInput. activity.cpp is pure and takes its
+# clock as a struct, so the screen binaries link the REAL score with no clock
+# bound but the one the screen assembles from ui_explore_clock() - which is how
+# tests/test_screens.cpp can drive an uncalibrated scan at all.
+#
+# P6-C1 added audio.o: ui/screen_battle.cpp arms one cue per battle beat, and
+# hardware/audio.cpp is a pure translation unit (its LEDC half is behind
+# `#if defined(ARDUINO)`), so the screen binaries link the REAL engine with no
+# sink bound - which is the silent, side-effect-free default and needs no stub.
+#
+# P5-C3/C4 added the exploration half. ui/screen_network.cpp and
+# ui/screen_encounter.cpp are pure translation units like every other migrated
+# screen, and they drag the real modules they drive - the scan job, the
+# classifier, the cooldown table, the encounter roll, capture and the inventory
+# - because a screen test against fakes of all six would prove nothing about the
+# thing that ships. The RADIO is still a fake: net.cpp is never compiled here,
+# and the screen reaches it through ui_scan_driver(), which test_screens.cpp
+# stubs with a driver of its own.
+#
+# P4-C4 added the six before them. ui/screen_battle.cpp is a PURE translation unit that
+# runs the real engine and the real AI, so the host renders a real battle at
+# 128x64 rather than a mock of one: battle.o and battle_ai.o are the same
+# objects tests/test_battle.cpp links, pebble.o is the stat derivation they
+# call, and xbm_mirror.o is ui/petfx.cpp's own horizontal flip - which nothing
+# in this repository compiled or executed until it moved out of that device-only
+# translation unit.
+
+# The minigame run frames, snapshotted by test_screens.cpp. Each game needs BOTH
+# halves: the draw half calls accessors the logic half owns, which is the whole
+# point of the split - neither side re-derives a rule. minigame.o drives them;
+# rng.o is already in SCREEN_OBJS.
+# ALL SIX GAMES, since P3-C5. P3-C4b shipped four: ping_draw.cpp and
+# sequence_draw.cpp were compiled only by the firmware build and never rendered
+# on the host, so the P3-C4 claim "snapshots for each game" was true of four of
+# six. They are here now, and the same argument that put the other four here
+# applies - a frozen BUFFER zone passed all 45 logic cases and was caught only
+# by a pixel golden.
+MG_FRAME_OBJS := $(OBJ)/minigame.o \
+                 $(OBJ)/ping_logic.o         $(OBJ)/ping_draw.o \
+                 $(OBJ)/sequence_logic.o     $(OBJ)/sequence_draw.o \
+                 $(OBJ)/packet_flood_logic.o $(OBJ)/packet_flood_draw.o \
+                 $(OBJ)/firewall_logic.o     $(OBJ)/firewall_draw.o \
+                 $(OBJ)/buffer_logic.o       $(OBJ)/buffer_draw.o \
+                 $(OBJ)/delete_logic.o       $(OBJ)/delete_draw.o
+
+# power.o JOINS THIS BINARY AT P10-C6. It is the only host binary that compiles
+# both hardware/power.cpp (the ladder) and ui/screen_creator.cpp (the third
+# radio owner), which is what the portal-hold case needs to drive: the ladder
+# tore the access point down at PWR_IDLE_MS because ui_radio_job_busy() did not
+# know the portal existed, and no binary could see it because ui/ui.cpp and
+# app/app.cpp are compiled by none.
+$(BIN)/test_screens:    $(SCREEN_OBJS) $(MG_FRAME_OBJS) $(OBJ)/alloc_count.o $(OBJ)/power.o
+
+# P7-C2/C3: THE LINK SCREEN, ITS CONSENT GATE AND THE BATTLE OVER THE LINK.
+#
+# ONE SCREEN AND ONE REAL PEER, IN ONE PROCESS, and that shape is the whole
+# design of this binary. A screen is a file-scope singleton, so two LINK screens
+# cannot coexist here - but a Session is CALLER-OWNED (networking/session.h says
+# why), so the far end is a real Session with a real BattleState and a real
+# game/battle_ai.cpp driving it over the other end of a real
+# transport_loopback.cpp. Nothing in this binary is a mock of the protocol: what
+# is faked is the RADIO (a LinkRadioDriver of function pointers, exactly as
+# tests/test_discovery.cpp fakes it) and the ui.h seams.
+#
+# screen_battle.o is here because P7-C3's battle IS that screen, and box.o
+# because the team the screen offers comes out of the tree's one Box.
+$(BIN)/test_link_screen: $(OBJ)/screen_link.o $(OBJ)/screen_battle.o \
+                        $(OBJ)/battle_renderer.o $(OBJ)/xbm_mirror.o \
+                        $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/battle_link.o \
+                        $(OBJ)/trade_link.o $(OBJ)/trade.o \
+                        $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
+                        $(OBJ)/validate.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
+                        $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/cooldowns.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/activity.o \
+                        $(OBJ)/inventory.o $(OBJ)/corruption.o \
+                        $(OBJ)/audio.o $(OBJ)/genome.o $(OBJ)/crc16.o \
+                        $(OBJ)/rng.o $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o \
+                        $(OBJ)/link_fake.o
+
+# THE BATTLE SCREEN'S BEHAVIOUR (P4-C4). Deliberately NOT $(SCREEN_OBJS): this
+# binary links the battle screen and the things it actually calls, and nothing
+# else, so it cannot start passing because some other screen happens to define
+# a seam it needs. gfx_widgets.o + gfx_fb.o come along because the screen draws
+# and because the mirror case reads pixels back.
+# inventory.o + its two consumers since P5-C4: the battle screen takes the armed
+# BATTLE_MOD from it, which is where a capture-menu item finally reaches a fight.
+$(BIN)/test_battle_screen: $(OBJ)/screen_battle.o $(OBJ)/battle_renderer.o \
+                        $(OBJ)/audio.o \
+                        $(OBJ)/xbm_mirror.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
+                        $(OBJ)/pebble.o $(OBJ)/box.o $(OBJ)/genome.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o \
+                        $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/xp.o \
+                        $(OBJ)/evolution.o $(OBJ)/species.o \
+                        $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o
+
+# P10-C2: THE PERFORMANCE INSTRUMENT'S ARITHMETIC. ONE OBJECT AND NO OTHERS,
+# and that is the whole design of core/perf.cpp: the span, the wrap, the
+# saturation, the discard, the overrun boundary and the render scheduler's
+# deadline are decided above every device call, exactly as hardware/power.cpp's
+# pwr_tick_budget() was extracted at P6-C3. If this link line ever needs a
+# second object something device-shaped has leaked below the seam.
+#
+# NO CASE IN test_perf.cpp MEASURES TIME AND NONE MAY: micros() does not exist
+# here, ui/render.cpp and app/app.cpp are compiled by no host binary, and the
+# ~24 ms sendBuffer() that dominates a frame is a property of an absent bus.
+# Spec section 46's five thresholds are answered in docs/bench.md, on a board.
+$(BIN)/test_perf:       $(OBJ)/perf.o
+
+# P10-C2: THE SOAK THAT CAN BE RUN WITHOUT A BOARD. One simulated day of the
+# real loop - sim, Box, cooldowns, the corruption deadline and the real
+# save_manager writing into a fake NVS every simulated minute - with a global
+# operator new counter armed for the whole run. It is in the ASAN set as well,
+# because a counter says "nothing was allocated" and LSAN says "nothing that was
+# allocated was lost", and the second is the half a counter cannot see.
+#
+# IT IS NOT SPEC SECTION 46's 24 h SOAK AND MUST NEVER BE QUOTED AS ONE: it
+# links none of the four subsystems that allocate on the device (Wi-Fi,
+# WebServer, U8g2, ESP-NOW). test_soak.cpp's banner says so; docs/bench.md
+# step A5 is the real one.
+$(BIN)/test_soak:       $(OBJ)/alloc_count.o $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o \
+                        $(OBJ)/corruption.o $(OBJ)/cooldowns.o \
+                        $(OBJ)/save_manager.o \
+                        $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/boot_host.o \
+                        $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/species.o $(OBJ)/species_custom.o \
+                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+
+# P10-C2: "THE SOUND SETTING PERSISTS", END TO END. A DELIBERATELY WIDE LINK
+# LINE, and the width IS the test: the claim joins hardware/audio.cpp to
+# persistence/save_manager.cpp through persistence/game_state.cpp, and the join
+# itself lives in app/app.cpp, which no host binary compiles. Every link was
+# already covered on its own and the join was covered nowhere. Nothing here is
+# a fake except the NVS partition and the piezo.
+#
+# NOTE WHY THIS IS NOT IN tests/test_audio.cpp: that binary's link line says in
+# its own comment that a second object there means something device-shaped has
+# leaked below the AudioSink seam, and it is right. The persistence chain is a
+# different claim and gets its own binary.
+$(BIN)/test_sound:      $(OBJ)/audio.o $(OBJ)/game_state.o $(OBJ)/save_manager.o \
+                        $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/boot_host.o \
+                        $(OBJ)/crc16.o $(OBJ)/rng.o $(OBJ)/validate.o \
+                        $(OBJ)/pebble.o $(OBJ)/evolution.o $(OBJ)/xp.o \
+                        $(OBJ)/genome.o $(OBJ)/species_custom.o
 
 # The navigation machine and the section 7 router, over the REAL table.
 $(BIN)/test_statemachine: $(SCREEN_OBJS) $(OBJ)/state_machine.o \
                         $(OBJ)/input_router.o $(OBJ)/host_shims.o
 # pet_view.cpp is the model->view seam petfx and actfx read (P2-C11c). It is
 # pure, so it compiles here; sim.o comes with it because the live fill reads
-# sim_stat_pct() / sim_mood_score().
-$(BIN)/test_pet_view:   $(OBJ)/pet_view.o $(OBJ)/sim.o $(OBJ)/box.o \
-                        $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+# sim_stat_pct() / sim_mood_score() - and since P4-C4a because the care case
+# drives a REAL bound simulation through sim_god_set_stat().
+# evolution.o + xp.o as well: the evolution cases evolve a Pebble and re-fill
+# its PetView through pet_view_fill_sim() + pet_view_attach(), which IS the pair
+# ui.cpp:201-203 calls. (Until P4-C4a they drove pet_view_fill(), a function no
+# firmware file called; that function is deleted and this comment no longer
+# has to explain why the case proved only the model half.)
+$(BIN)/test_pet_view:   $(OBJ)/pet_view.o $(OBJ)/sim.o $(OBJ)/daylight.o \
+                        $(OBJ)/box.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
+                        $(OBJ)/evolution.o $(OBJ)/xp.o
 
 $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
 
+# --- the browser harness's device end (P8-C4) -------------------------------
+# tools/page_test.mjs drives the SHIPPED creator page in a headless browser and
+# captures the body it POSTs. Nothing in JavaScript can say whether those bytes
+# mean what the device thinks they mean - in particular whether the page's XBM
+# bit order is the device's - so the harness pipes them through THE REAL
+# creator_parse.cpp and THE REAL validate.cpp, which is all this binary is.
+#
+# NOT part of `check`: it reads a document from outside the tree, which is what
+# tests/tools/ means. `make -C tests pagetool` builds it; tools/check.sh builds
+# it only when it is about to run the browser.
+.PHONY: pagetool
+pagetool: $(BIN)/creator_decode
+
+$(BIN)/creator_decode: tools/creator_decode.cpp $(OBJ)/creator_parse.o \
+                        $(OBJ)/creator_gate.o $(OBJ)/validate.o $(OBJ)/species_custom.o \
+                        $(OBJ)/species.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o \
+                        $(OBJ)/rng.o | $(BIN)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
+
+# --- the balance instruments (P9-C4) ----------------------------------------
+# THE TWO SIMULATORS THE BALANCE PASS IS DECIDED WITH. Both print a report and
+# answer a human, so neither is in `check` - that is what tests/tools/ means -
+# and neither is picked up by TESTS, which is $(wildcard test_*.cpp).
+#
+# balance_matrix links exactly test_battle_ai's object list and no more: the
+# content tables, type_mod_of() and species_get() are all inline in the
+# generated headers, so a round never leaves them and no species.o is needed.
+.PHONY: balancetool
+balancetool: $(BIN)/balance_matrix $(BIN)/sim_days
+
+$(BIN)/balance_matrix: tools/balance_matrix.cpp $(OBJ)/battle_ai.o $(OBJ)/battle.o \
+                        $(OBJ)/pebble.o $(OBJ)/genome.o $(OBJ)/crc16.o \
+                        $(OBJ)/rng.o | $(BIN)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
+
+# sim_days is the whole care/XP/encounter day, so it links the three modules the
+# app layer wires together and NOT app.cpp itself, which is Arduino-bound:
+# sim.o (care), xp.o + evolution.o (the curve, as the pair they always are),
+# encounters.o + species.o (the roll) and daylight.o (the sleep window sim.cpp
+# reads).
+#
+# box.o IS LINKED DEAD AND THAT IS DELIBERATE (corrected at P9-C6: this comment
+# used to claim box.o was here for "the Box recovery half of the care model",
+# which is the opposite of the truth). sim_days.cpp calls no box_* function and
+# never calls box_bind(), so box.cpp's static state stays null and none of its
+# code is reachable; game/sim.cpp does not call into it either. THE SIMULATED
+# DAY IS ONE ACTIVE PEBBLE. BOX_RECOVER_MPH governs BENCHED slots, which earn no
+# XP and take no care actions, so it is outside the question sim_days answers -
+# and the XP-curve decision P9-C4 settled rests on these numbers, so what the
+# instrument did and did not cover has to be right where a reader looks for it.
+# The object stays on the link line only because game/sim.cpp declares against
+# it; removing it is a separate change to sim.cpp'''s dependencies.
+$(BIN)/sim_days: tools/sim_days.cpp $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o \
+                        $(OBJ)/xp.o $(OBJ)/evolution.o $(OBJ)/encounters.o \
+                        $(OBJ)/species.o $(OBJ)/genome.o $(OBJ)/crc16.o \
+                        $(OBJ)/rng.o | $(BIN)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
+
+# --- the sprite renderer (P9-C1) --------------------------------------------
+# THE ONLY INSTRUMENT THIS PROJECT HAS FOR "DOES IT LOOK LIKE A CREATURE".
+# Every other check about art is a check about bytes. This one prints the
+# COMPILED atlas as text and writes a PBM contact sheet, so 60 incoming bodies
+# can be reviewed by a person rather than by a byte count.
+#
+# NOT part of `check`: it writes files and answers a human, which is what
+# tests/tools/ means. `make -C tests spritetool` builds it. The atlas itself is
+# `inline constexpr`, so the ONE object it links is petfx_core.o - the shipped
+# pf_build_lids(), for the `blink` mode, which composites the frame that is in
+# neither authored frame and that nothing in this tree could draw before P9-C6.
+.PHONY: spritetool
+spritetool: $(BIN)/sprite_dump
+
+$(BIN)/sprite_dump: tools/sprite_dump.cpp $(OBJ)/petfx_core.o | $(BIN)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(OBJ)/petfx_core.o $(OBJ)/utf8.o -o $@
+
+# --- the corruption glitch, drawn (P9-C5) -----------------------------------
+# THE SAME ARGUMENT sprite_dump MAKES, ONE LAYER UP. Every automated check this
+# chunk offers about the glitch is about GEOMETRY - it stays in the box, it
+# changes some pixels, the gate lights one slot in eight - and none of them can
+# see whether the effect READS as corruption. This renders a real body from the
+# compiled atlas at the real floor line, asks the SHIPPED ui/corrupt_fx.cpp for
+# the rows and XORs them in, so a person can look at it.
+#
+# NOT part of `check`: it prints a picture and asserts nothing, which is what
+# tests/tools/ means.
+.PHONY: corrupttool
+corrupttool: $(BIN)/corrupt_view
+
+$(BIN)/corrupt_view: tools/corrupt_view.cpp $(OBJ)/corrupt_fx.o | $(BIN)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
+
 # --- goldens ----------------------------------------------------------------
-golden: $(BIN)/test_sim_golden
-	./$(BIN)/test_sim_golden --record
+golden: $(BIN)/test_care_golden $(BIN)/test_battle_golden
+	./$(BIN)/test_care_golden --record
+	./$(BIN)/test_battle_golden --record
 
 # Screen snapshots (golden/screens/*.pbm). Same rule as above: only from a
 # commit that means to change what a screen looks like, and read the diff.

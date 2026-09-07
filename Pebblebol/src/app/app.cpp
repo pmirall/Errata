@@ -15,36 +15,59 @@
 #include "app.h"
 
 #include <Arduino.h>
+#include <string.h>
 #include <esp_random.h>
 
 #include "../core/config.h"
 #include "../core/nt_types.h"
+#include "../core/perf.h"        // P10-C2: the frame / pass instrument
 #include "../core/strings_es.h"
 #include "../game/genome.h"
 #include "../core/rng.h"
+#include "../game/activity.h"    // the daily activity score (P6-C2)
+#include "../game/cooldowns.h"   // cd_begin() from setup (P5-C2/C3)
+#include "../game/corruption.h"  // cor_service(): the 24 h deadline (P9-C5)
 #include "../game/sim.h"
 #include "../persistence/game_state.h"
 #include "../game/box.h"
+#include "../game/trade.h"        // the boot resolver (P7-C4)
+#include "../networking/trade_link.h"   // trade_wire_codec()
+#include "../game/xp.h"
+#include "../game/evolution.h"
 #include "../data/species_table.h"
 #include "../persistence/save_manager.h"
 #include "../hardware/boot.h"
 #include "../hardware/kv_nvs.h"
 #include "../hardware/gametime.h"
 #include "../hardware/input.h"
+#include "../hardware/power.h"    // the idle ladder (P6-C3)
+#include "../hardware/audio.h"
 #include "../ui/render.h"
 #include "../networking/net.h"
-#include "../networking/ble_social.h"
 #include "../ui/ui.h"
 #include "../ui/screen_error.h"   // the ERROR screen's retry / LED bindings
 #include "../networking/webui.h"
 #include "../dev/godmode.h"
+#include "onboarding.h"
+#include "state_machine.h"       // sm_current(): the power ladder's release hook reads it
 // data/index_html.h is deliberately NOT included: networking/webui.cpp is its
 // single translation unit (a second inclusion doubles the page blob in .rodata).
 
-// Guard rail for the 1 Hz scheduler: a stall longer than this (a long offline
-// catch-up, an NVS write storm) resynchronises instead of firing a burst of
-// catch-up ticks.
-#define NT_TICK_RESYNC_MS   4000UL
+// Guard rail for the 1 Hz scheduler. NT_TICK_MAX_OWED_S is in config.h beside
+// the sleep slices, because it is the same number seen from the other side.
+//
+// P6-C3 RAISED IT FROM NT_TICK_RESYNC_MS's 4 s AND TURNED IT FROM A DROP INTO A
+// CHARGE, and the difference is the whole point of the sleep rung. Before, the
+// loop advanced g_tick_ms by exactly 1000 ms per pass and resynchronised past
+// anything longer than 4 s - so an 8 s light-sleep slice would have run ONE
+// second of simulation and thrown the other seven away, which is a pet whose
+// timers stop while it sleeps (tests/test_care.cpp measures that shape). The
+// bound still exists for the case it was written for: a stall is not elapsed
+// game time and must not be charged.
+static_assert((uint32_t)NT_TICK_MAX_OWED_S * 1000UL > (uint32_t)PWR_SLEEP_SLICE_MS,
+              "a sleep slice must fit inside the tick scheduler's catch-up "
+              "bound, or the seconds the device slept would be resynchronised "
+              "away instead of charged to the pet");
 
 // Gestures drained per loop(). input_poll() hands out one queued gesture per
 // call; four is more than a human can generate inside one pass.
@@ -68,13 +91,31 @@ static uint8_t  g_clock_was_valid = 0;     // edge detector for a landing calibr
 static uint8_t  g_nvs_ok          = 0;
 static uint8_t  g_display_ok      = 0;     // rd_begin() answered on the I2C bus
 
+// THE POWER LADDER'S OWN IDLE CLOCK (P6-C3). millis() of the last gesture this
+// file dispatched. hardware/power.h says why it is not sm_idle_ms(): the IDLE
+// rung releases the radio by navigating, and a navigation resets the NAVIGATION
+// idle clock, so the ladder would have reset its own timer at the instant it
+// arrived and oscillated for ever.
+static uint32_t g_input_ms       = 0;
+// A press that ended a light sleep was aimed at the DEVICE - the panel was dark
+// - so the first gesture inside this window is consumed for the wake and never
+// reaches the screen. The window exists so that a wake nobody followed up on
+// cannot swallow an unrelated press a minute later.
+#define NT_WAKE_SWALLOW_MS  1500UL
+static uint32_t g_wake_ms        = 0;
+static uint8_t  g_wake_armed     = 0;
+
 // =============================================================================
 //  THE TWO CLOCKS persistence/save_manager.cpp CANNOT COMPUTE ITSELF
 //  A monotonic millisecond counter for the flash-wear filter, and the wall
 //  clock for saved_epoch. Injecting them is what keeps the save policy pure and
 //  host-testable (save_manager.h).
 // =============================================================================
-static uint32_t clock_ms(void)    { return millis(); }
+// gt_mono32(), not millis(): the wear filter defers a write by a millisecond
+// period, and a period measured in UPTIME would be paused for the whole of a
+// sleep - so the first tick after a ten-minute sleep would find the last write
+// "recent" and defer again. gametime.h says which clock decides what.
+static uint32_t clock_ms(void)    { return gt_mono32(); }
 static uint32_t clock_epoch(void) { return gt_now(); }
 
 // =============================================================================
@@ -90,7 +131,10 @@ static void apply_config(void)
 {
   ui_note_brightness(g_cfg.brightness);
 
-  net_set_credentials(g_cfg.wifi_ssid, g_cfg.wifi_pass);
+  // net_set_credentials() was here. It went with the station path (P5-C1):
+  // this firmware never joins a network, so there is nothing to apply.
+  // Config.wifi_ssid / wifi_pass stay in the struct as frozen padding - their
+  // offsets are pinned by tests/fixtures/config_v1.bin - and nothing reads them.
 
   g_cfg_crc = g_cfg.crc16;
 }
@@ -109,6 +153,20 @@ static bool app_retry_display(void)
   apply_config();
   return true;
 }
+
+// hardware/audio.h asks the firmware exactly one question - "is sound off?" -
+// and this is the whole answer. It reads CF_MUTE off the live Config every
+// time instead of the engine holding a copy, because a copy is a second place
+// the flag lives and ui/screen_settings.cpp and ui/screen_home.cpp both toggle
+// the original.
+// THE PREDICATE ITSELF IS NOT HERE ANY MORE (P10-C2). It is
+// cfg_sound_muted() in core/nt_types.h, because this file is compiled by no
+// host binary: a test that re-wrote `(flags & CF_MUTE) != 0` in its own fixture
+// would be asserting a COPY of the one line that decides whether a persisted
+// setting reaches the piezo, which is exactly how the phase-6 defect survived
+// four phases. tests/test_sound.cpp drives THIS function's body through the
+// real save_manager, and tools/check.sh gates that src/app still calls it.
+static bool app_audio_muted(void) { return cfg_sound_muted(g_cfg); }
 
 static void app_led(bool on)
 {
@@ -182,6 +240,225 @@ static bool gain_source(uint8_t pts[GS_GAIN_SLOTS], uint32_t& epoch)
 }
 
 // =============================================================================
+//  THE XP FUNNEL
+//  Every source of experience goes through here, and nowhere else, so the
+//  three things a level-up owes the rest of the system happen exactly once:
+//  the anti-farm ledger reaches flash the instant XP is SPENT (a reboot must
+//  not be able to refill it), the UI is told through the event word it already
+//  drains, and the new level is committed rather than left in RAM.
+//
+//  Only the ledger DECREASE is persisted, and since P6-C4 that is the whole of
+//  what a reboot gets back. A refill needs no blob because it needs no wall
+//  clock: xp_ledger_tick() puts the points back out of seconds the device
+//  watched pass, and xp_ledger_restore() adds nothing at all. It used to add
+//  (now_epoch - saved_epoch) / refill_step, which is the composition the hourly
+//  gain budget above STILL uses - and which a player refills by typing a date on
+//  the time screen. game/xp.cpp carries the measurement.
+// =============================================================================
+bool app_award_xp(uint16_t amount, XpSource src)
+{
+  if (amount == 0u) return false;
+  const uint8_t act = box_active();
+  if (act >= (uint8_t)BOX_SLOTS) return false;
+  PebbleInstance* p = box_slot(act);
+  if (!p) return false;
+
+  uint8_t before[XP_LEDGER_SLOTS];
+  uint8_t after[XP_LEDGER_SLOTS];
+  xp_ledger_snapshot(before);
+
+  uint8_t    ups     = 0;
+  const bool leveled = xp_add(*p, amount, src, &ups);
+
+  xp_ledger_snapshot(after);
+  if (memcmp(before, after, sizeof after) != 0) {
+    (void)gs_save_xp_ledger(after, sim_now());
+  }
+
+  if (leveled) {
+    sim_post_event(SIM_EV_LEVEL_UP);
+    (void)gs_save_active(true);
+  }
+  return leveled;
+}
+
+// =============================================================================
+//  THE ACTIVITY SEAM (P6-C2, spec sections 25 and 57)
+//
+//  game/activity.cpp is pure and clock-free: it takes the wall clock and the
+//  calibration state as an argument, exactly as game/cooldowns.cpp does, so
+//  this file is where the two are read. app_act_clock() is the only place they
+//  are assembled, so no caller can pass one without the other - and CAL_UNSET
+//  is what makes the whole score zero.
+// =============================================================================
+ActClock app_act_clock(void)
+{
+  ActClock c;
+  c.now_epoch = gt_now();
+  c.cal       = (uint8_t)gt_cal_state();
+  return c;
+}
+
+// -----------------------------------------------------------------------------
+//  PAYING WHAT THE SCORE EARNED. Drained once per logic tick and NOWHERE else:
+//  the screens and the care path only ever NOTE activity, so no screen can pay
+//  XP or happiness on its own and there is exactly one place to look for either.
+//
+//  THE XP GOES THROUGH app_award_xp(XP_SRC_CARRY), which is the metered bucket,
+//  which is the last of game/activity.h's anti-farm layers: even a bug in every
+//  rule above it leaves the award rate-limited by a budget that only seconds the
+//  device WATCHED PASS can refill. That sentence was false until P6-C4 - the
+//  budget was also refilled by (now_epoch - saved_epoch) at every boot, and both
+//  of those are a wall clock the player types on the time screen - which is why
+//  game/xp.cpp's restore no longer ages anything forward.
+//
+//  THE HAPPINESS IS APPLIED THE WAY game/inventory.cpp's care items apply
+//  theirs - clamped at PB_CARE_MILLI_MAX, never above, on the ACTIVE Pebble
+//  only. A creature in the Box is not being carried. What it is NOT is a second,
+//  unmetered reward: it is scaled to the XP the ledger actually paid for, so the
+//  one budget covers both halves. See act_happy_for_granted_xp().
+// -----------------------------------------------------------------------------
+void app_pay_activity(void)
+{
+  // The persisted half of the score changed: it rides the "cd" pair, so this is
+  // the same save cd_take_dirty() asks for.
+  //
+  // save_cooldowns() has no wear filter of its own - it is a straight
+  // pair_write() - so the WRITE COUNT is whatever act_take_dirty() says, and
+  // the caps are what bound it: 240 carried minutes + 20 interactions + 10
+  // networks is AT MOST 270 writes a day, after which every further note
+  // returns 0 before it can dirty anything. That is a fifth of the 1,440 the
+  // "t" last-seen key already costs, and it is the reason the counters are
+  // capped BEFORE the flag is set rather than after.
+  //
+  // The take-and-clear runs even in a read-only session, deliberately: the flag
+  // must not survive to ask for a write later, and a read-only session is
+  // exactly the one that may not write. gs_readonly() is checked second for
+  // that reason and the short-circuit is the wrong way round on purpose.
+  if (act_take_dirty() && !gs_readonly()) (void)save_cooldowns(gs_state().cds);
+
+  const ActGain g = act_take_gain();
+
+  // ONE BUDGET, BOTH HALVES OF THE REWARD. The award is what spends the meter,
+  // so what it spent is read off the meter either side of it rather than
+  // guessed: xp_add() takes min(owed, left) and nothing else can move the bucket
+  // in between. A PEBBLE AT XP_LEVEL_MAX USED TO BE THE ONE CASE WHERE THIS PAID
+  // NOTHING - xp_add() returned before it spent the meter, so granted was 0 and
+  // the happiness stopped with the XP. P7-C6 moved meter_take() above that
+  // return; the two halves now agree at every level and game/xp.h states what
+  // the device-wide ledger means as a result.
+  uint16_t granted = 0u;
+  if (g.xp != 0u) {
+    const uint16_t before = xp_daily_left(xp_ledger(), XP_SRC_CARRY);
+    (void)app_award_xp(g.xp, XP_SRC_CARRY);
+    const uint16_t after  = xp_daily_left(xp_ledger(), XP_SRC_CARRY);
+    granted = (before > after) ? (uint16_t)(before - after) : 0u;
+  }
+
+  const uint16_t happy = act_happy_for_granted_xp(g, granted);
+  if (happy != 0u) {
+    const uint8_t act = box_active();
+    PebbleInstance* p = (act < (uint8_t)BOX_SLOTS) ? box_slot(act) : nullptr;
+    if (p != nullptr && p->care[CARE_HAPPINESS] < (int32_t)PB_CARE_MILLI_MAX) {
+      int32_t v = p->care[CARE_HAPPINESS] + (int32_t)happy;
+      if (v > (int32_t)PB_CARE_MILLI_MAX) v = (int32_t)PB_CARE_MILLI_MAX;
+      p->care[CARE_HAPPINESS] = v;
+    }
+  }
+}
+
+void app_note_interaction(void)
+{
+  (void)act_note_interaction(gs_state().cds, app_act_clock());
+}
+
+// =============================================================================
+//  EVOLUTION (spec section 18, plan P3-C3)
+//
+//  ui.cpp asks app_evolution_offer() whether to put the question, and if the
+//  player answers yes it calls app_evolve_active() BEFORE it starts the show.
+//  The model change and BOTH of its flushes are therefore finished before the
+//  first ceremony frame is drawn: a brownout half way through the 4.5 s reboots
+//  into the evolved creature, never into a half-applied one. That ordering is
+//  the whole argument at the top of ui/ceremony.h and it must not be relaxed.
+//
+//  THE CONTEXT IS BUILT HERE because this is where a PebbleInstance can be
+//  read. Happiness comes off the care array and corruption off the status byte;
+//  items and the activity score do not exist until P6, so their EVOCTX_* bits
+//  are left CLEAR and any rule that needs one REFUSES (game/evolution.h). An
+//  unsupplied input that answered "true" would evolve a creature on a
+//  requirement nobody checked.
+// =============================================================================
+static void evo_context_of(const PebbleInstance& p, EvoContext& ctx)
+{
+  evo_context_clear(ctx);
+
+  int32_t happy = p.care[CARE_HAPPINESS];
+  if (happy < 0)                  happy = 0;
+  if (happy > PB_CARE_MILLI_MAX)  happy = PB_CARE_MILLI_MAX;
+  ctx.happiness = (uint16_t)(happy / (PB_CARE_MILLI_MAX / 100L));   // milli -> %
+  ctx.have |= EVOCTX_HAPPINESS;
+
+  ctx.corrupted = (uint8_t)((p.status & PBS_CORRUPTED) != 0u);
+  ctx.have |= EVOCTX_CORRUPTED;
+}
+
+bool app_evolution_offer(void)
+{
+  if (gs_readonly()) return false;          // a read-only session offers nothing
+  const uint8_t act = box_active();
+  if (act >= (uint8_t)BOX_SLOTS) return false;
+  const PebbleInstance* p = box_peek(act);
+  if (!p) return false;
+  // The bit game/xp.cpp raised. It says the LEVEL requirement is met and
+  // nothing more, so the whole rule is re-evaluated below with real context.
+  if (!(p->evo_state & (uint8_t)EVO_STATE_PENDING)) return false;
+
+  EvoContext ctx;
+  evo_context_of(*p, ctx);
+  return evolution_ready(*p, ctx) != 0u;
+}
+
+bool app_evolve_active(void)
+{
+  if (gs_readonly()) return false;
+  const uint8_t act = box_active();
+  if (act >= (uint8_t)BOX_SLOTS) return false;
+  PebbleInstance* p = box_slot(act);
+  if (!p) return false;
+
+  EvoContext ctx;
+  evo_context_of(*p, ctx);
+
+  // Kept so the RAM change can be undone if the commit below refuses. Without
+  // it a failed write would leave an evolved creature that flash has never
+  // heard of - which is the exact state this function's ordering exists to
+  // make impossible.
+  const PebbleInstance before = *p;
+  if (!evolution_apply(*p, ctx)) return false;
+
+  // COMMIT, before anything animates. game/sim.cpp holds a raw pointer at this
+  // same record and nothing moved it, so the simulation needs no re-bind:
+  // species_id and hp_cur are not mirrored into its SimView, and the stage it
+  // does mirror is derived from the level, which did not change.
+  //
+  // THE RETURN VALUE IS THE PROMISE. app.h tells the caller it may start a
+  // 4.5 s ceremony because the change is already on flash; if the write did
+  // not happen, saying "true" would turn a full NVS or a read-only session
+  // into a silently lost evolution the moment the battery dips mid-show. Roll
+  // back and refuse instead: the player sees no ceremony, keeps their pebble,
+  // and the pending bit is still up so the offer returns.
+  if (!gs_save_active(true)) { *p = before; return false; }
+
+  // The checkpoint is a BACKUP of a save that already succeeded, so its failure
+  // does not invalidate the evolution and must not roll one back. The ceremony
+  // may proceed; only the nvs2 recovery copy is stale, which is what
+  // save_checkpoint_all() failing means everywhere else in this file too.
+  (void)save_checkpoint_all();
+  return true;
+}
+
+// =============================================================================
 //  BOOT: THE BOX AND THE ACTIVE PEBBLE
 //  persistence decides whether there is anything to load; game/box.cpp decides
 //  which slot is active and what a brand new Pebble is; the app.cpp only
@@ -201,25 +478,144 @@ static bool bind_active(void)
   return true;
 }
 
+// =============================================================================
+//  THE TRADE STORE SEAM (game/trade.h). Four one-line shims, and they exist so
+//  that game/trade.cpp - a pure module - can own the WRITE ORDER without
+//  including persistence/kv_store.h. Each returns whether the bytes LANDED:
+//  save_manager.cpp verifies its own writes by reading them back, and a write
+//  that did not land has to stop the sequence rather than be assumed.
+// =============================================================================
+static uint16_t g_trade_toast = 0;      // STR_* queued for the first HOME frame
+
+static bool app_trade_write_journal(void* ctx, const PendingTrade& t)
+{
+  (void)ctx;
+  gs_state().trade = t;
+  return save_trade_journal(t);
+}
+static bool app_trade_write_slot(void* ctx, uint8_t slot)
+{
+  (void)ctx;
+  if (slot >= (uint8_t)BOX_SLOTS) return false;
+  // save_pebble_now(), NOT save_pebble(..., true) - and this shim is the BOOT
+  // RESOLVER's, so getting it wrong makes the last line of defence destroy what
+  // it exists to save. See persistence/save_manager.h.
+  return save_pebble_now(slot, gs_state().pebbles[slot]);
+}
+static bool app_trade_write_box(void* ctx)
+{
+  (void)ctx;
+  return save_box_header(gs_state().box);
+}
+static void app_trade_checkpoint(void* ctx)
+{
+  (void)ctx;
+  // A failed checkpoint does not invalidate the trade: the same sentence
+  // app_evolve() makes about the evolution ceremony. Only the nvs2 recovery
+  // copy is stale.
+  (void)save_checkpoint_all();
+}
+
+// =============================================================================
+//  BOOT: AN INTERRUPTED TRADE (P7-C4, spec section 16)
+//
+//  THIS RUNS BEFORE THE PET IS BOUND AND IT IS THE ONLY REASON THE JOURNAL IS
+//  WORTH WRITING. game/trade.h's whole property - "at every power-loss point
+//  the next boot leaves the Box holding either the outgoing Pebble or the
+//  incoming one, never both and never neither" - is a property of THIS CALL
+//  existing on the shipping path. Without it the journal is bytes nobody reads,
+//  which is exactly what it was before this commit: save_load_all() loaded
+//  gs.trade and `grep -rn 'gs.trade' app/ ui/ game/` returned nothing.
+//
+//  IT RUNS ON EVERY BOOT, INCLUDING THE ONES WITH NO TRADE IN THEM: a record
+//  that is absent, rotten or IDLE answers TRS_NONE and costs one struct read.
+//
+//  ORDER. After gs_load() (the journal comes off flash there) and BEFORE
+//  boot_box(), because the resolver can change WHICH Pebble is in the Box and
+//  which slot is active, and boot_box() is what binds the simulation to it.
+// =============================================================================
+static void boot_trade(void)
+{
+  box_bind(gs_state());                       // the resolver mutates the Box
+
+  // NO "is there a trade?" TEST HERE. game/trade.cpp's trade_journal_live()
+  // already answers it - magic, version and phase - and a second copy of that
+  // question in this file would be a second thing to keep true. An absent,
+  // rotten or IDLE record answers TRS_NONE and costs one struct read.
+  TradeStore store;
+  store.write_journal = &app_trade_write_journal;
+  store.write_slot    = &app_trade_write_slot;
+  store.write_box     = &app_trade_write_box;
+  store.checkpoint    = &app_trade_checkpoint;
+  store.ctx           = nullptr;
+
+  PendingTrade j = gs_state().trade;
+  const TradeResolution r = trade_resolve(j, trade_wire_codec(), store, gt_now());
+  gs_state().trade = j;
+
+  // The player is told. A Pebble that silently appeared or silently went is the
+  // failure mode this line exists against; the toast is queued here and drawn
+  // over HOME once the UI is up.
+  if      (r == TRS_COMPLETED)    g_trade_toast = (uint16_t)STR_TR_RESOLVED;
+  else if (r == TRS_ROLLED_BACK)  g_trade_toast = (uint16_t)STR_TR_ROLLED_BACK;
+  else if (r == TRS_LOST)         g_trade_toast = (uint16_t)STR_TR_LOST;
+}
+
 static void boot_box(void)
 {
   box_bind(gs_state());
 
+  // Empty is the safe seed for the anti-farm ledger; the branches below either
+  // reconstruct it from what was actually left at the last save, or - on a
+  // device with no history at all - hand it the full caps.
+  xp_ledger_reset(0);
+
   if (gs_have_pebble() && bind_active()) {
     // sim_bind() seeded the hourly gain budget to 0 - safe, but a lie to anyone
     // who just had a power cut ("esta llena" at 19 % satiety for the first
-    // minute, no full meal for 29 min). Replace it with what was actually left
-    // at the last save, aged forward to the moment the device was last alive.
-    // boot_absence()'s catch-up then refills the rest of the interval,
-    // [last_seen, now], through its own gain_refill() - the two terms compose
-    // into min(cap, saved + (now - saved_epoch) * cap / 3600), to within the
-    // one milli-point that the two integer divisions can differ by.
+    // minute). Replace it with what was actually left at the last save.
+    //
+    // IT NO LONGER AGES THAT SNAPSHOT FORWARD (P7-C6). It used to add
+    // (now - saved_epoch) * cap / 3600, and BOTH of those epochs are wall
+    // clocks a player types on the time screen - so 100 rounds of
+    // (clock +1 h, reboot) from a spent ledger manufactured 4,000 happiness
+    // gain points. The remaining refill is boot_absence()'s catch-up, which
+    // spends seconds THIS DEVICE WATCHED PASS. The cost is written into
+    // game/sim.h: off-time no longer refills the hourly budget, so a full meal
+    // can be up to 29 minutes out after an hour away.
     // A missing or corrupt blob leaves sim_bind()'s 0 in place.
     uint8_t  gpts[GS_GAIN_SLOTS];
     uint32_t gepoch = 0;
     if (gs_load_gain(gpts, gepoch)) {
       (void)sim_gain_restore(gpts, GS_GAIN_SLOTS, gepoch,
                              sim_pebble()->last_updated_epoch);
+    }
+    // THE XP LEDGER IS NOT THE SAME COMPOSITION AT ALL, SINCE P6-C4. It ages
+    // nothing forward: the restore hands back exactly the bytes of the last
+    // snapshot, and every point past that has to be refilled by
+    // xp_ledger_tick() out of seconds this device watched pass. The two epochs
+    // below still travel, because they are what says the blob came from a device
+    // that knew the date, but they no longer buy a single point.
+    //
+    // They used to. left = min(cap, saved + (now - saved)/step) reads a wall
+    // clock at both ends, the wall clock is typed on the time screen, and one
+    // day of "elapsed" refills a whole bucket - so (clock +1 day, reboot, one
+    // scan) x100 spent 990 metered XP in zero real seconds. game/xp.cpp carries
+    // the measurement and what the honest player loses for closing it.
+    //
+    // THE CARE GAIN LEDGER ABOVE HAD THAT SHAPE UNTIL P7-C6 AND NO LONGER DOES.
+    // Both restores now hand back exactly the bytes of their snapshot and let
+    // the catch-up refill out of observed seconds. The two ledgers are still
+    // different currencies - one bounds hourly stat gains, the other metered XP
+    // - but they have stopped disagreeing about whether a typed date is time.
+    // Without a trustworthy snapshot the XP budget stays at the zero
+    // xp_ledger_reset(0) seeded: unkind for an hour, but the only direction that
+    // cannot be farmed by power-cycling the device after spending the budget.
+    uint8_t  xpts[XP_LEDGER_SLOTS];
+    uint32_t xepoch = 0;
+    if (gs_load_xp_ledger(xpts, xepoch)) {
+      (void)xp_ledger_restore(xpts, (uint8_t)XP_LEDGER_SLOTS, xepoch,
+                              sim_pebble()->last_updated_epoch);
     }
     return;
   }
@@ -229,6 +625,11 @@ static void boot_box(void)
   // has levels, and the hatch ceremony becomes the evolution shell in P2-C11.
   // On a read-only session this Pebble is never written; it exists only so the
   // renderer has something to draw behind the error the user is about to see.
+  // Nothing has ever been earned on this device, so a full ledger cannot be a
+  // refill of a spent one - and a Pebble out of the box should not owe its
+  // owner six minutes before the first care action is worth anything.
+  xp_ledger_reset(1);
+
   const uint32_t now  = gt_now();
   const uint8_t  slot = box_new_pebble((uint8_t)SPECIES_ID_STARTER, 1,
                                        (uint8_t)ORIGIN_STARTER,
@@ -290,8 +691,11 @@ static void boot_absence(void)
     const BootKind bk       = boot_kind();
     const bool     real_gap = (g_boot_last_seen >= (uint32_t)NT_EPOCH_SANE_MIN) &&
                               (absence_s != 0u);
-    if (bk == BOOT_FIRST_RUN || bk == BOOT_CRASH || bk == BOOT_SOFT_RESET ||
-        !real_gap) {
+    // The list is nt_boot_charges_absence() in core/nt_types.h now, so this
+    // file and tests/test_clock.cpp read the same one. BOOT_DEEPSLEEP is in the
+    // charging set: a sleep gap IS elapsed time, and P6-C3's ladder is the
+    // thing that makes the device produce one on purpose.
+    if (!nt_boot_charges_absence(bk) || !real_gap) {
       known      = 1;     // nothing was abandoned: charge the true zero
       absence_s  = 0;
     }
@@ -312,6 +716,95 @@ static void boot_absence(void)
   ui_note_events(sim_take_events());
   (void)gs_save_active(true);
 }
+
+// =============================================================================
+//  THE POWER LADDER'S FOUR HOOKS (P6-C3, hardware/power.h)
+//  The ladder is pure and knows nothing about Config, the panel, the radio or
+//  the store. These four are the whole of what it can do to the device, and
+//  each one is a single call into the module that already owns that thing.
+// =============================================================================
+static void pwr_hook_dim(bool on)
+{
+  // Through ui, not through rd_contrast_ramp(): ui.cpp's bright_service() is
+  // the one owner of the contrast base and already arbitrates the user's
+  // brightness against the asleep-pet dim. A second writer would fight it on
+  // whichever of the two moved last.
+  ui_note_power_dim(on);
+}
+
+static void pwr_hook_panel(bool on)
+{
+  rd_power(on);
+}
+
+static void pwr_hook_release(void)
+{
+  // NOTHING TO RELEASE FROM A SCREEN THAT SAID IT IS A PLACE TO STAND. This
+  // predicate is a strict SUPERSET of the "== SCR_HOME" one it replaced: HOME is
+  // itself SF_STICKY (ui/screen_table.cpp), so every case the old test skipped is
+  // still skipped - and skipping it is not an optimisation, because re-entering
+  // HOME re-runs its enter hook, cuts the shared interpolators and closes
+  // whatever modal was up, every time the device idled.
+  //
+  // *** FINAL-REVIEW FIX. IT IS THE SAME DEFECT P10-C6 FIXED FOR ONE SCREEN. ***
+  // The old test named HOME. But ui's own 20 s auto-return (state_machine.cpp
+  // sm_service) already refuses to move a sticky screen, and has already taken
+  // every NON-sticky screen home 100 s earlier - so the only screens this hook
+  // could ever reach were the ones screen_table.cpp marks SF_STICKY, i.e. exactly
+  // the screens that explicitly opted out of being timed out. Each was taken to
+  // HOME at 120 s of no gesture with the panel blanked in the same transition:
+  // SCR_SETUP_NAME, SCR_SETUP_STARTER, SCR_TIME (whose table comment says
+  // SF_STICKY exists because "throwing away a half-entered date after 20 s of
+  // thinking would be wrong"), SCR_GAME, SCR_EVOLUTION, SCR_BATTLE, and worst
+  // SCR_ERROR - whose leave() hook clears s_blinking and calls led_set(0), which
+  // kills the blinking LED that this file calls "the ERROR screen's only voice
+  // when the panel is missing", with no route back for the rest of the power
+  // cycle because both SCR_ERROR entry points are inside app_setup(). CREATOR was
+  // spared only because P10-C6 added creator_screen_busy() to PowerInput.held -
+  // that fix WAS this defect, found once and patched for the one screen that
+  // happened to be holding a radio.
+  //
+  // NO RADIO DEBT IS LOST BY WIDENING IT. The two screens that discharge the
+  // radio through this hook - NETWORK and LINK - are NOT sticky, so they still
+  // arrive here. CREATOR is sticky but is clamped at DIM by ui_radio_job_busy()
+  // for as long as its access point is up, and self-exits on its own D7 timeout
+  // when it is not. tests/test_power_screens.cpp is the case that pins all three.
+  if (sm_is_sticky()) return;
+
+  // *** THE CARRIED RADIO DEBT, DISCHARGED HERE AND NOWHERE ELSE ***
+  // NOT net_request(RADIO_OFF). ui_home() navigates; sm_goto() runs the
+  // leaving screen's leave() hook; network_leave() calls wifi_scan_cancel(),
+  // which is the single idempotent path that stops the driver and releases the
+  // radio exactly once - and, inside wifi_down(), calls WiFi.scanDelete() on
+  // the per-access-point array the driver heap-allocated. Going round that
+  // would leave the job WSCAN_RUNNING with stopped == 0: wifi_scan_is_busy()
+  // would go on answering true to this very ladder, and the next poll would
+  // report FAILED to a player who did nothing. CREATOR's leave hook releases
+  // the AP the same way. tools/check.sh gates hardware/power.* for the radio
+  // call; tests/test_power.cpp is the case that watches the job end CANCELLED.
+  ui_home();
+}
+
+static void pwr_hook_persist(void)
+{
+  // Once, on the way into IDLE, while the device is definitely awake and a
+  // clean save is still cheap. save_touch_lastseen() first: without it the
+  // absence baseline is however long ago the last 1 Hz tick was, and a sleep
+  // measured from a stale baseline charges the awake time too.
+  // NOT ON A READ-ONLY SESSION. gs_save_active() already refuses one, but
+  // save_touch_lastseen() does not - it is a save_manager primitive and the
+  // read-only guard lives in the gs_* facade - so a board parked behind SAVE
+  // ERROR wrote the "t" key every 60 s into the save it had declared
+  // untrustworthy, with no player action at all. This is docs/bench.md G3's
+  // board and it is the ONE write on that path that needs no gesture.
+  if (gs_readonly()) return;
+  save_touch_lastseen(gt_now());
+  (void)gs_save_active(true);
+}
+
+static const PowerHooks kPowerHooks = {
+  &pwr_hook_dim, &pwr_hook_panel, &pwr_hook_release, &pwr_hook_persist
+};
 
 // =============================================================================
 //  SETUP
@@ -359,6 +852,12 @@ void app_setup(void)
   // config, and both are answers this call produces.
   save_set_clock(&clock_ms, &clock_epoch);
   const LoadResult load = gs_load(g_cfg);
+  // P10-C1. `load` used to be a local printed once at the bottom of this
+  // function and then dropped, so spec section 49's "Last error" field could
+  // never name the one thing most likely to be wrong about a boot. One byte,
+  // recorded above dev/godmode.cpp's GOD_MODE_ENABLED guard, so the SHIPPING
+  // build's `info` command can read it back.
+  god_note_load((uint8_t)load);
   boot_note_save(gs_have_pebble());
   const BootKind boot = boot_kind();
 
@@ -376,11 +875,50 @@ void app_setup(void)
   // one, and that write is what retires a stale snapshot on a unit whose clock
   // is gone.
   gs_bind_gain(&gain_source);
+  // AN INTERRUPTED TRADE IS FINISHED OR UNDONE BEFORE THE PET IS BOUND. It has
+  // to be before boot_box(), because the resolver can change which Pebble the
+  // Box holds and which slot is active.
+  boot_trade();
   boot_box();
 
   // --- everything that reads Config or the pet ------------------------------
   input_begin();
+  // THE PIEZO (P6-C1, decision D8). Bind first, begin second - audio_begin()
+  // idles the pin THROUGH the bound sink, so the order is what makes PIN_PIEZO
+  // quiet rather than floating from this line onwards. g_cfg is already loaded
+  // by the time we get here, and the hook re-reads it on every cue, so a mute
+  // toggled in SETTINGS needs nothing to be kept in step.
+  audio_bind(audio_device_sink(), &app_audio_muted);
+  audio_begin();
   net_begin();
+  // The scan's per-device salt (spec section 44). gs_device_id() is drawn once
+  // from RNG_MISC, is never 0 and is persisted, so the same access point hashes
+  // differently on two units and identically across reboots on one. It must be
+  // set before any scan runs; a salt of 0 is a usable hash but not a private
+  // one. THE CONSEQUENCE, WRITTEN DOWN: a factory reset regenerates the device
+  // id, so every armed cooldown goes stale at once - correct, a wiped device is
+  // a new device, but it looks like a bug when nobody has said it.
+  net_scan_salt_set(gs_device_id());
+  // THE PER-BOOT HALF OF THE COOLDOWN TABLE (P5-C2, and P5-C3's obligation to
+  // call it). The persisted rows come off flash with the rest of GameState;
+  // this clears the RAM table an uncalibrated device falls back to, and the
+  // dirty flag. Without it the fallback would carry whatever the .bss happened
+  // to hold, and cd_take_dirty() could report a save nobody made.
+  cd_begin();
+  // THE PER-BOOT HALF OF THE ACTIVITY SCORE (P6-C2), and it is the same
+  // sentence as the line above for the same reason: the day and the day's
+  // total come off flash inside gs.cds, and this clears ONLY the term
+  // counters, the two distinct sets and the dirty flag. game/activity.h says
+  // plainly what a power cycle therefore still buys and what it cannot.
+  act_begin();
+  // THE PERSISTED HALF, CHECKED (P7-C6). act_begin() clears the per-boot
+  // counters; this is the one look at the two fields that came off flash. An
+  // act_day above ACT_DAY_MAX_INDEX names a day the clock can never reach and
+  // would freeze the activity score for the life of the device, so it is
+  // clamped here and the repair is persisted rather than re-made every boot.
+  if (act_adopt(gs_state().cds) && !gs_readonly()) {
+    (void)save_cooldowns(gs_state().cds);
+  }
   god_begin();
 
   ui_bind_recover(&app_recover_save);
@@ -393,13 +931,33 @@ void app_setup(void)
 
   apply_config();                 // contrast and WiFi credentials
 
+  // WHICH FIRST-BOOT QUESTION THIS BOOT RESUMES AT, computed BEFORE the toast
+  // block below because the greeting depends on the answer (app/onboarding.h).
+  const uint8_t setup_step = ob_boot_step(boot == BOOT_FIRST_RUN,
+                                            gs_readonly(), g_cfg);
+
   // --- splash, then the absence verdict over HOME ---------------------------
   rd_splash();
   boot_absence();
 
   if (!g_nvs_ok) {
     ui_toast(STR_ERR_NVS);
-  } else if (boot == BOOT_FIRST_RUN) {
+  } else if (g_trade_toast != 0u) {
+    // AN INTERRUPTED TRADE OUTRANKS THE BOOT LINE. A Pebble changing hands
+    // while the device was off is the most surprising thing that can have
+    // happened to this Box, and "Hola. Soy nuevo aquí." is not what to say
+    // about it. NVS being dead still wins: nothing below it can be trusted.
+    ui_toast(g_trade_toast);
+    g_trade_toast = 0u;
+  } else if (boot == BOOT_FIRST_RUN && setup_step == (uint8_t)OB_DONE) {
+    // THE GREETING IS SUPPRESSED WHEN THE SETUP FLOW IS ABOUT TO RUN, and that
+    // is a bug fix rather than a preference. ui_draw() composites the toast
+    // band over any screen that does not own its frame, the band is rows 45-55,
+    // and BOTH of the setup screens' instruction lines - and both of the TIME
+    // screen's, which is where it was found - live inside it. So for the first
+    // UI_TOAST_MS of a fresh device the only line telling the player how to
+    // save was completely covered by "Hola. Soy nuevo aqui.". The naming screen
+    // says hello itself now (STR_SU_HELLO), on a row of its own.
     ui_toast(STR_BOOT_FIRST);
   } else if (boot == BOOT_CRASH) {
     ui_toast(STR_BOOT_DIZZY);     // a crash is not an abandonment
@@ -414,15 +972,48 @@ void app_setup(void)
   // nothing on the way there wipes it (audit risk 3).
   ui_note_load((uint8_t)load);
 
-  if (!gs_readonly() && boot == BOOT_FIRST_RUN && gt_cal_state() == CAL_UNSET) {
-    ui_goto(SCR_TIME);
+  // FIRST BOOT: THE THREE QUESTIONS (P10-C4, app/onboarding.h). This used to be
+  // a single jump to SCR_TIME guarded by `boot == BOOT_FIRST_RUN`, and that
+  // guard is the thing that could not survive a power cut: name the device,
+  // save, pull the power, and the next boot is no longer a first run - so the
+  // remaining questions were never asked and the answers already given decided
+  // nothing. The step is PERSISTED now and ob_boot_step() is what reads it;
+  // OB_DONE is zero, so every save written before this firmware - and every
+  // device that finished - reads "already set up" and is asked nothing.
+  if (setup_step != (uint8_t)OB_DONE) {
+    // Stamp it before the first question, so a power cut between here and the
+    // player's first press resumes rather than restarting. On a true first run
+    // this is the write that makes the flow resumable at all.
+    if (ob_step(g_cfg) != setup_step) {
+      ob_set_step(g_cfg, setup_step);
+      g_cfg.saved_epoch = gt_now();
+      gs_save_cfg(g_cfg);
+      // AND THE BOX, for the reason ui.h gives at ui_setup_persist(): a config
+      // written with no Box beside it is a config persistence/save_manager.cpp
+      // throws away, because load_all_inner() answers LOAD_FRESH the moment the
+      // Box pair is missing and returns before it reads the config. Without
+      // this line the window between here and the player's FIRST press is a
+      // window in which a power cut restarts the flow.
+      gs_save_box();
+      (void)gs_save_active(true);
+    }
+    ui_goto(ob_screen_for(setup_step));
   }
 
   // Last, so it wins the screen: with no panel there is nothing to read, and
   // every question above is moot until the user has a display again.
   if (!g_display_ok) ui_note_display_failure();
 
-  g_tick_ms        = millis();
+  // THE POWER LADDER, last: it must not be able to dim, blank or sleep the
+  // device while the boot pipeline above is still putting questions on the
+  // panel, and pwr_begin() starts it at PWR_ACTIVE with nothing applied.
+  pwr_bind(&kPowerHooks);
+  pwr_begin();
+
+  g_tick_ms         = millis();
+  g_input_ms        = g_tick_ms;      // the boot itself counts as activity
+  g_wake_ms         = 0;
+  g_wake_armed      = 0;
   g_clock_was_valid = gt_is_valid() ? 1u : 0u;
 
   Serial.printf("[nt] boot=%u nvs=%u load=%u slot=%u stage=%u free=%u\r\n",
@@ -436,14 +1027,79 @@ void app_setup(void)
 //  The ONLY place the simulation advances. millis() here is scheduling, not
 //  game time: how far the world moves is sim_step_seconds() (1 s, or the god
 //  mode multiplier), exactly as the layering rule requires.
+//
+//  `owed` is how many WHOLE SECONDS of real time this call is being asked to
+//  charge - 1 on an ordinary pass, more only when the CPU was stopped by the
+//  power ladder (hardware/power.h) and the loop is settling up on the far side.
+//  It multiplies the step, so every consumer below - the care sim, the XP
+//  ledger, the carry drip, the activity score - sees one longer second rather
+//  than a special case, which is exactly the shape god mode's speed multiplier
+//  already put through here.
 // =============================================================================
-static void logic_tick(void)
+static void logic_tick(uint32_t owed)
 {
   SimEnv env;
   build_env(env);
   sim_set_env(env);               // every tick, not once at boot
 
-  sim_tick(sim_step_seconds());
+  if (owed == 0u) owed = 1u;
+  const uint32_t step = sim_step_seconds() * owed;
+  // THE ENVIRONMENT IS ONE SAMPLE FOR THE WHOLE SLICE, AND THAT IS NOT EXACT.
+  // build_env() ran once above, so local_hour and day_of_year are read at the
+  // START of the slice and sim_tick(step) charges every second of it against
+  // that reading. A slice that straddles a sleep-window edge or midnight is
+  // therefore charged on the wrong side of it by up to PWR_SLEEP_SLICE_MS
+  // (8 s). MEASURED at the phase-6 exit: the worst care difference over half an
+  // hour at EPOCH0 is 0 MILLI-POINTS, so it is left alone deliberately - the
+  // fix would be a build_env() per simulated second, which is a clock read and
+  // a broken-down-time conversion sixty times a minute for a number nobody can
+  // see. Written down at P7-C6 rather than implied, because both this file and
+  // hardware/power.h used to describe the slice as if the charge were
+  // environment-exact.
+  sim_tick(step);
+
+  // XP from carried time (plan P3-C2): the ledger refills on real time, and a
+  // Pebble that is awake and switched on earns for being carried. Both happen
+  // BEFORE the event drain so a level-up reaches the UI in the same batch as
+  // the tick that caused it.
+  xp_ledger_tick(step);
+  if (!sim_is_asleep()) {
+    const uint16_t due = xp_carry_due(step);
+    if (due != 0u) (void)app_award_xp(due, XP_SRC_CARRY);
+    // THE ACTIVITY SCORE'S TIME TERM (P6-C2, spec section 25). The same
+    // condition as the drip above - awake, switched on, being carried - and
+    // deliberately the same XP bucket underneath, because the two measure the
+    // same thing. game/activity.h writes down what that costs.
+    (void)act_note_carried(gs_state().cds, step, app_act_clock());
+  }
+  app_pay_activity();
+
+  // THE 24 H CORRUPTION DEADLINE (spec section 55, P9-C5). THIS IS THE CALL
+  // THAT DID NOT EXIST: game/corruption.cpp shipped in P5-C3 with cor_apply()
+  // called from the encounter screen and cor_clear() called from the item
+  // route, and cor_expire() called by nothing outside tests/ - so the deadline
+  // was armed on every device and read on none, and PBS_CORRUPTED was permanent
+  // until an Antivirus was used. Every effect P9-C5 attaches (the glitch, the
+  // altered idle, the battle modifier, EVOC_CORRUPTED) hangs off that bit, so
+  // this line is what makes "it clears by timer" true in the firmware and not
+  // only in tools/content/balance.json.
+  //
+  // WHOLE BOX, NOT THE ACTIVE SLOT. A benched Pebble's day passes at the same
+  // rate, and expiring it only when the player selects it would make a 24 h
+  // status last until it was next looked at.
+  //
+  // gs_readonly() is honoured because a read-only session must not change a
+  // stored Pebble; the status simply stays until the session ends. The status
+  // and the deadline live in the Pebble record, so the change is persisted by
+  // gs_save_active() below on the active slot - and by save_pebble_now() when a
+  // benched slot is next written. A benched expiry that is lost to a power cut
+  // costs nothing: the deadline is still in the past next boot and this same
+  // line clears it again.
+  if (!gs_readonly() && cor_service(gs_state().pebbles, (uint8_t)BOX_SLOTS,
+                                    env.now_epoch, (uint8_t)gt_cal_state()) != 0u) {
+    (void)gs_save_active(true);
+  }
+
   const uint32_t ev = sim_take_events();
   ui_note_events(ev);
 
@@ -452,11 +1108,12 @@ static void logic_tick(void)
   save_service();                        // flushes a write the 1 s floor deferred
 
   // The nvs2 checkpoint (D6). Daily, plus the events that change what the pet
-  // IS. The plan's list is level-up / evolution / capture / trade; of those only
-  // evolution exists before P3 and P7, and its v1 spelling is a stage
-  // transition, so that is what forces one here. P2-C10 and P7 add the rest at
-  // the same call.
-  const bool grew = (ev & (SIM_EV_HATCHED | SIM_EV_STAGE_UP | SIM_EV_EVOLVE_MINOR)) != 0;
+  // IS. The plan's list is level-up / evolution / capture / trade; P3-C2 added
+  // the first of them, P3-C3 checkpoints a real evolution from
+  // app_evolve_active() above rather than from an event, and P5/P7 add capture
+  // and trade at the same call.
+  const bool grew = (ev & (SIM_EV_HATCHED | SIM_EV_STAGE_UP | SIM_EV_EVOLVE_MINOR |
+                          SIM_EV_LEVEL_UP)) != 0;
   if (!gs_readonly()) {
     (void)save_checkpoint_service(env.now_epoch, grew);
   }
@@ -499,6 +1156,30 @@ static void logic_tick(void)
 void app_loop(void)
 {
   const uint32_t ms = millis();
+  // P10-C2. Stage 0 of the pass, paired with perf_note_pass() just above the
+  // yield at stage 7. WHAT IS MEASURED IS THE WORK OF A PASS, NOT ITS PERIOD:
+  // pwr_yield() naps deliberately for up to PWR_SLEEP_SLICE_MS, so a stamp
+  // taken after it would read 8,000,000 us on a healthy sleeping board and
+  // spec section 46's 100 ms budget would mean nothing at all. tools/check.sh
+  // gates the ORDER of the two lines, because moving one below the yield is a
+  // plausible-looking edit that leaves every test green and the instrument a
+  // lie - which is the shape of defect this project has hit nine times.
+  const uint32_t pass_t0_us = micros();
+
+  // --- 0. the power ladder's bookkeeping ------------------------------------
+  pwr_note_loop(ms);              // DIAG's loop rate, counted against the rung
+
+  // A light sleep that ended on a button, rather than on its own timer. The
+  // panel was dark, so that press was aimed at the device: arm the swallow
+  // window and count it as activity so the ladder climbs straight back up.
+  if (pwr_take_wake()) {
+    g_wake_ms    = ms;
+    g_wake_armed = 1;
+    g_input_ms   = ms;
+  }
+  if (g_wake_armed && (uint32_t)(ms - g_wake_ms) > NT_WAKE_SWALLOW_MS) {
+    g_wake_armed = 0;             // nobody followed it up; stop swallowing
+  }
 
   // --- 1. input -------------------------------------------------------------
   for (uint8_t i = 0; i < NT_GESTURES_PER_LOOP; ++i) {
@@ -506,36 +1187,108 @@ void app_loop(void)
     if (g == GST_NONE) {
       break;
     }
+    g_input_ms = ms;              // the ladder's idle clock; see g_input_ms
+    if (g_wake_armed) {
+      g_wake_armed = 0;           // this is the press that did the waking
+      continue;
+    }
     ui_handle(g);
   }
 
   // --- 2. logic, at 1 Hz of REAL time --------------------------------------
-  if ((uint32_t)(ms - g_tick_ms) >= 1000UL) {
-    g_tick_ms += 1000UL;
-    if ((uint32_t)(ms - g_tick_ms) >= NT_TICK_RESYNC_MS) {
-      g_tick_ms = ms;             // long stall: resync, never burst
-    }
-    logic_tick();
-  }
+  // WHOLE SECONDS OWED, CHARGED IN ONE CALL. Normally exactly one; more only
+  // when the power ladder stopped the CPU for a slice, which is real elapsed
+  // time and must reach the pet. NT_TICK_MAX_OWED_S is where a sleep stops
+  // being a sleep and starts being a stall - see the macro.
+  // THE ARITHMETIC MOVED TO hardware/power.cpp AT P7-C6 so a host binary can
+  // drive it, and it now COUNTS the stalls it used to swallow in silence
+  // (pwr_tick_stalls() / pwr_tick_lost_s(), on the ENERGIA page).
+  const uint32_t owed = pwr_tick_budget(ms, g_tick_ms);
+  if (owed != 0u) logic_tick(owed);
 
   // --- 3. per-loop pumps that own presentation timing ----------------------
   ui_service();                   // auto-return, minigames, the hatch ceremony
+  audio_service(ms);              // one tone step at most; never blocks (P6-C1)
   god_service();                  // soak log, serial genome paste
 
-  // --- 4. render ------------------------------------------------------------
-  rd_set_fps(ui_fps());
-  if (rd_begin_frame()) {
+  // --- 4. the power ladder --------------------------------------------------
+  // Before the render, so a rung entered on this pass owns this pass's frame
+  // rate. `held` is the plan's "a screen holding a radio job counts as
+  // activity": while a scan is in flight the ladder is clamped at DIM and
+  // cannot reach the rung that drops the radio.
+  PowerInput pin;
+  pin.idle_ms = (uint32_t)(ms - g_input_ms);
+  // BOTH HOLDS. ui_radio_job_busy() is P7-C2/P10-C6's; ui_show_busy() is the
+  // final review's, and it is the same defect with a different owner: a
+  // ceremony is a state the player watches without pressing anything, so the
+  // idle clock runs straight through it. Without this the 4,480 ms birth show
+  // that ends every first boot ran for 60 s at PWR_SLEEP and sent ZERO frames
+  // to a panel that had been dark since 120 s. See ui/ui.h for the account.
+  pin.held    = (ui_radio_job_busy() || ui_show_busy()) ? 1u : 0u;
+  (void)pwr_service(pin);
+
+  // --- 5. render ------------------------------------------------------------
+  // WHICH SCREEN THE NEXT FRAME AND THIS PASS BELONG TO (P10-C2). ui_screen()
+  // and not sm_current(): a frame drawn with a modal up really is a different
+  // composition and really does cost what it costs, so it is billed to
+  // SCR_CONFIRM / SCR_ALERT rather than laundered into the screen underneath.
+  perf_set_screen((uint8_t)ui_screen());
+
+  // pwr_fps() CLAMPS what the screen asked for. It has to be applied here and
+  // not set once by the ladder, because this line runs every pass and would
+  // otherwise put the screen's rate straight back.
+  rd_set_fps(pwr_fps(ui_fps()));
+  const bool drew = rd_begin_frame();
+  if (drew) {
     ui_draw();
     rd_end_frame();
   }
 
-  // --- 5. radio ------------------------------------------------------------
+  // --- 6. radio ------------------------------------------------------------
   // NO POLICY HERE. The radio is OFF at boot and stays off:
   // the screen that needs it asks for it and releases it on the way out -
-  // QR owns RADIO_WIFI, SOCIAL owns RADIO_BLE. net_service() only pumps
-  // the state machine the screen put it in, including the settle timer that
-  // replaced the blocking delay between the two stacks.
+  // CREATOR owns the access point, NETWORK owns the scan and LINK owns the
+  // peer link (P7-C2), and each one releases through its own leave() hook.
+  // net_service() only pumps the state machine the screen put it in, including
+  // the NPH_SCANNING and NPH_LINK backstops that catch a job nobody is
+  // servicing. It used to pump a settle timer too; that went with BLE (P8-C0),
+  // and so did the ble_scan_service() call that stood on the line below.
   net_service();
   web_service();
-  ble_scan_service();
+
+  // THE PASS IS OVER (P10-C2). Everything below this line is a deliberate nap
+  // or a millisecond of politeness, and neither of those is WORK - see
+  // pass_t0_us at the top of this function and PERF_PASS_BUDGET_US in
+  // core/config.h. tools/check.sh gates that this line stays above the yield.
+  perf_note_pass(pass_t0_us, micros());
+
+  // --- 7. yield -------------------------------------------------------------
+  // AUDIT RISK 16: the loop must not run at 100 % duty cycle. Two rungs of one
+  // rule, and both of them measure "how long until this loop owes anything",
+  // which is the next 1 Hz logic tick.
+  //
+  //   ACTIVE / DIM  ->  delay(1). Cheap, keeps input_poll() well inside
+  //                     INPUT_POLL_MS, and costs nothing to be wrong about.
+  //   IDLE / SLEEP  ->  pwr_yield() STOPS THE CPU until the next tick or a
+  //                     button. The wake is a hardware level interrupt on both
+  //                     pins, so a press cannot be missed however long the
+  //                     slice is - which is why this is better than polling
+  //                     with a long delay(), not merely cheaper.
+  //
+  // The slice IS the tick cadence below DIM: IDLE's is one second, so the pet
+  // goes on ticking at 1 Hz for a player who is probably still in the room;
+  // SLEEP's is PWR_SLEEP_SLICE_MS, and the seconds it swallowed are charged in
+  // one logic_tick(owed) on the far side. Nothing is lost either way, because
+  // `owed` is computed from the clock and not from a count of passes.
+  const uint32_t slice = pwr_slice_ms();
+  if (slice != 0u) {
+    (void)pwr_yield(slice);
+  } else if (!drew && !pin.held) {
+    delay(1);                     // no frame was due and no job is pending
+  }
+  // The `!pin.held` exception is the plan's own wording and it is worth naming
+  // what it costs: while a scan is in flight ACTIVE and DIM spin without the
+  // millisecond. It is bounded by WIFI_SCAN_TIMEOUT_MS (12 s) and it happens
+  // with the radio already drawing far more than the core does, so it is the
+  // cheap half of an expensive operation - but it is a spin, not a nap.
 }

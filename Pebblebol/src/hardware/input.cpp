@@ -4,12 +4,19 @@
 //
 //  DESIGN NOTES (the reasons this file looks the way it does)
 //
-//  1. No gesture is ever emitted on a press edge except DBL_x. A single press
-//     is only classified once it has been released AND DOUBLE_TAP_WINDOW_MS has
-//     passed with no second press. That is what makes the chord free of the
-//     classic "BOTH is preceded by a spurious TAP" bug: when the second button
-//     goes down the first one has not produced anything yet, so there is
-//     nothing to retract.
+//  1. NO GESTURE IS EVER EMITTED ON A PRESS EDGE. A single press is classified
+//     the moment it is RELEASED, which is what keeps the chord free of the
+//     classic "BOTH is preceded by a spurious TAP" bug: BOTH is decided when
+//     the second button goes DOWN, and at that instant the first button has
+//     produced nothing yet, so there is nothing to retract.
+//
+//     Until P3-C4a a release only ARMED a tap, which was then emitted
+//     DOUBLE_TAP_WINDOW_MS (280 ms) later if no second press arrived. That
+//     bought GST_DBL_L/R and cost 280 ms of latency on every single press in
+//     the product - a quarter of a second between the button going up and the
+//     screen reacting, on a device whose minigames are scored on reaction
+//     time. The double tap is gone (see the commit) and a TAP now lands one
+//     debounce interval after release, ~25 ms.
 //
 //  2. Holds fire exactly ONCE when the threshold is crossed. HOLD_L then keeps
 //     repeating every REPEAT_RATE_MS because GAME_DESIGN 8.3 uses it as the
@@ -82,10 +89,8 @@ static bool     s_raw[INPUT_BTN_N];         // last sampled level (undebounced)
 static uint32_t s_raw_change_ms[INPUT_BTN_N];
 static uint32_t s_press_ms[INPUT_BTN_N];    // logical press instant (raw edge)
 
-static bool     s_pending_tap;         // a tap is waiting out the double-tap window
-static uint8_t  s_pending_idx;
-static uint32_t s_pending_since;       // release instant of that tap
 
+static bool     s_edge[INPUT_BTN_N];   // unconsumed press edge, input_pressed_edge()
 static bool     s_long_done;           // LONG_BOTH already emitted for this chord
 static uint32_t s_chord_ms;            // instant at which the SECOND button went down
 static uint32_t s_repeat_ms;           // last HOLD_L repeat
@@ -124,18 +129,6 @@ static void in_queue_clear(void)
 }
 
 // -----------------------------------------------------------------------------
-// 3. PENDING TAP
-// -----------------------------------------------------------------------------
-static void in_flush_pending(void)
-{
-  if (!s_pending_tap) {
-    return;
-  }
-  s_pending_tap = false;
-  in_emit(s_pending_idx == INPUT_BTN_L ? GST_TAP_L : GST_TAP_R);
-}
-
-// -----------------------------------------------------------------------------
 // 4. EDGE HANDLERS
 //    t is the instant of the physical edge, not the instant the debouncer
 //    accepted it, so every duration below matches the real waveform.
@@ -145,6 +138,10 @@ static void in_on_press(uint8_t i, uint32_t t)
   const uint8_t other = (uint8_t)(INPUT_BTN_N - 1 - i);
 
   s_press_ms[i] = t;
+  // BEFORE every early return below. input_pressed_edge() reports the physical
+  // press, not the gesture it eventually becomes, so a press that goes on to
+  // be swallowed as half a chord must still be visible to a minigame.
+  s_edge[i] = true;
 
   if (s_down[other]) {
     // --- second button of a two-button episode -------------------------------
@@ -167,38 +164,32 @@ static void in_on_press(uint8_t i, uint32_t t)
   }
 
   // --- first (and only) button down -----------------------------------------
-  if (s_pending_tap &&
-      s_pending_idx == i &&
-      (uint32_t)(t - s_pending_since) <= (uint32_t)DOUBLE_TAP_WINDOW_MS) {
-    // Second press of a double tap. Emit immediately, then swallow this press:
-    // it must not also become a TAP or a HOLD.
-    s_pending_tap = false;
-    in_emit(i == INPUT_BTN_L ? GST_DBL_L : GST_DBL_R);
-    s_state = ST_SWALLOW;
-    return;
-  }
-
-  // A press of the other button closes any tap still waiting out its window,
-  // so the single pending slot is never overwritten and the order is kept.
-  in_flush_pending();
-
+  // Nothing to reconcile with an earlier press any more: a TAP is emitted at
+  // its own release, so by the time this runs the previous episode has already
+  // produced its gesture and the queue order is right by construction.
   s_active = i;
   s_state  = ST_DOWN;
 }
 
-static void in_on_release(uint8_t i, uint32_t t)
+// `t`, the instant of the physical release edge, is deliberately unnamed: every
+// gesture this function can still emit is decided by the STATE, not by when the
+// release happened. It was the pending tap that needed the timestamp, to time
+// the double-tap window out, and that is gone. The parameter stays because the
+// caller replays real edge instants from the timer ring and a future gesture
+// (a "flick", a release-velocity anything) would want it back.
+static void in_on_release(uint8_t i, uint32_t /* t */)
 {
   const uint8_t other = (uint8_t)(INPUT_BTN_N - 1 - i);
 
   switch (s_state) {
 
     case ST_DOWN:
-      // Short press: it can still turn into a double tap, so only arm the
-      // window here. TAP_x is emitted by in_tick() when the window expires.
+      // Short press, and the button is up: that is a TAP and there is nothing
+      // left to wait for. HOLD would already have fired from in_tick() at
+      // HOLD_MS and moved the state to ST_HOLD, so reaching here means the
+      // press really was short.
       if (s_active == i) {
-        s_pending_tap   = true;
-        s_pending_idx   = i;
-        s_pending_since = t;
+        in_emit(i == INPUT_BTN_L ? GST_TAP_L : GST_TAP_R);
       }
       s_state = s_down[other] ? ST_SWALLOW : ST_IDLE;
       break;
@@ -306,13 +297,35 @@ static void in_timer_cb(void *)
   if (lv == s_ring_last) {
     return;                                 // no edge, nothing to record
   }
-  s_ring_last = lv;
 
   const uint8_t tail = s_ring_tail;
   const uint8_t next = (uint8_t)((tail + 1u) & IN_RING_MASK);
   if (next == s_ring_head) {
-    return;                                 // full: keep the oldest edges
+    // FULL: KEEP THE OLDEST EDGES, AND DO NOT ADVANCE s_ring_last.
+    // The assignment used to sit ABOVE this test, so once the producer had
+    // moved past a dropped edge every later sample equal to that level returned
+    // at the "no edge" line and the dropped edge was lost PERMANENTLY rather
+    // than retried when space freed. Leaving s_ring_last alone makes the next
+    // 5 ms sample see the same edge again and record it.
+    //
+    // A press and its release that BOTH landed while the ring was full were
+    // therefore never seen by the FSM as an edge pair, so the tap simply did
+    // not happen. input_poll() ends with a live in_sample(), which repairs the
+    // LEVEL state - so a stuck button was not the outcome; an intermittently
+    // lost tap was, which is the hardest class of defect to diagnose at a
+    // bench and the one most likely to be blamed on the buttons or the pin map.
+    // Sixteen unconsumed edges needs a loop() stall of exactly the kind the
+    // `stall` command and a slow HTTP request produce.
+    //
+    // NOTHING IN THIS REPOSITORY CAN EXECUTE THIS. The whole sampler is behind
+    // `#if defined(ARDUINO)` and tests/Makefile compiles input.cpp without it -
+    // `nm` over bin/test_input finds no ring and no callback. The section 67
+    // "Two-button input is robust" box named this as its FIRST artefact and has
+    // been UNTICKED at the final review for exactly that reason; the owner step
+    // is in the plan beside it.
+    return;
   }
+  s_ring_last         = lv;                 // consumed: now it is history
   s_ring[tail].ms     = (uint32_t)millis();
   s_ring[tail].levels = lv;
   s_ring_tail         = next;               // publish last
@@ -394,10 +407,6 @@ static void in_tick(uint32_t now)
       break;
   }
 
-  if (s_pending_tap &&
-      (uint32_t)(now - s_pending_since) > (uint32_t)DOUBLE_TAP_WINDOW_MS) {
-    in_flush_pending();
-  }
 }
 
 // -----------------------------------------------------------------------------
@@ -410,9 +419,8 @@ void input_begin(void)
   in_pins_begin();
   in_queue_clear();
 
-  s_pending_tap = false;
-  s_pending_idx = INPUT_BTN_L;
-  s_pending_since = now;
+  s_edge[INPUT_BTN_L] = false;
+  s_edge[INPUT_BTN_R] = false;
   s_long_done   = false;
   s_chord_ms    = now;
   s_repeat_ms   = now;
@@ -471,6 +479,14 @@ bool input_raw(uint8_t which)
   return s_down[which];
 }
 
+bool input_pressed_edge(uint8_t which)
+{
+  if (which >= INPUT_BTN_N) return false;
+  const bool e = s_edge[which];
+  s_edge[which] = false;        // consumed: one physical press, one true
+  return e;
+}
+
 uint32_t input_hold_ms(uint8_t which)
 {
   if (which >= INPUT_BTN_N || !s_down[which]) {
@@ -486,6 +502,9 @@ void input_flush(void)
   s_ring_head = s_ring_tail;
 #endif
   in_queue_clear();
-  s_pending_tap = false;
+  // The unconsumed press edges belong to the episode being swallowed too. A
+  // survivor here would hand a minigame a press from before it started.
+  s_edge[INPUT_BTN_L] = false;
+  s_edge[INPUT_BTN_R] = false;
   s_state = (s_down[INPUT_BTN_L] || s_down[INPUT_BTN_R]) ? ST_SWALLOW : ST_IDLE;
 }

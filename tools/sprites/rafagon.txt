@@ -1,0 +1,83 @@
+# RAFAGON (species 3) - family 1 PACKET, stage 2.  REDRAWN AT P9-C3 INTEGRATION.
+#
+# WHY IT WAS REDRAWN.  The first version was eleven 4x3 shards flung around a
+# small core.  Rendered next to Paketo and Fragmar it read as confetti: no legs,
+# no enclosed eye, and none of the family's vocabulary survived, so the line went
+# capsule -> torn capsule -> explosion and stage 2 stopped being the same
+# creature.  This version is PAKETO'S OWN BODY grown and battered: the same
+# two-lobe rounded rect split by the unlit header seam, the same stub feet made
+# heavy and uneven, one big enclosed eye instead of two small ones (spec 18/19:
+# final stages bigger, sharper, more asymmetric), and the shards cut from eleven
+# to FOUR sparks placed clear of the body.
+#
+# DEVIATION FROM THE PACK, on purpose and recorded here so it travels with the
+# pixels: species.json's _silhouette says 'eleven 4x3 shards spiralling out of a
+# filled 6px lozenge core'.  Eleven shards inside 24x24 is one shard every two
+# pixels, which is scatter, not a curve; and a lozenge core carries none of the
+# family's seam.  Four sparks and a battered capsule is what reads.  Either the
+# pack text gets corrected to match or this art does - they disagree in writing.
+#
+# _frame2 ('the spiral advances one slot') is likewise not implemented as
+# written: relocating eleven shards between two frames at a 50% duty cycle is two
+# unrelated drawings.  Each spark steps one pixel outward and the eye squints.
+#
+# THE HEADER SEAM IS BRIDGED AT ROWS 11-13 (P9-C6).  It ran the full height of
+# the body and split the silhouette into two masses of 132 and 105 px, the same
+# defect PAKETO had and the same fix pixio.txt already wrote down.  The seam
+# still reads above and below the waist; the creature is one piece.
+
+name: RAFAGON
+size: 24x24
+frames: 2
+species: 3
+
+--- frame 0
+..........##.......##...
+.........####.....####..
+..........##.......##...
+..#...................#.
+.###.................###
+..#...####...######...#.
+.....######..########...
+....#######..########...
+...########..#########..
+...##...###..#########..
+...##....##..########...
+...##....###########....
+...##....############...
+...##...##############..
+...########..#########..
+....#######..########...
+.....######..########...
+....#######..#########..
+....####..........####..
+....####..........####..
+...#####..........####..
+...#####..........####..
+..######.........#####..
+..######.........#####..
+--- frame 1
+.........##.........##..
+........####.......####.
+.........##.........###.
+.....................###
+..#...................#.
+.###..####...######.....
+..#..######..########...
+....#######..########...
+...########..#########..
+...##...###..#########..
+...##....##..########...
+...##....###########....
+...##################...
+...##...##############..
+...########..#########..
+....#######..########...
+.....######..########...
+....#######..#########..
+....####..........####..
+....####..........####..
+...#####..........####..
+...#####..........####..
+..######.........#####..
+..######.........#####..

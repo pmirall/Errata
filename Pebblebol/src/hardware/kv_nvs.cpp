@@ -65,7 +65,11 @@ int kv_get(KvPart part, const char* key, void* buf, size_t cap) {
     return -1;
   }
   if (!part_ok(part)) {
-    return -1;
+    // KV_CLOSED, not -1: there is no store here, so this says nothing about the
+    // key. See persistence/kv_store.h - answering -1 made a missing partition
+    // read as two corrupt copies of the Box and put the device on the
+    // corrupt-save screen offering to wipe an undamaged save.
+    return KV_CLOSED;
   }
   if (!s_prefs[part].isKey(key)) {
     return 0;                       // absent is not a fault
@@ -273,8 +277,22 @@ bool kv_begin(void) {
     kv_fail(KV_E_OPEN_CKPT, "begin(" PB_NVS_CKPT_PART ")", 0);
   }
 
+  // NO SELFTEST HERE SINCE THE FINAL REVIEW - app/app.cpp runs it, once.
+  // kv_selftest() calls canary_one() on each open partition, and canary_one()
+  // WRITES a fresh random uint32 and reads it back. Running it here as well as
+  // in app_setup() meant FOUR canary writes on every boot instead of two, and
+  // the first verdict was thrown away by the (void) cast - so the firmware paid
+  // a flash write for an answer nobody looked at, on the one key that exists to
+  // prove flash works. It also left kv_error() sticky: a first canary that
+  // failed set KV_E_CANARY inside this function, and a second attempt that
+  // succeeded left g_nvs_ok = 1 with kv_error() still reporting the failure to
+  // the DIAG line and to `info`. app.cpp's is the call whose verdict is acted
+  // on (it sets g_nvs_ok and raises STR_ERR_NVS), so app.cpp's is the one kept.
+  //
+  // NOTE FOR THE BENCH: this halves the canary traffic but does not remove it.
+  // "a fresh boot writes nothing" is true of save_load_all() and FALSE of a
+  // boot - see tests/test_persistence.cpp's comment on the same claim.
   if (s_open[KV_MAIN]) {
-    (void)kv_selftest();
     legacy_import();
   }
   return s_open[KV_MAIN];

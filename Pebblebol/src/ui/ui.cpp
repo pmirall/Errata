@@ -41,29 +41,47 @@
 #include "../core/config.h"
 #include "../core/nt_types.h"
 #include "../core/strings_es.h"
+#include "../core/utf8.h"
+#include "../app/onboarding.h"   // the first-boot step, read by ui_set_starter()
 #include "../data/sprites.h"
+#include "../data/balance.h"   // ACT_PLAY_MIN_ENERGY_PCT for the PLAY entry
 #include "render.h"
 #include "../hardware/input.h"
+#include "../minigames/manager.h"
+#include "../minigames/registry.h"
+#include "../game/activity.h"    // act_take_dirty(): the other half of "cd"
+#include "../game/cooldowns.h"   // cd_take_dirty(): the exploration commit
 #include "../game/sim.h"
 #include "../game/genome.h"
 #include "../core/rng.h"
 #include "../persistence/game_state.h"
+#include "../persistence/save_manager.h"  // save_cooldowns / save_inventory (P5-C3)
 #include "../hardware/kv_nvs.h"      // kv_error(), for the DIAG line
 #include "../hardware/gametime.h"
+#include "../hardware/audio.h"   // the P6-C1 tone engine: cues, never policy
 #include "ceremony.h"  // the hatch / evolution show (P2-C11c)
 #include "dialog.h"    // the CONFIRM / ALERT / HELP overlays (P2-C11c)
+#include "../game/corruption.h"   // cor_left_s(): the STATUS readout
 #include "screen_creator.h"   // CreatorInfo, for the radio seam below
 #include "screen_diag.h"
 #include "screen_evolution.h"
+#include "screen_network.h"  // network_screen_busy(): the power ladder's `held` input
+#include "screen_link.h"     // link_screen_busy() and the P7-C3 session seams
+#include "../game/trade.h"           // the P7-C4 journal, driven from here
+#include "../networking/trade_link.h" // TradeHooks: the screen's trade seam
 #include "../networking/net.h"
 #include "../networking/webui.h"      // web_pin() only - no network header comes with it
 #include "../dev/godmode.h"    // GodEvt, god_active/handle/draw/entry_progress/marker
+#include "pet_art.h"   // pet_species_name(): what the creature IS
 #include "pet_view.h"  // PetView: what petfx and actfx are allowed to know
 #include "petfx.h"      // the body's own presentation layer: floor, position, gaze
 #include "actfx.h"      // the choreography of every action the player can take
 #include "../game/box.h"          // the active slot: level, xp, hp for the view
 #include "../game/box_sim.h"      // and what a swap does to sim's raw pointer
 #include "../data/species_table.h" // and the base_hp hp_max is derived from
+#include "../game/pebble.h"    // pebble_name_syllables(): the dynasty hash (P9-C4)
+#include "../game/xp.h"        // the XP curve HOME draws and the award amounts
+#include "../app/app.h"        // app_award_xp(): the one door for experience
 #include "gfx.h"           // the header bar, the countdown and the list widgets
 #include "screen.h"        // the ScreenDef table this file is being dissolved into
 #include "../app/input_router.h"  // the section 7 grammar (P2-C11d)
@@ -72,6 +90,7 @@
 // out. What is left here is the DEVICE half each of them needs - the animated
 // body layer, the diagnostics page, the minigame start - which this file binds
 // and hands over. It draws none of them.
+#include "screen_battle.h"   // BT_ENTRY_*, BT_DIAG_SEED
 #include "screen_box.h"      // box_screen_to_list(), for the release commit
 #include "screen_home.h"
 #include "screen_settings.h"
@@ -89,7 +108,7 @@
 // UI_HDR_H, UI_HDR_BASE, UI_AFFORD_Y and UI_CONTENT_BOTTOM moved to screen.h:
 // a migrated screen may not include render.h, so the shared geometry has to
 // live where both sides can see it.
-#define UI_CONTENT_Y        UI_HDR_H                  // 11
+// UI_CONTENT_Y moved to ui/screen.h (P3-C4a): the minigame draw halves need it
 #define UI_CONTENT_H        (RD_AFFORD_Y - UI_CONTENT_Y)   // 45
 
 static_assert(UI_AFFORD_Y == RD_AFFORD_Y,
@@ -131,7 +150,6 @@ static uint8_t  s_fps_want    = FPS_NORMAL;
 static uint8_t  s_god_prog    = 0;      // god_entry_progress(), 0..100
 
 // ---- the last accepted action, replayed by the MENU's DBL_R -----------------
-static uint8_t  s_last_action = ACT_NONE;
 
 // ---- modal layer ------------------------------------------------------------
 // The CONFIRM dialog, the ALERT overlay and the HELP strip are ui/dialog.cpp's
@@ -145,6 +163,9 @@ static uint32_t s_toast_ms    = 0;
 // ---- home -------------------------------------------------------------------
 static uint32_t s_mimo_ms     = 0;
 static uint32_t s_evolve_ms   = 0;
+// When the section 18 evolution question was last put. 0 = never asked this
+// session. See the offer in ui_service() and UI_EVOLVE_ASK_MS.
+static uint32_t s_evo_ask_ms  = 0;
 
 // ---- screen entry dissolve --------------------------------------------------
 // The carousel and list interpolators moved into ui/gfx_widgets.cpp and
@@ -168,44 +189,12 @@ static Config*  s_cfg         = nullptr;
 // ceremony_start().
 
 // ---- GAME -------------------------------------------------------------------
-// MinigameState, not GameState: SaveSchema v2 owns that name for the whole
-// persisted world (persistence/save_schema.h section 8). This is the transient
-// state of the minigame currently on screen and never reaches flash.
-struct MinigameState {
-  uint8_t  id;
-  uint8_t  phase;        // 0 = ready, 1 = running, 2 = result
-  uint8_t  round;
-  uint8_t  target;       // reflex: the lit side
-  uint8_t  seq[10];
-  uint8_t  seq_len;
-  uint8_t  seq_pos;
-  uint8_t  play_idx;
-  uint8_t  passed;
-  uint8_t  obs_n;
-  uint16_t score;        // per-mille, 0..1000
-  uint16_t last_ms;
-  uint32_t arm_ms;       // reflex: dead time before the light
-  int16_t  obs_x[3];
-  int16_t  pet_dy;
-  uint32_t t0;
-  uint32_t step_ms;
-  uint32_t jump_ms;      // jump: 0 = grounded, else takeoff timestamp
-};
-static MinigameState s_g;
-static uint8_t  s_raw_prev[INPUT_BTN_N];
-
-#define GAME_STEP_MS       25UL
-#define GAME_INTRO_MS    1600UL
-#define GAME_RESULT_MS   2200UL
-#define REFLEX_ROUNDS       5
-#define REFLEX_WINDOW_MS  900UL
-#define MEMORY_LEVELS       6      // sequences of 3 .. 8
-#define MEMORY_FLASH_MS   380UL
-#define MEMORY_GAP_MS     170UL
-#define JUMP_TARGET        12
-#define JUMP_GROUND_Y      50
-#define JUMP_RISE_MS      700UL
-#define JUMP_HEIGHT        18
+// The games moved out to src/minigames/ (P3-C4a). What used to be here - a
+// MinigameState struct, three games and their drawing, all interleaved with
+// this file's chrome - is now minigames/minigame.{h,cpp} (the contract),
+// minigames/manager.{h,cpp} (the sequence, PURE so the "one report per game"
+// property is testable), minigames/games/*_logic.cpp (pure) and
+// minigames/games/*_draw.cpp (device). ui.cpp keeps only the SCREEN.
 
 // =============================================================================
 //  3. SMALL HELPERS
@@ -244,12 +233,7 @@ static void px_frame(int16_t x, int16_t y, int16_t w, int16_t h) {
   rd_u8g2().drawFrame((u8g2_uint_t)x, (u8g2_uint_t)y, (u8g2_uint_t)w, (u8g2_uint_t)h);
 }
 
-static void px_hline(int16_t x, int16_t y, int16_t w) {
-  if (w <= 0 || y < 0) return;
-  if (x < 0) { w = (int16_t)(w + x); x = 0; }
-  if (w <= 0) return;
-  rd_u8g2().drawHLine((u8g2_uint_t)x, (u8g2_uint_t)y, (u8g2_uint_t)w);
-}
+// px_hline() went with the SALTO minigame it drew the ground line for.
 
 // drawXBM cannot clip a negative origin, so an off-screen sprite is dropped.
 static void px_spr(int16_t x, int16_t y, const SpriteRef& r) {
@@ -283,20 +267,98 @@ static void fmt_apply(char* out, size_t cap, const char* tpl,
 
 // GAME_DESIGN 9.3: the name is a pure function of (lineage_id, generation), so
 // a given pet is called the same thing on every device, forever.
+//
+// THE HASH AND THE INDEX ARITHMETIC LEFT THIS FILE AT P9-C4 and live in
+// game/pebble.cpp, which a host binary can link; this file is now the LOOKUP
+// and nothing else. What that bought is written in pebble.h: the algorithm had
+// no test and could not have one (ui.cpp includes <Arduino.h>), so
+// tests/test_persistence.cpp carried a hand-copied second implementation of the
+// same hash and changing a constant here failed nothing anywhere.
+//
+// snprintf IS GONE TOO, and that is a fix rather than a move. It truncated on a
+// BYTE boundary, and the syllables are UTF-8 with a Latin-1 repertoire, so the
+// widest name in the repertoire - "Ña" + "rrón" - is six glyphs and EIGHT bytes:
+// a buffer sized in characters cut a two-byte sequence in half and handed
+// drawUTF8() a broken lead byte. pebble_name_join() truncates on a CHARACTER
+// boundary and always yields a PREFIX of the whole name.
 void ui_name_for(uint32_t lineage_id, uint8_t generation, char* out, size_t cap) {
   if (!out || cap == 0) return;
-  uint32_t h = lineage_id ^ 0x9E3779B9u;
-  h ^= (uint32_t)generation * 0x85EBCA6Bu;
-  h ^= h >> 15; h *= 0x2545F491u; h ^= h >> 13;
-  snprintf(out, cap, "%s%s", S_SYL_A(h % 12u), S_SYL_B((h / 12u) % 12u));
+  uint8_t syl[2];
+  pebble_name_syllables(lineage_id, generation, syl);
+  const uint16_t room = (cap > 0xFFFFu) ? 0xFFFFu : (uint16_t)cap;
+  (void)pebble_name_join(S_SYL_A(syl[0]), S_SYL_B(syl[1]), out, room);
 }
 
+// THE WORD BESIDE THE BODY, in the order the player earns it (P4-C4a).
+//
+//   1. the nickname the owner typed, if there is one - nothing outranks that;
+//   2. THE SPECIES the Pebble is, from the roster's own Spanish name
+//      (STR_SPC_NAME_1..36). This is the half that closes the P3-C3 obligation
+//      on the text side: HOME used to show the dynasty syllables, which are a
+//      pure function of (lineage_id, generation) and therefore say the SAME
+//      word before and after an evolution. Paketo becoming Fragmar has to
+//      change the name as well as the pixels;
+//   3. the dynasty syllables, unchanged, for a Pebble with no species row -
+//      an unfiled egg, a creator custom (200..209), or a save from a build with
+//      more families than this one. ui_name_for() keeps its job; it is the
+//      FALLBACK now rather than the answer.
+// THE LADDER IS WRITTEN ONCE, IN THE STORED ENCODING, AND CROSSED ONCE - which
+// is the P10-C6 fix and the reason this is two functions rather than one.
+//
+// P10-C4 made ui_pet_name() emit UTF-8, correctly, because everything that
+// DRAWS a name goes through drawUTF8(). But one caller does not draw: screen_
+// link.cpp's fill_self() puts this name into DiscBeacon.name, which is LATIN-1
+// by wire contract - networking/discovery.cpp's name_ok() refuses 0x80..0x9F,
+// and every Latin-1 byte in 0xC0..0xDF (exactly the uppercase accent set the
+// first-boot naming ring can type) becomes 0xC3 followed by a byte inside that
+// window. disc_encode() answered DE_NAME and link_service() dropped the frame,
+// so a device called "NUNO" with an n-tilde emitted NO BEACON AT ALL: invisible
+// to every peer, and because the peer never saw it the link could not be
+// offered from either side. LINK, trade and P2P battle, all dead, silently -
+// beacons_tx stayed 0 and nothing reported it.
+//
+// It was invisible to the suite for the phase-9 reason: no host binary compiles
+// this file, and tests/fakes/link_fake.cpp stood in for this function with the
+// PRE-P10-C4 body, so every discovery test drove the old one. The fake now
+// implements both halves the way this file does, and there is a case that puts
+// an accented name on the air through the real disc_encode().
+static void pet_name_stored(char* out, size_t cap) {
+  if (!out || cap == 0) return;
+  const uint16_t c16 = (uint16_t)((cap > 0xFFFFu) ? 0xFFFFu : cap);
+  // Rung 1: Config.pet_name is already the stored encoding - a raw copy.
+  if (s_cfg && s_cfg->pet_name[0] != '\0') {
+    size_t i = 0;
+    while (s_cfg->pet_name[i] != '\0' && i + 1u < cap) { out[i] = s_cfg->pet_name[i]; ++i; }
+    out[i] = '\0';
+    return;
+  }
+  const SimView* p = pet();
+  // Rungs 2 and 3 come from the string table and the dynasty generator, which
+  // are UTF-8; they cross BACK so the ladder answers one encoding whichever
+  // rung it lands on. A caller that got UTF-8 from one rung and Latin-1 from
+  // another would be a bug that only shows up for players with no set name.
+  char utf[64];
+  if (!p) {
+    snprintf(utf, sizeof utf, "%s", S(STR_EGG_TITLE));
+  } else {
+    const uint8_t slot = box_active();
+    const PebbleInstance* pb = (slot == BOX_ACTIVE_NONE) ? nullptr : box_peek(slot);
+    const char* species = pb ? pet_species_name(pb->species_id) : nullptr;
+    if (species) snprintf(utf, sizeof utf, "%s", species);
+    else         ui_name_for(p->genome.lineage_id, p->genome.generation, utf, sizeof utf);
+  }
+  (void)u8_to_latin1(out, c16, utf);
+}
+
+// THE STORED FORM. For the wire and for anything else that is not a draw.
+void ui_pet_name_latin1(char* out, size_t cap) { pet_name_stored(out, cap); }
+
+// THE DRAWN FORM. Stored, then the one crossing (core/utf8.h).
 void ui_pet_name(char* out, size_t cap) {
   if (!out || cap == 0) return;
-  if (s_cfg && s_cfg->pet_name[0] != '\0') { snprintf(out, cap, "%s", s_cfg->pet_name); return; }
-  const SimView* p = pet();
-  if (!p) { snprintf(out, cap, "%s", S(STR_EGG_TITLE)); return; }
-  ui_name_for(p->genome.lineage_id, p->genome.generation, out, cap);
+  char stored[64];
+  pet_name_stored(stored, sizeof stored);
+  (void)u8_from_latin1(out, (uint16_t)((cap > 0xFFFFu) ? 0xFFFFu : cap), stored);
 }
 
 // GAME_DESIGN 6.3's score -> face table. The ladder lives in ui/pet_view.cpp
@@ -388,11 +450,20 @@ static uint8_t s_bright_now   = OLED_CONTRAST_DEFAULT;  // last value handed to 
 // bright_service() returned without writing, and the panel stayed on
 // OLED_CONTRAST_DEFAULT - the setting silently lost at every power-up.
 static uint8_t s_bright_valid = 0;
+// The power ladder's DIM rung, an override on top of both of the above.
+static uint8_t s_pwr_dim      = 0;
 
 static void bright_service(void) {
   const SimView* p = pet();
-  const uint8_t want = (p && (p->flags & PF_ASLEEP)) ? (uint8_t)OLED_CONTRAST_DIM
-                                                     : s_bright_base;
+  uint8_t want = (p && (p->flags & PF_ASLEEP)) ? (uint8_t)OLED_CONTRAST_DIM
+                                               : s_bright_base;
+  // THE POWER LADDER'S DIM RUNG (P6-C3), and it is a third input to the same
+  // decision rather than a fourth writer of the register. It is about the
+  // PLAYER being away where the two above are about the pet and the setting,
+  // so when both are true the panel takes the lower of them - a sleeping pet
+  // on a device nobody has touched for a minute must not be BRIGHTER than
+  // either case alone.
+  if (s_pwr_dim && want > (uint8_t)PWR_DIM_CONTRAST) want = (uint8_t)PWR_DIM_CONTRAST;
   if (s_bright_valid && want == s_bright_now) return;
   // Falling asleep is slow and reluctant; waking is quicker. Not symmetric on
   // purpose: 2 s down reads as drifting off, 2 s up reads as a fault. The FIRST
@@ -411,7 +482,11 @@ static void bright_service(void) {
 
 static void toast_text(const char* txt) {
   if (!txt) return;
-  snprintf(s_toast, sizeof(s_toast), "%s", txt);
+  // u8_cat() and not snprintf("%s"): the copy is cut on a CODEPOINT boundary,
+  // so a line longer than the buffer cannot leave half a sequence behind for
+  // drawUTF8() (core/utf8.h).
+  s_toast[0] = '\0';
+  (void)u8_cat(s_toast, (uint16_t)sizeof s_toast, txt);
   s_toast_ms = now_ms();
 }
 
@@ -420,11 +495,11 @@ void ui_toast(uint16_t str_id) {
   toast_text(S(str_id));
 }
 
-static void cfg_persist(void) {
+static void cfg_persist(bool announce) {
   if (!s_cfg) return;
   s_cfg->saved_epoch = gt_now();
   gs_save_cfg(*s_cfg);
-  ui_toast(STR_SET_SAVED);
+  if (announce) ui_toast(STR_SET_SAVED);
 }
 
 void ui_alert(AlertId a) { dialog_alert((uint8_t)a); }
@@ -432,6 +507,20 @@ void ui_alert(AlertId a) { dialog_alert((uint8_t)a); }
 // =============================================================================
 //  5. ACTIONS
 // =============================================================================
+// The care actions experience is paid for. SLEEP is a toggle: it changes what
+// the Pebble is doing, not how well it is being looked after.
+static bool act_earns_xp(ActionId a) {
+  switch (a) {
+    case ACT_FEED_MEAL:
+    case ACT_FEED_SNACK:
+    case ACT_CLEAN:
+    case ACT_MEDICINE:
+    case ACT_PLAY:
+    case ACT_PET:      return true;
+    default:           return false;
+  }
+}
+
 static bool do_action(ActionId a) {
   // THE COPY HAS TO BE TAKEN FIRST. sim_apply_action(ACT_CLEAN) sets poop_count
   // to 0 on the spot, so a snapshot taken afterwards has nothing left for the
@@ -446,22 +535,43 @@ static bool do_action(ActionId a) {
   ActionResult r;
   const bool ok = sim_apply_action(a, r);
   if (ok) {
-    s_last_action = (uint8_t)a;
     if (a == ACT_PET) s_mimo_ms = now_ms();
     // Only a SUCCESSFUL action gets a film. A rejected one (cooldown, full,
     // asleep) keeps its toast and nothing else, which is the honest
     // reading: nothing happened to the pet, so nothing happens on screen.
     if (had) actfx_begin((uint8_t)a, body_view(before, pet_pose_of(before.flags)));
     if (r.str_id) ui_toast(r.str_id);
+    // EVERY care action pays XP, not just feeding. A meal is refused above 90 %
+    // satiety and satiety only falls at 4,200 milli/h, so FEED_MEAL comes round
+    // about once every 2.4 h and could never spend an hourly budget by itself;
+    // the two toggles are excluded because they care for nothing. The hourly
+    // ceiling inside app_award_xp() is what makes a spammable action harmless.
+    if (act_earns_xp(a)) {
+      (void)app_award_xp(xp_care_action_amount(), XP_SRC_CARE);
+      // AND THE SAME ACTION IS THE ACTIVITY SCORE'S "interactions" TERM (spec
+      // section 25). The same act_earns_xp() gate, so the two toggles that care
+      // for nothing score nothing here either, and the same argument for why a
+      // spammable action is harmless: the reward is capped by ACT_CAP_INTERACT
+      // per day on top of the hourly ceiling that already bounds the XP.
+      app_note_interaction();
+    }
     const SimView* p = pet();
     if (p) gs_save_active(true);
-  } else if (r.err == AERR_COOLDOWN && r.cooldown_s) {
-    // The base line has no {t}; the countdown is appended so the wait is honest.
-    char buf[64];
-    snprintf(buf, sizeof(buf), "%s %u s", S(STR_AERR_COOLDOWN), (unsigned)r.cooldown_s);
-    toast_text(buf);
   } else {
-    ui_toast(r.str_id ? r.str_id : (uint16_t)(STR_AERR_NONE + r.err));
+    // A REFUSAL IS WHERE A CUE EARNS ITS KEEP: the toast says why, but the
+    // player pressing A on a pet in a pocket only finds out that nothing
+    // happened. One SFX_BUZZ for every refusal, whichever branch names it -
+    // armed once here rather than once per branch, so a fourth refusal reason
+    // cannot arrive silent.
+    audio_play(SFX_BUZZ);
+    if (r.err == AERR_COOLDOWN && r.cooldown_s) {
+      // The base line has no {t}; the countdown is appended so the wait is honest.
+      char buf[64];
+      snprintf(buf, sizeof(buf), "%s %u s", S(STR_AERR_COOLDOWN), (unsigned)r.cooldown_s);
+      toast_text(buf);
+    } else {
+      ui_toast(r.str_id ? r.str_id : (uint16_t)(STR_AERR_NONE + r.err));
+    }
   }
   rd_request_frame();
   return ok;
@@ -534,12 +644,10 @@ void ui_nav_arrived(uint8_t to) {
 //
 // The test is actfx_active() and NOT a list of ActionIds, so an action that
 // gains or loses a film changes this behaviour by changing actfx.cpp and
-// nothing else. Two things therefore never navigate, both deliberately:
-//   * ACT_LIGHT_TOGGLE, which arms no film - its whole choreography is a
-//     register flash plus the contrast ramp, and both are PANEL-wide and read
-//     perfectly from wherever the player is standing;
-//   * a REJECTED action, which has no film to watch. The caller keeps whatever
-//     destination it had, and the toast explains itself where the player is.
+// nothing else. One thing therefore never navigates, deliberately: a REJECTED
+// action, which has no film to watch - including the first nudges against a
+// sleeping pebble. The caller keeps whatever destination it had, and the toast
+// explains itself where the player is standing.
 static bool act_and_show(ActionId a) {
   const bool ok = do_action(a);
   // ALREADY HOME IS NOT A NAVIGATION, and calling ui_goto(SCR_HOME) as if it
@@ -609,14 +717,19 @@ static void draw_transition(void) {
   u.setDrawColor(1);
 }
 
+// THE TOAST IS gfx_banner() NOW - the same picture as the HELP strip, drawn by
+// the same code, in a translation unit a host binary compiles.
+//
+// It was eleven pixels of slab and one CENTRED, UNBOUNDED line. Measured over
+// the fifty distinct ids that reach ui_toast(), FOUR are wider than the panel at
+// GF_BODY, the worst being STR_BOX_NO_RELEASE_ACTIVE at 185 px - and because
+// this file includes Arduino.h, no golden in this repository had ever drawn a
+// toast at all. Both halves of that are fixed here: the slab grows to hold the
+// line, and tests/test_screens.cpp now renders EVERY toast id through this
+// exact code.
 static void draw_toast(void) {
   if (s_toast[0] == '\0' || since(s_toast_ms) > UI_TOAST_MS) return;
-  U8G2& u = rd_u8g2();
-  const int16_t y = RD_AFFORD_Y - 11;
-  px_box(0, y, OLED_W, 11);
-  u.setDrawColor(0);
-  rd_text_center((int16_t)(y + 8), RD_FONT_BODY, s_toast);
-  u.setDrawColor(1);
+  (void)gfx_banner(s_toast);
 }
 
 // =============================================================================
@@ -964,309 +1077,161 @@ static void home_leave_layer(void) { actfx_cancel(); }
 //        reached through the ui.h seams in section 19.
 // =============================================================================
 
-static void game_start(uint8_t dev_id);
 
 // =============================================================================
-//  11. GAME - the three on-device 2-button minigames
+//  11. GAME - the screen. The games themselves live in src/minigames/.
 //
-//  Canonical for minigames_won (BRIEF 1.6): every result goes through
+//  This section used to be three games, their drawing, their scoring and their
+//  chrome, all in one place. P3-C4a moved everything but the SCREEN out:
+//  minigames/manager.cpp runs the sequence and reports each result exactly
+//  once, minigames/registry.cpp draws whichever game is live. What is left
+//  here is the frame around it and the two ways out.
+//
+//  Canonical for minigames_won (BRIEF 1.6): every result still goes through
 //  sim_apply_play_result(), which owns the shared cooldown and hourly ledger,
-//  so no surface can be farmed.
+//  so no surface can be farmed. It is reached through the manager's ONE report
+//  callback, bound below - which is the point of the extraction: there is now
+//  exactly one line in the firmware that can report a minigame result.
 //
-//  INPUT: the recogniser only classifies a TAP after DOUBLE_TAP_WINDOW_MS
-//  (280 ms), which is fatal for a reflex game. The games therefore read
-//  debounced RAW edges (~25 ms) and IGNORE the GST_TAP_*/GST_DBL_* that arrive
-//  later, so nothing is ever counted twice. GST_HOLD_R (pause) and
-//  GST_LONG_BOTH (force quit) still arrive as gestures, exactly as 8.3 wants.
+//  INPUT: a game is judged on the PRESS, not on the gesture the press turns
+//  into, so the run loop reads input_pressed_edge() - the debounced press
+//  edge, consumed once - and ignores the GST_TAP_* that arrives at release.
+//  Since P3-C4a that release is only ~25 ms behind the press rather than
+//  280 ms, but the distinction still matters: "press A as the indicator
+//  crosses the zone" is timed from the button going DOWN.
 // =============================================================================
 
-static void game_start(uint8_t dev_id) {
-  memset(&s_g, 0, sizeof(s_g));
-  s_g.id      = (dev_id < DG_COUNT) ? dev_id : (uint8_t)DG_REFLEX;
-  s_g.t0      = now_ms();
-  s_g.step_ms = s_g.t0;
-  s_g.seq_len = 3;
-  for (uint8_t i = 0; i < INPUT_BTN_N; ++i) s_raw_prev[i] = input_raw(i) ? 1u : 0u;
-  nav_push(SCR_GAME);
-}
-
-static void game_finish(void) {
+// THE one reporting path. Bound into the manager by ui_begin().
+static void game_report(uint8_t /* game_id */, uint16_t permille) {
   ActionResult r;
-  const uint16_t permille = (s_g.score > 1000u) ? 1000u : s_g.score;
+  if (permille > MG_SCORE_MAX) permille = MG_SCORE_MAX;
   sim_apply_play_result(permille, r);
-  s_last_action = ACT_PLAY;
-  const SimView* p = pet();
-  if (p) gs_save_active(true);
-  s_g.phase = 2;
-  s_g.t0    = now_ms();
-  ui_toast(permille >= 500u ? STR_GM_WIN : STR_GM_LOSE);
+  (void)app_award_xp(xp_minigame_amount(permille), XP_SRC_MINIGAME);
+  if (pet()) gs_save_active(true);
 }
 
-// ---- REFLEX -----------------------------------------------------------------
-static void reflex_arm(void) {
-  s_g.target = (uint8_t)(rng_u32(RNG_MINIGAME) & 1u);
-  s_g.t0     = now_ms();
-  s_g.arm_ms = 700UL + rng_below(RNG_MINIGAME, 1500u);   // dead time before the light
-}
-
-static void reflex_step(void) {
-  if (since(s_g.t0) > s_g.arm_ms + REFLEX_WINDOW_MS) {
-    s_g.last_ms = 0;                                 // missed the window
-    if (++s_g.round >= REFLEX_ROUNDS) { game_finish(); return; }
-    reflex_arm();
-  }
-}
-
-static void reflex_press(uint8_t side) {
-  const uint32_t el = since(s_g.t0);
-  if (el < s_g.arm_ms) {
-    ui_toast(STR_GM_TOOSOON);
-    s_g.last_ms = 0;
-  } else {
-    const uint32_t rt = el - s_g.arm_ms;
-    if (side == s_g.target && rt <= REFLEX_WINDOW_MS) {
-      s_g.last_ms = (uint16_t)rt;
-      s_g.score = (uint16_t)(s_g.score +
-                  (REFLEX_WINDOW_MS - rt) * 200UL / REFLEX_WINDOW_MS);  // 5 x 200
-    } else {
-      s_g.last_ms = 0;
-    }
-  }
-  if (++s_g.round >= REFLEX_ROUNDS) { game_finish(); return; }
-  reflex_arm();
-}
-
-static void reflex_draw(void) {
-  U8G2& u = rd_u8g2();
-  const uint32_t el = since(s_g.t0);
-  const bool lit = (el >= s_g.arm_ms) && (el <= s_g.arm_ms + REFLEX_WINDOW_MS);
-  if (lit) {
-    const int16_t x = s_g.target ? (int16_t)(OLED_W / 2) : (int16_t)0;
-    px_box(x, UI_CONTENT_Y, OLED_W / 2, 32);
-    u.setDrawColor(0);
-    px_spr((int16_t)(x + OLED_W / 4 - 4), (int16_t)(UI_CONTENT_Y + 12),
-           sprite_mini(s_g.target ? MIC_ARROW_R : MIC_ARROW_L));
-    u.setDrawColor(1);
-  } else {
-    rd_text_center((int16_t)(UI_CONTENT_Y + 20), RD_FONT_HEAD, S(STR_GM_READY));
-  }
-  char buf[16];
-  if (s_g.last_ms) snprintf(buf, sizeof(buf), "%u ms", (unsigned)s_g.last_ms);
-  else             snprintf(buf, sizeof(buf), "--");
-  rd_text_center(UI_CONTENT_BOTTOM, RD_FONT_TINY, buf);
-}
-
-// ---- MEMORY -----------------------------------------------------------------
-static void memory_new_round(void) {
-  s_g.seq_len = (uint8_t)(3u + s_g.round);
-  if (s_g.seq_len > 8u) s_g.seq_len = 8u;
-  for (uint8_t i = 0; i < s_g.seq_len; ++i) s_g.seq[i] = (uint8_t)(rng_u32(RNG_MINIGAME) & 1u);
-  s_g.play_idx = 0;
-  s_g.seq_pos  = 0;
-  s_g.t0       = now_ms();
-}
-
-static void memory_step(void) {
-  if (s_g.play_idx >= s_g.seq_len) return;
-  const uint32_t slot = MEMORY_FLASH_MS + MEMORY_GAP_MS;
-  const uint32_t idx  = since(s_g.t0) / slot;
-  s_g.play_idx = (idx > s_g.seq_len) ? s_g.seq_len : (uint8_t)idx;
-}
-
-static void memory_press(uint8_t side) {
-  if (s_g.play_idx < s_g.seq_len) return;             // still showing the sequence
-  if (side != s_g.seq[s_g.seq_pos]) {
-    s_g.score = (uint16_t)((uint32_t)s_g.round * 1000UL / MEMORY_LEVELS);
-    game_finish();
-    return;
-  }
-  if (++s_g.seq_pos >= s_g.seq_len) {
-    if (++s_g.round >= MEMORY_LEVELS) { s_g.score = 1000; game_finish(); return; }
-    memory_new_round();
-  }
-}
-
-static void memory_draw(void) {
-  U8G2& u = rd_u8g2();
-  const uint32_t slot = MEMORY_FLASH_MS + MEMORY_GAP_MS;
-  const bool showing  = (s_g.play_idx < s_g.seq_len);
-  int8_t lit = -1;
-  if (showing && (since(s_g.t0) % slot) < MEMORY_FLASH_MS)
-    lit = (int8_t)s_g.seq[s_g.play_idx];
-
-  for (uint8_t side = 0; side < 2; ++side) {
-    const int16_t x = (int16_t)(side ? 66 : 2);
-    if (lit == (int8_t)side) px_box(x, (int16_t)(UI_CONTENT_Y + 2), 60, 24);
-    else                     px_frame(x, (int16_t)(UI_CONTENT_Y + 2), 60, 24);
-    u.setDrawColor(lit == (int8_t)side ? 0 : 1);
-    px_spr((int16_t)(x + 26), (int16_t)(UI_CONTENT_Y + 10),
-           sprite_mini(side ? MIC_ARROW_R : MIC_ARROW_L));
-    u.setDrawColor(1);
-  }
-
-  for (uint8_t i = 0; i < s_g.seq_len; ++i) {
-    const int16_t x = (int16_t)(OLED_W / 2 - s_g.seq_len * 3 + i * 6);
-    if (i < s_g.seq_pos) px_box(x, (int16_t)(UI_CONTENT_Y + 30), 5, 4);
-    else                 px_frame(x, (int16_t)(UI_CONTENT_Y + 30), 5, 4);
-  }
-
-  char buf[24];
-  snprintf(buf, sizeof(buf), "%s %u/%u", S(STR_GM_ROUND),
-           (unsigned)(s_g.round + 1u), (unsigned)MEMORY_LEVELS);
-  rd_text_center(UI_CONTENT_BOTTOM, RD_FONT_BODY, buf);
-}
-
-// ---- JUMP -------------------------------------------------------------------
-static void jump_spawn(void) {
-  if (s_g.obs_n >= 3) return;
-  int16_t x = (int16_t)(OLED_W + (int16_t)rng_below(RNG_MINIGAME, 40u));
-  for (uint8_t i = 0; i < s_g.obs_n; ++i)
-    if (x - s_g.obs_x[i] < 36) x = (int16_t)(s_g.obs_x[i] + 36);
-  s_g.obs_x[s_g.obs_n++] = x;
-}
-
-static void jump_press(void) { if (s_g.jump_ms == 0) s_g.jump_ms = now_ms(); }
-
-static void jump_step(void) {
-  if (s_g.jump_ms) {
-    const uint32_t t = since(s_g.jump_ms);
-    if (t >= JUMP_RISE_MS) { s_g.jump_ms = 0; s_g.pet_dy = 0; }
-    else {
-      const int32_t half = (int32_t)(JUMP_RISE_MS / 2u);
-      const int32_t d    = (int32_t)t - half;
-      s_g.pet_dy = (int16_t)(-(JUMP_HEIGHT - (d * d * JUMP_HEIGHT) / (half * half)));
-    }
-  }
-
-  for (uint8_t i = 0; i < s_g.obs_n; ) {
-    s_g.obs_x[i] = (int16_t)(s_g.obs_x[i] - 3);
-    if (s_g.obs_x[i] < 30 && s_g.obs_x[i] + 6 > 14 && s_g.pet_dy > -9) {
-      s_g.score = (uint16_t)((uint32_t)s_g.passed * 1000UL / JUMP_TARGET);
-      game_finish();
-      return;
-    }
-    if (s_g.obs_x[i] < -6) {
-      ++s_g.passed;
-      for (uint8_t k = (uint8_t)(i + 1u); k < s_g.obs_n; ++k) s_g.obs_x[k - 1] = s_g.obs_x[k];
-      --s_g.obs_n;
-      if (s_g.passed >= JUMP_TARGET) { s_g.score = 1000; game_finish(); return; }
-      continue;
-    }
-    ++i;
-  }
-  if (s_g.obs_n == 0 || s_g.obs_x[s_g.obs_n - 1] < 72) jump_spawn();
-}
-
-static void jump_draw(void) {
-  px_hline(0, JUMP_GROUND_Y + 2, OLED_W);
-  const SimView* p = pet();
-  const uint8_t fr = (uint8_t)((now_ms() / 150u) & 1u);
-  SpriteRef r = sprite_frame(SPR_BABY_BLOB, fr);
-  if (p) {
-    const Stage st = (Stage)((p->stage == STAGE_EGG) ? (uint8_t)STAGE_BABY
-                                                     : p->stage);
-    r = sprite_lookup_pose(gene_species(p->genome), (uint8_t)st,
-                           sprite_form_of(p->genome, p->minor_form, st), POSE_IDLE, fr);
-  }
-  int16_t py = (int16_t)(JUMP_GROUND_Y + 2 - (int16_t)r.h + s_g.pet_dy);
-  if (py < UI_CONTENT_Y) py = UI_CONTENT_Y;
-  px_spr(14, py, r);
-
-  for (uint8_t i = 0; i < s_g.obs_n; ++i)
-    px_box(s_g.obs_x[i], (int16_t)(JUMP_GROUND_Y - 8), 6, 10);
-
-  char buf[16];
-  snprintf(buf, sizeof(buf), "%u/%u", (unsigned)s_g.passed, (unsigned)JUMP_TARGET);
-  rd_text_right(OLED_W - 2, (int16_t)(UI_CONTENT_Y + 6), RD_FONT_TINY, buf);
-}
-
-// ---- shared -----------------------------------------------------------------
-static void game_press(uint8_t side) {
-  if (s_g.phase != 1) return;
-  switch (s_g.id) {
-    case DG_REFLEX: reflex_press(side); break;
-    case DG_MEMORY: memory_press(side); break;
-    default:        jump_press();       break;
-  }
-}
+static uint32_t s_game_ms = 0;        // last service instant, for the real dt
 
 static void game_service(void) {
-  const uint32_t t = now_ms();
+  if (!mgr_active()) { if (sm_current() == SCR_GAME) nav_back(); return; }
 
-  if (s_g.phase == 0) {
-    if (since(s_g.t0) >= GAME_INTRO_MS) {
-      s_g.phase = 1;
-      s_g.round = 0;
-      s_g.score = 0;
-      if      (s_g.id == DG_REFLEX) reflex_arm();
-      else if (s_g.id == DG_MEMORY) memory_new_round();
-      else { s_g.t0 = t; s_g.step_ms = t; jump_spawn(); }
-    }
+  const uint32_t t  = now_ms();
+  const uint32_t dt = s_game_ms ? (uint32_t)(t - s_game_ms) : 0u;
+  s_game_ms = t;
+
+  // A MODAL IS A PAUSE, AND THE PAUSE HAS TO REACH THE GAME. This hook is
+  // called by sm_service() every frame regardless of what is on top of the
+  // screen, and the confirm layer collects GESTURES - so without this the quit
+  // confirm went up while the run underneath it kept stepping, kept scoring and
+  // kept eating the raw press edges that the player was using to ANSWER the
+  // dialog. Returning here (after s_game_ms has been moved forward, so the
+  // paused time is dropped rather than delivered as one enormous dt on resume)
+  // is what makes "PAUSA" true. The two edges are drained rather than left
+  // latched, because input_pressed_edge() holds a press until someone consumes
+  // it and the presses spent on the dialog belong to the dialog.
+  if (dialog_modal() != MODAL_NONE) {
+    (void)input_pressed_edge(INPUT_BTN_L);
+    (void)input_pressed_edge(INPUT_BTN_R);
     return;
   }
-  if (s_g.phase == 2) {
-    if (since(s_g.t0) >= GAME_RESULT_MS) nav_back();
-    return;
+
+  // Presses first, so a button pressed in the same frame the game ends still
+  // counts; mg_press() refuses once the game is over.
+  if (mgr_phase() == MGR_RUN || mgr_phase() == MGR_NEXT) {
+    if (input_pressed_edge(INPUT_BTN_L)) mgr_press(MG_SIDE_L);
+    if (input_pressed_edge(INPUT_BTN_R)) mgr_press(MG_SIDE_R);
   }
 
-  for (uint8_t b = 0; b < 2; ++b) {
-    const uint8_t down = input_raw(b) ? 1u : 0u;
-    const uint8_t prev = s_raw_prev[b];
-    s_raw_prev[b] = down;
-    if (down && !prev) game_press(b);
-    if (s_g.phase != 1) return;
-  }
+  // A note the pure logic left for us (PING's "too soon"): the presentation
+  // layer toasts it, because logic that could toast would not be pure.
+  const MgCtx& c = mgr_ctx();
+  if (c.note) { ui_toast(c.note); const_cast<MgCtx&>(c).note = 0u; }
 
-  // Fixed-step physics: the speed must not track the frame rate.
-  while ((uint32_t)(t - s_g.step_ms) >= GAME_STEP_MS) {
-    s_g.step_ms += GAME_STEP_MS;
-    switch (s_g.id) {
-      case DG_REFLEX: reflex_step(); break;
-      case DG_MEMORY: memory_step(); break;
-      default:        jump_step();   break;
-    }
-    if (s_g.phase != 1) return;
-  }
+  if (!mgr_tick(dt) && sm_current() == SCR_GAME) nav_back();
 }
 
 static void draw_game(void) {
-  const uint16_t title = (s_g.id == DG_REFLEX) ? STR_DG_REFLEX
-                       : (s_g.id == DG_MEMORY) ? STR_DG_MEMORY : STR_DG_JUMP;
-  const uint16_t sc = (s_g.score > 1000u) ? 1000u : s_g.score;
+  const MgLogic* g = mgr_logic();
+  if (g == nullptr) return;
+
+  const uint16_t sc = mgr_ctx().score;
   char tag[12];
   snprintf(tag, sizeof(tag), "%u", (unsigned)(sc / 10u));
-  draw_header(S(title), (s_g.phase == 1) ? tag : nullptr);
+  draw_header(S(g->name_idx), (mgr_phase() == MGR_RUN) ? tag : nullptr);
 
-  if (s_g.phase == 0) {
-    const bool go = since(s_g.t0) >= 1000UL;
-    rd_text_center((int16_t)(UI_CONTENT_Y + 16), RD_FONT_HEAD,
-                   S(go ? STR_GM_GO : STR_GM_READY));
-    const uint16_t hint = (s_g.id == DG_REFLEX) ? STR_DG_REFLEX_HINT
-                        : (s_g.id == DG_MEMORY) ? STR_DG_MEMORY_HINT : STR_DG_JUMP_HINT;
-    rd_text_center((int16_t)(UI_CONTENT_Y + 32), RD_FONT_BODY, S(hint));
-  } else if (s_g.phase == 2) {
-    rd_text_center((int16_t)(UI_CONTENT_Y + 16), RD_FONT_HEAD,
-                   S(sc >= 500u ? STR_GM_WIN : STR_GM_LOSE));
-    char buf[24];
-    snprintf(buf, sizeof(buf), "%s %u", S(STR_GM_SCORE), (unsigned)(sc / 10u));
-    rd_text_center((int16_t)(UI_CONTENT_Y + 32), RD_FONT_BODY, buf);
-  } else {
-    switch (s_g.id) {
-      case DG_REFLEX: reflex_draw(); break;
-      case DG_MEMORY: memory_draw(); break;
-      default:        jump_draw();   break;
+  switch (mgr_phase()) {
+    case MGR_INTRO: {
+      const bool go = mgr_phase_ms() >= MGR_GO_MS;
+      rd_text_center((int16_t)(UI_CONTENT_Y + 16), RD_FONT_HEAD,
+                     S(go ? STR_GM_GO : STR_GM_READY));
+      rd_text_center((int16_t)(UI_CONTENT_Y + 32), RD_FONT_BODY, S(g->hint_idx));
+      break;
     }
+    case MGR_RESULT: {
+      rd_text_center((int16_t)(UI_CONTENT_Y + 16), RD_FONT_HEAD,
+                     S(sc >= 500u ? STR_GM_WIN : STR_GM_LOSE));
+      char buf[24];
+      snprintf(buf, sizeof(buf), "%s %u", S(STR_GM_SCORE), (unsigned)(sc / 10u));
+      rd_text_center((int16_t)(UI_CONTENT_Y + 32), RD_FONT_BODY, buf);
+      break;
+    }
+    case MGR_NEXT: {
+      // The 1.2 s card between games. A continues, B stops - and it says so,
+      // because GAME_DESIGN 8.3 forbids hidden gestures.
+      rd_text_center((int16_t)(UI_CONTENT_Y + 20), RD_FONT_HEAD, S(STR_GM_NEXT));
+      char buf[24];
+      snprintf(buf, sizeof(buf), "%u/%u", (unsigned)(mgr_index() + 1u),
+               (unsigned)mgr_count());
+      rd_text_center((int16_t)(UI_CONTENT_Y + 36), RD_FONT_BODY, buf);
+      rd_affordance(S(STR_AF_OK), S(STR_AF_BACK));
+      return;
+    }
+    case MGR_TOTAL: {
+      char buf[24];
+      snprintf(buf, sizeof(buf), "%s %u", S(STR_GM_SCORE),
+               (unsigned)(mgr_total_score() / 10u));
+      rd_text_center((int16_t)(UI_CONTENT_Y + 24), RD_FONT_HEAD, buf);
+      break;
+    }
+    default:
+      mg_draw_current();      // the run frame, from minigames/registry.cpp
+      break;
   }
-  rd_affordance(nullptr, S(STR_AF_PAUSE));
+  // DURING A RUN BOTH BUTTONS ARE PLAY INPUTS, in all six games, so the strip
+  // may not offer B as PAUSA alone - the pause is B HELD, in the same tap/hold
+  // shape the lists already write "ATRAS/SEL" in. Outside the run B is the way
+  // out and nothing else. See handle_game() for the collision this closes.
+  if (mgr_phase() == MGR_RUN)
+    rd_affordance(S(STR_GM_AF_PLAY), S(STR_GM_AF_PLAY_PAUSE));
+  else
+    rd_affordance(nullptr, S(STR_AF_PAUSE));
 }
 
-// GAME_DESIGN 8.3: "games must not have hidden gestures." Section 7's B, which
-// is a TAP since P2-C11d: the strip has always said PAUSA and the gesture used
-// to be a 600 ms hold, which is the definition of a hidden one.
+// GAME_DESIGN 8.3: "games must not have hidden gestures."
+//
+// THE PAUSE IS ON HOLD_R DURING A RUN, and that is a collision fix rather than
+// a preference. game_service() feeds input_pressed_edge(INPUT_BTN_R) straight
+// into mgr_press() while in_on_release() turns the same physical press into a
+// GST_TAP_R - so with the pause on the tap, ONE press of B both played the game
+// and opened a modal over it. PING has been able to trip that since P3-C4a
+// whenever its target was R; P3-C4b would have given four more games the same
+// problem, with B as a play input in every one.
+//
+// The OTHER half of that bug was that the run did not actually stop: the modal
+// went up and the game kept ticking, scoring and consuming press edges behind
+// it, because dialog_input() consumes gestures and never touches the raw edge.
+// That half is fixed in game_service() above, which is where the clock is.
+//
+// GST_HOLD_R is the natural home: it is already SELECT on every list screen,
+// and in_on_release() emits nothing at all after a HOLD has fired, so a held B
+// cannot also arrive as a tap. The press edge underneath it still reaches the
+// game as one press, which is correct - the player did press the button.
 static void handle_game(Gesture g) {
-  if (g != GST_TAP_R) return;
-  if (s_g.phase == 1) dialog_open_confirm(CFM_QUIT_GAME, STR_CF_QUIT_GAME);
-  else                nav_back();
+  if (mgr_phase() == MGR_RUN) {
+    if (g == GST_HOLD_R) dialog_open_confirm(CFM_QUIT_GAME, STR_CF_QUIT_GAME);
+    return;
+  }
+  if (g == GST_TAP_R) mgr_back();
 }
 
 // =============================================================================
@@ -1323,14 +1288,38 @@ static const PetView* ceremony_body(void) {
 // ceremony frame, or answer false so the screen draws the incubator instead.
 static bool evo_ceremony_frame(void) { return ceremony_draw(now_ms()); }
 
-// The pure DIAG screen's input hook (screen_diag.h). Returns true when the
-// console wants the SCREEN closed - which is not the same as the console being
-// switched off: watching an accelerated life on the ordinary screens is the
-// entire point of it.
-static bool diag_gesture(Gesture g) {
-  switch (god_handle(g)) {
+// ONE place every GodEvt is acted on, whether a GESTURE raised it (god_handle)
+// or a TYPED SERIAL LINE did (god_take_evt, P10-C1). Two switches would be two
+// places to forget an arm, and the serial half is the half no host test can
+// reach. Returns true when the console wants the SCREEN closed.
+static bool apply_god_evt(GodEvt e, uint8_t arg) {
+  switch (e) {
     case GOD_EVT_LEAVE:
       return true;
+    // test_battle / start_battle (spec sections 49 and 66). The battle screen
+    // is PUSHED on top of the console rather than replacing it, so B walks back
+    // into the god menu the operator started from and god mode stays on - which
+    // is the point: the heap panel is where the per-frame delta this entry
+    // exists to measure is read back.
+    case GOD_EVT_BATTLE:
+      ui_start_battle(BT_ENTRY_DIAG);
+      return false;
+    // spec section 66's start_creator and scan_wifi. Both are PUSHES for the
+    // same reason: the console cannot navigate, and the radio and the scan job
+    // have exactly one owner each (ui/screen_network.cpp), so the console asks
+    // for the screen instead of starting a second scan behind its back.
+    case GOD_EVT_CREATOR:
+      nav_push(SCR_CREATOR);
+      return false;
+    case GOD_EVT_SCAN:
+      nav_push(SCR_NETWORK);
+      return false;
+    // spec section 49's test_minigame. ui_start_minigame() applies the SAME
+    // cooldown and energy refusals the PLAY menu does; a diagnostic that
+    // bypassed them would be testing a path no player can reach.
+    case GOD_EVT_MINIGAME:
+      ui_start_minigame(arg);
+      return false;
     case GOD_EVT_WIPED: {
       if (s_cfg) gs_cfg_defaults(*s_cfg);
       const SimView* np = pet();
@@ -1344,14 +1333,38 @@ static bool diag_gesture(Gesture g) {
   }
 }
 
+// The pure DIAG screen's input hook (screen_diag.h). Returns true when the
+// console wants the SCREEN closed - which is not the same as the console being
+// switched off: watching an accelerated life on the ordinary screens is the
+// entire point of it.
+static bool diag_gesture(Gesture g) {
+  return apply_god_evt(god_handle(g), 0);
+}
+
 // Idempotent, and it has to be: the manual rub path calls sim_hatch() itself
 // and the simulation then reports SIM_EV_HATCHED on the NEXT logic tick, so
 // this is reached twice for one birth. ceremony_begin() holds the guard.
 static void ceremony_start(uint8_t kind) {
   const SimView* p = pet();
-  if (!p || p->stage != STAGE_BABY) return;
+  if (!p) return;
+  // THE GATE IS KIND-AWARE. A hatch is only ever the moment a baby appears, so
+  // it still demands STAGE_BABY. An evolution happens to a creature that is
+  // already standing there and may be any age, so it demands only that there IS
+  // one and that it is not still inside its shell.
+  if (kind == CEREMONY_HATCH) {
+    if (p->stage != STAGE_BABY) return;
+  } else if (kind == CEREMONY_EVOLVE) {
+    if (p->stage == STAGE_EGG) return;
+  } else {
+    return;
+  }
 
-  gs_save_active(true);   // commit FIRST: everything below is presentation
+  // Commit FIRST: everything below is presentation. EXCEPT for an evolution,
+  // which app_evolve_active() has already applied AND flushed before calling
+  // in - it has to, because its return value is what promises the change
+  // survives a brownout mid-show. Writing again here would be a second forced
+  // NVS write for one event, for nothing.
+  if (kind != CEREMONY_EVOLVE) gs_save_active(true);
 
   if (!ceremony_begin(kind, now_ms())) return;
 
@@ -1397,10 +1410,24 @@ void ui_note_recovered(void) {
 static void dialog_commit(uint8_t which) {
   switch (which) {
     case CFM_QUIT_GAME:
-      s_g.score = 0;
-      game_finish();                                   // counts as a loss
+      // Quitting is a result of whatever was earned so far, reported through
+      // the manager's ONE path like every other ending. It used to zero the
+      // score and call game_finish() here, which was a second place in the
+      // firmware that could report a minigame.
+      mgr_back();
       break;
     case CFM_MEDICINE: act_and_show(ACT_MEDICINE); break;   // BRIEF D
+    // Spec section 18. app_evolve_active() performs the change and flushes it -
+    // the Pebble AND the nvs2 checkpoint - before it returns, so by the time
+    // ceremony_start() arms the show there is nothing left to lose to a
+    // brownout. That order is ui/ceremony.h's argument and it is why the call
+    // is here and not after the show.
+    case CFM_EVOLVE:
+      if (app_evolve_active()) {
+        ui_toast(STR_RX_EVOLVE);          // cleared by the show, as a hatch's is
+        ceremony_start(CEREMONY_EVOLVE);
+      }
+      break;
     case CFM_WIPE1:    dialog_open_confirm(CFM_WIPE2, STR_CF_WIPE2); break;  // two dialogs
     // The Box release, behind the same two dialogs and for the same reason:
     // it is the one action in the game that destroys a Pebble (spec section 9,
@@ -1427,10 +1454,36 @@ static void dialog_commit(uint8_t which) {
     case CFM_WIPE2: {
       gs_factory_reset();
       if (s_cfg) { gs_cfg_defaults(*s_cfg); gs_save_cfg(*s_cfg); }
+
+      // *** THROUGH THE BOX'S CONSTRUCTOR, SINCE THE FINAL REVIEW. ***
+      // This used to be a bare sim_new_pet(), which writes an egg into whatever
+      // PebbleInstance the simulation is still bound to and MINTS NO SLOT - it
+      // is not a Box constructor (game/box.h calls box_new_pebble() "THE TREE'S
+      // ONE CONSTRUCTOR"). gs_factory_reset() has just memset the Box, so
+      // slot_mask was 0 and active_slot 255, gs_save_active() refused at its
+      // `act >= BOX_SLOTS` guard, and the bool was discarded. Measured against
+      // the shipping objects: a fully playable creature on the panel with
+      // box_count() 0 and every save from that moment a silent no-op, so the
+      // next power cut lost everything since the reset AND re-ran the first-boot
+      // wizard. app/app.cpp's own first boot does exactly the sequence below.
       const Genome g0 = genome_genesis();
-      sim_new_pet(g0, gt_now(), 0);
-      const SimView* p = pet();
-      if (p) { gs_save_active(true); petfx_reset(body_view(*p, POSE_IDLE)); }
+      const uint8_t sl = box_new_pebble((uint8_t)SPECIES_ID_STARTER, 1,
+                                        (uint8_t)ORIGIN_STARTER, g0,
+                                        rng_u32(RNG_MISC), gt_now());
+      const SimView* p = nullptr;
+      if (sl != (uint8_t)BOX_SLOT_NONE) {
+        (void)box_set_active(sl);
+        PebbleInstance* pb = box_slot(sl);
+        if (pb != nullptr) { sim_bind(*pb); p = pet(); }
+      }
+      if (p) {
+        // The verdict is no longer discarded: a reset that cannot write its own
+        // starter must say so rather than hand back a device that looks fine.
+        if (!gs_save_active(true) || !gs_save_box()) ui_toast(STR_ERR_NVS);
+        petfx_reset(body_view(*p, POSE_IDLE));
+      } else {
+        ui_toast(STR_ERR_NVS);
+      }
       s_stat_ok  = 0;                // a wiped device shows the truth at once
       err_set_kind(ERRK_NONE);       // the save the ERROR screen was about is gone
       sm_replace_root(SCR_EVOLUTION);
@@ -1456,12 +1509,13 @@ void ui_game_render(void)                  { draw_game(); }
 void ui_game_input(Gesture g)              { handle_game(g); }
 
 void ui_game_leave(void) {
-  // Abandoning a game in any way at all is a loss.
-  if (s_g.phase != 1) return;
-  ActionResult r;
-  s_g.score = 0;
-  sim_apply_play_result(0, r);
-  s_g.phase = 2;
+  // Leaving the screen by ANY route abandons the run. This used to call
+  // sim_apply_play_result() itself, which made it a second reporting path
+  // guarded only by a phase check - two exits, two chances to count a game
+  // twice in minigames_won and in the XP ledger. mgr_abort() reports the
+  // running game exactly once and is a no-op if it already has.
+  mgr_abort();
+  s_game_ms = 0;
 }
 
 // =============================================================================
@@ -1494,11 +1548,40 @@ void ui_note_brightness(uint8_t contrast) {
   bright_service();
 }
 
+void ui_note_power_dim(bool on) {
+  const uint8_t want = on ? 1u : 0u;
+  if (want == s_pwr_dim) return;
+  s_pwr_dim = want;
+  bright_service();
+}
+
+// BOTH radio screens since P7-C2. A single-screen answer here would have been
+// a gate that stopped biting the moment a second screen took the radio, which
+// is the shape of defect this project keeps finding: the NETWORK screen's scan
+// and the LINK screen's discovery job and session both hold it.
+bool ui_radio_job_busy(void) {
+  // ALL THREE RADIO OWNERS, AND THE THIRD WAS MISSING UNTIL P10-C6. The
+  // creator portal was not in this predicate, so the ladder reached PWR_IDLE
+  // at 120 s and pwr_hook_release() navigated home - tearing the access point
+  // down under a phone that was still drawing on it, 180 s before D7's own
+  // timer would have. See ui/screen_creator.h for the whole account; the gate
+  // in tools/check.sh is on this line naming all three.
+  return network_screen_busy() || link_screen_busy() || creator_screen_busy();
+}
+
+// THE OTHER THING THE LADDER MUST NOT INTERRUPT, and it took until the final
+// review to notice that the predicate above had the wrong name for the general
+// case. A radio job is not the only state a player can be in for two minutes
+// without touching a button; a CEREMONY is the other one, and it is the one
+// every first boot ends on. See ui.h for the measurement.
+bool ui_show_busy(void) { return ceremony_active(); }
+
 // Defined with the rest of the seams in section 20; ui_begin() binds it.
 static const PebbleView* ui_fill_view(void);
 
 void ui_begin(void) {
-  memset(&s_g,     0, sizeof(s_g));
+  mgr_bind_report(game_report);   // THE one path a minigame result can take
+  mgr_abort();                    // a wipe must not leave a run half-played
   // The screens P2-C11b migrated read the pet through this snapshot and draw
   // the animated stage through the bound layer. Both bindings are re-made on
   // every ui_begin(), which is also what a factory reset runs.
@@ -1509,13 +1592,12 @@ void ui_begin(void) {
   ceremony_bind_body(&ceremony_body);
   evo_bind_ceremony(&evo_ceremony_frame);
   diag_bind(&god_active, &god_draw, &diag_gesture);
-  memset(s_raw_prev, 0, sizeof(s_raw_prev));
   sm_begin();
   dialog_bind_commit(&dialog_commit);
   dialog_reset();
   s_toast[0]    = '\0';
-  s_last_action = ACT_NONE;
   s_absence_ms  = 0;
+  s_evo_ask_ms  = 0;                 // a boot or a wipe re-offers a pending evolution
   s_stat_ok     = 0;                 // boot: show the truth, do not animate to it
   ceremony_reset();
   s_trans_ms    = 0;
@@ -1574,17 +1656,51 @@ void ui_note_events(uint32_t ev) {
   // with UI_ALERT_MIN_MS forcing the player to sit through a modal telling them
   // their newborn is evolving. HATCHED wins the batch outright.
   if (!(ev & SIM_EV_HATCHED) && (ev & (SIM_EV_STAGE_UP | SIM_EV_EVOLVE_MINOR))) {
-    s_evolve_ms = now_ms();
-    ui_alert(AL_EVOLVING);
+    if (!offline) { s_evolve_ms = now_ms(); ui_alert(AL_EVOLVING); }
     ui_toast(STR_RX_EVOLVE);
   }
-  if (ev & SIM_EV_POOP)        ui_alert(AL_POOP);
-  if (ev & SIM_EV_SICK_START)  ui_alert(AL_SICK);
+  // A level-up is the one moment the numbers under the sprite change without
+  // the player doing anything to the sprite, so it gets the flash as well as
+  // the toast: HOME's XP rule snaps back to empty and the level in the strip
+  // ticks over, and the frame flash is what points at it.
+  if (ev & SIM_EV_LEVEL_UP)  {
+    rd_flash(HATCH_FLASH_MS);
+    audio_play(SFX_RISE);          // the numbers went up; so does the cue
+    ui_toast(STR_RX_LEVEL_UP);
+  }
+  // *** NO MODAL CLAIMS ATTENTION FOR SOMETHING THAT HAPPENED WHILE THE DEVICE
+  // WAS OFF. Final review. ***
+  // s_events_offline is declared above with the contract "Everything in that
+  // batch happened while the device was off, and NOTHING IN IT MAY CLAIM THE
+  // PLAYER'S ATTENTION AS IF IT WERE HAPPENING NOW", and it gated exactly ONE
+  // of the six branches that can - the hatch ceremony. Every alert below fired
+  // unconditionally on the offline batch, and ui/dialog.cpp's queue holds eight
+  // and pops the first on the very first ui_service() of loop().
+  //
+  // What that cost, measured by replaying these branches through the real
+  // dialog queue against a real sim_catch_up_ex(): 1 h away -> 1 modal, 8 h -> 3,
+  // 3 days -> 4, a week -> 5. handle_alert() refuses every gesture for
+  // UI_ALERT_MIN_MS (1200 ms) each, and draw_alert() is an opaque fill over rows
+  // 16..47 - which covers the absence banner's own rows 12..35 from its first
+  // frame. So the "Donde estabas? 8 h 12 min." line, whose 5 s window is stamped
+  // before any frame is drawn, expired underneath the modals and was NEVER SEEN;
+  // and ui_draw() draws no toast at all while a modal is up, so the 1800 ms boot
+  // line - which app/app.cpp explicitly ranks the interrupted-trade result above
+  // the greeting in - was never drawn either. README line 5's "knows how long
+  // you left it alone" and trade.h's "the player is told, which is the only
+  // honest thing left" were both invisible on any absence worth measuring.
+  //
+  // The state is NOT lost by suppressing the modal: the toasts still queue, the
+  // bars are already what they are, and sim_alert() is re-raised by the next
+  // live tick - so a pet that is still hungry still says so, a moment later,
+  // when the player is actually looking.
+  if ((ev & SIM_EV_POOP)       && !offline) ui_alert(AL_POOP);
+  if ((ev & SIM_EV_SICK_START) && !offline) ui_alert(AL_SICK);
   if (ev & SIM_EV_SICK_END)    ui_toast(STR_RX_MED);
-  if (ev & SIM_EV_WISH_START)  ui_alert(AL_WISH);
+  if ((ev & SIM_EV_WISH_START) && !offline) ui_alert(AL_WISH);
   if (ev & SIM_EV_WISH_OK)     ui_toast(STR_WISH_OK);
   if (ev & SIM_EV_WISH_FAIL)   ui_toast(STR_WISH_FAIL);
-  if (ev & SIM_EV_BIRTHDAY)  { ui_alert(AL_BIRTHDAY); ui_toast(STR_EV_BIRTHDAY); }
+  if (ev & SIM_EV_BIRTHDAY)  { if (!offline) ui_alert(AL_BIRTHDAY); ui_toast(STR_EV_BIRTHDAY); }
   if (ev & SIM_EV_VISITA)      ui_toast(STR_EV_VISITA);
   // PF_ASLEEP is already set / cleared by the time the event is delivered, so
   // bright_service() derives the target itself instead of taking it as an
@@ -1592,7 +1708,10 @@ void ui_note_events(uint32_t ev) {
   // only buys one loop of latency, but it is the loop the player is looking at.
   if (ev & SIM_EV_SLEEP)     { ui_toast(STR_RX_SLEEP); bright_service(); }
   if (ev & SIM_EV_WAKE)      { ui_toast(STR_RX_WAKE);  bright_service(); }
-  if (ev & SIM_EV_ALERT) {
+  if ((ev & SIM_EV_ALERT) && !offline) {
+    // Not lost: sim_alert() is a STATE, re-raised by the next live tick, so a
+    // pet that is genuinely in trouble says so a second later with the player
+    // watching - instead of over the top of the welcome-back line.
     const uint8_t a = sim_alert();
     if (a != AL_NONE) ui_alert((AlertId)a);
   }
@@ -1695,6 +1814,27 @@ void ui_service(void) {
   // an input flush and a trip HOME.
   if (ceremony_active()) { ceremony_service(t); return; }
 
+  // P10-C1: the serial command layer's navigation latch. god_service() runs in
+  // app/app.cpp's loop, nowhere near the screen stack, so a typed
+  // `start_creator` leaves an event here and this drains it - through
+  // apply_god_evt(), the same arms a gesture goes through.
+  //
+  // BELOW the ceremony's early return ON PURPOSE. A birth or an evolution owns
+  // the screen for 4.5 s and ends itself with an input flush and a trip HOME, so
+  // a push landing inside one would be clobbered by the trip. The latch holds
+  // until the film is over instead, which is what a latch is for.
+  //
+  // One deep: a second event before the first is drained replaces it, because a
+  // queue of console navigations is a queue of surprises. Inert in the release
+  // build (god_take_evt() stubs to GOD_EVT_NONE).
+  {
+    uint8_t garg = 0;
+    const GodEvt ge = god_take_evt(garg);
+    if (ge != GOD_EVT_NONE) {
+      if (apply_god_evt(ge, garg) && sm_current() == SCR_DIAG) nav_home();
+    }
+  }
+
   // The alert layer surfaces only when nothing else owns the screen, and the
   // HELP strip expires on its own clock. Both are dialog_service()'s. A screen
   // that composed its own frame (SF_OWNS_FRAME: the console) would never draw
@@ -1703,6 +1843,19 @@ void ui_service(void) {
     const ScreenDef* d = sm_def();
     const bool owns_frame = (d != nullptr) && ((d->flags & SF_OWNS_FRAME) != 0u);
     (void)dialog_service(t, sm_current() != SCR_GAME && !owns_frame);
+  }
+
+  // SECTION 18's CONFIRMATION. An evolution is offered, never imposed, and the
+  // question goes up only on HOME with nothing else on top of it. Invariant 5
+  // starts the cursor on NO, so a stray press is a decline; a decline costs
+  // nothing, leaves EVO_STATE_PENDING set and simply comes back in
+  // UI_EVOLVE_ASK_MS. app_evolution_offer() is what knows whether the whole
+  // rule holds - this file never evaluates one.
+  if (dialog_modal() == MODAL_NONE && sm_current() == SCR_HOME &&
+      (s_evo_ask_ms == 0 || since(s_evo_ask_ms) >= UI_EVOLVE_ASK_MS) &&
+      app_evolution_offer()) {
+    s_evo_ask_ms = (t == 0u) ? 1u : t;   // 0 is the "never asked" sentinel
+    dialog_open_confirm(CFM_EVOLVE, STR_CF_EVOLVE);
   }
 
   // Invariant 3, plus the update hook of a migrated screen. A modal freezes
@@ -1775,6 +1928,7 @@ uint32_t ui_now_ms(void)   { return now_ms(); }
 uint32_t ui_idle_ms(void)  { return sm_idle_ms(); }
 
 void ui_push(ScreenId s)   { sm_push(s); }
+void ui_replace_root(ScreenId s) { sm_replace_root(s); }
 void ui_wiggle(void)       { s_wiggle_ms = now_ms(); }
 void ui_back(void)         { sm_back(); }
 void ui_home(void)         { sm_home(); }
@@ -1804,6 +1958,38 @@ void ui_box_activate(uint8_t slot) {
   ui_toast(STR_BOX_ACTIVATED);
 }
 
+// FIRST BOOT'S STARTER CHOICE (P10-C4). See ui.h for why there are two locks.
+//
+// THE FIRST LOCK IS HERE and it is the persisted step: this may only run while
+// app/onboarding.h says the flow is standing on OB_STARTER. Without it the
+// entry point exists on every device for ever, one seam away from any screen
+// that later wants to "just change the species".
+//
+// THE SECOND IS game/box.cpp's, and it is the one that actually protects a
+// player: box_reroll_starter() refuses any Pebble that has earned or been named
+// anything, whatever the caller believes about the step.
+bool ui_set_starter(uint8_t species_id) {
+  if (!s_cfg || ob_step(*s_cfg) != (uint8_t)OB_STARTER) return false;
+  const uint8_t slot = box_active();
+  if (slot == (uint8_t)BOX_ACTIVE_NONE) return false;
+  if (!box_reroll_starter(slot, species_id, gt_now())) return false;
+
+  PebbleInstance* p = box_slot(slot);
+  if (!p) return false;
+  // Same tail as ui_box_activate(): the simulation is rebound to the Pebble
+  // that is actually in the slot, the bars start at the truth rather than
+  // crawling from the old creature's, and the body cache is reset so the
+  // renderer does not keep drawing the species that was there a frame ago.
+  sim_switch(*p);
+  gs_save_box();
+  gs_save_active(true);
+  s_stat_ok = 0;
+  actfx_cancel();
+  const SimView* v = pet();
+  if (v) petfx_reset(body_view(*v, POSE_IDLE));
+  return true;
+}
+
 void ui_box_swap(uint8_t a, uint8_t b) {
   // box_sim_swap(), not box_swap(): when the swap moves the ACTIVE slot the two
   // creatures exchange addresses and sim's raw pointer has to follow the one
@@ -1821,7 +2007,14 @@ void ui_box_release(uint8_t slot) {
 }
 
 Config* ui_cfg(void)       { return s_cfg; }
-void ui_cfg_changed(void)  { cfg_persist(); }
+void ui_cfg_changed(void)     { cfg_persist(true); }
+
+void ui_setup_persist(void) {
+  cfg_persist(false);
+  // See ui.h: a config with no Box beside it is a save the loader throws away.
+  gs_save_box();
+  gs_save_active(true);
+}
 
 void ui_apply_brightness(uint8_t contrast) {
   s_bright_base = contrast ? contrast : (uint8_t)OLED_CONTRAST_DEFAULT;
@@ -1836,11 +2029,6 @@ bool ui_act_and_show(uint8_t action) {
   return (action < (uint8_t)ACT_COUNT) ? act_and_show((ActionId)action) : false;
 }
 
-void ui_repeat_last_action(void) {
-  if (s_last_action != ACT_NONE) act_and_show((ActionId)s_last_action);
-  else                           ui_toast(STR_AERR_BAD_ARG);
-}
-
 void ui_help(uint16_t str_id)    { dialog_open_help(str_id); }
 void ui_confirm_medicine(void)   { dialog_open_confirm(CFM_MEDICINE, STR_CF_SURE); }
 
@@ -1853,8 +2041,328 @@ void ui_start_minigame(uint8_t idx) {
     return;
   }
   if (sim_stat_pct(ST_ENERGY) < ACT_PLAY_MIN_ENERGY_PCT) { ui_toast(STR_AERR_TIRED); return; }
-  game_start(idx);
+
+  // One seed for the whole sequence, drawn once from the minigame stream: the
+  // three games AND their layouts are reproducible from it, which is what
+  // makes a run replayable in a test and a bug report.
+  mgr_begin(idx, rng_u32(RNG_MINIGAME), MGR_SEQ_LEN);
+  s_game_ms = 0;
+  (void)input_pressed_edge(INPUT_BTN_L);   // drop the press that opened the game
+  (void)input_pressed_edge(INPUT_BTN_R);
+  nav_push(SCR_GAME);
 }
+
+// -----------------------------------------------------------------------------
+//  THE BATTLE SEAMS (P4-C4). See ui.h.
+// -----------------------------------------------------------------------------
+void ui_start_battle(uint8_t entry) {
+  // ONE seed per battle, drawn once. rng_u32(RNG_BATTLE) is legal here and
+  // illegal inside src/game/battle* - tools/check.sh's second battle gate greps
+  // for exactly that - because the ENGINE must draw only from BattleState.rng
+  // or two peers stop reproducing each other's rounds. Handing it in from the
+  // outside is what keeps both true at once.
+  const uint32_t seed = (entry == BT_ENTRY_DIAG) ? (uint32_t)BT_DIAG_SEED
+                                                 : rng_u32(RNG_BATTLE);
+  battle_arm(entry, seed);
+  // The console cannot navigate (ui.cpp owns that), so a DIAG battle is pushed
+  // ON TOP of SCR_DIAG and B walks back into the console it was started from.
+  nav_push(SCR_BATTLE);
+}
+
+void ui_battle_result(uint8_t entry, uint8_t won) {
+  // A diagnostic pays nothing. Entering god mode already sets
+  // genome.god_tainted for ever, and a test entry that also handed out XP would
+  // be a cheat wearing a developer tool's clothes.
+  //
+  // A LINKED WIN PAYS THE SAME AS A PRACTICE ONE, THROUGH THE SAME METER
+  // (P7-C3). It is deliberately not worth more: XP_CAP_BATTLE is two wins an
+  // hour for the device, and a source that a second device can supply on demand
+  // is the last one that should have its own larger bucket. What makes the
+  // linked win honest is not the amount, it is WHERE `won` came from -
+  // ui/screen_battle.cpp's won_now() reads ui_link_battle_status(), which is
+  // true only where networking/session.h's session_rewards_authorised() is, so
+  // a desync or a lost link arrives here as won == 0 and falls out on the line
+  // below with no Box written and no ledger touched.
+  if (entry != BT_ENTRY_PRACTICE && entry != BT_ENTRY_LINK) return;
+  if (!won) return;
+  // METERED LIKE EVERY OTHER SOURCE, and P4-C4 had to SIZE that meter to be able
+  // to say so: game/xp.cpp carried XP_SRC_BATTLE as {0, 0} - "reserved but not
+  // yet metered, until P4-C4 exists to spend it" - which would have made the
+  // practice battle the one repeatable XP source in the game with no ceiling at
+  // all. XP_CAP_BATTLE is two wins an hour (data/balance.h), refilling
+  // continuously, belonging to the device rather than to the Pebble.
+  //
+  // The return value is whether a LEVEL was gained, NOT whether anything was
+  // paid: a win against an empty bucket returns false and is not an error.
+  // ui_note_events() is what turns SIM_EV_LEVEL_UP into the flash and the toast.
+  (void)app_award_xp((uint16_t)XP_BATTLE_WIN, XP_SRC_BATTLE);
+  if (pet()) gs_save_active(true);
+  ui_toast(STR_BT_XP);
+}
+
+// -----------------------------------------------------------------------------
+//  THE EXPLORATION SEAMS (P5-C3/C4). See ui.h.
+// -----------------------------------------------------------------------------
+const WifiScanDriver& ui_scan_driver(void) { return net_scan_driver(); }
+
+// -----------------------------------------------------------------------------
+//  THE PEER LINK'S SEAMS (P7-C2/C3). See ui.h.
+//
+//  networking/net.cpp is the ONE radio owner on the far side of every one of
+//  them, exactly as it is for the scan. ui/screen_link.cpp is pure and reaches
+//  none of this itself.
+// -----------------------------------------------------------------------------
+const LinkRadioDriver& ui_link_driver(void)   { return net_link_driver(); }
+const Transport&       ui_link_transport(void){ return net_link_transport(); }
+bool     ui_link_bind(uint8_t slot)           { return net_link_bind(slot); }
+void     ui_link_unbind(void)                 { net_link_unbind(); }
+// RNG_MISC is core/rng.h's "tokens, nonces, PINs, canaries" stream - the same
+// one the creator PIN, the device id, the RTC nonce and the flash canary are
+// drawn from - and a session nonce is exactly that kind of value. A pure screen
+// may not reach a named global stream, which is the whole reason this line is
+// here and not in ui/screen_link.cpp.
+uint32_t ui_link_nonce(void)                  { return rng_u32(RNG_MISC); }
+
+// -----------------------------------------------------------------------------
+//  THE TRADE'S SEAM (P7-C4). See ui.h for why it is a pointer to an incomplete
+//  type over there and a whole struct here.
+//
+//  THE FIVE HOOKS ARE THE ONLY PLACE THE TRADE TOUCHES FLASH, and every one of
+//  them returns whether the bytes LANDED: save_manager.cpp verifies its own
+//  writes by reading them back, and game/trade.cpp stops the sequence on a
+//  false rather than assuming. The WRITE ORDER - W3, B1, B2, B3, W4 - belongs
+//  to game/trade.cpp and not to this file; these are the four verbs it drives.
+// -----------------------------------------------------------------------------
+//  AND EVERY ONE OF THEM REFUSES A READ-ONLY SESSION, SINCE THE FINAL REVIEW.
+//  persistence/game_state.h states the rule: read-only is set when the load
+//  refused to touch flash (LOAD_CORRUPT, LOAD_FOREIGN_NEWER) because "the pet in
+//  RAM is a placeholder and WRITING IT WOULD DESTROY EXACTLY THE SAVE THE USER
+//  IS ABOUT TO BE ASKED ABOUT". The guard lived only in the gs_* facade, and
+//  these five hooks go straight to save_manager - they READ through gs_state()
+//  and WRITE around gs_save_slot()/gs_save_box(). Measured against the shipping
+//  objects: on a read-only session gs_save_box() correctly returned 0 while
+//  save_box_header(), save_trade_journal(), save_pebble_now() and
+//  save_checkpoint_all() all landed real bytes, and a whole trade committed ten
+//  flash writes - the outgoing Pebble gone from flash, the incoming one on it.
+//
+//  This is docs/bench.md G3's board: an older image flashed over a v3 save comes
+//  up read-only behind "actualiza el firmware", and screen_error.cpp's LONG_BOTH
+//  gives a deliberate route to HOME. From there the trade would have written
+//  into the save the operator was told not to touch, so re-flashing the newer
+//  firmware afterwards would not find the save it left.
+//
+//  Guarded HERE, at the five hooks, rather than inside save_manager: the
+//  recovery path (persistence/game_state.cpp gs_recover) deliberately WRITES
+//  while still read-only and clears the flag afterwards, so a blanket guard one
+//  layer down would break the one path that exists to get a device out of this
+//  state. The player is not left without an answer: game/trade.cpp stops the
+//  W3 -> B1 -> B2 -> B3 -> W4 sequence on the first false and reports a
+//  TradeReject, which the LINK screen shows - so a read-only device refuses the
+//  trade visibly rather than writing into a save it has disowned. Refusing it
+//  one layer earlier, in ui/screen_link.cpp, would need a new ui.h seam and
+//  therefore a FIFTY-FIRST shadowed symbol in tests/fakes/link_fake.cpp; that is
+//  a better error message and not a better outcome, and it is not worth opening
+//  a new shadow for on the eve of a bench. Recorded here rather than done.
+static bool ui_tr_store_journal(void* ctx, const PendingTrade& t)
+{
+  (void)ctx;
+  if (gs_readonly()) return false;
+  gs_state().trade = t;
+  return save_trade_journal(t);
+}
+static bool ui_tr_store_slot(void* ctx, uint8_t slot)
+{
+  (void)ctx;
+  if (gs_readonly()) return false;
+  if (slot >= (uint8_t)BOX_SLOTS) return false;
+  // save_pebble_now(), NOT save_pebble(..., true). B1 and B2 write the SAME key
+  // microseconds apart whenever box_add() reuses the slot B1 released, and
+  // save_pebble() DEFERS a second write inside SAVE_MIN_GAP_MS and returns
+  // true - so this shim would tell game/trade.cpp that bytes landed which had
+  // not, and the trade would clear its journal over an empty flash slot. See
+  // persistence/save_manager.h.
+  return save_pebble_now(slot, gs_state().pebbles[slot]);
+}
+static bool ui_tr_store_box(void* ctx)
+{
+  (void)ctx;
+  if (gs_readonly()) return false;
+  return save_box_header(gs_state().box);
+}
+static void ui_tr_store_checkpoint(void* ctx)
+{
+  (void)ctx;
+  if (gs_readonly()) return;
+  // A failed checkpoint does not invalidate the trade - the same sentence
+  // app/app.cpp makes about the evolution ceremony. Only the nvs2 copy is stale.
+  (void)save_checkpoint_all();
+}
+
+static TradeStore ui_trade_store(void)
+{
+  TradeStore s;
+  s.write_journal = &ui_tr_store_journal;
+  s.write_slot    = &ui_tr_store_slot;
+  s.write_box     = &ui_tr_store_box;
+  s.checkpoint    = &ui_tr_store_checkpoint;
+  s.ctx           = nullptr;
+  return s;
+}
+
+// W1: our offer is on the wire.
+static bool ui_tr_journal_sent(void* ctx, uint32_t out_id, uint32_t peer_id)
+{
+  (void)ctx;
+  PendingTrade t;
+  trade_journal_sent(t, out_id, peer_id);
+  return ui_tr_store_journal(nullptr, t);
+}
+
+// THE POLICY VERDICT, which is game/trade.cpp's and not the transport's: the
+// taint gate, a duplicate id, a peer that is us. The decode has already run in
+// networking/trade_link.cpp, so what is left is what a legal Pebble may do.
+static uint8_t ui_tr_judge(void* ctx, const uint8_t rec[48])
+{
+  (void)ctx;
+  PebbleInstance in;
+  if (pbw_decode(rec, in) != VR_OK) return (uint8_t)TDR_PEER_INVALID;
+  const PebbleInstance* mine = box_peek(link_trade_slot());
+  if (mine == nullptr) return (uint8_t)TDR_NO_SLOT;
+  return (uint8_t)trade_accept_check(*mine, in, gs_device_id(), link_trade_peer_id());
+}
+
+// W2: theirs is here and ours is not gone.
+static bool ui_tr_journal_received(void* ctx, const uint8_t rec[48])
+{
+  (void)ctx;
+  PendingTrade t = gs_state().trade;
+  trade_journal_received(t, rec);
+  return ui_tr_store_journal(nullptr, t);
+}
+
+// W3 -> B1 -> B2 -> B3 -> W4, in that order, inside game/trade.cpp.
+static bool ui_tr_commit(void* ctx)
+{
+  (void)ctx;
+  PendingTrade t = gs_state().trade;
+  const TradeStore st = ui_trade_store();
+  const TradeReject r = trade_execute(t, trade_wire_codec(), st, gt_now());
+  gs_state().trade = t;
+  return r == TDR_OK;
+}
+
+static void ui_tr_abort(void* ctx)
+{
+  (void)ctx;
+  PendingTrade t;
+  trade_journal_idle(t);
+  (void)ui_tr_store_journal(nullptr, t);
+}
+
+const TradeHooks* ui_trade_hooks(void)
+{
+  static const TradeHooks H = {
+    &ui_tr_journal_sent, &ui_tr_judge, &ui_tr_journal_received,
+    &ui_tr_commit, &ui_tr_abort, nullptr
+  };
+  return &H;
+}
+
+uint16_t ui_trade_quarantine(void) { return save_quarantine_mask(); }
+
+uint8_t  ui_link_battle_status(void)          { return link_battle_status(); }
+uint8_t  ui_link_battle_side(void)            { return link_battle_side(); }
+void     ui_link_battle_pump(uint32_t now_ms) { link_battle_pump(now_ms); }
+bool     ui_link_battle_wants_action(void)    { return link_battle_wants_action(); }
+void     ui_link_battle_submit(uint8_t kind, uint8_t index) {
+  link_battle_submit(kind, index);
+}
+uint32_t ui_link_battle_move_ms_left(uint32_t now_ms) {
+  return link_battle_move_ms_left(now_ms);
+}
+void     ui_link_battle_done(void)            { link_battle_done(); }
+
+void ui_explore_clock(uint32_t* now_epoch, uint32_t* now_ms, uint8_t* cal)
+{
+  // All three at once, in the shape game/cooldowns.h takes them, so a screen
+  // cannot read two of them a frame apart and decide with a mixed clock.
+  if (now_epoch) *now_epoch = gt_now();
+  // gt_mono32(), NOT millis(), AND THIS ONE DECIDES A GAME OUTCOME (P6-C3).
+  // While the clock is CAL_UNSET the cooldown table's deadlines are monotonic
+  // MILLISECONDS (game/cooldowns.h), and millis() is uptime: it is the clock
+  // that stops at a deep-sleep wake, and the one that only carries a light
+  // sleep because esp_timer happens to be resynchronised from the RTC on the
+  // way out. gt_mono32() IS the RTC counter, so an armed cooldown survives
+  // every sleep this device can take. The other two millis() readers in this
+  // file are animation phase and modal lifetimes and stay as they are.
+  if (now_ms)    *now_ms    = gt_mono32();
+  if (cal)       *cal       = (uint8_t)gt_cal_state();
+}
+
+uint32_t ui_device_seed(void) { return gs_device_id(); }
+
+// RNG_ENCOUNTER, and this is the only draw from it in the firmware. The
+// ENCOUNTER itself is deterministic from its inputs (game/encounters.h says
+// why); what needs real randomness is the capture roll.
+uint32_t ui_explore_roll(void) { return rng_u32(RNG_ENCOUNTER); }
+
+CooldownTable& ui_cooldowns(void) { return gs_state().cds; }
+Inventory&     ui_inventory(void) { return gs_state().inv; }
+
+void ui_explore_commit(uint8_t mutated_slot)
+{
+  // A READ-ONLY SESSION COMMITS NOTHING, SINCE THE FINAL REVIEW. These three
+  // writes go straight to save_manager rather than through the gs_* facade
+  // where the read-only guard lives, so a device parked behind SAVE ERROR could
+  // still be walked into NETWORK -> scan -> encounter (which works with an
+  // empty Box, by design) and would then write cooldowns and inventory into the
+  // save it had just refused to touch. See the trade hooks above for the whole
+  // account and for why the guard is here rather than inside save_manager.
+  if (gs_readonly()) return;
+
+  GameState& gs = gs_state();
+  // cd_take_dirty() rather than "save after cd_arm": cd_ready() can dirty the
+  // table too, by promoting rows armed while the clock was CAL_UNSET, and a
+  // caller that only saved after arming would drop thirty-two promoted rows on
+  // the next power cut (game/cooldowns.h).
+  // BOTH HALVES OF THE "cd" BLOB, and NEITHER call may be skipped by a
+  // short-circuit: cd_take_dirty() is take-and-clear, so `a() || b()` would
+  // leave b's flag standing whenever a fired. P6-C2 put the activity day and
+  // its score in the same blob's reserved bytes, so a scan that credited a new
+  // network dirties it through act_take_dirty() even when no cooldown moved.
+  const bool cd_dirty  = cd_take_dirty();
+  const bool act_dirty = act_take_dirty();
+  if (cd_dirty || act_dirty) (void)save_cooldowns(gs.cds);
+  (void)save_inventory(gs.inv);
+  if (pet()) gs_save_active(true);
+  // THE SLOT THE CALLER MUTATED, when it is not the one gs_save_active() just
+  // wrote. Guarded against equality rather than left to the save manager: two
+  // writes of ONE key inside SAVE_MIN_GAP_MS are DEFERRED and still return true
+  // (persistence/save_manager.h, the P7 trade defect), so a second write of the
+  // active slot here would be a lie rather than a waste.
+  if (mutated_slot < (uint8_t)BOX_SLOTS && mutated_slot != box_active()) {
+    (void)gs_save_slot(mutated_slot, true);
+  }
+}
+
+Genome ui_fresh_genome(void) { return genome_genesis(); }
+
+PebbleInstance* ui_active_pebble(void)
+{
+  const uint8_t slot = box_active();
+  return (slot < (uint8_t)BOX_SLOTS) ? box_slot(slot) : nullptr;
+}
+
+void ui_award_xp(uint16_t amount, uint8_t src)
+{
+  if (amount == 0u) return;
+  (void)app_award_xp(amount, (XpSource)src);
+  if (pet()) gs_save_active(true);
+}
+
+void ui_hold_fps(uint8_t fps, uint16_t ms) { rd_hold_fps(fps, ms); }
+void ui_flash(uint16_t ms)                 { rd_flash(ms); }
+void ui_shake(uint8_t amp_px, uint16_t ms) { rd_shake(amp_px, ms); }
 
 uint8_t ui_god_progress(void) { return s_god_prog; }
 
@@ -1864,29 +2372,53 @@ uint8_t ui_god_progress(void) { return s_god_prog; }
 void ui_creator_info(CreatorInfo& out) {
   memset(&out, 0, sizeof(out));
   out.ap_up  = net_is_ap_up()  ? 1u : 0u;
-  out.sta_up = net_is_sta_up() ? 1u : 0u;
   out.pin    = web_pin();
+  // The D7 grace period. The screen owns the radio, so the screen is what acts
+  // on this - webui only answers the question (spec sections 34 and 40).
+  out.idle_expired = web_portal_idle_expired() ? 1u : 0u;
   snprintf(out.ssid, sizeof(out.ssid), "%s", net_ap_ssid());
   snprintf(out.ip,   sizeof(out.ip),   "%s", net_ip());
-  if (net_url(out.url, sizeof(out.url), out.pin) == 0) out.url[0] = '\0';
+  // NO PIN IN THE URL SINCE P8-C1 (spec section 39): net_url() lost the
+  // argument, not just the substitution, so there is nothing left to pass.
+  if (net_url(out.url, sizeof(out.url)) == 0) out.url[0] = '\0';
 }
 
+// THE ONE TEARDOWN (P8-C2). Leaving the screen, the D7 idle timeout and the
+// section 47 "the access point never came up" exit all arrive here with
+// on == false, so there is exactly one order of operations and no path that
+// leaves half of the portal standing.
 void ui_creator_radio(bool on) {
 #if FEATURE_WEB
   if (on) {
-    // The screen that wants the station is the screen that asks for it; there
-    // is no radio policy in the entry point any more (plan section 2 row G4).
+    // The screen that wants the radio is the screen that asks for it; there is
+    // no radio policy in the entry point any more (plan section 2 row G4).
     // Was cfg_flag(CF_WEB_ENABLED): the helper had exactly this one caller left
     // once SETTINGS and the HOME status bar moved out, and that caller is
     // inside #if FEATURE_WEB - so in the no-web variant the function was
     // defined and never used, which this build treats as an error.
-    if (net_mode() != RADIO_WIFI && s_cfg && (s_cfg->flags & CF_WEB_ENABLED) != 0)
-      net_request(RADIO_WIFI);
-  } else if (net_mode() == RADIO_WIFI) {
-    // Radio OFF by default: CREATOR is the only owner of RADIO_WIFI, so leaving
-    // it gives back the ~50 KB of heap and the largest current draw on the
-    // board instead of holding the station powered until the next reboot.
-    (void)net_request(RADIO_OFF);
+    if (s_cfg && (s_cfg->flags & CF_WEB_ENABLED) != 0) {
+      // The PIN first: it is loaded or minted and persisted BEFORE the access
+      // point exists, so there is no window in which the portal is reachable
+      // and the device does not yet know what it will ask for.
+      web_portal_open();
+      // net_request_portal(), NOT net_request(RADIO_WIFI): the latter answers
+      // "already on the WiFi track" for a scan or a peer link and would leave
+      // this screen waiting for an access point that is never coming (net.h).
+      (void)net_request_portal();
+    }
+  } else {
+    // Socket first, then the radio under it. web_service() re-opens the socket
+    // whenever the phase is still NPH_AP_PORTAL, so dropping the radio first
+    // would leave one pump in which the server is listening on a netif that is
+    // going away.
+    web_portal_close();
+    if (net_mode() == RADIO_WIFI) {
+      // Radio OFF by default: CREATOR is the only owner of RADIO_WIFI, so
+      // leaving it gives back the ~50 KB of heap and the largest current draw
+      // on the board instead of holding the radio powered until the next
+      // reboot.
+      (void)net_request(RADIO_OFF);
+    }
   }
 #else
   (void)on;
@@ -1906,9 +2438,22 @@ void ui_request_hatch(void) {
 void ui_info_lines(char lines[UI_INFO_LINES][UI_INFO_CAP]) {
   for (uint8_t i = 0; i < UI_INFO_LINES; ++i) lines[i][0] = '\0';
   snprintf(lines[0], UI_INFO_CAP, "%s %s", FW_NAME, FW_VERSION);
-  snprintf(lines[1], UI_INFO_CAP, "IP %s  rssi %d", net_ip(), (int)net_rssi());
-  snprintf(lines[2], UI_INFO_CAP, "PIN %04u  spr rev %u",
-           (unsigned)(web_pin() % 10000u), (unsigned)SPRITE_REV);
+  // Was "IP %s  rssi %d". net_rssi() was station-only and went with the
+  // station (P5-C1); the radio's phase is what this line can still report.
+  snprintf(lines[1], UI_INFO_CAP, "IP %s  net %u/%u", net_ip(),
+           (unsigned)net_mode(), (unsigned)net_phase());
+  // "----" AND NOT "0000" WHEN NOTHING HAS BEEN ISSUED. 0 is the sentinel and
+  // is a value the PIN can never take (networking/creator_gate.h), so printing
+  // it as four zeros would be a diagnostic screen stating a PIN that does not
+  // exist. It is minted on the first CREATOR entry, not at boot.
+  {
+    const uint16_t pin = web_pin();
+    char pin_txt[8];
+    if (pin == 0u) snprintf(pin_txt, sizeof pin_txt, "----");
+    else           snprintf(pin_txt, sizeof pin_txt, "%04u", (unsigned)pin);
+    snprintf(lines[2], UI_INFO_CAP, "PIN %s  spr rev %u",
+             pin_txt, (unsigned)SPRITE_REV);
+  }
   snprintf(lines[3], UI_INFO_CAP, "heap %lu  nvs %02X",
            (unsigned long)ESP.getFreeHeap(), (unsigned)kv_error());
   if (gt_is_valid()) {
@@ -1952,9 +2497,9 @@ uint32_t ui_btn_hold_ms(uint8_t btn)     { return input_hold_ms(btn); }
 // -----------------------------------------------------------------------------
 //  THE SCREEN VIEW. One snapshot per frame, derived and never stored: the
 //  smoothed care percentages this file already computes, the identity the Box
-//  holds, and the two numbers spec section 8 asks for that Phases 3 and 4 will
-//  fill in properly (hp_max is derived from the species base, and the XP curve
-//  is a flat placeholder until P3-C2 lands XP_TABLE[31]).
+//  holds, and the two numbers spec section 8 asks for: hp_max derived from the
+//  species base (P4-C1 gives it a real roster) and the XP cost of the current
+//  level from XP_TABLE[31].
 // -----------------------------------------------------------------------------
 static PebbleView s_view;
 
@@ -1976,23 +2521,38 @@ static const PebbleView* ui_fill_view(void) {
 
   for (uint8_t i = 0; i < ST_COUNT; ++i) s_view.care_pct[i] = ui_stat_shown((StatId)i);
   s_view.mood_pct  = (uint8_t)sim_mood_score();
-  s_view.mood_face = mood_of();
 
   const uint8_t slot = box_active();
   const PebbleInstance* pb = (slot == BOX_ACTIVE_NONE) ? nullptr : box_peek(slot);
   if (pb) {
     s_view.species_id = pb->species_id;
     s_view.level      = pb->level;
+    // §55, for the STILL body path's glitch painter (P10-C3). The animated path
+    // reads the same bit off PetView.corrupted in ui/pet_view.cpp; this is the
+    // one a golden can see.
+    s_view.corrupted  = (uint8_t)((pb->status & PBS_CORRUPTED) != 0u);
+    // ...and how much longer, for SCR_STATUS's readout (P10-C6). Rounded UP so
+    // a corrupted creature never reports 0 h left while it is still shimmering.
+    s_view.corrupt_h  = 0u;
+    if (s_view.corrupted) {
+      uint32_t ep = 0; uint8_t cal = 0;
+      ui_explore_clock(&ep, nullptr, &cal);
+      const uint32_t left = cor_left_s(*pb, ep, cal);
+      const uint32_t h = (left + 3599u) / 3600u;
+      s_view.corrupt_h = (uint8_t)((h > 255u) ? 255u : ((h == 0u) ? 1u : h));
+    }
     s_view.xp         = pb->xp;
     s_view.hp_cur     = pb->hp_cur;
     const SpeciesDef* sp = species_get(pb->species_id);
-    // hp_max = 10 + 2*base_hp + level (plan 1.5.1), recomputed and never
-    // stored. With no species row there is nothing honest to show, so the
-    // meter reports the current value as full rather than inventing a maximum.
-    s_view.hp_max = sp ? (uint16_t)(10u + 2u * (uint16_t)sp->base_hp + (uint16_t)pb->level)
-                       : pb->hp_cur;
+    // hp_max is recomputed and never stored (plan 1.5.1). With no species row
+    // there is nothing honest to show, so the meter reports the current value
+    // as full rather than inventing a maximum. P4-C1: this used to open-code
+    // `10 + 2*base_hp + level`, a second copy of a formula game/xp.cpp owns.
+    s_view.hp_max = sp ? xp_hp_max(sp->base_hp, pb->level) : pb->hp_cur;
   }
   if (s_view.level == 0) s_view.level = 1;
-  s_view.xp_next = (uint16_t)PB_XP_PER_LEVEL_PLACEHOLDER;
+  // What THIS level costs to leave (game/xp.h). 0 at XP_LEVEL_MAX, which is how
+  // a screen is told the curve is finished rather than being handed a divisor.
+  s_view.xp_next = xp_for_level(s_view.level);
   return &s_view;
 }

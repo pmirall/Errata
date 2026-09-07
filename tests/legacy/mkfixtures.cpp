@@ -87,7 +87,7 @@ static LegacyPetSave petsave_adult(void) {
   p.pad_overfeed   = 2;                     // v1 overfeed
   p.snacks_total   = 12;
   p.wish_left_s    = 0;
-  p.flags          = PF_LIGHT_ON;
+  p.flags          = LV1_PF_LIGHT_ON;
   p.pad_adult_form = 0;                     // v1 adult_form = FORM_BOLOTA
   p.minor_form     = 0x21;
   p.poop_count     = 1;
@@ -119,7 +119,7 @@ static LegacyPetSave petsave_egg(void) {
   p.genome              = fixture_genome(0x00C0FFEEu);
   p.cq                  = CQ_START;
   p.pad_weight          = (int16_t)gene_weight_ideal_dg(p.genome);
-  p.flags               = PF_LIGHT_ON;
+  p.flags               = LV1_PF_LIGHT_ON;
   p.pad_adult_form      = 0xFF;             // v1 adult_form = FORM_UNSET
   p.crc16 = crc16_ccitt(&p, LEGACY_PETSAVE_CRC_BYTES);
   return p;
@@ -130,7 +130,7 @@ static Config config_v1(void) {
   memset(&c, 0, sizeof c);
   c.magic       = NT_CFG_MAGIC;
   c.version     = NT_CFG_VERSION;
-  c.flags       = (uint8_t)(CF_BLE_ENABLED | CF_WEB_ENABLED);
+  c.flags       = (uint8_t)(CF_RESERVED_BLE | CF_WEB_ENABLED);   // 0x04 unchanged
   c.saved_epoch = 1700200000u;
   copy_str(c.wifi_ssid, sizeof c.wifi_ssid, "legacy-ssid");
   copy_str(c.wifi_pass, sizeof c.wifi_pass, "legacy-pass");

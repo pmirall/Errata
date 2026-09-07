@@ -124,8 +124,6 @@ void menu_input(Gesture g) {
     // fires exactly ONCE, which is why choosing sits on it and stepping does
     // not - see app/input_router.h.
     case GST_HOLD_R: menu_select(); break;
-    case GST_DBL_L: s_idx = 0; s_ring_from = 0; break;   // a jump, not a step
-    case GST_DBL_R: ui_repeat_last_action(); break;
     case GST_BOTH:  ui_help(kHelp[s_idx]); break;
     default: break;
   }

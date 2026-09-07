@@ -63,6 +63,17 @@ enum ScreenId : uint8_t {
   SCR_CREATOR,       // the creator portal (ex SCR_QR)
   SCR_SETTINGS,
   SCR_TIME,          // on-device time entry (ex SCR_CLOCK)
+  // THE TWO FIRST-BOOT SCREENS (P10-C4). They sit here, beside TIME, because
+  // the three of them are one flow: app/onboarding.h owns the order and
+  // ui/screen_setup.cpp draws the two that are new. Inserting rather than
+  // appending renumbers every id below - which is safe, and was checked rather
+  // than assumed: no ScreenId is persisted or transmitted anywhere (grep over
+  // persistence/ and networking/ is empty), the screen table is positional and
+  // ui/screen_table.cpp's three static_asserts fire on the count, and
+  // tests/test_screens.cpp pins every row to its render hook BY IDENTITY so a
+  // table whose rows did not move with the enum fails by screen name.
+  SCR_SETUP_NAME,    // first boot: name the device
+  SCR_SETUP_STARTER, // first boot: pick one of three starters
   SCR_CONFIRM,       // overlay, cursor defaults to NO
   SCR_ALERT,         // overlay
   SCR_ENCOUNTER,     // phase 5
@@ -92,8 +103,6 @@ enum Gesture : uint8_t {
   GST_NONE = 0,
   GST_TAP_L,
   GST_TAP_R,
-  GST_DBL_L,
-  GST_DBL_R,
   GST_HOLD_L,        // repeats every REPEAT_RATE_MS
   GST_HOLD_R,        // CHOOSES (section 7); fires once, never repeats
   GST_BOTH,
@@ -112,11 +121,11 @@ enum Mood : uint8_t {
   MOOD_COUNT
 };
 
-// Exactly one radio stack may be resident.
+// The radio. RADIO_BLE was the third value until P8-C0 deleted BLE; nothing
+// persists or transmits a RadioMode, so the renumbering reaches no stored byte.
 enum RadioMode : uint8_t {
   RADIO_OFF = 0,
   RADIO_WIFI,
-  RADIO_BLE,
   RADIO_COUNT
 };
 
@@ -129,7 +138,6 @@ enum ActionId : uint8_t {
   ACT_MEDICINE,
   ACT_PLAY,
   ACT_PET,
-  ACT_LIGHT_TOGGLE,
   ACT_SLEEP_TOGGLE,
   ACT_COUNT
 };
@@ -190,6 +198,31 @@ enum BootKind : uint8_t {
   BOOT_COUNT
 };
 
+// -----------------------------------------------------------------------------
+// nt_boot_charges_absence(k)
+//   Does this boot kind describe an interval that REALLY ELAPSED, and may
+//   therefore be charged to the pet as an absence?
+//
+//   THE ONE THAT MATTERS IS BOOT_DEEPSLEEP, AND IT ANSWERS TRUE. A timed wake
+//   is not a restart: the sleep interval is elapsed game time and care, box
+//   recovery and the cooldown table all have to be charged over it exactly as
+//   they are after a power cut (hardware/boot.cpp says the same thing in prose;
+//   v1 folded ESP_RST_DEEPSLEEP into BOOT_SOFT_RESET and lost it). The three
+//   that answer false do so for three different reasons: BOOT_FIRST_RUN has
+//   nobody to have abandoned, BOOT_CRASH is the firmware dying and must never
+//   be dressed up as neglect, and BOOT_SOFT_RESET is a ~0 s gap.
+//
+//   This lives here, as a pure inline over the enum, so app.cpp's
+//   boot_absence() and a host test read the SAME list. It used to be four
+//   literals inside one `if` in app.cpp, where nothing could see it: adding
+//   BOOT_DEEPSLEEP to that list would have silently stopped every sleep from
+//   charging, with no test able to fail (tests/test_clock.cpp now has one).
+// -----------------------------------------------------------------------------
+inline bool nt_boot_charges_absence(BootKind k)
+{
+  return !(k == BOOT_FIRST_RUN || k == BOOT_CRASH || k == BOOT_SOFT_RESET);
+}
+
 // Daily wish.
 enum WishId : uint8_t {
   WISH_NONE = 0,
@@ -200,13 +233,9 @@ enum WishId : uint8_t {
   WISH_COUNT
 };
 
-// On-device 2-button minigames (the GAME screen). Canonical for minigames_won.
-enum DevGameId : uint8_t {
-  DG_REFLEX = 0,
-  DG_MEMORY,
-  DG_JUMP,
-  DG_COUNT
-};
+// The minigame ids moved to minigames/minigame.h (P3-C4a): they belong with
+// the contract that defines them, and nt_types.h is included by translation
+// units that have no business knowing the games exist.
 
 // S0 TAP_R cycles this.
 enum StatusBarMode : uint8_t {
@@ -285,6 +314,13 @@ static_assert(sizeof(Genome) == 16, "Genome must be exactly 16 bytes");
 #define GENE_NEUTRAL    8
 #define GENESIS_GENE_MIN 4
 #define GENESIS_GENE_MAX 12
+// luck is a 3-bit gene (0..7), so the same proportional band applies to it.
+// DEFINED HERE AND NOT IN game/genome.cpp SINCE P7-C5: game/breeding.cpp clamps
+// a bred child back into exactly the band genome_genesis() rolls in, and two
+// copies of that band in two files is the disagreement this project keeps
+// finding. genome.cpp reads these; it no longer owns them.
+#define GENESIS_LUCK_MIN 2
+#define GENESIS_LUCK_MAX 6
 
 // Temperament classes
 enum Temperament : uint8_t {
@@ -308,7 +344,9 @@ enum Temperament : uint8_t {
 // SimView.flags bits
 #define PF_SICK          0x0001u
 #define PF_ASLEEP        0x0002u
-#define PF_LIGHT_ON      0x0004u
+// bit 0x0004 is retired (PF_LIGHT_ON). P3-C2b deleted the light mechanic: the
+// sleep window comes from the daylight table (game/daylight.h) and insistence
+// is what wakes the creature, so there is no switch left to remember.
 // bits 0x0008 / 0x0010 / 0x0020 are retired (PF_SCAR / PF_DEAD / PF_BURIED).
 #define PF_COLD_EGG      0x0040u   // hatched from an egg older than EGG_COLD_AFTER_S
 #define PF_INBRED        0x0080u   // sick probability x1.25 for life
@@ -364,15 +402,29 @@ static_assert(sizeof(PendingEgg) == 24, "PendingEgg must be 24 bytes");
 #define NT_CFG_MAGIC     0x4643u   // 'C','F'
 #define NT_CFG_VERSION   1
 #define CF_PROVISIONED   0x01u     // WiFi credentials confirmed working at least once
-#define CF_BLE_ENABLED   0x04u
+// 0x04 WAS CF_BLE_ENABLED AND IS RESERVED, NOT REUSED (P8-C0). BLE is deleted
+// from the firmware but not from the SAVES: a v1 blob written before the
+// deletion has this bit set, tests/fixtures/config_v1.bin is one, and giving it
+// a new meaning would make that fixture assert something it never recorded.
+#define CF_RESERVED_BLE  0x04u
 #define CF_WEB_ENABLED   0x08u
 #define CF_MUTE          0x20u
+// FIRST-BOOT SETUP, two bits (app/onboarding.h). ZERO MEANS FINISHED, which is
+// what makes every save written before P10-C4 - and gs_cfg_defaults()'s memset
+// - read "this device is already set up" instead of being handed a wizard.
+#define CF_SETUP_MASK    0xC0u
+#define CF_SETUP_SH      6
 
 struct Config {
   uint16_t magic;                        //   0  NT_CFG_MAGIC
   uint8_t  version;                      //   2  NT_CFG_VERSION
   uint8_t  flags;                        //   3  CF_*
   uint32_t saved_epoch;                  //   4
+  // FROZEN PADDING SINCE P5-C1, and deliberately not renamed. Nothing reads
+  // these 98 bytes any more - the device never joins a network - but the
+  // offsets of pet_name, tz, brightness and crc16 are asserted below and pinned
+  // by tests/fixtures/config_v1.bin, so removing them would move five fields
+  // and stop a v1 save loading. Kept, empty, with the reason written down.
   char     wifi_ssid[SSID_MAX_LEN + 1];  //   8  33
   char     wifi_pass[PASS_MAX_LEN + 1];  //  41  65
   char     pet_name[NAME_MAX_LEN + 1];   // 106  13
@@ -394,6 +446,28 @@ static_assert(offsetof(Config, reserved_b)== 224, "Config.reserved_b moved");
 static_assert(offsetof(Config, reserved_c)== 248, "Config.reserved_c moved");
 static_assert(offsetof(Config, crc16)     == 254, "Config.crc16 moved");
 #define CONFIG_CRC_BYTES 254
+
+// -----------------------------------------------------------------------------
+//  THE SOUND SETTING, AS ONE PREDICATE (P10-C2, spec section 64).
+//
+//  hardware/audio.h asks the firmware exactly one question - "is sound off?" -
+//  through a bound hook, and app/app.cpp's app_audio_muted() is what answers
+//  it. That body used to be the expression itself, in a file NO HOST BINARY
+//  COMPILES. Every link of the chain around it was tested (the toggle in
+//  tests/test_screens.cpp, Config <-> ConfigV2 in tests/test_game_state.cpp,
+//  the blob round trip in tests/test_persistence.cpp, the mute rule in
+//  tests/test_audio.cpp) and the JOIN between the persisted bit and the piezo
+//  was tested nowhere, because the join lived in app.cpp. A test that re-wrote
+//  the expression in its own fixture would have asserted a COPY.
+//
+//  So it is one inline function in the pure layer, app.cpp calls it,
+//  tests/test_sound.cpp drives it with a Config that came back off the real
+//  save_manager, and tools/check.sh gates the call site - the same three-part
+//  shape the cor_service() and god_note_load() gates use, for the same reason.
+// -----------------------------------------------------------------------------
+static inline bool cfg_sound_muted(const Config& c) {
+  return (c.flags & CF_MUTE) != 0u;
+}
 
 // -----------------------------------------------------------------------------
 // 6. RTC RETENTION - RTC_NOINIT_ATTR, survives soft reset, lost on power loss.
@@ -422,17 +496,6 @@ struct ActionResult {
   int16_t  d[ST_COUNT];    // applied delta per StatId
   int16_t  d_cq;
   uint16_t str_id;         // StrId of the reaction line, 0 = none
-};
-
-// One BLE peer seen in the last BLE_PEER_TTL_S seconds.
-struct BlePeerInfo {
-  uint8_t  mac[6];
-  Genome   genome;
-  uint8_t  stage;          // Stage
-  uint8_t  cq_hi;          // cq >> 2
-  uint8_t  peer_flags;     // b0 = debug/godmode, b1 = seeking
-  int8_t   rssi;
-  uint32_t last_seen_ms;
 };
 
 // The absence report handed from sim_catch_up_ex() to the UI.

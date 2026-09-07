@@ -64,6 +64,7 @@ void sim_env_defaults(SimEnv& env);
 #define SIM_EV_WISH_FAIL    0x00002000u
 #define SIM_EV_BIRTHDAY     0x00004000u
 #define SIM_EV_VISITA       0x00008000u
+#define SIM_EV_LEVEL_UP     0x00010000u  // game/xp.h: at least one level gained
 #define SIM_EV_EVOLVE_MINOR 0x00080000u  // child/teen variant chosen
 
 // -----------------------------------------------------------------------------
@@ -121,6 +122,16 @@ void     sim_switch(PebbleInstance& next);
 // No-op before sim_bind(), and a no-op when `p` is already the bound Pebble.
 void     sim_rebind(PebbleInstance& p);
 
+// The sub-step grid. Every cadence in the design (60 s stage check, 600 s
+// sickness roll, 600 s care-quality tick) is a multiple of it, and every
+// integrator carries its remainder, so a caller that hands over 1800 s at once
+// lands on the same bytes as one that ticks a second at a time. It is public
+// because that equivalence is a contract a test has to be able to state: a
+// rate CHANGE (a poop arriving, the loneliness multiplier turning on) is
+// evaluated on this grid, so a finer step charges the new rate up to one
+// sub-step earlier - a bounded offset, not a drift.
+#define SIM_SUBSTEP_S            60u
+
 // Advances the simulation by `seconds` simulated seconds. Internally sub-steps
 // at SIM_SUBSTEP_S so thresholds, poop, sickness and stage checks land on the
 // same grid regardless of the chunk size the caller uses.
@@ -132,6 +143,11 @@ bool     sim_apply_action(ActionId action, ActionResult& out);
 
 // Simulated seconds per logic tick: 1 normally, the god-mode time scale
 // otherwise. The ONLY time source game logic is allowed to read.
+//
+// THE 1 IS SET BY sim_bind(), NOT BY GOD MODE. sim_set_time_scale() below is an
+// override; it is called only from dev/godmode.cpp, which is compiled out of the
+// release artefact, so a default that depended on it was a default the shipping
+// build never got - and a step of 0 stops the whole simulation. See sim_bind().
 uint32_t sim_step_seconds(void);
 
 // 0..100 displayed mood score.
@@ -151,7 +167,10 @@ int32_t  sim_stat_milli(StatId id);
 void     sim_seed(uint32_t seed);            // reseeds RNG_CARE (wrapper on rng_seed)
 void     sim_set_env(const SimEnv& env);     // once per logic tick
 const SimEnv& sim_env(void);
-void     sim_set_time_scale(uint32_t scale); // god mode: 1/6/60/360/3600
+// God mode's acceleration: 1/6/60/360/3600. An OVERRIDE of sim_bind()'s 1, and
+// never the thing that sets it - dev/godmode.cpp is compiled out of `release`.
+// A scale of 0 is clamped to 1: a step of zero is not a speed, it is a stop.
+void     sim_set_time_scale(uint32_t scale);
 
 // -----------------------------------------------------------------------------
 // 5. LIFE CYCLE
@@ -191,17 +210,27 @@ uint16_t sim_gain_left(StatId id);
 // ST_COUNT elements.
 void     sim_gain_snapshot(uint8_t out_pts[ST_COUNT]);
 
-// Re-seeds the ledger from a snapshot taken at saved_epoch, as of now_epoch:
+// Re-seeds the ledger from a snapshot taken at saved_epoch:
 //
-//     budget = min(cap, saved + elapsed * cap / 3600)
+//     budget = min(cap, saved)
 //
-// integer throughout, with elapsed clamped to one hour before the multiply (an
-// hour refills the whole cap, so anything longer is the same answer and the
-// clamp is what makes an elapsed of years harmless).
+// IT AGES NOTHING FORWARD, SINCE P7-C6, and that is the whole point. It used to
+// be min(cap, saved + elapsed * cap / 3600), which reads a wall clock at BOTH
+// ends of the interval - and the wall clock is typed on the time screen, and
+// one hour of "elapsed" refills a whole cap. Measured: 100 rounds of
+// (clock +1 h, reboot) from a fully spent ledger manufactured 4,000 happiness
+// gain points against a cap of 40 an hour, and the same restore with no gap
+// manufactured 0. That is the same shape xp_ledger_restore() lost at P6-C4.
+//
+// WHAT THE HONEST PLAYER LOSES, stated because it is a real cost and not a
+// rounding error: off-time no longer refills the hourly gain budget. Come back
+// after an hour away and the ledger holds what it held when the device went
+// off, so a full meal may be up to 29 minutes out. An unkind hour is
+// recoverable; a stat budget a power cycle can refill is not.
 //
 // Call it once, immediately after sim_bind(), BEFORE the boot's catch-up: the
-// catch-up's own refill then covers the absence [last_seen, now] on top, which
-// is exactly the remaining term of the same expression.
+// catch-up's gain_refill() then covers the absence [last_seen, now] out of
+// seconds THIS DEVICE WATCHED PASS, which is the only refill left.
 //
 // Returns 1 when the snapshot was used. It returns 0 - and seeds ZERO, today's
 // safe behaviour, never the cap - when there is no snapshot or when either
@@ -231,6 +260,12 @@ bool     sim_apply_play_result(uint16_t win_permille, ActionResult& out);
 const SimView*        sim_view(void);   // read-only presentation view for ui
 const PebbleInstance* sim_pebble(void); // the bound Pebble, read-only
 uint32_t sim_take_events(void);         // returns and CLEARS the event bitmask
+// The one door for the OTHER game systems into the event word the UI drains.
+// game/xp.h has no UI of its own and no clock, and a second event channel
+// would mean a second place ui_note_events() has to be kept in step with; the
+// bits it posts (SIM_EV_LEVEL_UP today) are drained by the same call as the
+// care simulation's own. It ORs, so it can never clear somebody else's event.
+void     sim_post_event(uint32_t mask);
 uint8_t  sim_alert(void);               // AlertId currently demanding attention
 uint8_t  sim_is_asleep(void);
 uint8_t  sim_is_sick(void);

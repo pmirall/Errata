@@ -1,6 +1,7 @@
 # build outputs
 build/
 tests/bin/
+tests/bin_asan/
 *.o
 *.bin
 *.elf
@@ -13,4 +14,7 @@ tests/bin/
 !tests/fixtures/*.bin
 # manual build output
 docs/manual/out/
+# the content pack gate writes its transcript beside the JSON
+tools/content/_verify_out.txt
+tools/content/__pycache__/
 __pycache__/

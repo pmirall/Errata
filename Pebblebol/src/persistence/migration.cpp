@@ -11,20 +11,57 @@
 #include "legacy_v1.h"
 #include "../core/crc16.h"
 #include "../core/strings_es.h"   // the dynasty-name syllables, v1's own tables
+#include "../data/species_table.h"   // SPECIES_BASE_OF_FAMILY: where a v1 pet lands
+#include "../game/xp.h"              // xp_hp_max(): inline constexpr, no link edge
 
 // -----------------------------------------------------------------------------
-// The legacy family map. v1 had no species roster: appearance came out of the
-// genome's four-bit species gene. Grouping it modulo 8 gives the eight legacy
-// families, and each maps onto one of the eight starter Pebbles of the v2
-// roster. The roster itself lands in P9 (src/data/species_table.h); until then
-// these are the reserved built-in ids 1..8, which is exactly what a migrated
-// pet should be: a starter of the right family, not a random monster.
+// THE LEGACY FAMILY MAP (fixed in P4-C1, obligation 5).
+//
+// v1 had no species roster: appearance came out of the genome's four-bit
+// species gene, and a gen-0 pet rolled 0..7 (GENESIS_SPECIES_MAX). Folding the
+// gene modulo LEGACY_FAMILY_COUNT gives the eight legacy families.
+//
+// WHAT WAS WRONG WITH THE OLD TABLE. It was a literal { 1, 2, 3, 4, 5, 6, 7, 8 },
+// written when ids 1..8 were expected to be eight different families' starters.
+// P3-C3 then filled ids 1..3 with the three EVOLUTION STAGES of family 1, so
+// legacy family 1 landed on a MID-stage creature (and, at the ADULT/SENIOR
+// level anchors, one already past its own level-18 evolution gate), legacy
+// family 2 landed on a final-stage RARE dead end, and legacy families 3..7
+// resolved to nothing at all - species_get() returned nullptr, which meant a
+// migrated pet showed a fabricated "full" HP meter, silently skipped the
+// level-up HP rescale and could never evolve.
+//
+// THE RULE NOW: every legacy family lands on the BASE STAGE of a v2 family, so
+// a migrated pet starts a family rather than arriving mid-way through one. The
+// destination is read from the generated SPECIES_BASE_OF_FAMILY[] rather than
+// typed out here, so growing the roster cannot leave a stale literal behind.
+//
+// WITH THE ROSTER AT 12 FAMILIES the eight legacy families land on eight
+// DISTINCT base species (1, 4, 7, 10, 13, 16, 19, 22), which preserves v1's
+// "different genomes looked different". A SMALLER ROSTER CANNOT DO THAT: the
+// modulo folds, and at 4 families the map would be 1/4/7/10/1/4/7/10. The
+// static_assert below states the requirement that actually matters (every
+// destination exists and is a base stage) and the distinctness is a property of
+// this roster size, not a promise the code can keep at any size.
 // -----------------------------------------------------------------------------
-static const uint8_t LEGACY_FAMILY_SPECIES[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+#define LEGACY_FAMILY_COUNT  8u
+
+static constexpr bool legacy_families_land_on_a_base_stage(void) {
+  for (uint8_t l = 0; l < LEGACY_FAMILY_COUNT; ++l) {
+    const uint8_t id = SPECIES_BASE_OF_FAMILY[l % SPECIES_FAMILY_COUNT];
+    if (id < SPECIES_ID_MIN || id > SPECIES_TABLE_COUNT) return false;
+    if (SPECIES_TABLE[id - 1u].stage != 0u) return false;
+  }
+  return true;
+}
+static_assert(legacy_families_land_on_a_base_stage(),
+              "a legacy v1 family migrates onto a species that does not exist or is "
+              "not a base stage");
 
 uint8_t migrate_species_of(const Genome& g) {
   const uint8_t legacy = GN_GET(g.g0, GN_SPECIES_SH, GN_SPECIES_MK);   // 0..15
-  return LEGACY_FAMILY_SPECIES[legacy & 7u];
+  return SPECIES_BASE_OF_FAMILY[(legacy & (LEGACY_FAMILY_COUNT - 1u))
+                                % SPECIES_FAMILY_COUNT];
 }
 
 // v1 had six life stages and no levels; v2 has thirty levels and no stages.
@@ -43,20 +80,14 @@ uint8_t migrate_level_of(uint8_t legacy_stage) {
   }
 }
 
-void migrate_default_name(uint32_t lineage_id, uint8_t generation,
-                          char* out, size_t cap) {
-  if (!out || cap == 0) return;
-  // The v1 hash, unchanged (ui.cpp ui_name_for): same dynasty, same name.
-  uint32_t h = lineage_id ^ 0x9E3779B9u;
-  h ^= (uint32_t)generation * 0x85EBCA6Bu;
-  h ^= h >> 15; h *= 0x2545F491u; h ^= h >> 13;
-  const char* a = S_SYL_A(h % 12u);
-  const char* b = S_SYL_B((h / 12u) % 12u);
-  size_t o = 0;
-  for (const char* s = a; *s && o + 1 < cap; ++s) out[o++] = *s;
-  for (const char* s = b; *s && o + 1 < cap; ++s) out[o++] = *s;
-  out[o] = '\0';
-}
+// migrate_default_name() USED TO LIVE HERE and was deleted by P4-C4's
+// follow-up, together with the only call it had. It wrote the v1 dynasty name
+// into PebbleInstance.nickname for a pet whose owner had never typed one, so
+// that "nothing appears to have been renamed by the update". That was
+// DISPLAY-NEUTRAL when it was written - ui.cpp's ui_name_for() computes the
+// same hash over the same syllable tables, so an empty nickname rendered the
+// identical word - and it stopped being neutral the moment P4-C4a gave the
+// name ladder a middle rung. See the nickname block in migrate_v1_to_v2().
 
 bool migration_needed(uint8_t found) {
   return found >= SAVE_SCHEMA_VERSION_V1 && found < (uint8_t)SAVE_SCHEMA_VERSION;
@@ -123,6 +154,24 @@ MigrateResult migrate_v1_to_v2(const uint8_t* petsave128, const uint8_t* cfg256,
   PebbleInstance& p = out.pebbles[0];
   p.species_id         = migrate_species_of(old.genome);
   p.level              = migrate_level_of(old.stage);
+  // TWO FIELDS THIS FUNCTION USED TO LEAVE AT ZERO (found by the P4-C1 survey,
+  // fixed here because the species row it needs only exists now).
+  //   * moves[] stayed {0,0,0,0}: a migrated pet knew no attacks at all, and
+  //     0 is the EMPTY move slot, so it would have walked into P4's battle with
+  //     nothing to do on any of its four buttons.
+  //   * hp_cur stayed 0: hp_max is derived but hp_cur is a Pebble's own, and
+  //     xp_hp_rescale() scales it, so 0 stays 0 for ever. Every screen that
+  //     draws the HP meter (screen_home, screen_status, screen_box) would have
+  //     shown a migrated pet at 0 % HP permanently.
+  // A migration is not a punishment: the pet arrives with its family's learnset
+  // and at full health, exactly like box_new_pebble() gives a fresh one.
+  {
+    const SpeciesDef* msp = species_get(p.species_id);
+    if (msp != nullptr) {
+      memcpy(p.moves, msp->moves, sizeof p.moves);
+      p.hp_cur = xp_hp_max(msp->base_hp, (p.level == 0u) ? 1u : p.level);
+    }
+  }
   p.genome             = old.genome;
   p.id                 = migrated_id(old.genome);
   p.creation_seed      = old.genome.lineage_id ^ ((uint32_t)old.genome.g2 << 16);
@@ -141,19 +190,49 @@ MigrateResult migrate_v1_to_v2(const uint8_t* petsave128, const uint8_t* cfg256,
 
   if (old.flags & LV1_PF_SICK)      p.status |= PBS_SICK;
   if (old.flags & LV1_PF_ASLEEP)    p.status |= PBS_ASLEEP;
-  if (old.flags & LV1_PF_LIGHT_ON)  p.status |= PBS_LIGHT_ON;
+  // LV1_PF_LIGHT_ON is deliberately DROPPED (P3-C2b): the light mechanic no
+  // longer exists, so carrying its bit forward would only put a meaning that
+  // nothing implements into a fresh v2 save.
   if (old.flags & LV1_PF_GOD_TAINTED) p.flags |= PBF_GOD_TAINTED;
 
-  // The name: an explicit v1 pet_name wins, otherwise the dynasty name the v1
-  // UI would have shown, so nothing appears to have been renamed by the update.
+  // THE NAME. An explicit v1 pet_name is a name the OWNER TYPED and nothing
+  // outranks it, so it comes across as the nickname. Anything else leaves the
+  // nickname EMPTY, and that is a deliberate change of behaviour rather than an
+  // omission.
+  //
+  // WHY IT CHANGED. This used to synthesize the v1 dynasty name here when there
+  // was no typed one. At the time that was display-neutral: ui.cpp's
+  // ui_name_for() computes the same hash over the same syllable tables, so an
+  // empty nickname drew the identical word, and the write only mattered to the
+  // BOX list. P4-C4a then made the display ladder nickname -> SPECIES NAME ->
+  // dynasty, and this write pinned every migrated device to the first rung for
+  // ever: persistence/game_state.cpp copies pebbles[0].nickname into
+  // Config.pet_name when device_name is empty, ui_pet_name() answers
+  // Config.pet_name before anything else, and no v2 code path ever clears it.
+  // The result was that a migrated player's HOME showed the dynasty syllables
+  // for the life of the device and the species name never appeared once - the
+  // exact complaint P3-C3 raised and P4-C4a set out to close - while a fresh v2
+  // device (box.cpp writes no nickname, ever) showed Paketo and then Fragmar.
+  //
+  // WHAT LEAVING IT EMPTY COSTS, NARROWED IN P4-C6 - this used to say "NOTHING
+  // IS LOST", and that sentence contradicted its own next clause. The dynasty
+  // syllables are the LAST rung of ui_pet_name()'s ladder, reached only by a
+  // Pebble with NO species row; migrate_species_of() always lands on a real
+  // roster id, so a migrated pet never reaches that rung and the v1 dynasty word
+  // is gone from the device for good. There is no rename UI in V1 either -
+  // nothing outside persistence/game_state.cpp writes Config.pet_name - so an
+  // update renames a player's pet with no way back to the old word.
+  //
+  // IT IS STILL THE RIGHT TRADE, and it is a trade rather than a free win: a
+  // name that never changes on a creature that now evolves is worse than a name
+  // the roster owns, because the evolution is the thing V1 has to be able to
+  // show. Restoring the old word would mean a nickname field on the SETTINGS
+  // screen, which is P8's keyboard and not this function's business.
   if (have_cfg && oldcfg.pet_name[0] != '\0') {
     size_t o = 0;
     while (o + 1 < sizeof p.nickname && o < sizeof oldcfg.pet_name &&
            oldcfg.pet_name[o] != '\0') { p.nickname[o] = oldcfg.pet_name[o]; ++o; }
     p.nickname[o] = '\0';
-  } else {
-    migrate_default_name(old.genome.lineage_id, old.genome.generation,
-                         p.nickname, sizeof p.nickname);
   }
   pebble_seal(p);
 
@@ -206,15 +285,103 @@ static MigrateResult step_v1_to_v2(GameState& out) {
   return migrate_v1_to_v2(save_bytes, cfg_ptr, out);
 }
 
+// -----------------------------------------------------------------------------
+//  v2 -> v3 (P10-C5). A NO-OP TRANSFORM, AND SAYING SO IS THE POINT.
+//
+//  Not one field moves between v2 and v3: every struct in save_schema.h has the
+//  same size, the same offsets and the same meaning, and the static_asserts in
+//  that header pin all three. The version number moves because spec section 31
+//  asks for the migration path to be EXERCISED before the release rather than
+//  merely to exist, and because a release is the honest moment to find out
+//  whether "bump the number and add a row" is really all it takes.
+//
+//  IT TURNED OUT NOT TO BE, and that is recorded in three places rather than
+//  fixed in silence: core/version.h (why a naive bump is LOAD_CORRUPT on every
+//  played device), save_manager.cpp's BlobOps::min_version (the read side) and
+//  its pair_write() (the write side, where a converging upgrade needs the
+//  WRITER to accept what the reader accepts).
+//
+//  WHAT IT ACTUALLY DOES is re-seal: blob_seal() stamps o.version and
+//  recomputes the CRC, so after this step every blob in 'out' says 3.
+//
+//  AND THE MUTATION SAYS EXACTLY HOW MUCH OF THAT IS LOAD-BEARING, which is
+//  worth more than the claim it replaced. Emptied to `return MIGRATE_OK;`, the
+//  suite fails on THREE of the five: `inv.version 2 != 3`, `cds.version 2 != 3`
+//  and `trade.version 2 != 3`. The Box and the config come out right ANYWAY -
+//  load_all_inner() box_seal()s the header before it calls the chain (the
+//  slot_mask may have healed), and save_config() seals into the CALLER'S struct
+//  rather than a copy - so those two would have been an accident rather than a
+//  migration, and this comment would have been claiming credit for it.
+//
+//  THE PEBBLES ARE DELIBERATELY NOT TOUCHED. PebbleInstance carries
+//  PEBBLE_LAYOUT_VER, a version axis of its own that has not moved; sealing
+//  them here would produce identical bytes and imply a change that did not
+//  happen. If a later bump does move a Pebble field, PEBBLE_LAYOUT_VER is what
+//  moves with it, and this is where the loop goes.
+// -----------------------------------------------------------------------------
+static MigrateResult step_v2_to_v3(GameState& out) {
+  box_seal(out.box);
+  cfgv2_seal(out.cfg);
+  inventory_seal(out.inv);
+  cooldowns_seal(out.cds);
+  trade_seal(out.trade);
+  return MIGRATE_OK;
+}
+
 struct MigrateStep {
   uint8_t       from;
   uint8_t       to;
   MigrateStepFn fn;
 };
 
-static const MigrateStep MIGRATE_STEPS[] = {
+static constexpr MigrateStep MIGRATE_STEPS[] = {
   { 1, 2, &step_v1_to_v2 },
+  { 2, 3, &step_v2_to_v3 },
 };
+
+// -----------------------------------------------------------------------------
+//  THE CHAIN IS COMPLETE, CHECKED BY THE COMPILER.
+//
+//  The failure this exists to prevent is a one-character edit: somebody bumps
+//  SAVE_SCHEMA_VERSION in core/version.h and does not add a row here. Nothing
+//  would complain - migrate_run() would answer MIGRATE_UNSUPPORTED at runtime,
+//  the loader would turn that into LOAD_CORRUPT, and the first person to find
+//  out would be a player watching SAVE ERROR after a firmware update. A grep
+//  gate cannot check it (the numbers live in two files and one of them is a
+//  table), so it is a static_assert: the walk from the oldest readable save to
+//  this firmware's version must land exactly, using only rows that exist.
+// -----------------------------------------------------------------------------
+static constexpr bool migrate_chain_reaches_current(void) {
+  uint8_t at = (uint8_t)SAVE_SCHEMA_VERSION_V1;
+  // At most one hop per row, so a table with a cycle terminates here rather
+  // than hanging the compiler.
+  for (size_t guard = 0; guard <= NT_ARRAY_LEN(MIGRATE_STEPS); ++guard) {
+    if (at == (uint8_t)SAVE_SCHEMA_VERSION) return true;
+    bool moved = false;
+    for (size_t i = 0; i < NT_ARRAY_LEN(MIGRATE_STEPS); ++i) {
+      if (MIGRATE_STEPS[i].from == at && MIGRATE_STEPS[i].to > at) {
+        at = MIGRATE_STEPS[i].to;
+        moved = true;
+        break;
+      }
+    }
+    if (!moved) return false;
+  }
+  return at == (uint8_t)SAVE_SCHEMA_VERSION;
+}
+static_assert(migrate_chain_reaches_current(),
+              "SAVE_SCHEMA_VERSION was bumped without a matching MIGRATE_STEPS row. "
+              "A save written by the previous firmware would reach migrate_run(), "
+              "find no step, and be reported to the player as LOAD_CORRUPT - "
+              "SAVE ERROR on a device whose data is perfectly intact.");
+
+// The in-place range is a claim about LAYOUT, not about kindness: a blob inside
+// it is read straight into the live struct, so its fields must still be where
+// this firmware expects them. v1 is outside it and has a transform instead.
+static_assert(SAVE_SCHEMA_INPLACE_MIN >= 2 &&
+              SAVE_SCHEMA_INPLACE_MIN <= (uint8_t)SAVE_SCHEMA_VERSION,
+              "SAVE_SCHEMA_INPLACE_MIN must name a version whose layout is this "
+              "firmware's, and never v1, which is a different set of keys");
 
 bool migrate_v1_present(void) {
   // kv_get refuses to truncate, so the whole blob is read even though only the
