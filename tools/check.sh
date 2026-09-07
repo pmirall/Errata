@@ -89,4 +89,28 @@ done
 #   n=$(grep -rn "WiFi\.begin(" "$SKETCH/src" | grep -v creator_server | wc -l); [ "$n" -eq 0 ] || fail "WiFi.begin outside creator_server ($n)"
 # fi
 
+# --- manual gates (P10-M6) ---------------------------------------------------
+# The manual illustrates itself from tests/golden/screens/*.pbm. A golden that
+# moved without its SVG being regenerated means the printed booklet shows a
+# screen the firmware no longer draws.
+if [ -f "$ROOT/tools/pbm2svg.py" ] && [ -d "$ROOT/docs/manual" ]; then
+  python3 "$ROOT/tools/pbm2svg.py" --check >/dev/null || fail "manual screens are stale (tools/pbm2svg.py --all)"
+
+  # No page number may be typed into the manual. The legal section grew by
+  # three pages during drafting and every hard-coded "see page 19" silently
+  # became wrong; cross-references go through pg(<label>) instead.
+  n=$( { grep -rniE '(pagina|página|page)s? +[0-9]+' "$ROOT/docs/manual/content" || true; } \
+        | { grep -vE '^[^:]+:[0-9]+: *//' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "hard-coded page number in the manual; use pg(<label>) ($n)"
+
+  # No legal fact may be typed into the manual either. Every company name,
+  # address, URL, e-mail and registration number comes from
+  # product_facts.toml through fact(), so filling the manual in is editing one
+  # file. A literal e-mail or http URL in the legal pages means one escaped.
+  n=$( { grep -rnE '(https?://|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})' \
+           "$ROOT/docs/manual/content/legal.typ" || true; } \
+        | { grep -v 'olikraus' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "literal URL or e-mail in content/legal.typ; put it in product_facts.toml ($n)"
+fi
+
 echo "GATE OK"

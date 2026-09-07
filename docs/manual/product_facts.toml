@@ -1,0 +1,102 @@
+# =============================================================================
+#  docs/manual/product_facts.toml
+#  THE SINGLE SOURCE OF EVERY LEGAL AND IDENTITY FACT IN THE PRINTED MANUAL.
+#
+#  Nothing in content/legal.typ may hard-code a company name, an address, a
+#  URL or a registration number. It all comes from here, so filling the manual
+#  in is editing ONE file instead of hunting through prose in two languages.
+#
+#  THE "TODO" CONVENTION. Any value left as the exact string "TODO" renders as
+#  a black block reading TODO: <key> on the page, and tools/build_manual.sh
+#  --print REFUSES TO BUILD. A draft PDF with visible holes is useful; a
+#  print-ready PDF missing a legally mandated field is a recall. The gate makes
+#  the second one impossible to produce by accident.
+#
+#  Every field below carries the reason it exists. Do not delete a field
+#  because it is inconvenient to fill; if one genuinely does not apply, say so
+#  in this file and note why.
+# =============================================================================
+
+# --- Who is legally responsible ---------------------------------------------
+# GPSR (EU) 2023/988 art. 19: name, postal address and electronic address must
+# be ON the product, or on the packaging, or in an accompanying document. The
+# manual is that document.
+# Because the manufacturer is established in Spain, the manufacturer is also
+# the "responsible person" for art. 16 - no third party has to be appointed.
+[entity]
+name = "TODO"                    # registered name, exactly as filed
+legal_form = "TODO"              # autonomo / S.L. / cooperativa ...
+tax_id = "TODO"                  # NIF / CIF
+street = "TODO"
+city = "TODO"
+postcode = "TODO"
+country = "España"
+
+# --- How to reach that person ------------------------------------------------
+[contact]
+email = "TODO"                   # general contact (GPSR "electronic address")
+safety_email = "TODO"            # GPSR art. 19: a channel to report a SAFETY
+                                 # incident. May equal `email`, but it must be
+                                 # published and it must be monitored.
+website = "TODO"
+support_url = "TODO"
+
+# RED 2014/53/EU art. 10.9 + Annex VII: a SIMPLIFIED declaration of conformity
+# is only valid if it carries the EXACT internet address of the full text.
+# A homepage is not enough; this must resolve straight to the signed DoC.
+doc_url = "TODO"
+
+# Cyber Resilience Act (EU) 2024/2847 Annex II - "Information and instructions
+# to the user". Main obligations bite on 11 Dec 2027 and this product will
+# still be on sale, so the manual carries them from the first print run.
+vuln_disclosure_url = "TODO"     # coordinated vulnerability disclosure policy
+sbom_url = "TODO"                # where the software bill of materials lives
+
+# --- What the product is -----------------------------------------------------
+# GPSR art. 19 also requires a product identifier: type, batch or serial.
+[product]
+name = "Pebblebol"
+model = "TODO"                   # e.g. PBBL-1
+hw_revision = "TODO"
+fw_version = "0.2.0-dev"         # keep in step with src/core/version.h
+batch_format = "TODO"            # how a batch is stamped, e.g. "AAAA-WW"
+country_of_manufacture = "España"
+
+# --- Waste registrations -----------------------------------------------------
+# RD 110/2015 (WEEE): registration in the RII-AEE is free but MANDATORY, and a
+# producer with no registration number may not place product on the Spanish
+# market at all. RD 710/2015 does the same for batteries via the RII-PYA.
+[registers]
+rii_aee = "TODO"                 # RII-AEE producer number
+rii_pya = "TODO"                 # RII-PYA number, needed if cells are boxed
+scrap = "TODO"                   # the collective scheme actually contracted
+
+# --- Radio -------------------------------------------------------------------
+# RED art. 10.8: the instructions MUST state the frequency bands and the
+# maximum transmit power in each band. These are declarations about the
+# finished device in its own enclosure - they are NOT inherited from the
+# ESP32-C3 module's datasheet, and the number below is not final until a lab
+# has measured this product.
+[radio]
+band = "2400-2483,5 MHz"
+max_power_dbm = "TODO"           # e.g. "20 dBm (100 mW) PIRE" - MEASURED
+restrictions = "Ninguna"         # art. 10.10: member states where putting into
+                                 # service is restricted. "Ninguna" if none.
+
+# --- Commercial terms --------------------------------------------------------
+# RDL 1/2007 (TRLGDCU) as amended: 3 years of legal conformity guarantee for
+# goods bought from 1 Jan 2022, and spare parts / technical assistance for 10
+# years after the model stops being manufactured.
+# Directive 2011/83/EU: 14 days of withdrawal on distance sales, crowdfunding
+# included.
+[commercial]
+warranty_years = 3
+spare_parts_years = 10
+withdrawal_days = 14
+support_end_date = "TODO"        # CRA Annex II: the date security support ends.
+                                 # Must be a real date you intend to honour.
+
+# --- The manual itself -------------------------------------------------------
+[manual]
+version = "0.1.0-draft"
+date = "TODO"                    # date of this print run

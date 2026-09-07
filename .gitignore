@@ -11,3 +11,6 @@ tests/bin/
 .vscode/
 # committed test fixtures (legacy v1 blobs) are the one exception to *.bin
 !tests/fixtures/*.bin
+# manual build output
+docs/manual/out/
+__pycache__/
