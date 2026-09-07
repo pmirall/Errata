@@ -156,15 +156,18 @@
 = La pantalla de inicio / The home screen
 
 #align(center, screen("home_starter", width: 58mm, marks: (
-  (0.05, 0.02, 1), (0.72, 0.05, 2), (0.05, 0.72, 3), (0.72, 0.72, 4),
+  (0.46, 0.10, 1), (0.79, 0.10, 2), (0.90, 0.50, 3),
+  (0.50, 0.62, 4), (0.20, 0.93, 5),
 )))
 
 #v(2mm)
-#mark(1, [Nombre y nivel.], [Name and level.])
-#mark(2, [Salud y felicidad.], [Health and happiness.])
-#mark(3, [Tu Pebble. Su postura te dice como esta.],
+#mark(1, [El nombre de tu Pebble.], [Your Pebble's name.])
+#mark(2, [Su nivel.], [Its level.])
+#mark(3, [Salud, comida y ánimo.], [Health, food and mood.])
+#mark(4, [Tu Pebble. Su postura te dice cómo está.],
          [Your Pebble. Its posture tells you how it is doing.])
-#mark(4, [Hambre y experiencia.], [Hunger and experience.])
+#mark(5, [Lo que hacen *A* y *B* en esta pantalla.],
+         [What *A* and *B* do on this screen.])
 
 #v(1.5mm)
 #bi[
@@ -242,7 +245,7 @@
 ]
 
 #v(2mm)
-#align(center, screen("soon_network", width: 54mm))
+#align(center, screen("network_scanning", width: 54mm))
 
 #v(2mm)
 #bi[
@@ -346,7 +349,7 @@
 #pagebreak()
 = Combate y enlace / Battle and link
 
-#align(center, screen("link_phase7", width: 54mm))
+#align(center, screen("link_peers", width: 54mm))
 
 #v(2mm)
 #bi[
@@ -377,7 +380,7 @@
 
 #grid(columns: (1fr, 1fr), column-gutter: 3mm,
   screen("creator_portal"),
-  screen("creator_station"),
+  screen("creator_offline"),
 )
 
 #v(1.5mm)

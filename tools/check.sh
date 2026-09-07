@@ -2513,11 +2513,23 @@ else
 fi
 
 # --- manual gates (P10-M6) ---------------------------------------------------
-# The manual illustrates itself from tests/golden/screens/*.pbm. A golden that
-# moved without its SVG being regenerated means the printed booklet shows a
-# screen the firmware no longer draws.
+# The manual illustrates itself from tests/capture/golden/screens/*.pbm - the
+# REAL-FONT capture, not the goldens. The goldens are drawn by a fake that
+# paints each character as a barcode and says so in its own header; the manual
+# read them for one commit and every screen in it came out as bars. A capture
+# that moved without its SVG being regenerated means the printed booklet shows
+# a screen the firmware no longer draws.
 if [ -f "$ROOT/tools/pbm2svg.py" ] && [ -d "$ROOT/docs/manual" ]; then
-  python3 "$ROOT/tools/pbm2svg.py" --check >/dev/null || fail "manual screens are stale (tools/pbm2svg.py --all)"
+  # tests/capture/ is build output and is not committed - the SVGs are. So the
+  # staleness check only runs where a capture exists; on a fresh clone it says
+  # so rather than failing a gate nobody can satisfy without building first.
+  if [ -d "$ROOT/tests/capture/golden/screens" ]; then
+    python3 "$ROOT/tools/pbm2svg.py" --check >/dev/null \
+      || fail "manual screens are stale (make -C tests capture && tools/pbm2svg.py --all)"
+  else
+    echo "check: no screen capture present, manual SVGs not verified" \
+         "(make -C tests capture)"
+  fi
 
   # No page number may be typed into the manual. The legal section grew by
   # three pages during drafting and every hard-coded "see page 19" silently

@@ -1,14 +1,29 @@
 #!/usr/bin/env python3
-"""tools/pbm2svg.py - turn a golden screen snapshot into a print-quality SVG.
+"""tools/pbm2svg.py - turn a screen capture into a print-quality SVG.
 
-The 36 files under tests/golden/screens are P1 (ASCII) PBM, 128x64, and they
-are the ONLY pixel-exact record of what the device actually draws. The manual
-illustrates itself from them, so a screen that changes in the firmware changes
-in the manual too, and tools/check.sh fails if someone forgets to regenerate.
+THE SOURCE IS NOT THE GOLDENS, AND THAT IS THE WHOLE POINT. This script used
+to read tests/golden/screens/*.pbm and claimed they were "the ONLY pixel-exact
+record of what the device actually draws". That was FALSE, and the file that
+says so had said so all along - tests/fakes/gfx_fb.h:
+
+    Text is NOT glyph-accurate and does not pretend to be: each codepoint is
+    drawn as a fixed-width cell whose row pattern is a function of the
+    codepoint...
+
+The goldens are a layout instrument. They catch a name that overflows its row,
+a truncation on the wrong codepoint, a primitive drawn off the panel - and they
+do it with a cheap deterministic fake that paints each character as a barcode.
+Every screen in the printed manual came out as barcodes.
+
+So the manual reads tests/capture/golden/screens/*.pbm instead, written by
+`make -C tests capture`: the same scenes, drawn by tests/fakes/gfx_real.cpp
+with the real U8g2 the firmware links, in the panel's own solid font mode, with
+the affordance triangles the device actually draws. Two artefacts, two
+contracts; neither pretends to be the other.
 
 Output is one <rect> per horizontal run of set pixels inside a 128x64 viewBox,
 with shape-rendering="crispEdges". That is vector (so it scales to any print
-size), about 1-3 KB, and keeps the pixel grid exact at 1200 dpi instead of the
+size), about 13 KB, and keeps the pixel grid exact at 1200 dpi instead of the
 soft edges a scaled-up bitmap would give.
 
 Nothing is annotated here on purpose. Callouts are drawn in Typst on top of the
@@ -17,7 +32,7 @@ the bilingual content file where they can be translated.
 
 Usage:
     tools/pbm2svg.py IN.pbm [-o OUT.svg]      one file, stdout if no -o
-    tools/pbm2svg.py --all                    every golden -> docs/manual/assets/screens
+    tools/pbm2svg.py --all                    every capture -> docs/manual/assets/screens
     tools/pbm2svg.py --check                  exit 1 if any output is stale
 """
 
@@ -26,7 +41,7 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-GOLDEN = ROOT / "tests" / "golden" / "screens"
+CAPTURE = ROOT / "tests" / "capture" / "golden" / "screens"
 OUTDIR = ROOT / "docs" / "manual" / "assets" / "screens"
 
 
@@ -102,18 +117,19 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("source", nargs="?", type=pathlib.Path)
     ap.add_argument("-o", "--out", type=pathlib.Path)
-    ap.add_argument("--all", action="store_true", help="convert every golden")
+    ap.add_argument("--all", action="store_true", help="convert every capture")
     ap.add_argument("--check", action="store_true",
                     help="exit 1 if any generated SVG is missing or stale")
     args = ap.parse_args()
 
     if args.all or args.check:
-        goldens = sorted(GOLDEN.glob("*.pbm"))
-        if not goldens:
-            print(f"pbm2svg: no goldens under {GOLDEN}", file=sys.stderr)
+        shots = sorted(CAPTURE.glob("*.pbm"))
+        if not shots:
+            print(f"pbm2svg: no captures under {CAPTURE}.\n"
+                  f"         Run: make -C tests capture", file=sys.stderr)
             return 1
         stale = []
-        for src in goldens:
+        for src in shots:
             svg = convert(src)
             dst = OUTDIR / (src.stem + ".svg")
             if args.check:
@@ -129,9 +145,9 @@ def main():
                 for s in stale:
                     print(f"  {s}", file=sys.stderr)
                 return 1
-            print(f"pbm2svg: {len(goldens)} screens up to date")
+            print(f"pbm2svg: {len(shots)} screens up to date")
             return 0
-        print(f"pbm2svg: wrote {len(goldens)} screens to "
+        print(f"pbm2svg: wrote {len(shots)} screens to "
               f"{OUTDIR.relative_to(ROOT)}")
         return 0
 

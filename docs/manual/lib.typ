@@ -121,15 +121,20 @@
 ))
 
 #let screen(name, width: 46mm, marks: ()) = {
-  let img = image("assets/screens/" + name + ".svg", width: width)
-  block(breakable: false, {
-    box(width: width, {
-      // 2:1 panel, so the height follows from the width
-      box(img, stroke: 0.5pt + black)
-      for m in marks {
-        place(dx: m.at(0) * width, dy: m.at(1) * width / 2, dot(m.at(2)))
-      }
-    })
+  // The panel is 128x64, so the drawn height follows from the width. Both the
+  // image and the callout dots are PLACED inside a box of exactly that size:
+  // letting the image flow and then placing over it puts the dots below it,
+  // because `place` measures from the box origin and a flowed image has
+  // already advanced the cursor.
+  let h = width / 2
+  box(width: width, height: h, {
+    place(top + left, image("assets/screens/" + name + ".svg", width: width))
+    place(top + left, rect(width: width, height: h, stroke: 0.5pt + black))
+    for m in marks {
+      // Centre the dot on the feature rather than hanging it off the corner.
+      place(top + left, dx: m.at(0) * width - 2.1mm, dy: m.at(1) * h - 2.1mm,
+            dot(m.at(2)))
+    }
   })
 }
 
