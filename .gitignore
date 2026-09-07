@@ -16,3 +16,5 @@ tests/bin_asan/
 tools/content/_verify_out.txt
 tools/content/__pycache__/
 __pycache__/
+# PlatformIO
+.pio/
