@@ -1105,8 +1105,15 @@ static void home_leave_layer(void) { actfx_cancel(); }
 static void game_report(uint8_t /* game_id */, uint16_t permille) {
   ActionResult r;
   if (permille > MG_SCORE_MAX) permille = MG_SCORE_MAX;
-  sim_apply_play_result(permille, r);
-  (void)app_award_xp(xp_minigame_amount(permille), XP_SRC_MINIGAME);
+  // THE XP IS AWARDED ON WHAT THE RUN WAS ACTUALLY WORTH, not on the raw score.
+  // With the 120 s cooldown gone (data/balance.h) the decay curve is the only
+  // thing standing between "play as much as you like" and "farm levels in the
+  // bathroom", so it has to reach the experience and not only the happiness.
+  // The effective score comes back FROM the call that applied it, because that
+  // call is also what pushes this run into the rolling window - see sim.h.
+  uint16_t paid = 0;
+  sim_apply_play_result(permille, r, &paid);
+  (void)app_award_xp(xp_minigame_amount(paid), XP_SRC_MINIGAME);
   if (pet()) gs_save_active(true);
 }
 
@@ -2033,13 +2040,12 @@ void ui_help(uint16_t str_id)    { dialog_open_help(str_id); }
 void ui_confirm_medicine(void)   { dialog_open_confirm(CFM_MEDICINE, STR_CF_SURE); }
 
 void ui_start_minigame(uint8_t idx) {
-  const uint16_t cd = sim_minigame_cooldown_s();
-  if (cd) {
-    char buf[48];
-    snprintf(buf, sizeof(buf), "%s %u s", S(STR_GM_COOLDOWN), (unsigned)cd);
-    toast_text(buf);
-    return;
-  }
+  // NO COOLDOWN CHECK. There was a 120 s one here, and it meant one twenty-second
+  // game per visit to the device followed by a countdown - which is the opposite
+  // of what a thing you use for three minutes at a time is for. The anti-farm is
+  // data/balance.h's decay curve now: you can always start a game, and the fifth
+  // one this hour is worth a fraction of the first. The energy floor stays,
+  // because that one is about the CREATURE being tired and not about the clock.
   if (sim_stat_pct(ST_ENERGY) < ACT_PLAY_MIN_ENERGY_PCT) { ui_toast(STR_AERR_TIRED); return; }
 
   // One seed for the whole sequence, drawn once from the minigame stream: the
@@ -2069,6 +2075,16 @@ void ui_start_battle(uint8_t entry) {
   nav_push(SCR_BATTLE);
 }
 
+void ui_start_wild_battle(uint8_t species, uint8_t level) {
+  if (species == 0u) return;                 // nothing to fight; the caller asked wrong
+  battle_arm_wild(rng_u32(RNG_BATTLE), species, level);
+  ui_input_flush();
+  // ui_goto() and NOT nav_push(): see ui.h. The encounter is spent by the fight,
+  // so it must not be underneath the battle waiting to offer CAPTURAR to a
+  // creature that has just fainted.
+  ui_goto(SCR_BATTLE);
+}
+
 void ui_battle_result(uint8_t entry, uint8_t won) {
   // A diagnostic pays nothing. Entering god mode already sets
   // genome.god_tainted for ever, and a test entry that also handed out XP would
@@ -2083,7 +2099,12 @@ void ui_battle_result(uint8_t entry, uint8_t won) {
   // true only where networking/session.h's session_rewards_authorised() is, so
   // a desync or a lost link arrives here as won == 0 and falls out on the line
   // below with no Box written and no ledger touched.
-  if (entry != BT_ENTRY_PRACTICE && entry != BT_ENTRY_LINK) return;
+  // A WILD WIN PAYS THE SAME AS A PRACTICE ONE AND OUT OF THE SAME BUCKET, which
+  // is what keeps it from being a new farm: XP_CAP_BATTLE is two wins an hour
+  // for the DEVICE, and on top of that a wild fight can only be reached through
+  // an encounter, which arms the network's own two-hour cooldown on the way in.
+  if (entry != BT_ENTRY_PRACTICE && entry != BT_ENTRY_LINK &&
+      entry != BT_ENTRY_WILD) return;
   if (!won) return;
   // METERED LIKE EVERY OTHER SOURCE, and P4-C4 had to SIZE that meter to be able
   // to say so: game/xp.cpp carried XP_SRC_BATTLE as {0, 0} - "reserved but not

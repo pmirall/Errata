@@ -107,9 +107,22 @@
 //              There is no AI on this entry - the opposing actions come off the
 //              wire - and no pick list: the team was frozen when the two
 //              players consented, one screen earlier.
+//  WILD     the creature the exploration loop just found, fought instead of
+//           caught. ONE Pebble a side: the player's ACTIVE one against the one
+//           on the panel, because you did not choose a team to bump into a
+//           stranger with - you were carrying what you were carrying. There is
+//           no pick list for that reason, and the foe is not built by
+//           build_foe()'s dice: it is the species and level the encounter
+//           already rolled and already showed the player, which is the whole
+//           point - the thing you fight is the thing you were looking at.
+//           A win pays XP_BATTLE_WIN through XP_SRC_BATTLE, the same meter and
+//           the same bucket as a practice win, so this is not a new farm: the
+//           network's own two-hour cooldown is what limits how often one can
+//           be reached at all.
 #define BT_ENTRY_PRACTICE   0u
 #define BT_ENTRY_DIAG       1u
 #define BT_ENTRY_LINK       2u
+#define BT_ENTRY_WILD       3u
 
 // The seed spec section 49's "deterministic RNG seed" pins. Stated here rather
 // than hidden in a .cpp because reproducing a report means quoting it.
@@ -134,6 +147,12 @@ enum BattleScreenMode : uint8_t {
 // screen, because the seed comes from a named RNG stream and a pure screen may
 // not draw from one. Calling it does not start anything: battle_enter() does.
 void battle_arm(uint8_t entry, uint32_t seed);
+
+// Arm a WILD entry: the seed, and the creature the encounter rolled. Separate
+// from battle_arm() because a wild battle carries two more numbers, and passing
+// them through a call that does not name them is how a foe ends up being built
+// by dice on the one entry whose whole promise is that it is not.
+void battle_arm_wild(uint32_t seed, uint8_t species, uint8_t level);
 
 // -----------------------------------------------------------------------------
 //  THE LINKED ENTRY (P7-C3)
@@ -210,6 +229,15 @@ uint16_t battle_screen_dropped(void);   // log-ring overflow; MUST stay 0
 uint8_t  battle_screen_picked(void);    // how many Box slots are chosen
 uint8_t  battle_screen_submits(void);   // actions this screen has handed the engine
 uint8_t  battle_screen_reports(void);   // how many times the result was reported
+
+// THE FOE THIS SCREEN BUILT, which exists because BT_ENTRY_WILD makes exactly
+// one promise and this is it: the creature you fight is the creature the
+// encounter rolled and SHOWED YOU, not a fresh throw of build_foe()'s dice.
+// That claim is invisible in a rendered frame - one 24x24 body looks like
+// another - and a mutation that dropped the wild branch would fail nothing
+// without these two.
+uint8_t  battle_screen_foe_species(void);
+uint8_t  battle_screen_foe_level(void);
 
 // THE ENGINE'S OWN VERDICT ON THE ROW THE CURSOR IS POINTING AT RIGHT NOW, as a
 // BattleReject. This is the promise at the top of this header expressed as a

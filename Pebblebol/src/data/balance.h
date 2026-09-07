@@ -126,15 +126,51 @@ inline constexpr int32_t CARE_DECAY_MPH[PB_BALANCE_CARE_COUNT] = {
 #define ACT_PLAY_MIN_ENERGY_PCT 12
 #define ACT_PET_HAPPINESS       3
 
-// Diminishing returns on minigame happiness, permille, rolling 3 h window.
-#define PLAY_DECAY_WINDOW_S     10800UL
+// -----------------------------------------------------------------------------
+//  DIMINISHING RETURNS ON PLAYING, permille, over a rolling window.
+//
+//  *** THIS IS THE WHOLE ANTI-FARM NOW: THE 120 s MINIGAME COOLDOWN IS GONE. ***
+//  The owner's brief: "I want to use this when I'm in the bathroom for three
+//  minutes, and one minigame doesn't last three minutes." A 120 s lockout let
+//  you play exactly ONE twenty-second game per visit and then stare at a toast.
+//  So the block is gone and the CURVE does the work instead: you can always
+//  play, and the fifth game in an hour is worth a fraction of the first.
+//
+//  GEOMETRIC, AND WITH A FLOOR THAT IS NOT ZERO. Each step is about 0.62 of the
+//  one before - the shape the brief asked for - and it stops at 150 rather than
+//  falling to nothing, because a reward of zero is a lockout wearing a
+//  different hat. At the floor a run still pays 15 % of the happiness and, with
+//  XP_MINIGAME_NUM = 8, still one whole XP: playing is never pointless, it is
+//  only no longer the fastest way to level.
+//
+//  THE WINDOW IS ONE HOUR, DOWN FROM THREE, and that is deliberate rather than
+//  incidental: it is now the SAME hour as XP_WIN_MINIGAME_S, so the two
+//  independent brakes on the same activity - this curve on happiness, the XP
+//  ledger's bucket on experience - refill on one clock instead of arguing.
+//  Under the old 3 h window a morning session left the curve at its floor until
+//  lunch, which with no cooldown in front of it would have been the worse trade.
+#define PLAY_DECAY_WINDOW_S     3600UL
 #define PLAY_DECAY_0            1000
-#define PLAY_DECAY_1            700
-#define PLAY_DECAY_2            450
-#define PLAY_DECAY_3            250
-#define PLAY_DECAY_4            100
-#define PLAY_DECAY_5            0
-#define PLAY_DECAY_STEPS        6
+#define PLAY_DECAY_1            620
+#define PLAY_DECAY_2            384
+#define PLAY_DECAY_3            238
+#define PLAY_DECAY_4            150
+#define PLAY_DECAY_5            150
+#define PLAY_DECAY_6            150
+#define PLAY_DECAY_7            150
+#define PLAY_DECAY_STEPS        8
+#define PLAY_DECAY_FLOOR        150
+
+// The curve must be non-increasing and must never reach zero. Both are checked
+// here rather than left to the reader: a table edited to end in 0 is the
+// lockout coming back through the balance file.
+static_assert(PLAY_DECAY_0 >= PLAY_DECAY_1 && PLAY_DECAY_1 >= PLAY_DECAY_2 &&
+              PLAY_DECAY_2 >= PLAY_DECAY_3 && PLAY_DECAY_3 >= PLAY_DECAY_4 &&
+              PLAY_DECAY_4 >= PLAY_DECAY_5 && PLAY_DECAY_5 >= PLAY_DECAY_6 &&
+              PLAY_DECAY_6 >= PLAY_DECAY_7,
+              "the play decay curve goes back up");
+static_assert(PLAY_DECAY_7 == PLAY_DECAY_FLOOR && PLAY_DECAY_FLOOR > 0,
+              "the play decay curve ends at zero - that is a lockout, not a curve");
 
 // Mimo (PET) decay per hour: 4/3/2/1/0
 #define PET_DECAY_STEPS         5
@@ -153,7 +189,6 @@ inline constexpr int32_t CARE_DECAY_MPH[PB_BALANCE_CARE_COUNT] = {
 #define ACT_CD_MED_S            30
 
 // Shared cooldown for the on-device (S4) minigames.
-#define MG_COOLDOWN_S           120
 
 // Per-stat hourly gain budget (whole points). The real anti-farm ceiling; it
 // refills continuously, so an hour of real time is worth exactly one cap.
@@ -283,6 +318,12 @@ static_assert(xp_table_total() < 65535u,
 // A minigame pays permille * XP_MINIGAME_NUM / 1000, i.e. 0..8 for a run.
 #define XP_MINIGAME_NUM         8
 #define XP_MINIGAME_DEN         1000
+// The other half of the play-decay curve's promise, and it has to be down here
+// because it joins two blocks: at the FLOOR of that curve a run must still pay a
+// whole XP, or "you can always play" is true of the button and false of the
+// reward. 150 * 8 / 1000 = 1.
+static_assert((PLAY_DECAY_FLOOR * XP_MINIGAME_NUM) / XP_MINIGAME_DEN >= 1,
+              "at the floor a minigame pays 0 XP, so playing really is pointless");
 
 // Carried time: +XP_CARRY_STEP_XP for every XP_CARRY_STEP_S seconds the active
 // Pebble spends AWAKE with the device on. Asleep time and time in the Box pay

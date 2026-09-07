@@ -26,6 +26,7 @@
 #include "data/balance.h"
 #include "data/species_table.h"
 #include "game/sim.h"
+#include "game/xp.h"       // xp_minigame_amount(): the floor must still pay one
 #include "game/genome.h"
 #include "game/box.h"
 #include "persistence/save_schema.h"
@@ -1332,6 +1333,105 @@ static int32_t gain_typed_day_round(uint32_t saved_epoch, uint32_t claimed_now)
   care_pet();                                    // a power cycle: sim_bind() zeroes it
   (void)sim_gain_restore(g_gain_snap, (uint8_t)ST_COUNT, saved_epoch, claimed_now);
   return (int32_t)sim_gain_left(ST_HAPPINESS);
+}
+
+// =============================================================================
+//  PLAYING BACK TO BACK
+//
+//  THE OWNER'S BRIEF, VERBATIM: "I want to use this when I'm in the bathroom for
+//  three minutes, and one minigame doesn't last three minutes. If it's for
+//  balance, balance it so that playing a lot in a row rewards you exponentially
+//  less, but don't stop me from playing."
+//
+//  So the 120 s MG_COOLDOWN_S is gone and data/balance.h's decay curve is the
+//  whole anti-farm. That trade only holds if BOTH halves are true, and neither
+//  half was driven by a single case in this repository before now - which is
+//  how a 120 s lockout survived ten phases without one test noticing it existed.
+//
+//    (a) A RUN IS NEVER REFUSED for having been preceded by another run.
+//    (b) THE REWARD FALLS, AND IT NEVER REACHES ZERO. A payout of nothing is a
+//        lockout wearing a different hat, and it is what the old curve did at
+//        its sixth step.
+// =============================================================================
+TEST(a_minigame_is_never_refused_for_following_another_one) {
+  care_pet();
+  // Energy is the ONE floor that stays, and it is about the creature rather
+  // than the clock - so it is held up here to keep this case about the cooldown.
+  ActionResult r;
+  for (uint8_t i = 0; i < 12u; ++i) {
+    sim_god_set_stat(ST_ENERGY, 100);
+    if (!sim_apply_play_result(1000u, r)) {
+      fprintf(stderr, "  run %u was REFUSED: err=%u cooldown=%u s\n",
+              (unsigned)i, (unsigned)r.err, (unsigned)r.cooldown_s);
+      CHECK(false);
+    }
+    CHECK(r.ok);
+    // Not one second passes between them: this is twelve presses in a row.
+  }
+}
+
+TEST(playing_in_a_row_pays_exponentially_less_and_never_nothing) {
+  care_pet();
+  ActionResult r;
+
+  // The curve as the player meets it: a perfect run, over and over, with the
+  // happiness read back from what the call SAYS it paid rather than from the
+  // table it read.
+  uint16_t paid[PLAY_DECAY_STEPS + 4];
+  for (uint8_t i = 0; i < (uint8_t)(PLAY_DECAY_STEPS + 4); ++i) {
+    sim_god_set_stat(ST_ENERGY, 100);
+    CHECK(sim_apply_play_result(1000u, r, &paid[i]));
+  }
+
+  // (a) IT FALLS. Every step is worth no more than the one before it.
+  for (uint8_t i = 1; i < (uint8_t)(PLAY_DECAY_STEPS + 4); ++i) {
+    if (paid[i] > paid[i - 1]) {
+      fprintf(stderr, "  run %u paid %u, more than run %u's %u - the curve went "
+                      "back up\n", (unsigned)i, (unsigned)paid[i],
+              (unsigned)(i - 1), (unsigned)paid[i - 1]);
+      CHECK(false);
+    }
+  }
+
+  // (b) IT FALLS FAST. The brief said exponentially, so the second run must be
+  // worth well under three quarters of the first and the fourth well under half
+  // the second. Stated as ratios rather than as the table's own numbers, so a
+  // rebalance that keeps the SHAPE keeps this case.
+  CHECK(paid[0] == 1000u);
+  CHECK(paid[1] * 4u < paid[0] * 3u);
+  CHECK(paid[3] * 2u < paid[1]);
+
+  // (c) AND IT NEVER REACHES ZERO - not at the floor, and not four steps past
+  // the end of the table. This is the half that makes "you can always play"
+  // true of the REWARD and not only of the button.
+  for (uint8_t i = 0; i < (uint8_t)(PLAY_DECAY_STEPS + 4); ++i) {
+    CHECK(paid[i] >= (uint16_t)PLAY_DECAY_FLOOR);
+    // ...and a whole XP, which is the smallest unit the player can see.
+    CHECK(xp_minigame_amount(paid[i]) >= 1u);
+  }
+}
+
+// AND THE WINDOW ROLLS. An hour of not playing puts the curve back at the top,
+// which is what makes it a rate and not a budget - the thing the old cooldown
+// was not, because it never recovered any faster than 120 s at a time.
+TEST(an_hour_away_from_the_games_puts_the_curve_back_at_the_top) {
+  care_pet();
+  ActionResult r;
+  uint16_t first = 0, worn = 0, again = 0;
+
+  sim_god_set_stat(ST_ENERGY, 100);
+  CHECK(sim_apply_play_result(1000u, r, &first));
+  for (uint8_t i = 0; i < (uint8_t)PLAY_DECAY_STEPS; ++i) {
+    sim_god_set_stat(ST_ENERGY, 100);
+    CHECK(sim_apply_play_result(1000u, r, &worn));
+  }
+  CHECK(worn < first);
+
+  // PLAY_DECAY_WINDOW_S of uptime, in the sixty-second steps sim_tick() takes.
+  for (uint32_t t = 0; t < (uint32_t)PLAY_DECAY_WINDOW_S + 60u; t += 60u) sim_tick(60);
+  sim_god_set_stat(ST_ENERGY, 100);
+  CHECK(sim_apply_play_result(1000u, r, &again));
+  CHECK_EQ((int)again, (int)first);
 }
 
 TEST(a_typed_hour_and_a_reboot_cannot_refill_a_spent_gain_budget) {

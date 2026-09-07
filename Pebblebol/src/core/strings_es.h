@@ -254,7 +254,7 @@ enum StrId : uint16_t {
   STR_GM_WIN,
   STR_GM_LOSE,
   STR_GM_SCORE,
-  STR_GM_COOLDOWN,
+  STR_GM_COOLDOWN,        // DEAD since the minigame cooldown was deleted; see the row
   //     The affordance strip a RUNNING game shows. Both buttons are play
   //     inputs in every one of the six, so the strip may not advertise B as
   //     "PAUSA" alone; the pause is B HELD, in the same tap/hold shape the
@@ -741,6 +741,7 @@ enum StrId : uint16_t {
   STR_ENC_SPECIAL,
   STR_ENC_CORRUPT,
   STR_ENC_CATCH,
+  STR_ENC_FIGHT,
   STR_ENC_LEAVE,
   STR_ENC_BAG_FULL,
   STR_ENC_NO_CLOCK,
@@ -1092,6 +1093,12 @@ inline constexpr const char* const ES[] = {
   /* STR_GM_WIN */                "¡Ganaste!",
   /* STR_GM_LOSE */               "Otra vez será.",
   /* STR_GM_SCORE */              "Puntos",
+  // DEAD, AND KEPT ON PURPOSE. The 120 s minigame cooldown is gone, so nothing
+  // can raise this line any more. It stays because removing a row RENUMBERS
+  // every StrId after it, and the content hash those ids feed is what two
+  // peers compare before they will talk (data/content_version.h) - a cosmetic
+  // tidy that costs cross-device compatibility is the wrong trade. Delete it
+  // at the next content-version bump, with the others.
   /* STR_GM_COOLDOWN */           "Descansa un poco.",
   /* STR_GM_AF_PLAY */            "JUGAR",
   /* STR_GM_AF_PLAY_PAUSE */      "JUGAR/PAUSA",
@@ -1503,6 +1510,7 @@ inline constexpr const char* const ES[] = {
   , /* STR_ENC_SPECIAL */         "¡ALGO RARO PASA!"
   , /* STR_ENC_CORRUPT */         "Pebble corrompido 24 h"
   , /* STR_ENC_CATCH */           "CAPTURAR"
+  , /* STR_ENC_FIGHT */           "LUCHAR"
   , /* STR_ENC_LEAVE */           "DEJAR"
   , /* STR_ENC_BAG_FULL */        "La mochila está llena"
   , /* STR_ENC_NO_CLOCK */        "Pon la fecha primero"

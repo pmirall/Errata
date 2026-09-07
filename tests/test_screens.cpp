@@ -186,6 +186,12 @@ void ui_start_minigame(uint8_t i) { g_minigame = i; }
 // these are the only three things it cannot do for itself: draw a seed, award
 // XP, and reach render.h's frame-level effects.
 void ui_start_battle(uint8_t e)          { g_battle_entry = e; g_battle_starts++; }
+// The wild fight (the encounter's third answer). Recorded rather than run: the
+// real one draws a seed and navigates, and neither belongs in a screen test.
+static uint8_t g_wild_sp = 0, g_wild_lv = 0; static int g_wild_starts = 0;
+void ui_start_wild_battle(uint8_t sp, uint8_t lv) {
+  g_wild_sp = sp; g_wild_lv = lv; ++g_wild_starts;
+}
 void ui_battle_result(uint8_t e, uint8_t won) {
   g_result_entry = e; g_result_won = won; g_results++;
 }
@@ -3690,23 +3696,41 @@ TEST(the_encounter_transient_draws_all_four_outcomes_and_only_wild_can_be_steere
   EncounterResult r;
   memset(&r, 0, sizeof r);
 
-  // WILD: two options, and A on the first one opens CAPTURE.
+  // WILD: THREE options now - catch it, fight it, or walk away - and the ring
+  // walks all three and wraps.
   r.outcome = (uint8_t)ENC_OUT_WILD; r.species_id = 1; r.level = 7;
   encounter_arm(r, (uint8_t)NET_CAT_HOME);
   encounter_enter();
-  CHECK_EQ(encounter_screen_cursor(), 0);
+  CHECK_EQ(encounter_screen_cursor(), (int)ENC_OPT_CATCH);
   encounter_input((Gesture)GST_TAP_L);
-  CHECK_EQ(encounter_screen_cursor(), 1);          // moved to DEJAR
+  CHECK_EQ(encounter_screen_cursor(), (int)ENC_OPT_FIGHT);
   encounter_input((Gesture)GST_TAP_L);
-  CHECK_EQ(encounter_screen_cursor(), 0);          // and back
+  CHECK_EQ(encounter_screen_cursor(), (int)ENC_OPT_LEAVE);
+  encounter_input((Gesture)GST_TAP_L);
+  CHECK_EQ(encounter_screen_cursor(), (int)ENC_OPT_CATCH);   // and it wraps
   encounter_input((Gesture)GST_HOLD_L);
   CHECK_EQ(g_push, (uint8_t)SCR_CAPTURE);
-  // DEJAR is a real answer and leaves without capturing.
-  g_push = 0xFF;
+
+  // LUCHAR hands the ENCOUNTER'S OWN creature to the battle - the species and
+  // the level the player was just looking at, not a re-roll - and it does NOT
+  // push, because a beaten wild Pebble must not be left underneath still
+  // offering to be caught.
+  g_push = 0xFF; g_wild_starts = 0;
+  encounter_input((Gesture)GST_TAP_L);
+  CHECK_EQ(encounter_screen_cursor(), (int)ENC_OPT_FIGHT);
+  encounter_input((Gesture)GST_HOLD_L);
+  CHECK_EQ(g_wild_starts, 1);
+  CHECK_EQ((int)g_wild_sp, 1);
+  CHECK_EQ((int)g_wild_lv, 7);
+  CHECK_EQ(g_push, 0xFF);
+
+  // DEJAR is a real answer and leaves without capturing or fighting.
   const int backs = g_backs;
   encounter_input((Gesture)GST_TAP_L);
+  CHECK_EQ(encounter_screen_cursor(), (int)ENC_OPT_LEAVE);
   encounter_input((Gesture)GST_HOLD_L);
   CHECK_EQ(g_push, 0xFF);
+  CHECK_EQ(g_wild_starts, 1);                      // still one: no second fight
   CHECK_EQ(g_backs, backs + 1);
 
   // ITEM: the drop is in the bag the moment the screen opens, so a stray BACK
@@ -3797,7 +3821,7 @@ TEST(snapshot_encounter_item_film) {
   // spark at three quarters of its reach. A film golden taken early enough that
   // nothing has happened yet is a golden of the resting screen with an icon on
   // it, which is what the second snapshot below is for.
-  g_now += 450u;
+  g_now += (ENC_ITEM_RISE_MS * 7u) / 8u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_ITEM_RISE);
   snapshot(SCR_ENCOUNTER, "encounter_item_film");
   encounter_leave();
@@ -3834,14 +3858,17 @@ static void wild_fixture(uint8_t species) {
 
 TEST(the_wild_reveal_walks_its_three_beats_and_the_clock_ends_it) {
   wild_fixture(1u);
+  // DRIVEN BY THE TIMETABLE'S OWN NAMES (screen_encounter.h), not by literals:
+  // the beats were retimed once already and a case full of magic milliseconds
+  // is a second copy of the schedule.
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_TEAR);
-  g_now += 299u;
+  g_now += ENC_WILD_TEAR_MS - 1u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_TEAR);
-  g_now += 2u;                                        // 301
+  g_now += 2u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_FORM);
-  g_now += 460u;                                      // 761
+  g_now += ENC_WILD_FORM_MS - ENC_WILD_TEAR_MS;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_STARE);
-  g_now += 220u;                                      // 981, past the end
+  g_now += ENC_WILD_END_MS - ENC_WILD_FORM_MS;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
   encounter_leave();
 }
@@ -3869,7 +3896,7 @@ TEST(the_wild_reveal_does_not_replay_when_the_player_comes_back_from_capture) {
 TEST(the_wild_tear_is_the_same_picture_every_time_it_is_played) {
   wild_fixture(1u);
   const uint32_t t0 = g_now;
-  g_now = t0 + 150u;
+  g_now = t0 + ENC_WILD_TEAR_MS / 2u;
   fb_reset();
   encounter_render();
   uint8_t first[FB_H][FB_W];
@@ -3878,7 +3905,7 @@ TEST(the_wild_tear_is_the_same_picture_every_time_it_is_played) {
   encounter_leave();
 
   wild_fixture(1u);
-  g_now += 150u;
+  g_now += ENC_WILD_TEAR_MS / 2u;
   fb_reset();
   encounter_render();
   int diff = 0;
@@ -3899,14 +3926,14 @@ TEST(the_wild_tear_is_the_same_picture_every_time_it_is_played) {
 TEST(the_wild_reveal_ends_on_a_full_band_snap) {
   wild_fixture(1u);
   const uint32_t t0 = g_now;
-  g_now = t0 + 820u;                                  // STARE, before the snap
+  g_now = t0 + ENC_WILD_SNAP_MS - 60u;                // STARE, before the snap
   fb_reset();
   encounter_render();
   uint8_t before[FB_H][FB_W];
   for (int y = 0; y < FB_H; ++y)
     for (int x = 0; x < FB_W; ++x) before[y][x] = (uint8_t)fb_get(x, y);
 
-  g_now = t0 + 920u;                                  // inside the snap
+  g_now = t0 + ENC_WILD_SNAP_MS + 60u;                // inside the snap
   fb_reset();
   encounter_render();
   int flipped = 0;
@@ -3921,7 +3948,7 @@ TEST(the_wild_reveal_ends_on_a_full_band_snap) {
 // The tear, mid-corruption: no body yet, and the band torn into scanlines.
 TEST(snapshot_encounter_wild_tear) {
   wild_fixture(1u);
-  g_now += 150u;
+  g_now += ENC_WILD_TEAR_MS / 2u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_TEAR);
   snapshot(SCR_ENCOUNTER, "encounter_wild_tear");
   encounter_leave();
@@ -3931,7 +3958,7 @@ TEST(snapshot_encounter_wild_tear) {
 // on, the head is not, and two bars of the tear are still standing.
 TEST(snapshot_encounter_wild_form) {
   wild_fixture(1u);
-  g_now += 480u;
+  g_now += (ENC_WILD_TEAR_MS + ENC_WILD_FORM_MS) / 2u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_FORM);
   snapshot(SCR_ENCOUNTER, "encounter_wild_form");
   encounter_leave();
@@ -4003,7 +4030,7 @@ TEST(snapshot_capture_caught_pull) {
   // leave every successful capture with no film at all and every golden below
   // would still be a valid picture of the screen.
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_CAP_CLAMP);
-  g_now += 600u;
+  g_now += (ENC_CAP_CLAMP_MS + ENC_CAP_PULL_MS) / 2u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_CAP_PULL);
   snapshot(SCR_CAPTURE, "capture_caught_pull");
   capture_leave();
@@ -4014,7 +4041,7 @@ TEST(snapshot_capture_caught_pull) {
 TEST(snapshot_capture_caught_seal) {
   caught_fixture();
   capture_input((Gesture)GST_HOLD_L);
-  g_now += 900u;
+  g_now += (ENC_CAP_PULL_MS + ENC_CAP_END_MS) / 2u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_CAP_SEAL);
   snapshot(SCR_CAPTURE, "capture_caught_seal");
   capture_leave();
@@ -4035,7 +4062,7 @@ TEST(snapshot_capture_caught_seal) {
 TEST(a_film_ends_by_the_clock_alone_even_though_nothing_cancels_it) {
   item_fixture(1u);
   CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
-  g_now += 979u;                                   // one millisecond short
+  g_now += ENC_ITEM_END_MS - 1u;                   // one millisecond short
   CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
   g_now += 1u;                                     // and exactly at the end
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
@@ -4045,7 +4072,7 @@ TEST(a_film_ends_by_the_clock_alone_even_though_nothing_cancels_it) {
   caught_fixture();
   capture_input((Gesture)GST_HOLD_L);
   CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
-  g_now += 1079u;
+  g_now += ENC_CAP_END_MS - 1u;
   CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
   g_now += 1u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
@@ -4126,9 +4153,9 @@ TEST(a_film_armed_before_the_millis_wrap_measures_forward_and_not_backward) {
   g_now += 64u;                           // the wrap itself
   CHECK_EQ(g_now, 0u);
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_ITEM_RISE);
-  g_now += 500u;                          // 564 ms in: past the climb
+  g_now += ENC_ITEM_RISE_MS;              // past the climb, across the wrap
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_ITEM_SETTLE);
-  g_now += 500u;                          // 1064 ms in: over
+  g_now += ENC_ITEM_END_MS;               // and over
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
   encounter_leave();
   g_now = 100000u;
@@ -4171,7 +4198,7 @@ TEST(every_frame_of_both_films_stays_inside_the_content_band) {
   g_now = t0_item + 5000u;                       // film over
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
   capture_base(encounter_render);
-  for (uint32_t t = 0; t < 980u; t += 10u) {
+  for (uint32_t t = 0; t < ENC_ITEM_END_MS; t += 10u) {
     g_now = t0_item + t;
     fb_reset();
     encounter_render();
@@ -4208,7 +4235,7 @@ TEST(every_frame_of_both_films_stays_inside_the_content_band) {
   g_now = t0_cap + 5000u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
   capture_base(capture_render);
-  for (uint32_t t = 0; t < 1080u; t += 10u) {
+  for (uint32_t t = 0; t < ENC_CAP_END_MS; t += 10u) {
     g_now = t0_cap + t;
     fb_reset();
     capture_render();
@@ -4237,7 +4264,7 @@ TEST(every_frame_of_both_films_stays_inside_the_content_band) {
   g_now = t0_wild + 5000u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
   capture_base(encounter_render);
-  for (uint32_t t = 0; t < 980u; t += 10u) {
+  for (uint32_t t = 0; t < ENC_WILD_END_MS; t += 10u) {
     g_now = t0_wild + t;
     fb_reset();
     encounter_render();
@@ -4260,7 +4287,8 @@ TEST(every_frame_of_both_films_stays_inside_the_content_band) {
 
   // ANTI-VACUITY. "Nothing moved outside the band" must not be able to pass
   // because nothing moved at all.
-  CHECK_EQ(frames, 98 + 108 + 98);
+  CHECK_EQ(frames, (int)(((ENC_ITEM_END_MS + 9u) / 10u) + ((ENC_CAP_END_MS + 9u) / 10u) +
+                         ((ENC_WILD_END_MS + 9u) / 10u)));
   CHECK(moved > 1000);
   g_now = 100000u;
 }

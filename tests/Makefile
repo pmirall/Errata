@@ -206,7 +206,13 @@ $(BIN)/test_care_golden: $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
 # box.o comes along for the "seven days stored comes back full" case: box_recover
 # is the OTHER half of the care model (spec section 9) and P3-C1 tunes both.
+# xp.o joined at the play-decay work: with the 120 s minigame cooldown gone, the
+# curve is the whole anti-farm, and half of its promise is that at the FLOOR a
+# run still pays one whole XP. That claim joins two modules, so the case that
+# holds it has to link both rather than repeat xp_minigame_amount()'s arithmetic.
 $(BIN)/test_care:       $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o \
+                        $(OBJ)/xp.o $(OBJ)/pebble.o $(OBJ)/species.o \
+                        $(OBJ)/evolution.o \
                         $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 # daylight.cpp is pure arithmetic over the balance.h table: no clock, no state.
 $(BIN)/test_daylight:   $(OBJ)/daylight.o

@@ -240,11 +240,13 @@ void     sim_gain_snapshot(uint8_t out_pts[ST_COUNT]);
 uint8_t  sim_gain_restore(const uint8_t* pts, uint8_t n,
                           uint32_t saved_epoch, uint32_t now_epoch);
 
-// Seconds left before a minigame may be played again.
-uint16_t sim_minigame_cooldown_s(void);
+// A MINIGAME HAS NO COOLDOWN. sim_minigame_cooldown_s() used to be declared
+// here and it is gone, not stubbed: the 120 s lockout let the owner play one
+// twenty-second game per visit to the device. data/balance.h's decay curve is
+// the anti-farm now and it takes the REWARD down instead of the button away.
 
-// Number of plays inside the rolling PLAY_DECAY_WINDOW_S window, 0..5.
-// The happiness payout is scaled by PLAY_DECAY_0..5 permille from this.
+// Number of plays inside the rolling PLAY_DECAY_WINDOW_S window, 0..PLAY_DECAY_STEPS-1.
+// The payout is scaled by PLAY_DECAY_0.. permille from this.
 uint8_t  sim_play_window_count(void);
 
 // Rolling-window happiness payout scale, permille (1000 / 700 / 450 / ...).
@@ -252,7 +254,15 @@ uint16_t sim_play_decay_permille(void);
 
 // An on-device (GAME screen) minigame finished. win_permille 0..1000 is how well the
 // player did; >= 500 counts as a win for minigames_won and the branch score.
-bool     sim_apply_play_result(uint16_t win_permille, ActionResult& out);
+//
+// `paid_permille`, when given, receives the score AFTER the rolling-window decay
+// - i.e. what this run was actually worth. THE CALLER MUST USE IT RATHER THAN
+// RE-READING sim_play_decay_permille(): this call pushes the run into the
+// window, so the curve answers differently before and after it, and an XP award
+// computed on the wrong side would drift one step out of step with the
+// happiness the same run paid. One reader, one moment, no order to get wrong.
+bool     sim_apply_play_result(uint16_t win_permille, ActionResult& out,
+                               uint16_t* paid_permille = nullptr);
 
 // -----------------------------------------------------------------------------
 // 7. QUERIES

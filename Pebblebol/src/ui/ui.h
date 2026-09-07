@@ -386,6 +386,15 @@ void     ui_start_minigame(uint8_t idx);
 // screen's reach.
 void     ui_start_battle(uint8_t entry);
 
+// FIGHT THE CREATURE THE ENCOUNTER FOUND. The screen says WHICH creature; this
+// draws the seed from RNG_BATTLE (a pure screen may not) and hands over.
+//
+// IT REPLACES THE ENCOUNTER RATHER THAN STACKING ON IT, and that is a rule about
+// the fiction rather than about the stack: a wild Pebble you have just beaten is
+// not still standing there waiting to be caught. Leaving the battle therefore
+// walks back to whatever was under the encounter, which is the scan.
+void     ui_start_wild_battle(uint8_t species, uint8_t level);
+
 // THE ONE PATH A BATTLE RESULT CAN TAKE, and it is called exactly once per
 // VISIT to SCR_BATTLE however the player leaves the screen (ui/
 // screen_battle.cpp's report_once(), which is minigames/manager.cpp's

@@ -51,15 +51,9 @@ uint8_t capture_screen_item(void)      { return s_item; }
 //  durations makes every such question a running sum that one edit puts out of
 //  step with the next.
 // =============================================================================
-#define ENC_ITEM_RISE_MS    520u    // the climb ends
-#define ENC_ITEM_END_MS     980u    // the whole item film ends
-#define ENC_CAP_CLAMP_MS    420u    // the brackets have closed
-#define ENC_CAP_PULL_MS     760u    // the body has gone
-#define ENC_CAP_END_MS     1080u    // the whole capture film ends
-#define ENC_WILD_TEAR_MS    300u    // the scanline tear is over
-#define ENC_WILD_FORM_MS    760u    // the body has finished assembling
-#define ENC_WILD_SNAP_MS    880u    // the band goes inverse from here
-#define ENC_WILD_END_MS     980u    // the whole wild film ends
+// The film boundaries live in screen_encounter.h since the retiming: the tests
+// drive them by name, and two copies of a timetable is how a film and its case
+// come to disagree about when a beat ends.
 
 // HOW LONG ONE TORN PATTERN STANDS. Corruption reads as DISCONTINUITY: anything
 // that eases between two states looks alive, which is the opposite of what a
@@ -85,6 +79,25 @@ static_assert(ENC_WILD_TEAR_MS < ENC_WILD_FORM_MS &&
 #define ENC_ICON_X     ((int16_t)((OLED_W - ENC_ICON_W) / 2))
 #define ENC_ICON_TOP    26          // where the drop finishes
 #define ENC_ICON_BOT    43          // where it starts, down on the name line
+
+// -----------------------------------------------------------------------------
+//  THE RESTING WILD CARD: body on the left, name and level beside it, the two
+//  options underneath. Every number is checked against the furniture below
+//  rather than eyeballed - the countdown bar owns UI_CONTENT_BOTTOM-2 upwards
+//  and the header owns rows 0..UI_HDR_H-1.
+// -----------------------------------------------------------------------------
+#define ENC_WILD_CARD_X    ((int16_t)4)
+#define ENC_WILD_CARD_Y    ((int16_t)13)
+#define ENC_WILD_TEXT_X    ((int16_t)32)
+#define ENC_WILD_OPT_Y     ((int16_t)40)
+#define ENC_WILD_OPT_H     ((int16_t)12)
+#define ENC_WILD_OPT_TEXT_Y ((int16_t)48)
+// THREE BOXES ACROSS THE PANEL, and the font drops to GF_TINY to pay for the
+// third. "CAPTURAR" is 40 px at GF_BODY and a third of 128 is 42 - it would fit
+// with one pixel on each side and read as a mistake. At GF_TINY it is 32 px in a
+// 42 px box, which is a label with room around it.
+#define ENC_WILD_OPT_X0    ((int16_t)1)
+#define ENC_WILD_OPT_W     ((int16_t)42)
 
 #define ENC_BODY_W      24
 #define ENC_BODY_X     ((int16_t)((OLED_W - ENC_BODY_W) / 2))
@@ -114,6 +127,20 @@ static_assert(ENC_BODY_X - 1 - ENC_CLAMP_FAR >= 0,
 static_assert(ENC_BODY_X + ENC_BODY_W + ENC_CLAMP_FAR < (int)OLED_W,
               "a bracket would open off the right of the panel");
 static_assert(ENC_CLAMP_NEAR < ENC_CLAMP_FAR, "the brackets close the wrong way");
+
+static_assert(ENC_WILD_CARD_Y >= (int)UI_CONTENT_Y,
+              "the wild card's body would draw into the header bar");
+static_assert(ENC_WILD_CARD_Y + ENC_BODY_W - 1 < ENC_WILD_OPT_Y,
+              "the wild card's body would draw through the two options");
+static_assert(ENC_WILD_CARD_X + ENC_BODY_W < ENC_WILD_TEXT_X,
+              "the species name would be drawn on top of the creature");
+static_assert(ENC_WILD_OPT_Y + ENC_WILD_OPT_H - 1 < (int)UI_CONTENT_BOTTOM - 2,
+              "the option boxes would reach under the countdown bar");
+static_assert(ENC_WILD_OPT_TEXT_Y > ENC_WILD_OPT_Y &&
+              ENC_WILD_OPT_TEXT_Y <= ENC_WILD_OPT_Y + ENC_WILD_OPT_H - 1,
+              "the option label's baseline is outside its own highlight");
+static_assert(ENC_WILD_OPT_X0 + (int)ENC_OPT_COUNT * ENC_WILD_OPT_W <= (int)OLED_W,
+              "the three answers do not fit across the panel");
 
 // WHICH FILM AND WHEN IT STARTED. Two bytes and a word; there is no service()
 // hook and no per-frame state, because enc_film_phase() is a pure function of
@@ -538,14 +565,20 @@ void encounter_input(Gesture g)
   if (g == (Gesture)GST_BOTH) { ui_help(STR_ENC_HELP); return; }
   if (s_enc.outcome != (uint8_t)ENC_OUT_WILD) return;   // nothing to steer
   if (g == (Gesture)GST_TAP_L) {
-    s_cursor = (uint8_t)(s_cursor ^ 1u);
+    s_cursor = (uint8_t)((s_cursor + 1u) % (uint8_t)ENC_OPT_COUNT);
     audio_play(SFX_TICK);      // the rule is in ui/screen_menu.cpp
     ui_note_input();
     return;
   }
   if (g == (Gesture)GST_HOLD_L) {
-    if (s_cursor == 0u) ui_push(SCR_CAPTURE);   // CAPTURAR
-    else                ui_back();              // DEJAR - a real answer
+    switch (s_cursor) {
+      case ENC_OPT_CATCH: ui_push(SCR_CAPTURE); break;
+      // THE FIGHT REPLACES THIS SCREEN rather than stacking over it (ui.h): a
+      // wild Pebble you have just beaten is not still standing here waiting to
+      // be caught, so leaving the battle must not walk back onto this card.
+      case ENC_OPT_FIGHT: ui_start_wild_battle(s_enc.species_id, s_enc.level); break;
+      default:            ui_back(); break;     // DEJAR - a real answer
+    }
   }
 }
 
@@ -572,16 +605,47 @@ void encounter_render(void)
         gfx_affordance(S(STR_AF_SEL), S(STR_AF_BACK));
         break;
       }
-      gfx_text_center(GF_NARR, 22, S(STR_ENC_WILD));
-      wild_row(row, sizeof row);
-      gfx_text_center(GF_BODY, 33, row);
-      // The two options section 23 draws, with the cursor inverted rather than
-      // marked, which is the BOX screen's own idiom.
-      const char* opt[2] = { S(STR_ENC_CATCH), S(STR_ENC_LEAVE) };
-      for (uint8_t i = 0; i < 2u; ++i) {
-        const int16_t x = (int16_t)(6 + i * 62);
-        gfx_text(GF_BODY, (int16_t)(x + 2), 46, opt[i]);
-        if (i == s_cursor) gfx_invert_rect(x, 38, 60, 11);
+      // -----------------------------------------------------------------------
+      //  THE CREATURE STAYS ON THE PANEL WHILE THE PLAYER DECIDES.
+      //
+      //  It did not, and that was the whole complaint from the first evening on
+      //  a board: "it appears for a millisecond, it goes, and it lets you catch
+      //  it or leave." The reveal drew a 24x24 body, the film ended, and what
+      //  was left was three lines of prose asking you to decide about something
+      //  you could no longer see. A creature you are choosing whether to keep is
+      //  the one thing that may not leave the screen while you are choosing.
+      //
+      //  So the resting frame is a CARD, not a paragraph: the body on the left
+      //  exactly where the film left it standing, its name and level beside it,
+      //  and the two options underneath. "PEBBLE SALVAJE" is gone as a line -
+      //  the title bar says ENCUENTRO and the picture says the rest, and the row
+      //  it used to occupy is what makes room for the body.
+      // -----------------------------------------------------------------------
+      {
+        const SpriteRef r = enc_wild_sprite(enc_body_frame());
+        if (r.bits && r.w > 0u && r.h > 0u)
+          gfx_xbm_t(ENC_WILD_CARD_X, ENC_WILD_CARD_Y, r.w, r.h, r.bits);
+      }
+      const char* nm = pet_species_name(s_enc.species_id);
+      gfx_text_fit(GF_BODY, ENC_WILD_TEXT_X, 26,
+                   (int16_t)(OLED_W - ENC_WILD_TEXT_X - 2), nm ? nm : "?");
+      snprintf(row, sizeof row, "Nv%u", (unsigned)s_enc.level);
+      gfx_text(GF_BODY, ENC_WILD_TEXT_X, 37, row);
+
+      // The three answers, with the cursor INVERTED rather than marked, which is
+      // the BOX screen's own idiom. Each label is centred in its own box by
+      // measurement rather than by a hand-counted offset, so a translation that
+      // changes a word's length still lands in the middle of it.
+      const char* opt[ENC_OPT_COUNT] = {
+        S(STR_ENC_CATCH), S(STR_ENC_FIGHT), S(STR_ENC_LEAVE)
+      };
+      for (uint8_t i = 0; i < (uint8_t)ENC_OPT_COUNT; ++i) {
+        const int16_t x = (int16_t)(ENC_WILD_OPT_X0 + (int16_t)i * ENC_WILD_OPT_W);
+        const int16_t tw = (int16_t)gfx_text_w(GF_TINY, opt[i]);
+        gfx_text(GF_TINY, (int16_t)(x + (ENC_WILD_OPT_W - tw) / 2),
+                 ENC_WILD_OPT_TEXT_Y, opt[i]);
+        if (i == s_cursor)
+          gfx_invert_rect(x, ENC_WILD_OPT_Y, ENC_WILD_OPT_W, ENC_WILD_OPT_H);
       }
       gfx_affordance(S(STR_AF_SEL), S(STR_AF_BACK));
       break;

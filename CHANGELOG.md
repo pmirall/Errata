@@ -29,6 +29,93 @@ carries the developer console and ships to nobody. A number quoted without its
 variant is not a number — `docs/budget.md` §8 records a phase exit that compared
 one with the other.
 
+## [Unreleased] — playable in three minutes, 2026-09-07
+
+Three changes the owner asked for after the first hardware session: two about
+usability, one a feature the exploration loop was missing.
+
+### Changed — a minigame has no cooldown any more
+- **The brief, verbatim:** *"I want to use this when I'm in the bathroom for
+  three minutes, and one minigame doesn't last three minutes."* `MG_COOLDOWN_S`
+  was 120 s, so a visit to the device bought you exactly ONE twenty-second game
+  and then a countdown. It is **deleted** — the constant, `sim_minigame_cooldown_s()`
+  and all three of its checks.
+- **`data/balance.h`'s decay curve is the whole anti-farm now**, and it takes
+  the REWARD down instead of the button away. Geometric at about 0.62 per run,
+  and it stops at a floor of 150‰ instead of falling to nothing, because a
+  payout of zero is a lockout wearing a different hat — which is exactly what
+  the old six-step curve did at its sixth step. At the floor a run still pays
+  15 % of the happiness and one whole XP; two `static_assert`s hold both, and
+  setting the last step back to 0 **does not compile**.
+- The window is **1 h**, down from 3, so it is the same hour as
+  `XP_WIN_MINIGAME_S`: the two independent brakes on the same activity now
+  refill on one clock instead of arguing.
+- **The XP is awarded on what the run was actually worth**, not on the raw
+  score. `sim_apply_play_result()` reports the decayed value through a new
+  out-param, because it is also the call that pushes the run into the rolling
+  window — a caller that re-read the curve itself would get a different answer
+  before and after, and the experience would drift one step out of step with the
+  happiness the same run paid.
+- **Nothing in the repository had ever driven any of this.** No test mentioned
+  the cooldown or the curve, which is how a 120 s lockout survived ten phases.
+  Three cases now do: a run is never refused for following another one; twelve
+  in a row pay monotonically less, fall fast, and never reach zero; and an hour
+  away puts the curve back at the top. All three confirmed failing by name
+  against a re-introduced cooldown.
+
+### Added — you can FIGHT a wild Pebble
+- **The gap the owner named:** *"it lets you catch it or leave, you can't even
+  fight it for XP."* Catching and walking away were a wild encounter's only two
+  answers, so a creature you could not afford to keep was worth nothing at all —
+  in a loop whose entire purpose is finding creatures.
+- **`BT_ENTRY_WILD`**, a fourth battle entry. **One Pebble a side: your ACTIVE
+  one against the one on the panel**, and no pick list — you did not choose a
+  team to bump into a stranger with, you were carrying what you were carrying,
+  and asking the player to assemble three creatures while one stands in front of
+  them would be a menu in the middle of a moment.
+- **The foe is not rolled.** `build_foe()`'s dice are skipped: the species and
+  level are the ones `game/encounters.cpp` already rolled and already showed the
+  player one screen ago. That is the entry's only promise, it is invisible in a
+  rendered frame (one 24×24 body looks like another), and it is asserted over
+  three different creatures on the setup itself — confirmed failing by name when
+  the wild branch is deleted.
+- **A win pays `XP_BATTLE_WIN` out of the same `XP_SRC_BATTLE` bucket as a
+  practice win**, so this is not a new farm: `XP_CAP_BATTLE` is two wins an hour
+  for the device, and a wild fight can only be reached through an encounter,
+  which arms the network's own two-hour cooldown on the way in.
+- **The fight REPLACES the encounter rather than stacking on it.** A wild Pebble
+  you have just beaten is not still standing there waiting to be caught, so
+  leaving the battle walks back to the scan and not onto a card offering
+  CAPTURAR to something that fainted.
+- The card carries three answers now — CAPTURAR / LUCHAR / DEJAR — in a row of
+  three boxes at `GF_TINY`, because "CAPTURAR" is 40 px at `GF_BODY` and a third
+  of the panel is 42. Each label is centred by measurement rather than by a
+  hand-counted offset.
+
+### Changed — the wild Pebble stays on screen while you decide
+- **The complaint:** *"it appears for a millisecond, it goes, and it lets you
+  catch it or leave."* Exactly right, and it was this session's own doing: the
+  reveal drew a 24×24 body, the film ended, and what was left was three lines of
+  prose asking the player to decide about something they could no longer see.
+- The resting frame is a **card** now: the body on the left where the film left
+  it standing, the species name and level beside it, the two options underneath.
+  The `¡PEBBLE SALVAJE!` line is gone — the title bar says ENCOUNTER and the
+  picture says the rest, and the row it occupied is what makes room for the
+  body. Five `static_assert`s pin the layout against the header bar, the
+  countdown bar and each other.
+- **The films are about 70 % longer** (item 980→1660 ms, capture 1080→1840,
+  wild 980→1700). They were written against host goldens, where a film is a
+  still picture you study a frame at a time; on a 0.96" panel at arm's length a
+  300 ms tear is four frames, and four frames of anything is a glitch in the
+  literal sense rather than the intended one. A `static_assert` caps every film
+  at two seconds so none of them can quietly grow into a wait.
+- **The timetable moved into `ui/screen_encounter.h`** and the tests drive it by
+  name. They held it as literal milliseconds before, which is two copies of a
+  schedule — and the retiming is exactly the edit that makes those two copies
+  disagree.
+
+---
+
 ## [Unreleased] — the first board, 2026-09-07
 
 **The firmware ran on hardware for the first time.** The intro played. The
@@ -113,8 +200,8 @@ never appeared.
 
 ## [Unreleased] — first impressions, 2026-09-07
 
-*(Three `[Unreleased]` sections stand here on purpose: none has been tagged, and
-they are three different pieces of work on the same day. This one is what the
+*(Four `[Unreleased]` sections stand here on purpose: none has been tagged, and
+they are four different pieces of work on the same day. This one is what the
 owner asked for after playing the build; above it is the first hardware session;
 below it is the pre-hardware review. Inventing version numbers to keep the
 headings unique would be claiming tags that were never cut.)*

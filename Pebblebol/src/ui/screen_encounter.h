@@ -67,8 +67,20 @@ enum CapScreenMode : uint8_t {
   CSM_RESULT,         // an attempt has been resolved
   CSM_MODE_COUNT
 };
+// The three answers a wild encounter takes, in the order they are drawn.
+// LUCHAR joined them after the owner played the build and asked for it: catching
+// and walking away were the only two, so a creature you could not afford to keep
+// was worth nothing at all - and a fight is the one thing an exploration loop
+// full of creatures obviously wants to offer.
+enum EncOption : uint8_t {
+  ENC_OPT_CATCH = 0,
+  ENC_OPT_FIGHT,
+  ENC_OPT_LEAVE,
+  ENC_OPT_COUNT
+};
+
 const EncounterResult& encounter_screen_result(void);
-uint8_t encounter_screen_cursor(void);
+uint8_t encounter_screen_cursor(void);      // 0..ENC_OPT_COUNT-1
 uint8_t capture_screen_mode(void);
 uint8_t capture_screen_outcome(void);   // CaptureOutcome of the last attempt
 uint8_t capture_screen_item(void);      // the capture item the throw will spend
@@ -122,6 +134,45 @@ uint8_t capture_screen_item(void);      // the capture item the throw will spend
 //  replayed its establishing shot after every failed throw would be charging a
 //  second of the player's time for a fact they already have.
 // =============================================================================
+
+// -----------------------------------------------------------------------------
+//  THE FILM TIMETABLE. CUMULATIVE MILLISECOND BOUNDARIES, NOT DURATIONS -
+//  ui/actfx.cpp's convention and for its reason: the draw code asks "where am I
+//  now", and a table of durations makes every such question a running sum that
+//  one edit puts out of step with the next.
+//
+//  IN THE HEADER, not the .cpp, since the retiming below: tests/test_screens.cpp
+//  drives these boundaries by name, and a timetable copied into a test as
+//  literals is how a film and the case that checks it come to disagree about
+//  when a beat ends.
+// -----------------------------------------------------------------------------
+//  *** THE LENGTHS WENT UP ABOUT 70 % AFTER THE FIRST EVENING ON A BOARD. ***
+//  They were written against a host golden, where a film is a still picture you
+//  study one frame at a time; on a 0.96" panel at arm's length the same beats
+//  are a flicker. The owner's words were "the animations should last longer so
+//  they are more legible", and he is right about every one of them: a 300 ms
+//  tear is four frames at 20 fps, and four frames of anything is a glitch in
+//  the literal sense rather than the intended one.
+//
+//  NOTHING IS SLOWER TO SIT THROUGH THAN IT NEEDS TO BE. Every film is still
+//  bounded by its own clock and skippable by any press (screen_encounter.h),
+//  and the longest of them is under two seconds - which is the budget a beat
+//  gets before it stops being a reveal and starts being a wait.
+#define ENC_ITEM_RISE_MS    880u    // the climb ends
+#define ENC_ITEM_END_MS    1660u    // the whole item film ends
+#define ENC_CAP_CLAMP_MS    700u    // the brackets have closed
+#define ENC_CAP_PULL_MS    1300u    // the body has gone
+#define ENC_CAP_END_MS     1840u    // the whole capture film ends
+#define ENC_WILD_TEAR_MS    520u    // the scanline tear is over
+#define ENC_WILD_FORM_MS   1300u    // the body has finished assembling
+#define ENC_WILD_SNAP_MS   1520u    // the band goes inverse from here
+#define ENC_WILD_END_MS    1700u    // the whole wild film ends
+
+// AND NO FILM MAY QUIETLY GROW INTO A WAIT. Two seconds is the ceiling: past it
+// a player who has seen the beat forty times is being charged for it.
+static_assert(ENC_ITEM_END_MS <= 2000u && ENC_CAP_END_MS <= 2000u &&
+              ENC_WILD_END_MS <= 2000u,
+              "an encounter film is longer than two seconds - that is a wait");
 
 // Which film, if any, is running. Ordered so a test can walk them.
 enum EncFilmPhase : uint8_t {

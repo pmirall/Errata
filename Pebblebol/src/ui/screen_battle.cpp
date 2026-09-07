@@ -121,6 +121,12 @@ uint8_t  battle_screen_mode(void)    { return s_mode; }
 uint8_t  battle_screen_side(void)    { return s_me; }
 uint8_t  battle_screen_cursor(void)  { return s_cur; }
 uint8_t  battle_screen_reject(void)  { return s_reject; }
+uint8_t  battle_screen_foe_species(void) {
+  return (s_setup.count[1] > 0u) ? s_setup.member[1][0].species_id : 0u;
+}
+uint8_t  battle_screen_foe_level(void) {
+  return (s_setup.count[1] > 0u) ? s_setup.member[1][0].level : 0u;
+}
 uint8_t  battle_screen_outcome(void) { return s_st.outcome; }
 
 int8_t battle_screen_lead_stage(uint8_t stat) {
@@ -736,6 +742,13 @@ static void end_playback(void) {
 // -----------------------------------------------------------------------------
 //  STARTING
 // -----------------------------------------------------------------------------
+// The wild foe, held between battle_arm_wild() and start_battle(). Two bytes,
+// and they are the encounter's own answer rather than anything this screen
+// decided: ui/screen_encounter.cpp showed the player a species at a level and
+// this is the same species at the same level.
+static uint8_t s_wild_sp = 0;
+static uint8_t s_wild_lv = 1;
+
 static uint8_t start_battle(void) {
   battle_setup_clear(s_setup);
   s_setup.seed = s_seed;
@@ -760,7 +773,16 @@ static uint8_t start_battle(void) {
     lead = s_setup.member[0][0].level;
   }
 
-  build_foe(s_setup, s_setup.count[0], lead, s_seed);
+  // THE FOE. Dice everywhere except on a WILD entry, where the creature was
+  // rolled by game/encounters.cpp and SHOWN TO THE PLAYER one screen ago -
+  // re-rolling it here would mean fighting something other than the thing on
+  // the panel, which is the only promise this entry makes.
+  if (s_entry == BT_ENTRY_WILD) {
+    s_setup.count[1] = 1u;
+    make_member(s_setup.member[1][0], s_wild_sp, s_wild_lv, free_id(s_setup, 0xFF000001u));
+  } else {
+    build_foe(s_setup, s_setup.count[0], lead, s_seed);
+  }
 
   const uint8_t r = (uint8_t)battle_init(s_st, s_setup);
   if (r != (uint8_t)BR_OK) return r;
@@ -814,6 +836,14 @@ static uint8_t start_battle(void) {
 // -----------------------------------------------------------------------------
 //  THE TABLE HOOKS
 // -----------------------------------------------------------------------------
+void battle_arm_wild(uint32_t seed, uint8_t species, uint8_t level) {
+  s_entry   = (uint8_t)BT_ENTRY_WILD;
+  s_seed    = seed;
+  s_wild_sp = species;
+  s_wild_lv = (level >= 1u) ? level : 1u;
+  s_armed   = 1;
+}
+
 void battle_arm(uint8_t entry, uint32_t seed) {
   s_entry = (entry == BT_ENTRY_DIAG) ? (uint8_t)BT_ENTRY_DIAG
                                      : (uint8_t)BT_ENTRY_PRACTICE;
@@ -889,6 +919,23 @@ void battle_enter(void) {
   }
 
   if (s_entry == BT_ENTRY_DIAG) {
+    const uint8_t r = start_battle();
+    if (r != (uint8_t)BR_OK) { s_reject = r; ui_toast(STR_BT_START_ERR); }
+    return;
+  }
+
+  // NO PICK LIST ON A WILD ENTRY. You did not choose a team to bump into a
+  // stranger with - you were carrying what you were carrying, and asking the
+  // player to assemble three creatures while one is standing in front of them
+  // would be a menu in the middle of a moment. The team is the ACTIVE slot, and
+  // it goes through the same s_pick[] the list would have filled, so start_battle()
+  // needs no branch of its own for side 0.
+  if (s_entry == BT_ENTRY_WILD) {
+    const uint8_t act = box_active();
+    if (act >= (uint8_t)BOX_SLOTS) { s_reject = (uint8_t)BR_TEAM_SIZE;
+                                     ui_toast(STR_BT_NO_TEAM); return; }
+    s_pick[0] = act;
+    s_pick_n  = 1u;
     const uint8_t r = start_battle();
     if (r != (uint8_t)BR_OK) { s_reject = r; ui_toast(STR_BT_START_ERR); }
     return;

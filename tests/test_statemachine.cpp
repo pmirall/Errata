@@ -103,6 +103,12 @@ void ui_start_minigame(uint8_t)   { }
 // The P4-C4 battle seams. This binary drives the REAL table, so SCR_BATTLE's
 // row runs the real screen and these three have to exist for it to link.
 void ui_start_battle(uint8_t e)   { g_battle_entry = e; }
+// The wild fight (the encounter's third answer). Recorded rather than run: the
+// real one draws a seed and navigates, and neither belongs in a screen test.
+static uint8_t g_wild_sp = 0, g_wild_lv = 0; static int g_wild_starts = 0;
+void ui_start_wild_battle(uint8_t sp, uint8_t lv) {
+  g_wild_sp = sp; g_wild_lv = lv; ++g_wild_starts;
+}
 
 // THE EXPLORATION SEAMS (P5-C3/C4). This binary is about NAVIGATION, so the
 // stubs are the smallest thing that lets the two new screens link and render:

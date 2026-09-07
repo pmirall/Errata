@@ -51,7 +51,6 @@
 //    points:
 //      gain_budget[]  the hourly gain ceiling (BRIEF 1.6)
 //      act_last[]     the six per-action cooldowns + the global one
-//      mg_last_s      the minigame cooldown
 //      play_at[]      the 3 h play-payout decay window
 //    reset_pebble_state(0) / reset_gain_ledger(0) seed all four as if they had
 //    JUST been spent, and the boot's offline catch-up then refills them at
@@ -84,15 +83,15 @@
 //
 //    RESIDUAL 1, KNOWN AND ACCEPTED: play_at[] is NOT reconstructed and NOT
 //    persisted. The honest reconstruction is "assume the window was full",
-//    which would drop the play payout to PLAY_DECAY_5 (0 permille) for 3 h
-//    after any innocent power cut - a far larger punishment than the exploit it
-//    prevents. It still resets on reboot.
+//    which would drop the play payout to its FLOOR for an hour after any
+//    innocent power cut - a far larger punishment than the exploit it prevents,
+//    and one the floor now bounds rather than zeroes. It still resets on reboot.
 //    RESIDUAL 2: the cooldowns are still seeded as "just started", so the first
 //    seconds after a reboot can answer AERR_COOLDOWN. That message is TRUE - it
 //    says wait, and the wait is real - and it is bounded by each action's own
-//    constant: 20 s feed, 15 s clean, 25 s play, 30 s med, and MG_COOLDOWN_S
-//    (120 s) for a minigame, which is the widest of them (mg_seen is set on a
-//    reload, so sim_minigame_cooldown_s() reads the full 120 s at uptime 0).
+//    constant: 20 s feed, 15 s clean, 25 s play, 30 s med. The 120 s MINIGAME
+//    cooldown that used to be the widest of them is GONE (data/balance.h), so
+//    the worst a reboot now costs a player who wants to play is nothing at all.
 //    RESIDUAL 3: with no snapshot (first boot on this firmware, a wiped unit, a
 //    corrupt blob) or with no trustworthy clock at either end of the interval,
 //    sim_gain_restore() seeds 0 and the 29-minute behaviour above is exactly
@@ -149,8 +148,6 @@ struct CareCtx {
   uint8_t  play_n;
   uint32_t pet_at[PET_DECAY_STEPS];
   uint8_t  pet_n;
-  uint32_t mg_last_s;
-  uint8_t  mg_seen;
 
   // --- PER-PEBBLE: the sleep window (P3-C2b) --------------------------------
   // hold_s is when the player was last busy with this creature: bedtime waits
@@ -339,8 +336,11 @@ static_assert((int)CARE_HUNGER      == 0 &&
 
 static const uint16_t PLAY_DECAY[PLAY_DECAY_STEPS] = {
   PLAY_DECAY_0, PLAY_DECAY_1, PLAY_DECAY_2, PLAY_DECAY_3,
-  PLAY_DECAY_4, PLAY_DECAY_5
+  PLAY_DECAY_4, PLAY_DECAY_5, PLAY_DECAY_6, PLAY_DECAY_7
 };
+static_assert(NT_ARRAY_LEN(PLAY_DECAY) == (size_t)PLAY_DECAY_STEPS,
+              "a PLAY_DECAY_n was added to balance.h and not to this table - the "
+              "curve would then stop one step early and the floor would move");
 
 static const uint8_t PET_DECAY[PET_DECAY_STEPS] = { 4, 3, 2, 1, 0 };
 
@@ -495,14 +495,6 @@ uint8_t sim_gain_restore(const uint8_t* pts, uint8_t n,
     g.gain_rem[i]    = 0;
   }
   return trust;
-}
-
-uint16_t sim_minigame_cooldown_s(void)
-{
-  if (!g.mg_seen) return 0;
-  uint32_t gone = g.uptime_s - g.mg_last_s;
-  return (gone >= (uint32_t)MG_COOLDOWN_S)
-           ? 0 : (uint16_t)((uint32_t)MG_COOLDOWN_S - gone);
 }
 
 uint8_t sim_play_window_count(void)
@@ -1205,8 +1197,6 @@ static void reset_pebble_state(uint8_t fresh)
   g.play_n = 0;
   memset(g.pet_at, 0, sizeof(g.pet_at));
   g.pet_n = 0;
-  g.mg_last_s = g.uptime_s;
-  g.mg_seen = fresh ? 0u : 1u;
   g.hold_s = g.uptime_s;
   g.hold_seen = 0;              // a boot inside the night window sleeps at once
   g.nudge_t0_s = 0;
@@ -1557,8 +1547,7 @@ bool sim_apply_action(ActionId action, ActionResult& out)
         fail(out, AERR_TIRED, 0);
         return false;
       }
-      uint16_t cdmg = sim_minigame_cooldown_s();
-      if (cdmg > 0) { fail(out, AERR_COOLDOWN, cdmg); return false; }
+      // The minigame cooldown used to be checked here too; see minigame_guard().
       int32_t gain = ((int32_t)ACT_PLAY_HAPPINESS_MAX
                       * (int32_t)sim_play_decay_permille()) / 1000;
       stat_add(ST_HAPPINESS, gain);
@@ -1569,8 +1558,6 @@ bool sim_apply_action(ActionId action, ActionResult& out)
         g.cq_game_today = (uint16_t)(g.cq_game_today + CQ_D_MINIGAME);
       }
       play_window_push();
-      g.mg_last_s = g.uptime_s;
-      g.mg_seen   = 1;
       str_id = STR_RX_PLAY;
       break;
     }
@@ -1612,8 +1599,13 @@ static bool minigame_guard(ActionResult& out)
   if (g.view.stage == STAGE_EGG)  { fail(out, AERR_IS_EGG, 0); return false; }
   if (g.view.flags & PF_ASLEEP) { fail(out, AERR_ASLEEP, 0); return false; }
   if (pct_milli(ST_ENERGY) < ACT_PLAY_MIN_ENERGY_PCT) { fail(out, AERR_TIRED, 0); return false; }
-  uint16_t cd = sim_minigame_cooldown_s();
-  if (cd > 0)                { fail(out, AERR_COOLDOWN, cd); return false; }
+  // NO COOLDOWN. There was a 120 s one here and it is gone: it let the owner
+  // play exactly one twenty-second game per visit to the device and then showed
+  // a countdown. data/balance.h's decay curve is the anti-farm now, and it
+  // takes the REWARD down instead of taking the button away. What is left in
+  // this guard is the three things that are about the CREATURE and not about
+  // the clock: an egg cannot play, a sleeping Pebble must not be woken to play,
+  // and an exhausted one is what the energy floor is for.
   return true;
 }
 
@@ -1625,13 +1617,13 @@ static void minigame_commit(uint8_t won)
     g.cq_game_today = (uint16_t)(g.cq_game_today + CQ_D_MINIGAME);
   }
   play_window_push();
-  g.mg_last_s = g.uptime_s;
-  g.mg_seen   = 1;
   note_interaction((uint8_t)ACT_PLAY);
 }
 
-bool sim_apply_play_result(uint16_t win_permille, ActionResult& out)
+bool sim_apply_play_result(uint16_t win_permille, ActionResult& out,
+                           uint16_t* paid_permille)
 {
+  if (paid_permille) *paid_permille = 0u;
   if (!minigame_guard(out)) return false;
   if (win_permille > 1000u) win_permille = 1000u;
 
@@ -1639,8 +1631,18 @@ bool sim_apply_play_result(uint16_t win_permille, ActionResult& out)
   int16_t cq_before = g.view.cq;
   result_begin(out, snap);
 
+  // THE DECAY IS READ ONCE, HERE, AND HANDED BACK - which is the whole reason
+  // for the out-parameter. minigame_commit() below pushes this run into the
+  // rolling window, so a caller that asked sim_play_decay_permille() itself
+  // would get a different answer depending on whether it asked before or after
+  // this call, and the XP award would silently be one step out of step with the
+  // happiness. One reader, one moment, no order to get wrong.
+  const uint16_t decay = sim_play_decay_permille();
+  if (paid_permille)
+    *paid_permille = (uint16_t)(((uint32_t)win_permille * (uint32_t)decay) / 1000u);
+
   int32_t gain = ((int32_t)ACT_PLAY_HAPPINESS_MAX * (int32_t)win_permille) / 1000;
-  gain = (gain * (int32_t)sim_play_decay_permille()) / 1000;
+  gain = (gain * (int32_t)decay) / 1000;
 
   stat_add(ST_HAPPINESS, gain);
   stat_add(ST_ENERGY, ACT_PLAY_ENERGY);

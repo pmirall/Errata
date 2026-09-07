@@ -406,6 +406,68 @@ TEST(one_battle_reports_its_result_exactly_once) {
 // ui.cpp's ui_battle_result() branches on to decide that a diagnostic pays
 // nothing. (ui.cpp is not host-linkable; this is the half of that rule a host
 // test can hold.)
+// =============================================================================
+//  THE WILD ENTRY (BT_ENTRY_WILD)
+//
+//  The owner asked for it after the first hardware session: catching and walking
+//  away were a wild encounter's only two answers, so a creature you could not
+//  afford to keep was worth nothing at all.
+//
+//  IT MAKES EXACTLY ONE PROMISE AND THESE CASES ARE IT: the creature you fight
+//  is the creature the encounter rolled and SHOWED YOU. That is invisible in a
+//  rendered frame - one 24x24 body looks like another - so it is asserted on
+//  the setup, which is also the only place build_foe()'s dice could sneak back in.
+// =============================================================================
+TEST(a_wild_battle_fights_the_creature_the_encounter_showed_and_not_a_new_roll) {
+  seams_reset();
+  box_fixture(3);
+
+  // Three different creatures, each armed and entered, each checked. One would
+  // pass by luck: build_foe() draws from the whole roster and would agree with
+  // a fixed expectation about one time in the roster's length.
+  static const uint8_t kSp[3] = { 1u, 9u, 21u };
+  static const uint8_t kLv[3] = { 4u, 17u, 30u };
+  for (uint8_t i = 0; i < 3u; ++i) {
+    battle_arm_wild(0x5EED0000u + i, kSp[i], kLv[i]);
+    battle_enter();
+    // NO PICK LIST: you fight with what you were carrying.
+    CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_INTRO);
+    CHECK_EQ(battle_screen_picked(), 1);
+    CHECK_EQ(battle_screen_reject(), (uint8_t)BR_OK);
+    CHECK_EQ((int)battle_screen_foe_species(), (int)kSp[i]);
+    CHECK_EQ((int)battle_screen_foe_level(),   (int)kLv[i]);
+    battle_leave();
+  }
+}
+
+// AND A WIN REPORTS ITSELF AS A WILD WIN, which is what lets ui.cpp pay it out
+// of the SAME XP_SRC_BATTLE bucket as a practice win rather than a new one.
+TEST(a_wild_win_reports_the_wild_entry_exactly_once) {
+  seams_reset();
+  box_fixture(3);
+
+  // A level-1 foe against a Box the fixture filled: the player's active Pebble
+  // wins this, and the case says so rather than assuming it.
+  battle_arm_wild(0x7A1D0001u, 1u, 1u);
+  battle_enter();
+  CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_INTRO);
+  battle_input(GST_TAP_R);                      // skip the stare-down
+
+  for (int guard = 0; guard < 4000; ++guard) {
+    const uint8_t m = battle_screen_mode();
+    if (m == BTM_RESULT) break;
+    if (m == BTM_MENU || m == BTM_SWITCH) { battle_input(GST_TAP_R); continue; }
+    if (m == BTM_RESOLVE) { battle_input(GST_TAP_L); continue; }
+    break;
+  }
+  CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_RESULT);
+  CHECK_EQ((int)battle_screen_outcome(), (int)BO_WIN_A);
+  battle_leave();
+  CHECK_EQ(g_results, 1);
+  CHECK_EQ((int)g_res_entry, (int)BT_ENTRY_WILD);
+  CHECK_EQ((int)g_res_won, 1);
+}
+
 TEST(the_diag_entry_reports_itself_as_a_diagnostic) {
   seams_reset();
   box_fixture(0);                       // a device that has never filled its Box
