@@ -46,6 +46,7 @@
 #include "../networking/net.h"
 #include "../ui/ui.h"
 #include "../ui/screen_error.h"   // the ERROR screen's retry / LED bindings
+#include "../ui/screen_setup.h"  // setup_intro_arm(): the first-boot cinematic
 #include "../networking/webui.h"
 #include "../dev/godmode.h"
 #include "onboarding.h"
@@ -997,6 +998,13 @@ void app_setup(void)
       gs_save_box();
       (void)gs_save_active(true);
     }
+    // THE INTRO PLAYS ON A TRUE FIRST RUN AND NOWHERE ELSE (ui/screen_setup.h).
+    // A flow RESUMED after a power cut has a stored step and is not a first
+    // run, so it goes straight to the question: the cinematic is a first
+    // impression rather than a gate, and making somebody watch sixteen seconds
+    // of it again because their battery died is the opposite of what it is for.
+    if (boot == BOOT_FIRST_RUN && setup_step == (uint8_t)OB_STARTER)
+      setup_intro_arm();
     ui_goto(ob_screen_for(setup_step));
   }
 

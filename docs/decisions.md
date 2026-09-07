@@ -3354,13 +3354,73 @@ exactly the reset bench §C1 asks about.
 cents, before running the scan test. The firmware already helps: the scanner is
 passive, so it listens rather than sending probe requests.
 
+## D-INTRO — the first sixteen seconds, and where they live (recorded 2026-09-07)
+
+**The ask.** A first boot that opens on a cinematic: lines of code being written,
+a bug that sneaks in, and that bug is the player's first companion, chosen from
+three. Cinematic plus onboarding under two minutes. It has to look worked on,
+because it is the first impression.
+
+**The decision: it is a PHASE of `SCR_SETUP_STARTER`, not a `ScreenId`.** Three
+reasons, in the order they decided it.
+
+1. **The brief.** "The animation's last frame is that screen's first" is a claim
+   about pixels, and a separate screen can only approximate it — two enter hooks,
+   two renders and a cut between them, kept in step by hand. Inside the screen it
+   is structural: the intro and the picker both ask `pick_geometry()` where the
+   three bodies stand, so they cannot disagree, and
+   `the_last_frame_of_the_intro_is_the_first_frame_of_the_picker` asserts it
+   pixel by pixel.
+2. **The persisted step has no room.** `ObStep` lives in two bits of
+   `Config.flags` and all four values are spoken for, with `OB_DONE` pinned at 0
+   so that every save written by an older firmware decodes as "already set up". A
+   fifth step would cost a save migration.
+3. **And it must not be resumable anyway.** `app/app.cpp` arms it only on
+   `boot == BOOT_FIRST_RUN`, so a flow resumed after a power cut goes straight to
+   the question. Making somebody watch sixteen seconds again because their
+   battery died is the opposite of what a first impression is for — and a
+   persisted step is exactly a thing that resumes.
+
+**What was NOT done, and why.** The one bug the player keeps was going to be
+picked at random from the three that crawl out. The owner chose the other shape:
+all three arrive and the player picks. That is also the shape that costs nothing
+— the picker already existed and already had three.
+
+**No sound was invented for it.** Every cue it plays is reused: the typewriter
+tick is the same `SFX_TICK` the menu cursor now clicks with, and the three
+arrivals are `SFX_CHIRP`, which is this firmware's "something arrived"
+everywhere else. Two effects WERE added in the same batch (`SFX_TICK`,
+`SFX_FANFARE`) and each was required to earn its flash in three places before it
+was written.
+
+**Open, and it needs a board.** Whether 4x6 pseudo-C is legible on a 0.96" panel.
+`tests/fakes/gfx_fb.cpp` draws no real glyphs — the typed listing is a stack of
+bars in every golden of it — so the host can prove the geometry, the timing, the
+containment and the handoff, and cannot prove the one thing a reader would ask
+first. `docs/bench.md` **F0** is written for it.
+
+## D-ORDER — pick, then name, then time (recorded 2026-09-07)
+
+**Why it changed.** Naming the device before the player has met the creature
+meant typing a name for nothing in particular, and then, two screens later,
+being shown three bugs one of which was suddenly called that.
+
+**Why it is interesting.** `ob_next()` was `step + 1`, which welded the ASKING
+order to the PERSISTED values — and those values are on flash in every device
+that has already run this firmware. Reordering by renumbering would have cost a
+save migration for what is a presentation decision. The order is a table in
+`app/onboarding.cpp` now, the values did not move, and a `static_assert` holds
+that the table asks every real step exactly once and never asks `OB_DONE`.
+
+The clock stays last because it is the one question with no character in it.
+
 ## What is measured, and what is not
 
-**Measured on the host, by the gate, at this commit:** 58 test binaries
-(6,210,627 assertions), an AddressSanitizer subset of 8 over every path that
-reads bytes the device did not write, 51 browser assertions over the phone page,
-159 named gates, six firmware variants at zero project warnings, and the release
-image against its caps — **1,350,840 / 1,600,000 flash and 59,452 / 65,000
+**Measured on the host, by the gate, at this commit:** 59 test binaries, an
+AddressSanitizer subset of 8 over every path that reads bytes the device did not
+write, 51 browser assertions over the phone page, the named gates of
+`tools/check.sh`, six firmware variants at zero project warnings, and the release
+image against its caps — **1,354,812 / 1,600,000 flash and 59,468 / 65,000
 globals**.
 
 **Not measured, at all:** everything that needs a board. **Seventeen §67

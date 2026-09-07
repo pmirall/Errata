@@ -40,7 +40,7 @@ static const uint8_t G_A[3] = {  9, 14,  6 };   // SIGNAL
 static const uint8_t G_B[3] = { 22, 27, 36 };   // CORRUPT, CORRUPT, SYSTEM
 
 static const char* const EV_NAME[RLE_COUNT] = {
-  "NONE", "ROUND_BEGIN", "ACTION", "ORDER", "SWITCH", "SKIPPED", "MISS", "HIT",
+  "NONE", "ROUND_BEGIN", "ACTION", "ORDER", "SWITCH", "SKIPPED", "MISS", "HIT", "TYPE_EDGE",
   "HP", "STAGE", "PROTECT", "DOT", "CORRUPT", "STUN", "CLEANSE", "FAINT",
   "ROUND_END", "BATTLE_END"
 };

@@ -29,6 +29,111 @@ carries the developer console and ships to nobody. A number quoted without its
 variant is not a number — `docs/budget.md` §8 records a phase exit that compared
 one with the other.
 
+## [Unreleased] — first impressions, 2026-09-07
+
+*(Two `[Unreleased]` sections stand here on purpose: neither has been tagged, and
+they are two different pieces of work on the same day. This one is what the
+owner asked for after playing the build; the one below it is the pre-hardware
+review. Inventing a version number for either to keep the headings unique would
+be claiming a tag that was never cut.)*
+
+**The owner played the build.** Everything in this section comes from that:
+seven observations about how the game FEELS, a list of the moments that deserved
+a picture and did not have one, and a first boot that now opens on a cinematic
+instead of on a text field.
+
+### Added — the first-boot intro
+- **Sixteen seconds of cinematic** (`ui/screen_setup.cpp`), as a PHASE of
+  `SCR_SETUP_STARTER` rather than a screen of its own. Pseudo-C types itself
+  onto the panel one character at a time, a compile bar fills, the build dies at
+  92 %, the content band tears into scanlines and **three bugs climb out of the
+  failure** — and stop exactly where the picker draws them, because both ask the
+  same `pick_geometry()`. That is the point of putting it inside the screen: the
+  brief was "the animation's last frame is that screen's first", and a separate
+  ScreenId can only approximate it. `tests/test_screens.cpp`'s
+  `the_last_frame_of_the_intro_is_the_first_frame_of_the_picker` asserts every
+  pixel of it.
+- **It plays on a true first run and nowhere else.** `app/app.cpp` arms it only
+  when `boot == BOOT_FIRST_RUN`, so a flow resumed after a power cut goes
+  straight to the question. That is also why it is NOT an `ObStep`: the four
+  two-bit values are all spoken for, and buying a fifth would cost a save
+  migration for a beat that must not be resumable in the first place.
+- **Any press skips it, and only skips it.** A press that also chose a starter
+  would make the impatient player's very first act on the device an accident —
+  and a permanent one. Driven for all five gestures.
+- Five cues, all reused effects: a typewriter tick every two characters, one
+  beep when the build starts, `SFX_GLITCH` when it dies, and one `SFX_CHIRP` per
+  bug. They are armed from the update hook and not the render, because a cue
+  armed in a render fires again on every redraw.
+
+### Added — the moments that had no picture
+- **The wild reveal** (`ui/screen_encounter.cpp`). An item drop had a film and a
+  successful capture had a film; FINDING THE CREATURE — the event the whole
+  exploration loop exists to produce — opened straight onto two menu options.
+  About a second: the band tears, the body assembles out of the tear feet-first,
+  and the band snaps to inverse on the last beat, which is what covers the cut
+  to a menu that shares no pixel with it. **It plays once per encounter, not
+  once per entry**: `encounter_enter()` runs again on every walk back out of
+  `SCR_CAPTURE`.
+- **A verdict cue** (`ui/screen_battle.cpp`). A win plays `SFX_FANFARE` on the
+  `RLE_BATTLE_END` beat. A loss adds nothing on purpose: the beat before it is
+  the player's last Pebble going down, which already played `SFX_FALL`.
+- **The cursor clicks** — menu, care, settings, box, encounter. One rule: a
+  cursor that moves clicks, a cursor that cannot move does not. The BOX card is
+  silent because it has one row; the battle ring is silent because it is stepped
+  while a transcript is playing cues.
+- **Two effects** in `hardware/audio.cpp`, each earning its flash in more than
+  one place. `SFX_TICK` is a 12 ms click, above `SFX_BEEP` and a fifth of its
+  length, because a keystroke repeated forty times must not sound like forty
+  confirmations. `SFX_FANFARE` is four rising notes and a HELD fifth — the hold
+  is the whole difference from `SFX_RISE`, which is a flat slide: a slide says
+  "going up", a resolution says "arrived". The step table now `static_assert`s
+  that the effects tile it exactly once each.
+- `ae_noise()` in `ui/anim_ease.cpp` — the deterministic scramble both tears are
+  drawn from. Not an RNG and never asked to be one: a film that drew from a real
+  generator would record a different golden every time.
+
+### Changed — the onboarding order
+- **PICK, THEN NAME, THEN TIME.** Naming the device before the player has met
+  the creature meant typing a name for nothing in particular, and then being
+  shown three bugs one of which was suddenly called that.
+- **And it cost no save migration**, which is the interesting half. `ob_next()`
+  was `step + 1`, which welded the ASKING order to the PERSISTED values — two
+  bits of `Config.flags`, all four spoken for, `OB_DONE` pinned at 0 so every
+  older save decodes as "already set up". The order is a table now, the values
+  did not move, and a `static_assert` holds that the table asks every real step
+  exactly once and never asks `OB_DONE`.
+
+### Changed — the seven things the owner played and found
+Four were fixed at `77b2094`; three were deliberate and are documented rather
+than changed. The four: **CORTAFUEGOS** draws over all five lanes uniformly and
+its score subtracts the idle expectation (`FW_LUCK_FLOOR`, which is DERIVED —
+ten packets over five lanes is exactly 2), so standing still scores zero by
+arithmetic instead of by construction; **PAQUETES** widened its gap floor;
+**battle** gained an `RLE_TYPE_EDGE` line so the once-per-battle type advantage
+says out loud when it is spent; **the auto-return countdown** went from 5 s to
+10 s and blinks full-width over the last 3.
+
+### Fixed
+- `tools/check.sh`'s exact `enc_film_phase()` call-site count went 3 → 5 with
+  its prose updated to say why, rather than being loosened to an inequality.
+- `README.md` §4's size table, `docs/PROJECT_CONTEXT.md`'s and `docs/budget.md`
+  §16's were all quoting **1,350,840**, a number two commits stale by the time
+  the final review closed. They are re-measured here.
+
+### Sizes
+`release` **1,354,812** flash / **59,468** globals against caps 1,600,000 /
+65,000 — 245,188 B and 5,532 B free. `baseline` 1,371,966 / 59,564. MATRIX OK on
+all six variants at 0 project warnings. The whole section above costs **+3,294 B
+of flash and +16 B of globals** over the final review's 1,351,518 / 59,452.
+
+### Not verified
+Nothing in this section has been on a board. The intro in particular is the one
+piece of this firmware a host golden cannot judge: `tests/fakes/gfx_fb.cpp`
+draws no real glyphs, so the typed listing is a stack of bars in every golden of
+it, and whether 4x6 pseudo-C is legible on a 0.96" panel is a question only the
+panel answers. `docs/bench.md` **F0** is written for exactly that.
+
 ## [Unreleased] — the final review, 2026-09-07
 
 **The commit before the soldering iron.** Not a phase: a review of the whole

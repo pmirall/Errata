@@ -74,7 +74,7 @@ uint8_t capture_screen_outcome(void);   // CaptureOutcome of the last attempt
 uint8_t capture_screen_item(void);      // the capture item the throw will spend
 
 // =============================================================================
-//  THE TWO FILMS (P10-C3)
+//  THE FILMS (P10-C3, and the wild reveal after it)
 //
 //  Spec section 22's item pickup and section 23's successful capture had no
 //  picture at all: the drop landed in the bag the instant the screen opened and
@@ -101,10 +101,26 @@ uint8_t capture_screen_item(void);      // the capture item the throw will spend
 //  that: it arms a film, calls no input at all, advances the clock past the
 //  duration and requires the frame to be identical to the un-armed one.
 //
-//  Both films are OVERLAYS: the screen draws its ordinary text first and the
+//  The ITEM film is an OVERLAY: the screen draws its ordinary text first and the
 //  film goes on top through the TRANSPARENT blit (gfx_xbm_t), so an icon
 //  crossing its own label does not punch a 12x12 hole in it. That is the seam
-//  divergence P10-C3 found and fixed before writing a line of either film.
+//  divergence P10-C3 found and fixed before writing a line of either film. The
+//  CAPTURE and WILD films REPLACE the content band instead, so only containment
+//  applies to them - see tests/test_screens.cpp, which drives both rules.
+//
+//  THE WILD REVEAL, AND WHY IT IS THE ONE THAT WAS MISSING. ENC_OUT_ITEM got a
+//  film at P10-C3 and a successful capture got one; FINDING THE CREATURE - the
+//  event the entire exploration loop exists to produce - opened straight onto
+//  two menu options. The owner played the build and named exactly that. So the
+//  wild encounter now spends about a second on the thing it is announcing: the
+//  content band tears into scanlines, the body assembles out of the tear from
+//  the feet up, and the band snaps to inverse on the last beat, which is what
+//  covers the cut to the two options.
+//
+//  IT PLAYS ONCE PER ENCOUNTER, NOT ONCE PER ENTRY. encounter_enter() runs
+//  again every time the player backs out of SCR_CAPTURE, and a screen that
+//  replayed its establishing shot after every failed throw would be charging a
+//  second of the player's time for a fact they already have.
 // =============================================================================
 
 // Which film, if any, is running. Ordered so a test can walk them.
@@ -115,6 +131,12 @@ enum EncFilmPhase : uint8_t {
   ENC_FILM_CAP_CLAMP,     // four brackets close on the wild body
   ENC_FILM_CAP_PULL,      // the body dissolves upward between them
   ENC_FILM_CAP_SEAL,      // the brackets collapse onto a sealed marker
+  // THE WILD REVEAL, added after the owner played the build and said the one
+  // moment the whole loop is named after had no picture at all. Appended
+  // rather than grouped with the other two so no existing phase changes value.
+  ENC_FILM_WILD_TEAR,     // the band tears into scanlines: corrupted memory
+  ENC_FILM_WILD_FORM,     // the bug assembles out of the tear, feet first
+  ENC_FILM_WILD_STARE,    // it is whole, it holds, and the band snaps white
   ENC_FILM_PHASE_COUNT
 };
 

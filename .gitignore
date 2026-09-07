@@ -20,3 +20,5 @@ tools/content/__pycache__/
 __pycache__/
 # the real-font screen capture (regenerate with: make -C tests capture)
 tests/capture/
+# PlatformIO
+.pio/

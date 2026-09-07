@@ -11,6 +11,7 @@ r=001 ACTION      s=1 i=0 a=1 b=0
 r=001 ORDER       s=0 i=0 a=0 b=13
 r=001 HIT         s=0 i=0 a=3 b=0
 r=001 STAGE       s=0 i=0 a=0 b=129
+r=001 TYPE_EDGE   s=1 i=0 a=2 b=0
 r=001 HIT         s=1 i=0 a=0 b=4
 r=001 HP          s=0 i=0 a=0 b=34
 r=001 CORRUPT     s=0 i=0 a=0 b=3
@@ -20,6 +21,7 @@ r=002 ROUND_BEGIN h=61CBD622
 r=002 ACTION      s=0 i=0 a=1 b=2
 r=002 ACTION      s=1 i=0 a=1 b=3
 r=002 ORDER       s=0 i=0 a=0 b=13
+r=002 TYPE_EDGE   s=0 i=0 a=1 b=0
 r=002 HIT         s=0 i=0 a=2 b=11
 r=002 HP          s=1 i=0 a=0 b=23
 r=002 HIT         s=1 i=0 a=3 b=0
@@ -52,6 +54,7 @@ r=005 ACTION      s=0 i=0 a=2 b=1
 r=005 ACTION      s=1 i=1 a=1 b=0
 r=005 ORDER       s=0 i=0 a=0 b=13
 r=005 SWITCH      s=0 i=1 a=0 b=38
+r=005 TYPE_EDGE   s=1 i=1 a=2 b=0
 r=005 HIT         s=1 i=1 a=0 b=5
 r=005 HP          s=0 i=1 a=0 b=33
 r=005 ROUND_END   h=79370FC7
@@ -80,6 +83,7 @@ r=008 ACTION      s=1 i=1 a=1 b=1
 r=008 ORDER       s=1 i=1 a=1 b=12
 r=008 HIT         s=1 i=1 a=1 b=16
 r=008 HP          s=0 i=1 a=0 b=1
+r=008 TYPE_EDGE   s=0 i=1 a=1 b=0
 r=008 HIT         s=0 i=1 a=0 b=17
 r=008 HP          s=1 i=1 a=0 b=2
 r=008 HP          s=0 i=1 a=0 b=0
@@ -117,6 +121,7 @@ r=012 ORDER       s=0 i=0 a=0 b=13
 r=012 HIT         s=0 i=0 a=0 b=11
 r=012 HP          s=1 i=2 a=0 b=31
 r=012 HP          s=0 i=0 a=0 b=20
+r=012 TYPE_EDGE   s=1 i=2 a=1 b=0
 r=012 HIT         s=1 i=2 a=1 b=18
 r=012 HP          s=0 i=0 a=0 b=2
 r=012 STUN        s=1 i=2 a=0 b=1
@@ -178,6 +183,7 @@ r=019 ROUND_BEGIN h=B45AD298
 r=019 ACTION      s=0 i=2 a=1 b=1
 r=019 ACTION      s=1 i=2 a=1 b=2
 r=019 ORDER       s=0 i=2 a=0 b=13
+r=019 TYPE_EDGE   s=0 i=2 a=2 b=0
 r=019 HIT         s=0 i=2 a=1 b=6
 r=019 HP          s=1 i=2 a=0 b=11
 r=019 HIT         s=1 i=2 a=2 b=15

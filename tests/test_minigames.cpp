@@ -606,18 +606,23 @@ TEST(packet_flood_resolves_every_packet_exactly_once_routed_lost_or_wrong) {
 
 TEST(packet_flood_can_only_be_shortened_by_playing_never_lengthened) {
   // The schedule is a function of the packet index, so no press can EXTEND the
-  // run past the idle length - 467 steps, 11,675 ms, the hard ceiling asserted
+  // run past the idle length - 524 steps, 13,100 ms, the hard ceiling asserted
   // below. A press CAN end it early: pf_press() calls pf_resolve(), which
   // advances c.round, and pf_done() is `c.round >= PF_PACKETS`, so a run that
-  // is actually sorted finishes at 9,875 ms. The bound is the property; the
-  // length is not a constant. (P3-C5 follow-up: this case was named
+  // is actually sorted finishes sooner. The bound is the property; the length
+  // is not a constant. (P3-C5 follow-up: this case was named
   // ..._ends_at_the_same_instant_however_it_is_played, which its own
   // `sort_steps <= idle_steps` line contradicts.)
+  //
+  // 467 UNTIL PF_GAP_MIN_MS WENT FROM 500 TO 650, which is the whole of the
+  // packet-readability change: the run is 1,425 ms longer because every packet
+  // late in it gets 30 % more time to be read. The number is restated here and
+  // not derived from the module, so a schedule that drifts fails this line.
   uint32_t idle_steps = 0, sort_steps = 0;
   for (uint32_t seed = 1; seed <= 8u; ++seed) {
     (void)run_tape(MG_PACKET_FLOOD, seed, tape_idle,    &idle_steps);
     (void)run_tape(MG_PACKET_FLOOD, seed, tape_pf_sort, &sort_steps);
-    CHECK_EQ(idle_steps, 467u);              // 11,675 ms, the hard end
+    CHECK_EQ(idle_steps, 524u);              // 13,100 ms, the hard end
     CHECK(sort_steps <= idle_steps);         // playing can only shorten it
     CHECK((idle_steps * MG_STEP_MS) < MG_MAX_MS);
   }
@@ -645,22 +650,52 @@ TEST(packet_flood_makes_a_one_button_mash_worth_almost_nothing) {
 //  FIREWALL (29.3). The one rule that makes it itself: THE HIT IS DISCRETE, and
 //  the score is a count of events. The mirror of buffer, below.
 // =============================================================================
+// THE NUMBERS ARE RESTATED HERE AND NOT IMPORTED. 10 packets over 5 lanes puts
+// the luck floor at 2, leaving 8 paid blocks at 125 each. A test that pulled
+// FW_LUCK_FLOOR out of the module would agree with the module by construction.
 static bool inv_fw_score_is_a_count(const MgCtx& c)
 {
-  return c.score == (uint16_t)(fw_blocked(c) * (MG_SCORE_MAX / 8u));
+  const uint8_t b    = fw_blocked(c);
+  const uint8_t paid = (b > 2u) ? (uint8_t)(b - 2u) : 0u;
+  return c.score == (uint16_t)(paid * (MG_SCORE_MAX / 8u));
 }
 
-TEST(firewall_perfect_play_is_exactly_the_maximum_and_idle_play_exactly_zero) {
+TEST(firewall_perfect_play_is_exactly_the_maximum_and_idle_play_pays_nothing) {
+  // IDLE IS NOW ZERO IN EXPECTATION, NOT PER SEED, AND THAT IS THE POINT OF THE
+  // CHANGE. The draw used to exclude the shield's own lane, which made a
+  // motionless run score exactly nothing by making the packet dodge the player.
+  // The draw is uniform now and the luck is subtracted at the score instead, so
+  // an idle run blocks Binomial(10, 1/5) and is paid for whatever exceeds the
+  // floor of 2. A lucky idle run CAN score; the mean is what must be nothing.
+  uint32_t idle_sum = 0, idle_max = 0, idle_zero = 0, idle_wins = 0;
+  const uint32_t kSeeds = 400u;
+  for (uint32_t seed = 1; seed <= kSeeds; ++seed) {
+    const uint16_t v = run_tape(MG_FIREWALL, seed, tape_idle);
+    idle_sum += v;
+    if (v > idle_max) idle_max = v;
+    if (v == 0u) idle_zero++;
+    if (v >= 500u) idle_wins++;
+  }
+  printf("     firewall idle over %u seeds: mean %u, max %u, exactly zero %u, "
+         "runs at or over 500: %u\n",
+         (unsigned)kSeeds, (unsigned)(idle_sum / kSeeds), (unsigned)idle_max,
+         (unsigned)idle_zero, (unsigned)idle_wins);
   for (uint32_t seed = 1; seed <= 16u; ++seed) {
     CHECK_EQ(run_tape(MG_FIREWALL, seed, tape_fw_perfect), MG_SCORE_MAX);
-    // EQUALITY, not an inequality: a packet's lane is drawn from the four lanes
-    // the shield is NOT in, so a motionless shield blocks nothing structurally
-    // rather than merely unluckily.
-    CHECK_EQ(run_tape(MG_FIREWALL, seed, tape_idle), 0u);
     // Competent play - late, and one packet sat out - still clears the 500 that
     // increments minigames_won.
     CHECK(run_tape(MG_FIREWALL, seed, tape_fw_competent) >= 500u);
   }
+  // The floor is the expectation, so the mean must sit near zero rather than
+  // near the 250 an unsubtracted uniform draw would pay.
+  CHECK((idle_sum / kSeeds) < 150u);
+  // A LUCKY IDLE RUN CAN REACH THE WIN LINE, AND THAT IS THE PRICE OF THE HONEST
+  // DRAW - stated as a rate rather than forbidden, because forbidding it is what
+  // the rigged draw did. Measured: 1 run in 400 blocks 6 of 10 and is paid
+  // 4 x 125 = 500. The bound is one percent.
+  CHECK((idle_wins * 100u) <= kSeeds);
+  // Most idle runs are still exactly nothing: measured 297 of 400.
+  CHECK((idle_zero * 2u) > kSeeds);
 }
 
 TEST(firewall_scores_a_count_of_events_and_nothing_else) {
@@ -701,12 +736,27 @@ TEST(firewall_samples_one_instant_so_passing_through_the_lane_is_worth_nothing) 
 
 TEST(firewall_makes_mashing_worth_less_than_playing) {
   // Sweeping through a lane is worth nothing: the impact is one sampled step,
-  // not an overlap window. A one-sided mash walks into a wall and blocks the one
-  // packet drawn into the lane it is stuck in.
-  for (uint32_t seed = 1; seed <= 16u; ++seed) {
-    CHECK(run_tape(MG_FIREWALL, seed, tape_mash_alt) < 500u);
-    CHECK(run_tape(MG_FIREWALL, seed, tape_mash_rl)  < 500u);
-    CHECK(run_tape(MG_FIREWALL, seed, tape_mash_l)   < 500u);
+  // not an overlap window. A one-sided mash walks into a wall and blocks only
+  // what the uniform draw puts in the lane it is stuck in.
+  //
+  // MEASURED OVER SEEDS, NOT ASSERTED PER SEED, for the reason the idle case
+  // gives: the draw is honest now, so a lucky mash exists. What must hold is
+  // that mashing is not a strategy - the mean stays under the win line and no
+  // single run approaches real play.
+  static TapeFn kMash[] = { tape_mash_alt, tape_mash_rl, tape_mash_l };
+  static const char* const kName[] = { "alt", "rl ", "l  " };
+  const uint32_t kSeeds = 400u;
+  for (uint8_t t = 0; t < 3u; ++t) {
+    uint32_t sum = 0, hi = 0, wins = 0;
+    for (uint32_t seed = 1; seed <= kSeeds; ++seed) {
+      const uint16_t v = run_tape(MG_FIREWALL, seed, kMash[t]);
+      sum += v; if (v > hi) hi = v; if (v >= 500u) wins++;
+    }
+    printf("     firewall mash %s: mean %u, max %u, runs at or over 500: %u/%u\n",
+           kName[t], (unsigned)(sum / kSeeds), (unsigned)hi,
+           (unsigned)wins, (unsigned)kSeeds);
+    CHECK((sum / kSeeds) < 250u);          // nowhere near real play's 1000
+    CHECK((wins * 20u) < kSeeds);          // under 5% of mashed runs count as won
   }
 }
 

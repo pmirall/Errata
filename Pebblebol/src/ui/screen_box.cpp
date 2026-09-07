@@ -2,6 +2,7 @@
 //  PEBBLEBOL - ui/screen_box.cpp
 //  See screen_box.h. PURE translation unit.
 // =============================================================================
+#include "../hardware/audio.h"
 #include "screen_box.h"
 
 #include <stdio.h>
@@ -289,7 +290,12 @@ void box_input(Gesture g) {
   switch (g) {
     case GST_TAP_L:
     case GST_HOLD_L:
-      if (s_mode != BOXM_CARD) s_cur = ring_next(s_cur, mode_rows());
+      // INSIDE THE GUARD, not beside it: BOXM_CARD has one row and does not
+      // step, so it must not click. The rule is written once in screen_menu.cpp.
+      if (s_mode != BOXM_CARD) {
+        s_cur = ring_next(s_cur, mode_rows());
+        audio_play(SFX_TICK);
+      }
       break;
     case GST_HOLD_R:
       switch (s_mode) {

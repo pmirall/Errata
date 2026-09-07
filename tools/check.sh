@@ -1595,7 +1595,9 @@ if [ -f "$SKETCH/src/ui/anim_ease.cpp" ]; then
   #    ui/actfx.h:88-93's contract, and this is the first time it is checkable:
   #    enc_film_phase() must be reached from the render hooks, and the screen
   #    must still cancel on input and on leave. A film whose only bound was a
-  #    cancel is a screen nailed to an animation until power-cycle.
+  #    cancel is a screen nailed to an animation until power-cycle. There are
+  #    THREE films since the wild reveal was added; the exact count lives in
+  #    section 5 below and this one is only the floor.
   enc_txt=$( strip_comments7 < "$SKETCH/src/ui/screen_encounter.cpp" )
   n=$( printf '%s\n' "$enc_txt" | { grep -cE '\benc_film_phase[[:space:]]*\(' || true; } )
   [ "${n:-0}" -ge 3 ] || fail "ui/screen_encounter.cpp reaches enc_film_phase() only $n time(s) - both render hooks and the phase query need it, or a film draws with nothing deciding whether it is over (ui/screen_encounter.h)"
@@ -2059,7 +2061,7 @@ n=$( strip_comments12 < "$enc" \
 n=$( strip_comments12 < "$enc" \
      | { grep -E '\benc_film_phase[[:space:]]*\([[:space:]]*\)' || true; } \
      | { grep -vcE '^uint8_t[[:space:]]+enc_film_phase[[:space:]]*\(' || true; } )
-[ "${n:-0}" -eq 3 ] || fail "ui/screen_encounter.cpp has $n enc_film_phase() USES, not 3 (the definition is excluded now) - the two render call sites and the guard are what draw the films at all"
+[ "${n:-0}" -eq 5 ] || fail "ui/screen_encounter.cpp has $n enc_film_phase() USES, not 5 (the definition is excluded now) - three render guards (item, capture, wild) and the two films that branch on the phase they are in are what draw the films at all"
 
 # -----------------------------------------------------------------------------
 # 6. THE PASS STAMP IS ABOVE THE YIELD **AND THERE IS EXACTLY ONE OF IT**.

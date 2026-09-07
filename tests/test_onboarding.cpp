@@ -71,12 +71,29 @@ TEST(the_step_survives_every_other_flag_in_the_byte) {
   CHECK_EQ((int)ob_step(c), (int)OB_DONE);
 }
 
-TEST(the_flow_is_name_then_time_then_starter_and_then_it_is_over) {
+// THE ORDER IS STARTER, NAME, TIME - AND IT IS NOT THE ENUM'S ORDER. That is
+// the point of the case: the persisted values are 1, 2, 3 for NAME, TIME,
+// STARTER and they are on flash in devices that already exist, so the asking
+// order lives in a table and ob_next() is no longer `step + 1`. Restoring the
+// increment would put NAME first again and fail here by name.
+TEST(the_flow_is_starter_then_name_then_time_and_then_it_is_over) {
+  CHECK_EQ((int)ob_next(OB_STARTER), (int)OB_NAME);
   CHECK_EQ((int)ob_next(OB_NAME),    (int)OB_TIME);
-  CHECK_EQ((int)ob_next(OB_TIME),    (int)OB_STARTER);
-  CHECK_EQ((int)ob_next(OB_STARTER), (int)OB_DONE);
+  CHECK_EQ((int)ob_next(OB_TIME),    (int)OB_DONE);
   // "What follows finished" must not be "start again".
   CHECK_EQ((int)ob_next(OB_DONE),    (int)OB_DONE);
+
+  // AND THE WHOLE WALK TERMINATES AND VISITS EVERY QUESTION EXACTLY ONCE. A
+  // table with a loop in it, or one that drops a step, is the failure the
+  // increment could not have - and three CHECK_EQs above would not catch a
+  // fourth step added to a five-value enum.
+  uint8_t seen = 0, n = 0, step = ob_next(OB_DONE);
+  for (step = (uint8_t)OB_STARTER; step != (uint8_t)OB_DONE; step = ob_next(step)) {
+    CHECK_EQ((int)(seen & (uint8_t)(1u << step)), 0);   // no step twice
+    seen = (uint8_t)(seen | (uint8_t)(1u << step));
+    CHECK(++n <= (uint8_t)OB_STEP_COUNT);               // and it terminates
+  }
+  CHECK_EQ((int)n, (int)OB_STEP_COUNT - 1);             // every real step asked
 
   CHECK(ob_screen_for(OB_NAME)    == SCR_SETUP_NAME);
   CHECK(ob_screen_for(OB_TIME)    == SCR_TIME);     // the P2-C6 screen, reused
@@ -92,8 +109,9 @@ TEST(a_fresh_device_is_asked_and_a_device_with_a_save_is_not) {
   Config c;
   gs_cfg_defaults(c);
 
-  // FIRST RUN: asked, whatever the (default) field says.
-  CHECK_EQ((int)ob_boot_step(true, false, c), (int)OB_NAME);
+  // FIRST RUN: asked, whatever the (default) field says - and asked the FIRST
+  // question of onboarding.cpp's order, which is the starter and not the name.
+  CHECK_EQ((int)ob_boot_step(true, false, c), (int)OB_STARTER);
 
   // NOT a first run and nothing recorded: never asked. This is the case that
   // protects a device somebody has been playing for months.
@@ -128,9 +146,10 @@ TEST(a_stored_step_outranks_the_boot_kind_and_that_is_the_whole_ordering) {
   // first_run TRUE and a stored step: resume where the player was, do not
   // restart the flow on top of answers that are already on the device.
   CHECK_EQ((int)ob_boot_step(true, false, c), (int)OB_STARTER);
-  // ...and with nothing stored, a first run still starts at the beginning.
+  // ...and with nothing stored, a first run still starts at the beginning -
+  // which is the FIRST step of the order and not the lowest-numbered one.
   ob_set_step(c, OB_DONE);
-  CHECK_EQ((int)ob_boot_step(true, false, c), (int)OB_NAME);
+  CHECK_EQ((int)ob_boot_step(true, false, c), (int)OB_STARTER);
   // read-only still beats both, whatever is stored.
   ob_set_step(c, OB_STARTER);
   CHECK_EQ((int)ob_boot_step(true, true, c), (int)OB_DONE);
@@ -147,7 +166,7 @@ TEST(a_power_cut_halfway_through_setup_resumes_at_the_step_it_reached) {
     Config c;
     LoadResult r = gs_load(c);
     CHECK_EQ((int)r, (int)LOAD_FRESH);
-    CHECK_EQ((int)ob_boot_step(true, false, c), (int)OB_NAME);
+    CHECK_EQ((int)ob_boot_step(true, false, c), (int)OB_STARTER);
 
     // The player answers up to `step`, and app/app.cpp stamps the step it is
     // standing on before each question. The last write is the one a power cut
@@ -257,7 +276,7 @@ TEST(a_power_cut_before_anything_reached_flash_starts_over) {
   begin();
   Config c;
   CHECK_EQ((int)gs_load(c), (int)LOAD_FRESH);
-  CHECK_EQ((int)ob_boot_step(true, false, c), (int)OB_NAME);
+  CHECK_EQ((int)ob_boot_step(true, false, c), (int)OB_STARTER);
 
   // The player types a name; nothing is persisted; the power goes.
   const char nm[] = "PACO";
@@ -267,7 +286,7 @@ TEST(a_power_cut_before_anything_reached_flash_starts_over) {
   Config after;
   CHECK_EQ((int)gs_load(after), (int)LOAD_FRESH);
   CHECK_EQ((int)after.pet_name[0], 0);            // the name is gone with it
-  CHECK_EQ((int)ob_boot_step(true, false, after), (int)OB_NAME);
+  CHECK_EQ((int)ob_boot_step(true, false, after), (int)OB_STARTER);
 }
 
 // AND A CONFIG SAVED WITH NO BOX BESIDE IT IS THE SAME THING, which is the fact

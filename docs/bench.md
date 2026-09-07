@@ -496,10 +496,36 @@ onboarding flow: **whether a person who has never seen the device can get throug
 needs a person, a board and no explanation.
 
 **F1. A genuinely fresh board.** `esptool erase_flash`, then flash `release`. Expected, in order:
-splash → "Cargando la partida..." → **PONLE NOMBRE**. Not a toast over it: the greeting is drawn
-on the screen itself (`STR_SU_HELLO`), because the toast band is rows 45–55 and both instruction
-lines live there. **If a toast covers the bottom two lines, that is the defect P10-C4 fixed
-coming back.**
+splash → "Cargando la partida..." → **the intro** → **ELIGE PEBBLE**. Not a toast over it: the
+greeting is drawn on the screen itself (`STR_SU_HELLO`, on the naming screen, which is the SECOND
+question now), because the toast band is rows 45–55 and both instruction lines live there. **If a
+toast covers the bottom two lines, that is the defect P10-C4 fixed coming back.**
+
+**F0. THE INTRO, AND IT IS THE ONE ITEM THIS WHOLE SECTION EXISTS FOR NOW. — variant `release`.**
+It is the first sixteen seconds of the product and the only part of it a host golden cannot judge,
+because `tests/fakes/gfx_fb.cpp` draws no real glyphs — the typed listing is a stack of bars in
+every golden of it, and whether `pebble_t nuevo(void) {` is *legible at 4x6 on a 0.96" panel* is a
+question only the panel answers. Watch it end to end, once, without touching a button:
+
+  1. The listing types itself, left to right, one character at a time, with a caret after the last
+     one and a click roughly every two characters. **Every line must fit the panel width.** A line
+     that runs off the right edge is the `static_assert` on `GFX_ADV_TINY` having been defeated by
+     a font change.
+  2. The header reads `pebble.c`, then gains **COMPILANDO** and a bar. The bar must **stop short of
+     full** and stay there — a bar that reaches 100 % and then reports a failure lied about its
+     last frame.
+  3. `ERROR: 3 BUGS`, and the band tears into jumping scanlines. The tear must **jump**, not slide.
+  4. Three bugs climb out, one at a time, about a second apart, each with its own chirp.
+  5. **THE CUT.** When the intro ends, the three bodies must not move by one pixel: the only things
+     that appear are the selection frame, the species name and the hint. `tests/test_screens.cpp`
+     asserts this on the host, so a visible jump here means the panel and the fake disagree about
+     `gfx_xbm_t()` — the P10-C3 seam again.
+  6. Total elapsed, splash to ELIGE PEBBLE: **under 25 s.** Time it. The whole budget is "cinematic
+     plus three questions under two minutes" and the questions are the player's to pace.
+
+Then repeat and **press a button in the middle**: the intro must stop immediately, the picker must
+be on the FIRST creature (the press may not have spun the cursor), and nothing may have been
+chosen.
 
 **F2. Type a name with an accent in it. — variant `release`. See also B8, which is the same name
 on the air, and which was broken until the P10-C6 exit.** Walk the ring to `Ñ` and accept. Then read the name back
@@ -508,17 +534,21 @@ name that renders as one wrong glyph, or that loses the character *after* the ac
 Latin-1/UTF-8 seam (`core/utf8.h`) failing on the panel's own decoder — which is the half no host
 test can see, because the host fake is not u8g2.
 
-**F3. The date, then the starter. — variant `release`.** HOLD L on the date must go **forward** to ELIGE PEBBLE, not
-back. Pick the third creature. On HOME the Pebble must be that creature, at level 1, with the name
-from F2.
+**F3. The starter, then the name, then the date. — variant `release`.** THE ORDER CHANGED: the
+picker is FIRST now. Pick the third creature — HOLD L must go **forward** to PONLE NOMBRE, not
+back — then type the name (F2), then the date. HOLD L on the date must go **forward to HOME**. On
+HOME the Pebble must be the third creature, at level 1, with the name from F2.
 
-**F4. THE POWER CUT, and this is the item worth the trip. — variant `release`.** Repeat F1, type a name, accept it, and
-**pull the power while the date screen is up**. On the next boot the device must come back **on the
-date screen with the name already stored** — not at PONLE NOMBRE, and not on HOME. Repeat with the
-cut after the date is accepted: it must come back on ELIGE PEBBLE. Then finish the flow, power
-cycle twice more, and confirm **no setup screen is ever shown again**.
+**F4. THE POWER CUT, and this is the item worth the trip. — variant `release`.** Repeat F1, pick a
+starter, and **pull the power while the naming screen is up**. On the next boot the device must
+come back **on the naming screen with the starter already minted** — not at ELIGE PEBBLE, not on
+HOME, and **without replaying the intro**: the cinematic is armed only on `BOOT_FIRST_RUN`, and a
+resumed flow that plays it again is sixteen seconds charged to somebody whose battery died. Repeat
+with the cut after the name is accepted: it must come back on the date screen. Then finish the
+flow, power cycle twice more, and confirm **no setup screen is ever shown again**.
 
-**F5. The player who reads nothing.** From a fresh board, hold both buttons on the first screen.
+**F5. The player who reads nothing.** From a fresh board, skip the intro with one press, then hold
+both buttons on the first screen.
 The device must land on HOME with a working Pebble (species 1, the historical starter), no name,
 and the clock unset — and it must never ask again.
 

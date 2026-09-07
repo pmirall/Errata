@@ -103,3 +103,14 @@ uint8_t ae_dissolve_skip(uint8_t dir, uint8_t row, int16_t front,
   }
   return (uint8_t)((edge && ae_bayer(sx, sy) >= 8u) ? 1u : 0u);
 }
+
+// -----------------------------------------------------------------------------
+//  ae_noise. See the header. Three cheap steps - multiply-mix, xor-shift,
+//  multiply again - chosen because a single multiply leaves the low bits
+//  marching in step, which shows up as scanlines that all move the same way.
+// -----------------------------------------------------------------------------
+uint8_t ae_noise(uint8_t a, uint8_t b) {
+  uint8_t h = (uint8_t)((uint8_t)(a * 37u) + (uint8_t)(b * 97u) + 0x5Au);
+  h = (uint8_t)(h ^ (uint8_t)(h >> 3));
+  return (uint8_t)((uint8_t)(h * 5u) + 1u);
+}

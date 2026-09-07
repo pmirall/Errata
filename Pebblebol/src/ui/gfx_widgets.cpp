@@ -75,9 +75,26 @@ void gfx_header(const char* title, const char* tag) {
 // -----------------------------------------------------------------------------
 //  AUTO-RETURN COUNTDOWN (navigation invariant 3)
 // -----------------------------------------------------------------------------
+// PURE FUNCTION OF THE IDLE TIME, blink included: the phase is derived from
+// `left` and not from a counter this file keeps, so the same idle_ms always
+// draws the same thing and tests/test_screens.cpp can pin any instant of it.
 void gfx_countdown(uint32_t idle_ms) {
   if (idle_ms + UI_COUNTDOWN_MS < UI_AUTORETURN_MS) return;
   const uint32_t left = (idle_ms >= UI_AUTORETURN_MS) ? 0u : (UI_AUTORETURN_MS - idle_ms);
+
+  // THE LAST THREE SECONDS BLINK. Drawn as a FULL-WIDTH bar on the lit half of
+  // the blink rather than as the drain: a bar that is both shrinking and
+  // flashing reads as noise, and the thing the player needs at three seconds is
+  // "something is about to happen", not "how much is left".
+  if (left <= UI_COUNTDOWN_URGENT_MS) {
+    if (((left / UI_COUNTDOWN_BLINK_MS) & 1u) == 0u) return;   // dark half
+    gfx_invert_rect(0, UI_CONTENT_BOTTOM - 2, OLED_W, 3);
+    return;
+  }
+
+  // Before that, the drain - measured over the whole UI_COUNTDOWN_MS window so
+  // the bar leaves the screen at the same rate it always did, just starting
+  // twice as early.
   int16_t w = (int16_t)((left * (uint32_t)OLED_W) / UI_COUNTDOWN_MS);
   if (w > OLED_W) w = OLED_W;
   if (w > 0) gfx_invert_rect(0, UI_CONTENT_BOTTOM - 2, w, 3);

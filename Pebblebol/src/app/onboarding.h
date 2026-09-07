@@ -38,9 +38,16 @@
 
 #include "../core/nt_types.h"
 
-// The steps, in the order they are asked. The VALUES are persisted (two bits of
-// Config.flags / ConfigV2.flags), so they may not be renumbered without a save
-// migration - and OB_DONE must stay 0 for the reason in the banner.
+// The steps. The VALUES are persisted (two bits of Config.flags /
+// ConfigV2.flags), so they may not be renumbered without a save migration - and
+// OB_DONE must stay 0 for the reason in the banner.
+//
+// THESE ARE NOT THE ORDER THEY ARE ASKED IN. They were, once, because ob_next()
+// was `step + 1`; the order is now a table in onboarding.cpp and it reads
+// STARTER, NAME, TIME - you meet the creature, then you name IT, then you tell
+// it what day it is. Separating the two is what let the order change without a
+// save migration, and it is why nothing below may be renumbered to "fix" the
+// order: the numbers are on flash in devices that already exist.
 enum ObStep : uint8_t {
   OB_DONE    = 0,     // setup is over, and this is what an unset field means
   OB_NAME    = 1,     // ui/screen_setup.cpp, SCR_SETUP_NAME
@@ -68,7 +75,8 @@ void    ob_set_step(Config& c, uint8_t step);
 //                 the only thing that matters on that boot.
 //   a stored step -> that step, WHATEVER the boot kind says. This is the case a
 //                 power cut lands in and it is checked FIRST for that reason.
-//   first_run  -> OB_NAME. A device with no save at all has answered nothing.
+//   first_run  -> the FIRST step of onboarding.cpp's order, which is OB_STARTER.
+//                 A device with no save at all has answered nothing.
 //   otherwise  -> OB_DONE, which is what every save that predates this feature
 //                 and every device that finished decodes to.
 uint8_t ob_boot_step(bool first_run, bool readonly, const Config& c);

@@ -706,6 +706,7 @@ enum StrId : uint16_t {
   STR_BT_HELP,
   STR_BT_ENTER,
   STR_BT_MISS,
+  STR_BT_EDGE,
   STR_BT_FAINT,
   STR_BT_PROTECT,
   STR_BT_DOT,
@@ -830,6 +831,16 @@ enum StrId : uint16_t {
   STR_SU_DONE,
   STR_AF_CHAR,
   STR_AF_OTHER,
+
+  // --- THE FIRST-BOOT INTRO ------------------------ <= 25 chars @ 5x8 ------
+  //     The three words the cinematic says out loud. Everything else it draws
+  //     is CODE - pseudo-C typed onto the panel - and code is a literal in
+  //     ui/screen_setup.cpp rather than a string here, because it is not copy:
+  //     translating `return nueva_vida();` would be translating a variable
+  //     name. These three are copy: they are the machine talking to the player.
+  STR_IN_BUILD,
+  STR_IN_ERROR,
+  STR_IN_FOUND,
 
   // P10-C6. Using an item said "Usado" and nothing else, for every item in the
   // game: game/inventory.cpp fills a whole ItemEffect (XP, levels, how many
@@ -1466,6 +1477,7 @@ inline constexpr const char* const ES[] = {
   , /* STR_BT_HELP */             "A elige, B vuelve. Cambiar cuesta el turno."
   , /* STR_BT_ENTER */            "entra"
   , /* STR_BT_MISS */             "falla"
+  , /* STR_BT_EDGE */             "explota la debilidad"
   , /* STR_BT_FAINT */            "cae"
   , /* STR_BT_PROTECT */          "se protege"
   , /* STR_BT_DOT */              "daño"
@@ -1554,6 +1566,10 @@ inline constexpr const char* const ES[] = {
   , /* STR_SU_DONE */              "Listo. Encantado de conocerte."
   , /* STR_AF_CHAR */              "LETRA"
   , /* STR_AF_OTHER */             "OTRO"
+  // --- THE FIRST-BOOT INTRO -------------------------------------------------
+  , /* STR_IN_BUILD */             "COMPILANDO"
+  , /* STR_IN_ERROR */             "ERROR: 3 BUGS"
+  , /* STR_IN_FOUND */             "se han colado tres"
   // P10-C6, the item reactions. One per ItemEffect shape rather than one for
   // all of them; ui/screen_care.cpp's item_reaction() is a pure function of the
   // struct and tests/test_screens.cpp drives every arm.

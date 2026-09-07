@@ -423,6 +423,15 @@ enum BattleLogEvent : uint8_t {
   RLE_SKIPPED,       // side, a = BattleSkipReason
   RLE_MISS,          // side, slot, a = move slot
   RLE_HIT,           // side/slot = ATTACKER, a = move slot, b = damage dealt
+  RLE_TYPE_EDGE,     // side/slot = ATTACKER, a = 1 advantage / 2 disadvantage,
+                     //   b = type_edge_left AFTER the spend. Pushed just before
+                     //   the RLE_HIT it belongs to, so a reader sees the reason
+                     //   and then the number. IT EXISTS BECAUSE THE CAP WAS
+                     //   INVISIBLE: TYPE_MOD_MAX_HITS is 1 and nothing told the
+                     //   player which hit got it or that it was now gone, so the
+                     //   most consequential rule in the fight was one the player
+                     //   could not see. The cap is unchanged; only its reporting
+                     //   is new.
   RLE_HP,            // side, slot, b = hp_cur AFTER
   RLE_STAGE,         // side, slot, a = BattleStat, b = stage AFTER + BATTLE_STAGE_BIAS
   RLE_PROTECT,       // side, slot, b = protect_left after

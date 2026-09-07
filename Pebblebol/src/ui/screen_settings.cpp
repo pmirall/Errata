@@ -10,6 +10,7 @@
 //
 //  PURE translation unit.
 // =============================================================================
+#include "../hardware/audio.h"
 #include "screen_settings.h"
 
 #include "../core/strings_es.h"
@@ -122,7 +123,8 @@ void settings_input(Gesture g) {
     case GST_TAP_R:  ui_back(); break;      // section 7: B cancels
     case GST_HOLD_R: settings_select(); break;
     case GST_TAP_L:
-    case GST_HOLD_L: s_cur = ring_next(s_cur, SET_ROWS); break;
+    // The click, and the rule behind it, is written once in ui/screen_menu.cpp.
+    case GST_HOLD_L: s_cur = ring_next(s_cur, SET_ROWS); audio_play(SFX_TICK); break;
     case GST_BOTH:   ui_help(kHelp[s_cur]); break;
     default: break;
   }

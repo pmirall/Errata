@@ -69,6 +69,12 @@ enum SfxId : uint8_t {
   SFX_FALL,          // five descending steps - something got worse
   SFX_DOUBLE_BEEP,   // note, silence, note - confirmed
   SFX_GLITCH,        // six alternating extremes - corruption, error
+  // ADDED FOR THE FIRST-BOOT INTRO, AND BOTH EARN THEIR FLASH SOMEWHERE ELSE.
+  // A piezo is one square-wave voice with no envelope, so the only things that
+  // separate two effects are pitch, duration and silence - which is why these
+  // two are a very short click and a held resolution rather than two melodies.
+  SFX_TICK,          // one 12 ms click - a keystroke, a cursor, a countdown
+  SFX_FANFARE,       // four rising notes and a HELD fifth - you got something
   SFX_COUNT
 };
 

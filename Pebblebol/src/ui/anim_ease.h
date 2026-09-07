@@ -148,4 +148,21 @@ uint8_t ae_dissolve_skip(uint8_t dir, uint8_t row, int16_t front,
 // a 16-byte table is how two effects come to shimmer against each other.
 uint8_t ae_bayer(int16_t x, int16_t y);
 
+// -----------------------------------------------------------------------------
+//  ae_noise - a deterministic 8-bit scramble of two bytes.
+//
+//  IT IS NOT A RANDOM NUMBER GENERATOR AND IS NEVER ASKED TO BE ONE. Its whole
+//  job is to turn a step counter into a handful of numbers that do not look
+//  related to each other, IDENTICALLY on every machine and every run - which is
+//  what makes a golden of a glitch possible at all. A film that drew from a
+//  real generator would record a different picture every time, and a golden
+//  nobody can reproduce is a picture rather than a test.
+//
+//  Two films use it: the wild reveal's scanline tear (ui/screen_encounter.cpp)
+//  and the first-boot intro's compile failure (ui/screen_setup.cpp). It lives
+//  here rather than in either of them for the reason this whole file exists -
+//  two copies of one piece of arithmetic is how two effects come to disagree.
+// -----------------------------------------------------------------------------
+uint8_t ae_noise(uint8_t a, uint8_t b);
+
 #endif  // PB_UI_ANIM_EASE_H

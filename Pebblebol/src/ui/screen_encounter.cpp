@@ -16,6 +16,7 @@
 #include "../game/species.h"
 #include "../game/xp.h"
 #include "anim_ease.h"      // the film maths, lifted out of ui/actfx.cpp at P10-C3
+#include "../hardware/audio.h"
 #include "gfx.h"
 #include "pet_art.h"          // pet_species_name(): the roster's own Spanish name
 #include "screen.h"
@@ -29,7 +30,7 @@ static EncounterResult s_enc;
 static CaptureState    s_cap;
 static uint8_t         s_cat     = 0;
 static uint8_t         s_cursor  = 0;    // 0 = CAPTURAR, 1 = DEJAR
-static uint8_t         s_applied = 0;    // the ITEM / SPECIAL arm has run
+static uint8_t         s_applied = 0;    // this encounter's entry work has run
 static uint8_t         s_mode    = (uint8_t)CSM_READY;
 static uint8_t         s_out     = (uint8_t)CAP_ESCAPED;
 static uint8_t         s_item    = 0;    // the capture item a throw will spend
@@ -55,6 +56,23 @@ uint8_t capture_screen_item(void)      { return s_item; }
 #define ENC_CAP_CLAMP_MS    420u    // the brackets have closed
 #define ENC_CAP_PULL_MS     760u    // the body has gone
 #define ENC_CAP_END_MS     1080u    // the whole capture film ends
+#define ENC_WILD_TEAR_MS    300u    // the scanline tear is over
+#define ENC_WILD_FORM_MS    760u    // the body has finished assembling
+#define ENC_WILD_SNAP_MS    880u    // the band goes inverse from here
+#define ENC_WILD_END_MS     980u    // the whole wild film ends
+
+// HOW LONG ONE TORN PATTERN STANDS. Corruption reads as DISCONTINUITY: anything
+// that eases between two states looks alive, which is the opposite of what a
+// glitch is. So the bars jump every ENC_WILD_STEP_MS and do not move in
+// between - three frames at 30 fps, slow enough to be seen as a pattern and
+// fast enough that six of them fit in the tear.
+#define ENC_WILD_STEP_MS     70u
+#define ENC_WILD_BARS         6u    // scanlines at full corruption
+
+static_assert(ENC_WILD_TEAR_MS < ENC_WILD_FORM_MS &&
+              ENC_WILD_FORM_MS < ENC_WILD_SNAP_MS &&
+              ENC_WILD_SNAP_MS < ENC_WILD_END_MS,
+              "the wild film's boundaries are not in order");
 
 // GEOMETRY. Everything either film draws is inside this box, which is the
 // content band and nothing else: the header owns rows 0..UI_HDR_H-1 and the
@@ -101,7 +119,7 @@ static_assert(ENC_CLAMP_NEAR < ENC_CLAMP_FAR, "the brackets close the wrong way"
 // hook and no per-frame state, because enc_film_phase() is a pure function of
 // (ui_now_ms() - s_film_t0) and cannot be left running by a call somebody
 // forgot to make.
-enum : uint8_t { ENC_F_NONE = 0, ENC_F_ITEM, ENC_F_CAP };
+enum : uint8_t { ENC_F_NONE = 0, ENC_F_ITEM, ENC_F_CAP, ENC_F_WILD };
 static uint8_t  s_film    = ENC_F_NONE;
 static uint32_t s_film_t0 = 0;
 
@@ -113,6 +131,7 @@ static uint32_t enc_film_t(void) { return (uint32_t)(ui_now_ms() - s_film_t0); }
 static uint32_t enc_film_len(void) {
   if (s_film == ENC_F_ITEM) return ENC_ITEM_END_MS;
   if (s_film == ENC_F_CAP)  return ENC_CAP_END_MS;
+  if (s_film == ENC_F_WILD) return ENC_WILD_END_MS;
   return 0u;
 }
 
@@ -130,6 +149,11 @@ uint8_t enc_film_phase(void) {
   if (s_film == ENC_F_ITEM)
     return (uint8_t)((t < ENC_ITEM_RISE_MS) ? ENC_FILM_ITEM_RISE
                                             : ENC_FILM_ITEM_SETTLE);
+  if (s_film == ENC_F_WILD) {
+    if (t < ENC_WILD_TEAR_MS) return (uint8_t)ENC_FILM_WILD_TEAR;
+    if (t < ENC_WILD_FORM_MS) return (uint8_t)ENC_FILM_WILD_FORM;
+    return (uint8_t)ENC_FILM_WILD_STARE;
+  }
   if (t < ENC_CAP_CLAMP_MS) return (uint8_t)ENC_FILM_CAP_CLAMP;
   if (t < ENC_CAP_PULL_MS)  return (uint8_t)ENC_FILM_CAP_PULL;
   return (uint8_t)ENC_FILM_CAP_SEAL;
@@ -251,6 +275,19 @@ static void draw_item_film(void) {
              (int16_t)(y + ENC_ICON_W / 2 - 8), reach);
 }
 
+// THE WILD BODY, at one animation frame. STAGE_BABY and POSE_IDLE for the same
+// reason ui/battle_renderer.cpp passes them: a wild Pebble on this screen has no
+// stage of its own to show, and every body in the atlas is 24x24 since P9-C3.
+// Shared by the capture film and the wild reveal so the creature that assembles
+// is byte-for-byte the creature that dissolves.
+static SpriteRef enc_wild_sprite(uint8_t frame) {
+  const uint8_t key = pet_art_key(s_enc.species_id, 0u);
+  const uint8_t set = sprite_set_id((uint8_t)STAGE_BABY,
+                                    sprite_form_of(key, STAGE_BABY),
+                                    (uint8_t)POSE_IDLE);
+  return sprite_frame(set, frame);
+}
+
 // -----------------------------------------------------------------------------
 //  THE CAPTURE SUCCESS FILM. Four brackets close on the wild creature, the
 //  creature dissolves upward between them, and the brackets collapse onto a
@@ -274,14 +311,8 @@ static void draw_capture_film(uint8_t frame) {
 
   if (phase != (uint8_t)ENC_FILM_CAP_SEAL) {
     // The creature, solid while the brackets close and dissolving while they
-    // hold. STAGE_BABY and POSE_IDLE for the same reason ui/battle_renderer.cpp
-    // passes them: a wild Pebble on this screen has no stage of its own to show
-    // and every body in the atlas is 24x24 since P9-C3.
-    const uint8_t key  = pet_art_key(s_enc.species_id, 0u);
-    const uint8_t set  = sprite_set_id((uint8_t)STAGE_BABY,
-                                       sprite_form_of(key, STAGE_BABY),
-                                       (uint8_t)POSE_IDLE);
-    const SpriteRef r  = sprite_frame(set, frame);
+    // hold.
+    const SpriteRef r  = enc_wild_sprite(frame);
     const uint8_t pct  = (phase == (uint8_t)ENC_FILM_CAP_PULL)
                            ? ae_pct(t, ENC_CAP_CLAMP_MS, ENC_CAP_PULL_MS) : 0u;
     // DOWNWARD, AND THE FIRST DRAFT HAD IT THE OTHER WAY. AE_DIS_UP eats a
@@ -320,6 +351,88 @@ static void draw_capture_film(uint8_t frame) {
 // The two-frame idle phase, the same one HOME and the battle field breathe on.
 static uint8_t enc_body_frame(void) {
   return (uint8_t)((ui_now_ms() / UI_ANIM_FRAME_MS) & 1u);
+}
+
+// -----------------------------------------------------------------------------
+//  THE WILD REVEAL. See screen_encounter.h for why this film exists at all.
+//
+//  THREE BEATS AND A CUT:
+//    TEAR   six scanlines jump around the band. No body. This is the panel
+//           failing, which is what a wild Pebble IS in this fiction - something
+//           that got into memory that should not be there.
+//    FORM   the bars thin out while the body assembles feet-first out of them,
+//           one pixel of horizontal tear on the same step clock, so the body
+//           and the corruption are visibly the same event and not two effects
+//           that happen to overlap.
+//    STARE  the body stands still. On the last ENC_WILD_END_MS - ENC_WILD_SNAP_MS
+//           the whole band goes inverse, and THAT IS THE POINT OF THE BEAT: the
+//           film ends on a hard cut to a two-option menu that shares not one
+//           pixel with it, and a full-band flash is what a cut hides behind.
+//           Without it the creature simply vanishes and the menu appears, which
+//           reads as a dropped frame rather than as an answer.
+//
+//  NO RNG. Every bar comes out of ae_noise(), a pure function of the step
+//  number, because a film that drew from a real generator would record a
+//  different golden every time - and a golden nobody can reproduce is a
+//  picture, not a test.
+// -----------------------------------------------------------------------------
+
+#define ENC_BAND_H  ((int16_t)(ENC_STAGE_Y1 - ENC_STAGE_Y0 + 1))
+
+// `bars` scanlines, placed by the step clock. enc_hline() clips, so the widths
+// below cannot reach off the panel however the scramble comes out.
+static void enc_tear(uint32_t t, uint8_t bars) {
+  const uint8_t step = (uint8_t)((t / ENC_WILD_STEP_MS) & 0xFFu);
+  for (uint8_t i = 0; i < bars; ++i) {
+    const int16_t y = (int16_t)(ENC_STAGE_Y0 +
+                                (int16_t)(ae_noise(step, i) % (uint8_t)ENC_BAND_H));
+    const int16_t x = (int16_t)(ae_noise(step, (uint8_t)(i + 64u)) % 80u);
+    const int16_t w = (int16_t)(12u + (ae_noise(step, (uint8_t)(i + 128u)) % 44u));
+    enc_hline(x, y, w);
+  }
+}
+
+static void draw_wild_film(void) {
+  const uint32_t t  = enc_film_t();
+  const uint8_t  ph = enc_film_phase();
+
+  // How much corruption is left: all of it through the tear, none of it once
+  // the body is whole.
+  uint8_t bars = 0u;
+  if (ph == (uint8_t)ENC_FILM_WILD_TEAR) {
+    bars = (uint8_t)ENC_WILD_BARS;
+  } else if (ph == (uint8_t)ENC_FILM_WILD_FORM) {
+    const uint8_t gone = ae_pct(t, ENC_WILD_TEAR_MS, ENC_WILD_FORM_MS);
+    bars = (uint8_t)((uint16_t)ENC_WILD_BARS * (uint16_t)(100u - gone) / 100u);
+  }
+  enc_tear(t, bars);
+
+  if (ph == (uint8_t)ENC_FILM_WILD_TEAR) return;   // nothing has arrived yet
+
+  // THE BODY, RUN BACKWARDS. AE_DIS_DOWN eats a sprite from its top row down,
+  // so a percentage that falls from 100 to 0 puts it back on from the bottom
+  // up - feet, then torso, then head, which is the direction something climbing
+  // out of the floor arrives in. (The upward direction was tried first and is
+  // wrong here for the same reason the capture film gives for preferring DOWN:
+  // every body stands on the bottom of its 24x24 box with empty margin above,
+  // so an upward frontier spends most of its travel over nothing.)
+  const uint8_t pct = (ph == (uint8_t)ENC_FILM_WILD_FORM)
+                        ? (uint8_t)(100u - ae_pct(t, ENC_WILD_TEAR_MS, ENC_WILD_FORM_MS))
+                        : 0u;
+  // One pixel of horizontal tear while it is still assembling, stepped on the
+  // bars' clock rather than on the frame clock.
+  const int16_t dx = (ph == (uint8_t)ENC_FILM_WILD_FORM)
+                       ? (int16_t)((int16_t)(ae_noise((uint8_t)((t / ENC_WILD_STEP_MS) & 0xFFu),
+                                                       200u) % 3u) - 1)
+                       : (int16_t)0;
+  enc_blit((int16_t)(ENC_BODY_X + dx), (int16_t)ENC_BODY_Y, enc_wild_sprite(enc_body_frame()),
+           (uint8_t)(pct ? AE_DIS_DOWN : AE_DIS_NONE), pct);
+
+  // THE SNAP. gfx_invert_rect() and not a fill: the body has to survive it, and
+  // on a 1-bit panel the only way to flash something without deleting it is to
+  // swap the ink for the paper.
+  if (t >= ENC_WILD_SNAP_MS)
+    gfx_invert_rect(0, ENC_STAGE_Y0, (int16_t)OLED_W, ENC_BAND_H);
 }
 
 
@@ -362,6 +475,18 @@ void encounter_enter(void)
 {
   s_cursor = 0;
   if (s_applied) return;              // re-entering from CAPTURE, already paid
+
+  if (s_enc.outcome == (uint8_t)ENC_OUT_WILD) {
+    // s_applied is doing double duty here and the flag's comment says so: for
+    // ITEM and SPECIAL it means "the reward has been paid", and for WILD it
+    // means "the reveal has played". Both are the same question - has this
+    // encounter's one-shot entry work already run - and answering it twice with
+    // two bytes is how the two answers come to disagree.
+    s_applied = 1u;
+    enc_film_begin(ENC_F_WILD);
+    audio_play(SFX_GLITCH);           // corruption, which is what this is
+    return;
+  }
 
   uint32_t now_epoch = 0, now_ms = 0;
   uint8_t  cal = 0;
@@ -414,6 +539,7 @@ void encounter_input(Gesture g)
   if (s_enc.outcome != (uint8_t)ENC_OUT_WILD) return;   // nothing to steer
   if (g == (Gesture)GST_TAP_L) {
     s_cursor = (uint8_t)(s_cursor ^ 1u);
+    audio_play(SFX_TICK);      // the rule is in ui/screen_menu.cpp
     ui_note_input();
     return;
   }
@@ -436,6 +562,16 @@ void encounter_render(void)
 
   switch ((EncounterOutcome)s_enc.outcome) {
     case ENC_OUT_WILD: {
+      if (enc_film_phase() != (uint8_t)ENC_FILM_NONE) {
+        // THE REVEAL OWNS THE BAND, unlike the item film which overlays its own
+        // label. The two options are a QUESTION, and asking it over a picture
+        // that has not finished arriving is asking it before the player knows
+        // what they are answering about. The affordance strip is still drawn,
+        // because any press does answer it - see encounter_input().
+        draw_wild_film();
+        gfx_affordance(S(STR_AF_SEL), S(STR_AF_BACK));
+        break;
+      }
       gfx_text_center(GF_NARR, 22, S(STR_ENC_WILD));
       wild_row(row, sizeof row);
       gfx_text_center(GF_BODY, 33, row);

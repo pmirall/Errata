@@ -1193,17 +1193,37 @@ is that 117 B of existing slack was consumed and the number a cap is applied to 
 
 ---
 
-## 16. THE FINAL ACCOUNT — what v1.0.0-rc1 costs
+## 16. THE FINAL ACCOUNT — what the shipping artefact costs
 
 **Measured at this commit, `release` variant (`GOD_MODE_ENABLED=0`), the artefact that ships.**
 
 | | Used | Cap | Free | Headroom |
 |---|---:|---:|---:|---:|
-| **Flash** (`GATE_RELEASE_FLASH_MAX`) | 1,350,840 | 1,600,000 | **249,160** | 15.6 % |
-| **Globals** (`GATE_RELEASE_GLOBALS_MAX`) | 59,452 | 65,000 | **5,548** | 8.5 % |
+| **Flash** (`GATE_RELEASE_FLASH_MAX`) | 1,354,812 | 1,600,000 | **245,188** | 15.3 % |
+| **Globals** (`GATE_RELEASE_GLOBALS_MAX`) | 59,468 | 65,000 | **5,532** | 8.5 % |
 | Sprite atlas (`SPRITE_DATA_BYTES_MAX`) | 10,247 | 11,264 | 1,017 | 9.0 % |
 | Pebble atlas (`PB_SPRITE_DATA_BYTES_MAX`) | 9,216 | 10,240 | 1,024 | 10.0 % |
-| `app0` partition | 1,350,840 | 3,145,728 | 1,794,888 | 57.1 % |
+| `app0` partition | 1,354,812 | 3,145,728 | 1,790,916 | 56.9 % |
+
+> **This table was 1,350,840 / 59,452 until the first-impressions work, and that
+> number was already two commits stale when the final review closed** — the
+> review's own "Sizes" line said 1,351,518 and this section still said 1,350,840.
+> A size table nobody re-measures is the same defect this project keeps finding:
+> a document describing the build the author had in mind. The numbers above are
+> `tools/build_matrix.sh`'s output at this commit.
+
+### 16.1 What the first-impressions work cost
+
+| | Final review | First impressions | Δ |
+|---|---:|---:|---:|
+| `release` flash | 1,351,518 | **1,354,812** | **+3,294** |
+| `release` globals | 59,452 | **59,468** | **+16** |
+
+Sixteen bytes of globals for the whole thing, which is the shape to expect: the
+intro is 3 statics and the wild reveal is 3 more, and everything else it draws
+is a pure function of the clock. The 3,294 B of flash are the intro's drawing
+code, the wild reveal's, two new sound effects, three strings, and the twenty or
+so `audio_play()` call sites.
 
 Both caps are enforced by `tools/build_matrix.sh` and, since P10-C5, by CI — which they had never
 been in eight phases before that.

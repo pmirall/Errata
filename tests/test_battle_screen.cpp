@@ -569,8 +569,10 @@ TEST(a_hit_shakes_once_and_a_faint_flashes_once) {
 TEST(a_hit_and_a_faint_each_arm_their_own_cue_exactly_once) {
   const int nb = notes_in(SFX_BUZZ);
   const int nf = notes_in(SFX_FALL);
+  const int nw = notes_in(SFX_FANFARE);
   CHECK(nb > 0);
   CHECK(nf > nb);
+  CHECK(nw > 0);
 
   seams_reset();
   box_fixture(3);
@@ -582,8 +584,14 @@ TEST(a_hit_and_a_faint_each_arm_their_own_cue_exactly_once) {
 
   CHECK(r.hit_beats > 0);
   CHECK(r.faint_beats > 0);
-  CHECK_EQ(g_tone_on,  r.hit_beats * nb + r.faint_beats * nf);
-  CHECK_EQ(g_tone_off, r.hit_beats + r.faint_beats);
+  // THE VERDICT IS THE THIRD CUE. This seed is a PRACTICE battle, so the player
+  // is side 0 and BO_WIN_A is the win; the expression carries the loss case so
+  // that changing the seed cannot silently turn the assertion into a tautology.
+  const bool won = (r.outcome == (uint8_t)BO_WIN_A);
+  const int  ne  = won ? 1 : 0;
+  CHECK(won);                                   // this seed does win - stated
+  CHECK_EQ(g_tone_on,  r.hit_beats * nb + r.faint_beats * nf + ne * nw);
+  CHECK_EQ(g_tone_off, r.hit_beats + r.faint_beats + ne);
   battle_leave();
 
   // Leave the engine as the rest of this file expects to find it: no sink, so

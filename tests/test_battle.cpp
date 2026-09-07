@@ -1261,6 +1261,79 @@ TEST(fainting_forces_the_replacement_and_the_replacement_costs_the_turn) {
   CHECK_EQ(st.side[0].team[0].hp_cur, a_hp);         // and answered with nothing
 }
 
+// =============================================================================
+//  THE TYPE EDGE IS NOW VISIBLE, AND THIS IS WHAT MAKES THAT CLAIM CHECKABLE.
+//  TYPE_MOD_MAX_HITS is 1 and it decides cross-type duels (measured: uncapped,
+//  the off-diagonal cells win 69-78 % of the time; capped, 40-63 %). Until
+//  RLE_TYPE_EDGE the log said nothing about which hit got it or that it was
+//  spent, so the most consequential rule in a fight was one no player could see.
+//  The rule did not change; only its reporting did, which is exactly what this
+//  case pins - the EVENT COUNT, not the damage.
+// =============================================================================
+TEST(the_type_edge_is_announced_exactly_once_per_combatant_and_never_again) {
+  BattleState st;
+  duel(st, TYPE_SIGNAL, TYPE_CORRUPT);      // a real cross-type relation
+  st.side[0].team[0].hp_cur = 400u;         // nobody dies inside the sample
+  st.side[1].team[0].hp_cur = 400u;
+
+  BattleEvent buf[256];
+  BattleLog log;
+  battle_log_init(log, buf, 256u);
+
+  // Eight rounds of the same attacking move on both sides. The relation holds
+  // every round; the ANNOUNCEMENT must not.
+  for (int r = 0; r < 8; ++r) {
+    rng_init(st.rng, SEED_HIT_ROLL0 + (uint32_t)r);
+    // SLOT 0 is the damaging on-type move on both sides - slot 1 has no type
+    // relation, which is what the first draft of this case got wrong and why
+    // it measured zero edges over eight rounds.
+    (void)round_with(st, ACT(BACT_ATTACK, 0u), ACT(BACT_ATTACK, 0u), &log);
+  }
+
+  int edges[2] = { 0, 0 };
+  int hits = 0;
+  int edge_before_its_hit = 0;
+  for (uint16_t i = 0; i < log.count; ++i) {
+    const BattleEvent* e = battle_log_at(log, i);
+    if (!e) continue;
+    if (e->kind == (uint8_t)RLE_HIT) hits++;
+    if (e->kind != (uint8_t)RLE_TYPE_EDGE) continue;
+    CHECK(e->side <= 1u);
+    edges[e->side]++;
+    CHECK(e->a == 1u || e->a == 2u);        // advantage or disadvantage, never 0
+    CHECK_EQ((int)e->b, 0);                 // nothing left: the cap is 1
+    // It belongs to the hit that follows it, so the very next event for the
+    // same side is that RLE_HIT. Order is the whole reason it is pushed first.
+    const BattleEvent* nx = battle_log_at(log, (uint16_t)(i + 1u));
+    if (nx && nx->kind == (uint8_t)RLE_HIT && nx->side == e->side) edge_before_its_hit++;
+  }
+  CHECK(hits >= 8);                         // the sample really did land hits
+
+  // THE MODIFIER IS THE ATTACK'S TYPE AGAINST THE DEFENDER'S, NOT THE
+  // ATTACKER'S, and this case pins that because it is the easy thing to get
+  // wrong - two drafts of it did. duel() arms BOTH sides with the same four
+  // moves, so slot 0 is MV_PING on both, and MV_PING is one type:
+  //    side 0: PING's type into CORRUPT -> a relation, one announcement
+  //    side 1: PING's type into SIGNAL  -> none, and nothing is announced
+  // Read out of the tables rather than asserted from memory, so a content
+  // change that retypes MV_PING fails here instead of quietly making the case
+  // measure nothing.
+  const AttackDef* ping = attack_get(MV_PING);
+  CHECK(ping != nullptr);
+  const int8_t m_vs_corrupt = type_mod_of(ping->type, (uint8_t)TYPE_CORRUPT);
+  const int8_t m_vs_signal  = type_mod_of(ping->type, (uint8_t)TYPE_SIGNAL);
+  CHECK(m_vs_corrupt != 0);                 // side 0 really has an edge to spend
+  CHECK_EQ((int)m_vs_signal, 0);            // side 1 really has none
+
+  // ONE announcement for the side that has a relation, over eight rounds in
+  // which that relation held every single time. That is the cap being visible.
+  CHECK_EQ(edges[0], 1);
+  // ...and NONE for the neutral side: a matchup with no edge must not announce
+  // one. No false positives is half of what makes the line worth reading.
+  CHECK_EQ(edges[1], 0);
+  CHECK_EQ(edge_before_its_hit, 1);         // and it preceded its own hit
+}
+
 TEST(the_second_action_is_skipped_with_a_reason_when_the_first_one_emptied_the_field) {
   BattleState st;
   duel(st, TYPE_SIGNAL, TYPE_CORRUPT);
