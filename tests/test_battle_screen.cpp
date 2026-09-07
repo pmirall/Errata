@@ -43,7 +43,10 @@
 #include "fakes/gfx_fb.h"
 #include "game/battle.h"
 #include "game/box.h"
+#include "data/attacks_table.h"    // ATTACK_COUNT: the move-set search walks it
 #include "game/genome.h"
+#include "game/species_custom.h"   // the registry a drawn body comes out of
+#include "game/validate.h"         // creator_cost_of / validate_custom_species
 #include "ui/battle_renderer.h"
 #include "ui/pet_art.h"
 #include "game/inventory.h"
@@ -879,6 +882,193 @@ TEST(every_species_has_its_own_combat_body) {
   printf("  %d species resolve onto %d distinct 24x24 combat bodies, "
          "at most %d of them sharing one\n",
          (int)SPECIES_TABLE_COUNT, n, worst);
+}
+
+// =============================================================================
+//  THE CREATURE THE PLAYER DREW, ON THE FIELD (P10-C4b)
+//
+//  ui/battle_renderer.cpp resolves a body from an ATLAS SET ID, and a creator
+//  species has no atlas row - it folds onto somebody else's. Until this change
+//  the 144 bytes the player drew were read by nothing at all, so a drawn Pebble
+//  walked into a fight wearing a stranger's silhouette. The renderer stays a
+//  renderer: it draws the bits the caller brings and never learns that a
+//  creator exists, which is what these two cases are about - one for the seam,
+//  one for the screen that fills it.
+// =============================================================================
+static void mk_custom_bits(uint8_t* out, uint8_t seed) {
+  for (uint8_t i = 0; i < (uint8_t)BR_BODY_BYTES; ++i)
+    out[i] = (uint8_t)(0x55u ^ (uint8_t)(i * 7u + seed));
+}
+
+TEST(a_body_the_caller_brings_is_drawn_instead_of_the_atlas_row) {
+  static uint8_t drawn[BR_BODY_BYTES];
+  mk_custom_bits(drawn, 0x11u);
+
+  // The atlas body for the same key, which is what the field drew before and
+  // must not draw now. Read off the panel so the comparison is about PIXELS.
+  static uint8_t atlas_px[BR_BODY_H][BR_BODY_W];
+  fb_reset();
+  br_draw_body(0, 0, 3u, 0, false, false, false, false);
+  for (int y = 0; y < BR_BODY_H; ++y)
+    for (int x = 0; x < BR_BODY_W; ++x) atlas_px[y][x] = (uint8_t)fb_get(x, y);
+
+  fb_reset();
+  br_draw_body(0, 0, 3u, 0, false, false, false, false, drawn);
+  // Every pixel is the drawing's...
+  int wrong = 0;
+  for (int y = 0; y < BR_BODY_H; ++y)
+    for (int x = 0; x < BR_BODY_W; ++x)
+      if ((int)fb_get(x, y) != ((drawn[y * 3 + (x >> 3)] >> (x & 7)) & 1)) ++wrong;
+  CHECK_EQ(wrong, 0);
+  // ...and the atlas body is not what is on the panel, so "it drew something"
+  // cannot pass for "it drew the drawing".
+  int same_as_atlas = 0;
+  for (int y = 0; y < BR_BODY_H; ++y)
+    for (int x = 0; x < BR_BODY_W; ++x)
+      if ((int)fb_get(x, y) == (int)atlas_px[y][x]) ++same_as_atlas;
+  CHECK(same_as_atlas < BR_BODY_W * BR_BODY_H);
+
+  // AND THE MIRROR STILL APPLIES. A drawn body on the FOE's side has to face
+  // the player like any other, which is the whole reason it goes through the
+  // same SpriteRef rather than getting a blit of its own.
+  fb_reset();
+  br_draw_body(0, 0, 3u, 0, true, false, false, false, drawn);
+  int mirrored = 0;
+  for (int y = 0; y < BR_BODY_H; ++y)
+    for (int x = 0; x < BR_BODY_W; ++x) {
+      const int mx = BR_BODY_W - 1 - x;
+      if ((int)fb_get(x, y) == ((drawn[y * 3 + (mx >> 3)] >> (mx & 7)) & 1)) ++mirrored;
+    }
+  CHECK_EQ(mirrored, BR_BODY_W * BR_BODY_H);
+}
+
+TEST(a_drawn_pebble_fights_in_its_own_body) {
+  seams_reset();
+  csp_reset();
+
+  // A creature made in the creator, put in the Box, and taken into a wild
+  // fight - which is the route the player actually walks.
+  CustomSpeciesRec c;
+  memset(&c, 0, sizeof c);
+  c.magic   = (uint16_t)CS_MAGIC;
+  c.version = (uint8_t)SAVE_SCHEMA_VERSION;
+  c.slot    = 0u;
+  c.type    = (uint8_t)TYPE_SIGNAL;
+  c.base[0] = 6u; c.base[1] = 5u; c.base[2] = 5u; c.base[3] = 5u;
+  memcpy(c.name, "Bicho", 6);
+  // The move set is FOUND rather than typed: the validator is the oracle, so
+  // this cannot rot into a record the registry silently refuses.
+  bool legal = false;
+  for (uint8_t a = 1u; a <= (uint8_t)ATTACK_COUNT && !legal; ++a)
+    for (uint8_t b = (uint8_t)(a + 1u); b <= (uint8_t)ATTACK_COUNT && !legal; ++b)
+      for (uint8_t d = (uint8_t)(b + 1u); d <= (uint8_t)ATTACK_COUNT && !legal; ++d)
+        for (uint8_t e = (uint8_t)(d + 1u); e <= (uint8_t)ATTACK_COUNT && !legal; ++e) {
+          c.moves[0] = a; c.moves[1] = b; c.moves[2] = d; c.moves[3] = e;
+          uint16_t su = 0, au = 0;
+          creator_cost_of(c, su, au);
+          c.budget_used = au;
+          legal = (validate_custom_species(c) == (uint8_t)VR_OK);
+        }
+  CHECK(legal);
+  for (uint8_t f = 0; f < (uint8_t)CS_SPRITE_FRAMES; ++f)
+    mk_custom_bits(c.sprite[f], (uint8_t)(0x20u + f * 0x33u));
+  CHECK(csp_install(c));
+  const uint8_t id = csp_species_id(0);
+  CHECK(id != 0u);
+
+  memset(&g_gs, 0, sizeof g_gs);
+  box_bind(g_gs);
+  Genome gen;
+  memset(&gen, 0, sizeof gen);
+  gen.magic_ver  = GENOME_MAGIC_VER;
+  gen.lineage_id = 0x0BADF00Du;
+  gen.g0 = 0x1234u; gen.g1 = 0x5678u; gen.g2 = 0x9ABCu;
+  gen.generation = 3;
+  const uint8_t slot = box_new_pebble(id, 12u, ORIGIN_CREATOR, gen, 0xC0FFEEu, 1000u);
+  CHECK(slot != BOX_SLOT_NONE);
+  PebbleInstance* p = box_slot(slot);
+  CHECK(p != nullptr);
+  if (p) for (uint8_t k = 0; k < PB_CARE_COUNT; ++k) p->care[k] = PB_CARE_MILLI_MAX;
+  CHECK(box_set_active(slot));
+
+  battle_arm_wild(0x00D0D0u, 9u, 12u);       // the FOE is a roster species
+  battle_enter();
+  // BTM_INTRO IS THE MODE THAT DRAWS THE FIELD, and the first draft of this
+  // case pressed past it into BTM_MENU - where the list widget owns the content
+  // band and no body is drawn at all. It failed on BOTH combatants at once,
+  // which is what said the fault was the mode and not the wiring.
+  CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_INTRO);
+
+  // ---------------------------------------------------------------------------
+  //  TWO DRAWINGS, ONE FIELD, AND THE DIFFERENCE IS THE ASSERTION.
+  //
+  //  The first draft compared the player's body box against the record byte for
+  //  byte and failed on 39 pixels in its top three rows - and on 12 of the
+  //  ATLAS foe's, which is what proved the fault was not the change under test.
+  //  The foe's name plate is drawn AFTER both bodies and reaches down over the
+  //  top of the player's, which is the field's shipped composition (the
+  //  geometry asserts in battle_renderer.cpp cover body-vs-OWN-panel, not
+  //  body-vs-the-other-side's). Carving that band out by hand would bake an
+  //  observed failure into a constant.
+  //
+  //  So the field is rendered TWICE with two different drawings on the same
+  //  Pebble, and the pixels that MOVE are the statement: they must lie inside
+  //  the player's body box, they must be exactly the pixels the two drawings
+  //  disagree on there, and nothing else on the panel may move at all. Under
+  //  the old renderer both frames are identical, so the count is zero and this
+  //  fails on its first check rather than on a hand-written band.
+  // ---------------------------------------------------------------------------
+  static uint8_t shot[2][FB_H][FB_W];
+  CustomSpeciesRec c2 = c;
+  for (uint8_t f = 0; f < (uint8_t)CS_SPRITE_FRAMES; ++f)
+    mk_custom_bits(c2.sprite[f], (uint8_t)(0x9Bu + f * 0x11u));
+
+  g_now = 100000u;
+  const uint8_t frame = (uint8_t)((g_now / UI_ANIM_FRAME_MS) & 1u);
+  for (uint8_t k = 0; k < 2u; ++k) {
+    CHECK(csp_install(k == 0u ? c : c2));    // same slot, same id, new pixels
+    fb_reset();
+    battle_render();
+    CHECK_EQ(fb_oob(), 0u);
+    for (int y = 0; y < FB_H; ++y)
+      for (int x = 0; x < FB_W; ++x) shot[k][y][x] = (uint8_t)fb_get(x, y);
+  }
+
+  int moved = 0, moved_outside = 0, disagreed = 0, wrong = 0;
+  for (int y = 0; y < FB_H; ++y) {
+    for (int x = 0; x < FB_W; ++x) {
+      const bool inside = (x >= BR_YOU_BODY_X && x < BR_YOU_BODY_X + BR_BODY_W &&
+                           y >= BR_YOU_BODY_Y && y < BR_YOU_BODY_Y + BR_BODY_H);
+      if (shot[0][y][x] == shot[1][y][x]) continue;
+      ++moved;
+      if (!inside) { ++moved_outside; continue; }
+      const int bx = x - BR_YOU_BODY_X, by = y - BR_YOU_BODY_Y;
+      const int a_bit = (c.sprite[frame][by * 3 + (bx >> 3)]  >> (bx & 7)) & 1;
+      const int b_bit = (c2.sprite[frame][by * 3 + (bx >> 3)] >> (bx & 7)) & 1;
+      if (a_bit != b_bit) ++disagreed;
+      // The pixel that moved has to hold each drawing's own bit in its own
+      // frame: "it changed" is not "it changed into the right thing".
+      if ((int)shot[0][y][x] != a_bit || (int)shot[1][y][x] != b_bit) ++wrong;
+    }
+  }
+  CHECK(moved > 0);                     // the drawing reached the field at all
+  CHECK_EQ(moved_outside, 0);           // and it reached nothing else
+  CHECK_EQ(disagreed, moved);           // every moved pixel is one they differ on
+  CHECK_EQ(wrong, 0);                   // and each holds its own drawing's bit
+  printf("  a drawn Pebble moves %d pixels of the field and none outside its "
+         "own %dx%d body box\n", moved, (int)BR_BODY_W, (int)BR_BODY_H);
+
+  // AND THE FOE, A ROSTER SPECIES, IS UNTOUCHED - which moved_outside already
+  // says, but saying it by name is what makes a regression report the right
+  // half of the field.
+  int foe_moved = 0;
+  for (int y = BR_FOE_BODY_Y; y < BR_FOE_BODY_Y + BR_BODY_H; ++y)
+    for (int x = BR_FOE_BODY_X; x < BR_FOE_BODY_X + BR_BODY_W; ++x)
+      if (shot[0][y][x] != shot[1][y][x]) ++foe_moved;
+  CHECK_EQ(foe_moved, 0);
+
+  battle_leave();
+  csp_reset();
 }
 
 TEST(the_two_combatants_face_each_other) {

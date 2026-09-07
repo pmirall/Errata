@@ -113,6 +113,23 @@ const SpeciesDef* csp_get(uint8_t species_id);
 uint8_t csp_slot_of(uint8_t species_id);
 uint8_t csp_species_id(uint8_t slot);
 
+// -----------------------------------------------------------------------------
+//  THE PIXELS. 24x24, two frames, 72 B each - byte for byte the shape of every
+//  body in data/sprites_pebbles.h, which is why wiring them into the renderer
+//  needed no new format and no scaling.
+//
+//  UNTIL THIS EXISTED THE CREATOR WAS A LIE BY OMISSION. csp_install() set
+//  sprite_id = 0 with a comment saying the renderer would learn to read these
+//  "at P8-C4/P9-C3"; it never did, so the 144 B were stored, CRC-covered and
+//  served back to the phone - and the device drew the player the body of
+//  species 1. The owner drew a creature, the page showed it to him, and his
+//  Pebble came out wearing somebody else's face.
+//
+//  Answers nullptr for a species that is not a custom one, for an empty slot,
+//  and for a frame past the second - so a caller that forgets to check gets a
+//  refusal rather than a pointer into the next slot.
+const uint8_t* csp_sprite(uint8_t species_id, uint8_t frame);
+
 static_assert(CREATOR_SPECIES_SLOTS == CUSTOM_SPECIES_SLOTS,
               "the creator schema's slot count and the save schema's disagree: "
               "one of them would index past the other");

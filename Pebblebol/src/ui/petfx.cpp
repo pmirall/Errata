@@ -35,6 +35,7 @@
 #include "render.h"
 #include "xbm_mirror.h"
 #include "../data/sprites.h"
+#include "../persistence/save_schema.h"   // CS_SPRITE_W/H/FRAMES: a creator body's geometry
 
 // THE EYELID TABLE IS NO LONGER IN THIS FILE, and the assert that froze it is
 // gone with it (P9-C3).
@@ -320,6 +321,7 @@ static int16_t  s_ink_x0 = 44, s_ink_y0 = 12, s_ink_x1 = 83, s_ink_y1 = 51;
 static uint8_t  s_qry_ok      = 0;
 static uint8_t  s_qry_stage   = 0;
 static uint8_t  s_qry_form    = 0;
+static const uint8_t* s_qry_custom = nullptr;
 
 // --- sprite cache: mirrored body + ink bounds + eyelid strips, per frame ---
 static uint8_t  s_cache_set   = 0xFF;
@@ -328,6 +330,10 @@ static uint8_t  s_cache_mir   = 0xFF;
 // idle frame it is derived FROM have the same set id, so without this a pet
 // that fell asleep would keep whichever of the two the cache happened to hold.
 static uint8_t  s_cache_slp   = 0xFF;
+// The creator body the cache currently holds, and the fourth part of its key.
+// Two custom Pebbles share a set id, so without this the second one to be drawn
+// keeps the first one's face.
+static const uint8_t* s_cache_cst = nullptr;
 static uint8_t  s_cache_w     = 0;
 static uint8_t  s_cache_h     = 0;
 static uint8_t  s_cache_bits[2][PF_FRAME_BYTES];
@@ -476,9 +482,19 @@ static uint16_t pf_stretch(uint16_t ms) {
 // between a species and a generic blob every UI_ANIM_FRAME_MS. No body in
 // today's atlas takes this path, and tests/test_sprite_pipeline.cpp is what
 // says so over all sixty.
-static void pf_cache_sync(uint8_t set_id, uint8_t mirrored, uint8_t sleeping) {
-  if (set_id == s_cache_set && mirrored == s_cache_mir && sleeping == s_cache_slp)
+// `custom` is PetView.custom_bits: frame 0 of a creator species' own 24x24
+// drawing, or nullptr for every Pebble with an atlas row. THIS MODULE STILL DOES
+// NOT KNOW WHAT A SPECIES IS - it gets bits, exactly as the banner above
+// requires. What it has to do is treat them as a set of its own for CACHE
+// purposes, which is what s_cache_cst is for: two different creator Pebbles
+// resolve to the same set_id (both fall back to sprite_id 0), so keying on the
+// set alone would draw the first one's body for the second.
+static void pf_cache_sync(uint8_t set_id, uint8_t mirrored, uint8_t sleeping,
+                          const uint8_t* custom) {
+  if (set_id == s_cache_set && mirrored == s_cache_mir && sleeping == s_cache_slp &&
+      custom == s_cache_cst)
     return;
+  s_cache_cst = custom;
 
   // The band, in the orientation the cache holds. Shared by the derivation and
   // by the lids, so the two cannot disagree about where the eyes are.
@@ -518,7 +534,14 @@ static void pf_cache_sync(uint8_t set_id, uint8_t mirrored, uint8_t sleeping) {
   uint8_t use_id = set_id;
   uint8_t derive = sleeping;
   for (uint8_t pass = 0; pass < 2u; ++pass) {
-    const SpriteSet s = sprite_set(use_id);
+    // A CREATOR BODY IS A SET OF ITS OWN, in the first pass only: the fallback
+    // pass exists to reach the authored PBSPR_SLEEP blob, and a custom drawing
+    // that cannot be derived has to be able to reach it too.
+    SpriteSet s = sprite_set(use_id);
+    if (custom != nullptr && pass == 0u) {
+      s.bits = custom; s.w = (uint8_t)CS_SPRITE_W; s.h = (uint8_t)CS_SPRITE_H;
+      s.frames = (uint8_t)CS_SPRITE_FRAMES;
+    }
     const uint8_t   stride = pf_stride(s.w);
     const uint16_t  fbytes = (uint16_t)stride * s.h;
     s_cache_w = s.w;
@@ -768,6 +791,7 @@ void petfx_begin(void) {
   s_began      = 1;
   s_cache_set  = 0xFF;
   s_cache_mir  = 0xFF;
+  s_cache_cst  = nullptr;
   s_cache_slp  = 0xFF;
   s_state      = PF_STAND;
   s_state_len  = 900;
@@ -1030,6 +1054,12 @@ void petfx_draw_body(const PetView& p, uint8_t pose, uint8_t frame, int16_t dy,
 
   uint8_t set_id;
   uint8_t sleeping = 0;
+  // BEFORE THE BRANCH, NOT INSIDE IT. The else-arm below used to be the only
+  // writer, and an EGG therefore kept whichever creator body the LAST Pebble
+  // drawn had brought - a stale pointer straight into pf_cache_sync()'s key and
+  // into its first pass. ui/pet_view.cpp already answers nullptr for an egg;
+  // this is what makes the module honour that instead of remembering.
+  s_qry_custom = p.custom_bits;
   if (p.stage == STAGE_EGG) {
     // Same rule ui.cpp uses, kept in sync deliberately: the egg starts
     // cracking a minute before it hatches.
@@ -1059,7 +1089,7 @@ void petfx_draw_body(const PetView& p, uint8_t pose, uint8_t frame, int16_t dy,
 
   // no_face, not pinned: a frozen pet keeps whatever way it is facing.
   const uint8_t mirrored = (uint8_t)((!no_face && s_facing > 0) ? 1u : 0u);
-  pf_cache_sync(set_id, mirrored, sleeping);
+  pf_cache_sync(set_id, mirrored, sleeping, s_qry_custom);
 
   const uint8_t w      = s_cache_w;
   const uint8_t h      = s_cache_h;
@@ -1398,7 +1428,11 @@ uint8_t petfx_body_h(void) { return s_draw_h; }
 // 40x40 bitmap, once per choreography.
 void petfx_pose_ink_x(uint8_t pose, int16_t* x0, int16_t* x1) {
   int16_t lo = s_ink_x0, hi = s_ink_x1;      // the honest fallback: what is drawn
-  if (s_qry_ok) {
+  // AND A DRAWN BODY TAKES THAT FALLBACK ON PURPOSE. The scan below reads the
+  // ATLAS, which for a creator species holds a row that creature never wore -
+  // so it would answer where the BOWL goes from a silhouette nobody has seen.
+  // The live ink box is the only true statement about a body somebody drew.
+  if (s_qry_ok && s_qry_custom == nullptr) {
     const uint8_t   id = sprite_set_id(s_qry_stage, s_qry_form, pose);
     const SpriteSet s  = sprite_set(id);
     const uint8_t   st = pf_stride(s.w);

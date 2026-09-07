@@ -28,6 +28,7 @@
 #ifndef PB_PET_ART_H
 #define PB_PET_ART_H
 
+#include "../game/species_custom.h"   // csp_sprite(): a creator body
 #include <stdint.h>
 
 #include "../core/strings_es.h"
@@ -77,6 +78,45 @@ inline uint8_t pet_art_key(uint8_t species_id, uint8_t gene_species) {
 inline uint8_t pet_art_design(uint8_t species_id, uint8_t gene_species,
                               Stage stage) {
   return sprite_form_of(pet_art_key(species_id, gene_species), stage);
+}
+
+// -----------------------------------------------------------------------------
+//  THE BODY, WHOEVER DREW IT. THE ONE lookup every body path must use.
+//
+//  A creator species has no atlas row, so until this existed csp_install()'s
+//  sprite_id = 0 sent it to species 1's body and the 144 B the player drew were
+//  stored, CRC-covered, served back to the phone and never rendered. The owner
+//  drew a creature, the page showed it to him, and his Pebble came out wearing
+//  somebody else's face. game/species_custom.h keeps the pixels now; this is
+//  what prefers them.
+//
+//  THE GEOMETRY NEEDED NO CONVERSION: CS_SPRITE_W/H are 24x24 and
+//  CS_SPRITE_FRAMES is 2, which is byte for byte every body in
+//  data/sprites_pebbles.h. A custom body is a SpriteRef like any other.
+//
+//  THREE POSES ARE DELIBERATELY NOT OVERRIDDEN:
+//    EGG   an egg is an egg. Nobody's drawing shows through a shell.
+//    SICK  the shared sick body is HOW A PLAYER READS "sick" (data/sprites.h
+//          argues that at length). A custom body here would take a state the
+//          player needs and replace it with one they cannot tell from healthy.
+//    SLEEP falls through to the caller, because sleep is DERIVED from the idle
+//          frame rather than looked up (P10-C3) - and the callers that derive it
+//          hand this function POSE_IDLE to get the frame they derive FROM, so a
+//          custom sleeper already wears its own silhouette without a branch here.
+// -----------------------------------------------------------------------------
+inline SpriteRef pet_body_ref(uint8_t species_id, uint8_t gene_species,
+                              uint8_t stage, uint8_t pose, uint8_t frame) {
+  if (stage != (uint8_t)STAGE_EGG && pose != (uint8_t)POSE_SICK) {
+    const uint8_t* bits = csp_sprite(species_id, (uint8_t)(frame & 1u));
+    if (bits != nullptr) {
+      SpriteRef r = { bits, (uint8_t)CS_SPRITE_W, (uint8_t)CS_SPRITE_H };
+      return r;
+    }
+  }
+  return sprite_lookup_pose(stage,
+                            sprite_form_of(pet_art_key(species_id, gene_species),
+                                           (Stage)stage),
+                            pose, frame);
 }
 
 // -----------------------------------------------------------------------------

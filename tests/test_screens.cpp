@@ -72,6 +72,9 @@
 #include "ui/screen_view.h"
 #include "ui/gfx.h"        // gfx_xbm(): the clipping proof draws one directly
 #include "ui/pet_art.h"    // pet_art_key(): the body box a species-difference check measures
+#include "data/attacks_table.h"   // ATTACK_COUNT: the move-set search walks it
+#include "game/validate.h"        // creator_cost_of(): a legal record prices itself
+#include "game/species_custom.h"  // the registry the drawn body comes out of
 #include "ui/ui.h"
 
 // =============================================================================
@@ -1579,6 +1582,255 @@ static int sweep_species_on_home(uint8_t stage, uint8_t pose, uint8_t frame) {
     ++drawn;
   }
   return drawn;
+}
+
+// =============================================================================
+//  THE CREATURE THE PLAYER DREW (P10-C4b)
+//
+//  REPORTED FROM A BOARD, AND IT WAS REAL: a Pebble made in the creator showed
+//  up in the BOX by name and then walked onto HOME wearing SOMEBODY ELSE'S
+//  BODY. csp_install() had always parked CustomSpeciesRec.sprite - 144 bytes
+//  the player drew a pixel at a time - in a record NOTHING EVER READ. A grep
+//  for a reader across the whole tree found none, so what got drawn was
+//  whichever atlas row the id happened to fold onto.
+//
+//  So these cases assert PIXELS, and they assert the NEGATIVE alongside them.
+//  "It drew a body" would have passed before the fix, because it always drew
+//  one: what has to be true is that the ink on the panel IS the ink in the
+//  record and IS NOT the atlas body for the same key.
+// =============================================================================
+// THE MOVE SET IS FOUND, NOT TYPED. tests/test_validate.cpp holds four move ids
+// as #defines and is welcome to - it is the file about the rules. A second copy
+// of them here would be a second place the attack table can quietly outgrow, so
+// the VALIDATOR is the oracle instead: the first four-move set it accepts is by
+// definition legal, and if the table ever stops containing one this fails
+// loudly rather than installing a record the registry would refuse.
+static_assert(PB_MOVE_COUNT == 4, "the search below fills exactly four slots");
+static bool cs_find_moves(CustomSpeciesRec& c)
+{
+  for (uint8_t a = 1u; a <= (uint8_t)ATTACK_COUNT; ++a)
+    for (uint8_t b = (uint8_t)(a + 1u); b <= (uint8_t)ATTACK_COUNT; ++b)
+      for (uint8_t d = (uint8_t)(b + 1u); d <= (uint8_t)ATTACK_COUNT; ++d)
+        for (uint8_t e = (uint8_t)(d + 1u); e <= (uint8_t)ATTACK_COUNT; ++e) {
+          c.moves[0] = a; c.moves[1] = b; c.moves[2] = d; c.moves[3] = e;
+          uint16_t stat_used = 0, attack_used = 0;
+          creator_cost_of(c, stat_used, attack_used);
+          c.budget_used = attack_used;
+          if (validate_custom_species(c) == (uint8_t)VR_OK) return true;
+        }
+  return false;
+}
+
+static void mk_custom(CustomSpeciesRec& c, uint8_t slot, uint8_t seed)
+{
+  memset(&c, 0, sizeof c);
+  c.magic   = (uint16_t)CS_MAGIC;
+  c.version = (uint8_t)SAVE_SCHEMA_VERSION;
+  c.slot    = slot;
+  c.type    = (uint8_t)TYPE_SIGNAL;
+  c.base[0] = 6u; c.base[1] = 5u; c.base[2] = 5u; c.base[3] = 5u;   // 21
+  memcpy(c.name, "Bicho", 6);
+  c.compat_group = 0u;                       // a custom species does not breed
+  CHECK(cs_find_moves(c));
+
+  // A DRAWING NO ATLAS ROW COULD BE, and one whose two frames differ from each
+  // other: the frame index is folded into every byte, so "the renderer drew
+  // frame 0 twice" cannot pass as "the renderer drew the drawing".
+  for (uint8_t f = 0; f < (uint8_t)CS_SPRITE_FRAMES; ++f)
+    for (uint8_t i = 0; i < (uint8_t)CS_SPRITE_BYTES; ++i)
+      c.sprite[f][i] = (uint8_t)(0x55u ^ (uint8_t)(i * 7u + f * 33u + seed));
+}
+
+// The 24x24 box a HOME body stands in, read straight off the framebuffer and
+// packed back into XBM rows so it can be compared with the record byte for
+// byte. XBM is little-endian per row: bit 0 of a byte is its LEFTMOST pixel.
+static void read_body_box(const SpriteRef& r, uint8_t* out)
+{
+  const int bx = (int)sprite_center_x(r.w);
+  const int by = (int)HOME_FLOOR_Y - (int)r.h;
+  const int stride = (r.w + 7) / 8;
+  memset(out, 0, (size_t)stride * r.h);
+  for (int y = 0; y < (int)r.h; ++y)
+    for (int x = 0; x < (int)r.w; ++x)
+      if (fb_get(bx + x, by + y))
+        out[y * stride + (x >> 3)] |= (uint8_t)(1u << (x & 7));
+}
+
+TEST(a_creature_from_the_creator_wears_the_body_it_was_drawn_with) {
+  seams2_reset();
+  fixture_starter();
+  csp_reset();
+
+  CustomSpeciesRec c;
+  mk_custom(c, 0u, 0x11u);
+  CHECK(csp_install(c));
+
+  const uint8_t id = csp_species_id(0);
+  CHECK(id != 0u);
+  g_view.species_id = id;
+  g_view.stage      = (uint8_t)STAGE_ADULT;
+  g_view.pose       = (uint8_t)POSE_IDLE;
+
+  // The atlas body this id folds onto: the WRONG creature, and the one the
+  // device drew before this change. It has to still be there to be refused.
+  const SpriteRef atlas = sprite_lookup_pose(
+      g_view.stage,
+      sprite_form_of(pet_art_key(id, gene_species(g_view.genome)),
+                     (Stage)g_view.stage),
+      g_view.pose, 0u);
+  CHECK(atlas.bits != nullptr);
+
+  const SpriteRef r = pet_body_ref(id, gene_species(g_view.genome),
+                                   g_view.stage, g_view.pose, 0u);
+  CHECK_EQ((int)r.w, (int)CS_SPRITE_W);
+  CHECK_EQ((int)r.h, (int)CS_SPRITE_H);
+  CHECK(r.bits != atlas.bits);          // it is not the atlas row any more
+  CHECK_EQ(memcmp(r.bits, c.sprite[0], (size_t)CS_SPRITE_BYTES), 0);
+
+  // AND ON THE PANEL, which is the only claim that is about the device: the
+  // helper above is what screen_home.cpp calls, and this is what it painted.
+  fb_reset();
+  home_render();
+  CHECK_EQ(fb_oob(), 0u);
+  uint8_t seen[CS_SPRITE_BYTES];
+  read_body_box(r, seen);
+  CHECK_EQ(memcmp(seen, c.sprite[0], sizeof seen), 0);
+  CHECK(memcmp(seen, atlas.bits, sizeof seen) != 0);
+
+  csp_reset();
+}
+
+TEST(both_of_the_creators_frames_reach_home) {
+  seams2_reset();
+  fixture_starter();
+  csp_reset();
+
+  CustomSpeciesRec c;
+  mk_custom(c, 0u, 0x2Au);
+  CHECK(csp_install(c));
+  g_view.species_id = csp_species_id(0);
+
+  // The frame HOME draws is (ui_now_ms() / UI_ANIM_FRAME_MS) & 1, so the clock
+  // is what selects it - exactly as it does for an atlas body.
+  const uint32_t t0 = g_now;
+  uint8_t seen[2][CS_SPRITE_BYTES];
+  for (uint8_t f = 0; f < 2u; ++f) {
+    g_now = t0 + (uint32_t)f * UI_ANIM_FRAME_MS;
+    CHECK_EQ((int)((g_now / UI_ANIM_FRAME_MS) & 1u), (int)f);
+    const SpriteRef r = pet_body_ref(g_view.species_id,
+                                     gene_species(g_view.genome),
+                                     g_view.stage, g_view.pose, f);
+    fb_reset();
+    home_render();
+    read_body_box(r, seen[f]);
+    CHECK_EQ(memcmp(seen[f], c.sprite[f], sizeof seen[f]), 0);
+  }
+  // The record's two frames differ, so the panel's two have to as well: a
+  // renderer that ignored `frame` would pass every check above but this one.
+  CHECK(memcmp(seen[0], seen[1], sizeof seen[0]) != 0);
+  g_now = t0;
+  csp_reset();
+}
+
+TEST(a_roster_species_still_wears_the_atlas_body) {
+  // THE CONTROL. Sixty authored creatures must not have moved a pixel, and the
+  // registry must not answer for an id it was never given: csp_sprite() is
+  // keyed on the OCCUPIED MASK, so an empty slot inside the custom id range is
+  // as much "not custom" as species 3 is.
+  seams2_reset();
+  fixture_starter();
+  csp_reset();
+
+  for (uint8_t id = 1u; id <= 8u; ++id) {
+    const SpriteRef want = sprite_lookup_pose(
+        (uint8_t)STAGE_ADULT,
+        sprite_form_of(pet_art_key(id, gene_species(g_view.genome)),
+                       STAGE_ADULT),
+        (uint8_t)POSE_IDLE, 0u);
+    const SpriteRef got = pet_body_ref(id, gene_species(g_view.genome),
+                                       (uint8_t)STAGE_ADULT,
+                                       (uint8_t)POSE_IDLE, 0u);
+    CHECK(got.bits == want.bits);
+  }
+  for (uint8_t slot = 0; slot < (uint8_t)CREATOR_SPECIES_SLOTS; ++slot)
+    CHECK(csp_sprite(csp_species_id(slot), 0u) == nullptr);
+}
+
+TEST(an_egg_and_a_sick_pebble_are_never_the_players_drawing) {
+  // ui/pet_art.h names three poses it will not override and gives a reason for
+  // each. Two of them are decided HERE, and they are decided because a player
+  // reads "sick" off a shared silhouette and an egg off a shell: replacing
+  // either with a drawing takes a state the player needs and hides it.
+  seams2_reset();
+  fixture_starter();
+  csp_reset();
+
+  CustomSpeciesRec c;
+  mk_custom(c, 0u, 0x71u);
+  CHECK(csp_install(c));
+  const uint8_t id = csp_species_id(0);
+  const uint8_t gs = gene_species(g_view.genome);
+
+  const SpriteRef egg  = pet_body_ref(id, gs, (uint8_t)STAGE_EGG,
+                                      (uint8_t)POSE_IDLE, 0u);
+  const SpriteRef sick = pet_body_ref(id, gs, (uint8_t)STAGE_ADULT,
+                                      (uint8_t)POSE_SICK, 0u);
+  CHECK(egg.bits  != nullptr);
+  CHECK(sick.bits != nullptr);
+  CHECK(egg.bits  != c.sprite[0]);
+  CHECK(sick.bits != c.sprite[0]);
+  CHECK_EQ(memcmp(egg.bits,  c.sprite[0], (size_t)CS_SPRITE_BYTES) != 0, true);
+  CHECK_EQ(memcmp(sick.bits, c.sprite[0], (size_t)CS_SPRITE_BYTES) != 0, true);
+
+  // But IDLE at the same stage is the drawing, so the two above are a rule and
+  // not simply a renderer that never works.
+  const SpriteRef idle = pet_body_ref(id, gs, (uint8_t)STAGE_ADULT,
+                                      (uint8_t)POSE_IDLE, 0u);
+  CHECK_EQ(memcmp(idle.bits, c.sprite[0], (size_t)CS_SPRITE_BYTES), 0);
+  csp_reset();
+}
+
+TEST(two_drawn_pebbles_do_not_share_one_derived_sleeper) {
+  // THE CACHE KEY, and it is the bug this file caught while the fix was being
+  // written. screen_home.cpp derives the sleeping body from the idle one and
+  // caches it under (atlas set id, frame) - and TWO creator species fold onto
+  // the SAME atlas set id, because neither has a row of its own. Without the
+  // source frame in the key, the second custom Pebble to fall asleep wears the
+  // first one's face.
+  seams2_reset();
+  fixture_starter();
+  csp_reset();
+
+  CustomSpeciesRec a, b;
+  mk_custom(a, 0u, 0x03u);
+  mk_custom(b, 1u, 0xC0u);
+  CHECK(csp_install(a));
+  CHECK(csp_install(b));
+
+  g_view.stage = (uint8_t)STAGE_ADULT;
+  g_view.pose  = (uint8_t)POSE_SLEEP;
+
+  uint8_t seen[2][CS_SPRITE_BYTES];
+  for (uint8_t k = 0; k < 2u; ++k) {
+    g_view.species_id = csp_species_id(k);
+    const SpriteRef r = pet_body_ref(g_view.species_id,
+                                     gene_species(g_view.genome),
+                                     g_view.stage, (uint8_t)POSE_IDLE, 0u);
+    CHECK_EQ(memcmp(r.bits, (k == 0u ? a.sprite[0] : b.sprite[0]),
+                    (size_t)CS_SPRITE_BYTES), 0);
+    fb_reset();
+    home_render();
+    CHECK_EQ(fb_oob(), 0u);
+    read_body_box(r, seen[k]);
+  }
+  CHECK(memcmp(seen[0], seen[1], sizeof seen[0]) != 0);
+
+  // And each sleeper really is DERIVED from its own drawing rather than being
+  // it: pf_build_sleep() closes the eye band, so the frame on the panel differs
+  // from the idle frame it came from.
+  CHECK(memcmp(seen[0], a.sprite[0], sizeof seen[0]) != 0);
+  CHECK(memcmp(seen[1], b.sprite[0], sizeof seen[1]) != 0);
+  csp_reset();
 }
 
 TEST(every_species_draws_on_home_at_every_stage_and_pose_without_clipping) {

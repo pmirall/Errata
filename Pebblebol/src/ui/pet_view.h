@@ -70,6 +70,21 @@ struct PetView {
                               // ADULT / SENIOR, care-chosen at CHILD / TEEN
   uint8_t  pose;              // SpritePose the caller wants drawn
 
+  // ---- the body a CREATOR species brought with it --------------------------
+  // Frame 0 of the player's own 24x24 drawing, or nullptr for every species
+  // with an atlas row. Frame 1 follows it at +CS_SPRITE_BYTES, which is the
+  // layout data/sprites_pebbles.h already uses, so a consumer indexes both the
+  // same way it indexes the atlas.
+  //
+  // IT IS A POINTER IN THE VIEW AND NOT A LOOKUP IN THE RENDERER, and that is
+  // the whole reason this field exists rather than a csp_sprite() call inside
+  // ui/petfx.cpp: that module's own banner says "this module does not know what
+  // a species is and must not learn". It does not have to. It gets bits.
+  //
+  // The pixels live in game/species_custom.cpp for the life of the install, so
+  // this never points at a caller's stack.
+  const uint8_t* custom_bits;
+
   // ---- numbers a screen may show ------------------------------------------
   uint8_t  level;             // 1..30
   // NO hp_pct. It was written by pet_view_fill() alone and read by nothing at

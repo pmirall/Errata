@@ -11,6 +11,7 @@
 //
 //  Identifiers and comments: English.
 // =============================================================================
+#include "../game/species_custom.h"   // csp_sprite(): the creator body
 #include "pet_view.h"
 
 #include "../core/utf8.h"
@@ -160,8 +161,15 @@ void pet_view_fill_sim(PetView& out, const SimView& p, uint8_t pose) {
 // -----------------------------------------------------------------------------
 static void apply_species_design(PetView& out) {
   const Stage st = (Stage)out.stage;
+  out.custom_bits = nullptr;
   if (st == STAGE_EGG) return;
   out.form = pet_art_design(out.species_id, out.gene_species, st);
+  // THE CREATOR'S OWN PIXELS, ATTACHED WITH THE SPECIES AND AT THE SAME MOMENT.
+  // This is the ONE place a custom body enters the drawing pipeline: every
+  // renderer downstream reads the view, so none of them has to know that a
+  // creator species exists (ui/petfx.cpp's banner is explicit that it must not).
+  // nullptr for all sixty roster species, which is every other Pebble.
+  out.custom_bits = csp_sprite(out.species_id, 0u);
 }
 
 void pet_view_attach(PetView& out, const PebbleInstance* inst) {

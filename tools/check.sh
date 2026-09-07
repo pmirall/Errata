@@ -2530,4 +2530,56 @@ else
   [ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp never calls pet_view_attach() ($n) - see above"
 fi
 
+# --- AND A BODY THE PLAYER DREW IS STILL DRAWN (P10-C4b) --------------------
+# THE DEFECT THIS CLOSES WAS SHIPPED FOR TWO PHASES WITH THE SUITE GREEN.
+# csp_install() parked CustomSpeciesRec.sprite - 144 B the owner drew a pixel at
+# a time - behind `sprite_id = 0` and a comment promising a renderer "at
+# P8-C4/P9-C3". No renderer ever read it, no test could have noticed, and a
+# creature made in the creator walked onto HOME wearing species 1's body. It was
+# found on a board, by its owner, not by this tree.
+#
+# There are five links in that chain and FOUR OF THEM ARE NOW COVERED BY TESTS.
+# The fifth - ui/petfx.cpp - is compiled by no host binary at all, so this is
+# the one place anything can see it, which is the whole argument for the check
+# living here rather than only in tests/.
+n=$( strip_comments12 < "$SKETCH/src/game/species_custom.cpp" \
+       | { grep -cE '\bmemcpy[[:space:]]*\([[:space:]]*s_bits\[' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "game/species_custom.cpp no longer keeps the record's sprite ($n) - csp_install() would be back to storing 144 B of the player's drawing where nothing can reach it, which is exactly the state P10-C4b found"
+
+body=$( awk '/^inline SpriteRef pet_body_ref\(/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/ui/pet_art.h" | strip_comments12 )
+[ -n "$body" ] || fail "ui/pet_art.h has no pet_body_ref() body - it is the ONE lookup every body path goes through, and without it a creator species has no way to reach its own pixels"
+n=$( printf '%s\n' "$body" | { grep -cE '\bcsp_sprite[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "ui/pet_art.h's pet_body_ref() does not ask csp_sprite() ($n) - every custom Pebble would silently fall through to the atlas row its id folds onto, which is the pre-P10-C4b bug verbatim"
+
+body=$( awk '/^static void draw_static_body\(/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/ui/screen_home.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "ui/screen_home.cpp has no draw_static_body() body - it is HOME's still body path and the one a golden can see"
+n=$( printf '%s\n' "$body" | { grep -cE '\bpet_body_ref[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 2 ] || fail "ui/screen_home.cpp's draw_static_body() reaches pet_body_ref() fewer than twice ($n) - it has TWO body lookups, the ordinary one and the frame the sleeper is derived FROM, and covering only one of them is how P10-C3's sleeping body went wrong the first time"
+
+body=$( awk '/^static void apply_species_design\(/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/ui/pet_view.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "ui/pet_view.cpp has no apply_species_design() body - it is where a custom body enters the drawn view and the only place it can"
+n=$( printf '%s\n' "$body" | { grep -cE 'custom_bits[[:space:]]*=[[:space:]]*csp_sprite[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "ui/pet_view.cpp's apply_species_design() does not fill custom_bits from csp_sprite() ($n) - PetView.custom_bits would be null for every Pebble and ui/petfx.cpp, which takes the pointer and never asks the registry itself, would draw the atlas body on the device while every host golden stayed green"
+
+# ui/petfx.cpp: THE DEVICE-ONLY HALF. It includes render.h, so no host binary
+# compiles it; a test cannot reach these two lines and a golden cannot show them.
+n=$( strip_comments12 < "$SKETCH/src/ui/petfx.cpp" \
+       | { grep -cE 's_qry_custom[[:space:]]*=[[:space:]]*p\.custom_bits' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "ui/petfx.cpp never reads PetView.custom_bits ($n) - the ANIMATED body is the one the device actually draws on HOME, so a drawn Pebble would wear a stranger's face on hardware with the whole suite green"
+body=$( awk '/^static void pf_cache_sync\(/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/ui/petfx.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "ui/petfx.cpp has no pf_cache_sync() body - it is the cache the animated body is drawn out of"
+n=$( printf '%s\n' "$body" | { grep -cE 'custom[[:space:]]*==[[:space:]]*s_cache_cst|s_cache_cst[[:space:]]*==[[:space:]]*custom' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "ui/petfx.cpp's pf_cache_sync() no longer keys its cache on the custom body ($n) - two creator Pebbles resolve to the SAME set id (both fall back to sprite_id 0), so the second one drawn would keep the first one's face"
+
+body=$( awk '/^static void fill_art\(/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/ui/screen_battle.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "ui/screen_battle.cpp has no fill_art() body - it is what hands the field each combatant's art"
+n=$( printf '%s\n' "$body" | { grep -cE 'out\.body[[:space:]]*=[[:space:]]*csp_sprite[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "ui/screen_battle.cpp's fill_art() does not resolve the creator body ($n) - a drawn Pebble would change into somebody else the moment it entered a fight"
+
+
 echo "GATE OK"

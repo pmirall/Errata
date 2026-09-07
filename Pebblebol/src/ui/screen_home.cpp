@@ -102,21 +102,36 @@ static void draw_meters(const PebbleView& v) {
 // and a memset of this file's statics cannot look like a valid cache.
 static uint8_t  s_sleep_bits[PF_FRAME_BYTES];
 static uint16_t s_sleep_key = 0;
+// THE FOURTH KEY, and it is not optional. `set` is the ATLAS set id, which two
+// different creator Pebbles share - they have no atlas row of their own and both
+// fold onto the same one - so a (set, frame) key alone would derive one player's
+// sleeper and then hand it to the next custom creature that closed its eyes.
+// The source frame IS the identity here, so it is what the cache compares.
+// ui/petfx.cpp's own cache carries the same pointer for the same reason.
+static const uint8_t* s_sleep_src = nullptr;
 
 // Fill the cache for (set, frame) and answer 1 when there is a derived body to
 // draw. 0 means fall back to the authored PBSPR_SLEEP blob - a blank frame or a
 // set wider than the cache geometry, neither of which today's atlas contains.
-static uint8_t sleep_frame_of(uint8_t set, uint8_t frame) {
+// `body` is the frame the sleeper is DERIVED FROM, handed in rather than looked
+// up from `set`: a creator species has no atlas row, so a lookup here would put
+// species 1's silhouette under a custom Pebble the moment it fell asleep - the
+// same defect this whole change is about, one pose further along. `set` stays
+// as the CACHE KEY and as the source of the eye band, which is the only part a
+// custom body has no answer for.
+static uint8_t sleep_frame_of(uint8_t set, uint8_t frame, const SpriteRef& body) {
   const uint16_t key = (uint16_t)(((uint16_t)set << 1) | (frame & 1u)) + 1u;
-  if (key == s_sleep_key) return 1u;
+  if (key == s_sleep_key && body.bits == s_sleep_src) return 1u;
   const SpriteSet   s = sprite_set(set);
-  const SpriteRef   r = sprite_frame(set, frame);
+  const SpriteRef   r = body;
   const SpriteEyeBand b = sprite_eyes(set, (uint8_t)(frame < s.frames ? frame : 0u));
   if (pf_build_sleep(r.bits, r.w, r.h, b.y0, b.y1, b.x0, b.x1, s_sleep_bits) == 0u) {
     s_sleep_key = 0;
+    s_sleep_src = nullptr;
     return 0u;
   }
   s_sleep_key = key;
+  s_sleep_src = body.bits;
   return 1u;
 }
 
@@ -185,17 +200,21 @@ static void draw_static_body(const PebbleView& v, uint8_t frame) {
   // sites.
   if (v.stage != (uint8_t)STAGE_EGG && v.pose == (uint8_t)POSE_SLEEP) {
     const uint8_t set = sprite_set_id(v.stage, form, (uint8_t)POSE_IDLE);
-    const SpriteSet s = sprite_set(set);
-    if (sleep_frame_of(set, frame)) {
-      const int16_t x = (int16_t)sprite_center_x(s.w);
-      const int16_t y = (int16_t)(HOME_FLOOR_Y - s.h);
-      gfx_xbm(x, y, s.w, s.h, s_sleep_bits);
-      if (v.corrupted) draw_glitch(x, y, s_sleep_bits, s.w, s.h, v.genome.lineage_id);
+    // THE IDLE BODY, WHOEVER DREW IT - which for a creator species is the
+    // player's own 24x24 and not the atlas row it has no claim to.
+    const SpriteRef idle = pet_body_ref(v.species_id, gene_species(v.genome),
+                                        v.stage, (uint8_t)POSE_IDLE, frame);
+    if (sleep_frame_of(set, frame, idle)) {
+      const int16_t x = (int16_t)sprite_center_x(idle.w);
+      const int16_t y = (int16_t)(HOME_FLOOR_Y - idle.h);
+      gfx_xbm(x, y, idle.w, idle.h, s_sleep_bits);
+      if (v.corrupted) draw_glitch(x, y, s_sleep_bits, idle.w, idle.h, v.genome.lineage_id);
       return;
     }
   }
 
-  const SpriteRef r  = sprite_lookup_pose(v.stage, form, v.pose, frame);
+  const SpriteRef r  = pet_body_ref(v.species_id, gene_species(v.genome),
+                                    v.stage, v.pose, frame);
   if (!r.bits || r.w == 0 || r.h == 0) return;
   const int16_t x = (int16_t)sprite_center_x(r.w);
   const int16_t y = (int16_t)(HOME_FLOOR_Y - r.h);

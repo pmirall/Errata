@@ -115,6 +115,12 @@ struct BattleCombatantArt {
   uint8_t     fainted;   // 1 = draw the body dissolved rather than solid
   uint8_t     struck;    // 1 = overprint the body this frame (the impact)
   uint8_t     guard;     // 1 = this combatant is protecting: draw the barrier
+  // THE CREATOR'S PIXELS, ALREADY CHOSEN FOR THIS FRAME, or NULL for the atlas
+  // body `art_key` names - which is every roster species. A creature the player
+  // DREW carries its own 24x24 and has no claim on an atlas row, so the caller
+  // resolves the bits and hands them over; this file stays a renderer and never
+  // learns that a creator exists. See ui/pet_art.h for the same rule on HOME.
+  const uint8_t* body;
 };
 
 // The whole field: both bodies, both panels, both pip tracks, and `message`
@@ -125,8 +131,12 @@ void br_draw_field(const BattleCombatantArt& foe, const BattleCombatantArt& you,
 // One body, exposed so the INTRO can draw a bench line-up and so a test can
 // assert the flip without going through a whole field.
 // `face_left` mirrors the frame through ui/xbm_mirror.h.
+// `body`, when non-NULL, is drawn INSTEAD of the atlas body: BR_BODY_W x
+// BR_BODY_H bytes for the frame the caller already picked, so the two-frame
+// phase is the caller's to choose exactly as the frame number is.
 void br_draw_body(int16_t x, int16_t y, uint8_t art_key, uint8_t frame,
-                  bool face_left, bool fainted, bool struck, bool guard);
+                  bool face_left, bool fainted, bool struck, bool guard,
+                  const uint8_t* body = nullptr);
 
 // The atlas set id `art_key` resolves to at BATTLE size. Exposed for the tests:
 // asserting that two species draw two different bodies needs the id, not the

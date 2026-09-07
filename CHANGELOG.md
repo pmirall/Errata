@@ -29,6 +29,92 @@ carries the developer console and ships to nobody. A number quoted without its
 variant is not a number — `docs/budget.md` §8 records a phase exit that compared
 one with the other.
 
+## [Unreleased] — the creature you drew, 2026-09-07
+
+**The owner made a Pebble in the creator, and the device drew somebody else's
+body on it.** It appeared in the Box under its own name, so the record was
+there; it walked onto HOME wearing species 1.
+
+### Fixed — the 144 bytes the player drew were read by nothing
+
+- **`csp_install()` set `sprite_id = 0` under a comment promising the renderer
+  would learn to read `CustomSpeciesRec.sprite` "at P8-C4/P9-C3".** It never
+  did. A grep for a reader of that field across the whole tree found none: the
+  pixels were parsed, validated, CRC-covered, written to flash, migrated,
+  served back to the phone — and drawn by nothing. Two phases of pipeline
+  ending in a `0`.
+- **`csp_sprite(species_id, frame)`** is the reader. `game/species_custom.cpp`
+  keeps the frames beside the projected stats (1,440 B of globals: 10 slots ×
+  2 frames × 72 B), because a pointer into the caller's `CustomSpeciesRec` is a
+  pointer into a stack frame that is gone by the time anything draws. It is
+  keyed on the OCCUPIED MASK and not on the bytes — an all-blank drawing is a
+  legal drawing, and answering `nullptr` for one would hand that player species
+  1's body instead of the empty creature they actually made.
+- **`pet_body_ref()` in `ui/pet_art.h`** is the one lookup every body path now
+  goes through. The geometry needed no conversion: `CS_SPRITE_W/H` are 24×24
+  and `CS_SPRITE_FRAMES` is 2, byte for byte every body in
+  `data/sprites_pebbles.h`.
+- **Three poses are deliberately NOT overridden.** An EGG is an egg — nobody's
+  drawing shows through a shell. A SICK body stays the shared one, because that
+  silhouette is HOW a player reads "sick" and a custom body there would hide a
+  state they need. SLEEP is derived rather than looked up, so it already wears
+  the drawing without a branch.
+- **Four draw sites, not one.** HOME's still body, `ui/petfx.cpp`'s animated
+  cache, HOME's derived sleeper, and the battle field. The BOX card draws no
+  body at all, which is why the creature was visible there the whole time and
+  is why the report read the way it did. The encounter screen is deliberately
+  untouched: a custom species has `spawn_weight = 0` and never appears wild.
+
+### Fixed — two drawn Pebbles shared one cached face
+
+- **Both body caches were keyed on the ATLAS set id**, and every creator species
+  folds onto the same one — they have no row of their own. `ui/screen_home.cpp`'s
+  derived sleeper and `ui/petfx.cpp`'s mirrored-body cache would each have handed
+  the second custom Pebble the first one's silhouette. Both now carry the source
+  frame's pointer as a fourth key. Found while writing the fix, not after it.
+- **`petfx_draw_body()` left `s_qry_custom` stale on an EGG.** The assignment was
+  inside the else-arm, so an egg kept whichever creator body the last Pebble
+  drawn had brought — straight into the cache key and its first pass. It is
+  written before the branch now.
+- **`petfx_pose_ink_x()` scans the ATLAS**, which for a creator species holds a
+  row that creature never wore, so it answered where the food bowl goes from a
+  silhouette nobody has seen. A drawn body takes the live-ink-box fallback that
+  was already there for the egg case.
+
+### Coverage — the registry was linked by no screen binary
+
+- **`species_custom.o` was in no screen link line, and the link error is the
+  finding.** `test_screens`, `test_battle_screen`, `test_link_screen` and
+  `test_pet_view` all now link the real registry; before this they could not
+  have drawn a custom body if the code had existed. That is exactly how 144
+  bytes sat unread for two phases with the suite green.
+- **Eight cases, and each one was mutation-proven.** Disabling the lookup in
+  `pet_body_ref()` kills four by name; dropping the sleeper's fourth key kills
+  one; deriving the sleeper from the atlas kills one; ignoring the frame index
+  in `csp_sprite()` kills one; dropping `out.body` in `fill_art()` and ignoring
+  the brought body in `br_draw_body()` kill the two battle cases; and nulling
+  `PetView.custom_bits` kills the one in `tests/test_pet_view.cpp` — which is
+  the only host case that can reach the pointer `ui/petfx.cpp` draws the DEVICE's
+  animated body out of, since that file is compiled by no host binary at all.
+- **The field case asserts a DIFFERENCE, not a rectangle.** Its first draft
+  compared the player's body box against the record byte for byte and failed on
+  39 pixels — and on 12 of the ATLAS foe's, which is what proved the fault was
+  the field's composition (the foe's name plate is drawn over the top of the
+  player's body) and not the change under test. Carving that band out by hand
+  would have baked an observed failure into a constant, so the field is rendered
+  twice with two different drawings and the pixels that MOVE are the assertion.
+  Under the old renderer nothing moves and it fails on its first check.
+
+### Gated
+
+- **`tools/check.sh` gains seven greps** over the five links in the chain, and
+  they are mutation-proven too. Six of them duplicate something a test already
+  holds. The seventh does not and cannot: `ui/petfx.cpp` includes `render.h`, so
+  no host binary compiles it, and its two lines are the ones that decide what the
+  DEVICE draws on HOME.
+
+---
+
 ## [Unreleased] — playable in three minutes, 2026-09-07
 
 Three changes the owner asked for after the first hardware session: two about

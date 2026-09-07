@@ -50,6 +50,9 @@
 #include "ui/pet_art.h"
 #include "core/utf8.h"
 #include "ui/pet_view.h"
+#include "data/attacks_table.h"    // ATTACK_COUNT: the move-set search walks it
+#include "game/species_custom.h"   // the registry a drawn body comes out of
+#include "game/validate.h"         // creator_cost_of / validate_custom_species
 
 // The identity is the Pebble's own, not the genome's: two Pebbles of the SAME
 // species with the SAME genome must still move differently, and the same one
@@ -661,4 +664,95 @@ TEST(every_rule_changes_the_body_at_the_level_it_actually_fires_at) {
   printf("  %d of %d rules change the drawn body at the level they fire at; "
          "%d of them fire below ADULT\n",
          body_too, (int)n, reaches_the_body_at_adult);
+}
+
+
+// =============================================================================
+//  THE CREATOR'S BODY ENTERS THE VIEW HERE, AND NOWHERE ELSE (P10-C4b)
+//
+//  ui/petfx.cpp draws the ANIMATED body on HOME - the one the device actually
+//  shows - and its banner forbids it from knowing what a species is. So it does
+//  not ask the registry; it reads PetView.custom_bits, which apply_species_
+//  design() fills. That single assignment is the whole device path: null it and
+//  a drawn Pebble wears the atlas body on hardware while every golden in the
+//  suite, which goes through the STILL path, stays green.
+//
+//  ui/petfx.cpp is compiled by no host binary, so this case cannot reach the
+//  drawing. What it CAN do is hold the pointer that gets handed to it.
+// =============================================================================
+static void mk_custom_view_rec(CustomSpeciesRec& c, uint8_t slot, uint8_t seed)
+{
+  memset(&c, 0, sizeof c);
+  c.magic   = (uint16_t)CS_MAGIC;
+  c.version = (uint8_t)SAVE_SCHEMA_VERSION;
+  c.slot    = slot;
+  c.type    = (uint8_t)TYPE_SIGNAL;
+  c.base[0] = 6u; c.base[1] = 5u; c.base[2] = 5u; c.base[3] = 5u;
+  memcpy(c.name, "Bicho", 6);
+  bool legal = false;
+  for (uint8_t a = 1u; a <= (uint8_t)ATTACK_COUNT && !legal; ++a)
+    for (uint8_t b = (uint8_t)(a + 1u); b <= (uint8_t)ATTACK_COUNT && !legal; ++b)
+      for (uint8_t d = (uint8_t)(b + 1u); d <= (uint8_t)ATTACK_COUNT && !legal; ++d)
+        for (uint8_t e = (uint8_t)(d + 1u); e <= (uint8_t)ATTACK_COUNT && !legal; ++e) {
+          c.moves[0] = a; c.moves[1] = b; c.moves[2] = d; c.moves[3] = e;
+          uint16_t su = 0, au = 0;
+          creator_cost_of(c, su, au);
+          c.budget_used = au;
+          legal = (validate_custom_species(c) == (uint8_t)VR_OK);
+        }
+  CHECK(legal);
+  for (uint8_t f = 0; f < (uint8_t)CS_SPRITE_FRAMES; ++f)
+    for (uint8_t i = 0; i < (uint8_t)CS_SPRITE_BYTES; ++i)
+      c.sprite[f][i] = (uint8_t)(0x55u ^ (uint8_t)(i * 7u + f * 33u + seed));
+}
+
+TEST(the_drawn_view_carries_the_creators_own_pixels) {
+  csp_reset();
+  CustomSpeciesRec c;
+  mk_custom_view_rec(c, 0u, 0x4Du);
+  CHECK(csp_install(c));
+  const uint8_t id = csp_species_id(0);
+  CHECK(id != 0u);
+
+  PebbleInstance p;
+  memset(&p, 0, sizeof p);
+  p.species_id = id;
+  p.level      = 5u;
+
+  PetView v;
+  memset(&v, 0, sizeof v);
+  v.stage      = (uint8_t)STAGE_ADULT;
+  v.species_id = id;
+  pet_view_attach(v, &p);
+  CHECK(v.custom_bits != nullptr);
+  CHECK_EQ(memcmp(v.custom_bits, c.sprite[0], (size_t)CS_SPRITE_BYTES), 0);
+  // FRAME 1 FOLLOWS FRAME 0 IN MEMORY, which is the layout ui/pet_view.h
+  // promises and the one ui/petfx.cpp indexes by. A registry that stored the
+  // two frames apart would satisfy every check above and break the animation.
+  CHECK_EQ(memcmp(v.custom_bits + CS_SPRITE_BYTES, c.sprite[1],
+                  (size_t)CS_SPRITE_BYTES), 0);
+
+  // AND A ROSTER SPECIES CARRIES NOTHING, so the field is a statement about
+  // creator Pebbles and not a pointer everybody now has.
+  PebbleInstance r;
+  memset(&r, 0, sizeof r);
+  r.species_id = 3u;
+  r.level      = 5u;
+  PetView rv;
+  memset(&rv, 0, sizeof rv);
+  rv.stage      = (uint8_t)STAGE_ADULT;
+  rv.species_id = 3u;
+  pet_view_attach(rv, &r);
+  CHECK(rv.custom_bits == nullptr);
+
+  // An EGG never wears anybody's drawing (ui/pet_art.h says why), and the view
+  // is where that starts: petfx reads this field before it looks at the stage.
+  PetView ev;
+  memset(&ev, 0, sizeof ev);
+  ev.stage      = (uint8_t)STAGE_EGG;
+  ev.species_id = id;
+  pet_view_attach(ev, &p);
+  CHECK(ev.custom_bits == nullptr);
+
+  csp_reset();
 }

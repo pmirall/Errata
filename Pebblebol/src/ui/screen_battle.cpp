@@ -1064,7 +1064,24 @@ static uint8_t hp_pct(uint16_t cur, uint16_t max) {
   return (uint8_t)(((uint32_t)cur * 100u) / (uint32_t)max);
 }
 
-static void fill_art(BattleCombatantArt& out, uint8_t side, bool at_beat) {
+// THE CREATOR'S CREATURE FIGHTS IN ITS OWN BODY (P10-C4b).
+//
+// `frame` is here for one reason and it is the whole reason this parameter
+// exists: a drawn body has TWO frames like every atlas body, and the phase is
+// picked by the field's clock (body_frame()), not by the registry. Everything
+// else in this struct is frame-independent, which is why the parameter is
+// defaulted - battle_screen_guard() below asks for the ward and not for pixels.
+//
+// A roster species answers nullptr and falls straight through to the atlas, so
+// this costs one table lookup per side per frame and changes nothing for the
+// sixty authored creatures.
+static_assert(CS_SPRITE_W == BR_BODY_W && CS_SPRITE_H == BR_BODY_H,
+              "a creator body has to be exactly the body the field can hold");
+static_assert(CS_SPRITE_FRAMES == 2,
+              "body_frame() picks between two frames and nothing else");
+
+static void fill_art(BattleCombatantArt& out, uint8_t side, bool at_beat,
+                     uint8_t frame = 0u) {
   memset(&out, 0, sizeof out);
   const uint8_t slot = s_st.side[side].active;
   const BattleCombatant* c = battle_combatant(s_st, side, slot);
@@ -1073,6 +1090,7 @@ static void fill_art(BattleCombatantArt& out, uint8_t side, bool at_beat) {
   out.alive = battle_alive_count(s_st, side);
   if (c == nullptr) return;
   out.art_key = (slot < (uint8_t)BATTLE_TEAM_MAX) ? s_art[side][slot] : 0u;
+  out.body    = csp_sprite(c->species_id, (uint8_t)(frame & 1u));
   out.level   = c->level;
   const uint16_t hp = at_beat ? hp_at_beat(side, slot) : c->hp_cur;
   out.hp_pct  = hp_pct(hp, c->hp_max);
@@ -1102,10 +1120,14 @@ static uint8_t body_frame(void) {
 }
 
 static void draw_field(bool at_beat, const char* message) {
+  // ONE frame number for the whole field: the two bodies breathe together, and
+  // the phase the art is resolved AT has to be the phase it is drawn AT or a
+  // creator body would animate against its own name plate.
+  const uint8_t frame = body_frame();
   BattleCombatantArt foe, you;
-  fill_art(foe, s_foe(), at_beat);
-  fill_art(you, s_me, at_beat);
-  br_draw_field(foe, you, body_frame(), message);
+  fill_art(foe, s_foe(), at_beat, frame);
+  fill_art(you, s_me, at_beat, frame);
+  br_draw_field(foe, you, frame, message);
 }
 
 // "RONDA n" over "<your HP>|<foe HP>". Both numbers ride in the header tag

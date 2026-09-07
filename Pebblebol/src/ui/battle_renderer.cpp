@@ -93,8 +93,16 @@ static void draw_guard(int16_t x, int16_t y, int16_t w, int16_t h, bool face_lef
 }
 
 void br_draw_body(int16_t x, int16_t y, uint8_t art_key, uint8_t frame,
-                  bool face_left, bool fainted, bool struck, bool guard) {
-  const SpriteRef r = sprite_frame(br_body_set_id(art_key), frame);
+                  bool face_left, bool fainted, bool struck, bool guard,
+                  const uint8_t* body) {
+  // A BODY THE CALLER BROUGHT WINS OVER THE ATLAS, and it goes through the very
+  // same SpriteRef: the mirror, the dissolve, the impact and the contact shadow
+  // are then one code path for both kinds of creature rather than two that have
+  // to be kept agreeing. The size is this file's to assert, not the caller's to
+  // promise - the frame it hands over is BR_BODY_W x BR_BODY_H because that is
+  // the only body this field can hold.
+  SpriteRef r = { body, (uint8_t)BR_BODY_W, (uint8_t)BR_BODY_H };
+  if (body == nullptr) r = sprite_frame(br_body_set_id(art_key), frame);
   if (r.bits == nullptr || r.w != BR_BODY_W || r.h != BR_BODY_H) return;
 
   const uint8_t* bits = r.bits;
@@ -161,9 +169,11 @@ void br_draw_field(const BattleCombatantArt& foe, const BattleCombatantArt& you,
   // The foe faces LEFT (mirrored) and the player faces RIGHT, so the two look
   // at each other whatever the art was drawn facing.
   br_draw_body(BR_FOE_BODY_X, BR_FOE_BODY_Y, foe.art_key, frame,
-               true, foe.fainted != 0u, foe.struck != 0u, foe.guard != 0u);
+               true, foe.fainted != 0u, foe.struck != 0u, foe.guard != 0u,
+               foe.body);
   br_draw_body(BR_YOU_BODY_X, BR_YOU_BODY_Y, you.art_key, frame,
-               false, you.fainted != 0u, you.struck != 0u, you.guard != 0u);
+               false, you.fainted != 0u, you.struck != 0u, you.guard != 0u,
+               you.body);
 
   draw_panel(BR_FOE_PANEL_X, BR_FOE_PANEL_Y, foe);
   draw_panel(BR_YOU_PANEL_X, BR_YOU_PANEL_Y, you);

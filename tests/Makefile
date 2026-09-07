@@ -649,6 +649,7 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/encounters.o $(OBJ)/capture.o \
                $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/species.o \
                $(OBJ)/validate.o $(OBJ)/evolution.o $(OBJ)/xp.o \
+               $(OBJ)/species_custom.o \
                $(OBJ)/dialog.o $(OBJ)/qr.o $(OBJ)/box.o \
                $(OBJ)/anim_ease.o \
                $(OBJ)/anim_ease.o \
@@ -741,6 +742,7 @@ $(BIN)/test_link_screen: $(OBJ)/screen_link.o $(OBJ)/screen_battle.o \
                         $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
                         $(OBJ)/validate.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
                         $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/species_custom.o \
                         $(OBJ)/cooldowns.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/activity.o \
                         $(OBJ)/inventory.o $(OBJ)/corruption.o \
@@ -755,6 +757,12 @@ $(BIN)/test_link_screen: $(OBJ)/screen_link.o $(OBJ)/screen_battle.o \
 # and because the mirror case reads pixels back.
 # inventory.o + its two consumers since P5-C4: the battle screen takes the armed
 # BATTLE_MOD from it, which is where a capture-menu item finally reaches a fight.
+#
+# P10-C4b added species_custom.o + validate.o, and the link error that forced it
+# is the finding: ui/screen_battle.cpp now asks the creator registry for the
+# body a drawn Pebble fights in, and until this line existed NO screen binary
+# linked that registry at all - which is exactly how 144 bytes of the player's
+# own drawing sat unread in a record for two phases with the suite green.
 $(BIN)/test_battle_screen: $(OBJ)/screen_battle.o $(OBJ)/battle_renderer.o \
                         $(OBJ)/audio.o \
                         $(OBJ)/xbm_mirror.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
@@ -762,6 +770,7 @@ $(BIN)/test_battle_screen: $(OBJ)/screen_battle.o $(OBJ)/battle_renderer.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o \
                         $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/xp.o \
                         $(OBJ)/evolution.o $(OBJ)/species.o \
+                        $(OBJ)/species_custom.o $(OBJ)/validate.o \
                         $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o
 
 # P10-C2: THE PERFORMANCE INSTRUMENT'S ARITHMETIC. ONE OBJECT AND NO OTHERS,
@@ -825,8 +834,13 @@ $(BIN)/test_statemachine: $(SCREEN_OBJS) $(OBJ)/state_machine.o \
 # ui.cpp:201-203 calls. (Until P4-C4a they drove pet_view_fill(), a function no
 # firmware file called; that function is deleted and this comment no longer
 # has to explain why the case proved only the model half.)
+# species_custom.o + validate.o + species.o since P10-C4b: PetView carries the
+# creator's own 24x24 now (PetView.custom_bits), so the projection asks the
+# registry whether this species has one. A roster species answers nullptr.
 $(BIN)/test_pet_view:   $(OBJ)/pet_view.o $(OBJ)/sim.o $(OBJ)/daylight.o \
                         $(OBJ)/box.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
+                        $(OBJ)/species_custom.o $(OBJ)/validate.o \
+                        $(OBJ)/species.o $(OBJ)/pebble.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o
 
 $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)
