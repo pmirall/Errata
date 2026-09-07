@@ -266,6 +266,7 @@ static uint8_t       g_cal     = (uint8_t)CAL_USER;
 static uint32_t      g_dev     = 0x0BADC0DEu;
 static uint32_t      g_roll    = 0;
 static int           g_saves   = 0;   // ui_explore_commit() calls
+static uint8_t       g_save_slot = 0xFFu;  // and the slot it was told about
 static uint16_t      g_xp_amt  = 0;
 static uint8_t       g_xp_src  = 0xFF;
 static CooldownTable g_cds;
@@ -298,7 +299,7 @@ uint32_t ui_device_seed(void)     { return g_dev; }
 uint32_t ui_explore_roll(void)    { return g_roll; }
 CooldownTable& ui_cooldowns(void) { return g_cds; }
 Inventory&     ui_inventory(void) { return g_inv; }
-void ui_explore_commit(void)      { g_saves++; }
+void ui_explore_commit(uint8_t s) { g_saves++; g_save_slot = s; }
 Genome ui_fresh_genome(void) {
   Genome g;
   memset(&g, 0, sizeof g);
@@ -3525,6 +3526,60 @@ TEST(snapshot_encounter_item_settled) {
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
   snapshot(SCR_ENCOUNTER, "encounter_item");
   encounter_leave();
+}
+
+// =============================================================================
+//  THE CALL SITE THE HOST COULD NOT SEE UNTIL NOW.
+//
+//  tests/test_box_persist.cpp proves the PERSISTENCE half - that a slot other
+//  than the active one only reaches flash through gs_save_slot(). This case is
+//  the other half: that ui/screen_encounter.cpp actually TELLS the seam which
+//  slot it filled. Neither half alone would have caught the defect, because the
+//  defect was a call site that named no slot at all while the header it wrote
+//  claimed one, and ui.cpp is compiled by no host binary.
+//
+//  The assertion is on the SLOT and not on the call count: g_saves was already
+//  non-zero on this path before the fix.
+// =============================================================================
+TEST(a_catch_tells_the_commit_which_slot_it_filled) {
+  seams2_reset();
+  explore_reset();
+  memset(&g_gs, 0, sizeof g_gs);
+  box_bind(g_gs);
+
+  // A PEBBLE IN SLOT 0 FIRST, AND THAT IS THE WHOLE POINT OF THE FIXTURE.
+  // caught_fixture() catches into an EMPTY Box, so the catch lands in slot 0,
+  // which is also box_active() - the ONE case the broken commit handled. The
+  // defect only appears from the SECOND creature onward.
+  Genome gen; memset(&gen, 0, sizeof gen);
+  gen = genome_genesis();
+  const uint8_t starter = box_new_pebble(1u, 5u, (uint8_t)ORIGIN_STARTER,
+                                         gen, 0xC0FFEEu, 1700300000u);
+  CHECK_EQ((int)starter, 0);
+  CHECK(box_set_active(starter));
+
+  EncounterResult r;
+  memset(&r, 0, sizeof r);
+  r.outcome = (uint8_t)ENC_OUT_WILD; r.species_id = 1; r.level = 1;
+  encounter_arm(r, (uint8_t)NET_CAT_HOME);
+  inv_add(g_inv, 5u, 3u);
+  g_roll = 0x1000u;
+  g_dev  = 0xABCD0000u;
+  capture_enter();
+
+  const uint8_t before = box_count();
+  capture_input((Gesture)GST_HOLD_L);                 // throw
+  CHECK_EQ(capture_screen_outcome(), (uint8_t)CAP_CAUGHT);
+  CHECK_EQ((int)box_count(), (int)(before + 1u));
+  CHECK(g_saves > 0);
+  // THE ASSERTION THAT WOULD HAVE FAILED BEFORE THE FIX: the commit was told
+  // BOX_SLOT_NONE, so the creature in slot 1 never reached flash while the Box
+  // header written by the same commit already claimed it.
+  CHECK(g_save_slot < (uint8_t)BOX_SLOTS);
+  CHECK(g_save_slot != box_active());
+  CHECK_EQ((int)g_save_slot, 1);                      // first_free() past the starter
+  CHECK(box_occupied(g_save_slot));
+  capture_leave();
 }
 
 // THE CATCH, MID-DISSOLVE: the creature coming apart upward between four

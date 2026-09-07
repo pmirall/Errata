@@ -586,6 +586,23 @@ $(BIN)/test_game_state: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migrati
                         $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o \
                         $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/species_custom.o
+
+# THE FIRST BINARY IN THIS PROJECT THAT LINKS game/box.cpp AND
+# persistence/game_state.cpp TOGETHER. box.h says "the Box does no I/O of its
+# own - persistence decides when a mutated slot reaches flash", and until the
+# final review nothing held either half of that to account: test_box proved the
+# RAM mutation and test_game_state proved the flash round trip, with the seam
+# between them - "does the creature I just caught survive a power cut" -
+# untested. It was not a hypothetical gap: a capture landed in first_free() and
+# was committed with gs_save_active(), which writes the ACTIVE slot only.
+# capture.o and encounters.o come along so the case can drive the real
+# cap_attempt() rather than a hand-rolled stand-in.
+$(BIN)/test_box_persist: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
+                        $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o \
+                        $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/species_custom.o \
+                        $(OBJ)/box.o $(OBJ)/capture.o $(OBJ)/encounters.o \
+                        $(OBJ)/species.o $(OBJ)/corruption.o $(OBJ)/activity.o
 # The screen table's migrated rows are pure translation units, so they compile
 # here exactly as they do in the firmware; gfx_fb.o is the host end of gfx.h
 # and gfx_widgets.o is the SHARED half of it, linked into both.

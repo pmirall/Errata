@@ -372,7 +372,7 @@ void encounter_enter(void)
     // reward that a stray BACK can lose is a reward the player will not trust.
     const uint8_t added = inv_add(ui_inventory(), s_enc.item_id, 1u);
     if (added == 0u) ui_toast(STR_ENC_BAG_FULL);
-    ui_explore_commit();
+    ui_explore_commit((uint8_t)BOX_SLOT_NONE);   // the bag moved, no slot did
     s_applied = 1u;
     // THE FILM IS ARMED ONLY ON A DROP THAT LANDED. A full bag already raises a
     // toast and adds nothing; playing the pickup over it would be the screen
@@ -395,7 +395,7 @@ void encounter_enter(void)
       // not stick, and the player is told rather than left guessing.
       if (p == nullptr || !cor_apply(*p, now_epoch, cal)) ui_toast(STR_ENC_NO_CLOCK);
     }
-    ui_explore_commit();
+    ui_explore_commit((uint8_t)BOX_SLOT_NONE);   // corruption is on the ACTIVE Pebble
     s_applied = 1u;
   }
 }
@@ -525,7 +525,12 @@ static void throw_once(void)
     ui_award_xp(XP_CAPTURE, (uint8_t)XP_SRC_CAPTURE);
     enc_film_begin(ENC_F_CAP);             // only a catch gets the film
   }
-  ui_explore_commit();
+  // THE SLOT THE CATCH LANDED IN, WHICH IS NOT THE ACTIVE ONE UNLESS THE BOX WAS
+  // EMPTY. cap_attempt() files through box_new_pebble() -> first_free(), and
+  // CaptureReport.slot has carried the answer since P5-C3 - nothing read it.
+  // Without this the creature lived in RAM until the next brown-out while the
+  // Box HEADER, written by the same commit, claimed the slot was occupied.
+  ui_explore_commit(caught ? rep.slot : (uint8_t)BOX_SLOT_NONE);
 }
 
 void capture_input(Gesture g)

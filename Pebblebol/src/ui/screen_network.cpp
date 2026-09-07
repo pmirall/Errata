@@ -144,7 +144,7 @@ static void hand_off(uint32_t now_epoch, uint32_t now_ms, uint8_t cal)
     // until something turns up the optimal play, which is the farm section 21
     // exists to close.
     (void)cd_arm(ui_cooldowns(), r.net_hash, clk);
-    ui_explore_commit();
+    ui_explore_commit((uint8_t)BOX_SLOT_NONE);
 
     if (enc.outcome == (uint8_t)ENC_OUT_NOTHING) {
       s_phase = (uint8_t)NSP_EMPTY;

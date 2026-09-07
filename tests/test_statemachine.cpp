@@ -152,7 +152,7 @@ uint32_t ui_device_seed(void)     { return 0x0BADC0DEu; }
 uint32_t ui_explore_roll(void)    { return 0u; }
 CooldownTable& ui_cooldowns(void) { return g_sm_cds; }
 Inventory&     ui_inventory(void) { return g_sm_inv; }
-void ui_explore_commit(void)      { }
+void ui_explore_commit(uint8_t)   { }
 Genome ui_fresh_genome(void)      { Genome g; memset(&g, 0, sizeof g); return g; }
 void ui_award_xp(uint16_t, uint8_t) { }
 PebbleInstance* ui_active_pebble(void) { return nullptr; }

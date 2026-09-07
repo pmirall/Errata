@@ -486,7 +486,7 @@ void link_update(uint32_t now_ms) {
     // is a property of the peer table, so it lives with the table
     // (networking/discovery.h). This is the screen that finally drives it.
     link_service(s_job, ui_link_driver(), self, ms, ui_cooldowns(), aclk);
-    if (s_job.peers_scored != scored_before) ui_explore_commit();
+    if (s_job.peers_scored != scored_before) ui_explore_commit((uint8_t)BOX_SLOT_NONE);
 
     ui_request_frame();     // the signal bars and the peer count move
 

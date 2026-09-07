@@ -2214,7 +2214,7 @@ uint32_t ui_explore_roll(void) { return rng_u32(RNG_ENCOUNTER); }
 CooldownTable& ui_cooldowns(void) { return gs_state().cds; }
 Inventory&     ui_inventory(void) { return gs_state().inv; }
 
-void ui_explore_commit(void)
+void ui_explore_commit(uint8_t mutated_slot)
 {
   GameState& gs = gs_state();
   // cd_take_dirty() rather than "save after cd_arm": cd_ready() can dirty the
@@ -2231,6 +2231,14 @@ void ui_explore_commit(void)
   if (cd_dirty || act_dirty) (void)save_cooldowns(gs.cds);
   (void)save_inventory(gs.inv);
   if (pet()) gs_save_active(true);
+  // THE SLOT THE CALLER MUTATED, when it is not the one gs_save_active() just
+  // wrote. Guarded against equality rather than left to the save manager: two
+  // writes of ONE key inside SAVE_MIN_GAP_MS are DEFERRED and still return true
+  // (persistence/save_manager.h, the P7 trade defect), so a second write of the
+  // active slot here would be a lie rather than a waste.
+  if (mutated_slot < (uint8_t)BOX_SLOTS && mutated_slot != box_active()) {
+    (void)gs_save_slot(mutated_slot, true);
+  }
 }
 
 Genome ui_fresh_genome(void) { return genome_genesis(); }

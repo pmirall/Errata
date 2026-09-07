@@ -139,7 +139,7 @@ void ui_explore_clock(uint32_t* e, uint32_t* ms, uint8_t* cal) {
 }
 uint32_t ui_device_seed(void)     { return g_dev_id; }
 CooldownTable& ui_cooldowns(void) { return g_cds; }
-void ui_explore_commit(void)      { ++g_commits; }
+void ui_explore_commit(uint8_t)   { ++g_commits; }
 // The spinner request. The screen asks for one more frame while it is
 // browsing; there is no frame scheduler here to ask.
 void ui_request_frame(void)       {}

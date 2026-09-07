@@ -535,9 +535,23 @@ uint32_t ui_explore_roll(void);
 // cooldown table, a changed bag or a changed Pebble on flash, and it polls
 // cd_take_dirty() rather than saving after every arm (game/cooldowns.h says
 // why: cd_ready() can dirty the table too).
+//
+// THE SLOT ARGUMENT EXISTS BECAUSE THE SENTENCE ABOVE WAS WIDER THAN THE TREE.
+// It said "a changed Pebble" and the body wrote gs_save_active(), which commits
+// THE ACTIVE SLOT AND NOTHING ELSE. A capture is filed by box_new_pebble() into
+// first_free(), which is the active slot only when the Box was empty - so the
+// FIRST creature caught survived a power cut and every one after it did not,
+// while box.slot_mask (written by the header on the same commit) went on
+// claiming a slot whose blob had never been written.
+//
+// So a caller that mutated a slot OTHER than the active one now has to say
+// which, and BOX_SLOT_NONE is how a caller says it mutated none. A second
+// entry point would have been the other option and it is the worse one: the
+// bug was a call site that forgot, and adding a function to forget does not
+// fix that.
 CooldownTable& ui_cooldowns(void);
 Inventory&     ui_inventory(void);
-void           ui_explore_commit(void);
+void           ui_explore_commit(uint8_t mutated_slot);
 
 // A fresh sealed genome for a captured Pebble. It draws through RNG_BREEDING
 // (game/genome.cpp), which is a named global stream and therefore out of a pure

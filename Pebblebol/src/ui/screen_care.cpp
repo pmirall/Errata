@@ -14,6 +14,7 @@
 #include <stdio.h>
 
 #include "../core/strings_es.h"
+#include "../game/box.h"          // BOX_SLOT_NONE, for the explore-commit seam
 #include "../game/inventory.h"
 #include "gfx.h"
 #include "screen.h"
@@ -220,7 +221,8 @@ static void bag_use(void) {
     case IU_NO_TARGET: ui_toast(STR_ITEM_NO_PET);   break;
     default:           ui_toast(STR_ITEM_NO_USE);   break;
   }
-  if (r == (uint8_t)IU_OK) ui_explore_commit();
+  // The item acts on the ACTIVE Pebble, which gs_save_active() already covers.
+  if (r == (uint8_t)IU_OK) ui_explore_commit((uint8_t)BOX_SLOT_NONE);
   // The row under the cursor may have just been spent, so the cursor is
   // re-clamped rather than left pointing past the end of a shorter list.
   const uint8_t left = care_bag_rows();
