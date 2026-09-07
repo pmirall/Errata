@@ -456,13 +456,47 @@ void rd_hold_fps(uint8_t fps, uint16_t ms) {
   if (fps == 0u || ms == 0u) { s_hold_fps_armed = false; return; }
   if (fps > 60u) fps = 60u;
   if (ms > RD_FPS_HOLD_MAX_MS) ms = (uint16_t)RD_FPS_HOLD_MAX_MS;
+
+  // *** ONLY ON A RAISE, SINCE THE FINAL REVIEW. ***
+  // This used to end in an UNCONDITIONAL rd_request_frame(), which sets
+  // s_next_frame_ms = millis() - i.e. "a frame is due now". The header tells
+  // callers to renew the hold EVERY TICK for as long as their film lasts, and
+  // both callers do: sm_service() runs the screen's update() on every app_loop()
+  // pass, so screen_battle.cpp's battle_update() re-armed the hold on every pass
+  // while SCR_BATTLE was up, and actfx_service() re-armed it on every pass while
+  // a film ran. Every renewal moved the deadline to now, rd_begin_frame()'s
+  // `(int32_t)(now - s_next_frame_ms) < 0` was therefore NEVER true, and a frame
+  // was drawn on EVERY LOOP PASS - so the hold's VALUE was irrelevant and a
+  // caller asking for 5 fps free-ran exactly like one asking for 20. Measured
+  // against a modelled 28 ms drawing pass: 20 fps requested, 35.7 fps delivered,
+  // frames/passes 1.00 against 0.08 on an idle HOME.
+  //
+  // Three consequences on the board, all in the two states docs/bench.md A1 sits
+  // in: app.cpp's `delay(1)` is gated on `!drew`, so with drew always true stage
+  // 7 became a no-op and audit risk 16 ("the loop must not run at 100 % duty
+  // cycle") was broken exactly there; the loop period became the whole frame
+  // (~28 ms of I2C) instead of ~2 ms, so audio_service() ran ~36 times a second
+  // instead of ~500 and every 40 ms step of SFX_RISE/SFX_FALL took ~56 ms (the
+  // five-step SFX_FALL on a faint runs ~280 ms instead of 200); and roughly
+  // double the sendBuffer() traffic on a battery pet with the radio also up.
+  //
+  // The request is what makes an ARMING take effect inside the current period -
+  // without it up to 250 ms of the film still plays at 4 fps, which is most of a
+  // phase. A RENEWAL has nothing to bring forward, so it must not touch the
+  // deadline. Ask only when this call actually raises the rate.
+  // THE RULE ITSELF IS IN core/perf.cpp, where tests/test_perf.cpp sweeps it -
+  // this file is compiled by no host binary and the rule was wrong here for ten
+  // phases with nothing able to see it. rd_fps_hold_live() and not
+  // s_hold_fps_armed, because the flag is cleared LAZILY on the way past: a
+  // hold whose deadline has passed but which nobody has asked about since still
+  // reads as armed, and re-arming after an expiry IS an arming.
+  const bool raises = perf_hold_raises(rd_fps_hold_live(), s_hold_fps_val, fps);
+
   s_hold_fps_val   = fps;
   s_hold_fps_until = millis() + ms;
   s_hold_fps_armed = true;
-  // Without this the raise would not take effect until the CURRENT period
-  // elapsed - i.e. up to 250 ms of the film would still play at 4 fps, which is
-  // most of a phase.
-  rd_request_frame();
+
+  if (raises) rd_request_frame();
 }
 
 uint8_t rd_fps(void) {

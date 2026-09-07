@@ -89,6 +89,24 @@ static void send_err(int code, const char* err)
 // 256 B blob whose only guarantee is a CRC - and a name carrying a quote would
 // produce a response the page's JSON.parse() refuses, which is a bug reported
 // as "the creator does not work" long after anyone remembers why.
+// ...AND THE BYTES IT KEEPS ARE ESCAPED, SINCE THE FINAL REVIEW.
+// Dropping the quote and the backslash stops a name changing the SHAPE of the
+// document. The bytes this deliberately KEEPS broke its ENCODING instead:
+// creator_name_char_ok() admits twenty Latin-1 high bytes - the accented set
+// the naming ring can type - and they went out raw inside a JSON string served
+// as application/json. JSON is UTF-8 by definition (RFC 8259 8.1) and the
+// response carries no charset, so a Spanish device name was not valid UTF-8.
+// Measured: device_name "Ni\xF1o" produced a body with a raw 0xF1 at byte 50.
+//
+// It does not kill the feature - the fetch decoder substitutes U+FFFD rather
+// than throwing, so JSON.parse still succeeds - which is exactly why nothing
+// caught it. What the owner sees on the phone during bench items 32-35 is
+// "Ni?o" / "Espa?a" in the device card while the OLED shows the name correctly.
+// There is a quieter form too: two adjacent allowed high bytes are a
+// syntactically valid UTF-8 pair and decode to one unrelated character.
+//
+// \u00XX, the same choice data/creator_schema_json.h already made and says so
+// in its banner. This is the P10-C4 crossing with the arrow reversed.
 static void json_copy_name(char* dst, size_t cap, const char* src)
 {
   size_t o = 0;
@@ -96,8 +114,13 @@ static void json_copy_name(char* dst, size_t cap, const char* src)
     const uint8_t ch = (uint8_t)src[i];
     if (ch == '"' || ch == '\\') continue;
     if (!creator_name_char_ok(ch)) continue;
-    if (o + 1 >= cap) break;
-    dst[o++] = (char)ch;
+    if (ch < 0x80u) {
+      if (o + 1 >= cap) break;
+      dst[o++] = (char)ch;
+    } else {
+      if (o + 6 >= cap) break;
+      o += (size_t)snprintf(dst + o, cap - o, "\\u%04X", (unsigned)ch);
+    }
   }
   dst[o] = '\0';
 }
@@ -142,7 +165,22 @@ void cs_body_hook(void)
       // nothing left to write it to - and that trade is why CS_BODY_DRAIN_MAX
       // exists: below it the body is drained so a polite answer is still
       // possible, above it the connection is not worth the seconds.
-      if (cb_state(s_body) == CB_ABORT) s_srv->client().stop();
+      if (cb_state(s_body) == CB_ABORT) {
+        s_srv->client().stop();
+        // ...AND THE STATE IS RESET HERE, SINCE THE FINAL REVIEW, BECAUSE THIS
+        // EXIT HAS NO HANDLER. creator_server.h promises no request can inherit
+        // the previous one's state because "EVERY handler calls cs_body_done()".
+        // Every handler does - but the over-drain path never reaches one: the
+        // core turns the closed socket into RAW_ABORTED and _parseRequest()
+        // returns false, so _handleRequest() is never called and s_body was left
+        // at CB_ABORT. The next request shape that runs neither a raw phase nor
+        // the upload hook then inherited it, and cs_body_answered() takes
+        // `case CB_ABORT: return true` - answering NOTHING where the file
+        // documents 415. No bytes leak (cb_abort() zeroes len); what was false
+        // was the header's own argument, which enumerated the handler exits and
+        // was silent about the one exit that has none.
+        cb_reset(s_body);
+      }
       break;
 
     case RAW_WRITE:
@@ -297,7 +335,14 @@ static void h_schema(void)
 //   v        CREATOR_API_VERSION as unsigned .......  5 (any uint16)
 //   fw       FW_VERSION ............................  sizeof - 1
 //   content  CONTENT_VERSION as unsigned ...........  5 (uint16)
-//   name     json_copy_name() into char[NAME_MAX_LEN+1]  NAME_MAX_LEN
+//   name     json_copy_name() into char[6*NAME_MAX_LEN+1]  6 * NAME_MAX_LEN
+//            SIX bytes per character since the final review: creator_name_char_ok()
+//            admits twenty Latin-1 high bytes and json_copy_name() now emits them
+//            as \u00XX, because a raw high byte in a body served as
+//            application/json is not valid UTF-8 and the phone rendered it as a
+//            replacement glyph. 72 B against the old 12 takes the worst case
+//            from about 160 B to about 220 against CS_OUT_BUF; the assert below
+//            is what says so rather than a comment.
 //   box/cs   four uint8 counts .....................  3 each
 //   body     CS_BODY_MAX as unsigned ...............  5 (uint16)
 //   cal      gt_cal_state() ........................  5 (over-bounded)
@@ -314,7 +359,7 @@ static constexpr size_t CS_STATE_WORST =
   + (5u - 2u)                            // v
   + ((sizeof(FW_VERSION) - 1u) - 2u)     // fw
   + (5u - 2u)                            // content
-  + ((size_t)NAME_MAX_LEN - 2u)          // name
+  + ((6u * (size_t)NAME_MAX_LEN) - 2u)   // name, \u00XX-escaped
   + 4u * (3u - 2u)                       // box.used/free, cs.used/free
   + (5u - 2u)                            // body
   + (5u - 2u)                            // cal
@@ -338,7 +383,7 @@ static void h_state(void)
 {
   if (!prologue(WEB_COST_READ, true)) { cs_body_done(); return; }
 
-  char name[NAME_MAX_LEN + 1];
+  char name[6 * NAME_MAX_LEN + 1];       // \u00XX per Latin-1 high byte
   json_copy_name(name, sizeof name, gs_state().cfg.device_name);
 
   const uint8_t box_used = box_count();
@@ -535,7 +580,30 @@ static void h_pebble(void)
     cs_body_done();
     return;
   }
-  (void)gs_save_slot(slot, true);              // also commits the Box header
+  // *** THE VERDICT IS NOT DISCARDED, SINCE THE FINAL REVIEW. ***
+  // This was the ONLY discarded write in a function that answers 500 and undoes
+  // its RAM state for every other failure (csp_install, box_new_pebble,
+  // validate_pebble, save_custom_species, all above). When it failed the client
+  // was still told {"ok":1,...}. Two ways it fails: the flash write genuinely
+  // does not land, or gs_save_slot() returns TRUE WITHOUT WRITING because
+  // save_manager defers a write to a slot touched under SAVE_MIN_GAP_MS ago -
+  // even with force=true - and game_state.cpp then skips gs_save_box(), so the
+  // Box header's slot_mask and next_id_counter are never committed for this
+  // upload. Measured: with the store dead after the cs record landed, the page
+  // got 200 {"ok":1,...} and the Pebble was gone after a power cycle.
+  //
+  // The residue this leaves is deliberate and is the one the write-order comment
+  // above already anticipates: the cs record IS on flash by now, so this cannot
+  // csp_forget() the slot back. A creator slot spent with no Pebble pointing at
+  // it is the honest outcome, and P8-C4's CREATOR-screen reclaim is what frees
+  // it. What must not happen is the page being told the creature exists.
+  if (!gs_save_slot(slot, true)) {             // also commits the Box header
+    pebble_clear(*p);
+    (void)box_active();
+    send_err(500, "flash");
+    cs_body_done();
+    return;
+  }
 
   snprintf(s_out, sizeof(s_out),
            "{\"ok\":1,\"slot\":%u,\"cs\":%u,\"species\":%u,\"id\":%lu,\"pct\":%u}",

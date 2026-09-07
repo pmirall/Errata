@@ -80,6 +80,10 @@ static NetPhase     s_phase          = NPH_OFF;
 static NetErr       s_err            = NERR_NONE;
 
 static uint32_t     s_phase_ms       = 0;    // millis() when the phase was entered
+                                             // ...and, in NPH_LINK, when the
+                                             // ESP-NOW counters last moved. See
+                                             // the NPH_LINK backstop.
+static uint32_t     s_link_fp        = 0;    // last EspNowStats fingerprint
 static bool         s_ap_up          = false;
 static bool         s_want_scan      = false;  // the next WiFi bring-up is a scan
 static bool         s_want_link      = false;  // ...or the peer link (P7-C1)
@@ -151,6 +155,9 @@ void net_heap_log(const char *tag) {
 static void set_phase(NetPhase p) {
   s_phase    = p;
   s_phase_ms = millis();
+  // A fresh phase starts its backstop from a fresh fingerprint, so counters
+  // left over from an earlier LINK cannot look like traffic on this one.
+  s_link_fp  = 0;
 }
 
 // Every RadioMode transition logs a heap census (BRIEF open question 5).
@@ -552,7 +559,42 @@ void net_service(void) {
     // stop(). This only fires when NOBODY IS PUMPING THE JOB AT ALL, and
     // because its deadline is strictly later it can never pre-empt the job's
     // answer or disagree with it about what happened.
-    case NPH_LINK:
+    //
+    // *** THAT SENTENCE WAS NOT TRUE UNTIL THE FINAL REVIEW, AND THE FALSEHOOD
+    // KILLED LINKED BATTLES. *** s_phase_ms is written ONCE, by set_mode() when
+    // link_begin() brings the radio up, and never again - so this was not
+    // measuring "nobody is pumping the job", it was measuring "the LINK SCREEN
+    // HAS BEEN OPEN 91 SECONDS", and it fired in the middle of a consented
+    // session. link_hold() (networking/discovery.h: "THE CEILING IS NOT LOST,
+    // IT CHANGES OWNER") deliberately stops the job's own LINK_JOB_TIMEOUT_MS
+    // so a battle or a trade can outlive the browse, and link_service() then
+    // returns at its first line while j.held - which also means the DRIVER IS
+    // NO LONGER CALLED AT ALL during a session. Nothing did for this clock what
+    // link_hold() did for the job's. Measured against the shipping transport:
+    // 91,000 ms after LINK opened, wifi_down() -> espnow_end() unregisters both
+    // callbacks, deletes the bound peer and deinits ESP-NOW under a live
+    // session. en_send() then answers false with tx_refused++ for every frame
+    // and en_recv() returns 0 for ever, so the session runs its nine 1 s
+    // PROTO_RETX rungs into silence and reports SE_LOST - while the LinkJob is
+    // still LS_RUNNING with held=1 and stopped=0, so link_screen_busy() goes on
+    // clamping the power ladder over a radio that is already off. Six rounds of
+    // a battle at ~10 s a round runs straight through it, and each board has
+    // its OWN clock starting when THAT board opened LINK, so the two boards die
+    // a few seconds apart - which reads as one flaky board, not a fixed wall.
+    //
+    // THE FIX IS TO MEASURE WHAT THE PARAGRAPH ABOVE CLAIMS. The evidence that
+    // somebody is using the stack is inside this file's own transport: every
+    // beacon out, every frame in and every unicast ACK moves an EspNowStats
+    // counter, and the SESSION moves them just as the browse does. So take a
+    // cheap fingerprint each pass and re-stamp the deadline when it changes.
+    // A LINK phase that nobody is driving moves no counter and still ages out
+    // in exactly NET_LINK_BACKSTOP_MS, which is the case this exists for.
+    case NPH_LINK: {
+      const EspNowStats& es = espnow_stats();
+      const uint32_t fp = es.rx_session + es.rx_beacon + es.rx_wrong_peer +
+                          es.rx_malformed + es.tx_ok + es.tx_fail +
+                          es.tx_refused + es.beacons_tx;
+      if (fp != s_link_fp) { s_link_fp = fp; s_phase_ms = now; }
       if ((uint32_t)(now - s_phase_ms) >= NET_LINK_BACKSTOP_MS) {
         NET_LOGF("[net] link backstop fired - nobody serviced the job\r\n");
         wifi_down();
@@ -560,6 +602,7 @@ void net_service(void) {
         set_mode(RADIO_OFF, NPH_OFF, "LINK BACKSTOP");
       }
       break;
+    }
 
     // NPH_AP_PORTAL has no timer of its own. The portal is not a fallback the
     // firmware retries out of any more (plan section 2 row G4): the screen that

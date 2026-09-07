@@ -493,3 +493,105 @@ TEST(game_state_a_settings_write_does_not_clobber_the_pin) {
   CHECK_EQ((unsigned long)gs_state().cfg.pin_lock_until, 777ul);
   CHECK_EQ((int)gs_state().cfg.brightness, 44);
 }
+
+// =============================================================================
+//  THE BOOT SEAM, PINNED WHERE IT COULD BE
+//  Added at the FINAL REVIEW, because tests/fakes/SHADOWS.txt now names these
+//  three cases as the anchors for five of the eleven boot_host rows, and
+//  tools/check.sh refuses an IMITATION row that points at nothing.
+//
+//  The other six rows are marked INJECTOR and are NOT imitated - boot_begin()
+//  always reports an intact RTC, boot_kind() collapses seven kinds to two - and
+//  saying so in the manifest is the honest alternative to a test that would be
+//  green about a device property no host can produce. hardware/boot_reason.h is
+//  where the real classifier is held instead, host-linkable and swept over all
+//  256 esp_reset_reason_t values by tests/test_clock.cpp.
+// =============================================================================
+
+// The one pair the suite has always asserted on, and the subtle part is that
+// the fake gets it right: a mirror write is NOT visible to the getter within
+// the same power cycle. On the device the getter returns s_boot_seen, the
+// snapshot boot_begin() took, while the writer touches the live RtcKeep. Had
+// the fake collapsed the two into one variable, this test would have been green
+// and the device's crash-absence behaviour unproven - app/app.cpp's
+// `if (boot_rtc_last_seen() > save_last_seen())` is the line that makes a crash
+// reboot report ~0 s of absence instead of up to one 60 s save period.
+TEST(the_boot_snapshot_is_not_the_live_mirror) {
+  begin();
+  CHECK_EQ(boot_host_mirror(), 0u);
+  CHECK_EQ(boot_rtc_last_seen(), 0u);
+
+  gs_touch_lastseen(1700400000u);
+  CHECK_EQ(boot_host_mirror(), 1700400000u);      // the write landed...
+  CHECK_EQ(boot_rtc_last_seen(), 0u);             // ...and this boot cannot see it
+
+  // The zero guard, which both bodies have and which stops an uncalibrated
+  // device from mirroring an epoch of 0 over a real one.
+  boot_touch_lastseen(0u);
+  CHECK_EQ(boot_host_mirror(), 1700400000u);
+
+  // Only a new power cycle publishes it, which the hook models directly.
+  boot_host_set_rtc_last_seen(1700400000u);
+  CHECK_EQ(boot_rtc_last_seen(), 1700400000u);
+}
+
+TEST(the_taint_survives_and_a_rearm_launders_it) {
+  begin();
+  CHECK(!boot_god_tainted());
+  boot_mark_god();
+  CHECK(boot_god_tainted());
+  CHECK(boot_god_tainted());        // it is a latch, not a one-shot
+
+  // GAME_DESIGN 10.2's ribbon depends on this surviving an ordinary reboot; on
+  // the device it lives in RTC fast memory and only a full rearm clears it.
+  boot_rearm();
+  CHECK(!boot_god_tainted());
+}
+
+// THE DIVERGENCE THIS CASE WAS WRITTEN FOR. The shipping boot_rearm() opens
+// with nonce_new(), which memsets the whole RtcKeep - so god_taint goes to zero
+// - and then sets s_kind = BOOT_FIRST_RUN. The fake did neither: it imitated
+// the two effects nothing observes (the boot counter and the epoch) and missed
+// both effects that change a verdict. Measured against the real body compiled
+// on the host: after mark_god() then rearm(), boot_god_tainted() was fake=1 /
+// ship=0 and boot_kind() was fake=SOFT_RESET(3) / ship=FIRST_RUN(0).
+//
+// gs_factory_reset() is boot_rearm()'s sole caller and is reachable from
+// SETTINGS -> "Reset de fabrica" and from bench item G1, so this is what the
+// device does after a wipe. Nothing asserted on it, which is what made it the
+// P10 shape ONE EDIT EARLY: the first test anybody wrote about post-reset boot
+// state would have been written against the fake's answer and been green and
+// wrong.
+TEST(a_rearm_relabels_the_session_and_launders_the_taint) {
+  begin();
+  boot_note_save(true);
+  CHECK_EQ((int)boot_kind(), (int)BOOT_SOFT_RESET);
+  boot_mark_god();
+  gs_touch_lastseen(1700400000u);
+  CHECK(boot_host_mirror() != 0u);
+
+  boot_rearm();
+
+  CHECK_EQ((int)boot_kind(), (int)BOOT_FIRST_RUN);   // ...not SOFT_RESET
+  CHECK(!boot_god_tainted());                        // ...and the taint is gone
+  CHECK_EQ(boot_host_mirror(), 0u);
+  CHECK_EQ(boot_rtc_last_seen(), 0u);
+  CHECK_EQ(boot_count(), 1u);
+}
+
+// AND THE FACTORY RESET REALLY GOES THROUGH IT. gs_factory_reset() is the only
+// caller in the tree, so if it ever stops calling boot_rearm() the device keeps
+// a god-mode taint across a wipe and reports the wrong BootKind for the rest of
+// the power cycle - neither of which any other test would notice.
+TEST(a_factory_reset_rearms_the_boot_record) {
+  begin();
+  boot_note_save(true);
+  boot_mark_god();
+  gs_touch_lastseen(1700400000u);
+
+  CHECK(gs_factory_reset());
+
+  CHECK(!boot_god_tainted());
+  CHECK_EQ((int)boot_kind(), (int)BOOT_FIRST_RUN);
+  CHECK_EQ(boot_host_mirror(), 0u);
+}

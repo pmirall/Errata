@@ -1,0 +1,146 @@
+# =============================================================================
+#  THE SHADOWED SET
+#  Every function that tests/fakes/*.cpp DEFINES and that Pebblebol/src also
+#  defines. Whenever a host binary links one of those fakes it drives the FAKE's
+#  body while the reader believes it is driving the firmware's.
+#
+#  WHY THIS FILE EXISTS. Two of the defects this product shipped were exactly
+#  that, and neither was visible to any instrument:
+#
+#    P10-C6  tests/fakes/link_fake.cpp carried a PRE-P10-C4 copy of
+#            ui_pet_name_latin1(), so every discovery test drove a function the
+#            firmware no longer had - and a device whose owner typed an accented
+#            name emitted NO BEACON AT ALL. LINK, trade and P2P battle dead,
+#            silently, in a Spanish product.
+#    P7      tests/test_trade.cpp bound save_set_clock(nullptr, ...), switching
+#            off a whole branch of save_manager.cpp - so a 15-point power-cut
+#            sweep ran against a save manager the release artefact does not
+#            execute, while on the shipping build EVERY CLEAN TRADE DESTROYED A
+#            PEBBLE.
+#
+#  THE LINKER CAN NEVER CATCH THIS CLASS, and that is measured rather than
+#  assumed: intersecting the T/t symbols the six fake objects DEFINE against
+#  those the other host objects define finds ZERO, because all fifty shipping
+#  bodies live in translation units no host binary compiles. So no object ever
+#  defines them and there is never a collision to trip over. Any detector has to
+#  be source-based, which is what tools/check.sh section 10 is.
+#
+#  WHAT THE GATE ENFORCES, per row:
+#
+#    LINKED     The real body is in a host binary and the fake body is GONE.
+#               The gate requires the fake NOT to define the symbol. Drift is
+#               impossible by construction; this is the status every row should
+#               eventually reach.
+#    IMITATION  The fake claims to behave like the shipping body. The gate
+#               requires a named ANCHOR - a test case or a check.sh gate - that
+#               actually pins the behaviour, and requires that anchor to exist.
+#               A row that claims imitation and names nothing is refused.
+#    INJECTOR   The fake is DELIBERATELY not an imitation: it is a fault
+#               injector or a simulator, and a test that treats it as evidence
+#               about the device is misreading it. The gate requires a reason.
+#    RECORDER   The fake records a device property instead of reproducing it
+#               (a counter a test asserts on). The gate requires a reason.
+#
+#  AND, ABOVE ALL, THE GATE RE-DERIVES THIS SET FROM SOURCE AND FAILS WHEN IT
+#  DIFFERS FROM THIS FILE. A fifty-first shadow cannot appear without somebody
+#  writing down which of the four it is, and one cannot silently vanish either.
+#  That is the half the P10-C6 exit could not do: it added ONE gate for ONE
+#  symbol, after that symbol had already burned somebody.
+#
+#  WHAT IT DOES NOT CATCH, said plainly so nobody over-reads it:
+#    - The P7 shape. A FIXTURE nulling out a shipping seam is not a shadow;
+#      tools/check.sh has a separate gate for save_set_clock(nullptr, ...).
+#    - Drift ONE CALL DEEP. ui_pet_name_latin1()'s whole body is
+#      `{ pet_name_stored(out, cap); }`, so an edit to pet_name_stored() changes
+#      no shadowed body. That is why the IMITATION anchors are BEHAVIOURAL
+#      (a running assertion) rather than a hash of the text.
+#    - The twelve .cpp files with NO fake at all. app/app.cpp holds
+#      boot_absence(), which decides whether a power cut costs the player hours,
+#      and nothing here covers it.
+#
+#  FORMAT: symbol  shipping-file  fake-file  STATUS  anchor-or-reason
+#  (whitespace separated; the anchor/reason is the rest of the line)
+# =============================================================================
+
+# --- hardware/boot.cpp x tests/fakes/boot_host.cpp ---------------------------
+# The boot classifier. tests/test_game_state.cpp asserts on exactly ONE of these
+# eleven (the last-seen mirror); the other ten exist to satisfy the linker and
+# their bodies are NOT imitations of boot.cpp. hardware/boot_reason.h is where
+# the classification table itself lives, host-linkable, swept over all 256
+# reason values by tests/test_clock.cpp - which is the right shape and is why
+# these rows can honestly be INJECTOR.
+boot_begin           hardware/boot.cpp  boot_host.cpp  INJECTOR   Always reports an intact RTC and a clean boot; the device evaluates the nonce and calls boot_classify(). A host test may NOT read a BootKind from this.
+boot_count           hardware/boot.cpp  boot_host.cpp  INJECTOR   A test-set counter, not the RTC-backed one.
+boot_god_tainted     hardware/boot.cpp  boot_host.cpp  IMITATION  the_taint_survives_and_a_rearm_launders_it
+boot_kind            hardware/boot.cpp  boot_host.cpp  INJECTOR   Collapses seven kinds to two. hardware/boot_reason.h + tests/test_clock.cpp hold the real table.
+boot_mark_god        hardware/boot.cpp  boot_host.cpp  IMITATION  the_taint_survives_and_a_rearm_launders_it
+boot_note_save       hardware/boot.cpp  boot_host.cpp  INJECTOR   Sets SOFT_RESET/FIRST_RUN from have_save; the device restores the HARDWARE verdict.
+boot_rearm           hardware/boot.cpp  boot_host.cpp  IMITATION  a_rearm_relabels_the_session_and_launders_the_taint
+boot_reset_reason    hardware/boot.cpp  boot_host.cpp  INJECTOR   Always 0. Only a board can produce a real esp_reset_reason().
+boot_rtc_intact      hardware/boot.cpp  boot_host.cpp  INJECTOR   Always true; the device answers false on a cold power-on.
+boot_rtc_last_seen   hardware/boot.cpp  boot_host.cpp  IMITATION  the_boot_snapshot_is_not_the_live_mirror
+boot_touch_lastseen  hardware/boot.cpp  boot_host.cpp  IMITATION  the_boot_snapshot_is_not_the_live_mirror
+
+# --- hardware/kv_nvs.cpp x tests/fakes/kv_mem.cpp ----------------------------
+# The flash store. A RAM map with a fault model, so these are deliberately
+# different implementations - but four of the five have behaviour the shipping
+# body also has, and each of those four is now pinned by a case that was written
+# at the final review because none existed.
+kv_get      hardware/kv_nvs.cpp  kv_mem.cpp  IMITATION  a_closed_main_partition_is_not_a_corrupt_save
+kv_put      hardware/kv_nvs.cpp  kv_mem.cpp  IMITATION  an_invalid_write_does_not_eat_an_armed_fault
+kv_erase    hardware/kv_nvs.cpp  kv_mem.cpp  IMITATION  an_empty_key_is_refused_by_erase_as_well_as_by_get_and_put
+kv_wipe     hardware/kv_nvs.cpp  kv_mem.cpp  IMITATION  a_dead_store_refuses_a_wipe_the_way_it_refuses_a_write
+kv_healthy  hardware/kv_nvs.cpp  kv_mem.cpp  IMITATION  a_failed_write_makes_the_store_unhealthy_until_it_is_wiped
+
+# --- ui/gfx_u8g2.cpp x tests/fakes/gfx_fb.cpp --------------------------------
+# The drawing seam. ELEVEN OF THESE WERE MEASURED PIXEL-EXACT against the real
+# vendored U8g2 at the final review - a 223,776-case differential sweep over both
+# blits, all three draw colours, every dither level and phase, every panel edge
+# and the degenerate rectangles, byte-identical on both sides. THE HARNESS WAS
+# NOT COMMITTED (it needs the Arduino library tree, which tools/check.sh's
+# narrowness gate on tests/fakes/arduino deliberately keeps out), so that is a
+# measurement taken once and recorded here, not a standing instrument. It is
+# what makes the goldens evidence about GEOMETRY, and the anchors below are the
+# in-tree assertions that hold the compositing rule. The SIX text entry points are not: the fake models a font as one
+# integer per face and paints transparent glyphs where the panel is in
+# setFontMode(0). ui/gfx.h and tests/fakes/gfx_fb.h say so; the rows below say
+# where.
+gfx_pixel              ui/gfx_u8g2.cpp  gfx_fb.cpp  IMITATION  every_geometry_primitive_clips_instead_of_wrapping
+gfx_hline              ui/gfx_u8g2.cpp  gfx_fb.cpp  IMITATION  every_geometry_primitive_clips_instead_of_wrapping
+gfx_vline              ui/gfx_u8g2.cpp  gfx_fb.cpp  IMITATION  every_geometry_primitive_clips_instead_of_wrapping
+gfx_rect               ui/gfx_u8g2.cpp  gfx_fb.cpp  IMITATION  every_geometry_primitive_clips_instead_of_wrapping
+gfx_fill               ui/gfx_u8g2.cpp  gfx_fb.cpp  IMITATION  every_geometry_primitive_clips_instead_of_wrapping
+gfx_color              ui/gfx_u8g2.cpp  gfx_fb.cpp  IMITATION  the_draw_colour_is_sticky_and_erase_is_the_inverse_of_draw
+gfx_invert_rect        ui/gfx_u8g2.cpp  gfx_fb.cpp  IMITATION  the_draw_colour_is_sticky_and_erase_is_the_inverse_of_draw
+gfx_dither_rect        ui/gfx_u8g2.cpp  gfx_fb.cpp  IMITATION  the_dither_phase_actually_slides_the_matrix
+gfx_dither_rect_phase  ui/gfx_u8g2.cpp  gfx_fb.cpp  IMITATION  the_dither_phase_actually_slides_the_matrix
+gfx_xbm                ui/gfx_u8g2.cpp  gfx_fb.cpp  IMITATION  an_opaque_blit_paints_its_whole_box_and_a_transparent_one_only_its_ink
+gfx_xbm_t              ui/gfx_u8g2.cpp  gfx_fb.cpp  IMITATION  an_opaque_blit_paints_its_whole_box_and_a_transparent_one_only_its_ink
+gfx_text        ui/gfx_u8g2.cpp  gfx_fb.cpp  INJECTOR   NOT glyph-accurate and does not pretend to be (tests/fakes/gfx_fb.h): a synthetic one-cell-per-codepoint pattern at a fixed advance, drawn TRANSPARENT while ui/render.cpp holds the panel in setFontMode(0). A golden containing text is evidence about LAYOUT, never about glyph shape or compositing. See README section 2's font-mode note.
+gfx_text_center ui/gfx_u8g2.cpp  gfx_fb.cpp  INJECTOR   As gfx_text, and the device additionally drops leading codepoints on a negative x where the fake clips per pixel.
+gfx_text_right  ui/gfx_u8g2.cpp  gfx_fb.cpp  INJECTOR   As gfx_text_center.
+gfx_text_w      ui/gfx_u8g2.cpp  gfx_fb.cpp  INJECTOR   codepoints x GFX_ADV_*, a fixed advance per face; u8g2 returns the advance sum with the last glyph's ink edge, so the two can differ by up to 2 px. Measured: the four prose fonts really are fixed-pitch, so the table is right and only the last-glyph rule differs.
+gfx_text_fit    ui/gfx_u8g2.cpp  gfx_fb.cpp  INJECTOR   Built on gfx_text_w; the truncation POINT is host evidence, the pixels are not.
+gfx_text_wrap   ui/gfx_u8g2.cpp  gfx_fb.cpp  INJECTOR   Built on gfx_text_w; the LINE BREAKS are host evidence, the pixels are not. The two bodies also use different working-buffer sizes (128 here, RD_LINE_BUF 64 there), which is unreachable from the current string table and is recorded so it is not re-derived.
+gfx_affordance  ui/gfx_u8g2.cpp  gfx_fb.cpp  INJECTOR   Draws the two corner markers as solid 4x5 blocks; the device draws u8g2 filled triangles (about 5 and 7 lit pixels). 58 of the 75 goldens carry the square form. Declared in tests/fakes/gfx_fb.h and in README section 2 so a bench photograph is not read as a rendering fault.
+
+# --- ui/ui.cpp x tests/fakes/link_fake.cpp -----------------------------------
+# The LINK screen's seams. tests/fakes/link_fake.h states the scope: what is
+# fake is THE RADIO and THE PET NAME, so a green run is evidence about the
+# SCREEN and the SESSION, never about the air.
+ui_link_driver     ui/ui.cpp  link_fake.cpp  INJECTOR   A declared simulator with fault injectors (lf_set_start_ok, lf_set_beacon_ok, lf_set_bind_ok, lf_set_poll_fail). Nothing here is evidence about ESP-NOW.
+ui_link_transport  ui/ui.cpp  link_fake.cpp  INJECTOR   A loopback that delivers regardless of binding. The consent gate's radio half is docs/bench.md B2 and nothing else.
+ui_link_bind       ui/ui.cpp  link_fake.cpp  INJECTOR   Records the slot and answers whatever lf_set_bind_ok() was told; espnow_bind() refuses on four conditions and additionally unbinds the previous peer and drains the session ring.
+ui_link_unbind     ui/ui.cpp  link_fake.cpp  RECORDER   A counter, used as an ORDERING recorder: consenting_stops_the_browse_and_keeps_the_radio
+ui_link_nonce      ui/ui.cpp  link_fake.cpp  INJECTOR   A constant (lf_set_nonce overrides), where the device draws rng_u32(RNG_MISC). Deliberate: it makes the derived session id deterministic. bind_roles() elects on device_id, not on this, so nothing depends on it varying.
+ui_pet_name        ui/ui.cpp  link_fake.cpp  INJECTOR   One rung (a test-set string, crossed once) against the shipping three-rung ladder. The rungs the fake cannot express are pinned on the SHIPPING side by tools/check.sh section 10's body gate and by tests/test_creator_api.cpp.
+ui_pet_name_latin1 ui/ui.cpp  link_fake.cpp  INJECTOR   As ui_pet_name. THIS IS THE P10-C6 FUNCTION: the fake carried a stale copy and the firmware's own body was reachable by nothing. It is now gated on BOTH sides - the fake by check.sh section 1, the shipping body by check.sh section 10.
+ui_trade_hooks     ui/ui.cpp  link_fake.cpp  INJECTOR   A RAM PendingTrade; the shipping hooks write the flash journal and the Box header. tests/test_trade.cpp is where the store arms belong.
+ui_trade_quarantine ui/ui.cpp link_fake.cpp  INJECTOR   A test-set bitmask standing in for save_quarantine_mask().
+ui_link_battle_done         ui/ui.cpp link_fake.cpp RECORDER One-line forward into the REAL ui/screen_link.cpp, which this fake links. Identical on both sides.
+ui_link_battle_move_ms_left ui/ui.cpp link_fake.cpp RECORDER As ui_link_battle_done.
+ui_link_battle_pump         ui/ui.cpp link_fake.cpp RECORDER As ui_link_battle_done.
+ui_link_battle_side         ui/ui.cpp link_fake.cpp RECORDER As ui_link_battle_done.
+ui_link_battle_status       ui/ui.cpp link_fake.cpp RECORDER As ui_link_battle_done.
+ui_link_battle_submit       ui/ui.cpp link_fake.cpp RECORDER As ui_link_battle_done.
+ui_link_battle_wants_action ui/ui.cpp link_fake.cpp RECORDER As ui_link_battle_done.

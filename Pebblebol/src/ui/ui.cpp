@@ -1454,10 +1454,36 @@ static void dialog_commit(uint8_t which) {
     case CFM_WIPE2: {
       gs_factory_reset();
       if (s_cfg) { gs_cfg_defaults(*s_cfg); gs_save_cfg(*s_cfg); }
+
+      // *** THROUGH THE BOX'S CONSTRUCTOR, SINCE THE FINAL REVIEW. ***
+      // This used to be a bare sim_new_pet(), which writes an egg into whatever
+      // PebbleInstance the simulation is still bound to and MINTS NO SLOT - it
+      // is not a Box constructor (game/box.h calls box_new_pebble() "THE TREE'S
+      // ONE CONSTRUCTOR"). gs_factory_reset() has just memset the Box, so
+      // slot_mask was 0 and active_slot 255, gs_save_active() refused at its
+      // `act >= BOX_SLOTS` guard, and the bool was discarded. Measured against
+      // the shipping objects: a fully playable creature on the panel with
+      // box_count() 0 and every save from that moment a silent no-op, so the
+      // next power cut lost everything since the reset AND re-ran the first-boot
+      // wizard. app/app.cpp's own first boot does exactly the sequence below.
       const Genome g0 = genome_genesis();
-      sim_new_pet(g0, gt_now(), 0);
-      const SimView* p = pet();
-      if (p) { gs_save_active(true); petfx_reset(body_view(*p, POSE_IDLE)); }
+      const uint8_t sl = box_new_pebble((uint8_t)SPECIES_ID_STARTER, 1,
+                                        (uint8_t)ORIGIN_STARTER, g0,
+                                        rng_u32(RNG_MISC), gt_now());
+      const SimView* p = nullptr;
+      if (sl != (uint8_t)BOX_SLOT_NONE) {
+        (void)box_set_active(sl);
+        PebbleInstance* pb = box_slot(sl);
+        if (pb != nullptr) { sim_bind(*pb); p = pet(); }
+      }
+      if (p) {
+        // The verdict is no longer discarded: a reset that cannot write its own
+        // starter must say so rather than hand back a device that looks fine.
+        if (!gs_save_active(true) || !gs_save_box()) ui_toast(STR_ERR_NVS);
+        petfx_reset(body_view(*p, POSE_IDLE));
+      } else {
+        ui_toast(STR_ERR_NVS);
+      }
       s_stat_ok  = 0;                // a wiped device shows the truth at once
       err_set_kind(ERRK_NONE);       // the save the ERROR screen was about is gone
       sm_replace_root(SCR_EVOLUTION);
@@ -1543,6 +1569,13 @@ bool ui_radio_job_busy(void) {
   return network_screen_busy() || link_screen_busy() || creator_screen_busy();
 }
 
+// THE OTHER THING THE LADDER MUST NOT INTERRUPT, and it took until the final
+// review to notice that the predicate above had the wrong name for the general
+// case. A radio job is not the only state a player can be in for two minutes
+// without touching a button; a CEREMONY is the other one, and it is the one
+// every first boot ends on. See ui.h for the measurement.
+bool ui_show_busy(void) { return ceremony_active(); }
+
 // Defined with the rest of the seams in section 20; ui_begin() binds it.
 static const PebbleView* ui_fill_view(void);
 
@@ -1623,8 +1656,7 @@ void ui_note_events(uint32_t ev) {
   // with UI_ALERT_MIN_MS forcing the player to sit through a modal telling them
   // their newborn is evolving. HATCHED wins the batch outright.
   if (!(ev & SIM_EV_HATCHED) && (ev & (SIM_EV_STAGE_UP | SIM_EV_EVOLVE_MINOR))) {
-    s_evolve_ms = now_ms();
-    ui_alert(AL_EVOLVING);
+    if (!offline) { s_evolve_ms = now_ms(); ui_alert(AL_EVOLVING); }
     ui_toast(STR_RX_EVOLVE);
   }
   // A level-up is the one moment the numbers under the sprite change without
@@ -1636,13 +1668,39 @@ void ui_note_events(uint32_t ev) {
     audio_play(SFX_RISE);          // the numbers went up; so does the cue
     ui_toast(STR_RX_LEVEL_UP);
   }
-  if (ev & SIM_EV_POOP)        ui_alert(AL_POOP);
-  if (ev & SIM_EV_SICK_START)  ui_alert(AL_SICK);
+  // *** NO MODAL CLAIMS ATTENTION FOR SOMETHING THAT HAPPENED WHILE THE DEVICE
+  // WAS OFF. Final review. ***
+  // s_events_offline is declared above with the contract "Everything in that
+  // batch happened while the device was off, and NOTHING IN IT MAY CLAIM THE
+  // PLAYER'S ATTENTION AS IF IT WERE HAPPENING NOW", and it gated exactly ONE
+  // of the six branches that can - the hatch ceremony. Every alert below fired
+  // unconditionally on the offline batch, and ui/dialog.cpp's queue holds eight
+  // and pops the first on the very first ui_service() of loop().
+  //
+  // What that cost, measured by replaying these branches through the real
+  // dialog queue against a real sim_catch_up_ex(): 1 h away -> 1 modal, 8 h -> 3,
+  // 3 days -> 4, a week -> 5. handle_alert() refuses every gesture for
+  // UI_ALERT_MIN_MS (1200 ms) each, and draw_alert() is an opaque fill over rows
+  // 16..47 - which covers the absence banner's own rows 12..35 from its first
+  // frame. So the "Donde estabas? 8 h 12 min." line, whose 5 s window is stamped
+  // before any frame is drawn, expired underneath the modals and was NEVER SEEN;
+  // and ui_draw() draws no toast at all while a modal is up, so the 1800 ms boot
+  // line - which app/app.cpp explicitly ranks the interrupted-trade result above
+  // the greeting in - was never drawn either. README line 5's "knows how long
+  // you left it alone" and trade.h's "the player is told, which is the only
+  // honest thing left" were both invisible on any absence worth measuring.
+  //
+  // The state is NOT lost by suppressing the modal: the toasts still queue, the
+  // bars are already what they are, and sim_alert() is re-raised by the next
+  // live tick - so a pet that is still hungry still says so, a moment later,
+  // when the player is actually looking.
+  if ((ev & SIM_EV_POOP)       && !offline) ui_alert(AL_POOP);
+  if ((ev & SIM_EV_SICK_START) && !offline) ui_alert(AL_SICK);
   if (ev & SIM_EV_SICK_END)    ui_toast(STR_RX_MED);
-  if (ev & SIM_EV_WISH_START)  ui_alert(AL_WISH);
+  if ((ev & SIM_EV_WISH_START) && !offline) ui_alert(AL_WISH);
   if (ev & SIM_EV_WISH_OK)     ui_toast(STR_WISH_OK);
   if (ev & SIM_EV_WISH_FAIL)   ui_toast(STR_WISH_FAIL);
-  if (ev & SIM_EV_BIRTHDAY)  { ui_alert(AL_BIRTHDAY); ui_toast(STR_EV_BIRTHDAY); }
+  if (ev & SIM_EV_BIRTHDAY)  { if (!offline) ui_alert(AL_BIRTHDAY); ui_toast(STR_EV_BIRTHDAY); }
   if (ev & SIM_EV_VISITA)      ui_toast(STR_EV_VISITA);
   // PF_ASLEEP is already set / cleared by the time the event is delivered, so
   // bright_service() derives the target itself instead of taking it as an
@@ -1650,7 +1708,10 @@ void ui_note_events(uint32_t ev) {
   // only buys one loop of latency, but it is the loop the player is looking at.
   if (ev & SIM_EV_SLEEP)     { ui_toast(STR_RX_SLEEP); bright_service(); }
   if (ev & SIM_EV_WAKE)      { ui_toast(STR_RX_WAKE);  bright_service(); }
-  if (ev & SIM_EV_ALERT) {
+  if ((ev & SIM_EV_ALERT) && !offline) {
+    // Not lost: sim_alert() is a STATE, re-raised by the next live tick, so a
+    // pet that is genuinely in trouble says so a second later with the player
+    // watching - instead of over the top of the welcome-back line.
     const uint8_t a = sim_alert();
     if (a != AL_NONE) ui_alert((AlertId)a);
   }
@@ -2072,15 +2133,47 @@ uint32_t ui_link_nonce(void)                  { return rng_u32(RNG_MISC); }
 //  false rather than assuming. The WRITE ORDER - W3, B1, B2, B3, W4 - belongs
 //  to game/trade.cpp and not to this file; these are the four verbs it drives.
 // -----------------------------------------------------------------------------
+//  AND EVERY ONE OF THEM REFUSES A READ-ONLY SESSION, SINCE THE FINAL REVIEW.
+//  persistence/game_state.h states the rule: read-only is set when the load
+//  refused to touch flash (LOAD_CORRUPT, LOAD_FOREIGN_NEWER) because "the pet in
+//  RAM is a placeholder and WRITING IT WOULD DESTROY EXACTLY THE SAVE THE USER
+//  IS ABOUT TO BE ASKED ABOUT". The guard lived only in the gs_* facade, and
+//  these five hooks go straight to save_manager - they READ through gs_state()
+//  and WRITE around gs_save_slot()/gs_save_box(). Measured against the shipping
+//  objects: on a read-only session gs_save_box() correctly returned 0 while
+//  save_box_header(), save_trade_journal(), save_pebble_now() and
+//  save_checkpoint_all() all landed real bytes, and a whole trade committed ten
+//  flash writes - the outgoing Pebble gone from flash, the incoming one on it.
+//
+//  This is docs/bench.md G3's board: an older image flashed over a v3 save comes
+//  up read-only behind "actualiza el firmware", and screen_error.cpp's LONG_BOTH
+//  gives a deliberate route to HOME. From there the trade would have written
+//  into the save the operator was told not to touch, so re-flashing the newer
+//  firmware afterwards would not find the save it left.
+//
+//  Guarded HERE, at the five hooks, rather than inside save_manager: the
+//  recovery path (persistence/game_state.cpp gs_recover) deliberately WRITES
+//  while still read-only and clears the flag afterwards, so a blanket guard one
+//  layer down would break the one path that exists to get a device out of this
+//  state. The player is not left without an answer: game/trade.cpp stops the
+//  W3 -> B1 -> B2 -> B3 -> W4 sequence on the first false and reports a
+//  TradeReject, which the LINK screen shows - so a read-only device refuses the
+//  trade visibly rather than writing into a save it has disowned. Refusing it
+//  one layer earlier, in ui/screen_link.cpp, would need a new ui.h seam and
+//  therefore a FIFTY-FIRST shadowed symbol in tests/fakes/link_fake.cpp; that is
+//  a better error message and not a better outcome, and it is not worth opening
+//  a new shadow for on the eve of a bench. Recorded here rather than done.
 static bool ui_tr_store_journal(void* ctx, const PendingTrade& t)
 {
   (void)ctx;
+  if (gs_readonly()) return false;
   gs_state().trade = t;
   return save_trade_journal(t);
 }
 static bool ui_tr_store_slot(void* ctx, uint8_t slot)
 {
   (void)ctx;
+  if (gs_readonly()) return false;
   if (slot >= (uint8_t)BOX_SLOTS) return false;
   // save_pebble_now(), NOT save_pebble(..., true). B1 and B2 write the SAME key
   // microseconds apart whenever box_add() reuses the slot B1 released, and
@@ -2093,11 +2186,13 @@ static bool ui_tr_store_slot(void* ctx, uint8_t slot)
 static bool ui_tr_store_box(void* ctx)
 {
   (void)ctx;
+  if (gs_readonly()) return false;
   return save_box_header(gs_state().box);
 }
 static void ui_tr_store_checkpoint(void* ctx)
 {
   (void)ctx;
+  if (gs_readonly()) return;
   // A failed checkpoint does not invalidate the trade - the same sentence
   // app/app.cpp makes about the evolution ceremony. Only the nvs2 copy is stale.
   (void)save_checkpoint_all();
@@ -2216,6 +2311,15 @@ Inventory&     ui_inventory(void) { return gs_state().inv; }
 
 void ui_explore_commit(uint8_t mutated_slot)
 {
+  // A READ-ONLY SESSION COMMITS NOTHING, SINCE THE FINAL REVIEW. These three
+  // writes go straight to save_manager rather than through the gs_* facade
+  // where the read-only guard lives, so a device parked behind SAVE ERROR could
+  // still be walked into NETWORK -> scan -> encounter (which works with an
+  // empty Box, by design) and would then write cooldowns and inventory into the
+  // save it had just refused to touch. See the trade hooks above for the whole
+  // account and for why the guard is here rather than inside save_manager.
+  if (gs_readonly()) return;
+
   GameState& gs = gs_state();
   // cd_take_dirty() rather than "save after cd_arm": cd_ready() can dirty the
   // table too, by promoting rows armed while the clock was CAL_UNSET, and a

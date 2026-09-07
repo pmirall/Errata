@@ -317,6 +317,15 @@ TEST(every_state_draws) {
     CHECK(sm_draw());
     if (fb_oob()) fprintf(stderr, "  %s: %d out-of-bounds\n", kName[i], fb_oob());
     CHECK(fb_oob() == 0);
+    // AND THE TEXT IS TEXT THE PANEL CAN SHOW. Added at the FINAL REVIEW: the
+    // two recorders bought with P10-C4 and P10-C6 were asserted in
+    // tests/test_screens.cpp alone, so three of the four binaries that link
+    // the fake and draw would not have reported the next instance of either.
+    // This one walks EVERY screen, which is the widest sweep in the suite.
+    if (fb_no_glyph()) fprintf(stderr, "  %s: %s\n", kName[i], fb_no_glyph_first());
+    CHECK_EQ(fb_no_glyph(), 0u);
+    if (fb_bad_utf8()) fprintf(stderr, "  %s: %s\n", kName[i], fb_bad_utf8_first());
+    CHECK_EQ(fb_bad_utf8(), 0u);
   }
 }
 
@@ -380,6 +389,63 @@ TEST(autoreturn_follows_sticky) {
     if (sticky == timed) fprintf(stderr, "  %s: sticky %d timed %d\n",
                                  kName[i], (int)sticky, (int)timed);
     CHECK(sticky != timed);
+  }
+}
+
+// =============================================================================
+//  THE POWER LADDER'S RELEASE HOOK, AND THE SET IT IS ALLOWED TO ACT ON
+//  Added at the FINAL REVIEW, for a defect that had been standing since P6-C3.
+//
+//  app/app.cpp's pwr_hook_release() runs at the PWR_DIM -> PWR_IDLE edge (120 s
+//  of no BUTTON PRESS - an animation nobody has to press for is indistinguishable
+//  from an idle device) and, in the same transition, hook_panel(false) blanks the
+//  screen. Until this review its guard was `if (sm_current() == SCR_HOME) return;`
+//  and it therefore took SCR_SETUP_NAME, SCR_SETUP_STARTER, SCR_TIME, SCR_GAME,
+//  SCR_EVOLUTION, SCR_BATTLE and SCR_ERROR to HOME behind a dark panel.
+//
+//  The reason it could only ever hit those seven is the test above: sm_service()
+//  has ALREADY taken every non-sticky screen home at 20 s. So the release hook's
+//  reachable set is exactly the SF_STICKY set, i.e. the screens that opted out.
+//
+//  app/app.cpp is compiled by no host binary, so this pair splits the claim in
+//  two and holds both halves where they can be held: this case pins the TABLE
+//  property the fixed predicate depends on (HOME sticky so the new test is a
+//  superset; NETWORK and LINK not sticky so the radio debt is still discharged),
+//  and tools/check.sh gates that pwr_hook_release()'s BODY reads sm_is_sticky()
+//  rather than naming one screen. Neither half is enough alone.
+// =============================================================================
+TEST(the_release_hook_may_only_skip_screens_that_opted_out_of_being_timed_out) {
+  // HOME must be sticky, or `sm_is_sticky()` would not be a superset of the
+  // `== SCR_HOME` test it replaced and every idle would re-enter HOME.
+  CHECK((SCREENS[(uint8_t)SCR_HOME].flags & SF_STICKY) != 0u);
+
+  // The two screens that hold the radio through this hook must NOT be sticky,
+  // or widening the guard would strand a scan job with stopped == 0 - the exact
+  // failure the hook's own comment says it exists to prevent.
+  CHECK((SCREENS[(uint8_t)SCR_NETWORK].flags & SF_STICKY) == 0u);
+  CHECK((SCREENS[(uint8_t)SCR_LINK].flags    & SF_STICKY) == 0u);
+
+  // And the seven the old predicate used to navigate away from mid-flow. Each
+  // one is a screen a player can legitimately stand on for two minutes without
+  // pressing anything: a naming ring, a date, an incubating egg, a battle, a
+  // minigame, and the two error screens whose whole job is to be read.
+  static const ScreenId kMustSurviveTheLadder[] = {
+    SCR_SETUP_NAME, SCR_SETUP_STARTER, SCR_TIME,
+    SCR_GAME, SCR_EVOLUTION, SCR_BATTLE, SCR_ERROR
+  };
+  for (size_t i = 0; i < sizeof kMustSurviveTheLadder / sizeof kMustSurviveTheLadder[0]; ++i) {
+    const uint8_t id = (uint8_t)kMustSurviveTheLadder[i];
+    if ((SCREENS[id].flags & SF_STICKY) == 0u)
+      fprintf(stderr, "  %s lost SF_STICKY: the power ladder will now navigate "
+                      "away from it at 120 s with the panel dark\n", kName[id]);
+    CHECK((SCREENS[id].flags & SF_STICKY) != 0u);
+  }
+
+  // sm_is_sticky() must actually read the row, not a copy of it.
+  for (uint8_t i = 0; i < (uint8_t)SCR_COUNT; ++i) {
+    reset_all();
+    sm_replace_root((ScreenId)i);
+    CHECK_EQ((int)sm_is_sticky(), (int)((SCREENS[i].flags & SF_STICKY) != 0u));
   }
 }
 

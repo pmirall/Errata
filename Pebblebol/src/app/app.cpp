@@ -739,13 +739,37 @@ static void pwr_hook_panel(bool on)
 
 static void pwr_hook_release(void)
 {
-  // NOTHING TO RELEASE FROM HOME, and skipping it there is not an optimisation.
-  // The radio is only ever held by the screen that asked for it - NETWORK's scan
-  // job, CREATOR's access point - and both give it back in their own leave()
-  // hook, so on HOME it is already off. Re-entering HOME anyway would re-run its
-  // enter hook, cut the shared interpolators and close whatever modal was up,
-  // every time the device idled.
-  if (sm_current() == SCR_HOME) return;
+  // NOTHING TO RELEASE FROM A SCREEN THAT SAID IT IS A PLACE TO STAND. This
+  // predicate is a strict SUPERSET of the "== SCR_HOME" one it replaced: HOME is
+  // itself SF_STICKY (ui/screen_table.cpp), so every case the old test skipped is
+  // still skipped - and skipping it is not an optimisation, because re-entering
+  // HOME re-runs its enter hook, cuts the shared interpolators and closes
+  // whatever modal was up, every time the device idled.
+  //
+  // *** FINAL-REVIEW FIX. IT IS THE SAME DEFECT P10-C6 FIXED FOR ONE SCREEN. ***
+  // The old test named HOME. But ui's own 20 s auto-return (state_machine.cpp
+  // sm_service) already refuses to move a sticky screen, and has already taken
+  // every NON-sticky screen home 100 s earlier - so the only screens this hook
+  // could ever reach were the ones screen_table.cpp marks SF_STICKY, i.e. exactly
+  // the screens that explicitly opted out of being timed out. Each was taken to
+  // HOME at 120 s of no gesture with the panel blanked in the same transition:
+  // SCR_SETUP_NAME, SCR_SETUP_STARTER, SCR_TIME (whose table comment says
+  // SF_STICKY exists because "throwing away a half-entered date after 20 s of
+  // thinking would be wrong"), SCR_GAME, SCR_EVOLUTION, SCR_BATTLE, and worst
+  // SCR_ERROR - whose leave() hook clears s_blinking and calls led_set(0), which
+  // kills the blinking LED that this file calls "the ERROR screen's only voice
+  // when the panel is missing", with no route back for the rest of the power
+  // cycle because both SCR_ERROR entry points are inside app_setup(). CREATOR was
+  // spared only because P10-C6 added creator_screen_busy() to PowerInput.held -
+  // that fix WAS this defect, found once and patched for the one screen that
+  // happened to be holding a radio.
+  //
+  // NO RADIO DEBT IS LOST BY WIDENING IT. The two screens that discharge the
+  // radio through this hook - NETWORK and LINK - are NOT sticky, so they still
+  // arrive here. CREATOR is sticky but is clamped at DIM by ui_radio_job_busy()
+  // for as long as its access point is up, and self-exits on its own D7 timeout
+  // when it is not. tests/test_power_screens.cpp is the case that pins all three.
+  if (sm_is_sticky()) return;
 
   // *** THE CARRIED RADIO DEBT, DISCHARGED HERE AND NOWHERE ELSE ***
   // NOT net_request(RADIO_OFF). ui_home() navigates; sm_goto() runs the
@@ -767,6 +791,13 @@ static void pwr_hook_persist(void)
   // clean save is still cheap. save_touch_lastseen() first: without it the
   // absence baseline is however long ago the last 1 Hz tick was, and a sleep
   // measured from a stale baseline charges the awake time too.
+  // NOT ON A READ-ONLY SESSION. gs_save_active() already refuses one, but
+  // save_touch_lastseen() does not - it is a save_manager primitive and the
+  // read-only guard lives in the gs_* facade - so a board parked behind SAVE
+  // ERROR wrote the "t" key every 60 s into the save it had declared
+  // untrustworthy, with no player action at all. This is docs/bench.md G3's
+  // board and it is the ONE write on that path that needs no gesture.
+  if (gs_readonly()) return;
   save_touch_lastseen(gt_now());
   (void)gs_save_active(true);
 }
@@ -1187,7 +1218,13 @@ void app_loop(void)
   // cannot reach the rung that drops the radio.
   PowerInput pin;
   pin.idle_ms = (uint32_t)(ms - g_input_ms);
-  pin.held    = ui_radio_job_busy() ? 1u : 0u;
+  // BOTH HOLDS. ui_radio_job_busy() is P7-C2/P10-C6's; ui_show_busy() is the
+  // final review's, and it is the same defect with a different owner: a
+  // ceremony is a state the player watches without pressing anything, so the
+  // idle clock runs straight through it. Without this the 4,480 ms birth show
+  // that ends every first boot ran for 60 s at PWR_SLEEP and sent ZERO frames
+  // to a panel that had been dark since 120 s. See ui/ui.h for the account.
+  pin.held    = (ui_radio_job_busy() || ui_show_busy()) ? 1u : 0u;
   (void)pwr_service(pin);
 
   // --- 5. render ------------------------------------------------------------

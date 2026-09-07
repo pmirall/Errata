@@ -833,6 +833,15 @@ TEST(the_two_combatants_face_each_other) {
   // And the body is not symmetric, so "mirrored" is a claim with content.
   CHECK(same < BR_BODY_W * BR_BODY_H);
   CHECK_EQ(fb_oob(), 0u);
+  // AND THE TEXT THIS BINARY DREW IS TEXT THE PANEL CAN SHOW. Added at the
+  // FINAL REVIEW: fb_no_glyph() and fb_bad_utf8() were asserted in
+  // tests/test_screens.cpp alone, so three of the four binaries that link the
+  // fake and draw would not have reported the next instance of either defect.
+  // Lifetime totals, so this covers every frame this file has rendered.
+  if (fb_no_glyph() != 0u) fprintf(stderr, "  %s\n", fb_no_glyph_first());
+  CHECK_EQ(fb_no_glyph(), 0u);
+  if (fb_bad_utf8() != 0u) fprintf(stderr, "  %s\n", fb_bad_utf8_first());
+  CHECK_EQ(fb_bad_utf8(), 0u);
 }
 
 // =============================================================================

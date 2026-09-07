@@ -12,6 +12,10 @@
 #include "minigames/minigame.h"
 #include "minigames/games/games.h"
 #include "minigames/manager.h"
+#include "minigames/registry.h"   // mg_draw_current() / mg_def_at(): the pairing that ships
+#include "core/strings_es.h"
+#include "ui/screen.h"
+#include "fakes/gfx_fb.h"
 
 static const MgLogic* const ALL[] = {
   &MG_PING, &MG_SEQUENCE, &MG_PACKET_FLOOD, &MG_FIREWALL, &MG_BUFFER, &MG_DELETE
@@ -1209,5 +1213,126 @@ TEST(the_report_count_never_exceeds_the_games_started) {
       }
     }
     CHECK(g_reports <= started);
+  }
+}
+
+// =============================================================================
+//  EVERY MgId DRAWS ITS OWN FRAME
+//  Added at the FINAL REVIEW, and it is the case minigames/registry.cpp's own
+//  comment said it already had.
+//
+//  DEFS[] in registry.cpp pairs each MgId's logic with its drawing half, and
+//  mg_draw_current() indexes it with g->id. Its only guard was
+//  `static_assert(sizeof(DEFS)/sizeof(DEFS[0]) == MG_ID_COUNT)` - a COUNT.
+//  MEASURED: swapping two rows compiles clean under -Wall -Wextra -Werror,
+//  satisfies that assert, and passes the whole gate; MG_PING then draws
+//  SEQUENCE's two panels and pip row while PING's logic runs, and one game's
+//  MgCtx is handed to another game's draw half, which reinterprets MgCtx::state
+//  as a different private struct.
+//
+//  Nothing could see it. registry.cpp was compiled by no host binary - its
+//  banner called it a "DEVICE translation unit", which is false; it reaches no
+//  ui/ header - and tests/test_screens.cpp re-derives the pairing BY HAND at
+//  each of its six mg_snapshot() call sites, so the eleven minigame goldens
+//  prove the pairing test_screens.cpp wrote rather than the pairing that ships.
+//
+//  ui/screen_care.cpp had already diagnosed exactly this for its own table, in
+//  writing - "neither can see a row in the WRONG PLACE, which is exactly the
+//  mistake that matters here" - and nobody came back to registry.cpp. The
+//  README's 38-item bench list has no PLAY step at all, so a board would have
+//  shown SECUENCIA's frame under REFLEJOS with nothing to catch it.
+//
+//  A constexpr fold cannot do this: MG_PING and its siblings are extern const
+//  with no visible initialiser, so DEFS[i].logic->id is not a constant
+//  expression. It has to be a runtime case, over the real table.
+// =============================================================================
+TEST(every_minigame_id_is_paired_with_its_own_drawing_half) {
+  for (uint8_t i = 0; i < (uint8_t)MG_ID_COUNT; ++i) {
+    const MinigameDef* d = mg_def_at(i);
+    CHECK(d != nullptr);
+    if (d == nullptr) continue;
+    const MgLogic* want = mg_logic_by_id(i);
+    CHECK(want != nullptr);
+    if (want == nullptr) continue;
+
+    if (d->logic != want)
+      fprintf(stderr, "  DEFS[%u] carries %s, not %s: this game draws its "
+                      "neighbour's frame from its own context\n",
+              (unsigned)i,
+              d->logic ? S(d->logic->name_idx) : "(null)",
+              S(want->name_idx));
+    CHECK(d->logic == want);
+    CHECK_EQ((int)d->logic->id, (int)i);       // ...and the row knows its index
+    CHECK(d->draw != nullptr);                 // a row with no frame is a hole
+  }
+  // Out of range answers nullptr rather than reading past the table - the same
+  // guard mg_draw_current() has.
+  CHECK(mg_def_at((uint8_t)MG_ID_COUNT) == nullptr);
+  CHECK(mg_def_at(255u) == nullptr);
+}
+
+// AND THE FRAME THE DEVICE ACTUALLY DRAWS IS THE ONE THAT ROW NAMES.
+// The case above checks the table; this one checks mg_draw_current(), which is
+// the function every device frame goes through. Rendering each game twice -
+// once through the registry and once through the draw function named for that
+// game - and comparing the framebuffers is the whole claim, and it is the claim
+// tests/test_screens.cpp could not make because it supplies the pairing itself.
+//  THE SECOND STATEMENT OF THE PAIRING, written out here on purpose. Comparing
+//  mg_draw_current() against DEFS[i].draw would compare a row with ITSELF and
+//  could not see a table whose DRAW COLUMN was permuted - which is one of the
+//  two ways to get this wrong, and the one the case above cannot see either
+//  (swapping only the draws leaves DEFS[i].logic correct). Two independent
+//  statements that have to agree is the whole mechanism; this is the second.
+void ping_draw(const MgCtx&);
+void sequence_draw(const MgCtx&);
+void packet_flood_draw(const MgCtx&);
+void firewall_draw(const MgCtx&);
+void buffer_draw(const MgCtx&);
+void delete_draw(const MgCtx&);
+
+static const MgDrawFn kExpectedDraw[] = {
+  ping_draw, sequence_draw, packet_flood_draw,
+  firewall_draw, buffer_draw, delete_draw
+};
+static_assert(sizeof(kExpectedDraw) / sizeof(kExpectedDraw[0]) == (size_t)MG_ID_COUNT,
+              "one expected frame per MgId");
+
+TEST(the_registry_draws_the_frame_its_own_row_names) {
+  for (uint8_t i = 0; i < (uint8_t)MG_ID_COUNT; ++i) {
+    const MgLogic* g = mg_logic_by_id(i);
+    const MinigameDef* d = mg_def_at(i);
+    CHECK(g != nullptr && d != nullptr);
+    if (!g || !d || !d->draw) continue;
+
+    // Advance a real sequence so the frame is not the blank first one, and so
+    // mgr_logic() is the game this row is about.
+    mgr_begin(i, 1u, 1u);
+    for (int k = 0; k < 30; ++k) (void)mgr_tick((uint32_t)MG_STEP_MS);
+    CHECK(mgr_logic() == g);
+
+    fb_reset();
+    mg_draw_current();
+    const uint32_t lit_registry = fb_pixels();
+    static uint8_t via_registry[OLED_W * OLED_H];
+    for (int y = 0; y < OLED_H; ++y)
+      for (int x = 0; x < OLED_W; ++x)
+        via_registry[y * OLED_W + x] = (uint8_t)fb_get(x, y);
+
+    fb_reset();
+    kExpectedDraw[i](mgr_ctx());
+    int differing = 0;
+    for (int y = 0; y < OLED_H; ++y)
+      for (int x = 0; x < OLED_W; ++x)
+        if (via_registry[y * OLED_W + x] != (uint8_t)fb_get(x, y)) ++differing;
+
+    if (differing != 0)
+      fprintf(stderr, "  %s: mg_draw_current() drew a frame differing in %d "
+                      "pixels from the one DEFS[%u] names\n",
+              S(g->name_idx), differing, (unsigned)i);
+    CHECK_EQ(differing, 0);
+    // Anti-vacuity: two identical BLANK frames would satisfy the line above.
+    if (lit_registry == 0)
+      fprintf(stderr, "  %s drew nothing at all\n", S(g->name_idx));
+    CHECK(lit_registry > 0);
   }
 }

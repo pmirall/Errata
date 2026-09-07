@@ -40,8 +40,12 @@ enum CeremonyKind : uint8_t {
   CEREMONY_EVOLVE
 };
 
-// Where the body comes from. ui.cpp binds it; a NULL answer means "no pet",
-// and the phases that need a body simply hold the last frame.
+// Where the body comes from. ui.cpp binds it. A NULL answer means "no pet", and
+// the ceremony then ENDS rather than drawing frames with nothing in them: the
+// renderer clears the buffer every frame, so a phase that draws no body is a
+// black panel, not a held one. (This header used to claim the phases "simply
+// hold the last frame"; they did not, and the claim is the sort a future change
+// gets read against - see ceremony.cpp.)
 typedef const PetView* (*CeremonyBodyFn)(void);
 void     ceremony_bind_body(CeremonyBodyFn fn);
 

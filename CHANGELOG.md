@@ -29,6 +29,77 @@ carries the developer console and ships to nobody. A number quoted without its
 variant is not a number — `docs/budget.md` §8 records a phase exit that compared
 one with the other.
 
+## [Unreleased] — the final review, 2026-09-07
+
+**The commit before the soldering iron.** Not a phase: a review of the whole
+tree against one measured fact, and the fixes it produced.
+
+### The fact
+`tests/fakes/*.cpp` defines 143 functions and **FIFTY of them are also defined
+under `Pebblebol/src`**, so every host binary that links a fake drives the
+FAKE's body while the reader believes it drives the firmware's. Two of the
+defects this product has already shipped were exactly that — P10-C6's stale copy
+of `ui_pet_name_latin1()` and P7's fixture nulling `save_manager`'s wear filter —
+and forty-nine of the fifty had no gate. **The linker can never catch this
+class**, measured rather than assumed: the six fake objects and the other host
+objects have ZERO defined symbols in common, because all fifty shipping bodies
+live in translation units no host binary compiles.
+
+### Added
+- **`tests/fakes/SHADOWS.txt`** — the fifty, enumerated and classified LINKED /
+  IMITATION / INJECTOR / RECORDER, each row carrying either a running assertion
+  that holds its imitation claim or a stated reason why it is not one.
+- **`tools/check.sh` §10** with `tools/shadow_defs.awk` — re-derives the set from
+  source and fails when it differs from the manifest, and enforces each class.
+  Five failure modes demonstrated by making them fail, including **the P10-C6
+  defect put back into `ui/ui.cpp`**, which the review measured passing the full
+  gate at exit 0 and which now fails by name.
+- `tools/check.sh` §11-13 — body gates for the read-only guard, the two power
+  ladder holds, the wipe paths' use of the Box constructor, the three §67 "joins"
+  that were proven at both ends and at no point in the middle, and four gates a
+  ticked box named and that did not exist (`god_begin`/`god_service` in the
+  artefact, `webui.cpp`'s `Content-Type` registration, `#pragma GCC diagnostic`,
+  `strings_es.h`'s Latin-1 rule).
+- Host coverage where there was none: `tests/test_minigames.cpp` links
+  `minigames/registry.cpp` and pins the pairing that ships; `test_persistence`
+  drives the closed-partition branch `kv_mem.h` documented and no test had ever
+  called; `test_perf` holds the frame-hold rule extracted into `core/perf.cpp`;
+  `test_statemachine` pins the screen set the power ladder may skip;
+  `test_game_state` pins the boot rearm; `test_link_screen` reaches two refusals
+  that were dead code in all 59 binaries; `test_screens` proves both text
+  recorders are live, and three more binaries now read them.
+- README §2: 24 inline warning blocks (symptom → the cause you will try first →
+  the cause it is → the one reading that separates them), and three bench items
+  for CARE, BOX and PLAY, which the 38-item list had no step for.
+
+### Fixed
+Seven bench-afternoon defects: the power ladder navigating away from every
+`SF_STICKY` screen at 120 s behind a blanked panel (the first-boot naming ring,
+the date screen, a battle, an incubating egg and the ERROR screen with its
+blinking LED); the birth ceremony played at one phase per loop pass to a dark
+panel; the LINK backstop tearing ESP-NOW down 91 s into a battle; a factory
+reset leaving a pet in no Box slot that could never be saved; a store that never
+opened diagnosed as a corrupt save with an offer to wipe it; a read-only session
+writing through the trade seam; and the renderer free-running for the whole of
+every film. Plus the PING cue letter, `pet_species_name()` on an installed
+creator species, the minigame registry's order, the ceremony's name buffer, the
+offline alert flood, the console's whole-ring batch and its overlong-line tail,
+three `creator_server` defects, four `kv_mem` divergences, `boot_rearm`, and the
+input ring's permanently-lost edge.
+
+### Changed
+- `docs/bench.md` C7 rewritten: it asked for three reboots and two of the three
+  were unrunnable on this silicon and this artefact.
+- **UNTICKED: §67 "Two-button input is robust."** Its first named artefact —
+  P2-C6's 5 ms sampler and edge ring — is behind `#if defined(ARDUINO)` and is
+  compiled by no host binary. `test_input` 15/15 is real and is about the FSM.
+
+### Sizes
+`release` 1,351,518 flash / 59,452 globals (caps 1,600,000 / 65,000);
+`baseline` 1,368,672 / 59,548. Both at 0 project warnings.
+
+---
+
 ## [1.0.0-rc1] — 2026-09-07
 
 Phase 10, **six chunks**, and this entry now records all six rather than only

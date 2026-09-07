@@ -335,8 +335,8 @@ A board with no buzzer fitted must run the whole game unchanged — `audio_devic
 `nullptr` and the engine no-ops, which is host-driven but not the same as a board with an empty
 pad.
 
-**C7. The reset reason really becomes the right `BootKind`. ADDED AT THE P10-C6 EXIT.** — variant
-`release`, and it costs three reboots.
+**C7. The reset reason really becomes the right `BootKind`. ADDED AT THE P10-C6 EXIT, REWRITTEN AT
+THE FINAL REVIEW.** — variant **`baseline`**, and it costs **two** reboots.
 
 Whether a reboot charges elapsed game time to the pet is decided by
 `hardware/boot_reason.h`'s table, and until P10-C6 **nothing anywhere had ever turned a real
@@ -346,20 +346,54 @@ the fake that stood in for it collapsed seven kinds to two. The table is pure an
 produced by a real reset has still never existed. `boot.cpp`'s own header names the historical
 instance: v1 folded `ESP_RST_DEEPSLEEP` into `BOOT_SOFT_RESET` and lost every sleep.
 
-The artefact prints `[nt] boot=<kind> nvs=<n> load=<r>` on every boot, above every guard. With a
-played board, provoke three reboots and read the number each time (`BootKind`:
-0 FIRST_RUN, 1 POWER_LOSS, 2 CRASH, 3 SOFT_RESET, 4 DEEPSLEEP, 5 UNKNOWN):
+**THREE THINGS THE FINAL REVIEW MEASURED, WHICH CHANGE THIS ITEM. Read them before you spend the
+time.**
 
-1. **Unplug and replug** after five minutes → expect `boot=1`, and the pet's care bars must have
-   moved by five minutes' worth. This is the one that matters: if it reads 3, no absence is ever
-   charged and the pet stops ageing while the device is off.
-2. **Press the reset pin** → expect `boot=3`, and the bars must NOT jump.
-3. **Let the idle ladder reach SLEEP** (ten minutes untouched) and wake it with a button →
-   expect the device to come back with time charged over the sleep.
+**(a) `BootKind` 4 (DEEPSLEEP) IS UNREACHABLE ON THIS ARTEFACT, so the old step 3 could never
+produce a third number.** `grep -rn 'esp_deep_sleep_start' Pebblebol/src` returns NOTHING.
+`hardware/power.cpp` calls `esp_light_sleep_start()`, and `hardware/power.h` says in its own words
+why a deep rung is deliberately not built ("a DEEP sleep does not resync `esp_timer`, so a deep rung
+would take that clock back to zero on every wake"). **A light-sleep wake is not a reset**:
+`esp_reset_reason()` is never re-read, `app_setup()` never re-runs, and the `[nt] boot=` line is
+printed once per boot and never again. The old step 3 asked the operator to sit through ten
+untouched minutes waiting for a serial line the firmware cannot print, and then fail an acceptance
+criterion it is architecturally incapable of meeting.
 
-Acceptance: three different numbers, each matching the list, and care moving only on 1 and 3's
-sleep. Record them in the capture; it is four characters and it closes the last unmeasured link
-in §67's "Time-based calculations work across reboot".
+**(b) A RESET-PIN PRESS READS 1, NOT 3, AND THE BARS WILL MOVE.** The ESP32-C3 ROM's `RESET_REASON`
+enum has no external-pin value — `esp_system.h` documents `ESP_RST_EXT` as not applicable — so the
+pin produces `POWERON_RESET`; `boot_classify()` sees `BR_POWERON` and answers `BOOT_POWER_LOSS` = 1,
+and the pin reset also clears RTC fast memory so `s_intact` is false as well. **If you read 1 after
+a reset-pin press, the table is right and the silicon cannot tell you otherwise.** `boot=3` comes
+from a SOFTWARE restart, which is why step 2 below asks for one.
+
+**(c) ON A CALIBRATED BOARD THE CLASSIFIER IS NEVER CONSULTED.** `app/app.cpp`'s `boot_absence()`
+reads `boot_kind()` only inside `if (!known)`, and `known = (gt_cal_state() != CAL_UNSET)`. A board
+that has been through §F's date screen is calibrated, so the "bars moved / bars did not move" half
+measures `gt_elapsed_since()`, not `boot_classify()`. **To exercise the classifier, use an
+uncalibrated board — the one item 21 / F5 produces by skipping the date question.**
+
+The artefact prints `[nt] boot=<kind> nvs=<n> load=<r>` on every boot, above every guard
+(`BootKind`: 0 FIRST_RUN, 1 POWER_LOSS, 2 CRASH, 3 SOFT_RESET, 4 DEEPSLEEP — unreachable, see (a) —
+5 UNKNOWN). **Do it on `baseline`**, where god mode's DIAG SYS page prints `boot=%u rst=%u n=%lu` and
+you can re-read it at leisure: on `release` the number appears exactly once, at the end of
+`app_setup()`, on a USB link that does not survive an unplug, and it is flushed out of HWCDC's
+256 B TX ring by the first DIAG rows within about two minutes.
+
+1. **Unplug and replug** after five minutes → expect `boot=1`. On an UNCALIBRATED board the pet's
+   care bars must have moved by five minutes' worth. This is the one that matters: if it reads 3,
+   no absence is ever charged and the pet stops ageing while the device is off.
+2. **A software restart** — god mode's `reboot`, or `esptool run` — → expect `boot=3`, and the
+   bars must NOT jump. (A reset-pin press is step 1 again on this silicon; see (b).)
+
+Acceptance: **two** different numbers, each matching the list, and care moving on 1 and not on 2.
+Record them in the capture; it closes the last measurable link in §67's "Time-based calculations
+work across reboot".
+
+**What this item can no longer claim, and where the rest went.** The reason-to-`BootKind` mapping
+itself is pure and swept over all 256 values by `tests/test_clock.cpp`, and
+`tests/test_game_state.cpp` now holds the rearm/taint half that the host fake used to answer wrongly.
+What is left here — and it genuinely needs a board — is that a real unplug loses RTC fast memory and
+that a real software restart does not.
 
 ---
 

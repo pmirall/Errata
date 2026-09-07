@@ -91,7 +91,31 @@ inline uint8_t pet_art_design(uint8_t species_id, uint8_t gene_species,
 // -----------------------------------------------------------------------------
 inline const char* pet_species_name(uint8_t species_id) {
   const SpeciesDef* sp = species_get(species_id);
-  return sp ? S(sp->name_idx) : nullptr;
+  if (sp == nullptr) return nullptr;
+  const char* nm = S(sp->name_idx);
+  // *** AND AN EMPTY NAME IS NOT A NAME. Final review. ***
+  // The paragraph above says this answers "nullptr - never a placeholder - for
+  // the same three inputs", and one of those three inputs is "a creator custom
+  // (200..209)". It did not: game/species_custom.cpp's csp_install() sets
+  // name_idx = STR_EMPTY for every custom species ("the name lives on the
+  // PebbleInstance's nickname, not in a StrId"), species_get(200) therefore
+  // returns a real row, and S(STR_EMPTY) is the EMPTY STRING - which is not
+  // nullptr. So the test was a null test where the ladder needed an empty test,
+  // rung 2 was taken with a zero-length string, and the dynasty fallback at
+  // rung 3 became unreachable for exactly the creature the phone block mints.
+  //
+  // Measured against the shipping objects: an unnamed device whose active
+  // Pebble is a custom species produced "" from ui.cpp's pet_name_stored(), and
+  // disc_encode() ACCEPTS that (name_ok() is true for an all-zero field) - so
+  // the board went on the air with twelve zero bytes for a name. The far board's
+  // LINK row then fell back to S(STR_LK_SEARCH) ("Buscando Pebbles...") and its
+  // card header to S(STR_LINK_TITLE) ("ENLACE"), so the device was visible but
+  // anonymous and two of them were indistinguishable. HOME's identity line was
+  // blank on the near board.
+  //
+  // Fixed HERE rather than at ui.cpp's call site, because the contract is
+  // stated here and ui/screen_box.cpp reads the same answer.
+  return (nm != nullptr && nm[0] != '\0') ? nm : nullptr;
 }
 
 #endif  // PB_PET_ART_H

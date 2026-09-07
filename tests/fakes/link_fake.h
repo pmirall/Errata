@@ -32,6 +32,26 @@ void lf_reset(void);
 void lf_set_start_ok(bool ok);
 void lf_set_poll_fail(bool fail);
 
+// ...AND THE OTHER TWO DRIVER CALLS, added at the FINAL REVIEW because their
+// absence made two documented refusals DEAD CODE in all 59 binaries.
+//
+// lf_set_bind_ok(false)   : ui_link_bind() answers false, which is what
+//   networking/transport_espnow.cpp's espnow_bind() does on !s_up, on
+//   slot >= LINK_PEER_CAP, when the ESP-NOW slot table has no address for that
+//   handle, and when esp_now_add_peer() fails. ui/screen_link.cpp's
+//   STR_LK_RADIO_ERR arm for a failed consent had never executed: deleting the
+//   whole arm survived 122,581 checks across the three binaries that link
+//   screen_link.o.
+// lf_set_beacon_ok(false) : the driver's beacon() answers false, which
+//   espnow_broadcast() does on !s_up, on an oversize frame, and on any
+//   esp_now_send() error. networking/discovery.cpp handles that by NOT
+//   incrementing beacons_tx and doing nothing else, BY DESIGN - so at the job
+//   level a radio refusing every broadcast is bit-for-bit indistinguishable
+//   from an empty room, and beacons_tx is read by no ui/ file at all. That is
+//   the P10 invisible-device outcome reached from the transmit side.
+void lf_set_bind_ok(bool ok);
+void lf_set_beacon_ok(bool ok);
+
 // Queue one beacon for the next poll()s to hand up. `caps` is a DISC_CAP_* mask
 // and `slot` is the transport's opaque handle - the fake is what invents it,
 // exactly as networking/transport_espnow.cpp does on the device.

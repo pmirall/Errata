@@ -297,13 +297,35 @@ static void in_timer_cb(void *)
   if (lv == s_ring_last) {
     return;                                 // no edge, nothing to record
   }
-  s_ring_last = lv;
 
   const uint8_t tail = s_ring_tail;
   const uint8_t next = (uint8_t)((tail + 1u) & IN_RING_MASK);
   if (next == s_ring_head) {
-    return;                                 // full: keep the oldest edges
+    // FULL: KEEP THE OLDEST EDGES, AND DO NOT ADVANCE s_ring_last.
+    // The assignment used to sit ABOVE this test, so once the producer had
+    // moved past a dropped edge every later sample equal to that level returned
+    // at the "no edge" line and the dropped edge was lost PERMANENTLY rather
+    // than retried when space freed. Leaving s_ring_last alone makes the next
+    // 5 ms sample see the same edge again and record it.
+    //
+    // A press and its release that BOTH landed while the ring was full were
+    // therefore never seen by the FSM as an edge pair, so the tap simply did
+    // not happen. input_poll() ends with a live in_sample(), which repairs the
+    // LEVEL state - so a stuck button was not the outcome; an intermittently
+    // lost tap was, which is the hardest class of defect to diagnose at a
+    // bench and the one most likely to be blamed on the buttons or the pin map.
+    // Sixteen unconsumed edges needs a loop() stall of exactly the kind the
+    // `stall` command and a slow HTTP request produce.
+    //
+    // NOTHING IN THIS REPOSITORY CAN EXECUTE THIS. The whole sampler is behind
+    // `#if defined(ARDUINO)` and tests/Makefile compiles input.cpp without it -
+    // `nm` over bin/test_input finds no ring and no callback. The section 67
+    // "Two-button input is robust" box named this as its FIRST artefact and has
+    // been UNTICKED at the final review for exactly that reason; the owner step
+    // is in the plan beside it.
+    return;
   }
+  s_ring_last         = lv;                 // consumed: now it is history
   s_ring[tail].ms     = (uint32_t)millis();
   s_ring[tail].levels = lv;
   s_ring_tail         = next;               // publish last

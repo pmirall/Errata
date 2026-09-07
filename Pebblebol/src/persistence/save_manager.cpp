@@ -279,6 +279,12 @@ struct PairStat {
   uint8_t  good;         // copies that passed magic + CRC + version
   uint8_t  bad;          // copies that exist but did not pass
   uint8_t  foreign;      // copies that are intact but from a newer schema
+  // COPIES THAT COULD NOT BE ASKED ABOUT AT ALL, because the partition is not
+  // open. Not `present` and not `bad`: with the store shut both copies answer
+  // KV_CLOSED, and counting that as damage put a board with no usable "nvs" on
+  // the corrupt-save screen offering to wipe an undamaged save. See
+  // persistence/kv_store.h's KV_CLOSED.
+  uint8_t  closed;
   uint8_t  best_copy;    // 0/1, valid when good > 0
   uint32_t best_seq;
   // THE VERSION OF THE COPY THAT WON, and it is deliberately not the minimum
@@ -302,6 +308,13 @@ static void pair_load(KvPart part, const char* prefix, const BlobOps& o,
     key_pair(prefix, copy, key);
     const int n = kv_get(part, key, tmp, o.size);
     if (n == 0) continue;                       // absent: not a fault
+    // NOR IS A CLOSED STORE. With the partition shut every key answers
+    // KV_CLOSED, so counting it as present-and-bad made a board with no usable
+    // "nvs" report TWO CORRUPT COPIES of the Box - LOAD_CORRUPT, a read-only
+    // session, and the ERROR screen offering to wipe a save that was never
+    // damaged, before the checkpoint branch below was even reached. A store
+    // that is not there is evidence about the store, not about this key.
+    if (n == KV_CLOSED) { st.closed++; continue; }
     st.present++;
     if (n != (int)o.size) { st.bad++; continue; }
     // A HIGHER version is intact data this firmware does not understand; one
@@ -993,5 +1006,21 @@ bool save_factory_reset(void) {
   s_migrated      = false;
   s_ckpt_epoch    = 0;
   s_ckpt_known    = true;      // the partition was just wiped: nothing to read
-  return a && b;
+
+  // THE MAIN STORE IS THE RESET THAT MATTERS, and this used to be `a && b`.
+  // kv_wipe(KV_CKPT) returns false when the checkpoint partition never opened,
+  // and hardware/kv_nvs.h says in its own words that an absent "nvs2" is "not
+  // fatal ... it loses D6's recovery, nothing else". But a reset is not a
+  // checkpoint write, so on a board flashed without the sketch's partitions.csv
+  // - which README section 4 warns is exactly what the Arduino IDE board menu
+  // produces - a completely successful reset of KV_MAIN returned FALSE, and god
+  // mode's wipe confirms with `toast(ok ? STR_GOD_DONE : STR_ERR_NVS)`. The
+  // owner saw "No consigo recordar nada." after a reset that worked, on bench
+  // item 36, which reads as a broken reset or dying flash and is neither.
+  //
+  // The checkpoint half is still reported - it is in kv_healthy(KV_CKPT) and in
+  // kv_error()'s KV_E_OPEN_CKPT bit, both on the DIAG line - so nothing is
+  // hidden; it is just not allowed to fail the reset it was not part of.
+  (void)b;   // reported through kv_healthy(KV_CKPT) / kv_error(), not through here
+  return a;
 }

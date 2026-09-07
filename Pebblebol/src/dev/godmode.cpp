@@ -28,7 +28,10 @@
 // The always-compiled surface reads these. They are all already linked into the
 // release artefact - this adds the READERS, not the modules.
 #include "../core/version.h"
+#include "../core/rng.h"                     // the wipe's new starter draws a seed
+#include "../data/species_table.h"           // SPECIES_ID_STARTER
 #include "../game/box.h"
+#include "../persistence/save_schema.h"      // ORIGIN_STARTER
 #include "../hardware/boot.h"
 #include "../hardware/gametime.h"
 #include "../hardware/kv_nvs.h"
@@ -65,7 +68,7 @@ static void heap_trend_begin(void)
                 "pass_worst_scr,pass_over,discards\r\n");
   Serial.printf("DIAG#,link,uptime_s,rx_session,rx_beacon,rx_wrong_peer,"
                 "rx_malformed,rx_ring_ovf,rx_beacon_ovf,tx_ok,tx_fail,"
-                "tx_refused,tx_no_mem,beacons_tx\r\n");
+                "tx_refused,tx_no_mem,beacons_tx,ever_acked,ack_ms\r\n");
   // THE ScreenId MAP, ONCE, SO A CAPTURE IS SELF-DESCRIBING (P10-C6). The perf
   // row's scr / frame_worst_scr / pass_worst_scr columns are raw enum values,
   // docs/bench.md A1's method is "walk the screens, then read which one owned
@@ -98,7 +101,17 @@ static void link_trend_service(uint32_t now_ms)
   const uint32_t any = s.rx_session | s.rx_beacon | s.rx_wrong_peer |
                        s.rx_malformed | s.tx_ok | s.tx_fail | s.beacons_tx;
   if (any == 0u) return;
-  Serial.printf("DIAG,link,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu\r\n",
+  // TWO MORE COLUMNS SINCE THE FINAL REVIEW, and they close a documented
+  // acceptance step that had no instrument. PEBBLEBOL_IMPLEMENTATION_PLAN.md's
+  // phase-7 list says "Unicast and the send-callback ACK after HELLO:
+  // espnow_stats().tx_ok rising AND espnow_ever_acked() true after the first
+  // unicast to a bound peer" - and espnow_ever_acked()/espnow_ack_ms() had NO
+  // READER ANYWHERE IN THE TREE, on any variant, so the second half of that
+  // step was unrunnable on a board. networking/transport_espnow.h goes further
+  // and says the ACK "is what P7-C2's LINK screen shows as 'the peer is still
+  // there'"; the LINK screen never called either one. This is the same dead-
+  // export shape P10-C6 fixed for espnow_stats() itself, one function along.
+  Serial.printf("DIAG,link,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu\r\n",
                 (unsigned long)(now_ms / 1000UL),
                 (unsigned long)s.rx_session,   (unsigned long)s.rx_beacon,
                 (unsigned long)s.rx_wrong_peer,(unsigned long)s.rx_malformed,
@@ -106,7 +119,9 @@ static void link_trend_service(uint32_t now_ms)
                 (unsigned long)s.rx_beacon_overflow,
                 (unsigned long)s.tx_ok,        (unsigned long)s.tx_fail,
                 (unsigned long)s.tx_refused,   (unsigned long)s.tx_no_mem,
-                (unsigned long)s.beacons_tx);
+                (unsigned long)s.beacons_tx,
+                (unsigned long)(espnow_ever_acked() ? 1u : 0u),
+                (unsigned long)espnow_ack_ms());
 }
 
 // P10-C2. THE PERFORMANCE RECEIPT, AND IT IS A SEPARATE LINE ON PURPOSE.
@@ -248,7 +263,7 @@ static void shell_fill_fields(DiagFields& f)
 
   f.kv_healthy     = kv_healthy(KV_MAIN) ? 1u : 0u;
   f.kv_error       = (uint8_t)kv_error();
-  f.kv_write_fails = (uint8_t)kv_write_fails();
+  f.kv_write_fails = kv_write_fails();   // uint16, not truncated: see dev/diag_core.h
 
   f.uptime_s = (uint32_t)(millis() / 1000UL);
 }
@@ -367,12 +382,42 @@ static void shell_line_reset(void)
   s_line[0] = '\0';
 }
 
+// AN OVERLONG LINE IS SWALLOWED TO ITS NEWLINE, not restarted. Set while the
+// buffer has overflowed and cleared by the newline that ends the offending line.
+static bool s_line_drop = false;
+
 static void shell_line_service(void)
 {
   while (Serial.available() > 0) {
     const int c = Serial.read();
     if (c < 0) break;
+
+    // *** BACKSPACE AND ECHO, SINCE THE FINAL REVIEW. ***
+    // README section 2 says of this console "do this first on any board - it
+    // tells you which build you flashed", and it is the instrument every later
+    // item is diagnosed through. It neither echoed what was typed nor handled
+    // 0x08/0x7F, so a corrected typo became part of the command: the operator's
+    // own terminal showed "info" and the firmware had "inf\bo", answered "no
+    // such command", and the natural next suspicion is the flash or the baud
+    // rate. Six lines, entirely above the GOD_MODE_ENABLED guard.
+    if (c == 0x08 || c == 0x7F) {
+      if (!s_line_drop && s_linelen > 0) {
+        s_line[--s_linelen] = '\0';
+        Serial.write("\b \b");
+      }
+      continue;
+    }
+
     if (c == '\n' || c == '\r') {
+      Serial.write("\r\n");
+      if (s_line_drop) {
+        // Say so. Silence is why nobody noticed the old behaviour.
+        Serial.printf("[diag] line too long (max %u); ignored\r\n",
+                      (unsigned)GOD_LINE_MAX);
+        s_line_drop = false;
+        shell_line_reset();
+        continue;
+      }
       if (s_linelen > 0) {
         s_line[s_linelen] = '\0';
         // The console first: it owns the genome paste and every mutating
@@ -380,13 +425,51 @@ static void shell_line_service(void)
         if (!shell_dev_line(s_line)) shell_always_line(s_line);
       }
       shell_line_reset();
-      continue;
+
+      // *** ONE LINE PER PASS, SINCE THE FINAL REVIEW, AND IT IS THE ONLY
+      // THING BOUNDING THIS FUNCTION'S COST. ***
+      // shell_do_stall() clamps ONE command to GOD_STALL_MAX_MS (3000), under a
+      // comment that says "well under the 5 s task watchdog" - and that clamp
+      // guards the wrong unit. Nothing bounded how many commands one pass
+      // consumed, and this loop drained the whole serial RX before returning:
+      // N buffered `stall` lines were N consecutive busy-waits inside a single
+      // app_loop() pass, with no yield, no input_poll, no render and no
+      // net_service between them.
+      //
+      // The batch is not "a couple of pasted lines". Serial is HWCDC on this
+      // board (CDCOnBoot=cdc) and its RX ring is 256 bytes, so one full ring is
+      // 23 lines of "stall 3000\n" = SIXTY-NINE SECONDS in one pass: 14x the
+      // task watchdog, 690x PERF_PASS_BUDGET_US, and 4.3x NT_TICK_MAX_OWED_S -
+      // so it also trips pwr_tick_stalls(), the counter the ENERGIA page
+      // promises "a healthy board reads 0 0 for its whole run" about. And
+      // core/perf.cpp DISCARDS any pass over PERF_SANE_MAX_US (10 s), so the
+      // very worst passes this could produce were invisible in `p worst` and
+      // `p over` - the two figures docs/bench.md A2 tells the operator to read.
+      //
+      // Returning here leaves the rest in the RX ring for the next pass, which
+      // costs a paste one loop iteration per line and bounds the pass by ONE
+      // command - which is the unit GOD_STALL_MAX_MS was written for.
+      return;
     }
-    // An overlong line RESTARTS rather than truncating into a different
-    // command: "give_item 3<junk...>spawn 1" must not become a spawn.
-    if (s_linelen >= (uint8_t)GOD_LINE_MAX) { shell_line_reset(); continue; }
+
+    if (s_line_drop) continue;                       // swallowing to the newline
+
+    // *** AN OVERLONG LINE IS SWALLOWED, NOT RESTARTED. ***
+    // The comment that used to stand here promised the opposite of what the
+    // code did: "an overlong line RESTARTS rather than truncating into a
+    // different command: give_item 3<junk...>spawn 1 must not become a spawn."
+    // Restarting the buffer is exactly what MADE the tail a separate command -
+    // everything after the 56th byte accumulated into a fresh line and was
+    // dispatched at the next newline. MEASURED on the release build:
+    // "give_item 3" + 46 filler bytes + "spawn 1\n" reached DGC_SPAWN. On
+    // `baseline` - which is what bench items 3, 4, 5, 7 and 9 all use - that is
+    // a real spawn, and god_enter() taints the living pet permanently.
+    // The realistic trigger is not a crafted string: it is an operator
+    // correcting a typo blind on a console that had no echo (fixed above).
+    if (s_linelen >= (uint8_t)GOD_LINE_MAX) { s_line_drop = true; shell_line_reset(); continue; }
     s_line[s_linelen++] = (char)c;
     s_line[s_linelen]   = '\0';
+    Serial.write((uint8_t)c);
   }
 }
 
@@ -734,16 +817,48 @@ static void run_absence(uint32_t secs)
 // -----------------------------------------------------------------------------
 static bool run_wipe(void)
 {
-  const bool ok = gs_factory_reset();
-  Genome g = genome_genesis();
-  sim_new_pet(g, gt_now(), 0);
+  bool ok = gs_factory_reset();
+
+  // *** THROUGH THE BOX'S CONSTRUCTOR, SINCE THE FINAL REVIEW. ***
+  // This used to be a bare sim_new_pet(), which writes an egg into whatever
+  // PebbleInstance the simulation is still bound to and mints NO SLOT - it is
+  // not a Box constructor (game/box.h calls box_new_pebble() "THE TREE'S ONE
+  // CONSTRUCTOR"). gs_factory_reset() has just memset the Box, so slot_mask was
+  // 0 and active_slot 255; gs_save_active() therefore returned false at its
+  // `act >= BOX_SLOTS` guard, and the bool was DISCARDED. Measured against the
+  // shipping objects: a fully playable creature on the panel, gs_readonly()
+  // false, box_count() 0, active 255, and every save from that moment a silent
+  // no-op - so the next power cut lost everything since the reset AND ran the
+  // first-boot wizard again. It is the same class as the capture defect this
+  // review's parent commit fixed, and app/app.cpp's own first boot does it
+  // correctly twenty lines of this file away.
+  const Genome g = genome_genesis();
+  const uint8_t slot = box_new_pebble((uint8_t)SPECIES_ID_STARTER, 1,
+                                      (uint8_t)ORIGIN_STARTER, g,
+                                      rng_u32(RNG_MISC), gt_now());
+  if (slot == (uint8_t)BOX_SLOT_NONE) {
+    GOD_LOGF("[god] wipe: the Box refused a starter\n");
+    return false;
+  }
+  (void)box_set_active(slot);
+  PebbleInstance* pb = box_slot(slot);
+  if (pb == nullptr) {
+    GOD_LOGF("[god] wipe: no slot behind the active index\n");
+    return false;
+  }
+  sim_bind(*pb);
+
   // GAME_DESIGN 10.2: everything god mode produces carries the taint, and this
   // egg was produced inside god mode. A factory reset resets the save, not the
   // honesty of the dynasty ribbon.
-  sim_god_set_genome(g);
-  const SimView* p = pet();
-  if (p) gs_save_active(true);
-  GOD_LOGF("[god] wipe ok=%u\n", (unsigned)ok);
+  Genome tainted = g;
+  sim_god_set_genome(tainted);
+
+  // AND THE VERDICT IS NOT DISCARDED. A reset that could not write its new
+  // starter is a reset that reports success over an empty Box.
+  if (!gs_save_active(true)) ok = false;
+  if (!gs_save_box())        ok = false;
+  GOD_LOGF("[god] wipe ok=%u slot=%u\n", (unsigned)ok, (unsigned)slot);
   return ok;
 }
 

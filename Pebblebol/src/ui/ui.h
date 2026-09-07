@@ -135,6 +135,25 @@ void     ui_note_power_dim(bool on);
 // screen's scan and the LINK screen's discovery job and session.
 bool     ui_radio_job_busy(void);
 
+// Is a SHOW running that the player is watching but not pressing anything for?
+// The power ladder's second `held` input, added at the final review, and it is
+// the same shape as the one above with a different owner.
+//
+// The ladder is driven by g_input_ms, which only a BUTTON moves - so a 4,480 ms
+// ceremony nobody has to press for is indistinguishable from an idle device. A
+// first boot ends with an EGG on SCR_EVOLUTION and AGE_EGG_S is 900 s, so the
+// ordinary case is: the owner picks a starter (the last press), puts the board
+// down, and the birth arrives with the ladder already at PWR_SLEEP. The panel
+// has been off since 120 s, rd_end_frame() skips sendBuffer() while it is, and
+// ceremony_service() advances at most one phase per call - so the 4.48 s show
+// took 60 s and put zero frames on the glass. ui_fps()'s own defence ("a 4 fps
+// hatch is not a hatch") was already dead: app.cpp clamps it through pwr_fps().
+//
+// Reporting true here clamps the ladder at PWR_DIM, which is exactly the three
+// things the show needs and nothing more: the panel stays ON, pwr_fps() stops
+// clamping the rate, and pwr_slice_ms() stays 0 so no pass light-sleeps.
+bool     ui_show_busy(void);
+
 // Drain one sim_take_events() bitmask into the UI: evolution freeze, hatch,
 // alerts, poop/sick toasts.
 // Call every logic tick with the value sim_take_events() returned.

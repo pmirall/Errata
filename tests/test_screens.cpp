@@ -515,6 +515,77 @@ TEST(the_allocation_counter_is_live) {
 }
 
 // =============================================================================
+//  ...AND SO ARE THE TWO TEXT RECORDERS, which is the same rule applied to the
+//  two counters that were BOUGHT WITH SHIPPED DEFECTS and had never been held
+//  to it. Added at the FINAL REVIEW.
+//
+//  fb_bad_utf8() came from P10-C4 (a truncation that split a multi-byte
+//  sequence) and fb_no_glyph() from P10-C6 (five accented Spanish strings drawn
+//  in GF_TINY, a 95-glyph ASCII-only face, which rendered correctly in every
+//  golden and on no board). Every assertion on either is `== 0u`, and the only
+//  protection they had was two GREPS in tools/check.sh that COUNT THE FUNCTION
+//  NAME - which the definition line and the single call site satisfy whatever
+//  the body does.
+//
+//  MEASURED: putting the PRE-P10-C6 body back - font_has() returning true for
+//  every codepoint, the exact defect that chunk was created to fix - plus a
+//  one-line disarm of note_text(), left the full gate at ALL PASS 59/59,
+//  ASAN OK 8/8, PAGE TEST OK 51/51, GATE OK. Both instruments could be switched
+//  off with everything green.
+//
+//  These two cases render into a buffer no snapshot reads, so they move no
+//  golden. They are the difference between the next accented-name defect being
+//  caught by the suite and being caught by the owner on a board.
+// =============================================================================
+TEST(the_malformed_text_recorder_is_live) {
+  fb_reset();
+  CHECK_EQ(fb_bad_utf8(), 0u);
+  // A bare Latin-1 n-tilde: a lead byte with no continuation. This is the SHAPE
+  // P10-C4's truncation produced, and core/utf8.cpp's u8_len() is what refuses
+  // to believe it.
+  gfx_text(GF_BODY, 0, 20, "Ni\xF1o");
+  if (fb_bad_utf8() == 0u)
+    fprintf(stderr, "  note_text() recorded nothing for malformed UTF-8: the "
+                    "P10-C4 recorder is switched off and every `== 0u` "
+                    "assertion in this file is vacuous\n");
+  CHECK(fb_bad_utf8() > 0u);
+  CHECK(fb_bad_utf8_first()[0] != '\0');   // ...and it says which string
+  fb_reset();
+  CHECK_EQ(fb_bad_utf8(), 0u);             // fb_reset() really clears it
+}
+
+TEST(the_font_repertoire_recorder_is_live) {
+  fb_reset();
+  CHECK_EQ(fb_no_glyph(), 0u);
+  // U+00F1 in GF_TINY. u8g2_font_4x6_tr is ASCII only, and drawUTF8() emits
+  // nothing AND ADVANCES NOTHING for a codepoint the face lacks - the character
+  // does not become a box, it disappears and the line closes up. That is
+  // exactly what shipped in five strings at P10-C6.
+  gfx_text(GF_TINY, 0, 20, "\xC3\xB1");
+  if (fb_no_glyph() == 0u)
+    fprintf(stderr, "  note_glyph() recorded nothing for U+00F1 in GF_TINY: the "
+                    "P10-C6 recorder is switched off\n");
+  CHECK(fb_no_glyph() > 0u);
+  CHECK(fb_no_glyph_first()[0] != '\0');
+
+  // ...and it is per-FONT, not a blanket refusal: the same codepoint in a _tf
+  // face is legitimate and must not be recorded. A recorder that fired for
+  // everything would be as useless as one that fired for nothing, and would
+  // make every accented string in the product unusable.
+  fb_reset();
+  gfx_text(GF_BODY, 0, 20, "\xC3\xB1");
+  CHECK_EQ(fb_no_glyph(), 0u);
+
+  // GF_BIG is the digits-only face; a letter there is the same class.
+  fb_reset();
+  gfx_text(GF_BIG, 0, 30, "A");
+  CHECK(fb_no_glyph() > 0u);
+  fb_reset();
+  gfx_text(GF_BIG, 0, 30, "12:30");
+  CHECK_EQ(fb_no_glyph(), 0u);
+}
+
+// =============================================================================
 //  THE DRAWING SEAM'S TWO BLITS (P10-C3)
 //
 //  THIS IS THE TEST THAT WOULD HAVE CAUGHT A LATENT DIVERGENCE OF FIVE PHASES.
@@ -600,6 +671,140 @@ TEST(an_opaque_blit_paints_its_whole_box_and_a_transparent_one_only_its_ink) {
 // host backend implemented until P10-C3. Two different phases of the same
 // rectangle must be two different pictures, or the glitch's shimmer is a
 // constant.
+// =============================================================================
+//  THE GEOMETRY PRIMITIVES CLIP AND COMPOSE, AND THE RULE IS ui/gfx.h's
+//  Added at the FINAL REVIEW, because `tests/fakes/SHADOWS.txt` marks eight of
+//  these IMITATION and an IMITATION row has to name an assertion that actually
+//  holds the claim. Before this they all pointed at the two-blits case above,
+//  which pins the COMPOSITING rule and says nothing about clipping — nine rows
+//  resting on one test about a different function is the shape of overclaim this
+//  review exists to find, and writing it into the manifest would have been the
+//  same defect one level up.
+//
+//  What the eleven non-text primitives are held by in this tree: these
+//  assertions, plus the 75 goldens. They were separately measured pixel-exact
+//  against the real vendored U8g2 at the final review over a 223,776-case
+//  differential sweep — every draw colour, every dither level and phase, every
+//  panel edge, the degenerate rectangles — but that harness needs the Arduino
+//  library tree and is not committed, so it is a measurement taken once and NOT
+//  a standing instrument. These are the standing part.
+//
+//  ui/gfx.h's rule: "Out-of-range rectangles are clipped, never wrapped."
+// =============================================================================
+// A COUNT OF LIT PIXELS, which is not what fb_pixels() is - that is a count of
+// WRITES inside the panel, so an XOR that turns a pixel off still counts one.
+// The distinction is the point of half the cases below.
+static uint32_t fb_lit(void) {
+  uint32_t n = 0;
+  for (int y = 0; y < FB_H; ++y)
+    for (int x = 0; x < FB_W; ++x) n += (uint32_t)(fb_get(x, y) ? 1 : 0);
+  return n;
+}
+
+TEST(every_geometry_primitive_clips_instead_of_wrapping) {
+  // Off the left and top edges: the visible part is drawn at the panel edge and
+  // NOTHING appears on the opposite side. A wrap would light the right-hand
+  // columns, which on the device is what an unguarded negative origin does to a
+  // u8g2_uint_t (unsigned) - the hazard gfx_pixel's own comment names.
+  fb_reset();
+  gfx_fill(-4, -4, 8, 8);
+  CHECK_EQ(fb_lit(), 16u);                    // the 4x4 that is on the panel
+  for (int y = 0; y < 4; ++y)
+    for (int x = 0; x < 4; ++x) CHECK_EQ(fb_get(x, y), 1);
+  for (int y = 0; y < 8; ++y) CHECK_EQ(fb_get(FB_W - 1, y), 0);   // no wrap
+
+  // Off the right and bottom edges, the same both ways.
+  fb_reset();
+  gfx_fill((int16_t)(FB_W - 4), (int16_t)(FB_H - 4), 8, 8);
+  CHECK_EQ(fb_lit(), 16u);
+  for (int y = 0; y < FB_H; ++y) CHECK_EQ(fb_get(0, y), 0);
+
+  // Fully outside draws nothing at all. (fb_oob() DOES rise - it is the
+  // recorder doing its job on a draw the product would never make - so these
+  // cases are deliberately kept away from the snapshots that assert it is 0.)
+  fb_reset();
+  gfx_fill(-40, -40, 8, 8);
+  gfx_fill(200, 200, 8, 8);
+  gfx_rect(-40, -40, 8, 8);
+  gfx_hline(-40, -40, 8);
+  gfx_vline(-40, -40, 8);
+  gfx_pixel(-1, -1);
+  gfx_pixel(FB_W, FB_H);
+  CHECK_EQ(fb_lit(), 0u);
+
+  // Degenerate rectangles draw nothing. A zero-width fill that painted one
+  // column would put ink in every list highlight in the product.
+  fb_reset();
+  gfx_fill(10, 10, 0, 8);
+  gfx_fill(10, 10, 8, 0);
+  gfx_rect(10, 10, 0, 8);
+  gfx_rect(10, 10, 8, 0);
+  CHECK_EQ(fb_lit(), 0u);
+
+  // gfx_rect is an OUTLINE and gfx_fill is solid; conflating them would make
+  // every panel and card in the UI a slab.
+  fb_reset(); gfx_rect(10, 10, 10, 10);
+  const uint32_t outline = fb_lit();
+  const int mid_after_rect = fb_get(14, 14);
+  fb_reset(); gfx_fill(10, 10, 10, 10);
+  const uint32_t solid = fb_lit();
+  CHECK_EQ(solid, 100u);
+  CHECK_EQ(outline, 36u);                     // 10x10 border: 100 - 8x8 interior
+  CHECK(outline < solid);
+  CHECK_EQ(mid_after_rect, 0);                // ...and the outline is hollow
+
+  // The hline/vline halves agree with the box they bound, and clip on both
+  // ends rather than wrapping.
+  fb_reset(); gfx_hline(5, 5, 10); CHECK_EQ(fb_lit(), 10u);
+  fb_reset(); gfx_vline(5, 5, 10); CHECK_EQ(fb_lit(), 10u);
+  fb_reset(); gfx_hline(-5, 5, 10); CHECK_EQ(fb_lit(), 5u);
+  fb_reset(); gfx_vline(5, -5, 10); CHECK_EQ(fb_lit(), 5u);
+  fb_reset(); gfx_pixel(3, 3); CHECK_EQ(fb_lit(), 1u); CHECK_EQ(fb_get(3, 3), 1);
+}
+
+TEST(the_draw_colour_is_sticky_and_erase_is_the_inverse_of_draw) {
+  // ui/gfx.h: "Sticky, exactly like u8g2's setDrawColor: whoever changes it puts
+  // it back to GFX_DRAW before returning." Everything composited on this panel
+  // depends on it, and gfx_color() is one of the fifty shadowed functions.
+  fb_reset();
+  gfx_fill(0, 0, 16, 16);
+  CHECK_EQ(fb_lit(), 256u);
+
+  gfx_color(GFX_ERASE);
+  gfx_fill(4, 4, 8, 8);                       // a hole in the slab
+  CHECK_EQ(fb_get(5, 5), 0);
+  CHECK_EQ(fb_get(1, 1), 1);
+  CHECK_EQ(fb_lit(), 192u);
+  // STICKY: the colour is still ERASE until somebody puts it back.
+  gfx_fill(0, 0, 2, 2);
+  CHECK_EQ(fb_get(0, 0), 0);
+  gfx_color(GFX_DRAW);
+  gfx_fill(0, 0, 2, 2);
+  CHECK_EQ(fb_get(0, 0), 1);
+  gfx_color(GFX_DRAW);
+
+  // XOR flips what is there, both ways, which is what makes it XOR.
+  fb_reset();
+  gfx_fill(0, 0, 8, 8);
+  CHECK_EQ(fb_lit(), 64u);
+  gfx_color(GFX_XOR);
+  gfx_fill(0, 0, 8, 8);
+  CHECK_EQ(fb_lit(), 0u);                     // lit ^ 1 -> dark
+  gfx_fill(0, 0, 8, 8);
+  CHECK_EQ(fb_lit(), 64u);                    // ...and dark ^ 1 -> lit
+  gfx_color(GFX_DRAW);
+
+  // gfx_invert_rect is the same idea with its own entry point, and it must
+  // restore the colour itself: every list highlight in the product is one.
+  fb_reset();
+  gfx_fill(0, 0, 8, 8);
+  gfx_invert_rect(0, 0, 8, 8);
+  CHECK_EQ(fb_lit(), 0u);
+  gfx_fill(20, 20, 4, 4);                     // still GFX_DRAW afterwards
+  CHECK_EQ(fb_get(20, 20), 1);
+  CHECK_EQ(fb_oob(), 0u);                     // nothing here left the panel
+}
+
 TEST(the_dither_phase_actually_slides_the_matrix) {
   static uint8_t at_zero[FB_H][FB_W];
   fb_reset();
@@ -2947,6 +3152,87 @@ TEST(snapshot_ping_wait) {
 // the screen is solid on the side the player must hit.
 TEST(snapshot_ping_lit) {
   mg_snapshot(MG_PING, ping_draw, 1u, 30u, nullptr, "mg_ping_lit");
+}
+
+// =============================================================================
+//  THE PING CUE LETTER IS INSIDE THE HALF IT LABELS
+//  Added at the FINAL REVIEW, with the golden above re-recorded, for a defect
+//  that shipped in the only cue REFLEJOS has.
+//
+//  ping_draw() used gfx_text_center(), which centres over the whole 128 px panel
+//  while the slab it labels is 64 px wide - so the letter ALWAYS straddled the
+//  midline. gfx_text_w(GF_HEAD,"B") is 6, so x was (128-6)/2 = 61 and the glyph
+//  ran 61..66: three columns on the slab and three on unlit ground, in BOTH
+//  directions. The golden froze that as correct: the letter appeared as two
+//  visible columns out of five, which nobody would read as a "B".
+//
+//  On the panel it is worse, and it is why this site had to move rather than be
+//  left to the font-mode seam. ui/render.cpp holds the display in setFontMode(0)
+//  - SOLID - for the whole session, so a glyph's 0-bits are painted in the
+//  inverse of the draw colour; under GFX_ERASE that is LIT. The half of the
+//  glyph box hanging off the slab therefore became a bright mark standing alone
+//  in the DARK half, which no golden contains at all because the host fake draws
+//  transparent text. With the whole box inside the slab, those background pixels
+//  land on ground that is already lit - the "1 over 1" coincidence every other
+//  text-over-ink site in the tree relies on - so the two backends agree here.
+//
+//  The snapshot alone would not have caught the original: it was ALREADY wrong
+//  when it was recorded. This case measures the property instead.
+// =============================================================================
+TEST(the_ping_cue_letter_is_wholly_inside_the_half_it_labels) {
+  // The lit half for target B is x 64..127; for A it is 0..63. The letter is
+  // centred in that half, so its box must clear both the midline and the panel
+  // edge with room to spare.
+  const int16_t half = (int16_t)(OLED_W / 2);
+  const int16_t tw_b = (int16_t)gfx_text_w(GF_HEAD, "B");
+  const int16_t tw_a = (int16_t)gfx_text_w(GF_HEAD, "A");
+  CHECK(tw_b > 0 && tw_b < half);
+  CHECK(tw_a > 0 && tw_a < half);
+
+  const int16_t xb = (int16_t)(half + (half - tw_b) / 2);
+  CHECK(xb >= half);                       // no part of it in the dark half
+  CHECK((int16_t)(xb + tw_b) <= (int16_t)OLED_W);
+
+  const int16_t xa = (int16_t)(0 + (half - tw_a) / 2);
+  CHECK(xa >= 0);
+  CHECK((int16_t)(xa + tw_a) <= half);     // no part of it in the dark half
+
+  // AND THE DRAWN FRAME AGREES, measured the one way the host CAN see it.
+  // The fake draws transparent text, so the part of the glyph that hangs off
+  // the slab writes 0 over 0 and leaves no trace - which is exactly why the
+  // original defect was invisible to a golden. What IS visible is the KNOCKOUT:
+  // the cue is drawn in GFX_ERASE, so its ink is a hole in the lit slab. Find
+  // that hole and require it to be clear of BOTH edges of the half. Panel
+  // centring puts it flush against the midline, which is the failure.
+  fb_reset();
+  mg_begin(g_mg, MG_PING, 1u);
+  for (uint32_t i = 0; i < 30u && !g_mg.finished; ++i) mg_tick(g_mg, MG_PING);
+  CHECK(ping_is_lit(g_mg));                // the cue really is up in this frame
+  ping_draw(g_mg);
+  const bool right = ping_target(g_mg) != 0;
+  const int16_t lit_l = right ? half : (int16_t)0;
+  const int16_t lit_r = right ? (int16_t)OLED_W : half;      // exclusive
+
+  int16_t hole_l = (int16_t)OLED_W, hole_r = -1;
+  for (int16_t y = (int16_t)UI_CONTENT_Y; y < (int16_t)(UI_CONTENT_Y + 32); ++y) {
+    for (int16_t x = lit_l; x < lit_r; ++x) {
+      if (!fb_get(x, y)) {                 // a dark pixel inside the lit slab
+        if (x < hole_l) hole_l = x;
+        if (x > hole_r) hole_r = x;
+      }
+    }
+  }
+  if (hole_r < 0) fprintf(stderr, "  the cue letter left no mark on the slab\n");
+  CHECK(hole_r >= 0);                      // anti-vacuity: it really is drawn
+
+  // Centred in the half means clear of both its edges. A letter flush against
+  // an edge is one whose other half is off the slab.
+  if (hole_l <= lit_l || hole_r >= (int16_t)(lit_r - 1))
+    fprintf(stderr, "  cue ink spans %d..%d in a half of %d..%d: it is not "
+                    "inside the slab it labels\n",
+            (int)hole_l, (int)hole_r, (int)lit_l, (int)(lit_r - 1));
+  CHECK(hole_l > lit_l);
+  CHECK(hole_r < (int16_t)(lit_r - 1));
 }
 
 // SEQUENCE, showing: level 1 (three symbols), the first symbol lit. The half

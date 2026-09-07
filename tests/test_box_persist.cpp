@@ -270,3 +270,67 @@ TEST(gs_save_active_does_not_write_the_other_slots) {
   CHECK(!box_occupied(slot));
   CHECK_EQ((int)box_count(), 1);
 }
+
+// =============================================================================
+//  A FACTORY RESET LEAVES A PEBBLE THAT IS ACTUALLY IN THE BOX
+//  Added at the FINAL REVIEW. It is the SAME CLASS as the capture defect above,
+//  one door along, and it had been standing since the reset was written.
+//
+//  Both wipe paths - ui/ui.cpp's CFM_WIPE2 ("Reset de fabrica", the button an
+//  owner presses) and dev/godmode.cpp's run_wipe() ("BORRAR TODO") - did:
+//
+//      gs_factory_reset();          // memsets the Box: slot_mask 0, active 255
+//      Genome g = genome_genesis();
+//      sim_new_pet(g, gt_now(), 0); // writes an egg into the BOUND instance
+//      if (pet()) gs_save_active(true);            // ...and the bool is dropped
+//
+//  sim_new_pet() is not a Box constructor - it mints no slot - so gs_save_active()
+//  returned false at its `act >= BOX_SLOTS` guard and the verdict was discarded.
+//  Measured against these same objects before the fix: a fully playable creature
+//  with box_count() 0, active_slot 255, gs_readonly() false, and EVERY SAVE FROM
+//  THAT MOMENT A SILENT NO-OP - so the next power cut lost everything since the
+//  reset and re-ran the first-boot wizard, while `show_save` reported
+//  "slots=0x0000 active=255 count=0/10" under a live pet on the panel.
+//
+//  Neither wipe path is compiled by any host binary (ui/ui.cpp and
+//  dev/godmode.cpp are both in the never-compiled set), so this case pins the
+//  SEQUENCE they must both use, and tools/check.sh gates that each body uses it.
+//  game/box.h calls box_new_pebble() "THE TREE'S ONE CONSTRUCTOR"; this is what
+//  goes wrong when a caller goes round it.
+// =============================================================================
+TEST(a_factory_reset_leaves_a_starter_the_save_manager_can_actually_write) {
+  boot_with_starter();
+  // Earn something, so a lost reset is distinguishable from a lost boot.
+  box_slot(0u)->level = 7u;
+  CHECK(gs_save_active(true));
+  settle();
+
+  // --- the wipe, exactly as both shipping call sites now do it -------------
+  CHECK(gs_factory_reset());
+  CHECK_EQ((int)box_count(), 0);                    // the Box really is empty
+  CHECK(box_active() >= (uint8_t)BOX_SLOTS);        // ...and has no active slot
+
+  // THE DEFECT, DIRECTLY: with no slot minted, the save the old code relied on
+  // cannot land. If this ever starts returning true the guard has moved and the
+  // rest of this case stops meaning anything.
+  CHECK(!gs_save_active(true));
+
+  const uint8_t sl = box_new_pebble(1u, 1u, (uint8_t)ORIGIN_STARTER,
+                                    genome_genesis(), 0xC0DE01u, s_epoch);
+  CHECK(sl != (uint8_t)BOX_SLOT_NONE);
+  CHECK(box_set_active(sl));
+  CHECK(box_slot(sl) != nullptr);
+
+  // Now it can, and the verdict must be checked rather than discarded.
+  CHECK(gs_save_active(true));
+  CHECK(gs_save_box());
+  settle();
+
+  // --- and it is there after the power cut ---------------------------------
+  CHECK_EQ((int)reboot(), (int)LOAD_OK);
+  CHECK_EQ((int)box_count(), 1);
+  CHECK(box_occupied(sl));
+  CHECK_EQ((int)box_active(), (int)sl);
+  CHECK_EQ((int)box_peek(sl)->species_id, 1);
+  CHECK_EQ((int)box_peek(sl)->level, 1);            // the wiped one, not the level 7
+}

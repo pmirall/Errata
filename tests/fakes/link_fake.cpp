@@ -34,6 +34,8 @@ static uint8_t g_head = 0, g_count = 0;
 
 static bool    g_start_ok  = true;
 static bool    g_poll_fail = false;
+static bool    g_bind_ok   = true;   // ui_link_bind(): espnow_bind refuses four ways
+static bool    g_beacon_ok = true;   // driver beacon(): espnow_broadcast refuses four ways
 static int     g_starts = 0, g_stops = 0, g_tx = 0;
 static int     g_binds = 0, g_unbinds = 0;
 static uint8_t g_slot = 0xFFu;
@@ -49,6 +51,8 @@ void lf_reset(void) {
   g_head = g_count = 0;
   g_start_ok = true;
   g_poll_fail = false;
+  g_bind_ok = true;
+  g_beacon_ok = true;
   g_starts = g_stops = g_tx = 0;
   g_binds = g_unbinds = 0;
   g_slot = 0xFFu;
@@ -61,6 +65,8 @@ void lf_reset(void) {
 
 void lf_set_start_ok(bool ok)   { g_start_ok = ok; }
 void lf_set_poll_fail(bool f)   { g_poll_fail = f; }
+void lf_set_bind_ok(bool ok)    { g_bind_ok = ok; }
+void lf_set_beacon_ok(bool ok)  { g_beacon_ok = ok; }
 void lf_set_nonce(uint32_t n)   { g_nonce = n; }
 void lf_set_pet_name(const char* name) { snprintf(g_name, sizeof g_name, "%s", name); }
 
@@ -117,6 +123,7 @@ static bool fk_start(void) { ++g_starts; return g_start_ok; }
 static bool fk_beacon(const uint8_t* frame, uint16_t n) {
   (void)frame;
   (void)n;
+  if (!g_beacon_ok) return false;
   ++g_tx;
   return true;
 }
@@ -157,7 +164,18 @@ const LinkRadioDriver& ui_link_driver(void) { return g_drv; }
 const Transport& ui_link_transport(void) { return g_tp ? *g_tp : g_dead; }
 
 bool ui_link_bind(uint8_t slot) {
+  // THE FOURTH FAULT INJECTOR, ADDED AT THE FINAL REVIEW. This answered true
+  // unconditionally, for any slot including 0xFF, while the shipping
+  // espnow_bind() refuses on FOUR separate conditions - !s_up, slot >=
+  // LINK_PEER_CAP, no address in the ESP-NOW slot table, and esp_now_add_peer()
+  // returning anything but OK/EXIST. So ui/screen_link.cpp's
+  // `if (!ui_link_bind(p->slot)) { ui_toast(STR_LK_RADIO_ERR); return false; }`
+  // was DEAD CODE in all 59 binaries: measured by deleting the whole refusal
+  // arm, which survived 122,581 checks across the three binaries that link
+  // screen_link.o. The fake was already a declared fault injector for start()
+  // and poll(); this is the same legitimate shape for the third driver call.
   ++g_binds;
+  if (!g_bind_ok) return false;
   g_slot  = slot;
   g_bound = true;
   return true;

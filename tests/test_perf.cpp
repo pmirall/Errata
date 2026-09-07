@@ -276,3 +276,100 @@ TEST(every_screen_id_has_a_slot_and_a_frame_billed_to_it_comes_back_from_it) {
   }
   CHECK_EQ((int)perf_frames(), (int)SCR_COUNT);
 }
+
+// =============================================================================
+//  THE FRAME-RATE HOLD MUST NOT CANCEL THE PACING IT ASKED FOR
+//  Added at the FINAL REVIEW, for a defect that had been shipping since P2.
+//
+//  ui/render.h tells a caller to RENEW rd_hold_fps() every tick for as long as
+//  its film lasts, and both callers do - ui/screen_battle.cpp's battle_update()
+//  and ui/actfx.cpp's actfx_service() run on every app_loop() pass.
+//  rd_hold_fps() ended in an UNCONDITIONAL rd_request_frame(), which sets the
+//  frame deadline to "now", so every renewal cancelled rd_begin_frame()'s
+//  "not due yet, skip" gate and the renderer drew on EVERY PASS. Measured
+//  against a modelled 28 ms drawing pass: 20 fps requested, 35.7 delivered,
+//  frames/passes 1.00 against 0.08 on an idle HOME. The requested VALUE was
+//  irrelevant - a 5 fps hold free-ran identically - which is the tell that the
+//  rate was not being used at all.
+//
+//  The consequence is not only frames. app/app.cpp gives its `delay(1)` only
+//  `if (!drew && !pin.held)`, so with drew always true the loop ran at 100 %
+//  duty cycle in exactly the two states docs/bench.md A1 sits in (audit risk
+//  16); and the pass period became the whole frame (~28 ms of I2C) instead of
+//  ~2 ms, so audio_service() was called ~36 times a second instead of ~500 and
+//  every 40 ms step of SFX_RISE/SFX_FALL lasted ~56 - the five-step SFX_FALL a
+//  faint plays runs ~280 ms instead of 200, which is the audible half.
+//
+//  The decision now lives in core/perf.cpp so that this file can hold it.
+//  ui/render.cpp is one of the translation units no host binary compiles, and
+//  that is exactly why it was wrong for ten phases.
+// =============================================================================
+TEST(an_arming_frame_rate_hold_brings_the_frame_forward) {
+  // Nothing live: any hold is an arming, whatever rate it asks for. Without
+  // this the raise would not take effect until the CURRENT period elapsed -
+  // up to 250 ms of the film still played at 4 fps, which is most of a phase.
+  CHECK(perf_hold_raises(false, 0u,  (uint8_t)FPS_NORMAL));
+  CHECK(perf_hold_raises(false, 60u, 1u));
+
+  // A hold that expired but has not been cleared yet reads as not-live, so
+  // re-arming after an expiry is an arming. ui/render.cpp's flag is cleared
+  // lazily, so this is the case that keeps a second film from starting slow.
+  CHECK(perf_hold_raises(false, (uint8_t)FPS_NORMAL, (uint8_t)FPS_NORMAL));
+
+  // A genuine raise over a live, lower hold.
+  CHECK(perf_hold_raises(true, (uint8_t)FPS_LOW, (uint8_t)FPS_NORMAL));
+}
+
+TEST(a_renewed_frame_rate_hold_leaves_the_deadline_alone) {
+  // THE DEFECT, DIRECTLY. This is what both shipping callers do on every single
+  // app_loop() pass for the whole length of a film, and it must be inert.
+  CHECK(!perf_hold_raises(true, (uint8_t)FPS_NORMAL, (uint8_t)FPS_NORMAL));
+
+  // Renewing at a LOWER rate is not a raise either - rd_fps() takes the higher
+  // of the request and the live hold, so there is still nothing to bring
+  // forward.
+  CHECK(!perf_hold_raises(true, (uint8_t)FPS_NORMAL, (uint8_t)FPS_LOW));
+
+  // A disarm asks for nothing and must never request a frame.
+  CHECK(!perf_hold_raises(false, 0u, 0u));
+  CHECK(!perf_hold_raises(true, (uint8_t)FPS_NORMAL, 0u));
+}
+
+TEST(the_hold_rule_and_the_deadline_together_pace_a_whole_film) {
+  // The two halves of the pacing, composed the way rd_hold_fps() and
+  // rd_begin_frame() compose them, over a film renewed on every pass. The
+  // model is app_loop()'s: a 2 ms pass that skips, a 28 ms pass that draws.
+  //
+  // With the defect (`raises` forced true) this loop draws on all 500 passes.
+  const uint32_t period = 1000u / (uint32_t)FPS_NORMAL;
+  uint32_t now  = 0u;
+  uint32_t next = 0u;            // armed: a frame is due immediately
+  bool     live = false;
+  uint8_t  live_fps = 0u;
+  int      frames = 0;
+
+  for (int pass = 0; pass < 500; ++pass) {
+    // Every pass renews the hold, exactly as actfx_service() does.
+    if (perf_hold_raises(live, live_fps, (uint8_t)FPS_NORMAL)) next = now;
+    live = true;
+    live_fps = (uint8_t)FPS_NORMAL;
+
+    if ((int32_t)(now - next) >= 0) {
+      ++frames;
+      next = perf_advance_deadline(now, next, period);
+      now += 28u;                // a drawing pass costs a whole sendBuffer()
+    } else {
+      now += 2u;                 // an idle pass
+    }
+  }
+
+  // 500 passes spanning `now` ms; the film must have been paced at the rate it
+  // asked for and not at the loop rate. One frame per period, within one.
+  const int want = (int)(now / period);
+  if (frames > want + 1 || frames < want - 1)
+    fprintf(stderr, "  %d frames over %u ms at %u fps: expected about %d\n",
+            frames, (unsigned)now, (unsigned)FPS_NORMAL, want);
+  CHECK(frames <= want + 1);
+  CHECK(frames >= want - 1);
+  CHECK(frames < 500);           // the defect draws on every pass
+}

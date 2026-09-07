@@ -142,6 +142,12 @@ IDLE_S_DEFAULT="$(def_num "$CFG" CREATOR_IDLE_S_DEFAULT)" || exit 2
 RATE_TOKENS="$(def_num "$CFG" WEB_RATE_TOKENS)" || exit 2
 RATE_REFILL="$(def_num "$CFG" WEB_RATE_REFILL_PER_S)" || exit 2
 WEB_PORT="$(def_num "$CFG" WEB_PORT)" || exit 2
+# ...AND IT IS ACTUALLY USED, SINCE THE FINAL REVIEW. It was read, printed in
+# the run banner as "target $URL (port $WEB_PORT)", and never appended - so the
+# banner would have told the operator it targeted the right port while every
+# request in the D block went to 80. Harmless today (WEB_PORT is 80) and a
+# silent wrong-target failure the moment it is not.
+if [ "$WEB_PORT" != "80" ]; then URL="$URL:$WEB_PORT"; fi
 API_VERSION="$(def_num "$VER" CREATOR_API_VERSION)" || exit 2
 FW_VERSION="$(def_str "$VER" FW_VERSION)" || exit 2
 CONTENT_VERSION="$(def_hex "$CVH" CONTENT_VERSION)" || exit 2
@@ -167,6 +173,10 @@ PAGE_LEN="$(page_len "$IDX")"
 # -----------------------------------------------------------------------------
 #  ARGUMENTS
 # -----------------------------------------------------------------------------
+# WEB_PORT is appended below, once config.h has been read. Until the final
+# review it was parsed, PRINTED IN THE RUN BANNER, and never used - so if the
+# port ever moved, every request in the D block would have gone to 80 while the
+# banner told the operator it had targeted the right one.
 URL="http://192.168.4.1"
 PIN=""
 VARIANT=""
@@ -509,7 +519,28 @@ fi
 req POST /api/validate - -H 'Content-Length: 0' -H 'Content-Type: application/json'
 expect 411 "an empty body is answered 411 (framing), not 400 (content)"
 
-req POST /api/validate - -H 'Content-Type: multipart/form-data; boundary=b' --data-binary 'x'
+# *** A WELL-FORMED MULTIPART, SINCE THE FINAL REVIEW. ***
+# This used to send `--data-binary 'x'` with a multipart Content-Type, and that
+# request CANNOT be answered 415 by a correct board - so the probe reported a
+# failure on a healthy device and froze it for about ten seconds first.
+#
+# Why: a Content-Type starting "multipart/" makes the core set isForm, so the
+# bounded raw branch is skipped and _parseForm() runs. Its first two calls are
+# readStringUntil('\r') and readStringUntil('\n') against _timeout =
+# HTTP_MAX_SEND_WAIT (5000 ms), and Stream::timedRead() spins with NO YIELD - so
+# a body of "x" that never terminates a line burns the full 5 s each, inside
+# handleClient(), inside app_loop(). The line "x" then fails the boundary
+# compare, _parseForm returns false, _parseRequest returns false, and
+# WebServer.cpp NEVER REACHES _handleRequest(): the client is dropped with no
+# response at all. curl reports 000, the assertion fails, and the operator - who
+# has just watched the panel and both buttons freeze - is sent into
+# creator_body.cpp and CS_BODY_MAX, neither of which is on this path.
+#
+# `--form` emits a conforming body with a filename= disposition, which is the
+# only shape that reaches _currentHandler->upload() -> cs_body_hook() -> the
+# guard -> CB_IDLE -> cs_body_answered() -> 415. That is the assertion as
+# written and the only form of it that touches the guard at all.
+req POST /api/validate - --form 'f=@/dev/null'
 expect 415 "a multipart POST is answered 415 - the raw hook refuses the upload path it shares"
 
 req GET /api/schema -

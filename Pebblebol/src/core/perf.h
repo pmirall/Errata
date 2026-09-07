@@ -157,4 +157,31 @@ uint32_t perf_advance_deadline(uint32_t now_ms, uint32_t next_ms,
 // of them changing alone is what tests/test_perf.cpp's boundary case is for.
 uint32_t perf_overrun_backoff_ms(uint32_t frame_us);
 
+// -----------------------------------------------------------------------------
+//  DOES THIS FRAME-RATE HOLD BRING THE NEXT FRAME FORWARD?
+//  Extracted at the FINAL REVIEW for the same reason perf_advance_deadline()
+//  was: the decision lived in ui/render.cpp, which is compiled by no host
+//  binary, and it was wrong for ten phases with nothing able to see it.
+//
+//  ui/render.h tells a caller to RENEW rd_hold_fps() every tick for as long as
+//  its film lasts, and both callers do - ui/screen_battle.cpp's battle_update()
+//  and ui/actfx.cpp's actfx_service() run on every app_loop() pass. rd_hold_fps()
+//  ended in an unconditional rd_request_frame(), which sets the frame deadline to
+//  "now", so every renewal cancelled the pacing and the renderer drew on every
+//  pass: 20 fps requested, 35.7 fps delivered, frames/passes 1.00 against 0.08
+//  on an idle HOME. The requested VALUE was irrelevant - a 5 fps hold free-ran
+//  identically - and app/app.cpp's `delay(1)`, gated on `!drew`, became a no-op
+//  in exactly the two states docs/bench.md A1 sits in.
+//
+//  The rule, stated once, here, where tests/test_perf.cpp can sweep it: an
+//  ARMING (nothing live, or a rate strictly higher than the live one) must bring
+//  the frame forward, because otherwise up to a whole slow period of the film
+//  still plays at the old rate. A RENEWAL has nothing to bring forward and must
+//  leave the deadline alone.
+//
+//  `live` is whether a hold is currently in force (ui/render.cpp tests the
+//  deadline, so a hold that has expired but not yet been cleared reports false
+//  and the re-arm counts as an arming).
+bool perf_hold_raises(bool live, uint8_t live_fps, uint8_t want_fps);
+
 #endif  // PB_PERF_H

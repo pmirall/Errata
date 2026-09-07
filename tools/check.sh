@@ -1977,10 +1977,50 @@ for id in $tiny_ids; do
     fail "$id is drawn in GF_TINY and holds a byte outside ASCII - RD_FONT_TINY is the 95-glyph 4x6 face (ui/render.h) and drawUTF8() emits NO GLYPH AND NO ADVANCE for a codepoint it lacks, so the character disappears on the panel and the line closes up, while every host golden renders it correctly"
   fi
 done
-n=$( strip_comments12 < "$ROOT/tests/fakes/gfx_fb.cpp" | { grep -cE '\bnote_glyph[[:space:]]*\(' || true; } )
-[ "${n:-0}" -ge 2 ] || fail "tests/fakes/gfx_fb.cpp does not record glyphs the font cannot draw ($n) - the recorder is the only instrument that sees this class for a string nobody listed (tests/fakes/gfx_fb.h)"
-n=$( { grep -cE '\bfb_no_glyph[[:space:]]*\(' "$ROOT/tests/test_screens.cpp" || true; } )
-[ "${n:-0}" -ge 3 ] || fail "tests/test_screens.cpp does not assert fb_no_glyph() ($n) - the recorder would record and nothing would read it"
+# *** THIS GATE USED TO COUNT THE FUNCTION NAME, WHICH IS THIS PROJECT'S OLDEST
+# DEFECT REPRODUCED INSIDE THE GATE WRITTEN AGAINST IT. *** `grep -c note_glyph(`
+# >= 2 is satisfied by the definition line and the one call site whatever the
+# BODY does. MEASURED at the final review: putting the pre-P10-C6 body back -
+# font_has() returning true for every codepoint, the exact defect that chunk was
+# created to fix - plus a one-line disarm of note_text(), left the whole gate at
+# ALL PASS 59/59, ASAN OK 8/8, PAGE TEST OK 51/51, GATE OK. Both instruments
+# could be switched off with every light green.
+#
+# So the protection is split, and the split is the point. THIS gate reads the
+# BODIES for the two things a disarmed recorder must have lost, and - because a
+# grep can never prove a body still WORKS - it also requires the two LIVENESS
+# CASES to exist. Those cases draw a malformed sequence and an accented codepoint
+# in GF_TINY and demand a non-zero count, so they fail on any disarm however it
+# is spelt. Neither half is sufficient: the greps stop the obvious deletions, the
+# cases catch the clever ones, and this gate stops the cases from being deleted.
+body=$( awk '/^static bool font_has\(/{f=1} f{print} f&&/^\}/{exit}' \
+          "$ROOT/tests/fakes/gfx_fb.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "tests/fakes/gfx_fb.cpp has no font_has() body - the P10-C6 repertoire recorder has lost its subject"
+n=$( printf '%s\n' "$body" | { grep -cE '\bGF_TINY\b' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "tests/fakes/gfx_fb.cpp's font_has() does not name GF_TINY ($n) - GF_TINY is u8g2_font_4x6_tr, 95 glyphs and ASCII only, and it is the face the five P10-C6 strings were drawn in. A font_has() that answers the same thing for every face is the pre-P10-C6 body"
+n=$( printf '%s\n' "$body" | { grep -cE '0x7F|0x100' || true; } )
+[ "${n:-0}" -ge 2 ] || fail "tests/fakes/gfx_fb.cpp's font_has() no longer distinguishes the ASCII-only face from the 191-glyph _tf faces ($n)"
+body=$( awk '/^static void note_text\(/{f=1} f{print} f&&/^\}/{exit}' \
+          "$ROOT/tests/fakes/gfx_fb.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "tests/fakes/gfx_fb.cpp has no note_text() body - the P10-C4 malformed-text recorder has lost its subject"
+n=$( printf '%s\n' "$body" | { grep -cE '\bu8_well_formed[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "tests/fakes/gfx_fb.cpp's note_text() does not call u8_well_formed() ($n) - it would record nothing, and every `CHECK_EQ(fb_bad_utf8(), 0u)` in the suite would be vacuous"
+n=$( { grep -c 'TEST(the_malformed_text_recorder_is_live)' "$ROOT/tests/test_screens.cpp" || true; } )
+[ "${n:-0}" -eq 1 ] || fail "tests/test_screens.cpp has lost the_malformed_text_recorder_is_live - a counter that reads 0 because it is switched off is indistinguishable from one that reads 0 because the code is clean"
+n=$( { grep -c 'TEST(the_font_repertoire_recorder_is_live)' "$ROOT/tests/test_screens.cpp" || true; } )
+[ "${n:-0}" -eq 1 ] || fail "tests/test_screens.cpp has lost the_font_repertoire_recorder_is_live"
+
+# AND EVERY BINARY THAT DRAWS READS THEM. They were asserted in test_screens.cpp
+# alone, so three of the four binaries that link the fake and render would not
+# have reported the next instance of either defect - including the one that
+# covers ui/screen_link.cpp, whose header and peer rows put a live NAME on the
+# panel, which is the exact input class that produced P10-C6.
+for t in test_screens test_link_screen test_battle_screen test_statemachine; do
+  n=$( { grep -cE '\bfb_no_glyph[[:space:]]*\(' "$ROOT/tests/$t.cpp" || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "tests/$t.cpp links tests/fakes/gfx_fb.cpp and draws, and never reads fb_no_glyph() ($n) - a screen in this binary could draw a name the panel has no glyphs for and the run would be green"
+  n=$( { grep -cE '\bfb_bad_utf8[[:space:]]*\(' "$ROOT/tests/$t.cpp" || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "tests/$t.cpp links tests/fakes/gfx_fb.cpp and draws, and never reads fb_bad_utf8() ($n)"
+done
 
 # -----------------------------------------------------------------------------
 # 4. THE NEVER-RESIDENT EXEMPTION IS DERIVED FROM THE TABLE, NOT RETYPED.
@@ -2114,5 +2154,362 @@ body=$( awk '/^static void bag_use\(void\) \{/{f=1} f{print} f&&/^\}/{exit}' \
 [ -n "$body" ] || fail "ui/screen_care.cpp has no bag_use() body"
 n=$( printf '%s\n' "$body" | { grep -cE '\bitem_reaction[[:space:]]*\(' || true; } )
 [ "${n:-0}" -ge 1 ] || fail "bag_use() does not report the ItemEffect ($n) - game/inventory.cpp fills the whole struct and the screen would discard it again, answering one word for every item in the game (game/inventory.h)"
+
+
+# =============================================================================
+# 10. THE FIFTY SHADOWED SYMBOLS
+#     Built at the FINAL REVIEW. Everything above this line gates ONE symbol at
+#     a time, bolted on after that symbol had already burned somebody; this
+#     gates THE SET.
+#
+#     THE CLASS. tests/fakes/*.cpp defines 143 functions and FIFTY of them are
+#     also defined under Pebblebol/src, so every host binary that links a fake
+#     drives the FAKE's body while believing it drives the firmware's. Exactly
+#     this shipped two defects: P10-C6 (link_fake.cpp carried a pre-P10-C4 copy
+#     of ui_pet_name_latin1(), so a device whose owner typed an accented name
+#     emitted NO BEACON AT ALL) and, in the sibling fixture shape, P7 (a test
+#     bound save_set_clock(nullptr,...) and a 15-point power-cut sweep ran
+#     against a save manager the release artefact does not execute, while on the
+#     shipping build every clean trade destroyed a Pebble).
+#
+#     WHY IT HAS TO BE SOURCE-BASED, MEASURED RATHER THAN ASSUMED. Intersecting
+#     the T/t symbols the six fake objects DEFINE against those the other host
+#     objects define finds ZERO. All fifty shipping bodies live in translation
+#     units no host binary compiles, so no object ever defines them and the
+#     linker has nothing to collide. THE LINKER CAN NEVER CATCH THIS CLASS.
+#
+#     WHAT THIS SECTION DOES:
+#       (a) re-derives the shadowed set from source and FAILS when it differs
+#           from tests/fakes/SHADOWS.txt - so a fifty-first shadow cannot appear
+#           without a human writing down which of four kinds it is, and one
+#           cannot silently vanish either;
+#       (b) enforces each row's class: LINKED means the fake must NOT define it,
+#           IMITATION must name an ANCHOR (a test case or a gate) and that
+#           anchor must exist, INJECTOR and RECORDER must carry a reason;
+#       (c) reads the SHIPPING body of the P10-C6 function, which no host binary
+#           compiles and which the P10-C6 gate did not look at.
+#
+#     WHAT IT DOES NOT CATCH, said plainly: drift ONE CALL DEEP (the anchors are
+#     behavioural for that reason), the P7 fixture shape (gated separately
+#     above), and the twelve .cpp files with no fake at all.
+# -----------------------------------------------------------------------------
+SHADOWS="$ROOT/tests/fakes/SHADOWS.txt"
+SHADOW_AWK="$ROOT/tools/shadow_defs.awk"
+[ -f "$SHADOWS" ]    || fail "tests/fakes/SHADOWS.txt is missing - the fifty shadowed symbols would be unenumerated again"
+[ -f "$SHADOW_AWK" ] || fail "tools/shadow_defs.awk is missing - the shadowed set cannot be re-derived"
+
+shadow_tmp=$(mktemp -d) || fail "cannot make a temp dir for the shadow gate"
+shadow_defs_of() { strip_comments12 < "$1" | awk -f "$SHADOW_AWK"; }
+
+: > "$shadow_tmp/fake"
+for f in "$ROOT"/tests/fakes/*.cpp; do shadow_defs_of "$f" >> "$shadow_tmp/fake"; done
+sort -u "$shadow_tmp/fake" -o "$shadow_tmp/fake"
+: > "$shadow_tmp/ship"
+find "$SKETCH/src" -name '*.cpp' | sort | while read -r f; do
+  shadow_defs_of "$f" >> "$shadow_tmp/ship"
+done
+sort -u "$shadow_tmp/ship" -o "$shadow_tmp/ship"
+comm -12 "$shadow_tmp/fake" "$shadow_tmp/ship" > "$shadow_tmp/derived"
+
+# ANTI-VACUITY. A derivation that finds nothing is a gate that passes for the
+# wrong reason - which is this project's oldest defect, reproduced inside the
+# gate written against it.
+n=$( wc -l < "$shadow_tmp/fake" )
+[ "${n:-0}" -ge 100 ] || fail "the shadow gate found only $n function definitions in tests/fakes/*.cpp - the derivation is broken, not the tree"
+n=$( wc -l < "$shadow_tmp/ship" )
+[ "${n:-0}" -ge 1000 ] || fail "the shadow gate found only $n function definitions under $SKETCH/src - the derivation is broken, not the tree"
+
+awk '!/^[ \t]*#/ && NF { print $1 }' "$SHADOWS" | sort -u > "$shadow_tmp/listed"
+n=$( wc -l < "$shadow_tmp/listed" )
+[ "${n:-0}" -ge 40 ] || fail "tests/fakes/SHADOWS.txt lists only $n symbols - it has been emptied rather than maintained"
+
+if ! new=$( comm -23 "$shadow_tmp/derived" "$shadow_tmp/listed" ) || [ -n "$new" ]; then
+  echo "GATE FAIL: a fake now shadows a shipping function that tests/fakes/SHADOWS.txt does not list:" >&2
+  printf '  %s\n' $new >&2
+  echo "  Every host binary that links that fake drives the FAKE's body while believing it drives the firmware's." >&2
+  echo "  This is the P10-C6 class. Add a row saying which of LINKED / IMITATION / INJECTOR / RECORDER it is." >&2
+  exit 1
+fi
+if ! gone=$( comm -13 "$shadow_tmp/derived" "$shadow_tmp/listed" ) || [ -n "$gone" ]; then
+  echo "GATE FAIL: tests/fakes/SHADOWS.txt lists symbols that are no longer shadowed:" >&2
+  printf '  %s\n' $gone >&2
+  echo "  If the fake body was deleted because the real one is now linked, mark the row LINKED." >&2
+  echo "  If the SHIPPING function was renamed or deleted, the fake is now a body nothing corresponds to." >&2
+  exit 1
+fi
+
+# --- per-row obligations -----------------------------------------------------
+while read -r sym ship fake status rest; do
+  case "$sym" in ''|\#*) continue;; esac
+  case "$status" in
+    LINKED)
+      if grep -q "^${sym}\$" "$shadow_tmp/fake"; then
+        fail "SHADOWS.txt calls $sym LINKED but tests/fakes/$fake still defines it - LINKED means the real body is in a host binary and the fake body is GONE"
+      fi
+      ;;
+    IMITATION)
+      [ -n "$rest" ] || fail "SHADOWS.txt row $sym is IMITATION and names no anchor - a fake that claims to behave like $ship must point at the case that says so, or it is a claim nothing checks"
+      anchor=$( printf '%s' "$rest" | awk '{print $1}' )
+      if ! grep -rqE "(TEST\($anchor\)|\b$anchor\b)" "$ROOT"/tests/*.cpp "$ROOT"/tools/check.sh; then
+        fail "SHADOWS.txt row $sym names the anchor '$anchor', and no test case or gate by that name exists - the imitation claim rests on nothing"
+      fi
+      ;;
+    INJECTOR|RECORDER)
+      [ -n "$rest" ] || fail "SHADOWS.txt row $sym is $status and gives no reason - a fake that is deliberately not an imitation has to say what it is instead, or the next author will read it as one"
+      ;;
+    *)
+      fail "SHADOWS.txt row $sym has status '$status'; it must be one of LINKED / IMITATION / INJECTOR / RECORDER"
+      ;;
+  esac
+  [ -f "$SKETCH/src/$ship" ]     || fail "SHADOWS.txt row $sym names the shipping file $ship, which does not exist"
+  [ -f "$ROOT/tests/fakes/$fake" ] || fail "SHADOWS.txt row $sym names the fake $fake, which does not exist"
+done < "$SHADOWS"
+rm -rf "$shadow_tmp"
+
+# --- the P10-C6 function, on the side the P10-C6 gate did not look at --------
+# Section 1 above greps the CALLER (screen_link.cpp's fill_self) and the FAKE
+# (link_fake.cpp). Neither is the thing that ships. MEASURED: putting the P10
+# defect back into ui/ui.cpp - one line, `void ui_pet_name_latin1(char* out,
+# size_t cap) { ui_pet_name(out, cap); }`, so the wire form becomes UTF-8 -
+# left the full gate at GATE OK, exit 0, with the beacon defect in the release
+# artefact. ui/ui.cpp is compiled by no host binary, so nothing else can see it.
+body=$( awk '/^void ui_pet_name_latin1\(/{f=1} f{print} f&&/\}/{exit}' \
+          "$SKETCH/src/ui/ui.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "ui/ui.cpp has no ui_pet_name_latin1() body - the gate that keeps the beacon's name in the STORED encoding has lost its subject"
+n=$( printf '%s\n' "$body" | { grep -cE '\bpet_name_stored[[:space:]]*\(' || true; } )
+[ "${n:-0}" -eq 1 ] || fail "ui/ui.cpp's ui_pet_name_latin1() does not hand back pet_name_stored() ($n) - it must be the STORED Latin-1 form, because networking/discovery.cpp's name_ok() refuses 0x80..0x9F and every accented capital the naming ring can type becomes 0xC3 plus a byte inside that window. This is the P10-C6 defect: a device called with an accent emitted NO BEACON AT ALL"
+n=$( printf '%s\n' "$body" | { grep -cE '\b(u8_from_latin1|ui_pet_name)[[:space:]]*\(' || true; } )
+[ "${n:-0}" -eq 0 ] || fail "ui/ui.cpp's ui_pet_name_latin1() crosses to UTF-8 ($n) - that is the P10-C6 defect verbatim, and it is invisible to all host binaries"
+body=$( awk '/^void ui_pet_name\(/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/ui/ui.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "ui/ui.cpp has no ui_pet_name() body - the DRAWN form's single crossing has lost its subject"
+n=$( printf '%s\n' "$body" | { grep -cE '\bu8_from_latin1[[:space:]]*\(' || true; } )
+[ "${n:-0}" -eq 1 ] || fail "ui/ui.cpp's ui_pet_name() does not cross through u8_from_latin1() ($n) - everything that DRAWS a name goes through drawUTF8(), so the drawn form must be crossed exactly once"
+
+# =============================================================================
+# 11. THE READ-ONLY SESSION IS READ-ONLY EVERYWHERE, NOT JUST IN THE FACADE
+#     persistence/game_state.h: read-only is set when the load refused to touch
+#     flash (LOAD_CORRUPT, LOAD_FOREIGN_NEWER) because "the pet in RAM is a
+#     placeholder and WRITING IT WOULD DESTROY EXACTLY THE SAVE THE USER IS
+#     ABOUT TO BE ASKED ABOUT". save_manager.cpp has no read-only concept at all
+#     - grep it - so the whole guard is the twelve `if (s_readonly) return false;`
+#     lines in game_state.cpp, and anything that calls a save_* primitive
+#     DIRECTLY goes round it.
+#
+#     MEASURED before the fix, against the shipping objects: on a read-only
+#     session gs_save_box() correctly returned 0 while save_box_header(),
+#     save_trade_journal(), save_pebble_now(), save_cooldowns(), save_inventory()
+#     and save_touch_lastseen() all landed real bytes, and a whole trade
+#     committed TEN flash writes - the outgoing Pebble gone from flash, the
+#     incoming one on it. docs/bench.md G3 deliberately produces that board.
+#
+#     Both files are compiled by no host binary, so this is where it is held.
+# -----------------------------------------------------------------------------
+for fn in ui_tr_store_journal ui_tr_store_slot ui_tr_store_box ui_tr_store_checkpoint; do
+  body=$( awk -v f="$fn" 'index($0, "static bool " f "(") == 1 || index($0, "static void " f "(") == 1 {g=1} g{print} g&&/^\}/{exit}' \
+            "$SKETCH/src/ui/ui.cpp" | strip_comments12 )
+  [ -n "$body" ] || fail "ui/ui.cpp has no $fn() body - the trade's flash seam has lost one of its five hooks"
+  n=$( printf '%s\n' "$body" | { grep -cE '\bgs_readonly[[:space:]]*\(' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp's $fn() does not refuse a read-only session ($n) - it writes through save_manager rather than the gs_* facade, so it goes round the only read-only guard there is, and a device parked behind SAVE ERROR would overwrite the save the user is about to be asked about (persistence/game_state.h)"
+done
+body=$( awk '/^void ui_explore_commit\(/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/ui/ui.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "ui/ui.cpp has no ui_explore_commit() body"
+n=$( printf '%s\n' "$body" | { grep -cE '\bgs_readonly[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp's ui_explore_commit() does not refuse a read-only session ($n) - save_cooldowns() and save_inventory() are save_manager primitives and go round the facade's guard, and NETWORK -> scan -> encounter works with an empty Box by design"
+body=$( awk '/^static void pwr_hook_persist\(/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/app/app.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "app/app.cpp has no pwr_hook_persist() body"
+n=$( printf '%s\n' "$body" | { grep -cE '\bgs_readonly[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "app/app.cpp's pwr_hook_persist() does not refuse a read-only session ($n) - save_touch_lastseen() is a save_manager primitive, so a board parked behind SAVE ERROR wrote the lastseen key every 60 s into the save it had just disowned, with no player action at all"
+
+# --- and the power ladder does not navigate away from a screen that opted out -
+# app/app.cpp's pwr_hook_release() runs at the PWR_DIM -> PWR_IDLE edge (120 s of
+# no BUTTON PRESS - an animation nobody has to press for is indistinguishable
+# from an idle device) and blanks the panel in the same transition. Its guard
+# used to name ONE screen, SCR_HOME. But ui's own 20 s auto-return has already
+# taken every non-sticky screen home, so the ONLY screens this hook could reach
+# were the SF_STICKY ones - exactly the screens that opted out of being timed
+# out. It took SCR_SETUP_NAME, SCR_SETUP_STARTER, SCR_TIME, SCR_GAME,
+# SCR_EVOLUTION, SCR_BATTLE and SCR_ERROR to HOME behind a dark panel, and
+# SCR_ERROR's leave() hook kills the blinking LED that is the only voice a board
+# with no panel has. tests/test_statemachine.cpp holds the TABLE half.
+body=$( awk '/^static void pwr_hook_release\(/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/app/app.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "app/app.cpp has no pwr_hook_release() body"
+n=$( printf '%s\n' "$body" | { grep -cE '\bsm_is_sticky[[:space:]]*\(' || true; } )
+[ "${n:-0}" -eq 1 ] || fail "app/app.cpp's pwr_hook_release() does not skip on sm_is_sticky() ($n) - naming a single screen there is what took the first-boot naming ring, the date screen, a battle, an incubating egg and the ERROR screen to HOME at 120 s with the panel dark"
+n=$( printf '%s\n' "$body" | { grep -cE 'sm_current[[:space:]]*\(\)[[:space:]]*==' || true; } )
+[ "${n:-0}" -eq 0 ] || fail "app/app.cpp's pwr_hook_release() tests a single screen id ($n) - the reachable set is the SF_STICKY set, not one member of it"
+
+# --- and both holds are on the ladder ----------------------------------------
+# ui_radio_job_busy() is P7-C2/P10-C6's; ui_show_busy() is the final review's,
+# and it is the same defect with a different owner. Without it the 4,480 ms
+# birth show that ends every first boot ran for 60 s at PWR_SLEEP and sent ZERO
+# frames to a panel that had been dark since 120 s.
+n=$( strip_comments12 < "$SKETCH/src/app/app.cpp" | { grep -cE 'pin\.held[^;]*ui_show_busy[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "app/app.cpp's PowerInput.held does not include ui_show_busy() ($n) - a ceremony is a state the player watches without pressing anything, so the idle clock runs straight through it and the hatch is played to a dark panel one phase per loop pass"
+n=$( strip_comments12 < "$SKETCH/src/app/app.cpp" | { grep -cE 'pin\.held[^;]*ui_radio_job_busy[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "app/app.cpp's PowerInput.held does not include ui_radio_job_busy() ($n) - the ladder would tear a scan job or the creator access point down under a phone that is still using it (P10-C6)"
+
+# --- the wipe paths mint through the Box's one constructor -------------------
+# Both "factory reset" paths used a bare sim_new_pet(), which writes an egg into
+# the bound PebbleInstance and MINTS NO SLOT. gs_factory_reset() has just
+# memset the Box, so gs_save_active() refused at its `act >= BOX_SLOTS` guard
+# and the bool was discarded: a playable creature with box_count() 0 and every
+# save from that moment a silent no-op. Same class as the capture defect the
+# parent commit fixed. tests/test_box_persist.cpp holds the sequence.
+for pair in "ui/ui.cpp:CFM_WIPE2" "dev/godmode.cpp:run_wipe"; do
+  f=${pair%%:*}
+  n=$( strip_comments12 < "$SKETCH/src/$f" | { grep -cE '\bsim_new_pet[[:space:]]*\(' || true; } )
+  [ "${n:-0}" -eq 0 ] || fail "$f still calls sim_new_pet() ($n) - it is not a Box constructor and mints no slot, so the pet it makes after a factory reset is in no slot and can never be saved (game/box.h calls box_new_pebble() \"THE TREE'S ONE CONSTRUCTOR\")"
+done
+n=$( strip_comments12 < "$SKETCH/src/dev/godmode.cpp" | { grep -cE '\bbox_new_pebble[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "dev/godmode.cpp's wipe does not mint through box_new_pebble() ($n)"
+
+# =============================================================================
+# 12. THE GATES THE FINAL REVIEW FOUND MISSING BEHIND A TICKED BOX
+# -----------------------------------------------------------------------------
+# (a) THE SHIPPING ARTEFACT'S SERIAL SURFACE IS SWITCHED ON BY TWO LINES IN
+#     app/app.cpp, AND NOTHING GATED THEM. The section 67 "Diagnostics
+#     available" box is ticked on the read-only surface being IN THE RELEASE
+#     ARTEFACT, and it is in it only because app_setup() calls god_begin() and
+#     app_loop() calls god_service(). app/app.cpp is compiled by no host binary.
+#     MEASURED: commenting out either line left ALL PASS 58/58, ASAN OK 8/8,
+#     PAGE TEST OK 51/51, GATE OK. Every sibling of this shape already has a
+#     gate here - cor_service(), god_note_load(), perf_note_frame(),
+#     perf_note_pass(), perf_set_screen(), cfg_sound_muted(), audio_bind() - and
+#     the one caller that switches all of them on had none.
+#     Bench A5, C3, C5, E1-E3 and B2 read those serial lines and nothing else.
+for fn in god_begin god_service; do
+  n=$( strip_comments12 < "$SKETCH/src/app/app.cpp" | { grep -cE "^[[:space:]]*${fn}[[:space:]]*\(" || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "app/app.cpp does not call $fn() ($n) - the shipping artefact would be deaf on the serial line, and DIAG,heap / DIAG,perf / DIAG,link plus help/info/show_save/stall are the only instruments bench items A5, C3, C5, E1-E3 and B2 have"
+done
+
+# (b) THE ONE HEADER REGISTRATION THAT STANDS BETWEEN AN OPEN ACCESS POINT AND A
+#     NULL DEREFERENCE. WebServer keeps only registered header keys, so with
+#     "Content-Type" gone from webui.cpp's HDR_KEYS the header reads as the
+#     empty string on every request, creator_server.cpp's body_is_multipart()
+#     guard never fires, and cs_body_hook() calls s_srv->raw() - *_currentRaw -
+#     on a null unique_ptr for every multipart upload. MEASURED: deleting that
+#     one token left the full gate at GATE OK, and a host harness against the
+#     real WebServer shim reported "reference binding to null pointer of type
+#     'struct HTTPRaw'" under UBSan. networking/webui.cpp has no fake and is
+#     compiled by no host binary. The pair must appear or disappear TOGETHER.
+n=$( strip_comments12 < "$SKETCH/src/networking/webui.cpp" | { grep -cE '"Content-Type"' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "networking/webui.cpp does not register the Content-Type header ($n) - WebServer keeps only registered keys, so creator_server.cpp's body_is_multipart() guard would read an empty string, never fire, and let cs_body_hook() dereference a null _currentRaw for every multipart POST. That is a remote crash any client on the OPEN access point can ask for"
+n=$( strip_comments12 < "$SKETCH/src/networking/creator_server.cpp" | { grep -cE '\bbody_is_multipart[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "networking/creator_server.cpp has lost body_is_multipart() ($n) - it is the guard the Content-Type registration exists for; the two are one mechanism"
+
+# (c) "0 PROJECT WARNINGS" IS A CLAIM ABOUT A COUNT OF GREPPED COMPILER OUTPUT,
+#     so a single suppression makes it structurally unable to fail. The section
+#     67 box says "no `#pragma GCC diagnostic` or `-w` anywhere in the tree
+#     (gated)". The fact was true; THE GATE DID NOT EXIST - grep -n pragma over
+#     tools/ and .github/ returned nothing. A ticked box that names a gate the
+#     reader can go and read, when the gate is not there, is worse than an
+#     unticked one, because the reader stops looking.
+# This file names the pragma in its own failure text, so it excludes itself -
+# the same self-reference every grep gate in this script has to handle.
+n=$( { grep -rlE '#[[:space:]]*pragma[[:space:]]+GCC[[:space:]]+diagnostic' \
+        "$SKETCH/src" "$ROOT/tests" "$ROOT/tools" 2>/dev/null || true; } \
+     | { grep -v '/check\.sh$' || true; } | wc -l )
+[ "${n:-0}" -eq 0 ] || fail "$n file(s) carry a '#pragma GCC diagnostic' - the six-variant '0 project warnings' claim counts grepped compiler output, so one suppression makes it unable to fail"
+n=$( { grep -nE '(^|[[:space:]])-w([[:space:]]|$)' "$ROOT/tests/Makefile" "$ROOT/tools/build.sh" 2>/dev/null || true; } \
+     | { grep -v '^[^:]*:[0-9]*:[[:space:]]*#' || true; } | wc -l )
+[ "${n:-0}" -eq 0 ] || fail "'-w' appears in the build ($n) - it switches every warning off and the warning count becomes meaningless"
+n=$( { grep -cE '\-Wall.*\-Wextra.*\-Werror' "$ROOT/tests/Makefile" || true; } )
+[ "${n:-0}" -ge 1 ] || fail "tests/Makefile no longer compiles with -Wall -Wextra -Werror ($n)"
+
+# (d) EVERY CODEPOINT IN core/strings_es.h FITS LATIN-1. The file states this
+#     invariant itself ("every character in this file must exist in Latin-1 ...
+#     FORBIDDEN: em dash, ellipsis character, curly quotes, arrows, emoji") and
+#     only the GF_TINY sub-case was enforced. A recorder only sees a string a
+#     snapshot actually draws, so a pasted em dash or curly quote in a string no
+#     golden renders was invisible - and on the panel u8g2's drawUTF8 emits no
+#     glyph AND NO ADVANCE for it, so the character vanishes and the line closes
+#     up. It also reaches the wire: ui.cpp's pet_name_stored() runs
+#     u8_to_latin1() over these strings for the discovery beacon, and a
+#     codepoint above U+00FF becomes '?'.
+if command -v python3 >/dev/null 2>&1; then
+  python3 - "$SKETCH/src/core/strings_es.h" <<'PYEOF' || fail "core/strings_es.h holds a codepoint Latin-1 cannot represent - the file's own banner forbids it, and on the panel drawUTF8() emits no glyph and no advance for one, so the character disappears and the line closes up"
+import io, sys
+t = io.open(sys.argv[1], encoding='utf-8').read()
+bad = sorted({c for c in t if ord(c) > 0xFF or 0x80 <= ord(c) <= 0x9F})
+if bad:
+    sys.stderr.write("  offending codepoints: %s\n" %
+                     " ".join("U+%04X" % ord(c) for c in bad))
+    sys.exit(1)
+PYEOF
+fi
+
+# =============================================================================
+# 13. THE JOINS: FIVE section 67 BOXES ARE PROVEN AT BOTH ENDS AND NOT IN THE
+#     MIDDLE. Added at the FINAL REVIEW.
+#
+#     "Care works", "Active Pebble can be selected", "XP and leveling work",
+#     "At least 5 minigames" and "Minigames transition cleanly" are each held by
+#     a screen test at one end (the row picks the right action id) and a model
+#     test at the other (sim_apply_action / box_set_active / xp_add / mgr_begin
+#     do the right thing with it). The body that JOINS them lives in ui/ui.cpp,
+#     which no host binary compiles - and tests/test_screens.cpp replaces every
+#     one of those joins with a one-line recorder, e.g.
+#         bool ui_act_and_show(uint8_t a) { g_shown = a; return g_action_ok; }
+#     README section 2's 38-item list has no CARE step, no BOX step and no PLAY
+#     step, so for these five the join is covered by NEITHER the host suite nor
+#     the bench: an owner pressing CARE -> Comida in the first five minutes is
+#     running code nothing in this project has ever executed or checked.
+#
+#     check.sh already carries body gates on four ui.cpp functions for exactly
+#     this reason, and check.sh:1733 records that the ui_setup_persist one had to
+#     be REWRITTEN to read the BODY because counting a token walked straight
+#     through a deleted call. These are the same shape for the joins that had
+#     none. The minigame join was closed differently and better - tests/Makefile
+#     now links minigames/registry.cpp and tests/test_minigames.cpp asserts the
+#     pairing that ships - so it is not repeated here.
+# -----------------------------------------------------------------------------
+body=$( awk '/^static bool do_action\(/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/ui/ui.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "ui/ui.cpp has no do_action() body - the join between a CARE row and the simulation has lost its subject"
+n=$( printf '%s\n' "$body" | { grep -cE '\bsim_apply_action[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp's do_action() does not call sim_apply_action() ($n) - section 67's \"Care works\" is held by a screen test that records the action id and a model test that applies one, and this is the only thing between them"
+n=$( printf '%s\n' "$body" | { grep -cE '\bapp_award_xp[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp's do_action() does not pay XP ($n) - section 67's \"XP and leveling work\" is held at both ends and this is the join; a care action that pays nothing is invisible to every host binary"
+
+body=$( awk '/^void ui_box_activate\(/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/ui/ui.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "ui/ui.cpp has no ui_box_activate() body"
+for want in box_set_active sim_switch gs_save_box; do
+  n=$( printf '%s\n' "$body" | { grep -cE "\\b${want}[[:space:]]*\\(" || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp's ui_box_activate() does not call $want() ($n) - section 67's \"Active Pebble can be selected\" is proved at both ends (tests/test_box_sim.cpp) and this body is the whole of the middle. Without gs_save_box() the choice does not survive a power cut; without sim_switch() the per-Pebble accumulators are not reset and switching becomes a way to farm"
+done
+n=$( printf '%s\n' "$body" | { grep -cE '\bgs_save_active[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 2 ] || fail "ui/ui.cpp's ui_box_activate() no longer flushes BOTH slots ($n) - gs_save_active() writes only the slot box.active_slot names, so the outgoing Pebble has to be written BEFORE the index moves and the incoming one after"
+
+body=$( awk '/^bool ui_act_and_show\(/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/ui/ui.cpp" | strip_comments12 )
+[ -n "$body" ] || fail "ui/ui.cpp has no ui_act_and_show() body - it is the seam every screen calls and the one tests/test_screens.cpp replaces with a recorder"
+n=$( printf '%s\n' "$body" | { grep -cE '\bact_and_show[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp's ui_act_and_show() does not reach act_and_show() ($n) - the screens would record an action id that nothing performs"
+
+# --- AND THE DRAWN BODY STILL FOLLOWS species_id ----------------------------
+# Section 67's "Evolution works" is ticked partly on P4-C4a's visual half. The
+# derivation is genuinely good and pinned on both sides (ui/pet_art.h is pure,
+# tests/test_pet_view.cpp drives apply_species_design(), a golden holds
+# screen_home.cpp) - but species_id only ENTERS the view in pet_view_attach(),
+# the second of the two calls ui.cpp's body_view() makes. Delete or
+# short-circuit that call and every stored Pebble silently reverts to drawing
+# its genome body while every host golden stays green. That is the phase-9
+# blink defect's shape and the P10-C3 sleeping-body defect's shape, both of
+# which this tree has already paid for, and no bench item would show it either -
+# a wrong body is still a plausible-looking body.
+body=$( awk '/^static const PetView& body_view\(/{f=1} /^static PetView body_view\(/{f=1} f{print} f&&/^\}/{exit}' \
+          "$SKETCH/src/ui/ui.cpp" | strip_comments12 )
+if [ -n "$body" ]; then
+  n=$( printf '%s\n' "$body" | { grep -cE '\bpet_view_attach[[:space:]]*\(' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp's body_view() does not call pet_view_attach() ($n) - species_id enters the drawn view THERE and nowhere else, so every stored Pebble would revert to its genome body with every golden still green (section 67 \"Evolution works\", P4-C4a)"
+else
+  n=$( strip_comments12 < "$SKETCH/src/ui/ui.cpp" | { grep -cE '\bpet_view_attach[[:space:]]*\(' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp never calls pet_view_attach() ($n) - see above"
+fi
 
 echo "GATE OK"

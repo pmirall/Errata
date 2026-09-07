@@ -115,6 +115,13 @@ uint32_t perf_advance_deadline(uint32_t now_ms, uint32_t next_ms,
   return n;
 }
 
+bool perf_hold_raises(bool live, uint8_t live_fps, uint8_t want_fps)
+{
+  if (want_fps == 0u) return false;   // a disarm asks for nothing
+  if (!live) return true;             // an arming, or a re-arm after an expiry
+  return want_fps > live_fps;         // a raise; an equal renewal is not one
+}
+
 uint32_t perf_overrun_backoff_ms(uint32_t frame_us)
 {
   if (frame_us <= (uint32_t)FRAME_BUDGET_US) return 0u;

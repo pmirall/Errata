@@ -1343,6 +1343,22 @@ TEST(every_link_mode_draws_inside_the_panel) {
   battle_input(GST_HOLD_R);
   CHECK_EQ(g_screen, (uint8_t)SCR_LINK);
   fb_reset(); link_render(); CHECK_EQ(fb_oob(), 0u);       // the ended page
+  // ...AND EVERY ONE OF THEM DREW TEXT THE PANEL CAN ACTUALLY SHOW.
+  // Added at the FINAL REVIEW. The two recorders below were bought with shipped
+  // defects - fb_bad_utf8() with P10-C4's split multi-byte sequence,
+  // fb_no_glyph() with P10-C6's five accented strings drawn in a 95-glyph
+  // ASCII-only face - and until now they were asserted in tests/test_screens.cpp
+  // ALONE. Three of the four binaries that link the fake and draw never read
+  // them, and THIS is the one that covers ui/screen_link.cpp, whose header row
+  // and whose peer rows put a live NAME on the panel. Names are the exact input
+  // class that produced the P10-C6 beacon defect.
+  //
+  // They are lifetime totals across every render above, so this is one
+  // assertion for the whole sweep.
+  if (fb_no_glyph() != 0u) fprintf(stderr, "  %s\n", fb_no_glyph_first());
+  CHECK_EQ(fb_no_glyph(), 0u);
+  if (fb_bad_utf8() != 0u) fprintf(stderr, "  %s\n", fb_bad_utf8_first());
+  CHECK_EQ(fb_bad_utf8(), 0u);
 }
 
 // =============================================================================
@@ -1424,4 +1440,76 @@ TEST(no_frame_of_a_linked_battle_allocates_and_the_waiting_mode_is_drawn) {
   CHECK_EQ(g_allocs, 0L);
   printf("  %d linked frames, %d of them waiting on the peer, %ld allocations\n",
          frames, seen[BTM_WAIT], g_allocs);
+}
+
+// =============================================================================
+//  THE TWO REFUSALS THAT HAD NEVER EXECUTED
+//  Added at the FINAL REVIEW, with the injectors tests/fakes/link_fake.h grew
+//  for them. Both are documented behaviour of networking/transport_espnow.cpp
+//  that the fake could not produce, so both arms were dead code in every one of
+//  the 59 host binaries.
+// =============================================================================
+
+// ui/screen_link.cpp: `if (!ui_link_bind(p->slot)) { ui_toast(STR_LK_RADIO_ERR);
+// return false; }` - the branch the player hits when the A press lands on a peer
+// the ESP-NOW peer table will not take. espnow_bind() refuses on four separate
+// conditions; the fake answered true for any slot including 0xFF, so the arm
+// had never run. MEASURED before the injector existed: deleting the whole
+// refusal survived 122,581 checks across the three binaries that link
+// screen_link.o, and the only STR_LK_RADIO_ERR assertion in the suite sits under
+// lf_set_start_ok(false) and therefore covers a DIFFERENT producer.
+TEST(a_consent_the_radio_refuses_leaves_the_screen_usable) {
+  harness_reset(0x11110000u, 0x22220000u);
+  see_peer((uint16_t)DISC_CAP_BATTLE, -40, 0u);
+  g_toast = 0;
+
+  lf_set_bind_ok(false);
+  const int unbinds_before = lf_unbinds();
+  consent_to((uint8_t)LOP_BATTLE);
+
+  // The player is TOLD, and the refusal is the one the radio produced.
+  CHECK_EQ(g_toast, STR_LK_RADIO_ERR);
+  // Nothing was bound, so nothing needs unbinding: a refusal that then tore
+  // down a session it never made would be worse than the refusal.
+  CHECK_EQ(lf_unbinds(), unbinds_before);
+  // And the screen is still a screen. This is the whole point of the arm: a
+  // peer whose slot the transport will not take must not strand the player.
+  CHECK(link_screen_mode() == (uint8_t)LKM_CARD ||
+        link_screen_mode() == (uint8_t)LKM_BROWSE);
+  fb_reset(); link_render(); CHECK_EQ(fb_oob(), 0u);
+  link_input(GST_HOLD_L);                       // and the way out still works
+  fb_reset(); link_render(); CHECK_EQ(fb_oob(), 0u);
+
+  // With the radio willing, the same gesture consents - so the case above is a
+  // statement about the refusal and not about the gesture.
+  harness_reset(0x11110000u, 0x22220000u);
+  see_peer((uint16_t)DISC_CAP_BATTLE, -40, 0u);
+  lf_set_bind_ok(true);
+  consent_to((uint8_t)LOP_BATTLE);
+  CHECK(lf_bound());
+}
+
+// A RADIO THAT REFUSES EVERY BROADCAST IS INDISTINGUISHABLE FROM AN EMPTY ROOM,
+// and that is by design in networking/discovery.cpp - a false from beacon()
+// means "do not count it" and nothing else. This case records the consequence
+// rather than objecting to it: the job still runs its full ceiling and ends
+// LS_TIMEOUT, and the ONLY thing in the whole LinkJob that differs is
+// beacons_tx, which no ui/ file reads. On a board that is a device nobody can
+// see reporting "no peers" about a room it never spoke to; the instrument is
+// DIAG,link's beacons_tx column, and README section 2 now says to read it.
+TEST(a_radio_that_refuses_every_broadcast_looks_exactly_like_an_empty_room) {
+  harness_reset(0x11110000u, 0x22220000u);
+  lf_set_beacon_ok(false);
+  for (int i = 0; i < 40; ++i) tick(100u);
+  const int tx_deaf   = lf_beacons_tx();
+  const uint8_t m_deaf = link_screen_mode();
+
+  harness_reset(0x11110000u, 0x22220000u);
+  lf_set_beacon_ok(true);
+  for (int i = 0; i < 40; ++i) tick(100u);
+  const int tx_live   = lf_beacons_tx();
+
+  CHECK_EQ(tx_deaf, 0);                 // nothing went out...
+  CHECK(tx_live > 0);                   // ...where it should have
+  CHECK_EQ((int)m_deaf, (int)link_screen_mode());   // and the screen agrees
 }

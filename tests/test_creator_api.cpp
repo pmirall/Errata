@@ -75,6 +75,7 @@
 #include "data/creator_schema.h"
 #include "data/creator_schema_json.h"
 #include "data/species_table.h"
+#include "ui/pet_art.h"      // pet_species_name(): the roster name a custom species has NOT got
 #include "game/box.h"
 #include "game/genome.h"
 #include "game/species_custom.h"
@@ -1224,6 +1225,37 @@ TEST(an_uploaded_document_becomes_a_pebble_the_one_validator_accepts) {
   CHECK_EQ((int)p->origin, (int)ORIGIN_CREATOR);
   CHECK_STR_EQ(p->nickname, "Bicho");
   CHECK_EQ((int)p->species_id, (int)CREATOR_SPECIES_ID_MIN);
+
+  // *** AND THE ROSTER STILL HAS NO NAME FOR IT. Final review. ***
+  // ui/pet_art.h promises pet_species_name() answers "nullptr - never a
+  // placeholder" for three inputs, one of which is "a creator custom
+  // (200..209)". With a row actually INSTALLED that was false: csp_install()
+  // sets name_idx = STR_EMPTY ("the name lives on the PebbleInstance's
+  // nickname, not in a StrId"), species_get(200) therefore returns a real row,
+  // and S(STR_EMPTY) is the EMPTY STRING - which is not nullptr.
+  //
+  // tests/test_pet_view.cpp already asserted `pet_species_name(200) == nullptr`
+  // and passed, because it asserts it with NO custom species installed, i.e. in
+  // the one state where the defect cannot occur. This is the same claim in the
+  // state that reaches it, and it belongs here because this is the only place
+  // in the suite that gets a real record past the validator.
+  //
+  // What it cost: ui/ui.cpp's name ladder took rung 2 with a zero-length
+  // string, so the dynasty fallback at rung 3 was unreachable for exactly the
+  // creature the phone block mints. An unnamed device carrying one produced ""
+  // for its own name; disc_encode() ACCEPTS that (name_ok() is true for an
+  // all-zero field), so the board beaconed twelve zero bytes, the far board's
+  // LINK row fell back to "Buscando Pebbles..." and its card header to
+  // "ENLACE", and two such devices were indistinguishable on the air.
+  CHECK(species_get(CREATOR_SPECIES_ID_MIN) != nullptr);   // the row IS there
+  if (pet_species_name(CREATOR_SPECIES_ID_MIN) != nullptr)
+    fprintf(stderr, "    pet_species_name(%u) = \"%s\", not nullptr: ui.cpp's "
+                    "name ladder takes rung 2 with an empty string and the "
+                    "device beacons no name at all\n",
+            (unsigned)CREATOR_SPECIES_ID_MIN,
+            pet_species_name(CREATOR_SPECIES_ID_MIN));
+  CHECK(pet_species_name(CREATOR_SPECIES_ID_MIN) == nullptr);
+
   csp_reset();
 }
 

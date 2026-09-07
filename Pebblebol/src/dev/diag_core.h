@@ -299,7 +299,20 @@ struct DiagFields {
   // the last scan (ui/screen_network.h)
   uint8_t  scan_valid, scan_seen, scan_fresh, scan_phase;
   // flash
-  uint8_t  kv_healthy, kv_error, kv_write_fails;
+  uint8_t  kv_healthy, kv_error;
+  // uint16_t SINCE THE FINAL REVIEW, matching hardware/kv_nvs.h's own type.
+  // It was uint8_t here and uint16_t at the source, so `info`'s section-49 Last
+  // error line printed the count MODULO 256 - and it is the only numeric
+  // evidence the product offers about flash misbehaving. On a board with no
+  // usable nvs2 every save_checkpoint_all() raises it by exactly 12, so after a
+  // boot and 30 checkpoints the true count is 361 and the line read "wfails=105";
+  // every further 256 failures the reading passes through small numbers again,
+  // so a board with hundreds of failed writes could print a value
+  // indistinguishable from a healthy one. God mode's STORE page prints the full
+  // uint16 from the same counter, so the two disagreed and the operator had no
+  // way to know which to believe. Two neighbours in this struct are already
+  // uint16_t, so there is no new alignment cost.
+  uint16_t kv_write_fails;
   // uptime, for the operator reading a log
   uint32_t uptime_s;
 };

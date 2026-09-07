@@ -537,10 +537,27 @@ $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
 # The minigame contract and the PURE logic of every game. No draw objects and
 # no ui/: if this link line ever needs one, a game has leaked drawing into its
 # logic and the determinism argument has gone with it.
+# registry.o AND THE SIX DRAW HALVES SINCE THE FINAL REVIEW, and it is the whole
+# of a defect. minigames/registry.cpp pairs each MgId's logic with its drawing
+# half, and its only guard was a static_assert on the ROW COUNT: swapping two
+# rows compiled clean under -Werror and passed the whole gate, and MG_PING then
+# drew SEQUENCE's frame from PING's context. It was invisible because this file
+# was compiled by no host binary, and tests/test_screens.cpp re-derives the
+# pairing by hand at its six mg_snapshot() call sites - so the eleven minigame
+# goldens proved the pairing THAT FILE wrote, not the one that ships.
+#
+# registry.cpp's banner called it a "DEVICE translation unit", which was the
+# stated reason it was not here; it reaches no ui/ header at all. The draw
+# halves come with it because they are what it names.
 $(BIN)/test_minigames: $(OBJ)/minigame.o $(OBJ)/manager.o $(OBJ)/ping_logic.o \
                         $(OBJ)/sequence_logic.o $(OBJ)/packet_flood_logic.o \
                         $(OBJ)/firewall_logic.o $(OBJ)/buffer_logic.o \
-                        $(OBJ)/delete_logic.o $(OBJ)/rng.o
+                        $(OBJ)/delete_logic.o $(OBJ)/rng.o \
+                        $(OBJ)/registry.o $(OBJ)/ping_draw.o \
+                        $(OBJ)/sequence_draw.o $(OBJ)/packet_flood_draw.o \
+                        $(OBJ)/firewall_draw.o $(OBJ)/buffer_draw.o \
+                        $(OBJ)/delete_draw.o $(OBJ)/gfx_fb.o $(OBJ)/utf8.o \
+                        $(OBJ)/gfx_widgets.o $(OBJ)/anim_ease.o
 $(BIN)/test_qr:         $(OBJ)/qr.o
 $(BIN)/test_clock:      $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o
 # THE SAME MODULE, COMPILED FOR THE DEVICE (P7-C6). A separate binary and not a

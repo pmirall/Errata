@@ -41,6 +41,28 @@ static_assert(LINK_PEER_CAP + 2 <= ESP_NOW_MAX_TOTAL_PEER_NUM,
               "the slot table must not be able to ask for more ESP-NOW peer "
               "entries than the driver has");
 
+// THE RING SIZES ARE POWERS OF TWO, AND UNTIL THE FINAL REVIEW THAT WAS HELD BY
+// A COMMENT. networking/rxring.h masks with slots-1, so rxring_init() REFUSES a
+// non-power-of-two by design and leaves a ring that refuses everything - and
+// rxring_push() returns at its `!ring_bound(r)` guard BEFORE touching either
+// counter, exactly as intended. Both espnow_begin() return values were
+// discarded, so a board with, say, 12 beacon slots (an entirely plausible tune
+// for a busier room - see the essay at core/config.h) would still return true
+// from espnow_begin(), still open the LINK screen, still send beacons, and drop
+// every received frame with rx_beacon, rx_session, rx_ring_overflow and
+// rx_beacon_overflow ALL READING ZERO. On the bench that is B1 failing with
+// "beacons go out, nothing comes back" on both boards, which sends the owner
+// hunting the channel. Nothing here is host-compiled, so this is where it goes.
+static_assert((LINK_RX_SLOTS & (LINK_RX_SLOTS - 1)) == 0 &&
+              LINK_RX_SLOTS >= 2 && LINK_RX_SLOTS <= 128,
+              "LINK_RX_SLOTS must be a power of two in 2..128: networking/rxring.h "
+              "masks with slots-1 and rxring_init() refuses anything else, "
+              "leaving a ring that silently drops every session frame");
+static_assert((LINK_BEACON_SLOTS & (LINK_BEACON_SLOTS - 1)) == 0 &&
+              LINK_BEACON_SLOTS >= 2 && LINK_BEACON_SLOTS <= 128,
+              "LINK_BEACON_SLOTS must be a power of two in 2..128 - see above; a "
+              "mis-sized beacon ring is a device that beacons and hears nothing");
+
 #define EN_ADDR_LEN  6u
 
 // -----------------------------------------------------------------------------
@@ -77,6 +99,26 @@ static uint8_t  s_slot_used[LINK_PEER_CAP];      // 0/1
 static uint8_t  s_slot_next  = 0;                // round-robin victim
 
 // --- the bound session peer --------------------------------------------------
+//  PUBLISHED WITH RELEASE, READ WITH ACQUIRE, SINCE THE FINAL REVIEW.
+//  These two are written by loop() (espnow_bind / espnow_unbind) and read by
+//  en_on_recv ON THE WI-FI TASK for every received unicast. Everything else that
+//  crosses that boundary in this module uses __atomic_* with acquire/release -
+//  networking/rxring.h spells out why ("THE WI-FI TASK IS A REAL FreeRTOS TASK
+//  and can preempt loop()") - and this pair had nothing at all, in the one file
+//  whose header devotes a section to the hazard.
+//
+//  The practical risk on a single-core C3 is the compiler's, not the CPU's:
+//  nothing stops part of the 6-byte memcpy being sunk below the flag store,
+//  because in the abstract machine there is no observer. The worst reachable
+//  outcome is a frame or two from the real peer counted rx_wrong_peer while the
+//  address is half-published, which the session's retransmission ladder covers
+//  at one 1 s rung - but rx_wrong_peer IS bench B2's acceptance instrument, so a
+//  spurious count is noise in the one column the owner is asked to read.
+//
+//  MEASURED: a two-thread ThreadSanitizer run over 200,000 frames reported
+//  exactly three race sites and no others - these two writes against the
+//  callback's read, plus the benign EspNowStats counters. rxring.cpp itself was
+//  CLEAN, which is the first evidence anywhere that its SPSC claim holds.
 static uint8_t  s_bound_addr[EN_ADDR_LEN];
 static bool     s_bound      = false;
 
@@ -147,7 +189,8 @@ static void en_on_recv(const esp_now_recv_info_t* info, const uint8_t* data, int
   // cheapest denial-of-service leash available at this layer: session.h:107-112
   // is honest that the codec is not an authenticator, and a frame from a
   // stranger never reaches the ring, let alone the FSM.
-  if (!s_bound || info->src_addr == nullptr || !addr_eq(info->src_addr, s_bound_addr)) {
+  if (!__atomic_load_n(&s_bound, __ATOMIC_ACQUIRE) ||
+      info->src_addr == nullptr || !addr_eq(info->src_addr, s_bound_addr)) {
     s_st.rx_wrong_peer++;
     return;
   }
@@ -194,6 +237,14 @@ bool espnow_begin(void)
   s_bound     = false;
   memset(s_bound_addr, 0, sizeof s_bound_addr);
   memset(&s_st, 0, sizeof s_st);
+  // ...AND THE ACK EVIDENCE, SINCE THE FINAL REVIEW. These two were reset by
+  // neither espnow_begin() nor espnow_end(), so after a teardown and a second
+  // bring-up the pair said "something has acknowledged us" with a stale
+  // millis() timestamp while tx_ok - the counter that produced it - read 0.
+  // Now that they are on the DIAG,link line that would have been a reading the
+  // bench could not trust on the second LINK session of a run.
+  s_ack_ms     = 0;
+  s_ever_acked = false;
 
   if (esp_now_init() != ESP_OK) return false;
   if (esp_now_register_recv_cb(&en_on_recv) != ESP_OK) { (void)esp_now_deinit(); return false; }
@@ -327,7 +378,8 @@ bool espnow_bind(uint8_t slot)
   if (e != ESP_OK && e != ESP_ERR_ESPNOW_EXIST) return false;
 
   memcpy(s_bound_addr, s_slot_addr[slot], EN_ADDR_LEN);
-  s_bound = true;
+  // RELEASE: the address is fully written before the flag that publishes it.
+  __atomic_store_n(&s_bound, true, __ATOMIC_RELEASE);
   // A NEW SESSION DOES NOT INHERIT THE LAST ONE'S FRAMES. Drained from the
   // consumer side (rxring.h), because the Wi-Fi task owns the other cursor.
   rxring_drain(s_rx);
@@ -338,7 +390,9 @@ void espnow_unbind(void)
 {
   if (!s_bound) return;
   if (s_up) (void)esp_now_del_peer(s_bound_addr);
-  s_bound = false;
+  // The flag goes first here, so the callback stops trusting the address before
+  // it is cleared - the mirror image of the bind above.
+  __atomic_store_n(&s_bound, false, __ATOMIC_RELEASE);
   memset(s_bound_addr, 0, sizeof s_bound_addr);
   rxring_drain(s_rx);
 }

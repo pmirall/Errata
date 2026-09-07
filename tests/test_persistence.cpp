@@ -1758,3 +1758,179 @@ TEST(a_slot_out_of_range_is_refused_by_both_write_paths) {
   CHECK(!save_pebble_now((uint8_t)BOX_SLOTS, p));
   CHECK(!save_pebble_landed());
 }
+
+// =============================================================================
+//  A STORE THAT NEVER OPENED IS NOT A CORRUPT SAVE
+//  Added at the FINAL REVIEW. tests/fakes/kv_mem.h has documented
+//  kv_mem_set_healthy() since it was written as the knob for "the NVS would not
+//  open" branch, and until now it had ZERO CALLERS in all 59 host binaries - so
+//  the branch kv_nvs.h and persistence/kv_store.h both promise ("the firmware
+//  still runs, RAM-only; the UI shows ERR_NVS") had never once executed.
+//
+//  What it actually did: kv_get() answered -1 for a closed partition, pair_load()
+//  counts a negative as PRESENT AND BAD, so both copies of the Box came back
+//  rotten and load_all_inner() returned LOAD_CORRUPT. game_state.cpp then set
+//  s_readonly and ui/screen_error.cpp sent the device to ERROR/ERRK_SAVE_CORRUPT
+//  - whose R button offers to WIPE a save that was never damaged. Worse, the
+//  LOAD_CORRUPT return happens BEFORE the checkpoint branch, so a board with a
+//  perfect nvs2 backup and a closed nvs showed the corrupt screen too.
+//
+//  On the bench that is item 18's board (fresh flash, first boot): the Spanish
+//  corrupt-save error with a wipe offer instead of a game, and an afternoon
+//  spent hunting a save or CRC bug that is not there. kv_store.h's KV_CLOSED is
+//  the fix; these are the cases that hold it.
+// =============================================================================
+TEST(a_closed_main_partition_is_not_a_corrupt_save) {
+  begin();
+  GameState gs;
+  CHECK_EQ(save_load_all(gs), LOAD_FRESH);
+  gs.pebbles[0] = sample_pebble(0);
+  gs.box.slot_mask = 0x0001u;
+  gs.box.active_slot = 0;
+  CHECK(save_pebble(0, gs.pebbles[0], true));
+  CHECK(save_box_header(gs.box));
+  advance(5000); save_service();
+
+  // Now the partition does not open at all - the board was flashed without the
+  // sketch's partitions.csv, or the namespace would not begin.
+  kv_mem_set_healthy(KV_MAIN, false);
+
+  // THE SEAM: a closed store says nothing about any key.
+  uint8_t tmp[8];
+  CHECK_EQ(kv_get(KV_MAIN, "box0", tmp, sizeof tmp), KV_CLOSED);
+
+  GameState back;
+  const LoadResult r = save_load_all(back);
+  if (r == LOAD_CORRUPT)
+    fprintf(stderr, "  a closed partition reported LOAD_CORRUPT: the device "
+                    "would offer to wipe a save it never read\n");
+  CHECK(r != LOAD_CORRUPT);
+  CHECK_EQ((int)r, (int)LOAD_FRESH);   // nothing readable anywhere: a new device
+}
+
+TEST(a_closed_main_partition_still_reaches_the_checkpoint) {
+  begin();
+  GameState gs;
+  CHECK_EQ(save_load_all(gs), LOAD_FRESH);
+  gs.pebbles[0] = sample_pebble(0);
+  gs.pebbles[0].species_id = 9u;
+  gs.pebbles[0].level      = 22u;
+  gs.box.slot_mask   = 0x0001u;
+  gs.box.active_slot = 0;
+  save_bind(gs);
+  CHECK(save_pebble(0, gs.pebbles[0], true));
+  CHECK(save_box_header(gs.box));
+  CHECK(save_config(gs.cfg));
+  CHECK(save_checkpoint_all());
+  advance(5000); save_service();
+
+  // The live store is gone; the checkpoint partition is fine. Before KV_CLOSED
+  // this returned LOAD_CORRUPT and never looked at nvs2 at all.
+  kv_mem_set_healthy(KV_MAIN, false);
+
+  GameState back;
+  const LoadResult r = save_load_all(back);
+  CHECK(r != LOAD_CORRUPT);
+  CHECK_EQ((int)r, (int)LOAD_RECOVERED_CKPT);
+  CHECK_EQ((int)back.pebbles[0].species_id, 9);
+  CHECK_EQ((int)back.pebbles[0].level, 22);
+}
+
+// =============================================================================
+//  kv_healthy() IS BOTH HALVES OF ITS CONTRACT
+//  persistence/kv_store.h: "False when the partition could not be opened OR A
+//  WRITE HAS FAILED SINCE BOOT." hardware/kv_nvs.cpp honours both - s_wfail is
+//  set by any short putBytes and is cleared ONLY by a successful kv_wipe(). The
+//  fake returned a bare test knob that no failure ever touched, so it could
+//  neither go unhealthy when the device would nor be wiped back to health,
+//  which on the device is the only way back. No host test called kv_healthy()
+//  at all, so the shipping body's sticky bit was executed by nothing anywhere.
+//
+//  On the bench this is the `nvs=` field of `info` and the DIAG line: read it as
+//  "a write has failed at some point since this boot", not "the store is broken
+//  now".
+// =============================================================================
+TEST(a_failed_write_makes_the_store_unhealthy_until_it_is_wiped) {
+  begin();
+  CHECK(kv_healthy(KV_MAIN));
+
+  const uint32_t v = 0xA5A5A5A5u;
+  CHECK(kv_put(KV_MAIN, "box0", &v, sizeof v));
+  CHECK(kv_healthy(KV_MAIN));            // a good write changes nothing
+
+  kv_mem_fail_next_put();
+  CHECK(!kv_put(KV_MAIN, "box0", &v, sizeof v));
+  CHECK(!kv_healthy(KV_MAIN));           // ...and it is STICKY
+  CHECK(!kv_healthy(KV_MAIN));
+
+  // A successful write does NOT clear it - only the wipe does, exactly as on
+  // the device.
+  CHECK(kv_put(KV_MAIN, "box0", &v, sizeof v));
+  CHECK(!kv_healthy(KV_MAIN));
+
+  CHECK(kv_wipe(KV_MAIN));
+  CHECK(kv_healthy(KV_MAIN));
+}
+
+// =============================================================================
+//  A DEAD STORE WIPES NOTHING EITHER
+//  tests/fakes/kv_mem.h says "a fault model that refuses writes and permits
+//  deletes is not a power cut". P7-C6 made that true of kv_erase() and left
+//  kv_wipe() - the largest delete there is - permitting it. Measured before the
+//  fix: after kv_mem_fail_after_n_puts(0) the fake refused the write, refused
+//  the erase, and then destroyed the whole partition and reported SUCCESS.
+//
+//  save_factory_reset() is kv_wipe()'s only caller, so the sweep this protects
+//  is "pull the power during Reset de fabrica" - which would have come back
+//  green against a fake that wiped after the device was already gone.
+// =============================================================================
+TEST(a_dead_store_refuses_a_wipe_the_way_it_refuses_a_write) {
+  begin();
+  const uint32_t v = 0x5A5A5A5Au;
+  CHECK(kv_put(KV_MAIN, "box0", &v, sizeof v));
+  CHECK_EQ((int)kv_mem_key_count(KV_MAIN), 1);
+
+  kv_mem_fail_after_n_puts(0);                 // the power goes at the next write
+  CHECK(!kv_put(KV_MAIN, "box1", &v, sizeof v));
+  CHECK(!kv_erase(KV_MAIN, "box0"));
+  CHECK(!kv_wipe(KV_MAIN));                    // <- the half P7-C6 missed
+  CHECK_EQ((int)kv_mem_key_count(KV_MAIN), 1); // and the key is still there
+
+  kv_mem_power_restore();
+  CHECK(kv_wipe(KV_MAIN));
+  CHECK_EQ((int)kv_mem_key_count(KV_MAIN), 0);
+}
+
+// =============================================================================
+//  AN INJECTED FAULT IS NOT CONSUMED BY A CALL THE DEVICE WOULD HAVE REFUSED
+//  The fake used to count the attempt and consume s_fail_next_put BEFORE
+//  validating its arguments, so an invalid kv_put() with a fault armed returned
+//  false, ate the injection, and let the next REAL write through. That changes
+//  what every sweep index means: the device validates first and never goes near
+//  flash for a call like this.
+// =============================================================================
+TEST(an_invalid_write_does_not_eat_an_armed_fault) {
+  begin();
+  const uint32_t v = 1u;
+  kv_mem_fail_next_put();
+  CHECK(!kv_put(KV_MAIN, "", &v, sizeof v));            // empty key: refused early
+  CHECK(!kv_put(KV_MAIN, "0123456789abcdefg", &v, sizeof v));  // 17 chars: too long
+  CHECK(!kv_put(KV_MAIN, "box0", nullptr, sizeof v));   // no buffer
+  CHECK(!kv_put(KV_MAIN, "box0", &v, 0));               // no bytes
+  // The injection is still armed and lands on the first call a device would
+  // actually have made.
+  CHECK(!kv_put(KV_MAIN, "box0", &v, sizeof v));
+  CHECK(kv_put(KV_MAIN, "box0", &v, sizeof v));
+}
+
+TEST(an_empty_key_is_refused_by_erase_as_well_as_by_get_and_put) {
+  begin();
+  // save_manager.cpp's key builder returns an EMPTY string on overflow, by
+  // design, rather than a colliding key - so this is the one shape the seam has
+  // to agree about. hardware/kv_nvs.cpp refuses it in all three.
+  uint8_t tmp[4];
+  const uint32_t v = 1u;
+  CHECK(kv_get(KV_MAIN, "", tmp, sizeof tmp) < 0);
+  CHECK(!kv_put(KV_MAIN, "", &v, sizeof v));
+  CHECK(!kv_erase(KV_MAIN, ""));
+}

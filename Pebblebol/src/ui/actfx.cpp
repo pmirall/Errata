@@ -685,7 +685,20 @@ void actfx_service(uint32_t now_ms) {
     petfx_startle(200u);
   }
 
-  rd_request_frame();
+  // NO rd_request_frame() HERE, SINCE THE FINAL REVIEW, AND THE HOLD ABOVE IS
+  // WHY. actfx_service() runs on EVERY app_loop() pass (sm_service ->
+  // screen update -> here), so an unconditional request set the frame deadline
+  // to "now" every pass and the renderer free-ran for the whole film - the same
+  // defect rd_hold_fps() carried, arriving by a second route. The rate this
+  // film wants is already stated once, at actfx_begin(), by
+  // rd_hold_fps(FPS_NORMAL, AF_FPS_HOLD_MS) plus the single rd_request_frame()
+  // beside it that brings the first frame forward; rd_begin_frame() then paces
+  // the rest through perf_advance_deadline(). Asking again every pass did not
+  // make the film smoother, it removed the pacing.
+  //
+  // The hold IS still renewed every pass - by the rd_hold_fps() call near the
+  // top of this function, which is where it belongs and which no longer moves
+  // the frame deadline (see ui/render.cpp rd_hold_fps).
 }
 
 uint8_t actfx_pose(uint8_t fallback) {
