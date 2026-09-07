@@ -73,65 +73,90 @@
 #pagebreak()
 = Enciende / Switch on
 
-#grid(columns: (1fr, 1fr), column-gutter: 3mm,
-  screen("boot_splash"),
-  screen("time_entry"),
+#grid(columns: (1fr, 1fr, 1fr), column-gutter: 2mm,
+  screen("intro_type", width: 30mm), screen("intro_build", width: 30mm),
+  screen("intro_fail", width: 30mm),
 )
 
 #v(1.5mm)
 #bi[
-  Al poner las pilas el aparato arranca solo. Verás el nombre del producto y la
-  versión del firmware.
+  La primera vez que le pones las pilas, el Pebblebol no arranca en un menú:
+  arranca escribiendo código. Tarda unos dieciséis segundos.
 
-  Después te pedirá la *hora*. Ajústala: tu Pebble duerme de noche y come de
-  día, y sin hora correcta su ritmo no cuadra con el tuyo. Sin fecha tampoco
-  puedes explorar.
+  Se compila, la barra llega al 92 % y se para. #scr[ERROR: 3 BUGS]. La banda
+  se rompe en líneas y por la grieta salen tres bichos, uno a uno.
 
-  Con *A* cambias de dígito. Con *B mantenido* sumas uno.
+  Esos tres son tus candidatos, y el último fotograma de la película ya es la
+  pantalla donde eliges.
 ][
-  The device starts as soon as the cells go in. You will see the product name
-  and the firmware version.
+  The first time you fit the cells, the Pebblebol does not open on a menu: it
+  opens writing code. It takes about sixteen seconds.
 
-  Then it asks for the *time*. Set it: your Pebble sleeps at night and eats by
-  day, and with the wrong time its rhythm will not match yours. Without a date
-  you cannot explore either.
+  It compiles, the bar reaches 92% and stops. #scr[ERROR: 3 BUGS]. The band
+  tears into scanlines and three bugs climb out of the tear, one at a time.
 
-  *A* moves between digits. *Hold B* adds one.
+  Those three are your candidates, and the film's last frame is already the
+  screen where you choose.
 ]
 
-// --- 5. First boot: name and starter -----------------------------------------
+#v(1.5mm)
+#warnbox[
+  #set text(size: 7pt)
+  *Cualquier botón se la salta, y solo hace eso:* no elige Pebble por ti ni
+  mueve el cursor. Puedes saltártela sin miedo a quedarte con un bicho que no
+  has mirado. Solo se ve en el primer arranque de verdad. \
+  #text(fill: luma(25%))[*Any button skips it, and only that:* it does not pick
+  a Pebble for you and does not move the cursor. You can skip it without ending
+  up with a creature you never looked at. It plays on a true first run only.]
+]
+
+// --- 5. First boot: starter, then name, then clock ----------------------------
 #pagebreak()
-= Tu primer Pebble / Your first Pebble
+= Elige y ponle nombre / Choose and name
 
-#grid(columns: (1fr, 1fr), column-gutter: 3mm,
-  screen("setup_name"),
-  screen("setup_starter"),
+#grid(columns: (1fr, 1fr, 1fr), column-gutter: 2mm,
+  screen("intro_bugs", width: 30mm), screen("setup_starter", width: 30mm),
+  screen("setup_name", width: 30mm),
 )
 
 #v(1.5mm)
 #bi[
-  La primera vez, y solo la primera, el aparato te deja ponerle *nombre* a tu
-  Pebble y *elegir* con cuál empiezas.
+  Primero *eliges*, y después le pones *nombre*. Ese orden es a propósito:
+  conoces al bicho antes de bautizarlo.
 
-  Para escribir el nombre, *A* recorre las letras y *B mantenido* pasa a la
-  siguiente. Cuando te guste, *mantén A* para aceptar.
+  Los tres candidatos son uno de cada tipo del triángulo del combate, y los
+  tres pueden evolucionar. No hay uno mejor ni ninguno es una trampa: elige el
+  que te guste.
 
-  Luego eliges Pebble: *A* pasa de uno a otro, *mantén A* para quedártelo.
+  *A* pasa de uno a otro y *mantén A* para quedártelo.
 
-  Si prefieres saltarte todo esto, pulsa *A + B*. El aparato elige por ti y no
-  vuelve a preguntar.
+  Para el nombre, *A* recorre las letras y *B mantenido* pasa a la siguiente.
+  *Mantén A* para aceptar.
+
+  Al final te pedirá la *hora*. Ajústala: tu Pebble duerme de noche y come de
+  día, y sin fecha no puedes explorar.
+
+  Si prefieres saltarte las preguntas, pulsa *A + B*.
 ][
-  The first time, and only the first time, the device lets you *name* your
-  Pebble and *choose* which one you start with.
+  You *choose* first and *name* second. That order is deliberate: you meet the
+  creature before you christen it.
 
-  To type the name, *A* walks the letters and *hold B* moves to the next one.
-  When you like it, *hold A* to accept.
+  The three candidates are one of each type in the battle triangle, and all
+  three can evolve. None is better and none is a trap: pick the one you like.
 
-  Then you pick a Pebble: *A* moves between them, *hold A* keeps one.
+  *A* moves between them and *hold A* keeps one.
 
-  If you would rather skip all of this, press *A + B*. The device chooses for
-  you and does not ask again.
+  For the name, *A* walks the letters and *hold B* moves to the next. *Hold A*
+  to accept.
+
+  Last it asks for the *time*. Set it: your Pebble sleeps at night and eats by
+  day, and without a date you cannot explore.
+
+  If you would rather skip the questions, press *A + B*.
 ]
+
+#v(1.5mm)
+#align(center, screen("time_entry", width: 40mm))
 
 // --- 5. THE TWO BUTTONS - the most important page in the manual --------------
 #pagebreak()
@@ -593,8 +618,9 @@
 #pagebreak()
 = Qué te da una red / What a network gives
 
-#grid(columns: (1fr, 1fr), column-gutter: 3mm, row-gutter: 2mm,
-  screen("encounter_wild"), screen("encounter_item"),
+#grid(columns: (1fr, 1fr, 1fr), column-gutter: 2mm,
+  screen("encounter_wild_tear", width: 30mm), screen("encounter_wild_form", width: 30mm),
+  screen("encounter_item", width: 30mm),
 )
 
 #v(1.5mm)
@@ -602,6 +628,10 @@
   De mirar una red sale una de cinco cosas: un Pebble salvaje, uno raro, un
   objeto, un suceso especial, o nada. Que salga nada es normal y no es un
   fallo.
+
+  Cuando aparece un Pebble, la pantalla se rompe y el bicho se monta desde los
+  pies. Dura un segundo y *solo se ve una vez por encuentro*: si fallas un
+  intento de captura y vuelves, no te la repite.
 
   Un *suceso especial* puede dejar a tu Pebble *corrupto durante 24 h*. No es
   una avería: cambia su aspecto, cambia cómo combate, y abre dos evoluciones
@@ -613,6 +643,10 @@
 ][
   Checking a network gives one of five things: a wild Pebble, a rare one, an
   item, a special event, or nothing. Nothing is a normal outcome, not a fault.
+
+  When a Pebble turns up the screen tears and the creature assembles from the
+  feet up. It lasts a second and *plays once per encounter*: miss a throw and
+  come back, and it does not replay.
 
   A *special event* can leave your Pebble *corrupted for 24 h*. It is not a
   fault: it changes how it looks, changes how it fights, and opens two
@@ -811,7 +845,8 @@
   *La regla que nadie adivina:* la ventaja de tipo se aplica *una sola vez por
   Pebble y combate*. Gastarla en un golpe flojo la desperdicia. \
   #text(fill: luma(25%))[*The rule nobody guesses:* a type advantage applies
-  *once per Pebble per battle*. Spending it on a weak hit wastes it.]
+  *once per Pebble per battle*. The device says so when it fires --
+  #scr[explota la debilidad] -- and once spent it is gone.]
 ]
 
 #pagebreak()
