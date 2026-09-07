@@ -182,8 +182,8 @@ static void confirm_commit(void) {
 static void handle_confirm(Gesture g) {
   switch (g) {
     case GST_TAP_L:     s_confirm_yes = (uint8_t)!s_confirm_yes; break;
-    case GST_HOLD_R:    if (s_confirm_yes) confirm_commit(); else dialog_close(); break;
-    case GST_TAP_R:     dialog_close(); break;
+    case GST_TAP_R:     if (s_confirm_yes) confirm_commit(); else dialog_close(); break;
+    case GST_HOLD_R:    dialog_close(); break;
     case GST_LONG_BOTH: dialog_close(); ui_home(); break;
     default: break;
   }

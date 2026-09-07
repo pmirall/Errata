@@ -120,8 +120,8 @@ void settings_input(Gesture g) {
   // router: the page is one level BELOW the navigation stack.
   if (s_page == 1) { s_page = 0; return; }
   switch (g) {
-    case GST_TAP_R:  ui_back(); break;      // section 7: B cancels
-    case GST_HOLD_R: settings_select(); break;
+    case GST_HOLD_R: ui_back(); break;      // section 7: B cancels, on the HOLD
+    case GST_TAP_R:  settings_select(); break;
     case GST_TAP_L:
     // The click, and the rule behind it, is written once in ui/screen_menu.cpp.
     case GST_HOLD_L: s_cur = ring_next(s_cur, SET_ROWS); audio_play(SFX_TICK); break;

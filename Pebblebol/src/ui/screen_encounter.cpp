@@ -673,7 +673,7 @@ void capture_input(Gesture g)
 {
   enc_film_cancel();                       // see encounter_input()
   if (g == (Gesture)GST_BOTH) { ui_help(STR_ENC_HELP); return; }
-  if (g == (Gesture)GST_TAP_R) { ui_back(); return; }
+  if (g == (Gesture)GST_HOLD_R) { ui_back(); return; }
 
   if (g != (Gesture)GST_HOLD_L) return;
   if (s_mode == (uint8_t)CSM_READY) { throw_once(); return; }

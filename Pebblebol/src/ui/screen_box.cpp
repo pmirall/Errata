@@ -297,7 +297,7 @@ void box_input(Gesture g) {
         audio_play(SFX_TICK);
       }
       break;
-    case GST_HOLD_R:
+    case GST_TAP_R:
       switch (s_mode) {
         case BOXM_LIST:    choose_slot();        break;
         case BOXM_ACTIONS: choose_action();      break;
@@ -309,7 +309,7 @@ void box_input(Gesture g) {
     // SF_OWNS_BACK: B walks back through the modes and only leaves the screen
     // from the top one, so a half-finished swap is cancelled rather than
     // committed by the same gesture that closes the Box.
-    case GST_TAP_R:
+    case GST_HOLD_R:
       switch (s_mode) {
         case BOXM_LIST:    ui_back();                      break;
         case BOXM_ACTIONS: to_list();                      break;

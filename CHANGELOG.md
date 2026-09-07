@@ -57,6 +57,39 @@ never appeared.
   machine itself. Two new cases drive the readings apart; both were confirmed
   failing by name against the old line.
 
+### Changed — B is BACK on the HOLD, and choosing moved to the TAP
+- **The owner played it on a board and the grammar was backwards in a hand.**
+  Until now B tapped cancelled and B held chose, which is what spec §7's wording
+  says on paper; with the device in your hands the two presses are not
+  symmetric. A tap is the cheap, frequent, low-consequence gesture and a hold is
+  the deliberate one — so the cheap one should be what you do constantly
+  (walking a list and picking a row) and the deliberate one should be what
+  throws work away. The old grammar cost a 600 ms hold for every confirmation
+  and left the screen on any accidental brush of B.
+- **35 call sites in 14 files**, plus the router. What did NOT move, each for a
+  reason written down in `app/input_router.h`: the R auto-repeat on `SCR_TIME`
+  and both setup screens (there B is "+1 on the field", and a 46-entry ring
+  needs the repeat); the minigame pause, which stays on `GST_HOLD_R` because
+  that is the P3-C4a collision fix and not a preference; `SCR_HOME`, the root,
+  where both presses have always been the caress; and the ERROR screen, whose
+  two taps are both primary actions. The dev console needed no change at all —
+  it has used tap-to-choose and hold-to-leave since it was written.
+- `STR_AF_BACK_SEL` reads **"SEL/ATRÁS"** now, tap first.
+
+### Fixed — the coverage that let a 35-site swap through on one failing test
+- Swapping the whole grammar broke exactly **one** case in the suite. Every
+  screen case in `tests/test_screens.cpp` drives its own `input()` hook and so
+  cannot see the router at all, and the only router case named one screen.
+- **`the_router_takes_b_held_and_never_b_tapped_on_any_screen`** sweeps the
+  whole enum and asserts both halves: B held is consumed exactly where the flags
+  say, and B tapped is consumed nowhere. A half-done swap leaves either two
+  backs or none, and both pass a test that names one gesture. Confirmed failing
+  across 12 screens against the pre-swap router.
+- `tools/check.sh` §5b: the router must test `GST_HOLD_R` exactly once and name
+  `GST_TAP_R` never.
+- The `kExits` table named `GST_TAP_R` on rows whose driver never presses it —
+  a column that was decorative and, after the swap, also wrong. Corrected.
+
 ### Added — the instrument that was missing
 - **`DIAG,scr,<ms>,<n>=<NAME>`, one line per screen change**, in both
   `god_service()` bodies. `DIAG,perf` already carried a screen ordinal, but once

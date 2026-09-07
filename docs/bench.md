@@ -583,6 +583,25 @@ DIAG,scr,<t+4000..12000>,19=ENCOUNTER     <- 4 to 12 s later: the scan
 DIAG,scr,<t+...>,20=CAPTURE               <- only if you press A on CAPTURAR
 ```
 
+### F8. THE BUTTON GRAMMAR, in a hand. — variant `release`.
+**This is the item that changed BECAUSE of a bench session, so it is the one to re-check.**
+
+B is BACK on the **HOLD** and CHOOSE on the **TAP**. Walk it:
+
+1. HOME → hold A to open the MENU. Tap A to walk the ring. **Tap B** on PEBBLE: it must OPEN.
+   **Hold B**: it must go back to the MENU. Hold B again: HOME.
+2. The affordance strip on every list must read **`SEL/ATRÁS`** — tap first, hold second.
+3. BOX: tap B walks IN (list → actions → swap) and hold B walks OUT one rung at a time. Holding
+   B from the top leaves the screen; it must never leave from a half-finished swap.
+4. A confirm dialog (SETTINGS → *Reiniciar*): tap A moves the cursor, **tap B** acts on it,
+   **hold B** cancels. The cursor starts on NO, so a stray tap declines.
+5. **THE THREE THAT DID NOT MOVE, and each is a real reason - check them too:**
+   - **TIME / PONLE NOMBRE / ELIGE PEBBLE**: B is "+1 on the field", and HOLDING it must
+     auto-repeat. If holding B goes back instead, typing a name is unusable.
+   - **Inside a minigame**: hold B pauses. A tap must NOT pause - it is a play input, and one
+     press doing both is the P3-C4a defect.
+   - **HOME**: both presses of B are the caress. Neither leaves.
+
 ---
 
 ## G. The save, on a board — spec §31 (P10-C5)

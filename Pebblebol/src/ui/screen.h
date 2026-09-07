@@ -37,7 +37,7 @@
 // without the toast / modal / dissolve layers on top (god mode, the hatch
 // ceremony). ui_draw() returns immediately after the render hook.
 #define SF_OWNS_FRAME   0x04u
-// The screen handles B (GST_TAP_R) itself: app/input_router.cpp does NOT turn
+// The screen handles B (GST_HOLD_R) itself: app/input_router.cpp does NOT turn
 // it into sm_back(). For screens whose B means something one level down from
 // the navigation stack - the BOX walking back through its own modes, SETTINGS
 // closing its info page, EVOLUTION rubbing the egg with both buttons, a

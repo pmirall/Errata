@@ -1247,7 +1247,7 @@ inline constexpr const char* const ES[] = {
   /* STR_DISP_ERR_A */            "A: Reintentar",
 
   /* --- 33k. P2-C11d: BOX, the complete state table, the B affordance --- */
-  /* STR_AF_BACK_SEL */           "ATRÁS/SEL",
+  /* STR_AF_BACK_SEL */           "SEL/ATRÁS",
   /* STR_BOX_TITLE */             "CAJA",
   /* STR_BOX_EMPTY */             "Vacío",
   /* STR_BOX_ACTIVE */            "*",

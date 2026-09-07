@@ -199,7 +199,7 @@ void network_input(Gesture g)
 {
   // SF_OWNS_BACK, so B arrives here rather than as a plain navigation BACK.
   // Cancelling releases the radio; leaving without cancelling would not.
-  if (g == (Gesture)GST_TAP_R) {
+  if (g == (Gesture)GST_HOLD_R) {
     wifi_scan_cancel(s_job, ui_scan_driver());
     s_phase = (uint8_t)NSP_CANCELLED;
     ui_back();

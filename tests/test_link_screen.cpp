@@ -414,10 +414,10 @@ static void see_peer(uint16_t caps, int8_t rssi, uint8_t slot) {
 
 // The local player: open the card on peer 0 and press A on the row `op`.
 static void consent_to(uint8_t op) {
-  link_input(GST_HOLD_R);                            // peer -> card
+  link_input(GST_TAP_R);                            // peer -> card
   CHECK_EQ(link_screen_mode(), (uint8_t)LKM_CARD);
   while (link_screen_op() != op) link_input(GST_TAP_L);
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
 }
 
 // One frame of the whole device: the peer's loop, then the current screen's.
@@ -436,9 +436,9 @@ static void play(uint32_t dt, int max_ticks) {
     tick(dt);
     if (g_screen != (uint8_t)SCR_BATTLE) continue;
     switch (battle_screen_mode()) {
-      case BTM_INTRO:   battle_input(GST_HOLD_R); break;
+      case BTM_INTRO:   battle_input(GST_TAP_R); break;
       case BTM_MENU:
-      case BTM_SWITCH:  battle_input(GST_HOLD_R); break;
+      case BTM_SWITCH:  battle_input(GST_TAP_R); break;
       case BTM_RESOLVE: battle_input(GST_TAP_L);  break;
       case BTM_RESULT:  return;
       default: break;
@@ -552,7 +552,7 @@ TEST(the_a_press_is_the_only_thing_that_opens_a_session_or_binds_a_peer) {
   see_peer((uint16_t)DISC_CAP_BATTLE, -40, 5u);
   CHECK_EQ(lf_binds(), 0);
 
-  link_input(GST_HOLD_R);                     // opening the CARD binds nothing
+  link_input(GST_TAP_R);                     // opening the CARD binds nothing
   CHECK_EQ(link_screen_mode(), (uint8_t)LKM_CARD);
   CHECK_EQ(lf_binds(), 0);
   CHECK_EQ(link_screen_session_state(), (uint8_t)SS_IDLE);
@@ -563,7 +563,7 @@ TEST(the_a_press_is_the_only_thing_that_opens_a_session_or_binds_a_peer) {
   CHECK_EQ(lf_binds(), 0);
 
   while (link_screen_op() != (uint8_t)LOP_BATTLE) link_input(GST_TAP_L);
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   CHECK_EQ(link_screen_consents(), (uint8_t)1);
   CHECK_EQ(lf_binds(), 1);
   CHECK_EQ(lf_bound_slot(), (uint8_t)5);      // the peer's own opaque handle
@@ -622,14 +622,14 @@ TEST(a_lost_connection_offers_retry_and_exit_and_both_do_what_they_say) {
 
   // A retries: a fresh browse, and the radio is taken again.
   const int stops_before = lf_stops();
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   CHECK_EQ(link_screen_mode(), (uint8_t)LKM_BROWSE);
   CHECK_EQ(lf_starts(), 2);
   CHECK_EQ(lf_stops(), stops_before);          // it was already released
   CHECK(link_screen_busy());
 
   // B leaves, and the radio goes with it.
-  link_input(GST_TAP_R);
+  link_input(GST_HOLD_R);
   CHECK_EQ(g_backs, 1);
   CHECK_EQ(g_screen, (uint8_t)SCR_HOME);
   CHECK(!link_screen_busy());
@@ -645,17 +645,17 @@ TEST(a_lost_connection_offers_retry_and_exit_and_both_do_what_they_say) {
 TEST(an_operation_the_peer_cannot_do_is_refused_by_name_and_opens_nothing) {
   harness_reset(0x11110000u, 0x22220000u);
   see_peer((uint16_t)DISC_CAP_BATTLE, -40, 0u);   // battle only
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   while (link_screen_op() != (uint8_t)LOP_TRADE) link_input(GST_TAP_L);
   g_toast = STR_EMPTY;
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   CHECK_EQ(g_toast, STR_LK_NO_CAP);
   CHECK_EQ(lf_binds(), 0);
   CHECK_EQ(link_screen_mode(), (uint8_t)LKM_CARD);
 
   // And CANCELAR is a row, not an absence: it walks back to the list.
   while (link_screen_op() != (uint8_t)LOP_CANCEL) link_input(GST_TAP_L);
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   CHECK_EQ(link_screen_mode(), (uint8_t)LKM_BROWSE);
   CHECK_EQ(g_backs, 0);
 }
@@ -681,10 +681,10 @@ TEST(a_capability_this_build_has_no_protocol_for_says_so_and_opens_nothing) {
   for (uint8_t c = 0; c < 2u; ++c) {
     harness_reset(0x11110000u, 0x22220000u);
     see_peer(kCaps[c], -40, 0u);
-    link_input(GST_HOLD_R);
+    link_input(GST_TAP_R);
     while (link_screen_op() != (uint8_t)LOP_BREED) link_input(GST_TAP_L);
     g_toast = STR_EMPTY;
-    link_input(GST_HOLD_R);
+    link_input(GST_TAP_R);
     CHECK_EQ(g_toast, STR_UI_SOON);
     CHECK(g_toast != STR_LK_NO_CAP);
     CHECK_EQ(lf_binds(), 0);
@@ -696,10 +696,10 @@ TEST(a_capability_this_build_has_no_protocol_for_says_so_and_opens_nothing) {
   // capability check deleted from the whole screen.
   harness_reset(0x11110000u, 0x22220000u);
   see_peer((uint16_t)DISC_CAP_BATTLE, -40, 0u);
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   while (link_screen_op() != (uint8_t)LOP_TRADE) link_input(GST_TAP_L);
   g_toast = STR_EMPTY;
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   CHECK_EQ(g_toast, STR_LK_NO_CAP);
 }
 
@@ -760,7 +760,7 @@ TEST(two_players_who_both_press_a_swap_one_pebble_each_and_the_box_says_so) {
   // The frame the player is looking at draws inside the panel.
   fb_reset(); link_render(); CHECK_EQ(fb_oob(), 0u);
 
-  link_input(GST_HOLD_R);                       // THE SECOND CONSENT
+  link_input(GST_TAP_R);                       // THE SECOND CONSENT
   for (int i = 0; i < 400 && link_screen_mode() == (uint8_t)LKM_WAIT; ++i) tick(50u);
 
   CHECK_EQ(lf_trade_commits(), 1);
@@ -972,7 +972,7 @@ TEST(two_devices_that_both_consent_fight_one_battle_reported_exactly_once) {
     const uint8_t m = battle_screen_mode();
     if (m == BTM_RESOLVE && battle_screen_round() > widest_round)
       widest_round = battle_screen_round();
-    if (m == BTM_INTRO || m == BTM_MENU || m == BTM_SWITCH) battle_input(GST_HOLD_R);
+    if (m == BTM_INTRO || m == BTM_MENU || m == BTM_SWITCH) battle_input(GST_TAP_R);
     else if (m == BTM_RESOLVE) battle_input(GST_TAP_L);
     // The screen's own side never drifts from the session's, on any frame.
     CHECK_EQ(battle_screen_side(), ui_link_battle_side());
@@ -1000,7 +1000,7 @@ TEST(two_devices_that_both_consent_fight_one_battle_reported_exactly_once) {
          g_peer_moves);
 
   // Leaving the result page hands the link back and the radio with it.
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
   CHECK_EQ(g_screen, (uint8_t)SCR_LINK);
   CHECK_EQ(link_screen_mode(), (uint8_t)LKM_ENDED);
   CHECK_EQ(g_results, 1);                       // still once
@@ -1125,8 +1125,8 @@ TEST(a_link_that_dies_mid_battle_pays_nothing_and_is_not_a_defeat) {
   // Two rounds of a real fight, and then the room is cut in half.
   for (int i = 0; i < 40 && g_screen == (uint8_t)SCR_BATTLE; ++i) {
     tick(50u);
-    if (battle_screen_mode() == BTM_INTRO)   battle_input(GST_HOLD_R);
-    if (battle_screen_mode() == BTM_MENU)    battle_input(GST_HOLD_R);
+    if (battle_screen_mode() == BTM_INTRO)   battle_input(GST_TAP_R);
+    if (battle_screen_mode() == BTM_MENU)    battle_input(GST_TAP_R);
     if (battle_screen_mode() == BTM_RESOLVE) battle_input(GST_TAP_L);
   }
   g_lk.fault.dead = 1u;
@@ -1178,7 +1178,7 @@ TEST(a_player_who_thinks_longer_than_the_ladder_loses_the_link_and_is_paid_nothi
   // Get to the menu, which is where the lockstep is waiting for us.
   for (int i = 0; i < 200 && battle_screen_mode() != BTM_MENU; ++i) {
     tick(50u);
-    if (battle_screen_mode() == BTM_INTRO) battle_input(GST_HOLD_R);
+    if (battle_screen_mode() == BTM_INTRO) battle_input(GST_TAP_R);
   }
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_MENU);
   CHECK(ui_link_battle_wants_action());
@@ -1254,7 +1254,7 @@ TEST(the_radio_is_released_exactly_once_on_every_way_off_this_screen) {
   // (a) B from the browse.
   harness_reset(0x11110000u, 0x22220000u);
   CHECK_EQ(lf_starts(), 1);
-  link_input(GST_TAP_R);
+  link_input(GST_HOLD_R);
   CHECK_EQ(lf_stops(), 1);
   CHECK(!link_screen_busy());
 
@@ -1263,7 +1263,7 @@ TEST(the_radio_is_released_exactly_once_on_every_way_off_this_screen) {
   harness_reset(0x11110000u, 0x22220000u);
   see_peer((uint16_t)DISC_CAP_BATTLE, -40, 0u);
   consent_to((uint8_t)LOP_BATTLE);
-  link_input(GST_TAP_R);
+  link_input(GST_HOLD_R);
   CHECK_EQ(lf_stops(), 1);
   CHECK_EQ(lf_unbinds(), 1);
   CHECK(!link_screen_busy());
@@ -1319,11 +1319,11 @@ TEST(every_link_mode_draws_inside_the_panel) {
 
   see_peer((uint16_t)DISC_CAP_BATTLE, -40, 0u);
   fb_reset(); link_render(); CHECK_EQ(fb_oob(), 0u);       // browse, one peer
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   fb_reset(); link_render(); CHECK_EQ(fb_oob(), 0u);       // the card
 
   peer_consent();
-  link_input(GST_HOLD_R);                                   // consent
+  link_input(GST_TAP_R);                                   // consent
   fb_reset(); link_render(); CHECK_EQ(fb_oob(), 0u);       // the wait
 
   for (int i = 0; i < 200 && g_screen != (uint8_t)SCR_BATTLE; ++i) {
@@ -1335,12 +1335,12 @@ TEST(every_link_mode_draws_inside_the_panel) {
 
   for (int i = 0; i < 400 && battle_screen_mode() != BTM_RESULT; ++i) {
     tick(50u);
-    if (battle_screen_mode() == BTM_INTRO)   battle_input(GST_HOLD_R);
-    if (battle_screen_mode() == BTM_MENU)    battle_input(GST_HOLD_R);
+    if (battle_screen_mode() == BTM_INTRO)   battle_input(GST_TAP_R);
+    if (battle_screen_mode() == BTM_MENU)    battle_input(GST_TAP_R);
     if (battle_screen_mode() == BTM_RESOLVE) battle_input(GST_TAP_L);
     fb_reset(); battle_render(); CHECK_EQ(fb_oob(), 0u);
   }
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
   CHECK_EQ(g_screen, (uint8_t)SCR_LINK);
   fb_reset(); link_render(); CHECK_EQ(fb_oob(), 0u);       // the ended page
   // ...AND EVERY ONE OF THEM DREW TEXT THE PANEL CAN ACTUALLY SHOW.
@@ -1424,9 +1424,9 @@ TEST(no_frame_of_a_linked_battle_allocates_and_the_waiting_mode_is_drawn) {
     fb_reset();
     battle_render();
     ++frames;
-    if (m == BTM_INTRO)   battle_input(GST_HOLD_R);
-    if (m == BTM_MENU)    battle_input(GST_HOLD_R);
-    if (m == BTM_SWITCH)  battle_input(GST_HOLD_R);
+    if (m == BTM_INTRO)   battle_input(GST_TAP_R);
+    if (m == BTM_MENU)    battle_input(GST_TAP_R);
+    if (m == BTM_SWITCH)  battle_input(GST_TAP_R);
     if (m == BTM_RESOLVE) battle_input(GST_TAP_L);
     if (m == BTM_RESULT && seen[BTM_RESULT] > 4) break;
   }

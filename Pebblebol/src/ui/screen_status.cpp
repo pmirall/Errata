@@ -199,7 +199,7 @@ void status_input(Gesture g) {
     // tap away; HOLD_R is where it belongs anyway - the router calls HOLD_R
     // "B secondary", TAP_R is BACK and TAP_L flips the page, so this is the
     // only gesture STATUS has left and the only one that means "secondary".
-    case GST_HOLD_R: {
+    case GST_TAP_R: {
       const PebbleView* v = ui_view();
       if (v && v->present) {
         genome_to_hex32(v->genome, s_hex);

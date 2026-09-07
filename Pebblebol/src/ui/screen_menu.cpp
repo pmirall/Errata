@@ -134,7 +134,7 @@ void menu_input(Gesture g) {
     // Section 7: B taps back (the router took it), B held chooses. HOLD_R
     // fires exactly ONCE, which is why choosing sits on it and stepping does
     // not - see app/input_router.h.
-    case GST_HOLD_R: menu_select(); break;
+    case GST_TAP_R: menu_select(); break;
     case GST_BOTH:  ui_help(kHelp[s_idx]); break;
     default: break;
   }

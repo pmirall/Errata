@@ -864,8 +864,8 @@ void link_input(Gesture g) {
         case GST_HOLD_L:
           s_cur = ring(s_cur, (uint8_t)(link_qualified_count(s_job) + 1u));
           break;
-        case GST_HOLD_R: choose_peer(); break;
-        case GST_TAP_R:  ui_back();     break;
+        case GST_TAP_R:  choose_peer(); break;
+        case GST_HOLD_R: ui_back();     break;
         default: break;
       }
       break;
@@ -874,8 +874,8 @@ void link_input(Gesture g) {
       switch (g) {
         case GST_TAP_L:
         case GST_HOLD_L: s_op = ring(s_op, (uint8_t)LOP_COUNT); break;
-        case GST_HOLD_R: choose_op(); break;
-        case GST_TAP_R:  s_mode = LKM_BROWSE; gfx_list_reset(); break;
+        case GST_TAP_R:  choose_op(); break;
+        case GST_HOLD_R: s_mode = LKM_BROWSE; gfx_list_reset(); break;
         default: break;
       }
       break;
@@ -886,7 +886,7 @@ void link_input(Gesture g) {
       // to THESE TWO PEBBLES, which neither player could see until both records
       // were on the table. Nothing moves without it: networking/trade_link.cpp
       // applies only where it holds BOTH confirms.
-      if (g == GST_HOLD_R && link_trade_wants_consent()) {
+      if (g == GST_TAP_R && link_trade_wants_consent()) {
         trade_link_accept(s_sess);
         ui_request_frame();
         break;
@@ -903,10 +903,10 @@ void link_input(Gesture g) {
 
     case LKM_LOST:
       // Spec section 47's two answers, and they are the two the screen prints.
-      if (g == GST_HOLD_R || g == GST_TAP_L || g == GST_HOLD_L) {
+      if (g == GST_TAP_R || g == GST_TAP_L || g == GST_HOLD_L) {
         release_all();
         start_browse();
-      } else if (g == GST_TAP_R) {
+      } else if (g == GST_HOLD_R) {
         ui_back();
       }
       break;

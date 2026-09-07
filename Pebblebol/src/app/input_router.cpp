@@ -27,7 +27,11 @@ bool router_global(Gesture g) {
   }
 
   // --- invariant 1: B is BACK on every screen --------------------------------
-  if (g == GST_TAP_R) {
+  //
+  // ON THE HOLD, NOT ON THE TAP, SINCE THE FIRST HARDWARE SESSION. See the
+  // banner in input_router.h for the whole argument; the short version is that
+  // the owner played it on a board and the obvious button went backwards.
+  if (g == GST_HOLD_R) {
     if (f & SF_OWNS_BACK) return false;
     if (scr == SCR_HOME)  return false;         // the root: nothing to cancel
     sm_back();

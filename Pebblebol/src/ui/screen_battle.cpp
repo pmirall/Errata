@@ -1268,7 +1268,7 @@ static void pick_input(Gesture g) {
   switch (g) {
     case GST_TAP_L:
     case GST_HOLD_L: s_cur = ring_legal(s_cur, BT_PICK_ROWS, pick_row_legal); break;
-    case GST_HOLD_R:
+    case GST_TAP_R:
       if (s_cur < (uint8_t)BOX_SLOTS) { toggle_pick(s_cur); break; }
       if (s_pick_n == 0u) { ui_toast(STR_BT_NO_TEAM); break; }
       {
@@ -1276,7 +1276,7 @@ static void pick_input(Gesture g) {
         if (r != (uint8_t)BR_OK) { s_reject = r; ui_toast(STR_BT_START_ERR); }
       }
       break;
-    case GST_TAP_R: ui_back(); break;
+    case GST_HOLD_R: ui_back(); break;
     default: break;
   }
 }
@@ -1288,7 +1288,7 @@ void battle_input(Gesture g) {
 
   switch (s_mode) {
     case BTM_INTRO:
-      if (g == GST_TAP_R)          ui_back();
+      if (g == GST_HOLD_R)         ui_back();
       else if (g == GST_NONE)      break;
       // Skipping the stare-down on a linked battle does not open the menu: the
       // lockstep says when a move is wanted, and until it does the honest
@@ -1300,14 +1300,14 @@ void battle_input(Gesture g) {
     case BTM_WAIT:
       // One thing to say here and it is "stop". battle_leave() reports whatever
       // the session has authorised, which mid-battle is nothing.
-      if (g == GST_TAP_R) ui_back();
+      if (g == GST_HOLD_R) ui_back();
       break;
 
     case BTM_MENU:
       switch (g) {
         case GST_TAP_L:
         case GST_HOLD_L: s_cur = ring_legal(s_cur, BT_MENU_ROWS, menu_row_legal); break;
-        case GST_HOLD_R:
+        case GST_TAP_R:
           if (s_cur == BT_MENU_SWITCH) {
             s_cur = first_legal(BT_SWITCH_ROWS, switch_row_legal);
             set_mode(BTM_SWITCH);
@@ -1318,7 +1318,7 @@ void battle_input(Gesture g) {
           break;
         // The top of the ladder for a running battle: B abandons it. Nothing is
         // written and nothing is awarded - report_once(0) in battle_leave().
-        case GST_TAP_R: ui_back(); break;
+        case GST_HOLD_R: ui_back(); break;
         default: break;
       }
       break;
@@ -1327,14 +1327,14 @@ void battle_input(Gesture g) {
       switch (g) {
         case GST_TAP_L:
         case GST_HOLD_L: s_cur = ring_legal(s_cur, BT_SWITCH_ROWS, switch_row_legal); break;
-        case GST_HOLD_R:
+        case GST_TAP_R:
           if (s_cur >= (uint8_t)BATTLE_TEAM_MAX) { to_menu(); break; }
           {
             const BattleAction a = { (uint8_t)BACT_SWITCH, s_cur };
             submit(a);
           }
           break;
-        case GST_TAP_R:
+        case GST_HOLD_R:
           // One level up the ladder - unless the engine says a replacement is
           // owed, in which case there is nothing above this list to go to.
           if (battle_side_must_switch(s_st, s_me)) ui_wiggle();

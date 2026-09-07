@@ -185,11 +185,11 @@ static void box_fixture(uint8_t occupied) {
 // occupied slots and on the LISTO row, so walking it is how a slot is reached.
 static void pick_team(uint8_t n) {
   for (uint8_t i = 0; i < n; ++i) {
-    battle_input(GST_HOLD_R);                 // toggle the slot under the cursor
+    battle_input(GST_TAP_R);                 // toggle the slot under the cursor
     battle_input(GST_TAP_L);                  // and step to the next legal row
   }
   while (battle_screen_cursor() < (uint8_t)BOX_SLOTS) battle_input(GST_TAP_L);
-  battle_input(GST_HOLD_R);                   // LISTO
+  battle_input(GST_TAP_R);                   // LISTO
 }
 
 // Walk the whole ring of the current mode and require the engine to accept
@@ -227,7 +227,7 @@ static void run_battle(uint32_t seed, uint8_t entry, RunStats& out) {
     pick_team((uint8_t)BATTLE_TEAM_MAX);
   }
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_INTRO);
-  battle_input(GST_HOLD_R);                   // skip the stare-down
+  battle_input(GST_TAP_R);                   // skip the stare-down
 
   for (int guard = 0; guard < 4000; ++guard) {
     const uint8_t m = battle_screen_mode();
@@ -235,7 +235,7 @@ static void run_battle(uint32_t seed, uint8_t entry, RunStats& out) {
     if (m == BTM_MENU || m == BTM_SWITCH) {
       sweep_ring(out.stops, out.blocked_seen);
       ++out.rounds;
-      battle_input(GST_HOLD_R);
+      battle_input(GST_TAP_R);
       continue;
     }
     if (m == BTM_RESOLVE) {
@@ -296,7 +296,7 @@ TEST(a_forced_replacement_has_no_way_out_but_a_replacement) {
   battle_arm(BT_ENTRY_PRACTICE, 0x51DE0001u);
   battle_enter();
   pick_team((uint8_t)BATTLE_TEAM_MAX);
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
 
   int forced = 0, dead_ends = 0;
   for (int guard = 0; guard < 4000 && battle_screen_mode() != BTM_RESULT; ++guard) {
@@ -320,13 +320,13 @@ TEST(a_forced_replacement_has_no_way_out_but_a_replacement) {
       // that is one press from continuing.
       const int w = g_wiggles;
       const uint8_t before = battle_screen_mode();
-      battle_input(GST_TAP_R);
+      battle_input(GST_HOLD_R);
       CHECK_EQ(battle_screen_mode(), before);
       CHECK_EQ(g_wiggles, w + 1);
       CHECK_EQ(g_backs, 0);
       ++dead_ends;
     }
-    battle_input(GST_HOLD_R);
+    battle_input(GST_TAP_R);
   }
   CHECK(forced > 0);
   CHECK_EQ(dead_ends, forced);
@@ -378,9 +378,9 @@ TEST(one_battle_reports_its_result_exactly_once) {
   battle_arm(BT_ENTRY_PRACTICE, 0x3001u);
   battle_enter();
   pick_team((uint8_t)BATTLE_TEAM_MAX);
-  battle_input(GST_HOLD_R);             // INTRO -> MENU
+  battle_input(GST_TAP_R);             // INTRO -> MENU
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_MENU);
-  battle_input(GST_HOLD_R);             // one round, so the fight really started
+  battle_input(GST_TAP_R);             // one round, so the fight really started
   battle_leave();
   CHECK_EQ(g_results, 1);
   CHECK_EQ(g_res_won, 0u);
@@ -468,8 +468,8 @@ TEST(a_battle_leaves_the_box_byte_identical) {
   battle_arm(BT_ENTRY_PRACTICE, 0x4001u);
   battle_enter();
   pick_team((uint8_t)BATTLE_TEAM_MAX);
-  battle_input(GST_HOLD_R);
-  for (int i = 0; i < 6; ++i) battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
+  for (int i = 0; i < 6; ++i) battle_input(GST_TAP_R);
   battle_leave();
   CHECK_EQ(memcmp(&before, &g_gs, sizeof before), 0);
 
@@ -518,10 +518,10 @@ TEST(the_playback_draws_the_hp_of_the_beat_and_not_of_the_round_end) {
     battle_arm(BT_ENTRY_PRACTICE, 0x5000u + seed * 0x2545F491u);
     battle_enter();
     pick_team((uint8_t)BATTLE_TEAM_MAX);
-    battle_input(GST_HOLD_R);                  // INTRO -> MENU
+    battle_input(GST_TAP_R);                  // INTRO -> MENU
 
     for (int guard = 0; guard < 4000 && battle_screen_mode() != BTM_RESULT; ++guard) {
-      if (battle_screen_mode() != BTM_RESOLVE) { battle_input(GST_HOLD_R); continue; }
+      if (battle_screen_mode() != BTM_RESOLVE) { battle_input(GST_TAP_R); continue; }
       ++rounds;
       const uint16_t first0 = battle_screen_hp_shown(0);
       const uint16_t first1 = battle_screen_hp_shown(1);
@@ -646,13 +646,13 @@ TEST(the_pick_list_takes_three_occupied_slots_and_no_more) {
   CHECK_EQ(battle_screen_picked(), 0u);
 
   // Four presses on four different occupied slots; the fourth is refused.
-  for (uint8_t i = 0; i < 4u; ++i) { battle_input(GST_HOLD_R); battle_input(GST_TAP_L); }
+  for (uint8_t i = 0; i < 4u; ++i) { battle_input(GST_TAP_R); battle_input(GST_TAP_L); }
   CHECK_EQ(battle_screen_picked(), (uint8_t)BATTLE_TEAM_MAX);
   CHECK_EQ(g_toast, (uint16_t)STR_BT_FULL_TEAM);
 
   // A second press on a chosen slot takes it back out.
   while (battle_screen_cursor() != 0u) battle_input(GST_TAP_L);
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
   CHECK_EQ(battle_screen_picked(), 2u);
   battle_leave();
 }
@@ -667,7 +667,7 @@ TEST(an_empty_box_cannot_start_a_practice_battle) {
   // The ring stops only on the LISTO row, and LISTO with nothing chosen says so
   // rather than starting a battle with an empty side.
   CHECK_EQ(battle_screen_cursor(), (uint8_t)BOX_SLOTS);
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_PICK);
   CHECK_EQ(g_toast, (uint16_t)STR_BT_NO_TEAM);
   battle_leave();
@@ -682,7 +682,7 @@ TEST(one_pebble_is_a_legal_team) {
   battle_enter();
   pick_team(1u);
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_INTRO);
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_MENU);
   // With one Pebble there is nothing to switch to, so the CAMBIAR row is one
   // of the rows the ring steps over.
@@ -884,7 +884,7 @@ TEST(a_decided_battle_left_before_its_transcript_ends_still_reports_the_win) {
     battle_arm(BT_ENTRY_PRACTICE, 0x1000u + s * 0x9E3779B9u);
     battle_enter();
     pick_team((uint8_t)BATTLE_TEAM_MAX);
-    battle_input(GST_HOLD_R);                  // INTRO -> MENU
+    battle_input(GST_TAP_R);                  // INTRO -> MENU
 
     // Play until the engine has DECIDED but the playback has not finished:
     // that is the window, and it is entered by the transcript, never by a press.
@@ -895,7 +895,7 @@ TEST(a_decided_battle_left_before_its_transcript_ends_still_reports_the_win) {
       if (m == BTM_RESOLVE &&
           battle_screen_outcome() != (uint8_t)BO_UNDECIDED) { in_window = true; break; }
       if (m == BTM_RESOLVE) { battle_input(GST_TAP_L); continue; }
-      battle_input(GST_HOLD_R);
+      battle_input(GST_TAP_R);
     }
     if (!in_window) { battle_leave(); continue; }
     ++windows;
@@ -926,8 +926,8 @@ TEST(a_decided_battle_left_before_its_transcript_ends_still_reports_the_win) {
   battle_arm(BT_ENTRY_PRACTICE, 0x1000u);
   battle_enter();
   pick_team((uint8_t)BATTLE_TEAM_MAX);
-  battle_input(GST_HOLD_R);
-  battle_input(GST_HOLD_R);                    // one real round
+  battle_input(GST_TAP_R);
+  battle_input(GST_TAP_R);                    // one real round
   CHECK_EQ(battle_screen_outcome(), (uint8_t)BO_UNDECIDED);
   battle_leave();
   CHECK_EQ(g_results, 1);
@@ -1017,7 +1017,7 @@ TEST(every_menu_the_ring_can_reach_has_a_legal_row) {
     battle_arm(BT_ENTRY_PRACTICE, 0xA000u + s * 0x27D4EB2Fu);
     battle_enter();
     pick_team((uint8_t)BATTLE_TEAM_MAX);
-    battle_input(GST_HOLD_R);
+    battle_input(GST_TAP_R);
     for (int guard = 0; guard < 4000 && battle_screen_mode() != BTM_RESULT; ++guard) {
       const uint8_t m = battle_screen_mode();
       if (m == BTM_MENU || m == BTM_SWITCH) {
@@ -1028,7 +1028,7 @@ TEST(every_menu_the_ring_can_reach_has_a_legal_row) {
         if (legal < worst_legal) worst_legal = legal;
         ++menus;
       }
-      battle_input(m == BTM_RESOLVE ? GST_TAP_L : GST_HOLD_R);
+      battle_input(m == BTM_RESOLVE ? GST_TAP_L : GST_TAP_R);
     }
     battle_leave();
   }
@@ -1132,10 +1132,10 @@ TEST(no_frame_of_a_battle_allocates) {
         // counter rather than redrawing a settled frame.
         battle_input(GST_TAP_L);
         one_frame(); ++frames;
-        battle_input(GST_HOLD_R);
+        battle_input(GST_TAP_R);
         continue;
       }
-      if (m == BTM_SWITCH) { battle_input(GST_TAP_L); battle_input(GST_HOLD_R); continue; }
+      if (m == BTM_SWITCH) { battle_input(GST_TAP_L); battle_input(GST_TAP_R); continue; }
       // INTRO ends on its clock; RESOLVE advances on its own beat, so the
       // frames above are what move it - that is the point of counting them.
     }

@@ -8,7 +8,7 @@
 //  is bound and forwarded from section 20 of this file.
 //
 //  Invariants implemented literally (GAME_DESIGN 8.2):
-//    1. GST_TAP_R == BACK on every screen (spec section 7: B is back/cancel).
+//    1. GST_HOLD_R == BACK on every screen (spec section 7: B is back/cancel).
 //       Since P2-C11d this lives in app/input_router.cpp, and the screens that
 //       answer B themselves say so with SF_OWNS_BACK rather than by name.
 //    2. GST_LONG_BOTH == HOME from anywhere.
@@ -1231,7 +1231,7 @@ static void handle_game(Gesture g) {
     if (g == GST_HOLD_R) dialog_open_confirm(CFM_QUIT_GAME, STR_CF_QUIT_GAME);
     return;
   }
-  if (g == GST_TAP_R) mgr_back();
+  if (g == GST_HOLD_R) mgr_back();
 }
 
 // =============================================================================

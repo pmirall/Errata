@@ -2064,6 +2064,22 @@ n=$( strip_comments12 < "$enc" \
 [ "${n:-0}" -eq 5 ] || fail "ui/screen_encounter.cpp has $n enc_film_phase() USES, not 5 (the definition is excluded now) - three render guards (item, capture, wild) and the two films that branch on the phase they are in are what draw the films at all"
 
 # -----------------------------------------------------------------------------
+# 5b. B IS BACK ON THE HOLD, AND THE ROUTER SAYS SO EXACTLY ONCE.
+#
+#     The grammar has moved twice now (P2-C11d put BACK on the tap, the first
+#     hardware session put it back on the hold) and each move touched thirty-odd
+#     call sites. What must not happen is a HALF move: a router that consumed
+#     both would leave the product with two backs and no way to choose a row,
+#     and one that consumed neither would leave no way off any screen but the
+#     20 s timeout. tests/test_statemachine.cpp drives both halves; this is the
+#     cheap structural guard beside it, on the one file that decides.
+ir="$SKETCH/src/app/input_router.cpp"
+n=$( strip_comments12 < "$ir" | { grep -cE 'g[[:space:]]*==[[:space:]]*GST_HOLD_R' || true; } )
+[ "${n:-0}" -eq 1 ] || fail "app/input_router.cpp tests GST_HOLD_R $n times, not once - B is BACK on the HOLD and the router is the one place that says so (app/input_router.h)"
+n=$( strip_comments12 < "$ir" | { grep -cE 'GST_TAP_R' || true; } )
+[ "${n:-0}" -eq 0 ] || fail "app/input_router.cpp mentions GST_TAP_R $n times - B TAPPED belongs to the screen, which spends it choosing a row; a router that ate it would leave every list unable to select (app/input_router.h)"
+
+# -----------------------------------------------------------------------------
 # 6. THE PASS STAMP IS ABOVE THE YIELD **AND THERE IS EXACTLY ONE OF IT**.
 #
 #    P10-C2 gated the ORDER by line number, and the mutation that beats a line

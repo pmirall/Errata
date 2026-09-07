@@ -233,8 +233,8 @@ static void bag_use(void) {
 
 void care_input(Gesture g) {
   if (s_mode == (uint8_t)CAREM_BAG) {
-    if (g == (Gesture)GST_TAP_R) { s_mode = (uint8_t)CAREM_LIST; s_bag = 0; return; }
-    if (g != GST_HOLD_R) {
+    if (g == (Gesture)GST_HOLD_R) { s_mode = (uint8_t)CAREM_LIST; s_bag = 0; return; }
+    if (g != GST_TAP_R) {
       // THE BAG ANSWERS BOTH-BUTTONS TOO (P10-C6). It was the one list in the
       // product that did not: list_common() was handed a null help table, so
       // the gesture arrived and nothing happened, on the screen holding items
@@ -251,8 +251,8 @@ void care_input(Gesture g) {
 
   // SF_OWNS_BACK, so B arrives here. On the verb list it means what it always
   // meant.
-  if (g == (Gesture)GST_TAP_R) { ui_back(); return; }
-  if (g != GST_HOLD_R) { list_common(g, s_care, CARE_ROWS, kCareHelp); return; }
+  if (g == (Gesture)GST_HOLD_R) { ui_back(); return; }
+  if (g != GST_TAP_R) { list_common(g, s_care, CARE_ROWS, kCareHelp); return; }
   switch (s_care) {
     case CARE_MEAL:     if (!ui_act_and_show(ACT_FEED_MEAL))  ui_back(); break;
     case CARE_SNACK:    if (!ui_act_and_show(ACT_FEED_SNACK)) ui_back(); break;
@@ -269,7 +269,7 @@ void care_input(Gesture g) {
 void play_render(void) { draw_str_list(STR_MENU_PLAY, kPlayItem, PLAY_ROWS, s_play); }
 
 void play_input(Gesture g) {
-  if (g != GST_HOLD_R) { list_common(g, s_play, PLAY_ROWS, kPlayHelp); return; }
+  if (g != GST_TAP_R) { list_common(g, s_play, PLAY_ROWS, kPlayHelp); return; }
   if (s_play == PLAY_BACK)   { ui_back(); return; }
   // The seed comes from RNG_BATTLE and the Box has to be read, neither of which
   // a pure translation unit may do: the screen says WHICH battle, ui.cpp draws

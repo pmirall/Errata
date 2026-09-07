@@ -637,12 +637,23 @@ TEST(a_screen_pushed_from_inside_the_service_pass_survives_that_same_pass) {
 // =============================================================================
 //  4. THE SECTION 7 GRAMMAR (app/input_router.cpp)
 // =============================================================================
+// B IS BACK ON THE HOLD, NOT ON THE TAP, SINCE THE FIRST HARDWARE SESSION.
+// app/input_router.h carries the argument; what matters here is that BOTH
+// halves are asserted - the hold IS consumed and the tap is NOT - because a
+// swap that only moved one of them would leave the product with no back at all
+// or with two, and either passes a test that names only one gesture.
 TEST(router_back_and_home) {
-  // B is BACK on an ordinary screen.
+  // B held is BACK on an ordinary screen.
   reset_all();
   sm_push(SCR_MENU);
-  CHECK(router_global(GST_TAP_R));
+  CHECK(router_global(GST_HOLD_R));
   CHECK(sm_current() == SCR_HOME);
+
+  // ...and B tapped is NOT: it belongs to the screen, which spends it choosing.
+  reset_all();
+  sm_push(SCR_MENU);
+  CHECK(!router_global(GST_TAP_R));
+  CHECK(sm_current() == SCR_MENU);
 
   // LONG_BOTH is HOME from anywhere, however deep.
   reset_all();
@@ -654,20 +665,20 @@ TEST(router_back_and_home) {
   // On HOME neither is the router's: B is the caress and LONG_BOTH opens
   // SETTINGS, both of which belong to the screen.
   reset_all();
-  CHECK(!router_global(GST_TAP_R));
+  CHECK(!router_global(GST_HOLD_R));
   CHECK(!router_global(GST_LONG_BOTH));
 
   // SF_LOCK_INPUT takes both away from the router.
   reset_all();
   sm_push(SCR_TIME);
-  CHECK(!router_global(GST_TAP_R));
+  CHECK(!router_global(GST_HOLD_R));
   CHECK(!router_global(GST_LONG_BOTH));
   CHECK(sm_current() == SCR_TIME);
 
   // SF_OWNS_BACK takes only B: LONG_BOTH still leaves.
   reset_all();
   sm_push(SCR_BOX);
-  CHECK(!router_global(GST_TAP_R));
+  CHECK(!router_global(GST_HOLD_R));
   CHECK(sm_current() == SCR_BOX);
   CHECK(router_global(GST_LONG_BOTH));
   CHECK(sm_current() == SCR_HOME);
@@ -684,11 +695,62 @@ TEST(router_back_and_home) {
   sm_push(SCR_MENU);
   for (uint8_t g = 0; g < (uint8_t)GST_COUNT; ++g) {
     const Gesture gg = (Gesture)g;
-    if (gg == GST_NONE || gg == GST_TAP_R || gg == GST_LONG_BOTH) continue;
+    if (gg == GST_NONE || gg == GST_HOLD_R || gg == GST_LONG_BOTH) continue;
     CHECK(!router_global(gg));
   }
   CHECK(sm_current() == SCR_MENU);
   CHECK(!router_handle(GST_NONE));
+}
+
+// =============================================================================
+//  B'S TWO PRESSES, OVER THE WHOLE TABLE
+//
+//  The swap that moved BACK from the tap to the hold touched THIRTY-FIVE call
+//  sites in fourteen files, and exactly ONE case in this suite noticed. That is
+//  a statement about the coverage and not about the change: every screen case
+//  in tests/test_screens.cpp drives its own input() hook directly, so none of
+//  them can see the router at all, and the only router case named one screen.
+//
+//  This is the sweep that would have noticed, and it is written over the ENUM
+//  rather than over a list, for the reason the gesture sweep below it gives: a
+//  screen added tomorrow is covered, and a flag changed on an existing row
+//  fails here until the row is looked at.
+//
+//  TWO CLAIMS, and the second is the one that catches a HALF-DONE swap:
+//    * B HELD is consumed exactly where the flags say - not on the root, not
+//      on a row that locks input, not on a row that owns its own back.
+//    * B TAPPED is consumed NOWHERE. It belongs to the screen, which spends it
+//      choosing. A swap that moved the hold and forgot the tap would leave two
+//      backs; one that moved the tap and forgot the hold would leave none.
+// =============================================================================
+TEST(the_router_takes_b_held_and_never_b_tapped_on_any_screen) {
+  for (uint8_t i = 0; i < (uint8_t)SCR_COUNT; ++i) {
+    const ScreenDef* d = screen_def(i);
+    CHECK(d != nullptr);
+    if (d == nullptr) continue;
+    const bool locked = (d->flags & SF_LOCK_INPUT) != 0u;
+    const bool owns   = (d->flags & SF_OWNS_BACK)  != 0u;
+    const bool root   = (i == (uint8_t)SCR_HOME);
+    const bool want   = !locked && !owns && !root;
+
+    reset_all();
+    sm_push((ScreenId)i);
+    if (router_global(GST_TAP_R)) {
+      fprintf(stderr, "  %s: the router ate B TAPPED - that is the screen's, "
+                      "and it is what chooses a row\n", kName[i]);
+      CHECK(false);
+    }
+
+    reset_all();
+    sm_push((ScreenId)i);
+    const bool got = router_global(GST_HOLD_R);
+    if (got != want) {
+      fprintf(stderr, "  %s: router_global(B held) is %d, expected %d "
+                      "(lock=%d owns_back=%d root=%d)\n",
+              kName[i], (int)got, (int)want, (int)locked, (int)owns, (int)root);
+      CHECK(false);
+    }
+  }
 }
 
 // The BOX walks back through its own modes before it leaves (SF_OWNS_BACK).
@@ -844,23 +906,23 @@ static const ExitRow kExits[] = {
   { SCR_HOME,      ERRK_NONE, XK_ROOT, GST_NONE, 0, "HOME", "the destination of every other exit" },
 
   // --- the ordinary screens: invariant 3 ------------------------------------
-  { SCR_MENU,      ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "MENU",      "UI_AUTORETURN_MS" },
+  { SCR_MENU,      ERRK_NONE, XK_AUTORETURN, GST_HOLD_R, 0, "MENU",      "UI_AUTORETURN_MS" },
   { SCR_CARE,      ERRK_NONE, XK_AUTORETURN, GST_NONE,  0, "CARE",      "UI_AUTORETURN_MS" },
-  { SCR_PLAY,      ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "PLAY",      "UI_AUTORETURN_MS" },
+  { SCR_PLAY,      ERRK_NONE, XK_AUTORETURN, GST_HOLD_R, 0, "PLAY",      "UI_AUTORETURN_MS" },
   { SCR_BOX,       ERRK_NONE, XK_AUTORETURN, GST_NONE,  0, "BOX",       "UI_AUTORETURN_MS" },
-  { SCR_STATUS,    ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "STATUS",    "UI_AUTORETURN_MS" },
-  { SCR_STATUS_B,  ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "STATUS_B",  "UI_AUTORETURN_MS" },
+  { SCR_STATUS,    ERRK_NONE, XK_AUTORETURN, GST_HOLD_R, 0, "STATUS",    "UI_AUTORETURN_MS" },
+  { SCR_STATUS_B,  ERRK_NONE, XK_AUTORETURN, GST_HOLD_R, 0, "STATUS_B",  "UI_AUTORETURN_MS" },
   { SCR_SETTINGS,  ERRK_NONE, XK_AUTORETURN, GST_NONE,  0, "SETTINGS",  "UI_AUTORETURN_MS" },
-  { SCR_ENCOUNTER, ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "ENCOUNTER", "UI_AUTORETURN_MS" },
+  { SCR_ENCOUNTER, ERRK_NONE, XK_AUTORETURN, GST_HOLD_R, 0, "ENCOUNTER", "UI_AUTORETURN_MS" },
   { SCR_CAPTURE,   ERRK_NONE, XK_AUTORETURN, GST_NONE,  0, "CAPTURE",   "UI_AUTORETURN_MS" },
   // The four section 6 states that ship as ui/screen_soon.cpp placeholders.
   // None is SF_STICKY, so invariant 3 covers them - which is worth DRIVING
   // rather than assuming, because a placeholder given a flag by mistake would
   // be a screen with no implementation and no way off it.
-  { SCR_TRADE,       ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "TRADE",       "UI_AUTORETURN_MS" },
-  { SCR_BREED,       ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "BREED",       "UI_AUTORETURN_MS" },
-  { SCR_ITEM_REWARD, ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "ITEM_REWARD", "UI_AUTORETURN_MS" },
-  { SCR_SLEEP,       ERRK_NONE, XK_AUTORETURN, GST_TAP_R, 0, "SLEEP",       "UI_AUTORETURN_MS" },
+  { SCR_TRADE,       ERRK_NONE, XK_AUTORETURN, GST_HOLD_R, 0, "TRADE",       "UI_AUTORETURN_MS" },
+  { SCR_BREED,       ERRK_NONE, XK_AUTORETURN, GST_HOLD_R, 0, "BREED",       "UI_AUTORETURN_MS" },
+  { SCR_ITEM_REWARD, ERRK_NONE, XK_AUTORETURN, GST_HOLD_R, 0, "ITEM_REWARD", "UI_AUTORETURN_MS" },
+  { SCR_SLEEP,       ERRK_NONE, XK_AUTORETURN, GST_HOLD_R, 0, "SLEEP",       "UI_AUTORETURN_MS" },
 
   // --- THE RADIO WAITS (spec section 47's own subject) ---------------------
   // NETWORK: a scan in flight, driven to its own ceiling with a radio that
