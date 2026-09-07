@@ -558,6 +558,33 @@ earlier firmware. It must go straight to HOME. Being handed a setup wizard is th
 
 ---
 
+### F7. THE SCREEN TRACE, and read it before anything else in this file.
+**— variant `release` or `baseline`; it is in both.**
+
+Open the serial monitor at 115200 and drive the device. Every screen change prints one line:
+
+```
+DIAG,scr,<millis>,<ordinal>=<NAME>
+```
+
+The ordinals are printed once at boot in the `DIAG#,screens` header, so a capture is
+self-describing and cannot rot. **The GAP between two rows is what it is for.** A push
+followed 20 s later by `2=HOME` is the auto-return doing its job on a screen nobody
+noticed; a push followed *immediately* by `2=HOME` is a navigation defect. Those two
+need opposite fixes and are indistinguishable from the sofa - the first hardware session
+spent an hour telling them apart by argument, and this line is what it produced.
+
+The healthy trace for one exploration is exactly this, and anything else is the bug:
+
+```
+DIAG,scr,<t>,3=MENU
+DIAG,scr,<t>,10=NETWORK
+DIAG,scr,<t+4000..12000>,19=ENCOUNTER     <- 4 to 12 s later: the scan
+DIAG,scr,<t+...>,20=CAPTURE               <- only if you press A on CAPTURAR
+```
+
+---
+
 ## G. The save, on a board — spec §31 (P10-C5)
 
 **Variant: `release`.** Three flows the host proves *arithmetically* and cannot prove

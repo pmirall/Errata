@@ -32,6 +32,7 @@
 #include "../data/species_table.h"           // SPECIES_ID_STARTER
 #include "../game/box.h"
 #include "../persistence/save_schema.h"      // ORIGIN_STARTER
+#include "../app/state_machine.h"      // sm_current(): the screen trace below
 #include "../hardware/boot.h"
 #include "../hardware/gametime.h"
 #include "../hardware/kv_nvs.h"
@@ -155,6 +156,43 @@ static void perf_trend_service(uint32_t now_ms)
                 (unsigned)perf_pass_worst_screen(),
                 (unsigned)perf_pass_overruns(),
                 (unsigned)perf_discards());
+}
+
+// =============================================================================
+//  THE SCREEN TRACE (added during the first hardware session)
+//
+//  WHY IT EXISTS. The first evening on a board was spent guessing why an
+//  encounter that the console PROVED had been rolled - "16 seen / 1 fresh,
+//  phase=4", which is ui_push(SCR_ENCOUNTER) having been called - never
+//  appeared on the panel. Every candidate was chased by reading source, and
+//  three of them were wrong, because THE ONE THING NOBODY COULD SEE WAS THE
+//  NAVIGATION ITSELF. A state machine whose transitions are invisible is a
+//  state machine you debug by argument.
+//
+//  DIAG,perf already prints a screen ordinal, but only once a minute and only
+//  as a sample: a screen that lives for one frame never appears in it at all,
+//  which is precisely the case that needed watching.
+//
+//  One line per CHANGE, with a millisecond stamp, so the gap between two rows
+//  is the answer: a push followed 20 s later by HOME is the auto-return doing
+//  its job on a screen the player did not notice, and a push followed
+//  IMMEDIATELY by HOME is a navigation defect. Those two need opposite fixes
+//  and look identical from the sofa.
+//
+//  Called from god_service() on every pass, ABOVE the s_active guard and beside
+//  shell_line_service(), for that function's own stated reason: a diagnostic
+//  that only exists once somebody has turned god mode on is a diagnostic that
+//  is missing exactly when a freshly flashed board misbehaves.
+// =============================================================================
+static uint8_t s_scr_last = 0xFFu;
+
+static void screen_trace_service(void)
+{
+  const uint8_t s = (uint8_t)sm_current();
+  if (s == s_scr_last) return;
+  s_scr_last = s;
+  Serial.printf("DIAG,scr,%lu,%u=%s\r\n",
+                (unsigned long)millis(), (unsigned)s, diag_screen_name(s));
 }
 
 static void heap_trend_service(void)
@@ -1334,6 +1372,7 @@ void god_service(void)
   // heap_trend_service() has had since P2-C12 and the shape the phase-6 defect
   // taught (a default that lived in a dev-only function).
   shell_line_service();
+  screen_trace_service();
   heap_trend_service();
 
   if (!s_active) return;
@@ -2039,7 +2078,7 @@ void     god_dump_line(void)                    { }
 // ran sim_tick(0) for four phases: what the release artefact must still DO goes
 // above the guard, and both bodies call out to it.
 void     god_begin(void)                        { heap_trend_begin(); shell_line_reset(); }
-void     god_service(void)                      { shell_line_service(); heap_trend_service(); }
+void     god_service(void)                      { shell_line_service(); screen_trace_service(); heap_trend_service(); }
 uint8_t  god_entry_progress(uint8_t screen_id)  { (void)screen_id; return 0; }
 void     god_enter(void)                        { }
 void     god_exit(void)                         { }

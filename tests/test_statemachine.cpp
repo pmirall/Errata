@@ -546,6 +546,95 @@ TEST(autoreturn_waits_and_blocks) {
 }
 
 // =============================================================================
+//  THE AUTO-RETURN'S TWO CLOCK READINGS, AND WHY THEY WERE NOT THE SAME NUMBER
+//
+//  *** FOUND ON A BOARD, ON THE FIRST EVENING ONE EXISTED. ***
+//
+//  sm_service() takes a `now_ms` PARAMETER - the frame stamp ui.cpp samples at
+//  the top of ui_service() - and it used to measure invariant 3 against it:
+//
+//      if ((uint32_t)(now_ms - s_input_ms) < UI_AUTORETURN_MS) return false;
+//
+//  s_input_ms is not stamped by the caller. It is stamped by sm_goto() with
+//  sm_now(), i.e. millis() AT THE MOMENT OF THE NAVIGATION - and the update hook
+//  sm_service() runs one line earlier is allowed to navigate. When it does,
+//  s_input_ms ends up a few milliseconds AHEAD of now_ms, the unsigned
+//  subtraction underflows to about four billion, that is comfortably
+//  >= UI_AUTORETURN_MS, and THE SCREEN THAT WAS JUST PUSHED IS SENT TO HOME ON
+//  THE SAME TICK, with the back stack cleared and no message.
+//
+//  ui/screen_network.cpp is the one screen in the tree that navigates from its
+//  update() hook - a Wi-Fi scan answers on a frame, not on a press - and it
+//  writes the cooldown to flash on the way, so the gap between the two readings
+//  is milliseconds and not microseconds. Every wild encounter on a real board
+//  vanished: the console reported "16 seen / 1 fresh, phase=4", which is the
+//  roll having happened and ui_push(SCR_ENCOUNTER) having been called, and the
+//  panel showed the pet.
+//
+//  AND NO TEST IN THIS FILE COULD HAVE FAILED, because every one of them passes
+//  host_ms() as the parameter - the same reading sm_now() answers - so the two
+//  were equal by construction and the subtraction was always 0. That is this
+//  project's own recurring defect one level down: the thing under test was not
+//  the thing that ships. The case below drives the two readings apart, which is
+//  the only shape that can fail.
+// =============================================================================
+TEST(a_frame_stamp_older_than_the_last_gesture_is_not_twenty_seconds_of_idling) {
+  reset_all();
+  sm_push(SCR_MENU);
+
+  // The frame stamp ui_service() takes at the top of the pass...
+  const uint32_t frame = host_ms();
+  // ...then the pass does work - a care tick, an alert, a cooldown written to
+  // flash - and the screen's update hook navigates, stamping a gesture with a
+  // LATER reading of the same clock.
+  host_advance_ms(3u);
+  sm_note_input();
+
+  // Three milliseconds of the future are not twenty seconds of the past.
+  CHECK(!sm_service(frame));
+  CHECK(sm_current() == SCR_MENU);
+
+  // ONE MILLISECOND IS ENOUGH, which is why this was not a rare race: the
+  // underflow does not care how far ahead the stamp is.
+  const uint32_t frame2 = host_ms();
+  host_advance_ms(1u);
+  sm_note_input();
+  CHECK(!sm_service(frame2));
+  CHECK(sm_current() == SCR_MENU);
+
+  // ANTI-VACUITY, and it is the half that matters: the fix must not have turned
+  // invariant 3 off. A screen that really has been idle for 20 s still goes
+  // home, and it goes home whatever stamp the caller passes.
+  host_advance_ms(UI_AUTORETURN_MS + 1u);
+  CHECK(sm_service(host_ms()));
+  CHECK(sm_current() == SCR_HOME);
+}
+
+// THE SAME DEFECT IN THE SHAPE IT ACTUALLY SHIPPED IN: a push that happens
+// DURING sm_service() must survive the auto-return check that follows it in the
+// same call. Stated separately from the case above because it is the RULE, and
+// the case above is only the arithmetic that broke it - a future change that
+// re-derives the deadline from the parameter some other way would pass one of
+// these two and not the other.
+TEST(a_screen_pushed_from_inside_the_service_pass_survives_that_same_pass) {
+  reset_all();
+  sm_push(SCR_NETWORK);            // the one screen that navigates from update()
+  const uint32_t frame = host_ms();
+
+  // What network_update() -> hand_off() does when a scan answers: some work,
+  // then ui_push(SCR_ENCOUNTER). The work is what moves the clock.
+  host_advance_ms(7u);             // wifi_scan_service + a cooldown write
+  sm_push(SCR_ENCOUNTER);
+
+  CHECK(!sm_service(frame));
+  CHECK(sm_current() == SCR_ENCOUNTER);
+  // ...and the stack still has NETWORK under it, which sm_home() would have
+  // cleared. B from the encounter goes back to the scan, not to the pet.
+  sm_back();
+  CHECK(sm_current() == SCR_NETWORK);
+}
+
+// =============================================================================
 //  4. THE SECTION 7 GRAMMAR (app/input_router.cpp)
 // =============================================================================
 TEST(router_back_and_home) {

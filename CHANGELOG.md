@@ -29,13 +29,62 @@ carries the developer console and ships to nobody. A number quoted without its
 variant is not a number — `docs/budget.md` §8 records a phase exit that compared
 one with the other.
 
+## [Unreleased] — the first board, 2026-09-07
+
+**The firmware ran on hardware for the first time.** The intro played. The
+Wi-Fi scan found 22 networks, read 16, rolled an encounter — and the encounter
+never appeared.
+
+### Fixed — the auto-return measured two different readings of one clock
+- **`app/state_machine.cpp`: `sm_service()` compared `s_input_ms` against its
+  `now_ms` PARAMETER.** That parameter is the frame stamp `ui.cpp` samples at
+  the top of `ui_service()`, ninety lines earlier; `s_input_ms` is stamped by
+  `sm_goto()` with `sm_now()`. When a screen navigates **from its own `update()`
+  hook** — which `sm_service()` runs one line before the check — `s_input_ms`
+  ends up milliseconds AHEAD of `now_ms`, the unsigned subtraction underflows to
+  about four billion, that clears `UI_AUTORETURN_MS`, and **the screen that was
+  just pushed is sent to HOME on the same tick**, back stack cleared, no message.
+- `ui/screen_network.cpp` is the only screen in the tree that navigates from
+  `update()` (a scan answers on a frame, not on a press) and it writes the
+  cooldown to flash on the way, so the gap is milliseconds, not microseconds.
+  **Every wild encounter on a real board vanished into HOME**, while the console
+  reported `16 seen / 1 fresh, phase=4` — the roll had happened and
+  `ui_push(SCR_ENCOUNTER)` had been called.
+- **No test in `tests/test_statemachine.cpp` could have failed**: every one of
+  them passes `host_ms()` as the parameter, which is the same reading `sm_now()`
+  answers, so the two were equal by construction and the subtraction was always
+  0. The project's own recurring defect, one level down, inside the navigation
+  machine itself. Two new cases drive the readings apart; both were confirmed
+  failing by name against the old line.
+
+### Added — the instrument that was missing
+- **`DIAG,scr,<ms>,<n>=<NAME>`, one line per screen change**, in both
+  `god_service()` bodies. `DIAG,perf` already carried a screen ordinal, but once
+  a minute and only as a sample: a screen that lives for one frame never appears
+  in it, which is exactly the case that needed watching. The gap between two
+  rows is the diagnosis — a push followed 20 s later by HOME is the auto-return
+  doing its job on a screen nobody noticed; a push followed *immediately* by
+  HOME is a navigation defect. Those two need opposite fixes and look identical
+  from the sofa. An hour of this evening went on telling them apart by argument.
+
+### Measured on hardware, for the first time in eleven phases
+- Flash and boot: clean. The `serial exception` esptool prints after
+  `Hard resetting` is the native-USB port re-enumerating, not a failure.
+- The first-boot intro plays and hands over to the picker.
+- Wi-Fi scan: 22 access points seen, 16 read (the `WIFI_SCAN_MAX_RESULTS` cap),
+  radio released. Classification, hashing and the encounter roll all correct.
+- **Not yet exercised**: sound (no piezo fitted), battery (no cell fitted), and
+  everything that needs a second board.
+
+---
+
 ## [Unreleased] — first impressions, 2026-09-07
 
-*(Two `[Unreleased]` sections stand here on purpose: neither has been tagged, and
-they are two different pieces of work on the same day. This one is what the
-owner asked for after playing the build; the one below it is the pre-hardware
-review. Inventing a version number for either to keep the headings unique would
-be claiming a tag that was never cut.)*
+*(Three `[Unreleased]` sections stand here on purpose: none has been tagged, and
+they are three different pieces of work on the same day. This one is what the
+owner asked for after playing the build; above it is the first hardware session;
+below it is the pre-hardware review. Inventing version numbers to keep the
+headings unique would be claiming tags that were never cut.)*
 
 **The owner played the build.** Everything in this section comes from that:
 seven observations about how the game FEELS, a list of the moments that deserved
