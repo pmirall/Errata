@@ -9,6 +9,7 @@
 //
 //  PURE translation unit.
 // =============================================================================
+#include "../hardware/audio.h"
 #include "screen_care.h"
 
 #include <stdio.h>
@@ -138,7 +139,8 @@ static uint8_t ring_next(uint8_t cur, uint8_t n) {
 static void list_common(Gesture g, uint8_t& cur, uint8_t n, const uint16_t* help) {
   switch (g) {
     case GST_TAP_L:
-    case GST_HOLD_L: cur = ring_next(cur, n); break;
+    // The click, and the rule behind it, is written once in ui/screen_menu.cpp.
+    case GST_HOLD_L: cur = ring_next(cur, n); audio_play(SFX_TICK); break;
     case GST_BOTH:   if (help) ui_help(help[cur]); break;
     default: break;
   }

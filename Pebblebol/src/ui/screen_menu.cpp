@@ -16,6 +16,7 @@
 //
 //  PURE translation unit.
 // =============================================================================
+#include "../hardware/audio.h"
 #include "screen_menu.h"
 
 #include "../core/strings_es.h"
@@ -113,7 +114,17 @@ void menu_input(Gesture g) {
   switch (g) {
     case GST_TAP_L:
     case GST_HOLD_L:
+      // THE CURSOR MOVED, AND IT SAYS SO. One 12 ms tick, and this is the
+      // product's whole rule for it: A CURSOR THAT MOVES CLICKS, A CURSOR THAT
+      // CANNOT MOVE DOES NOT. Every list ring in the firmware wraps, so the
+      // step always happens and the click always fires - the silent cases are
+      // the ones where the ring is not stepped at all (a card with one row, a
+      // locked screen), which is exactly when the player needs to be told
+      // nothing happened. The battle ring is DELIBERATELY LEFT SILENT: it is
+      // stepped while a transcript is playing SFX_BUZZ and SFX_FALL, and a
+      // click layered over a hit would compete with the beat that matters.
       s_idx = ring_next(s_idx, MENU_ITEM_COUNT);
+      audio_play(SFX_TICK);
       // The new centre starts one slot to the RIGHT and slides in. HOLD_L
       // repeats every REPEAT_RATE_MS (220 ms) > UI_RING_MS, so a held button
       // still gets a full settle between steps instead of a smear.

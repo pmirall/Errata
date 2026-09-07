@@ -505,6 +505,23 @@ static void build_message(void) {
 
 static void end_playback(void);
 
+// -----------------------------------------------------------------------------
+//  DID THE PLAYER WIN THE BATTLE THIS BEAT ENDS?
+//
+//  The same two guards outcome_word() applies, for the same two reasons, and
+//  deliberately NOT won_now(): that one answers "were rewards authorised", which
+//  is a question about the session and the anti-cheat gate. This one is a
+//  question about a SOUND, and the two must not be welded together - a
+//  diagnostic battle that pays nothing is still a battle the player won.
+// -----------------------------------------------------------------------------
+static bool end_beat_is_a_win(uint16_t i) {
+  const BattleEvent* e = battle_log_at(s_log, i);
+  if (e == nullptr) return false;
+  if (linked() && ui_link_battle_status() == UI_LKB_BROKEN) return false;
+  const uint8_t win_me = (s_me == 0u) ? (uint8_t)BO_WIN_A : (uint8_t)BO_WIN_B;
+  return e->a == win_me;
+}
+
 // Move to the next beat, or finish the round. The two frame-level effects live
 // here rather than in render(): they are events, not pixels, and calling
 // rd_shake() once per frame would pin the panel shaking for the whole beat.
@@ -533,6 +550,14 @@ static void enter_beat(uint16_t i) {
   // The picture is br_draw_field()'s barrier and the sound is the short rising
   // pair, which is this firmware's "something arrived" everywhere else.
   if (k == RLE_PROTECT) { audio_play(SFX_CHIRP); }
+  // THE VERDICT, AND ONLY WHEN IT IS A WIN. Until this line the last thing a
+  // battle ever said was SFX_FALL for somebody fainting, whoever won - so the
+  // moment the player beat another creature sounded exactly like the moment
+  // they lost to one. A defeat still gets nothing added, and that is not an
+  // omission: the beat immediately before it is the player's last Pebble going
+  // down, which already played SFX_FALL. Sounding a loss twice would make the
+  // quieter half of the pair the one that lands.
+  if (k == RLE_BATTLE_END && end_beat_is_a_win(i)) audio_play(SFX_FANFARE);
 }
 
 static void advance_playback(void) {

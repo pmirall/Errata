@@ -505,12 +505,22 @@ static const SfxBand kBands[] = {
   { SFX_GLITCH,       50u, 150u, "damage"   },
   { SFX_RISE,        150u, 300u, "capture"  },
   { SFX_FALL,        150u, 300u, "capture"  },
+  // TICK IS DELIBERATELY BELOW THE UI-CLICK BAND. Spec 18's 30-80 ms is for a
+  // click that CONFIRMS; a tick marks a keystroke or a cursor and fires dozens
+  // of times in a row, so it has its own band and the band is the point.
+  { SFX_TICK,          5u,  20u, "keystroke" },
+  // FANFARE is above the capture band on purpose: the held final note is what
+  // separates "arriving" from "going up", and a hold that fits inside SFX_RISE's
+  // ceiling is not a hold.
+  { SFX_FANFARE,     250u, 450u, "arrival"  },
 };
 
 TEST(every_effect_is_inside_the_spec_18_band_it_was_written_for) {
   const uint16_t n = (uint16_t)(sizeof(kBands) / sizeof(kBands[0]));
-  CHECK_EQ((int)n, (int)SFX_COUNT - 1);        // all seven, and no eighth
-  bool seen[SFX_COUNT] = { false, false, false, false, false, false, false, false };
+  // EVERY effect but SFX_NONE, and no extras. The count is derived from the
+  // enum so adding one without a band fails here rather than shipping unbanded.
+  CHECK_EQ((int)n, (int)SFX_COUNT - 1);
+  bool seen[SFX_COUNT] = { false };
   for (uint16_t i = 0; i < n; ++i) {
     const uint16_t d = sfx_duration_ms(kBands[i].sfx);
     CHECK(d >= kBands[i].lo);

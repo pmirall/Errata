@@ -65,18 +65,38 @@ static const SfxStep kSteps[] = {
   // SFX_GLITCH - six alternating extremes. Corruption, and errors.
   { 3100,  25 }, {  420,  25 }, { 2600,  25 },
   {  520,  25 }, { 3400,  25 }, {  330,  25 },
+  // SFX_TICK - one click, as short as the step clock can express. Deliberately
+  // ABOVE SFX_BEEP and a fifth of its length: a keystroke repeated forty times
+  // must not sound like forty confirmations.
+  { 3600,  12 },
+  // SFX_FANFARE - four rising notes and a fifth held three times as long. The
+  // hold is the whole difference from SFX_RISE, which is a flat five-step
+  // slide: a slide says "going up", a resolution says "arrived".
+  { 1046,  45 }, { 1318,  45 }, { 1568,  45 }, { 2093,  45 }, { 2637, 140 },
 };
 
 // Index by SfxId. SFX_NONE owns no steps, which is what makes it unplayable
 // without a special case anywhere below.
-static constexpr uint8_t kFirst[SFX_COUNT] = { 0,  0,  1,  3,  4,  9, 14, 17 };
-static constexpr uint8_t kCount[SFX_COUNT] = { 0,  1,  2,  1,  5,  5,  3,  6 };
+static constexpr uint8_t kFirst[SFX_COUNT] = { 0,  0,  1,  3,  4,  9, 14, 17, 23, 24 };
+static constexpr uint8_t kCount[SFX_COUNT] = { 0,  1,  2,  1,  5,  5,  3,  6,  1,  5 };
 
-static_assert(sizeof(kSteps) / sizeof(kSteps[0]) == 23,
+static_assert(sizeof(kSteps) / sizeof(kSteps[0]) == 29,
               "the step table and the {first,count} index have drifted apart");
-static_assert(kFirst[SFX_GLITCH] + kCount[SFX_GLITCH]
+static_assert(kFirst[SFX_FANFARE] + kCount[SFX_FANFARE]
                 == (uint8_t)(sizeof(kSteps) / sizeof(kSteps[0])),
               "the last effect does not end at the end of the step table");
+// EVERY effect owns a contiguous, non-overlapping run, checked here rather than
+// by reading the two rows above and trusting them - adding SFX_TICK and
+// SFX_FANFARE meant editing three literals in three places, which is exactly
+// the shape that goes wrong quietly.
+static_assert([]{
+  uint8_t at = 0;
+  for (uint8_t i = 1; i < (uint8_t)SFX_COUNT; ++i) {
+    if (kFirst[i] != at) return false;
+    at = (uint8_t)(at + kCount[i]);
+  }
+  return at == (uint8_t)(sizeof(kSteps) / sizeof(kSteps[0]));
+}(), "the effects do not tile the step table exactly once each");
 
 // -----------------------------------------------------------------------------
 //  2. STATE. Everything mutable in this file is here, and it is all .bss.

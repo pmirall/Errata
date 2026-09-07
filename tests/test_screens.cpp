@@ -3815,6 +3815,129 @@ TEST(snapshot_encounter_item_settled) {
 }
 
 // =============================================================================
+//  THE WILD REVEAL
+//
+//  The moment the whole exploration loop exists to produce, and until the owner
+//  played the build it was the only one in the chain with no picture: an item
+//  drop had a film, a successful capture had a film, and FINDING THE CREATURE
+//  opened straight onto two menu options.
+// =============================================================================
+static void wild_fixture(uint8_t species) {
+  seams2_reset();
+  explore_reset();
+  EncounterResult r;
+  memset(&r, 0, sizeof r);
+  r.outcome = (uint8_t)ENC_OUT_WILD; r.species_id = species; r.level = 7;
+  encounter_arm(r, (uint8_t)NET_CAT_HOME);
+  encounter_enter();
+}
+
+TEST(the_wild_reveal_walks_its_three_beats_and_the_clock_ends_it) {
+  wild_fixture(1u);
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_TEAR);
+  g_now += 299u;
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_TEAR);
+  g_now += 2u;                                        // 301
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_FORM);
+  g_now += 460u;                                      // 761
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_STARE);
+  g_now += 220u;                                      // 981, past the end
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
+  encounter_leave();
+}
+
+// THE REVEAL IS PAID FOR ONCE. encounter_enter() runs again on every walk back
+// out of SCR_CAPTURE, and this is the check that a failed throw does not buy
+// the player a second establishing shot. Deleting the s_applied guard in
+// encounter_enter()'s WILD arm fails here by name.
+TEST(the_wild_reveal_does_not_replay_when_the_player_comes_back_from_capture) {
+  wild_fixture(1u);
+  CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
+  encounter_input((Gesture)GST_HOLD_L);               // -> SCR_CAPTURE
+  CHECK_EQ(g_push, (uint8_t)SCR_CAPTURE);
+  encounter_leave();
+  capture_enter();
+  capture_leave();
+  encounter_enter();                                  // back on the encounter
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
+  encounter_leave();
+}
+
+// THE TEAR IS REPRODUCIBLE. Two runs of the same beat draw the same frame -
+// which is what makes a golden of a glitch possible at all. Replacing
+// enc_noise() with anything that carries state across calls fails here.
+TEST(the_wild_tear_is_the_same_picture_every_time_it_is_played) {
+  wild_fixture(1u);
+  const uint32_t t0 = g_now;
+  g_now = t0 + 150u;
+  fb_reset();
+  encounter_render();
+  uint8_t first[FB_H][FB_W];
+  for (int y = 0; y < FB_H; ++y)
+    for (int x = 0; x < FB_W; ++x) first[y][x] = (uint8_t)fb_get(x, y);
+  encounter_leave();
+
+  wild_fixture(1u);
+  g_now += 150u;
+  fb_reset();
+  encounter_render();
+  int diff = 0;
+  int lit  = 0;
+  for (int y = 0; y < FB_H; ++y)
+    for (int x = 0; x < FB_W; ++x) {
+      if ((uint8_t)fb_get(x, y) != first[y][x]) ++diff;
+      lit += (int)fb_get(x, y);
+    }
+  CHECK_EQ(diff, 0);
+  CHECK(lit > 0);                                     // anti-vacuity
+  encounter_leave();
+}
+
+// THE BAND SNAPS. The last beat inverts the whole content band, which is what
+// covers the cut from a 24x24 creature to a two-option menu that shares no
+// pixel with it. Measured as "most of the band changed", not as an exact count.
+TEST(the_wild_reveal_ends_on_a_full_band_snap) {
+  wild_fixture(1u);
+  const uint32_t t0 = g_now;
+  g_now = t0 + 820u;                                  // STARE, before the snap
+  fb_reset();
+  encounter_render();
+  uint8_t before[FB_H][FB_W];
+  for (int y = 0; y < FB_H; ++y)
+    for (int x = 0; x < FB_W; ++x) before[y][x] = (uint8_t)fb_get(x, y);
+
+  g_now = t0 + 920u;                                  // inside the snap
+  fb_reset();
+  encounter_render();
+  int flipped = 0;
+  for (int y = (int)UI_CONTENT_Y; y <= (int)UI_CONTENT_BOTTOM; ++y)
+    for (int x = 0; x < FB_W; ++x)
+      if ((uint8_t)fb_get(x, y) != before[y][x]) ++flipped;
+  const int band = (int)(UI_CONTENT_BOTTOM - UI_CONTENT_Y + 1) * FB_W;
+  CHECK(flipped > (band * 3) / 4);
+  encounter_leave();
+}
+
+// The tear, mid-corruption: no body yet, and the band torn into scanlines.
+TEST(snapshot_encounter_wild_tear) {
+  wild_fixture(1u);
+  g_now += 150u;
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_TEAR);
+  snapshot(SCR_ENCOUNTER, "encounter_wild_tear");
+  encounter_leave();
+}
+
+// And the body half-assembled, which is the frame the film is for: the feet are
+// on, the head is not, and two bars of the tear are still standing.
+TEST(snapshot_encounter_wild_form) {
+  wild_fixture(1u);
+  g_now += 480u;
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_FORM);
+  snapshot(SCR_ENCOUNTER, "encounter_wild_form");
+  encounter_leave();
+}
+
+// =============================================================================
 //  THE CALL SITE THE HOST COULD NOT SEE UNTIL NOW.
 //
 //  tests/test_box_persist.cpp proves the PERSISTENCE half - that a slot other
@@ -4106,9 +4229,38 @@ TEST(every_frame_of_both_films_stays_inside_the_content_band) {
   }
   capture_leave();
 
+  // THE WILD REVEAL. It replaces the band too, and it is the one film that ends
+  // on a deliberate full-band INVERT - so the erase half of the rule cannot
+  // apply to it by construction, and the containment half is the whole check.
+  wild_fixture(1u);
+  const uint32_t t0_wild = g_now;
+  g_now = t0_wild + 5000u;
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
+  capture_base(encounter_render);
+  for (uint32_t t = 0; t < 980u; t += 10u) {
+    g_now = t0_wild + t;
+    fb_reset();
+    encounter_render();
+    CHECK_EQ(fb_oob(), 0u);
+    ++frames;
+    for (int y = 0; y < FB_H; ++y) {
+      for (int x = 0; x < FB_W; ++x) {
+        if ((uint8_t)fb_get(x, y) == g_base_fb[y][x]) continue;
+        ++moved;
+        if (y < (int)UI_CONTENT_Y || y > (int)UI_CONTENT_BOTTOM) {
+          fprintf(stderr, "  WILD film t=%u: pixel (%d,%d) changed OUTSIDE the "
+                          "content band %d..%d\n", (unsigned)t, x, y,
+                  (int)UI_CONTENT_Y, (int)UI_CONTENT_BOTTOM);
+          CHECK(false);
+        }
+      }
+    }
+  }
+  encounter_leave();
+
   // ANTI-VACUITY. "Nothing moved outside the band" must not be able to pass
   // because nothing moved at all.
-  CHECK_EQ(frames, 98 + 108);
+  CHECK_EQ(frames, 98 + 108 + 98);
   CHECK(moved > 1000);
   g_now = 100000u;
 }
@@ -4124,6 +4276,12 @@ TEST(the_exploration_screens_render_without_drawing_off_the_panel) {
   r.outcome = (uint8_t)ENC_OUT_WILD; r.species_id = 1; r.level = 7;
   encounter_arm(r, (uint8_t)NET_CAT_HOME);
   encounter_enter();
+  // PAST THE REVEAL. encounter_enter() now arms a film on a wild encounter, and
+  // this golden is the RESTING screen - the two options the player answers. The
+  // film has goldens of its own below; taking this one at t=0 would replace the
+  // question with the first frame of the picture that asks it.
+  g_now += 2000u;
+  CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
   snapshot(SCR_ENCOUNTER, "encounter_wild");
 
   memset(&r, 0, sizeof r);
