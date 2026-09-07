@@ -113,6 +113,21 @@ there; it walked onto HOME wearing species 1.
   no host binary compiles it, and its two lines are the ones that decide what the
   DEVICE draws on HOME.
 
+### Sizes
+
+| variant | flash | globals |
+|---|---|---|
+| `release` | 1,355,716 / 1,600,000 | 60,924 / 65,000 |
+| `baseline` | 1,372,878 | 61,028 |
+| `no-web` | 1,259,094 | 56,644 |
+| `all-off` | 609,922 | 28,212 |
+
+**+1,456 B of globals against the previous release** (59,468 → 60,924), and
+1,440 of them are the kept sprite bytes: `CREATOR_SPECIES_SLOTS` × two frames ×
+72 B, the price of a creature the device can actually draw. The rest is the
+fourth cache key on each of the two body caches. Flash moved 828 B. Six of six
+variants build with zero warnings.
+
 ---
 
 ## [Unreleased] — playable in three minutes, 2026-09-07
