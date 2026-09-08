@@ -91,6 +91,11 @@
 
   #set text(size: 6pt)
   #set par(leading: 2.4pt)
+  // VERBATIM, and that is why smart quotes are off here: the document is
+  // lang "es", so Typst was rendering the BSD-2 notice's "AS IS" as Spanish
+  // guillemets - a modification of the very text the licence requires be
+  // reproduced unchanged.
+  #set smartquote(enabled: false)
 
   Pebblebol usa software de terceros. Sus avisos de copyright se reproducen
   aqui como exigen sus licencias. / Pebblebol uses third-party software. Their
@@ -117,9 +122,17 @@
   #v(1.2mm)
   *arduino-esp32* -- Copyright (c) Espressif Systems. Licensed under the GNU
   Lesser General Public License v2.1 or later. El texto completo de la licencia
-  y el codigo fuente correspondiente estan disponibles en
+  y el código fuente correspondiente están disponibles en
   #fact("contact.support_url"). / The full licence text and the corresponding
   source code are available at #fact("contact.support_url").
+
+  #v(1.2mm)
+  *ESP-IDF* -- Copyright (c) Espressif Systems. Licensed under the Apache
+  License, Version 2.0. Este producto incluye componentes de ESP-IDF, que
+  arduino-esp32 distribuye. Copia de la licencia en
+  #fact("contact.support_url"). / This product includes ESP-IDF components
+  distributed with arduino-esp32. A copy of the licence is available at
+  #fact("contact.support_url").
 
   #v(2mm)
   #line(length: 100%, stroke: 0.4pt + black)
@@ -134,8 +147,8 @@
     [
       #fact("entity.name") \
       #fact("contact.website") \
-      Hecho en #fact("product.country_of_manufacture") \
-      Made in #fact("product.country_of_manufacture")
+      Hecho en #fact("product.country_of_manufacture_es") \
+      Made in #fact("product.country_of_manufacture_en")
     ],
   )
 ]

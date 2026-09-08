@@ -48,6 +48,23 @@
   }
 }
 
+// The frequency band, with each language's own decimal mark. Stored as two
+// numbers rather than a string for exactly that reason.
+#let radio-band(lang) = {
+  let lo = facts.radio.band_mhz_low
+  let hi = facts.radio.band_mhz_high
+  let hs = str(hi)
+  if lang == "es" { hs = hs.replace(".", ",") }
+  str(lo) + "-" + hs + " MHz"
+}
+
+// RED art. 10.10. An empty list is the normal case and has to say so in words.
+#let radio-restrictions(lang) = {
+  let r = facts.radio.restrictions
+  if r.len() == 0 { if lang == "es" { "Ninguna" } else { "None" } }
+  else { r.join(", ") }
+}
+
 // The postal address as GPSR art. 19 wants it: one legible block.
 #let address-block = [
   #fact("entity.name") #fact("entity.legal_form") \

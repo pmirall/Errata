@@ -2560,6 +2560,17 @@ PY
 )
   [ -z "$n" ] || fail "a manual section has no content: $n"
 
+  # THE MANUAL'S FIRMWARE VERSION IS A FACT ABOUT THE PRODUCT, and it had
+  # drifted: the booklet's back cover still said 0.2.0-dev against a tree at
+  # 1.0.0-rc1. Nothing could see it, because product_facts.toml is data and
+  # data does not get stale loudly.
+  mv=$( grep -oE '^fw_version = "[^"]*"' "$ROOT/docs/manual/product_facts.toml" \
+        | sed 's/.*"\(.*\)"/\1/' )
+  fv=$( grep -oE '^#define FW_VERSION[[:space:]]+"[^"]*"' "$SKETCH/src/core/version.h" \
+        | sed 's/.*"\(.*\)"/\1/' )
+  [ -n "$mv" ] && [ -n "$fv" ] || fail "cannot read the firmware version from both sides"
+  [ "$mv" = "$fv" ] || fail "the manual says firmware $mv and version.h says $fv"
+
   # NO MANUAL SCREEN MAY BE A PLACEHOLDER. The link page illustrated trading
   # with soon_trade - the "PROXIMAMENTE, fase 7" card - beside prose saying
   # trading works. SCR_TRADE is not reachable from anywhere in the firmware;

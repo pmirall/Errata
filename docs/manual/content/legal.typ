@@ -89,6 +89,8 @@
   - No mezcle pilas nuevas con usadas, ni marcas o tipos distintos.
   - *No intente recargar pilas alcalinas.* No las cortocircuite, perfore,
     deforme, caliente ni arroje al fuego: pueden reventar o tener fugas.
+  - *El aparato no tiene interruptor.* Quitar las pilas es la única forma de
+    apagarlo del todo.
   - Retire las pilas si no va a usar el aparato durante semanas, y retire
     siempre las pilas gastadas. Una pila agotada puede tener fugas y dañar el
     aparato de forma irreversible.
@@ -106,6 +108,8 @@
   - Do not mix new and used cells, or different brands or types.
   - *Do not attempt to recharge alkaline cells.* Do not short-circuit,
     puncture, deform, heat or burn them: they may burst or leak.
+  - *The device has no on/off switch.* Taking the cells out is the only way to
+    switch it off completely.
   - Remove the cells if the device will be unused for weeks, and always remove
     spent cells. A flat cell can leak and damage the device beyond repair.
   - If a cell leaks, do not touch the fluid with bare hands. Wipe the
@@ -126,9 +130,9 @@
 
   *Datos de radio (Directiva 2014/53/UE, art. 10.8).*
 
-  - Banda de frecuencia: #fact("radio.band")
+  - Banda de frecuencia: #radio-band("es")
   - Potencia máxima radiada: #fact("radio.max_power_dbm")
-  - Restricciones de puesta en servicio: #fact("radio.restrictions")
+  - Restricciones de puesta en servicio: #radio-restrictions("es")
 
   *Declaración UE de conformidad simplificada.* Por la presente,
   #fact("entity.name") declara que el tipo de equipo radioeléctrico
@@ -136,18 +140,24 @@
   2014/53/UE. El texto completo de la declaración UE de conformidad está
   disponible en la dirección Internet siguiente: #fact("contact.doc_url")
 
-  El aparato utiliza la radio de 2,4 GHz de dos maneras: para *observar* qué
-  redes hay alrededor, sin conectarse a ninguna, y para *hablar directamente*
-  con otro Pebblebol cercano.
+  El aparato usa la radio de 2,4 GHz de tres maneras, y en ninguna se conecta a
+  la red de nadie:
+
+  - *Escucha* qué redes hay alrededor. El escaneo es pasivo: ni se asocia ni
+    pide nada, solo oye lo que las redes ya emiten.
+  - *Habla* directamente con otro Pebblebol cercano, sin router.
+  - *Crea su propia red* mientras el creador está abierto, para que su página
+    se vea desde el móvil. Es la única situación en la que el aparato emite de
+    forma continuada, y termina en cuanto cierras el creador.
 ][
   #v(1mm)
   This product bears the CE marking.
 
   *Radio data (Directive 2014/53/EU, art. 10.8).*
 
-  - Frequency band: #fact("radio.band")
+  - Frequency band: #radio-band("en")
   - Maximum radiated power: #fact("radio.max_power_dbm")
-  - Restrictions on putting into service: #fact("radio.restrictions")
+  - Restrictions on putting into service: #radio-restrictions("en")
 
   *Simplified EU declaration of conformity.* Hereby, #fact("entity.name")
   declares that the radio equipment type #fact("product.name")
@@ -155,9 +165,16 @@
   text of the EU declaration of conformity is available at the following
   internet address: #fact("contact.doc_url")
 
-  The device uses its 2.4 GHz radio in two ways: to *observe* which networks
-  are around, without joining any of them, and to *talk directly* to another
-  nearby Pebblebol.
+  The device uses its 2.4 GHz radio in three ways, and joins nobody's network
+  in any of them:
+
+  - It *listens* for the networks around it. The scan is passive: it neither
+    associates nor asks for anything, it only hears what networks already
+    broadcast.
+  - It *talks* directly to another nearby Pebblebol, with no router.
+  - It *makes a network of its own* while the creator is open, so its page can
+    be reached from a phone. That is the only situation in which the device
+    transmits continuously, and it ends when you close the creator.
 ]
 
 // --- 21. Identity, incidents, substances -------------------------------------
@@ -301,20 +318,35 @@
   #fact("contact.website").
 
   *Privacidad.* El Pebblebol funciona sin cuenta, sin registro y sin conexión a
-  internet. No recoge ni transmite datos personales. Lee los nombres de las
-  redes Wi-Fi cercanas solo como sensor de juego, sin conectarse a ellas, sin
-  almacenarlos más de lo necesario y sin comunicarlos a nadie. La página del
-  creador se sirve desde el propio aparato y no envía nada al exterior.
-  Protección de datos: #fact("contact.email").
+  internet. No recoge ni transmite datos personales.
+
+  Del escaneo de redes conviene ser preciso, porque es lo único que el aparato
+  observa de su entorno. El nombre de la red y la dirección física del router
+  existen únicamente dentro de la función que lee el resultado del escaneo, y
+  se destruyen ahí mismo: lo que sale de esa función es un número resumen y una
+  etiqueta de tipo de red. Ese número se calcula con una sal propia de cada
+  aparato, así que el mismo router da un número distinto en dos Pebblebol y no
+  puede usarse para cruzar datos entre unidades. Ningún nombre de red se guarda,
+  se enseña en pantalla ni se manda a otro aparato.
+
+  La página del creador se sirve desde el propio aparato y no envía nada al
+  exterior. Protección de datos: #fact("contact.email").
 
   *Seguridad del producto con elementos digitales.* Punto único de contacto:
   #fact("contact.safety_email"). Política de divulgación coordinada de
   vulnerabilidades: #fact("contact.vuln_disclosure_url"). Lista de materiales
-  de software (SBOM): #fact("contact.sbom_url"). Soporte de seguridad y
-  actualizaciones hasta #fact("commercial.support_end_date"). Para retirar el
-  aparato de forma segura, borre la partida desde #scr[AJUSTES] antes de
-  cederlo o desecharlo: eso elimina sus Pebbles y el identificador aleatorio
-  del aparato.
+  de software (SBOM): #fact("contact.sbom_url"). Soporte de seguridad hasta
+  #fact("commercial.support_end_date").
+
+  *Este producto no se actualiza por sí solo.* No tiene actualización
+  inalámbrica: no busca versiones nuevas, no se conecta a internet y nada
+  llega al aparato sin que usted lo instale. Mientras dure el soporte
+  publicaremos el firmware corregido y las instrucciones para instalarlo por
+  USB en #fact("contact.support_url").
+
+  Para retirar el aparato de forma segura, borre la partida desde
+  #scr[AJUSTES] antes de cederlo o desecharlo: eso elimina sus Pebbles y el
+  identificador aleatorio del aparato.
 ][
   *Legal guarantee.* This product carries the
   #fact("commercial.warranty_years")-year legal guarantee of conformity under
@@ -327,17 +359,33 @@
   a reason, under Directive 2011/83/EU. Terms at #fact("contact.website").
 
   *Privacy.* The Pebblebol works with no account, no sign-up and no internet
-  connection. It neither collects nor transmits personal data. It reads nearby
-  Wi-Fi network names purely as a game sensor, without joining them, without
-  keeping them longer than needed and without passing them to anyone. The
-  creator page is served by the device itself and sends nothing outside. Data
-  protection: #fact("contact.email").
+  connection. It neither collects nor transmits personal data.
+
+  The network scan is worth being precise about, because it is the only thing
+  the device observes about its surroundings. A network's name and a router's
+  hardware address exist only inside the function that reads the scan result,
+  and they are destroyed there: what leaves that function is a summary number
+  and a network-type label. The number is computed with a salt unique to each
+  device, so the same router yields a different number on two Pebblebols and
+  cannot be used to correlate them. No network name is stored, shown on screen
+  or sent to another device.
+
+  The creator page is served by the device itself and sends nothing outside.
+  Data protection: #fact("contact.email").
 
   *Security of a product with digital elements.* Single point of contact:
   #fact("contact.safety_email"). Coordinated vulnerability disclosure policy:
   #fact("contact.vuln_disclosure_url"). Software bill of materials (SBOM):
-  #fact("contact.sbom_url"). Security support and updates until
-  #fact("commercial.support_end_date"). To decommission the device safely, wipe
-  the save from #scr[AJUSTES] before passing it on or discarding it: that
-  removes your Pebbles and the device's random identifier.
+  #fact("contact.sbom_url"). Security support until
+  #fact("commercial.support_end_date").
+
+  *This product does not update itself.* There is no over-the-air update: it
+  does not look for new versions, does not connect to the internet, and nothing
+  reaches the device unless you install it. For as long as support lasts we
+  will publish corrected firmware and instructions for installing it over USB
+  at #fact("contact.support_url").
+
+  To decommission the device safely, wipe the save from #scr[AJUSTES] before
+  passing it on or discarding it: that removes your Pebbles and the device's
+  random identifier.
 ]

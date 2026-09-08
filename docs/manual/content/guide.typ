@@ -1048,7 +1048,7 @@
   [*Síntoma / Symptom*], [*Causa / Cause*], [*Solución / Fix*],
 
   [No enciende \ #text(fill: luma(25%))[Will not switch on]],
-  [Pilas gastadas o al reves \ #text(fill: luma(25%))[Flat cells, or reversed]],
+  [Pilas gastadas o al revés \ #text(fill: luma(25%))[Flat cells, or reversed]],
   [Revisa *+* y *-*. Pon dos pilas nuevas \
    #text(fill: luma(25%))[Check *+* and *-*. Fit two fresh cells]],
 
@@ -1058,7 +1058,7 @@
    #text(fill: luma(25%))[Remove the cells, wait 10 s, refit them]],
 
   [Se reinicia solo \ #text(fill: luma(25%))[Restarts on its own]],
-  [Pilas casi vacias \ #text(fill: luma(25%))[Nearly flat cells]],
+  [Pilas casi vacías \ #text(fill: luma(25%))[Nearly flat cells]],
   [Cambia las dos a la vez \
    #text(fill: luma(25%))[Replace both at once]],
 

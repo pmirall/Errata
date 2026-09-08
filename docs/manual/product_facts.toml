@@ -58,9 +58,10 @@ sbom_url = "TODO"                # where the software bill of materials lives
 name = "Pebblebol"
 model = "TODO"                   # e.g. PBBL-1
 hw_revision = "TODO"
-fw_version = "0.2.0-dev"         # keep in step with src/core/version.h
+fw_version = "1.0.0-rc1"         # keep in step with src/core/version.h
 batch_format = "TODO"            # how a batch is stamped, e.g. "AAAA-WW"
-country_of_manufacture = "España"
+country_of_manufacture_es = "España"
+country_of_manufacture_en = "Spain"
 
 # --- Waste registrations -----------------------------------------------------
 # RD 110/2015 (WEEE): registration in the RII-AEE is free but MANDATORY, and a
@@ -77,11 +78,19 @@ scrap = "TODO"                   # the collective scheme actually contracted
 # finished device in its own enclosure - they are NOT inherited from the
 # ESP32-C3 module's datasheet, and the number below is not final until a lab
 # has measured this product.
+# A FACT THAT LANDS INSIDE A SENTENCE NEEDS BOTH LANGUAGES; AN ADDRESS DOES NOT.
+# `restrictions = "Ninguna"` used to be one field, and the English column of a
+# legally mandated section therefore read "Restrictions on putting into service:
+# Ninguna". Same for "Made in España" on the back cover. entity.country stays
+# untranslated on purpose - GPSR art. 19 wants the responsible person's address
+# as it is written on an envelope, not localised.
 [radio]
-band = "2400-2483,5 MHz"
+band_mhz_low = 2400
+band_mhz_high = 2483.5           # rendered with the decimal mark of each language
 max_power_dbm = "TODO"           # e.g. "20 dBm (100 mW) PIRE" - MEASURED
-restrictions = "Ninguna"         # art. 10.10: member states where putting into
-                                 # service is restricted. "Ninguna" if none.
+# RED art. 10.10: the member states where putting into service is restricted.
+# An empty list means none, and prints as "Ninguna" / "None" in each column.
+restrictions = []
 
 # --- Commercial terms --------------------------------------------------------
 # RDL 1/2007 (TRLGDCU) as amended: 3 years of legal conformity guarantee for
