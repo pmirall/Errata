@@ -11,8 +11,16 @@ tools/build_manual.sh --print         # refuses to build with any hole left
 
 Output lands in `docs/manual/out/`, which is not tracked.
 
-**The built booklet is committed**, at `docs/manual/manual-draft.pdf`, so it can
-be read without installing anything. It is a DRAFT: every legal fact that is
+**The built booklet is committed**, at `docs/uso.pdf`, so it can be read without
+installing anything - and, since GitHub Pages went up, that path is also what the
+device's MANUAL screen points a phone at.
+
+The name is not a taste. `ui/qr.cpp` encodes 32 bytes at a scale the 0.96" panel
+can resolve; `pmirall.github.io/Errata` is 24 of them, so the path has eight to
+live in and `/uso.pdf` is exactly eight. `core/config.h` static_asserts the URL
+against that budget, so a longer name fails the build rather than shipping a
+symbol nobody can scan. The build output under `out/` is still named
+`manual-draft.pdf` / `manual-print.pdf`; only the published copy is short. It is a DRAFT: every legal fact that is
 still missing prints as a black `TODO:` block, and `--print` refuses to build
 until they are filled in. Do not send it to a printer.
 

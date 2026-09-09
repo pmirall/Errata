@@ -23,7 +23,7 @@
 set -euo pipefail
 
 # THE BUILD IS BYTE-REPRODUCIBLE, and that is load-bearing rather than tidy:
-# docs/manual/manual-draft.pdf is COMMITTED so that reading the manual needs no
+# docs/uso.pdf is COMMITTED so that reading the manual needs no
 # toolchain, and a committed artefact that cannot be compared to its source is
 # just a file that goes quietly stale. Typst stamps /CreationDate from the wall
 # clock unless SOURCE_DATE_EPOCH says otherwise, which alone made two builds of
@@ -141,14 +141,23 @@ if [ "$WANT_PNG" -eq 1 ]; then
 fi
 
 # --- 6. the committed copy ----------------------------------------------------
-# docs/manual/manual-draft.pdf is in git. --verify rebuilds and compares instead
-# of writing, which is what tools/check.sh calls: the committed PDF may not
-# drift from the sources next to it.
-PUBLISHED="$MANUAL/manual-draft.pdf"
+# docs/uso.pdf is in git. --verify rebuilds and compares instead of writing,
+# which is what tools/check.sh calls: the committed PDF may not drift from the
+# sources next to it.
+#
+# THE NAME AND THE PLACE ARE BOTH DICTATED BY A QR CODE, which is worth saying
+# because "uso.pdf at the docs root" looks arbitrary next to manual.typ. The
+# MANUAL screen on the device (ui/screen_manual.cpp) paints one symbol, and
+# ui/qr.cpp's version-2 byte budget is 32. GitHub Pages serves this repository's
+# docs/ at pmirall.github.io/Errata, which is 24 of those 32 - so the whole
+# path, slash and extension included, has EIGHT bytes to live in.
+# "/manual/manual-draft.pdf" is 24 and does not fit at any scale; "/uso.pdf" is
+# 8 and the URL lands on 32 exactly. core/config.h static_asserts it.
+PUBLISHED="$ROOT/docs/uso.pdf"
 if [ "$MODE" = draft ]; then
   if [ "$VERIFY" -eq 1 ]; then
     if ! cmp -s "$OUT/$NAME.pdf" "$PUBLISHED"; then
-      echo "MANUAL FAIL: docs/manual/manual-draft.pdf is stale." >&2
+      echo "MANUAL FAIL: docs/uso.pdf is stale." >&2
       echo "             Rebuild it with tools/build_manual.sh --draft" >&2
       exit 1
     fi
@@ -160,4 +169,4 @@ fi
 
 echo "manual: $NAME.pdf, $n pages (pad $pad), A6 105x148 mm + 3 mm bleed"
 echo "        $OUT/$NAME.pdf"
-[ "$MODE" = draft ] && echo "        published to docs/manual/manual-draft.pdf"
+[ "$MODE" = draft ] && echo "        published to docs/uso.pdf"

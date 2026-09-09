@@ -2583,8 +2583,10 @@ PY
 )
   [ -z "$n" ] || fail "a manual section has no content: $n"
 
-  # THE COMMITTED PDF MAY NOT DRIFT FROM ITS SOURCES. docs/manual/manual-draft.pdf
-  # is in git so the booklet can be read without a toolchain, and an artefact
+  # THE COMMITTED PDF MAY NOT DRIFT FROM ITS SOURCES. docs/uso.pdf is in git so
+  # the booklet can be read without a toolchain - and since Pages went up it is
+  # also what the device's MANUAL screen points a phone at, so a stale copy is
+  # now a wrong answer to a QR and not just an out-of-date file. An artefact
   # that cannot be compared to its input is a file that goes quietly stale -
   # the same failure mode as the firmware version below and the screen SVGs
   # above. The build is byte-reproducible (SOURCE_DATE_EPOCH), so the check is
@@ -2592,7 +2594,7 @@ PY
   # because a gate nobody can satisfy is a gate people learn to disable.
   if command -v typst >/dev/null 2>&1; then
     "$ROOT/tools/build_manual.sh" --draft --verify >/dev/null \
-      || fail "docs/manual/manual-draft.pdf is stale (tools/build_manual.sh --draft)"
+      || fail "docs/uso.pdf is stale (tools/build_manual.sh --draft)"
   else
     echo "check: typst not installed, committed manual PDF not verified"
   fi

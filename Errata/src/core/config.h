@@ -466,12 +466,18 @@ static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
 //  panel is a coin flip, and nothing in the build would have said so: qrp_paint()
 //  clamps the scale and draws it anyway.
 //
-//  WHY THE SCHEME IS MISSING. "https://pmirall.github.io/Pebblebol" is 35 bytes
-//  and does not fit. Phone cameras resolve a bare host + path as a URL, so the
-//  eight characters buy nothing a scanner needs. If the repository is ever
-//  renamed to match the product, "https://pmirall.github.io/Errata" is 32 bytes
-//  exactly and the scheme comes back for free.
-#define MANUAL_URL              "pmirall.github.io/Pebblebol"
+//  WHY THE SCHEME IS MISSING AND WHY THE FILE IS CALLED uso.pdf. The host and
+//  the repository are 24 bytes together, which leaves EIGHT for the whole path.
+//  "/manual/manual-draft.pdf" is 24 and cannot be made to fit at any scale, so
+//  the published booklet is republished short - tools/build_manual.sh copies it
+//  to docs/uso.pdf and tools/check.sh verifies THAT path. Adding "https://" is
+//  another 8 and would leave nothing at all; phone cameras resolve a bare host
+//  plus path as a URL, so the scheme buys nothing a scanner needs.
+//
+//  THIS URL IS 32 BYTES. THE BUDGET IS 32. There is no headroom left, which is
+//  the static_assert's whole job: the next rename that lengthens any part of it
+//  fails the build instead of shipping a symbol the panel cannot resolve.
+#define MANUAL_URL              "pmirall.github.io/Errata/uso.pdf"
 static_assert(sizeof(MANUAL_URL) - 1 <= 32,
               "MANUAL_URL is past QR version 2's 32-byte budget: the symbol would\n               fall to one pixel per module in the 62 px box and stop being\n               scannable on a 0.96\" panel. See ui/qr.cpp's QR_VER table.");
 
