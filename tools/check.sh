@@ -2530,6 +2530,103 @@ else
   [ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp never calls pet_view_attach() ($n) - see above"
 fi
 
+# --- manual gates (P10-M6) ---------------------------------------------------
+# The manual illustrates itself from tests/capture/golden/screens/*.pbm - the
+# REAL-FONT capture, not the goldens. The goldens are drawn by a fake that
+# paints each character as a barcode and says so in its own header; the manual
+# read them for one commit and every screen in it came out as bars. A capture
+# that moved without its SVG being regenerated means the printed booklet shows
+# a screen the firmware no longer draws.
+if [ -f "$ROOT/tools/pbm2svg.py" ] && [ -d "$ROOT/docs/manual" ]; then
+  # tests/capture/ is build output and is not committed - the SVGs are. So the
+  # staleness check only runs where a capture exists; on a fresh clone it says
+  # so rather than failing a gate nobody can satisfy without building first.
+  # THE CAPTURE ITSELF HAS TO BE FRESH, and until the Errata rename this gate
+  # could not see that it was not. It compared the SVGs against whatever
+  # tests/capture/ happened to hold, and tests/capture/ is build output that
+  # survives a merge - so after 427 files were renamed the booklet's boot
+  # splash still read the old wordmark and this said GATE OK. Comparing a
+  # generated file against another generated file proves only that they agree
+  # with each other. So the capture is REBUILT here; make is incremental, so
+  # the cost is a no-op once it is warm.
+  if make -C "$ROOT/tests" capture >/dev/null 2>&1 || [ -d "$ROOT/tests/capture/golden/screens" ]; then
+    python3 "$ROOT/tools/pbm2svg.py" --check >/dev/null \
+      || fail "manual screens are stale (make -C tests capture && tools/pbm2svg.py --all)"
+  else
+    echo "check: screen capture could not be built, manual SVGs not verified"
+  fi
+
+  # No page number may be typed into the manual. The legal section grew by
+  # three pages during drafting and every hard-coded "see page 19" silently
+  # became wrong; cross-references go through pg(<label>) instead.
+  n=$( { grep -rniE '(pagina|página|page)s? +[0-9]+' "$ROOT/docs/manual/content" || true; } \
+        | { grep -vE '^[^:]+:[0-9]+: *//' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "hard-coded page number in the manual; use pg(<label>) ($n)"
+
+  # A SECTION THAT LOST ITS BODY. Editing the manual by replacing spans of
+  # .typ left "= Tu privacidad" standing with nothing under it: a heading alone
+  # on a page, and the privacy statement - which the legal block cross-refers
+  # to - silently gone from a booklet that was still building, still passing
+  # every other gate, and still 44 pages long. Nothing could see it.
+  n=$( python3 - "$ROOT/docs/manual/content" <<'PY' || true
+import pathlib, re, sys
+bad = []
+for f in sorted(pathlib.Path(sys.argv[1]).glob("*.typ")):
+    for chunk in re.split(r"(?m)^= ", f.read_text(encoding="utf-8"))[1:]:
+        title, _, body = chunk.partition("\n")
+        real = [l for l in body.splitlines()
+                if l.strip() and not l.strip().startswith(("//", "#pagebreak"))]
+        if len(real) < 2:
+            bad.append(f"{f.name}: {title.strip()}")
+print("\n".join(bad))
+PY
+)
+  [ -z "$n" ] || fail "a manual section has no content: $n"
+
+  # THE COMMITTED PDF MAY NOT DRIFT FROM ITS SOURCES. docs/manual/manual-draft.pdf
+  # is in git so the booklet can be read without a toolchain, and an artefact
+  # that cannot be compared to its input is a file that goes quietly stale -
+  # the same failure mode as the firmware version below and the screen SVGs
+  # above. The build is byte-reproducible (SOURCE_DATE_EPOCH), so the check is
+  # an exact compare rather than a heuristic. Skipped where typst is absent,
+  # because a gate nobody can satisfy is a gate people learn to disable.
+  if command -v typst >/dev/null 2>&1; then
+    "$ROOT/tools/build_manual.sh" --draft --verify >/dev/null \
+      || fail "docs/manual/manual-draft.pdf is stale (tools/build_manual.sh --draft)"
+  else
+    echo "check: typst not installed, committed manual PDF not verified"
+  fi
+
+  # THE MANUAL'S FIRMWARE VERSION IS A FACT ABOUT THE PRODUCT, and it had
+  # drifted: the booklet's back cover still said 0.2.0-dev against a tree at
+  # 1.0.0-rc1. Nothing could see it, because product_facts.toml is data and
+  # data does not get stale loudly.
+  mv=$( grep -oE '^fw_version = "[^"]*"' "$ROOT/docs/manual/product_facts.toml" \
+        | sed 's/.*"\(.*\)"/\1/' )
+  fv=$( grep -oE '^#define FW_VERSION[[:space:]]+"[^"]*"' "$SKETCH/src/core/version.h" \
+        | sed 's/.*"\(.*\)"/\1/' )
+  [ -n "$mv" ] && [ -n "$fv" ] || fail "cannot read the firmware version from both sides"
+  [ "$mv" = "$fv" ] || fail "the manual says firmware $mv and version.h says $fv"
+
+  # NO MANUAL SCREEN MAY BE A PLACEHOLDER. The link page illustrated trading
+  # with soon_trade - the "PROXIMAMENTE, fase 7" card - beside prose saying
+  # trading works. SCR_TRADE is not reachable from anywhere in the firmware;
+  # that golden exists to test the SOON frame, not to show a player a screen.
+  # A manual that illustrates a feature with its own "not built yet" card is
+  # worse than one that omits it.
+  n=$( { grep -oE 'screen\("soon_[a-z_]+"' "$ROOT/docs/manual/content/guide.typ" || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "the manual illustrates a screen with a SOON placeholder ($n)"
+
+  # No legal fact may be typed into the manual either. Every company name,
+  # address, URL, e-mail and registration number comes from
+  # product_facts.toml through fact(), so filling the manual in is editing one
+  # file. A literal e-mail or http URL in the legal pages means one escaped.
+  n=$( { grep -rnE '(https?://|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})' \
+           "$ROOT/docs/manual/content/legal.typ" || true; } \
+        | { grep -v 'olikraus' || true; } | wc -l )
+  [ "$n" -eq 0 ] || fail "literal URL or e-mail in content/legal.typ; put it in product_facts.toml ($n)"
+fi
+
 # --- AND A BODY THE PLAYER DREW IS STILL DRAWN (P10-C4b) --------------------
 # THE DEFECT THIS CLOSES WAS SHIPPED FOR TWO PHASES WITH THE SUITE GREEN.
 # csp_install() parked CustomSpeciesRec.sprite - 144 B the owner drew a pixel at

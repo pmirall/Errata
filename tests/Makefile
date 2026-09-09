@@ -722,6 +722,65 @@ MG_FRAME_OBJS := $(OBJ)/minigame.o \
 # app/app.cpp are compiled by none.
 $(BIN)/test_screens:    $(SCREEN_OBJS) $(MG_FRAME_OBJS) $(OBJ)/alloc_count.o $(OBJ)/power.o
 
+# =============================================================================
+#  THE SCREEN CAPTURE (P10-M10) - the same scenes, drawn with the real fonts.
+#
+#  WHY THIS EXISTS. docs/manual/ illustrates the printed booklet with pictures
+#  of the UI, and it took them from tests/golden/screens/*.pbm - which are drawn
+#  by fakes/gfx_fb.cpp, whose own header says "Text is NOT glyph-accurate and
+#  does not pretend to be". Every screen in the manual came out as barcodes.
+#
+#  WHY IT REUSES test_screens.cpp RATHER THAN A TOOL OF ITS OWN. That file is
+#  5,100 lines of SCENES: which pet, which box contents, which clock, which
+#  error. Re-staging them in tests/tools/ would be a second copy of the product
+#  that drifts. Instead the same translation unit is compiled twice, against a
+#  different backend and a different NT_TESTS_DIR, exactly as gametime.cpp is
+#  compiled twice for GT_HOST_NEVER_VALID. tests/test_screens.cpp is NOT
+#  modified and tests/golden/screens/ is NOT touched: the capture writes to
+#  tests/capture/golden/screens/ because NT_TESTS_DIR is already a -D.
+#
+#  IT IS NOT PART OF `check`. It draws pictures and its CHECK failures are
+#  findings about the firmware's real glyph metrics, not regressions. See the
+#  recorder note in fakes/gfx_real.cpp.
+U8G2_DIR   := vendor/u8g2
+U8G2_CPPFLAGS := -I$(U8G2_DIR)
+U8G2_OBJS  := $(OBJ)/u8g2_font.o $(OBJ)/u8x8_8x8.o \
+              $(OBJ)/u8g2_fonts_pebblebol.o $(OBJ)/u8g2_host_stubs.o
+
+# U8g2 is vendored C, not this project's C++: it is compiled as C and WITHOUT
+# -Wall -Wextra -Werror, which would fail on upstream code this repo does not
+# own and must not patch.
+$(OBJ)/%.o: $(U8G2_DIR)/%.c | $(OBJ)
+	$(CC) -std=c11 -O1 $(U8G2_CPPFLAGS) -c $< -o $@
+
+$(OBJ)/gfx_real.o: fakes/gfx_real.cpp Makefile | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(U8G2_CPPFLAGS) -c $< -o $@
+
+# The scenes, compiled a second time so their goldens land somewhere else.
+$(OBJ)/test_screens_capture.o: test_screens.cpp Makefile | $(OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -UNT_TESTS_DIR \
+	  -DNT_TESTS_DIR=\"$(CURDIR)/capture\" -c $< -o $@
+
+CAPTURE_OBJS := $(filter-out $(OBJ)/gfx_fb.o,$(SCREEN_OBJS)) $(MG_FRAME_OBJS) \
+                $(OBJ)/alloc_count.o $(OBJ)/power.o $(OBJ)/gfx_real.o \
+                $(OBJ)/utf8.o $(U8G2_OBJS)
+
+# The IMITATION anchor tests/fakes/SHADOWS.txt requires for gfx_real.cpp's
+# fit_copy(). Links the capture backend rather than the golden one, which is
+# the whole point: it pins what the REAL-font text path does.
+$(BIN)/test_capture_text: $(OBJ)/gfx_real.o $(OBJ)/utf8.o $(U8G2_OBJS) \
+                          $(OBJ)/gfx_widgets.o
+
+.PHONY: capture
+capture: $(BIN)/screen_capture
+	@mkdir -p capture/golden/screens
+	-./$(BIN)/screen_capture --record
+	@echo "capture: $$(ls capture/golden/screens/*.pbm 2>/dev/null | wc -l) screens with real fonts"
+
+$(BIN)/screen_capture: $(OBJ)/test_screens_capture.o $(CAPTURE_OBJS) | $(BIN)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+
 # P7-C2/C3: THE LINK SCREEN, ITS CONSENT GATE AND THE BATTLE OVER THE LINK.
 #
 # ONE SCREEN AND ONE REAL PEER, IN ONE PROCESS, and that shape is the whole

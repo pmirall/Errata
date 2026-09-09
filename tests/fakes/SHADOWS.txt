@@ -86,6 +86,7 @@ boot_touch_lastseen  hardware/boot.cpp  boot_host.cpp  IMITATION  the_boot_snaps
 # different implementations - but four of the five have behaviour the shipping
 # body also has, and each of those four is now pinned by a case that was written
 # at the final review because none existed.
+fit_copy             ui/render.cpp      gfx_real.cpp   IMITATION  the_capture_truncates_on_a_codepoint_and_never_past_the_box
 kv_get      hardware/kv_nvs.cpp  kv_mem.cpp  IMITATION  a_closed_main_partition_is_not_a_corrupt_save
 kv_put      hardware/kv_nvs.cpp  kv_mem.cpp  IMITATION  an_invalid_write_does_not_eat_an_armed_fault
 kv_erase    hardware/kv_nvs.cpp  kv_mem.cpp  IMITATION  an_empty_key_is_refused_by_erase_as_well_as_by_get_and_put
