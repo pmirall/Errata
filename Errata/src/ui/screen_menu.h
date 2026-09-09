@@ -2,9 +2,9 @@
 //  ERRATA - ui/screen_menu.h
 //  MENU: the horizontal icon ring, in the spec section 8 order
 //
-//      BUG  CARE  PLAY  BOX  NETWORK  LINK  SETTINGS
+//      BUG  CARE  PLAY  BOX  WIKI  NETWORK  LINK  SETTINGS
 //
-//  MENU_ITEM_COUNT (config.h) is 7, S_MENU(i) indexes exactly those seven
+//  MENU_ITEM_COUNT (config.h) is 8, S_MENU(i) indexes exactly those eight
 //  labels and strings_es.h static_asserts the two against each other.
 // =============================================================================
 #ifndef ER_SCREEN_MENU_H

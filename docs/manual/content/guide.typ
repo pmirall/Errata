@@ -232,13 +232,13 @@
 
 #v(1.5mm)
 #bi[
-  Desde aquí, *A* abre el menú principal: #scr[PEBBLE] #scr[CUIDAR]
-  #scr[JUGAR] #scr[CAJA] #scr[RED] #scr[ENLACE] #scr[AJUSTES].
+  Desde aquí, *A* abre el menú principal: #scr[BUG] #scr[CUIDAR] #scr[JUGAR]
+  #scr[CAJA] #scr[WIKI] #scr[RED] #scr[ENLACE] #scr[AJUSTES].
 
   Los menús son anillos: al pasar del último vuelves al primero.
 ][
-  From here, *A* opens the main menu: #scr[PEBBLE] #scr[CUIDAR] #scr[JUGAR]
-  #scr[CAJA] #scr[RED] #scr[ENLACE] #scr[AJUSTES].
+  From here, *A* opens the main menu: #scr[BUG] #scr[CUIDAR] #scr[JUGAR]
+  #scr[CAJA] #scr[WIKI] #scr[RED] #scr[ENLACE] #scr[AJUSTES].
 
   Menus are rings: past the last item you are back at the first.
 ]
@@ -609,7 +609,7 @@
 #v(2mm)
 #bi[
   Una red puede darte un Bug salvaje, uno raro, un objeto, un suceso
-  especial, o nada. Cada red se agota durante *un par de horas* como minimo:
+  especial, o nada. Cada red se agota durante *un par de horas* como mínimo:
   quedarte quieto en casa no sirve de mucho. Hay que moverse.
 ][
   A network can give you a wild Bug, a rare one, an item, a special event,
@@ -659,7 +659,7 @@
 ]
 
 #v(1.5mm)
-#align(center, screen("encounter_special", width: 46mm))
+#align(center, screen("encounter_special", width: 34mm))
 
 #pagebreak()
 = Capturar / Catching
@@ -759,6 +759,56 @@
 
   With a full Box you cannot catch anything. Release something before you go
   out.
+]
+
+// --- The wiki ----------------------------------------------------------------
+// It follows the Box because the firmware's own reason for putting WIKI next to
+// CAJA in the ring is the reason a reader needs: the Box is what you HOLD and
+// the wiki is what you have MET.
+//
+// THE PAGE IT SITS ON WAS ALREADY IN THE BOOKLET AND WAS ALREADY BEING WASTED.
+// "Que te da una red" overran its page by one screen, leaving the next leaf 6%
+// inked - not empty enough for tools/page_fill.py to call it an orphan, and far
+// too empty to be worth a leaf of a saddle-stitched A6. That screen is 6 mm
+// narrower now and the section closes on its own page, which is where this
+// section comes from. The booklet is still 40 pages.
+#pagebreak()
+= La wiki / The wiki
+
+#grid(columns: (1fr, 1fr), column-gutter: 3mm,
+  screen("dex_known", width: 42mm),
+  screen("dex_unknown", width: 42mm),
+)
+
+#v(1.5mm)
+#bi[
+  #scr[WIKI], justo después de #scr[CAJA] en el menú, lista las *sesenta*
+  especies: una ficha por pantalla, con el cuerpo, el número, el nombre y su
+  estado -- #scr[SIN VER], #scr[VISTO] o #scr[EN LA CAJA].
+
+  De la que no conoces ves la silueta, pero no el nombre: #scr[???].
+
+  Se llena sola. Guardar un Bug en la Caja lo deja #scr[EN LA CAJA]; cruzarte
+  con uno o pelear contra él lo deja #scr[VISTO], aunque se escape.
+
+  Aquí no hay nada que elegir, y *A* mantenido va hacia atrás en vez de
+  repetir. Se abre en la primera especie que te falta por capturar.
+
+  Arriba a la derecha llevas la cuenta: las que ya tienes, de sesenta.
+][
+  #scr[WIKI], right after #scr[CAJA] in the menu, lists all *sixty* species:
+  one card per screen, with the body, the number, the name and its state --
+  #scr[SIN VER] (unseen), #scr[VISTO] (seen) or #scr[EN LA CAJA] (in the Box).
+
+  One you have not met keeps its silhouette but not its name: #scr[???].
+
+  It fills itself in. Putting a Bug in the Box marks it #scr[EN LA CAJA];
+  meeting one or fighting one marks it #scr[VISTO], even if it gets away.
+
+  There is nothing to choose here, and *hold A* steps backwards rather than
+  repeating. It opens on the first species you have yet to catch.
+
+  The count in the top right is how many you hold, out of sixty.
 ]
 
 // --- 12. Evolution ------------------------------------------------------------
@@ -927,15 +977,28 @@
 ]
 
 #v(1.5mm)
-#warnbox[
-  #set text(size: 7pt)
-  *Criar todavía no funciona.* En esta versión, #scr[CRIAR] responde
-  #scr[Próximamente] y no hace nada más. No es un fallo del aparato ni del otro
-  jugador: la función no está terminada en este firmware. \
-  #text(fill: luma(25%))[*Breeding does not work yet.* In this version,
-  #scr[CRIAR] answers #scr[Próximamente] and does nothing else. It is not a
-  fault in your device or the other player's: the feature is unfinished in this
-  firmware.]
+#bi[
+  *Criar* no es un intercambio: no se va nadie. Cada aparato se queda con su
+  Bug y gana un *huevo* propio.
+
+  Cría el que llevas seleccionado, y no otro de la Caja. Los dos jugadores
+  tenéis que aceptar la pareja en vuestro aparato: una negativa la cancela para
+  los dos. No todas las parejas valen.
+
+  Un Bug de la primera fase aún no puede, y el aparato lo dice antes de llamar
+  al otro: #scr[Ese bug es muy pequeño aún]. Con la Caja llena el huevo no te
+  cabe, aunque el del otro jugador sí llegue.
+][
+  *Breeding* is not a trade: nobody leaves. Each device keeps its own Bug and
+  gains an *egg* of its own.
+
+  It breeds the one you are carrying, not another from the Box. Both players
+  accept the pair on their own device: one refusal cancels it for both. Not
+  every pair works.
+
+  A Bug still in its first stage cannot yet, and the device says so before it
+  calls the other: #scr[Ese bug es muy pequeño aún]. With a full Box there is no
+  room for your egg, though the other player's still arrives.
 ]
 
 // --- 14. The creator ---------------------------------------------------------
@@ -950,18 +1013,30 @@
 #v(1.5mm)
 #bi[
   La Errata puede abrir su propia página para que diseñes un Bug desde el
-  móvil. El aparato crea una red propia, te enseña un código QR y un PIN, y tu
-  te conectas a el. No hay servidor de por medio.
+  móvil. No hay servidor de por medio: el aparato monta su propia red Wi-Fi.
 
-  Cierra el creador cuando termines. La página solo debería estar abierta
-  mientras la usas.
+  *El código QR es esa red, no la página.* Apúntale la cámara, únete a la red y
+  la página se abre sola. Debajo del código tienes el nombre de la red, por si
+  prefieres entrar a mano desde la lista de Wi-Fi del móvil.
+
+  El *PIN* grande de la pantalla es lo que autoriza al móvil, y no va dentro
+  del código: se lee del aparato, que lo tienes delante.
+
+  Cierra el creador cuando termines. Si lo dejas abierto sin usarlo, se cierra
+  solo y apaga la radio.
 ][
-  The Errata can serve its own page so you can design a Bug from your
-  phone. The device makes its own network, shows a QR code and a PIN, and you
-  connect to it. There is no server involved.
+  The Errata can serve its own page so you can design a Bug from your phone.
+  There is no server involved: the device brings up its own Wi-Fi network.
 
-  Close the creator when you are done. The page should only be open while you
-  are using it.
+  *The QR code is that network, not the page.* Point the camera at it, join the
+  network, and the page opens by itself. The network's name is printed under
+  the code, in case you would rather join by hand from the phone's Wi-Fi list.
+
+  The large *PIN* on the screen is what authorises the phone, and it is not
+  inside the code: you read it off the device, which is in front of you.
+
+  Close the creator when you are done. Left open and unused, it closes itself
+  and switches the radio off.
 ]
 
 // --- 15. Settings and battery ------------------------------------------------
@@ -975,9 +1050,24 @@
 
 #v(1.5mm)
 #bi[
-  En #scr[AJUSTES] están la hora, el sonido, el brillo y la información del
-  aparato.
+  En #scr[AJUSTES] están la hora, el sonido, el brillo, la información del
+  aparato y #scr[Manual].
 
+  #scr[Manual] enseña un código QR que lleva el móvil a este mismo manual, al
+  día. Es lo que hay que escanear si has perdido este cuadernillo.
+][
+  #scr[AJUSTES] holds the clock, sound, brightness, device information and
+  #scr[Manual].
+
+  #scr[Manual] shows a QR code that takes your phone to this same manual, kept
+  up to date. It is what to scan if you have lost this booklet.
+]
+
+#v(1mm)
+#align(center, screen("manual", width: 28mm))
+
+#v(1mm)
+#bi[
   *Las pantallas se cierran solas.* Si dejas el aparato quieto veinte segundos
   vuelve al inicio, y antes avisa con la barrita fina de abajo. Toca cualquier
   botón y se queda donde estaba.
@@ -991,8 +1081,6 @@
 
   La radio es, con diferencia, lo que más gasta.
 ][
-  #scr[AJUSTES] holds the clock, sound, brightness and device information.
-
   *Screens close by themselves.* Leave the device for twenty seconds and it
   returns home, warning you first with the thin bar along the bottom. Press any
   button and it stays where it was.
@@ -1106,6 +1194,8 @@
 
   *Caja* -- donde guardas tus Bugs. Diez plazas.
 
+  *Wiki* -- la lista de las sesenta especies y de cuáles has conocido.
+
   *Seleccionado* -- el Bug que llevas encima y que cuidas.
 
   *Genoma* -- los datos internos que hacen a cada Bug distinto.
@@ -1121,6 +1211,8 @@
   *Bug* -- the creature. A digital bug trapped in the networks.
 
   *Box* -- where you keep your Bugs. Ten slots.
+
+  *Wiki* -- the list of the sixty species, and which ones you have met.
 
   *Selected* -- the Bug you carry and care for.
 

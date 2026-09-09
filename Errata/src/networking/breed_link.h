@@ -52,7 +52,7 @@
 //  3. CONSENT IS LOCAL, SYMMETRIC AND NOT INFERRED
 //
 //  game/breeding.h names it as audit risk 5: THERE IS NO AUTO-ACCEPTED EGG.
-//  Both players press A on their own device, on a pair they can both see, and
+//  Both players press B on their own device, on a pair they can both see, and
 //  nothing is filed until both CONFIRMs are in. One refusal ends it for both -
 //  a child neither person agreed to is worse than no child.
 //

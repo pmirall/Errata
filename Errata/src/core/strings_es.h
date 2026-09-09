@@ -1631,7 +1631,7 @@ inline constexpr const char* const ES[] = {
 #define S_AERR(e)      (ES[STR_AERR_NONE      + (uint16_t)(e)])   // ActionErr
 #define S_ALERT(a)     (ES[STR_AL_NONE        + (uint16_t)(a)])   // AlertId
 #define S_WISH(w)      (ES[STR_WISH_NONE      + (uint16_t)(w)])   // WishId
-#define S_MENU(i)      (ES[STR_MENU_BUG    + (uint16_t)(i)])   // 0..6
+#define S_MENU(i)      (ES[STR_MENU_BUG    + (uint16_t)(i)])   // 0..7
 #define S_SYL_A(i)     (ES[STR_SYL_A00        + (uint16_t)((i) % 12u)])  // name syllable 1
 #define S_SYL_B(i)     (ES[STR_SYL_B00        + (uint16_t)((i) % 12u)])  // name syllable 2
 

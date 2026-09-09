@@ -59,7 +59,13 @@
 
 #page(margin: 9mm, {
   align(center + horizon, block[
-    #text(size: 22pt, weight: "bold", tracking: 1pt, "PEBBLEBOL")
+    // THE WORDMARK IS A FACT, NOT A STRING TYPED HERE. It was typed here, and
+    // it survived the Pebblebol -> Errata rename that moved 427 files: the
+    // cover of the booklet in the box still said the old product name while
+    // the back cover, which goes through fact(), already said the new one.
+    // Nothing could see it, because the cover was the one place the name was
+    // not read from product_facts.toml.
+    #text(size: 22pt, weight: "bold", tracking: 1pt, upper(fact("product.name")))
     #v(2mm)
     #line(length: 40mm, stroke: 1pt + black)
     #v(4mm)
