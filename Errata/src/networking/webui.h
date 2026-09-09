@@ -35,7 +35,7 @@
 //      web_portal_open() and holds the live CreatorGate. The RULES are
 //      networking/creator_gate.h's (pure, host-tested) and the PERSISTED half
 //      is persistence/game_state.h's (gs_creator_load / gs_creator_store).
-//      The PIN NO LONGER TRAVELS IN THE QR: net_url() emits "http://<ip>/" and
+//      The PIN NEVER TRAVELS IN THE QR: the symbol joins the access point and
 //      the user types the four digits the device shows into an X-Pin header
 //      (spec section 39).
 //    - webui does NOT own the radio. It never calls WiFi.*, never starts the

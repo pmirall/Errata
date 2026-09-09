@@ -644,29 +644,15 @@ const char *net_ap_ssid(void) {
   return s_ap_ssid;
 }
 
-size_t net_url(char *out, size_t cap) {
-  if (!out || cap == 0) {
-    return 0;
-  }
-  out[0] = '\0';
-  if (s_ip[0] == '\0' || strcmp(s_ip, "0.0.0.0") == 0) {
-    return 0;
-  }
-  // BRIEF 1.4: IP only. A hostname form would be 33 B and would force QR
-  // version 3. Worst case here is "http://255.255.255.255/" = 23 B, and the
-  // real one is "http://192.168.4.1/" = 19 B - both inside the 32 B v2-L
-  // budget, so the symbol stays at 25 modules and the 62 px box still fits.
-  //
-  // THE "?k=NNNN" SUFFIX WAS HERE UNTIL P8-C1 AND IT WAS THE PIN. net.h says
-  // why it is gone (spec section 39); tools/check.sh has a gate that fails the
-  // build if it comes back.
-  int n = snprintf(out, cap, "http://%s/", s_ip);
-  if (n <= 0 || (size_t)n >= cap) {
-    out[0] = '\0';
-    return 0;
-  }
-  return (size_t)n;
-}
+// net_url() WAS HERE AND IS DELETED, NOT DEPRECATED. It built "http://<ip>/"
+// for the second of the creator screen's two QR symbols. The screen shows one
+// symbol now - the one that joins the access point - because the captive DNS
+// this file starts, plus networking/webui.cpp's catch-all, means a phone that
+// joins opens the page by itself. With the second symbol gone this had no
+// caller, and an uncalled builder of a URL is a thing somebody re-wires a PIN
+// into later. tools/check.sh section 1b guards what actually mattered - no URL
+// with a formatted query parameter anywhere under src/networking - and it
+// never depended on this function.
 
 const NetHeapStats &net_heap_last(void) {
   return s_heap;

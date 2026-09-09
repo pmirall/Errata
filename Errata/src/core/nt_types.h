@@ -61,6 +61,7 @@ enum ScreenId : uint8_t {
   SCR_NETWORK,       // Wi-Fi exploration, phase 5
   SCR_LINK,          // peer link, phase 7 (ex SCR_SOCIAL)
   SCR_CREATOR,       // the creator portal (ex SCR_QR)
+  SCR_MANUAL,        // one static QR: the user manual's address
   SCR_SETTINGS,
   SCR_TIME,          // on-device time entry (ex SCR_CLOCK)
   // THE TWO FIRST-BOOT SCREENS (P10-C4). They sit here, beside TIME, because

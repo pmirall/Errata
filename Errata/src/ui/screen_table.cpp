@@ -26,6 +26,7 @@
 #include "screen_box.h"
 #include "screen_care.h"
 #include "screen_creator.h"
+#include "screen_manual.h"
 #include "screen_diag.h"
 #include "screen_encounter.h"
 #include "screen_error.h"
@@ -120,6 +121,16 @@ const ScreenDef SCREENS[SCR_COUNT] = {
   // hook still runs.
   { creator_enter, creator_update, creator_render, creator_input, creator_leave,
     0, SF_STICKY },                                               // SCR_CREATOR
+  // MANUAL is NOT sticky and that is the difference between it and the screen
+  // above, which is worth saying because the two draw the same picture. The
+  // creator's portal has to outlive the 20 s navigation clock because the owner
+  // is holding a phone and not the device. Reading a manual is the same posture
+  // - but the manual is on the PHONE the moment the code is scanned, and the
+  // symbol here is a compile-time constant that costs nothing to redraw. So it
+  // times out like every other screen, and there is nothing to tear down when
+  // it does: no radio, no server, no hold on the power ladder.
+  { manual_enter, nop_update, manual_render, manual_input, nop_leave,
+    0, 0 },                                                       // SCR_MANUAL
   // SETTINGS owns B because its "Acerca de" page is one level below the
   // navigation stack: B closes the page, and only then the screen.
   { settings_enter, nop_update, settings_render, settings_input, nop_leave, 0,
@@ -216,6 +227,12 @@ const ScreenDef SCREENS[SCR_COUNT] = {
 // without its row moves every row below it onto the wrong screen and the count
 // still matches. tests/test_screens.cpp pins each row to its render hook BY
 // IDENTITY for exactly that reason, and fails naming the screen.
-static_assert((int)SCR_COUNT == 29, "screen table: rows and ScreenId drifted apart");
+// 29 -> 30 and 28 -> 29: SCR_MANUAL was INSERTED after SCR_CREATOR rather than
+// appended, so every id below it moved. That is exactly the renumbering this
+// banner warns about, and these three numbers plus dev/diag_core.cpp's
+// kScreenName[] are what made it a build failure instead of a silent
+// off-by-one - the perf receipt would otherwise have printed "SETTINGS" for
+// every frame the MANUAL screen owned.
+static_assert((int)SCR_COUNT == 30, "screen table: rows and ScreenId drifted apart");
 static_assert((int)SCR_BOOT  ==  0, "screen table: BOOT is the first state");
-static_assert((int)SCR_DIAG  == 28, "screen table: DIAG is the last state");
+static_assert((int)SCR_DIAG  == 29, "screen table: DIAG is the last state");

@@ -13,7 +13,7 @@
 
 enum SetRow : uint8_t {
   SET_SOUND = 0, SET_WEB, SET_BRIGHT,
-  SET_QR, SET_CLOCK, SET_INFO, SET_RESET, SET_BACK, SET_ROWS
+  SET_QR, SET_CLOCK, SET_INFO, SET_MANUAL, SET_RESET, SET_BACK, SET_ROWS
 };
 
 void    settings_enter(void);

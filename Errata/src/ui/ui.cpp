@@ -2399,9 +2399,13 @@ void ui_creator_info(CreatorInfo& out) {
   out.idle_expired = web_portal_idle_expired() ? 1u : 0u;
   snprintf(out.ssid, sizeof(out.ssid), "%s", net_ap_ssid());
   snprintf(out.ip,   sizeof(out.ip),   "%s", net_ip());
-  // NO PIN IN THE URL SINCE P8-C1 (spec section 39): net_url() lost the
-  // argument, not just the substitution, so there is nothing left to pass.
-  if (net_url(out.url, sizeof(out.url)) == 0) out.url[0] = '\0';
+  // CreatorInfo.url and net_url() are BOTH GONE. The creator screen showed two
+  // symbols in turn and this filled the second one; there is one symbol now
+  // (ui/screen_creator.cpp's build()), so the field had no reader and a field
+  // with no reader is how this tree lost a player's drawing for two phases.
+  // tools/check.sh section 1b still guards the thing that mattered - no URL
+  // built with a formatted query parameter under src/networking - and it never
+  // depended on net_url() existing.
 }
 
 // THE ONE TEARDOWN (P8-C2). Leaving the screen, the D7 idle timeout and the

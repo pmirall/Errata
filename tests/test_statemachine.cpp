@@ -42,6 +42,7 @@
 #include "ui/screen_box.h"
 #include "ui/screen_care.h"
 #include "ui/screen_creator.h"
+#include "ui/screen_manual.h"
 #include "ui/screen_diag.h"
 #include "ui/screen_error.h"
 #include "ui/screen_evolution.h"
@@ -298,7 +299,8 @@ TEST(every_row_is_the_screen_its_position_claims) {
   void (*const kRender[SCR_COUNT])(void) = {
     boot_render, load_save_render, home_render, menu_render, care_render,
     play_render, ui_game_render, box_render, status_a_render, status_b_render,
-    network_render, link_render, creator_render, settings_render, time_render,
+    network_render, link_render, creator_render, manual_render, settings_render,
+    time_render,
     setup_name_render, setup_pick_render,
     soon_generic, soon_generic, encounter_render, capture_render, battle_render,
     soon_trade, soon_breed, evo_render, soon_item_reward, err_render,
@@ -919,6 +921,15 @@ static const ExitRow kExits[] = {
   { SCR_STATUS,    ERRK_NONE, XK_AUTORETURN, GST_HOLD_R, 0, "STATUS",    "UI_AUTORETURN_MS" },
   { SCR_STATUS_B,  ERRK_NONE, XK_AUTORETURN, GST_HOLD_R, 0, "STATUS_B",  "UI_AUTORETURN_MS" },
   { SCR_SETTINGS,  ERRK_NONE, XK_AUTORETURN, GST_NONE,  0, "SETTINGS",  "UI_AUTORETURN_MS" },
+  // MANUAL is an ORDINARY screen and this row is the assertion. It draws a QR
+  // like SCR_CREATOR does, and SCR_CREATOR is SF_STICKY because tearing its
+  // access point down after 20 s of no button presses is exactly the wrong
+  // thing to do to somebody holding a phone. MANUAL inherits none of that: the
+  // manual is ON the phone the moment the code is read, there is no radio to
+  // hold and no server to kill, so it leaves on the ordinary clock like every
+  // other page. A sticky flag copied across with the picture would be a screen
+  // the device never walks away from.
+  { SCR_MANUAL,    ERRK_NONE, XK_AUTORETURN, GST_NONE,  0, "MANUAL",    "UI_AUTORETURN_MS" },
   { SCR_ENCOUNTER, ERRK_NONE, XK_AUTORETURN, GST_HOLD_R, 0, "ENCOUNTER", "UI_AUTORETURN_MS" },
   { SCR_CAPTURE,   ERRK_NONE, XK_AUTORETURN, GST_NONE,  0, "CAPTURE",   "UI_AUTORETURN_MS" },
   // The four section 6 states that ship as ui/screen_soon.cpp placeholders.

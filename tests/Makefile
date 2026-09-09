@@ -644,6 +644,7 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/protocol.o $(OBJ)/link_fake.o \
                $(OBJ)/screen_evolution.o $(OBJ)/screen_creator.o \
                $(OBJ)/screen_network.o $(OBJ)/screen_encounter.o \
+               $(OBJ)/screen_manual.o $(OBJ)/qr_paint.o $(OBJ)/qr.o \
                $(OBJ)/wifi_scanner.o $(OBJ)/net_classify.o \
                $(OBJ)/cooldowns.o $(OBJ)/activity.o \
                $(OBJ)/encounters.o $(OBJ)/capture.o \

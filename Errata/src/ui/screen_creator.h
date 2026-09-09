@@ -69,7 +69,13 @@ struct CreatorInfo {
   uint16_t pin;                      // web_pin(): 1..9999, 0 = none issued yet
   char     ssid[24];                 // the AP's SSID, when ap_up
   char     ip[24];                   // whichever address is live
-  char     url[CREATOR_TEXT_MAX];    // net_url(); NO PIN IN IT since P8-C1
+  // `url` WAS HERE, AND IT IS GONE RATHER THAN UNREAD. The screen showed two
+  // symbols in turn - join the network, then open the page - and this field fed
+  // the second one. There is one symbol now (see the banner over build() in
+  // screen_creator.cpp), so nothing encodes a URL, and a field kept "in case"
+  // is the defect this tree has already paid for once: 144 bytes of a player's
+  // drawing sat in a record nothing read for two phases behind exactly that
+  // reasoning. net_url() went with it.
 };
 
 // The screen-table hooks.
@@ -104,18 +110,13 @@ void creator_leave(void);
 //  creator_leave() and drops the hold. One teardown, as before.
 bool creator_screen_busy(void);
 
-// Which symbol is on screen: 0 = the URL, 1 = "join this network". Exposed for
-// the tests and for the snapshot names.
-uint8_t creator_variant(void);
-void    creator_set_variant(uint8_t v);
-
 // The NUL-terminated payload the symbol currently on screen encodes, or "" when
 // nothing has been encoded. THE POINT OF IT IS SPEC SECTION 39: a QR is
 // photographed, forwarded and posted, so the PIN must not be inside one, and
 // "the PIN is not in the payload" is a claim only a reader of the payload can
-// check. tools/check.sh's grep watches net_url() in src/networking and cannot
-// see ui/screen_creator.cpp, so without this seam a PIN appended in build()
-// would pass the whole gate.
+// check. tools/check.sh's grep watches src/networking for a URL built with a
+// formatted query parameter and cannot see ui/screen_creator.cpp at all, so
+// without this seam a PIN appended in build() would pass the whole gate.
 const char* creator_payload(void);
 
 #endif  // ER_SCREEN_CREATOR_H

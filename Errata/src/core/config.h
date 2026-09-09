@@ -449,6 +449,32 @@ static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
 // "ERRATA-" + 4 hex digits of the STA MAC = 14 chars, and net.h asserts
 // SSID_MAX_LEN >= 15 for exactly that.
 #define AP_SSID_PREFIX          "ERRATA-"
+
+// -----------------------------------------------------------------------------
+//  THE USER MANUAL'S ADDRESS, AND IT IS A COMPILE-TIME CONSTANT ON PURPOSE.
+//
+//  The MANUAL screen paints one QR and it never changes, so there is nothing to
+//  fetch, nothing to configure and nothing that can be stale on a device that
+//  has never been online. Point it somewhere else and the whole change is this
+//  line plus a rebuild.
+//
+//  THE LENGTH IS THE DESIGN CONSTRAINT AND THE static_assert BELOW IS THE ONLY
+//  THING STANDING BETWEEN A LONGER URL AND AN UNREADABLE SYMBOL. ui/qr.cpp's
+//  version-2-L byte budget is 32 (data_cw - 2). At 33 bytes the encoder picks
+//  version 3 - 29 modules - and 29 + 6 of quiet zone is 35, which in the 62 px
+//  box this screen reserves is ONE pixel per module. A 35 px symbol on a 0.96"
+//  panel is a coin flip, and nothing in the build would have said so: qrp_paint()
+//  clamps the scale and draws it anyway.
+//
+//  WHY THE SCHEME IS MISSING. "https://pmirall.github.io/Pebblebol" is 35 bytes
+//  and does not fit. Phone cameras resolve a bare host + path as a URL, so the
+//  eight characters buy nothing a scanner needs. If the repository is ever
+//  renamed to match the product, "https://pmirall.github.io/Errata" is 32 bytes
+//  exactly and the scheme comes back for free.
+#define MANUAL_URL              "pmirall.github.io/Pebblebol"
+static_assert(sizeof(MANUAL_URL) - 1 <= 32,
+              "MANUAL_URL is past QR version 2's 32-byte budget: the symbol would\n               fall to one pixel per module in the 62 px box and stop being\n               scannable on a 0.96\" panel. See ui/qr.cpp's QR_VER table.");
+
 #define AP_IP_A                 192
 #define AP_IP_B                 168
 #define AP_IP_C                 4

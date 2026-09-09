@@ -11,6 +11,7 @@
 #include "../data/sprites.h"
 #include "gfx.h"
 #include "qr.h"
+#include "qr_paint.h"
 #include "screen.h"
 #include "ui.h"
 
@@ -20,8 +21,9 @@
 
 // How long one symbol stays up while the provisioning AP alternates the two,
 // and how long a manual tap pins the choice.
-#define CR_ALTERNATE_MS  5000UL
-#define CR_MANUAL_MS    10000UL
+// CR_ALTERNATE_MS and CR_MANUAL_MS were here: five seconds per symbol and a
+// ten-second pin after a manual flip. There is one symbol now, so there is
+// nothing to alternate and nothing to pin.
 #define CR_REBUILD_MS    1000UL
 
 // The spec section 34 stack, as BASELINES in the right-hand column. Named
@@ -52,21 +54,17 @@ static_assert(CR_ROW_WAIT + 2 * GFX_LINE_BODY < UI_AFFORD_Y,
 
 static uint8_t  s_mod[QR_BUF_BYTES];
 static uint8_t  s_size     = 0;
-static uint8_t  s_variant  = 0;          // 0 = the URL, 1 = join-the-AP
 static uint32_t s_build_ms = 0;
-static uint32_t s_manual   = 0;
 static uint32_t s_open_ms  = 0;
 static char     s_key[CREATOR_TEXT_MAX]; // the payload the cached symbol encodes
-
-uint8_t creator_variant(void) { return s_variant; }
-void    creator_set_variant(uint8_t v) { s_variant = (uint8_t)(v ? 1u : 0u); s_key[0] = '\0'; }
 
 // THE EXACT BYTES THE SYMBOL ON SCREEN ENCODES. Exported for the same reason
 // creator_variant() is - a host test has no scanner - but it buys something
 // creator_variant() cannot: spec section 39 says the QR carries no secret, and
 // the only way to hold that is to read the payload back and look. The gate in
 // tools/check.sh greps src/networking for a formatted query parameter, which
-// catches net_url() growing a "?k=" again and CANNOT see this file at all: a
+// catches any URL under src/networking growing a "?k=" and CANNOT see this
+// file at all: a
 // PIN appended HERE, in the one function that decides what is encoded, would
 // pass every check in the tree. tests/test_screens.cpp's
 // creator_payload_carries_no_pin_for_any_pin is what closes that, and this is
@@ -76,11 +74,30 @@ const char* creator_payload(void) { return s_key; }
 // -----------------------------------------------------------------------------
 //  THE PAYLOAD
 // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+//  ONE SYMBOL, AND IT IS THE ONE THAT JOINS THE NETWORK.
+//
+//  This screen used to show two in turn: "join this network" for five seconds,
+//  then "open the page" for five, with A to flip between them. That is one
+//  symbol too many, and the owner said so from the bench: JOINING THE NETWORK
+//  IS ALREADY THE WHOLE JOURNEY. networking/net.cpp runs a DNSServer over the
+//  access point and networking/webui.cpp answers the catch-all, so a phone that
+//  joins fires its own captive-portal probe and opens the page by itself. The
+//  second symbol pointed at a page the first symbol had already opened.
+//
+//  What a rotating symbol cost, which is the part that does not show up in a
+//  screenshot: a person holding a phone at a QR has to notice that the picture
+//  under the camera changed while they were aiming at it, and the two symbols
+//  are indistinguishable at a glance. Half the time you scan the wrong one, and
+//  the wrong one is a URL for a network you have not joined yet - so it fails,
+//  and it fails in a way that looks like the device is broken rather than like
+//  you were early.
+// -----------------------------------------------------------------------------
 static void build(const CreatorInfo& in) {
   char text[CREATOR_TEXT_MAX];
   text[0] = '\0';
 
-  if (s_variant == 1 && in.ap_up) {
+  if (in.ap_up) {
     // OPEN NETWORK, AND P8-C2 DECIDED THAT RATHER THAN INHERITING IT.
     //
     // "WIFI:S:ERRATA-A1B2;;" is 23 B and fits QR version 2 (25 modules ->
@@ -115,8 +132,6 @@ static void build(const CreatorInfo& in) {
     // Reopening this needs a bench call (a redesigned CREATOR layout, or the
     // join symbol dropped for on-screen text), not a code change.
     snprintf(text, sizeof(text), "WIFI:S:%s;;", in.ssid);
-  } else {
-    snprintf(text, sizeof(text), "%s", in.url);
   }
 
   if (text[0] == '\0') { s_size = 0; s_key[0] = '\0'; return; }
@@ -152,12 +167,10 @@ void creator_enter(void) {
 
   CreatorInfo in;
   ui_creator_info(in);
-  s_variant  = in.ap_up ? 1u : 0u;
   s_key[0]   = '\0';
   s_size     = 0;
   s_build_ms = ui_now_ms();
   s_open_ms  = s_build_ms;
-  s_manual   = 0;
   build(in);
 }
 
@@ -200,28 +213,18 @@ void creator_update(uint32_t now_ms) {
     return;
   }
 
-  // In AP-provisioning mode the two symbols alternate: join the network first,
-  // then open the page. A manual tap pins the choice for CR_MANUAL_MS.
-  if (in.ap_up && (s_manual == 0 || (uint32_t)(now_ms - s_manual) > CR_MANUAL_MS)) {
-    const uint32_t up   = (uint32_t)(now_ms - s_open_ms);
-    const uint8_t  want = (uint8_t)(((up / CR_ALTERNATE_MS) & 1u) ? 0u : 1u);
-    if (want != s_variant) { s_variant = want; s_key[0] = '\0'; }
-  }
+  // The alternation was here. build() answers one payload now, and it caches on
+  // the payload itself, so a symbol that has not changed is not re-encoded.
   build(in);
 }
 
-// Section 7: A is the only button this screen owns. B is BACK (the router
-// took it) and there is nothing here a long press should mean.
-void creator_input(Gesture g) {
-  if (g != GST_TAP_L) return;
-  CreatorInfo in;
-  ui_creator_info(in);
-  if (!in.ap_up) return;                    // one symbol only: nothing to flip
-  s_variant  = (uint8_t)!s_variant;
-  s_key[0]   = '\0';
-  s_manual   = ui_now_ms();
-  build(in);
-}
+// THIS SCREEN OWNS NO BUTTON NOW. A flipped between the two symbols; there is
+// one symbol, so A has nothing to mean here and does nothing rather than doing
+// something invented to keep it busy. B is BACK and the router owns it.
+//
+// The `void` cast is not laziness: the hook is in the screen table and the
+// table's signature is fixed.
+void creator_input(Gesture g) { (void)g; }
 
 // -----------------------------------------------------------------------------
 //  DRAWING
@@ -231,36 +234,10 @@ void creator_input(Gesture g) {
 //  (lit paper, cleared dark modules, horizontal runs merged) and one less
 //  thing that only exists on the target.
 // -----------------------------------------------------------------------------
+// The painter moved to ui/qr_paint.cpp when the MANUAL screen needed the same
+// picture. What is left here is the box this screen reserves for it.
 static void draw_symbol(void) {
-  if (s_size == 0) {
-    gfx_rect(QR_BOX_X, QR_BOX_Y, QR_BOX_SIZE, QR_BOX_SIZE);
-    const int16_t w = (int16_t)gfx_text_w(GF_BODY, "...");
-    gfx_text(GF_BODY, (int16_t)(QR_BOX_X + (QR_BOX_SIZE - w) / 2), 34, "...");
-    return;
-  }
-
-  const int16_t q  = QR_QUIET_MODULES;
-  int16_t px = (int16_t)(QR_BOX_SIZE / (s_size + 2 * q));
-  if (px < 1) px = 1;
-  if (px > 3) px = 3;
-  const int16_t box = (int16_t)((s_size + 2 * q) * px);
-
-  // Lit paper first: on an OLED a lit pixel is white, so the whole symbol area
-  // including the quiet zone is drawn set and the dark modules are cleared.
-  gfx_fill(QR_BOX_X, QR_BOX_Y, box, box);
-  gfx_color(GFX_ERASE);
-  for (int16_t r = 0; r < (int16_t)s_size; ++r) {
-    int16_t c = 0;
-    while (c < (int16_t)s_size) {
-      if (!QR_MODULE_AT(s_mod, r, c)) { ++c; continue; }
-      int16_t run = 1;
-      while (c + run < (int16_t)s_size && QR_MODULE_AT(s_mod, r, c + run)) ++run;
-      gfx_fill((int16_t)(QR_BOX_X + (q + c) * px), (int16_t)(QR_BOX_Y + (q + r) * px),
-               (int16_t)(run * px), px);
-      c = (int16_t)(c + run);
-    }
-  }
-  gfx_color(GFX_DRAW);
+  qrp_paint(s_mod, s_size, QR_BOX_X, QR_BOX_Y, QR_BOX_SIZE);
 }
 
 void creator_render(void) {
@@ -294,19 +271,23 @@ void creator_render(void) {
   // THE PIN IS DRAWN HERE AND IS NOT IN THE SYMBOL (spec section 39). A QR is
   // photographed, forwarded and posted; a four-digit number a person reads off
   // a screen they are standing in front of is the authorisation layer. build()
-  // above encodes in.url or the SSID and nothing else, and
+  // above encodes the join string and nothing else, and
   // tests/test_screens.cpp's creator_payload_carries_no_pin_for_any_pin holds
   // that for all 9,999 PINs cg_mint_pin() can produce.
   if (in.ap_up) {
     gfx_text_fit(GF_BODY, rx, CR_ROW_SCAN, rw, S(STR_CREATOR_SCAN));
 
-    // WHICH SYMBOL IS ON SCREEN, in the words of the thing it encodes: the
-    // network name while the "join me" symbol is up, the address while the URL
-    // symbol is up. GF_TINY is the ASCII-only 4x6 and both of these are ASCII
-    // by construction (AP_SSID_PREFIX plus hex; a dotted quad), which is the
-    // one thing that font is for - no Spanish prose is drawn in it.
-    gfx_text_fit(GF_TINY, rx, CR_ROW_WHAT, rw,
-                 (s_variant == 1) ? in.ssid : in.ip);
+    // WHAT THE SYMBOL DOES, in the words of the thing it encodes: the network
+    // it joins. It used to be the SSID or the address depending on which symbol
+    // was up; there is one symbol, so there is one caption.
+    //
+    // IT EARNS ITS ROW BY BEING THE FALLBACK. If the camera will not read the
+    // code - a scratched panel, a phone that refuses WIFI: payloads - this line
+    // is how the owner joins by hand from the phone's own Wi-Fi list, and the
+    // captive portal then opens the page exactly as it would have. GF_TINY is
+    // the ASCII-only 4x6 and the SSID is ASCII by construction (AP_SSID_PREFIX
+    // plus hex), which is the one thing that font is for.
+    gfx_text_fit(GF_TINY, rx, CR_ROW_WHAT, rw, in.ssid);
 
     gfx_text_fit(GF_BODY, rx, CR_ROW_PIN_LBL, rw, S(STR_WEB_PIN));
 
@@ -344,9 +325,8 @@ void creator_render(void) {
     gfx_xbm(rx, UI_AFFORD_Y, l.w, l.h, l.bits);
     gfx_text_fit(GF_BODY, (int16_t)(rx + 10), (int16_t)(UI_AFFORD_Y + GFX_ASC_BODY),
                  40, S(STR_AF_BACK));
-    if (in.ap_up) {
-      const SpriteRef r = sprite_mini(MIC_ARROW_R);
-      gfx_xbm((int16_t)(OLED_W - 8), UI_AFFORD_Y, r.w, r.h, r.bits);
-    }
+    // The right-hand arrow was here and it advertised the flip. An affordance
+    // for a button that does nothing is worse than no affordance: it is a
+    // promise the screen cannot keep.
   }
 }

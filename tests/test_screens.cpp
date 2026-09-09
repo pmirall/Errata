@@ -39,6 +39,7 @@
 #include "ui/screen_care.h"
 #include "hardware/power.h"
 #include "ui/screen_creator.h"
+#include "ui/screen_manual.h"
 #include "ui/screen_diag.h"
 #include "ui/screen_evolution.h"
 #include "ui/screen_error.h"
@@ -230,11 +231,10 @@ void ui_creator_info(CreatorInfo& out) {
   out.pin    = g_pin;
   snprintf(out.ssid, sizeof out.ssid, "ERRATA-1234");
   snprintf(out.ip,   sizeof out.ip,   "192.168.4.1");
-  // NO "?k=NNNN" SINCE P8-C1. net_url() lost the PIN and the argument that
-  // carried it (spec section 39); this fixture matches what net.cpp now emits,
-  // and tools/check.sh has the gate that stops the query parameter coming back
-  // - a fixture could only ever assert what the fixture typed.
-  if (g_ap_up) snprintf(out.url, sizeof out.url, "http://192.168.4.1/");
+  // CreatorInfo.url is gone with the second symbol: the screen encodes the join
+  // string and nothing else. A fixture could only ever have asserted what the
+  // fixture typed anyway - tools/check.sh section 1b is what stops a query
+  // parameter coming back, and it greps the whole of src/networking.
 }
 bool ui_btn_down(uint8_t)         { return false; }
 uint32_t ui_btn_hold_ms(uint8_t)  { return 0; }
@@ -2543,8 +2543,50 @@ TEST(snapshot_creator_portal) {
   seams2_reset();
   g_ap_up = 1;
   creator_enter();
-  CHECK_EQ(creator_variant(), (uint8_t)1);     // the portal opens on "join me"
+  // ONE SYMBOL, AND THE SNAPSHOT IS OF THAT SYMBOL. It used to assert
+  // creator_variant() == 1 to say the portal opens on "join me"; there is no
+  // second variant to open on, so the claim is made against the bytes.
+  CHECK_STR_EQ(creator_payload(), "WIFI:S:ERRATA-1234;;");
   snapshot(SCR_CREATOR, "creator_portal");
+}
+
+// =============================================================================
+//  THE MANUAL SCREEN (P10-C7)
+// =============================================================================
+TEST(snapshot_manual) {
+  seams2_reset();
+  manual_enter();
+  snapshot(SCR_MANUAL, "manual");
+}
+
+// THE SYMBOL POINTS AT THE MANUAL AND AT NOTHING ELSE. A host binary has no
+// scanner, so the claim is made against the bytes handed to qr_encode() - the
+// same seam ui/screen_creator.h exports for the same reason.
+TEST(the_manual_qr_encodes_the_documented_address) {
+  seams2_reset();
+  manual_enter();
+  CHECK_STR_EQ(manual_payload(), MANUAL_URL);
+
+  // AND IT FITS QR VERSION 2, which is the whole reason MANUAL_URL is short.
+  // core/config.h static_asserts the length; this asserts the consequence -
+  // that the encoder really did accept it - because an assert on a #define
+  // cannot see qr_encode() refusing the string for some other reason.
+  CHECK(manual_payload()[0] != '\0');
+  CHECK(strlen(manual_payload()) <= 32u);
+
+  // No button changes it. There is nothing here to press.
+  const Gesture all[] = { GST_TAP_L, GST_TAP_R, GST_HOLD_L, GST_HOLD_R, GST_BOTH };
+  for (uint8_t i = 0; i < (uint8_t)(sizeof all / sizeof all[0]); ++i) {
+    manual_input(all[i]);
+    CHECK_STR_EQ(manual_payload(), MANUAL_URL);
+  }
+}
+
+// IT IS NOT STICKY, AND THE CREATOR SCREEN IS. Copying a flag across with a
+// picture is how a screen the device never walks away from gets shipped.
+TEST(the_manual_screen_leaves_on_the_ordinary_clock) {
+  CHECK((SCREENS[SCR_MANUAL].flags & SF_STICKY) == 0);
+  CHECK((SCREENS[SCR_CREATOR].flags & SF_STICKY) != 0);
 }
 
 TEST(snapshot_creator_offline) {
@@ -2565,18 +2607,32 @@ TEST(snapshot_creator_offline) {
 //  green. creator_payload() is the seam these three cases read through.
 // =============================================================================
 
-// The two payloads, named. Anything else on screen is a symbol pointing
-// somewhere nobody chose.
-TEST(creator_encodes_the_join_string_and_the_url_and_nothing_else) {
+// THE ONE PAYLOAD, NAMED - and the case is worth more than the two-payload one
+// it replaces, because "one symbol" is a claim about what the screen CANNOT do.
+// Pressing A used to flip to the URL. A is inert now, and a test that only
+// checked the opening payload would pass just as happily on a screen that still
+// flipped away from it the moment somebody leaned on the button.
+TEST(creator_encodes_the_join_string_and_nothing_else) {
   seams2_reset();
   g_ap_up = 1;
   creator_enter();
-  CHECK_EQ(creator_variant(), (uint8_t)1);
   CHECK_STR_EQ(creator_payload(), "WIFI:S:ERRATA-1234;;");
 
-  creator_input(GST_TAP_L);                       // flip to the URL
-  CHECK_EQ(creator_variant(), (uint8_t)0);
-  CHECK_STR_EQ(creator_payload(), "http://192.168.4.1/");
+  // Every gesture the screen can be handed, and none of them may change it.
+  const Gesture all[] = { GST_TAP_L, GST_TAP_R, GST_HOLD_L, GST_HOLD_R, GST_BOTH };
+  for (uint8_t i = 0; i < (uint8_t)(sizeof all / sizeof all[0]); ++i) {
+    creator_input(all[i]);
+    CHECK_STR_EQ(creator_payload(), "WIFI:S:ERRATA-1234;;");
+  }
+
+  // And it does not drift with the clock either: the old screen swapped symbol
+  // every CR_ALTERNATE_MS, so a case that never advanced time could not have
+  // seen the alternation at all.
+  for (uint32_t t = 0; t < 60000u; t += 1000u) {
+    g_now += 1000u;
+    creator_update(g_now);
+    CHECK_STR_EQ(creator_payload(), "WIFI:S:ERRATA-1234;;");
+  }
 }
 
 // THE PAYLOAD IS NOT A FUNCTION OF THE PIN, at any PIN the device can mint.
@@ -2595,23 +2651,21 @@ TEST(creator_payload_carries_no_pin_for_any_pin) {
   g_pin = 1u;
   creator_enter();
   char join[CREATOR_TEXT_MAX];
-  char url[CREATOR_TEXT_MAX];
   snprintf(join, sizeof join, "%s", creator_payload());
-  creator_input(GST_TAP_L);
-  snprintf(url, sizeof url, "%s", creator_payload());
   CHECK(join[0] != '\0');
-  CHECK(url[0]  != '\0');
-  CHECK(strcmp(join, url) != 0);                  // the two really are different
-
-  // Every PIN cg_mint_pin() can produce: 1..WEB_PIN_MAX-1, never the 0
-  // sentinel. Both symbols at each one.
+  // IT IS NOT A SUBSTRING SEARCH, and the reason is the same one that made the
+  // two-symbol version of this case worth writing: "1" appears inside the SSID's
+  // hex suffix for a great many PINs, so a search for the digits would fail on
+  // payloads that are innocent and pass on one that concatenated a PIN behind
+  // something else. What is checked is that the payload DOES NOT MOVE - if the
+  // PIN were in it, it would have to.
+  //
+  // Every PIN cg_mint_pin() can produce: 1..WEB_PIN_MAX-1, never the 0 sentinel.
   int bad = 0;
   for (uint32_t pin = 1u; pin < (uint32_t)WEB_PIN_MAX; ++pin) {
     g_pin = (uint16_t)pin;
     creator_enter();                              // re-encodes from scratch
     if (strcmp(creator_payload(), join) != 0) { bad++; break; }
-    creator_input(GST_TAP_L);
-    if (strcmp(creator_payload(), url) != 0) { bad++; break; }
   }
   if (bad) fprintf(stderr, "    payload moved at pin %u: \"%s\"\n",
                    (unsigned)g_pin, creator_payload());
@@ -2626,13 +2680,11 @@ TEST(creator_payload_never_carries_a_query_parameter) {
   g_ap_up = 1;
   g_pin = 4242u;
   creator_enter();
-  for (int i = 0; i < 2; ++i) {
-    const char* p = creator_payload();
-    CHECK(strchr(p, '?') == nullptr);
-    CHECK(strchr(p, '=') == nullptr);
-    CHECK(strchr(p, '&') == nullptr);
-    creator_input(GST_TAP_L);
-  }
+  const char* p = creator_payload();
+  CHECK(p[0] != '\0');
+  CHECK(strchr(p, '?') == nullptr);
+  CHECK(strchr(p, '=') == nullptr);
+  CHECK(strchr(p, '&') == nullptr);
 }
 
 // The radio is SCREEN-OWNED: taken on the way in, given back on the way out.
@@ -2649,24 +2701,24 @@ TEST(creator_takes_and_releases_the_radio) {
   CHECK_EQ(g_radio_calls, 2);
 }
 
-// With the portal up a tap flips between the two symbols; with one symbol
-// there is nothing to flip and the tap is a no-op rather than a broken frame.
-TEST(creator_alternates_only_while_the_portal_is_up) {
+// OFFLINE THE SCREEN ENCODES NOTHING, and it says so with an empty payload
+// rather than with a stale one. This case was `creator_alternates_only_while_
+// the_portal_is_up` and asserted that a tap flipped the symbol with the portal
+// up and did not without it. There is no flip left; what survives of it is the
+// half that still means something - before the access point is up there is
+// nothing to join, so there is nothing to draw.
+TEST(the_symbol_is_empty_until_there_is_a_network_to_join) {
   seams2_reset();
-  g_ap_up = 1;
-  creator_enter();
-  const uint8_t first = creator_variant();
+  creator_enter();                              // no radio, no access point
+  CHECK_STR_EQ(creator_payload(), "");
   creator_input(GST_TAP_L);
-  CHECK(creator_variant() != first);
+  CHECK_STR_EQ(creator_payload(), "");
 
-  // ...and with NO radio at all there is likewise one symbol and nothing to
-  // flip. This half used to drive g_sta_up, which no longer exists; the offline
-  // state is what is left of "the portal is not up".
-  seams2_reset();
-  creator_enter();
-  const uint8_t only = creator_variant();
-  creator_input(GST_TAP_L);
-  CHECK_EQ(creator_variant(), only);
+  // And it appears exactly when the access point does, without a button.
+  g_ap_up = 1;
+  g_now += 1000u;
+  creator_update(g_now);
+  CHECK_STR_EQ(creator_payload(), "WIFI:S:ERRATA-1234;;");
 }
 
 // -----------------------------------------------------------------------------
@@ -2868,7 +2920,6 @@ TEST(creator_join_string_fits_the_version_2_byte_budget) {
   seams2_reset();
   g_ap_up = 1;
   creator_enter();
-  CHECK_EQ(creator_variant(), (uint8_t)1);
   CHECK(strlen(creator_payload()) <= 32u);      // the encoded bytes, not a copy
   CHECK(strncmp(creator_payload(), "WIFI:S:", 7) == 0);
 }
@@ -4887,6 +4938,12 @@ static void au_status_a(void) { status_a_enter(); }
 static void au_status_b(void) { status_b_enter(); }
 static void au_network(void)  { network_enter(); }
 static void au_creator(void)  { g_ap_up = 1; creator_enter(); }
+// MANUAL has no worst case to build: no radio, no name, no numbers - one
+// compile-time payload and two fixed blocks of Spanish. The audit still wants
+// the row, and the row still earns its place, because the two text blocks are
+// wrapped and the longest Spanish string in them is what would push the hint
+// into the affordance strip.
+static void au_manual(void)   { manual_enter(); }
 static void au_settings(void) { settings_enter(); }
 static void au_time(void)     { time_enter(); }
 
@@ -4975,6 +5032,7 @@ static const AuditRow kAudit[] = {
   { SCR_NETWORK,       "NETWORK",       network_render,    au_network   },
   { SCR_LINK,          "LINK",          link_render,       au_link      },
   { SCR_CREATOR,       "CREATOR",       creator_render,    au_creator   },
+  { SCR_MANUAL,        "MANUAL",        manual_render,     au_manual    },
   { SCR_SETTINGS,      "SETTINGS",      settings_render,   au_settings  },
   { SCR_TIME,          "TIME",          time_render,       au_time      },
   { SCR_SETUP_NAME,    "SETUP_NAME",    setup_name_render, au_setup_name},

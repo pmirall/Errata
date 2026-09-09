@@ -164,7 +164,10 @@ const char *net_ap_ssid(void);
 // PIN remains the user-facing authorization layer" - a PIN that travels in the
 // QR is not a layer. It is typed by the user from the device screen into an
 // X-Pin header instead (networking/creator_gate.h).
-size_t      net_url(char *out, size_t cap);
+//
+// THE FUNCTION ITSELF IS GONE (the creator screen shows one symbol now, the
+// one that joins the network). The rule above outlived it and is why
+// tools/check.sh section 1b greps this whole directory rather than one name.
 
 // -----------------------------------------------------------------------------
 // net_request_portal() - THE CREATOR SCREEN'S OWN BRING-UP (P8-C2).

@@ -18,16 +18,22 @@
 #include "screen.h"
 #include "ui.h"
 
+// BOTH TABLES ARE INDEXED BY SetRow AND THE ORDER IS THE ENUM'S. Adding a row
+// in one and not the other is a silent mislabel, so the static_asserts under
+// them count both against SET_ROWS - which is what caught MANUAL being appended
+// to kLabel and forgotten in kHelp while this was being written.
 static const uint16_t kLabel[SET_ROWS] = {
   STR_SET_SOUND, STR_SET_WEB,   STR_SET_BRIGHT,
-  STR_WEB_TITLE, STR_SET_CLOCK, STR_SET_INFO,  STR_SET_RESET,
-  STR_ITEM_BACK
+  STR_WEB_TITLE, STR_SET_CLOCK, STR_SET_INFO,  STR_SET_MANUAL,
+  STR_SET_RESET, STR_ITEM_BACK
 };
 static const uint16_t kHelp[SET_ROWS] = {
   STR_HLP_SOUND, STR_HLP_WEB,   STR_HLP_BRIGHT,
-  STR_HLP_WEB,   STR_HLP_CLOCK, STR_HLP_INFO,  STR_HLP_RESET,
-  STR_HLP_BACK
+  STR_HLP_WEB,   STR_HLP_CLOCK, STR_HLP_INFO,  STR_HLP_MANUAL,
+  STR_HLP_RESET, STR_HLP_BACK
 };
+static_assert(NT_ARRAY_LEN(kLabel) == (size_t)SET_ROWS, "settings labels");
+static_assert(NT_ARRAY_LEN(kHelp)  == (size_t)SET_ROWS, "settings help lines");
 static const uint8_t kBrightSteps[5] = {
   OLED_CONTRAST_DIM, 90, OLED_CONTRAST_DEFAULT, 200, 255
 };
@@ -83,6 +89,7 @@ static void settings_select(void) {
   switch (s_cur) {
     case SET_BACK:  ui_back();                  return;
     case SET_INFO:  s_page = 1; ui_note_input(); return;
+    case SET_MANUAL: ui_push(SCR_MANUAL);       return;
     case SET_QR:    ui_push(SCR_CREATOR);            return;
     case SET_CLOCK: ui_push(SCR_TIME);         return;
     case SET_RESET: ui_confirm_wipe();          return;

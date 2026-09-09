@@ -226,6 +226,7 @@ enum StrId : uint16_t {
   STR_SET_BRIGHT,
   STR_SET_WEB,
   STR_SET_INFO,
+  STR_SET_MANUAL,
   STR_SET_RESET,
   STR_SET_SAVED,
   STR_SET_MUTE_ON,
@@ -319,6 +320,7 @@ enum StrId : uint16_t {
   STR_HLP_WEB,
   STR_HLP_BRIGHT,
   STR_HLP_INFO,
+  STR_HLP_MANUAL,
   STR_HLP_RESET,
   STR_HLP_PEER,
   STR_HLP_BACK,
@@ -859,6 +861,9 @@ enum StrId : uint16_t {
   // ...and the corruption readout, spec section 55. The state lasted 24 h with
   // one line of onset text and no way to check it afterwards.
   STR_ST_CORRUPT,
+  // The MANUAL screen (P10-C7). Two blocks beside one static QR.
+  STR_MAN_TITLE,
+  STR_MAN_HINT,
 
   STR_COUNT
 };
@@ -1069,6 +1074,7 @@ inline constexpr const char* const ES[] = {
   /* STR_SET_BRIGHT */            "Brillo",
   /* STR_SET_WEB */               "Web y QR",
   /* STR_SET_INFO */              "Acerca de",
+  /* STR_SET_MANUAL */            "Manual",
   /* STR_SET_RESET */             "Empezar de cero",
   /* STR_SET_SAVED */             "Guardado.",
   /* STR_SET_MUTE_ON */           "Sonido apagado.",
@@ -1150,6 +1156,7 @@ inline constexpr const char* const ES[] = {
   /* STR_HLP_WEB */               "Página y QR en el móvil.",
   /* STR_HLP_BRIGHT */            "Brillo de la pantalla.",
   /* STR_HLP_INFO */              "Versión, red y memoria.",
+  /* STR_HLP_MANUAL */            "QR al manual de uso.",
   /* STR_HLP_RESET */             "Borra todo. Todo.",
   /* STR_HLP_PEER */              "Acércalo y espera.",
   /* STR_HLP_BACK */              "Volver sin tocar nada.",
@@ -1588,6 +1595,8 @@ inline constexpr const char* const ES[] = {
   , /* STR_ITEM_BOOST */          "Listo para el combate"
   , /* STR_ITEM_EVOLVED */        "¡Algo está cambiando!"
   , /* STR_ST_CORRUPT */          "Corrupto"
+  , /* STR_MAN_TITLE */           "MANUAL"
+  , /* STR_MAN_HINT */            "Escanea para leerlo en el móvil."
 };
 
 // -----------------------------------------------------------------------------
@@ -1629,7 +1638,8 @@ static_assert(STR_MENU_SETTINGS   - STR_MENU_BUG + 1 == MENU_ITEM_COUNT,    "men
 static_assert(STR_SYL_A11         - STR_SYL_A00     + 1 == 12,                 "name syllables A");
 static_assert(STR_SYL_B11         - STR_SYL_B00     + 1 == 12,                 "name syllables B");
 // 19 -> 18: STR_HLP_LIGHT went with the light mechanic (P3-C2b).
-static_assert(STR_HLP_BACK        - STR_HLP_FEED    + 1 == 18,                 "ui help block");
+// 18 -> 19: STR_HLP_MANUAL joined the block with the MANUAL settings row.
+static_assert(STR_HLP_BACK        - STR_HLP_FEED    + 1 == 19,                 "ui help block");
 static_assert(STR_AF_ADD          - STR_SET_CLOCK   + 1 == 12,                 "time entry block");
 // The six minigame names and the six hints are index-parallel to MgId, which is
 // what lets ui/screen_care.cpp build the PLAY list by row index alone. Written
