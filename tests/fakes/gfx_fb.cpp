@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - fakes/gfx_fb.cpp
+//  Errata host tests - fakes/gfx_fb.cpp
 //  The host implementation of ui/gfx.h. See gfx_fb.h for what it is for.
 // =============================================================================
 #include "gfx_fb.h"
@@ -554,7 +554,7 @@ void gfx_affordance(const char* left, const char* right) {
 bool fb_write_pbm(const char* path) {
   FILE* f = fopen(path, "wb");
   if (!f) return false;
-  fprintf(f, "P1\n# Pebblebol screen snapshot, %dx%d\n%d %d\n", FB_W, FB_H, FB_W, FB_H);
+  fprintf(f, "P1\n# Errata screen snapshot, %dx%d\n%d %d\n", FB_W, FB_H, FB_W, FB_H);
   for (int y = 0; y < FB_H; y++) {
     for (int x = 0; x < FB_W; x++) fputc(s_fb[y][x] ? '1' : '0', f);
     fputc('\n', f);

@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL host tests - test_discovery.cpp
+//  ERRATA host tests - test_discovery.cpp
 //  P7-C1: THE BEACON CODEC, THE PEER TABLE AND THE DISCOVERY JOB.
 //
 //  NO RADIO ANYWHERE IN THIS BINARY. networking/discovery.cpp is a pure
@@ -62,7 +62,7 @@ static DiscBeacon mk_beacon(uint32_t id, const char* name, uint16_t caps)
 
 // The bytes a peer would put on the air.
 static void mk_wire(uint8_t out[DISC_BEACON_BYTES], uint32_t id,
-                    const char* name = "PEBBLE", uint16_t caps = DISC_CAP_BATTLE)
+                    const char* name = "BUG", uint16_t caps = DISC_CAP_BATTLE)
 {
   const DiscBeacon b = mk_beacon(id, name, caps);
   uint16_t n = 0;

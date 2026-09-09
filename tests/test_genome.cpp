@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_genome.cpp
+//  Errata host tests - test_genome.cpp
 //  genome.cpp through its public header: genesis ranges, seal/validate,
 //  breeding determinism, the 32-hex round trip and the gene setters.
 // =============================================================================

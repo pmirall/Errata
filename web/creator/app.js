@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL CREATOR - THE PAGE (P8-C4, spec sections 33 to 39).
+//  ERRATA CREATOR - THE PAGE (P8-C4, spec sections 33 to 39).
 //
 //  ==========================================================================
 //  THIS PAGE MIRRORS THE SCHEMA. THE DEVICE RE-VALIDATES. NOTHING HERE IS A
@@ -96,7 +96,7 @@
   var step = 0;
   var pingTimer = 0, previewTimer = 0;
 
-  var M = {              // the Pebble being built
+  var M = {              // the Bug being built
     name: '',
     type: 0,
     base: [],            // sized from the schema
@@ -141,13 +141,13 @@
     big:      'El dibujo o el nombre ocupan m\u00e1s de lo que el dispositivo acepta.',
     type:     'Formato de env\u00edo no aceptado.',
     ro:       'El dispositivo est\u00e1 en s\u00f3lo lectura y no puede guardar.',
-    nopet:    'El dispositivo todav\u00eda no tiene ning\u00fan Pebble.',
+    nopet:    'El dispositivo todav\u00eda no tiene ning\u00fan Bug.',
     boxfull:  'La caja est\u00e1 llena. Libera un hueco en el dispositivo.',
     csfull:   'No quedan huecos de especie. Libera uno en el dispositivo.',
     install:  'El dispositivo no pudo instalar la especie.',
-    box:      'El dispositivo no pudo crear el Pebble.',
+    box:      'El dispositivo no pudo crear el Bug.',
     flash:    'El dispositivo no pudo guardar en memoria.',
-    internal: 'El dispositivo rechaz\u00f3 el Pebble ya construido.',
+    internal: 'El dispositivo rechaz\u00f3 el Bug ya construido.',
     // the document reader
     CP_EMPTY:       'No lleg\u00f3 nada.',
     CP_SYNTAX:      'El documento no tiene la forma esperada.',
@@ -727,7 +727,7 @@
     var m = $('upload-msg'), b;
     try { b = body(); } catch (e) { m.textContent = String(e.message); return; }
     $('btn-upload').disabled = true;
-    req('POST', '/api/pebble', b).then(function (r) {
+    req('POST', '/api/bug', b).then(function (r) {
       var bad = refusal(r);
       if (bad) {
         $('btn-upload').disabled = false;
@@ -818,7 +818,7 @@
       M.base = [];
       for (i = 0; i < S.sprite.f * 0 + 4; i++) M.base.push(S.stat.lo);
       // Start inside the band rather than at the floor of every field, so the
-      // first thing the user sees is a legal Pebble and not four warnings.
+      // first thing the user sees is a legal Bug and not four warnings.
       var spread = Math.floor(S.stat.min / M.base.length);
       for (i = 0; i < M.base.length; i++) M.base[i] = spread;
       i = 0;

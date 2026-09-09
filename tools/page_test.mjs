@@ -5,12 +5,12 @@
 //  WHAT THIS PROVES AND WHAT IT DOES NOT
 //  ==========================================================================
 //  IT DRIVES THE SHIPPED BYTES. The page under test is extracted from
-//  Pebblebol/src/data/index_html.h - the blob GET / serves, raw-string
+//  Errata/src/data/index_html.h - the blob GET / serves, raw-string
 //  delimiters and all - not from web/creator/*.js. A harness that loaded the
 //  sources would pass while the generator mangled them.
 //
 //  IT ANSWERS WITH THE SHIPPED SCHEMA. GET /api/schema replies with the exact
-//  document in Pebblebol/src/data/creator_schema_json.h, so every number the
+//  document in Errata/src/data/creator_schema_json.h, so every number the
 //  page computes from is the number the device would have sent.
 //
 //  IT IS JUDGED BY THE SHIPPED DECODER. The body the page POSTs is piped into
@@ -67,9 +67,9 @@ function between(text, open, close, what) {
   return text.slice(a + open.length, b);
 }
 
-const PAGE = between(readFileSync(path.join(ROOT, 'Pebblebol/src/data/index_html.h'), 'utf8'),
+const PAGE = between(readFileSync(path.join(ROOT, 'Errata/src/data/index_html.h'), 'utf8'),
                      'R"PBHTML(', ')PBHTML";', 'the page blob in index_html.h');
-const SCHEMA = between(readFileSync(path.join(ROOT, 'Pebblebol/src/data/creator_schema_json.h'), 'utf8'),
+const SCHEMA = between(readFileSync(path.join(ROOT, 'Errata/src/data/creator_schema_json.h'), 'utf8'),
                        'R"JSON(', ')JSON";', 'the schema blob in creator_schema_json.h');
 
 // ---- the fake device --------------------------------------------------------
@@ -109,7 +109,7 @@ const srv = createServer(async (req, res) => {
   lastBody = body; lastPath = url;
   if (url === '/api/ping') return j(200, { ok: 1 });
   if (url === '/api/time') return j(200, { ok: 1, cal: 3, epoch: 1767225600 });
-  if (url === '/api/validate' || url === '/api/pebble') {
+  if (url === '/api/validate' || url === '/api/bug') {
     const d = decode(body);
     if (d.cp !== 'CP_OK') return j(400, { err: 'parse', why: d.cp });
     if (d.vr !== 'VR_OK') return j(422, { err: 'invalid', why: d.vr });
@@ -310,7 +310,7 @@ const run = async () => {
   // filter, the disabled state and the running cost are all exercised by the
   // path a user takes.
   // The cheapest DAMAGING move plus the three cheapest of anything: the set a
-  // user reaching for a legal Pebble builds, and the one the device accepts.
+  // user reaching for a legal Bug builds, and the one the device accepts.
   // The first version of this harness took the four cheapest outright and the
   // device answered VR_CS_NO_DAMAGING_MOVE - which is a real rule, so it moved
   // to section 10 as a hostile case instead of being papered over here.
@@ -345,7 +345,7 @@ const run = async () => {
   const pagePct = await p.evaluate('window.PB.pct(window.PB.statUsed(), window.PB.atkUsed())');
 
   // THE BAR AGAINST THE DEVICE OVER THE WHOLE INPUT DOMAIN, not at the one
-  // input this Pebble happens to produce. Four stats of 1..10 is S in 4..40 and
+  // input this Bug happens to produce. Four stats of 1..10 is S in 4..40 and
   // four moves of the served costs is A in 0..400 with room to spare; 14,837
   // pairs, each answered by game/validate.cpp's creator_power_pct() in the
   // binary above and by window.PB.pct() in the browser.
@@ -429,7 +429,7 @@ const run = async () => {
   await p.waitForSelector('#donebox:not([hidden])');
   eq(await p.textContent('#u-species'), '200', 'the device told the page which species id it used');
   eq(await p.textContent('#u-cs'), '0', 'and which cs slot');
-  eq(lastPath, '/api/pebble', 'the upload went to /api/pebble');
+  eq(lastPath, '/api/bug', 'the upload went to /api/bug');
 
   check(errors.length === 0, 'no page error in the whole run (' + errors.join(' | ') + ')');
 

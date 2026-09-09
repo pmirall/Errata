@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL host test - test_corruption.cpp
+//  ERRATA host test - test_corruption.cpp
 //  THE EFFECTS HALF OF CORRUPTION (spec section 55, plan P9-C5).
 //
 //  THE STATUS HALF IS NOT HERE. cor_apply / cor_expire / cor_clear, the 24 h
@@ -18,8 +18,8 @@
 //    4. THE IDLE ANIMATION CANNOT OUTLIVE THE STATUS.
 //    5. EVOC_CORRUPTED UNLOCKS AT MOST TWO FAMILIES and refuses without the
 //       flag.
-//    6. IT NEVER DESTROYS. A corrupted Pebble that is saved, reloaded, traded
-//       and bred from is still exactly one Pebble with a bounded effect.
+//    6. IT NEVER DESTROYS. A corrupted Bug that is saved, reloaded, traded
+//       and bred from is still exactly one Bug with a bounded effect.
 //
 //  WHAT THIS FILE CANNOT ASSERT, said plainly because the brief asks for it:
 //  NOTHING HERE PROVES THE GLITCH LOOKS LIKE A GLITCH. A byte count is not a
@@ -73,24 +73,24 @@ static Genome sealed_genome(uint32_t lineage)
   return g;
 }
 
-// A Pebble that validate_pebble() ACCEPTS. Every "it never destroys" case in
+// A Bug that validate_bug() ACCEPTS. Every "it never destroys" case in
 // this file compares a corrupted record against the validator every load and
 // every trade goes through, so the fixture has to start clean or the assertion
 // is about the fixture. Same construction as tests/test_validate.cpp's
 // mk_valid(), and deliberately not a private variant of it.
-static void mk_pebble(PebbleInstance& p, uint8_t species, uint8_t level, uint32_t id)
+static void mk_bug(BugInstance& p, uint8_t species, uint8_t level, uint32_t id)
 {
   memset(&p, 0, sizeof p);
-  p.magic         = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver    = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic         = (uint16_t)BUG_MAGIC;
+  p.layout_ver    = (uint8_t)BUG_LAYOUT_VER;
   p.species_id    = species;
   p.id            = id;
   p.level         = level;
   p.origin        = (uint8_t)ORIGIN_WILD;
-  p.custom_sprite = (uint8_t)PB_CUSTOM_SPRITE_NONE;
+  p.custom_sprite = (uint8_t)ER_CUSTOM_SPRITE_NONE;
   p.genome        = sealed_genome(0xA5A5A500u + id);
-  for (uint8_t c = 0; c < (uint8_t)PB_CARE_COUNT; ++c)
-    p.care[c] = (int32_t)PB_CARE_MILLI_MAX;
+  for (uint8_t c = 0; c < (uint8_t)ER_CARE_COUNT; ++c)
+    p.care[c] = (int32_t)ER_CARE_MILLI_MAX;
   const SpeciesDef* sp = species_get(species);
   if (sp == nullptr) return;
   memcpy(p.moves, sp->moves, sizeof p.moves);
@@ -104,7 +104,7 @@ static void mk_pebble(PebbleInstance& p, uint8_t species, uint8_t level, uint32_
 // A fake ms/epoch clock for the save manager. Binding a NULL ms clock switches
 // OFF save_manager.cpp's whole wear-filter branch, so a fixture that does it is
 // driving a save_manager the release artefact does not run - tools/check.sh
-// fails the build over it, and the reason is the Pebble that was destroyed on
+// fails the build over it, and the reason is the Bug that was destroyed on
 // every clean trade before P7-C6 found it.
 static uint32_t s_ms    = 10000u;
 static uint32_t s_epoch = T0;
@@ -119,8 +119,8 @@ static void box_fixture(void)
 {
   memset(&g_state, 0, sizeof g_state);
   for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
-    g_state.pebbles[i].magic      = (uint16_t)PEBBLE_MAGIC;
-    g_state.pebbles[i].layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+    g_state.bugs[i].magic      = (uint16_t)BUG_MAGIC;
+    g_state.bugs[i].layout_ver = (uint8_t)BUG_LAYOUT_VER;
   }
   g_state.box.magic           = (uint16_t)BOX_MAGIC;
   g_state.box.active_slot     = (uint8_t)BOX_ACTIVE_NONE;
@@ -133,9 +133,9 @@ static Genome seeded_genesis(uint32_t seed)
   genome_seed(seed);
   return genome_genesis();
 }
-static PebbleInstance* make_parent(uint8_t species_id, uint8_t level, const Genome& g)
+static BugInstance* make_parent(uint8_t species_id, uint8_t level, const Genome& g)
 {
-  const uint8_t slot = box_new_pebble(species_id, level, (uint8_t)ORIGIN_WILD,
+  const uint8_t slot = box_new_bug(species_id, level, (uint8_t)ORIGIN_WILD,
                                       g, 0x5EEDu + species_id, T0);
   if (slot == (uint8_t)BOX_SLOT_NONE) return nullptr;
   return box_slot(slot);
@@ -144,7 +144,7 @@ static PebbleInstance* make_parent(uint8_t species_id, uint8_t level, const Geno
 // =============================================================================
 //  1. THE TIMER REACHES THE FIRMWARE
 //
-//  cor_expire() had NO CALLER in Pebblebol/src at 37511d5 - measured by grep,
+//  cor_expire() had NO CALLER in Errata/src at 37511d5 - measured by grep,
 //  and recorded as the first finding of the survey that scoped this chunk. The
 //  24 h deadline was written by the encounter and read by nobody, so the status
 //  was permanent until an Antivirus cleared it, while tools/content/verify.py's
@@ -155,16 +155,16 @@ static PebbleInstance* make_parent(uint8_t species_id, uint8_t level, const Geno
 //  on the host - and the gate in tools/check.sh is what covers the call site.
 // =============================================================================
 TEST(the_timer_walk_expires_every_due_slot_and_leaves_the_rest_alone) {
-  PebbleInstance box[BOX_SLOTS];
+  BugInstance box[BOX_SLOTS];
   memset(box, 0, sizeof box);
 
   // Slot 0: due in an hour.   Slot 1: due already.   Slot 2: not corrupted.
   // Slot 3: due already.      Slot 4: empty.         Slot 5: due exactly now.
-  mk_pebble(box[0], 1, 5, 0x1001u);
-  mk_pebble(box[1], 2, 5, 0x1002u);
-  mk_pebble(box[2], 3, 5, 0x1003u);
-  mk_pebble(box[3], 4, 5, 0x1004u);
-  mk_pebble(box[5], 6, 5, 0x1006u);
+  mk_bug(box[0], 1, 5, 0x1001u);
+  mk_bug(box[1], 2, 5, 0x1002u);
+  mk_bug(box[2], 3, 5, 0x1003u);
+  mk_bug(box[3], 4, 5, 0x1004u);
+  mk_bug(box[5], 6, 5, 0x1006u);
 
   CHECK(cor_apply(box[0], T0 + 3600u, (uint8_t)CAL_USER));   // due at T0+90000
   CHECK(cor_apply(box[1], T0 - (uint32_t)CORRUPT_DURATION_S - 1u, (uint8_t)CAL_USER));
@@ -199,9 +199,9 @@ TEST(the_timer_walk_expires_every_due_slot_and_leaves_the_rest_alone) {
 }
 
 TEST(the_timer_walk_refuses_an_untrustworthy_clock_and_a_null_box) {
-  PebbleInstance box[2];
+  BugInstance box[2];
   memset(box, 0, sizeof box);
-  mk_pebble(box[0], 1, 5, 0x2001u);
+  mk_bug(box[0], 1, 5, 0x2001u);
   CHECK(cor_apply(box[0], T0, (uint8_t)CAL_USER));
 
   // An uptime estimate would expire a real 24 h deadline in seconds. The whole
@@ -531,8 +531,8 @@ TEST(the_glitch_is_deterministic_in_its_arguments) {
 // =============================================================================
 //  3. THE BATTLE MODIFIER
 // =============================================================================
-static BattleReject mk_battle(BattleState& st, const PebbleInstance& a,
-                              const PebbleInstance& b, uint32_t seed)
+static BattleReject mk_battle(BattleState& st, const BugInstance& a,
+                              const BugInstance& b, uint32_t seed)
 {
   BattleSetup s;
   battle_setup_clear(s);
@@ -544,10 +544,10 @@ static BattleReject mk_battle(BattleState& st, const PebbleInstance& a,
   return battle_init(st, s);
 }
 
-TEST(a_corrupted_pebble_enters_battle_corrupted_and_a_clean_one_does_not) {
-  PebbleInstance clean, sick;
-  mk_pebble(clean, 1, 15, 0xC0u);
-  mk_pebble(sick,  1, 15, 0xC1u);
+TEST(a_corrupted_bug_enters_battle_corrupted_and_a_clean_one_does_not) {
+  BugInstance clean, sick;
+  mk_bug(clean, 1, 15, 0xC0u);
+  mk_bug(sick,  1, 15, 0xC1u);
   CHECK(cor_apply(sick, T0, (uint8_t)CAL_USER));
   CHECK(cor_is_corrupted(sick));
 
@@ -581,16 +581,16 @@ TEST(the_battle_modifier_does_not_stack_across_rounds) {
   // THE BOUND THE BRIEF NAMES. corrupt_left ticks down once per round in step
   // 7, and battle_stat_eff() reads it as a BOOLEAN - so the effect must be the
   // same +1/-1 on round 1 and on round 40, never +2 or +40.
-  PebbleInstance sick, foe;
-  mk_pebble(sick, 1, 15, 0xD0u);
-  mk_pebble(foe,  4, 15, 0xD1u);
+  BugInstance sick, foe;
+  mk_bug(sick, 1, 15, 0xD0u);
+  mk_bug(foe,  4, 15, 0xD1u);
   CHECK(cor_apply(sick, T0, (uint8_t)CAL_USER));
 
   BattleState st;
   CHECK_EQ((int)mk_battle(st, sick, foe, 0x5A5Au), (int)BR_OK);
 
   BattleState ctl;
-  PebbleInstance clean = sick;
+  BugInstance clean = sick;
   CHECK(cor_clear(clean));
   CHECK_EQ((int)mk_battle(ctl, clean, foe, 0x5A5Au), (int)BR_OK);
 
@@ -621,10 +621,10 @@ TEST(the_battle_modifier_does_not_stack_across_rounds) {
 TEST(infectar_cannot_stack_on_top_of_a_stored_corruption) {
   // Attack 12 Infectar writes the SAME field (`if (d > corrupt_left)`), which
   // is what makes the two sources one fact. If P9-C5 had added a second flag,
-  // an infected corrupted Pebble would be at +2 ATK / -2 DEF here.
-  PebbleInstance sick, foe;
-  mk_pebble(sick, 1, 15, 0xE0u);
-  mk_pebble(foe,  4, 15, 0xE1u);
+  // an infected corrupted Bug would be at +2 ATK / -2 DEF here.
+  BugInstance sick, foe;
+  mk_bug(sick, 1, 15, 0xE0u);
+  mk_bug(foe,  4, 15, 0xE1u);
   CHECK(cor_apply(sick, T0, (uint8_t)CAL_USER));
 
   BattleState st;
@@ -656,20 +656,20 @@ TEST(infectar_cannot_stack_on_top_of_a_stored_corruption) {
 
 TEST(the_battle_modifier_does_not_stack_across_a_save_or_a_second_battle) {
   // "May not stack across a save" in the only form it can take: the ENGINE
-  // never writes back, so a Pebble that fights, is stored, is loaded and fights
+  // never writes back, so a Bug that fights, is stored, is loaded and fights
   // again is in exactly the same state on both occasions.
-  PebbleInstance sick;
-  mk_pebble(sick, 1, 15, 0xF0u);
-  PebbleInstance foe;
-  mk_pebble(foe, 4, 15, 0xF1u);
+  BugInstance sick;
+  mk_bug(sick, 1, 15, 0xF0u);
+  BugInstance foe;
+  mk_bug(foe, 4, 15, 0xF1u);
   CHECK(cor_apply(sick, T0, (uint8_t)CAL_USER));
-  const PebbleInstance before = sick;
+  const BugInstance before = sick;
 
   BattleState st;
   for (int pass = 0; pass < 3; ++pass) {
     CHECK_EQ((int)mk_battle(st, sick, foe, 0x11u + (uint32_t)pass), (int)BR_OK);
     for (uint16_t r = 0; r < 5u; ++r) battle_s7_process_status(st, nullptr);
-    // THE STORED PEBBLE IS UNTOUCHED BY THE FIGHT - byte for byte, deadline
+    // THE STORED BUG IS UNTOUCHED BY THE FIGHT - byte for byte, deadline
     // included. A battle that could extend or clear the 24 h status would be a
     // second writer of a fact game/corruption.cpp owns.
     CHECK_EQ(memcmp(&sick, &before, sizeof sick), 0);
@@ -682,9 +682,9 @@ TEST(the_battle_modifier_does_not_stack_across_a_save_or_a_second_battle) {
 
   // A ROUND TRIP THROUGH THE SAVE RECORD keeps the bit and the deadline, and
   // the next battle_init() derives the same number from them.
-  PebbleInstance reloaded;
+  BugInstance reloaded;
   memcpy(&reloaded, &sick, sizeof reloaded);
-  CHECK_EQ((int)validate_pebble(reloaded), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(reloaded), (int)VR_OK);
   CHECK(cor_is_corrupted(reloaded));
   CHECK_EQ(reloaded.corrupt_until_epoch, sick.corrupt_until_epoch);
   CHECK_EQ((int)mk_battle(st, reloaded, foe, 0x22u), (int)BR_OK);
@@ -695,28 +695,28 @@ TEST(the_battle_modifier_does_not_stack_across_a_save_or_a_second_battle) {
 TEST(a_linked_battle_is_uncorrupted_on_both_sides_and_cannot_desync) {
   // networking/session.cpp's load_own_team() decodes even the LOCAL team
   // through pbw_decode(), so both endpoints' BattleSetups are byte-identical -
-  // and PBW_STATUS_MASK strips PBS_CORRUPTED because it is EVOC_CORRUPTED's
+  // and BUGW_STATUS_MASK strips PBS_CORRUPTED because it is EVOC_CORRUPTED's
   // input and a forged bit would buy the receiver a free evolution. The
   // consequence of reading the status in battle_init() is therefore that a
   // LINKED battle carries no corruption AT ALL, symmetrically. That is the
   // property that stops this chunk introducing a round-1 desync, and it is
   // pinned here rather than left in a comment.
-  PebbleInstance sick;
-  mk_pebble(sick, 1, 15, 0x0BADCAFEu);
+  BugInstance sick;
+  mk_bug(sick, 1, 15, 0x0BADCAFEu);
   CHECK(cor_apply(sick, T0, (uint8_t)CAL_USER));
 
-  uint8_t rec[PBW_BYTES];
+  uint8_t rec[BUGW_BYTES];
   pbw_encode(sick, rec);
-  PebbleInstance wire;
+  BugInstance wire;
   CHECK_EQ((int)pbw_decode(rec, wire), (int)VR_OK);
   CHECK(!cor_is_corrupted(wire));                       // the mask did its job
   CHECK_EQ(wire.corrupt_until_epoch, 0u);
 
-  PebbleInstance foe;
-  mk_pebble(foe, 4, 15, 0xFEEDu);
-  uint8_t frec[PBW_BYTES];
+  BugInstance foe;
+  mk_bug(foe, 4, 15, 0xFEEDu);
+  uint8_t frec[BUGW_BYTES];
   pbw_encode(foe, frec);
-  PebbleInstance fwire;
+  BugInstance fwire;
   CHECK_EQ((int)pbw_decode(frec, fwire), (int)VR_OK);
 
   // BOTH ENDPOINTS: each builds the same setup from the same decoded records.
@@ -741,9 +741,9 @@ TEST(the_engine_version_moved_with_what_battle_init_accepts) {
   // latter, so a setup stamped with the old version must now be refused rather
   // than reproducing a different fight quietly.
   CHECK_EQ((int)BATTLE_ENGINE_VER, 3);
-  PebbleInstance a, b;
-  mk_pebble(a, 1, 15, 0x1u);
-  mk_pebble(b, 4, 15, 0x2u);
+  BugInstance a, b;
+  mk_bug(a, 1, 15, 0x1u);
+  mk_bug(b, 4, 15, 0x2u);
   BattleSetup s;
   battle_setup_clear(s);
   s.count[0] = 1u; s.count[1] = 1u;
@@ -827,8 +827,8 @@ TEST(corruption_gates_exactly_two_families_and_refuses_without_the_flag) {
     const EvolutionRule* r = evolution_rule_at(i);
     if (r == nullptr || r->cond != (uint8_t)EVOC_CORRUPTED) continue;
 
-    PebbleInstance p;
-    mk_pebble(p, r->species, r->level, 0x900u + i);
+    BugInstance p;
+    mk_bug(p, r->species, r->level, 0x900u + i);
 
     EvoContext ctx;
     evo_context_clear(ctx);
@@ -847,8 +847,8 @@ TEST(corruption_gates_exactly_two_families_and_refuses_without_the_flag) {
 
     // BELOW THE LEVEL IT STILL REFUSES: corruption is a second condition, not
     // a bypass of the first.
-    PebbleInstance young;
-    mk_pebble(young, r->species, (uint8_t)(r->level - 1u), 0x910u + i);
+    BugInstance young;
+    mk_bug(young, r->species, (uint8_t)(r->level - 1u), 0x910u + i);
     CHECK_EQ((int)evolution_ready(young, ctx), 0);
 
     // AND IT REALLY EVOLVES, into the species the table names.
@@ -859,7 +859,7 @@ TEST(corruption_gates_exactly_two_families_and_refuses_without_the_flag) {
 }
 
 TEST(the_corruption_evolution_is_reachable_from_the_status_the_item_clears) {
-  // The whole chain in one case: a Pebble that catches corruption becomes
+  // The whole chain in one case: a Bug that catches corruption becomes
   // eligible, an Antivirus takes the eligibility away again, and the deadline
   // does the same thing on its own. This is what "clears by timer OR by a care
   // item" means for the effect that is furthest from the bit.
@@ -871,8 +871,8 @@ TEST(the_corruption_evolution_is_reachable_from_the_status_the_item_clears) {
   CHECK(rule != nullptr);
   if (rule == nullptr) return;
 
-  PebbleInstance p;
-  mk_pebble(p, rule->species, rule->level, 0xA11u);
+  BugInstance p;
+  mk_bug(p, rule->species, rule->level, 0xA11u);
 
   EvoContext ctx;
   evo_context_clear(ctx);
@@ -902,7 +902,7 @@ TEST(the_corruption_evolution_is_reachable_from_the_status_the_item_clears) {
   ctx.corrupted = (uint8_t)(cor_is_corrupted(p) ? 1u : 0u);
   CHECK_EQ((int)evolution_ready(p, ctx), 0);
 
-  // THE TIMER ROUTE, on the same Pebble, with no item at all.
+  // THE TIMER ROUTE, on the same Bug, with no item at all.
   CHECK(cor_apply(p, T0, (uint8_t)CAL_USER));
   ctx.corrupted = 1u;
   CHECK_EQ((int)evolution_ready(p, ctx), 1);
@@ -918,21 +918,21 @@ TEST(the_corruption_evolution_is_reachable_from_the_status_the_item_clears) {
 //
 //  "Corruption is the one mechanic in this game that is SUPPOSED to look like
 //  damage, which makes it the one where real damage would hide." So the checks
-//  below are about the PEBBLE, not about the effect: every field that is not
+//  below are about the BUG, not about the effect: every field that is not
 //  the status byte and the deadline must be exactly what it was.
 // =============================================================================
 TEST(corruption_changes_two_fields_and_nothing_else_in_the_record) {
-  PebbleInstance p;
-  mk_pebble(p, 5, 12, 0xB0B0u);
+  BugInstance p;
+  mk_bug(p, 5, 12, 0xB0B0u);
   p.evolutions = 2u;
   p.care[CARE_HAPPINESS] = 40000;
-  const PebbleInstance before = p;
+  const BugInstance before = p;
 
   CHECK(cor_apply(p, T0, (uint8_t)CAL_USER));
 
   // Byte-for-byte, with the two fields corruption owns masked out. A memcmp
   // over the whole record is what catches a stray write nobody thought to name.
-  PebbleInstance a = before, b = p;
+  BugInstance a = before, b = p;
   a.status = 0u; b.status = 0u;
   a.corrupt_until_epoch = 0u; b.corrupt_until_epoch = 0u;
   CHECK_EQ(memcmp(&a, &b, sizeof a), 0);
@@ -943,30 +943,30 @@ TEST(corruption_changes_two_fields_and_nothing_else_in_the_record) {
   CHECK_EQ((int)p.xp, (int)before.xp);
   CHECK_EQ((int)p.species_id, (int)before.species_id);
 
-  // A CORRUPTED PEBBLE IS STILL A VALID PEBBLE. If it were not, the quarantine
+  // A CORRUPTED BUG IS STILL A VALID BUG. If it were not, the quarantine
   // in game/validate.cpp would refuse it on the next load and the "signature
   // mechanic" would be a way to lose a creature.
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 
   // ...and the cure puts the record back exactly as it was.
   CHECK(cor_clear(p));
   CHECK_EQ(memcmp(&p, &before, sizeof p), 0);
 }
 
-TEST(a_corrupted_pebble_survives_a_save_a_trade_and_a_breeding_intact) {
-  PebbleInstance p;
-  mk_pebble(p, 5, 20, 0x5A1Eu);
+TEST(a_corrupted_bug_survives_a_save_a_trade_and_a_breeding_intact) {
+  BugInstance p;
+  mk_bug(p, 5, 20, 0x5A1Eu);
   CHECK(cor_apply(p, T0, (uint8_t)CAL_USER));
 
   // --- SAVED AND RELOADED, THROUGH THE REAL SAVE MANAGER --------------------
   // NOT a memcpy dressed up as a reboot. Both the bit and the deadline are
   // STORED bytes - persistence/save_schema.h carved corrupt_until_epoch out of
-  // PebbleInstance.reserved[12] at P5-C3 with no schema bump - so the thing
+  // BugInstance.reserved[12] at P5-C3 with no schema bump - so the thing
   // that could go wrong is precisely that the deadline lands in a byte the
   // writer, the CRC or a migration does not carry. That cannot be seen without
-  // driving save_pebble_now() and save_load_all() over a real KV store.
+  // driving save_bug_now() and save_load_all() over a real KV store.
   //
-  // A LOST DEADLINE IS A DESTROYED PEBBLE IN THE ONLY SENSE SECTION 55 CARES
+  // A LOST DEADLINE IS A DESTROYED BUG IN THE ONLY SENSE SECTION 55 CARES
   // ABOUT: the bit surviving with a zeroed deadline is a corruption that never
   // ends by timer, and the whole "it never destroys" claim rests on it ending.
   kv_mem_reset();
@@ -974,20 +974,20 @@ TEST(a_corrupted_pebble_survives_a_save_a_trade_and_a_breeding_intact) {
   GameState gs;
   memset(&gs, 0, sizeof gs);
   CHECK_EQ((int)save_load_all(gs), (int)LOAD_FRESH);
-  gs.pebbles[3] = p;
-  pebble_seal(gs.pebbles[3]);
+  gs.bugs[3] = p;
+  bug_seal(gs.bugs[3]);
   // The header has to agree with what is on flash, or save_load_all() HEALS the
   // mask and answers LOAD_RECOVERED_PAIR - a successful recovery, and not the
   // plain read this case wants to be about. app/app.cpp keeps the two in step
   // through game/box.cpp; here it is one bit.
   gs.box.slot_mask   = (uint16_t)(1u << 3);
   gs.box.active_slot = 3u;
-  // TWICE, so BOTH copies of the pair carry the deadline. save_pebble_now()
+  // TWICE, so BOTH copies of the pair carry the deadline. save_bug_now()
   // writes "the inactive copy of the pair" (save_manager.h), so one call leaves
   // the other half empty and the next load answers LOAD_RECOVERED_PAIR - a
   // successful recovery, but not the plain read this case wants to be about.
-  CHECK(save_pebble_now(3u, gs.pebbles[3]));
-  CHECK(save_pebble_now(3u, gs.pebbles[3]));
+  CHECK(save_bug_now(3u, gs.bugs[3]));
+  CHECK(save_bug_now(3u, gs.bugs[3]));
   CHECK(save_box_header(gs.box));
   CHECK(save_box_header(gs.box));
   // The rest of the save, twice each, for the same reason: a half-written store
@@ -1003,11 +1003,11 @@ TEST(a_corrupted_pebble_survives_a_save_a_trade_and_a_breeding_intact) {
   GameState back;
   memset(&back, 0, sizeof back);
   CHECK_EQ((int)save_load_all(back), (int)LOAD_OK);
-  const PebbleInstance& stored = back.pebbles[3];
+  const BugInstance& stored = back.bugs[3];
   CHECK(cor_is_corrupted(stored));
   CHECK_EQ(stored.corrupt_until_epoch, p.corrupt_until_epoch);
   CHECK_EQ((int)(uint8_t)(stored.status & (uint8_t)PBS_CORRUPTED), (int)PBS_CORRUPTED);
-  CHECK_EQ((int)validate_pebble(stored), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(stored), (int)VR_OK);
   CHECK_EQ((int)stored.hp_cur, (int)p.hp_cur);
   CHECK_EQ((int)stored.level, (int)p.level);
   CHECK_EQ(stored.id, p.id);
@@ -1016,7 +1016,7 @@ TEST(a_corrupted_pebble_survives_a_save_a_trade_and_a_breeding_intact) {
            (uint32_t)CORRUPT_DURATION_S - 3600u);
   // ...and the reloaded copy still expires on its own second, which is the
   // property a zeroed deadline would silently take away.
-  PebbleInstance rl = stored;
+  BugInstance rl = stored;
   CHECK_EQ((int)cor_service(&rl, 1u, T0 + (uint32_t)CORRUPT_DURATION_S - 1u,
                             (uint8_t)CAL_USER), 0);
   CHECK_EQ((int)cor_service(&rl, 1u, T0 + (uint32_t)CORRUPT_DURATION_S,
@@ -1024,14 +1024,14 @@ TEST(a_corrupted_pebble_survives_a_save_a_trade_and_a_breeding_intact) {
   CHECK(!cor_is_corrupted(rl));
 
   // --- TRADED ---------------------------------------------------------------
-  // EXACTLY ONE PEBBLE COMES OUT. The wire strips the status (PBW_STATUS_MASK)
+  // EXACTLY ONE BUG COMES OUT. The wire strips the status (BUGW_STATUS_MASK)
   // and the receiver's copy is a complete, valid, UNCORRUPTED creature - not a
   // half-transferred one, not a second copy of a corrupted one.
-  uint8_t rec[PBW_BYTES];
+  uint8_t rec[BUGW_BYTES];
   pbw_encode(p, rec);
-  PebbleInstance received;
+  BugInstance received;
   CHECK_EQ((int)pbw_decode(rec, received), (int)VR_OK);
-  CHECK_EQ((int)validate_pebble(received), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(received), (int)VR_OK);
   CHECK_EQ((int)received.species_id, (int)p.species_id);
   CHECK_EQ((int)received.level, (int)p.level);
   CHECK_EQ(received.id, p.id);
@@ -1042,27 +1042,27 @@ TEST(a_corrupted_pebble_survives_a_save_a_trade_and_a_breeding_intact) {
   CHECK(cor_is_corrupted(p));
 
   // --- BRED FROM ------------------------------------------------------------
-  // The child is a NEW Pebble and inherits no status: corruption is an acquired
+  // The child is a NEW Bug and inherits no status: corruption is an acquired
   // condition with a 24 h life, not a heritable trait, and a heritable one
   // would be permanent by the back door. Through the REAL breeding path and a
   // REAL bound Box - a hand-built child would prove nothing about breed_commit.
   box_fixture();
-  PebbleInstance* pa = make_parent(2, 10, seeded_genesis(0x11u));
-  PebbleInstance* pb = make_parent(2, 10, seeded_genesis(0x22u));
+  BugInstance* pa = make_parent(2, 10, seeded_genesis(0x11u));
+  BugInstance* pb = make_parent(2, 10, seeded_genesis(0x22u));
   CHECK(pa != nullptr && pb != nullptr);
   if (pa == nullptr || pb == nullptr) return;
   CHECK(cor_apply(*pa, T0, (uint8_t)CAL_USER));
-  const PebbleInstance parent_before = *pa;
+  const BugInstance parent_before = *pa;
 
   BreedPlan plan;
   CHECK_EQ((int)breed_compute(*pa, *pb, 0xC0FFEEu, plan), (int)BRD_OK);
   uint8_t slot = (uint8_t)BOX_SLOT_NONE;
   CHECK_EQ((int)breed_commit(plan, T0, slot), (int)BRD_OK);
   CHECK(slot != (uint8_t)BOX_SLOT_NONE);
-  const PebbleInstance* child = box_peek(slot);
+  const BugInstance* child = box_peek(slot);
   CHECK(child != nullptr);
   if (child != nullptr) {
-    CHECK_EQ((int)validate_pebble(*child), (int)VR_OK);
+    CHECK_EQ((int)validate_bug(*child), (int)VR_OK);
     CHECK(!cor_is_corrupted(*child));
     CHECK_EQ(child->corrupt_until_epoch, 0u);
     CHECK_EQ((int)(uint8_t)(child->status & (uint8_t)PBS_CORRUPTED), 0);
@@ -1072,13 +1072,13 @@ TEST(a_corrupted_pebble_survives_a_save_a_trade_and_a_breeding_intact) {
   // breeding neither cures it, extends it, nor consumes the creature.
   CHECK_EQ(memcmp(pa, &parent_before, sizeof parent_before), 0);
   CHECK(cor_is_corrupted(*pa));
-  CHECK_EQ((int)validate_pebble(*pa), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(*pa), (int)VR_OK);
   CHECK(!cor_is_corrupted(*pb));
-  // THREE PEBBLES, ONE OF THEM CORRUPTED, AND NO FOURTH. "Still exactly one
-  // Pebble" measured over the whole Box rather than asserted about the record.
+  // THREE BUGS, ONE OF THEM CORRUPTED, AND NO FOURTH. "Still exactly one
+  // Bug" measured over the whole Box rather than asserted about the record.
   uint8_t filled = 0, ill = 0;
   for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
-    const PebbleInstance* q = box_peek(i);
+    const BugInstance* q = box_peek(i);
     if (q == nullptr) continue;
     ++filled;
     if (cor_is_corrupted(*q)) ++ill;
@@ -1087,11 +1087,11 @@ TEST(a_corrupted_pebble_survives_a_save_a_trade_and_a_breeding_intact) {
   CHECK_EQ((int)ill, 1);
 }
 
-TEST(the_status_bit_is_bounded_and_a_corrupted_pebble_is_never_lost) {
-  // Spec section 27: the Pebble is never lost. Corruption may not be the
+TEST(the_status_bit_is_bounded_and_a_corrupted_bug_is_never_lost) {
+  // Spec section 27: the Bug is never lost. Corruption may not be the
   // exception, so the extremes are driven rather than reasoned about.
-  PebbleInstance p;
-  mk_pebble(p, 5, 30, 0xDEADu);
+  BugInstance p;
+  mk_bug(p, 5, 30, 0xDEADu);
   p.status = (uint8_t)(PBS_SICK | PBS_ASLEEP);
 
   // A CLOCK AT THE TOP OF ITS RANGE SATURATES rather than wrapping to a
@@ -1099,7 +1099,7 @@ TEST(the_status_bit_is_bounded_and_a_corrupted_pebble_is_never_lost) {
   CHECK(cor_apply(p, 0xFFFFFF00u, (uint8_t)CAL_USER));
   CHECK_EQ(p.corrupt_until_epoch, 0xFFFFFFFFu);
   CHECK(cor_is_corrupted(p));
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
   // The other statuses are untouched: corruption owns one bit.
   CHECK_EQ((int)(uint8_t)(p.status & (uint8_t)PBS_SICK), (int)PBS_SICK);
   CHECK_EQ((int)(uint8_t)(p.status & (uint8_t)PBS_ASLEEP), (int)PBS_ASLEEP);
@@ -1111,12 +1111,12 @@ TEST(the_status_bit_is_bounded_and_a_corrupted_pebble_is_never_lost) {
   CHECK_EQ((int)(uint8_t)(p.status & (uint8_t)PBS_SICK), (int)PBS_SICK);
 
   // AND HP IS NEVER TOUCHED BY ANY OF IT. Corruption is not damage; it looks
-  // like damage. A corrupted Pebble at 1 HP is still at 1 HP.
+  // like damage. A corrupted Bug at 1 HP is still at 1 HP.
   p.hp_cur = 1u;
   CHECK(cor_apply(p, T0, (uint8_t)CAL_USER));
   CHECK_EQ((int)p.hp_cur, 1);
   CHECK_EQ((int)cor_service(&p, 1u, T0 + (uint32_t)CORRUPT_DURATION_S,
                             (uint8_t)CAL_USER), 1);
   CHECK_EQ((int)p.hp_cur, 1);
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 }

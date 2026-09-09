@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_anim.cpp
+//  Errata host tests - test_anim.cpp
 //  ui/anim_ease.{h,cpp}: THE MOTION MATHS (P10-C3).
 //
 //  WHY THIS BINARY EXISTS. Every film in this firmware is built out of five

@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_soak.cpp
+//  Errata host tests - test_soak.cpp
 //  THE SOAK THAT CAN BE RUN HERE (P10-C2, spec section 46 "no memory leaks").
 //
 //  READ THE SCOPE FIRST. Spec section 46 asks for a 24 h soak with a flat heap
@@ -21,7 +21,7 @@
 //  loop, second by second, through the real sim, the real Box, the real
 //  cooldown table, the real corruption deadline and the real save_manager into
 //  a fake NVS partition, with a global operator new counter armed for the
-//  entire run. The assertions are that the count is ZERO, that the Pebble is
+//  entire run. The assertions are that the count is ZERO, that the Bug is
 //  still valid at the end, and that what came back off "flash" is what went in.
 //
 //  THE LIMIT, SAID OUT LOUD: this proves the pure half leaks nothing. It says
@@ -51,7 +51,7 @@
 //  THE FIXTURE. A real GameState, a real Box, a real bound simulation, and a
 //  real save_manager with a REAL millisecond clock - never save_set_clock(
 //  nullptr, ...), which switches the wear filter off and is exactly the fixture
-//  that let a Pebble be destroyed on every clean trade for three phases.
+//  that let a Bug be destroyed on every clean trade for three phases.
 //  tools/check.sh greps for it.
 // -----------------------------------------------------------------------------
 #define SOAK_EPOCH0   1700000000u
@@ -74,8 +74,8 @@ static void fixture(void) {
 
   memset(&g_gs, 0, sizeof g_gs);
   for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
-    g_gs.pebbles[i].magic      = (uint16_t)PEBBLE_MAGIC;
-    g_gs.pebbles[i].layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+    g_gs.bugs[i].magic      = (uint16_t)BUG_MAGIC;
+    g_gs.bugs[i].layout_ver = (uint8_t)BUG_LAYOUT_VER;
   }
   g_gs.box.magic           = (uint16_t)BOX_MAGIC;
   g_gs.box.active_slot     = (uint8_t)BOX_ACTIVE_NONE;
@@ -86,11 +86,11 @@ static void fixture(void) {
   save_bind(g_gs);
 
   // Three creatures, so the corruption walk and the Box have something to walk.
-  // REAL SEALED GENOMES, not a memset: validate_pebble() is one of this file's
+  // REAL SEALED GENOMES, not a memset: validate_bug() is one of this file's
   // two end-of-run assertions and a zeroed genome fails it as VR_BAD_GENOME,
   // which would make "still valid after a day" a statement about the fixture.
   for (uint8_t i = 0; i < 3u; ++i) {
-    const uint8_t s = box_new_pebble(SPECIES_ID_STARTER, (uint8_t)(5u + i),
+    const uint8_t s = box_new_bug(SPECIES_ID_STARTER, (uint8_t)(5u + i),
                                      (uint8_t)ORIGIN_WILD, genome_genesis(),
                                      0x3000u + i, SOAK_EPOCH0);
     CHECK(s != (uint8_t)BOX_SLOT_NONE);
@@ -99,7 +99,7 @@ static void fixture(void) {
   sim_bind(*box_slot(0));
   CHECK(save_config(g_gs.cfg));
   CHECK(save_box_header(g_gs.box));
-  for (uint8_t i = 0; i < 3u; ++i) CHECK(save_pebble_now(i, g_gs.pebbles[i]));
+  for (uint8_t i = 0; i < 3u; ++i) CHECK(save_bug_now(i, g_gs.bugs[i]));
 }
 
 // One second of the firmware's stage 2, with the same inputs app.cpp assembles.
@@ -138,7 +138,7 @@ TEST(a_whole_simulated_day_of_the_pure_loop_allocates_nothing) {
     one_second(sec);
 
     // The two per-second walks app.cpp's logic_tick() also drives.
-    (void)cor_service(g_gs.pebbles, (uint8_t)BOX_SLOTS, g_epoch, (uint8_t)CAL_USER);
+    (void)cor_service(g_gs.bugs, (uint8_t)BOX_SLOTS, g_epoch, (uint8_t)CAL_USER);
     CdClock cc; cc.now_epoch = g_epoch; cc.now_ms = g_ms; cc.cal = (uint8_t)CAL_USER;
     (void)cd_ready(cds, 0xA1B2C3D4u, cc);
 
@@ -146,7 +146,7 @@ TEST(a_whole_simulated_day_of_the_pure_loop_allocates_nothing) {
     // filter, into the fake partition. A soak that never wrote would be a soak
     // of the half of the firmware that cannot wear flash out.
     if ((sec % SOAK_SAVE_S) == 0u) {
-      if (save_pebble(0, g_gs.pebbles[0], false)) ++saves;
+      if (save_bug(0, g_gs.bugs[0], false)) ++saves;
       save_service();
     }
   }
@@ -178,11 +178,11 @@ TEST(a_whole_simulated_day_of_the_pure_loop_allocates_nothing) {
   // The run has to have DONE something, or "it allocated nothing" is a
   // statement about a loop that did not run. This is the anti-vacuity clause.
   CHECK(saves > 0);
-  const PebbleInstance* p = box_peek(0);
+  const BugInstance* p = box_peek(0);
   CHECK(p != nullptr);
   if (p) {
     CHECK(p->age_s >= SOAK_SECONDS - 2u);   // a whole day really passed
-    CHECK_EQ((int)validate_pebble(*p), (int)VR_OK);
+    CHECK_EQ((int)validate_bug(*p), (int)VR_OK);
   }
 }
 
@@ -200,12 +200,12 @@ TEST(what_a_days_worth_of_writes_left_on_flash_still_loads_and_still_validates) 
     one_second(sec);
     CdClock cc; cc.now_epoch = g_epoch; cc.now_ms = g_ms; cc.cal = (uint8_t)CAL_USER;
     (void)cd_ready(cds, 0xA1B2C3D4u, cc);
-    if ((sec % SOAK_SAVE_S) == 0u) { (void)save_pebble(0, g_gs.pebbles[0], false); save_service(); }
+    if ((sec % SOAK_SAVE_S) == 0u) { (void)save_bug(0, g_gs.bugs[0], false); save_service(); }
   }
-  CHECK(save_pebble_now(0, g_gs.pebbles[0]));
+  CHECK(save_bug_now(0, g_gs.bugs[0]));
   CHECK(save_box_header(g_gs.box));
-  const uint32_t id0  = g_gs.pebbles[0].id;
-  const uint32_t age0 = g_gs.pebbles[0].age_s;
+  const uint32_t id0  = g_gs.bugs[0].id;
+  const uint32_t age0 = g_gs.bugs[0].age_s;
 
   // THE REBOOT: a brand-new GameState, filled from nothing but what reached the
   // fake partition, through the loader the firmware runs.
@@ -216,10 +216,10 @@ TEST(what_a_days_worth_of_writes_left_on_flash_still_loads_and_still_validates) 
   CHECK_EQ((int)r, (int)LOAD_OK);
 
   CHECK_EQ((int)back.box.active_slot, 0);
-  CHECK_EQ(back.pebbles[0].id, id0);
-  CHECK_EQ(back.pebbles[0].age_s, age0);
+  CHECK_EQ(back.bugs[0].id, id0);
+  CHECK_EQ(back.bugs[0].age_s, age0);
   for (uint8_t i = 0; i < 3u; ++i)
-    CHECK_EQ((int)validate_pebble(back.pebbles[i]), (int)VR_OK);
+    CHECK_EQ((int)validate_bug(back.bugs[i]), (int)VR_OK);
   // Nothing was quarantined by a day of ordinary living.
   CHECK_EQ((int)save_quarantine_mask(), 0);
 

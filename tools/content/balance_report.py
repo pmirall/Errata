@@ -288,7 +288,7 @@ def main():
     if args.diff:
         rc = do_diff(args.diff, out)
     else:
-        out("PEBBLEBOL CONTENT BALANCE REPORT - %d species, %d attacks, %d items"
+        out("ERRATA CONTENT BALANCE REPORT - %d species, %d attacks, %d items"
             % (len(SPECIES), len(ATTACKS), len(ITEMS)))
         out("(a report over tools/content/*.json, NOT a gate and NOT a "
             "simulation - see the module docstring)")

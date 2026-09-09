@@ -42,7 +42,7 @@
 #     opens. The script cannot set it; a connection refusal in phase 1 names it.
 #  4. THE DEVICE MUST BE ON THE CREATOR SCREEN. The portal exists only while it
 #     is (spec section 40), so the operator opens it and leaves it open.
-#  5. THE BOX AND THE cs REGISTRY. POST /api/pebble answers 409 "nopet" on an
+#  5. THE BOX AND THE cs REGISTRY. POST /api/bug answers 409 "nopet" on an
 #     empty Box, "boxfull" or "csfull" when there is no room. The script READS
 #     the free counts from /api/state and refuses the write phase with a stated
 #     reason rather than reporting an unexplained 409.
@@ -56,12 +56,12 @@
 #    * POST /api/time SETS THE DEVICE CLOCK from this host's clock, exactly as
 #      a phone would (CAL_PHONE). Do not run it from a host whose clock is
 #      wrong.
-#    * POST /api/pebble CREATES ONE PEBBLE named SMOKE and consumes one Box
+#    * POST /api/bug CREATES ONE BUG named SMOKE and consumes one Box
 #      slot and one of the ten creator-species slots. --no-write skips it.
 #    * The PIN failure counter is driven to the lockout and then CLEARED by a
 #      successful authorisation, so the device is not left armed. The lockout
 #      phase costs CREATOR_PIN_LOCK_MS of waiting for that reason.
-#    * Nothing else is written. No route this script calls can delete a Pebble.
+#    * Nothing else is written. No route this script calls can delete a Bug.
 #
 #  Usage:
 #    tools/creator_smoke.sh --variant release --pin 1234 [options]
@@ -70,7 +70,7 @@
 #                       tools/build_matrix.sh (release, baseline, no-god, ...).
 #      --pin NNNN       REQUIRED. The four digits the CREATOR screen is showing.
 #      --url URL        default http://192.168.4.1
-#      --no-write       skip POST /api/pebble (no Pebble is created)
+#      --no-write       skip POST /api/bug (no Bug is created)
 #      --no-lock        skip the wrong-PIN and lockout phases
 #      --no-idle        skip the idle-timeout phase (which takes ~6 minutes)
 #      --idle-s N       the device's ConfigV2.creator_idle_s, if not the default
@@ -85,7 +85,7 @@ set -uo pipefail
 # 403 tells the operator one thing when it could have told them nine.
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SKETCH="${SKETCH:-$ROOT/Pebblebol}"
+SKETCH="${SKETCH:-$ROOT/Errata}"
 
 CFG="$SKETCH/src/core/config.h"
 VER="$SKETCH/src/core/version.h"
@@ -225,7 +225,7 @@ if [ "$DRY" -eq 1 ]; then
   echo "  CONTENT_VERSION        $CONTENT_VERSION"
   echo "  INDEX_HTML_LEN         $PAGE_LEN"
   echo "  pace between requests  ${PACE}s"
-  echo "  routes probed          / /api/schema /api/state /api/validate /api/pebble /api/time /api/ping"
+  echo "  routes probed          / /api/schema /api/state /api/validate /api/bug /api/time /api/ping"
   echo "creator_smoke.sh --dry-run: NOTHING WAS SENT AND NOTHING WAS OBSERVED."
   echo "  A green --dry-run means this script can still read the tree. It is not"
   echo "  evidence about any device and must never be reported as one."
@@ -310,7 +310,7 @@ expect_num() {  # expect_num KEY WANT "claim"
 #  are exactly 2*CS_SPRITE_BYTES hex characters each.
 #
 #  NO "budget" KEY AND NO "slot" KEY, and their absence is the assertion: the
-#  device prices the Pebble itself and picks the slot itself, so a document
+#  device prices the Bug itself and picks the slot itself, so a document
 #  carrying either is refused CP_UNKNOWN_KEY at the character it appears.
 # -----------------------------------------------------------------------------
 ZEROS="$(printf '%0144d' 0)"
@@ -341,7 +341,7 @@ printf '%s' "$DOC_BODYPIN_OK"  > "$TMP/doc_bodypin_ok.json"
 cat <<HDR
 
 =============================================================================
- PEBBLEBOL creator smoke - $(date -u '+%Y-%m-%dT%H:%M:%SZ')
+ ERRATA creator smoke - $(date -u '+%Y-%m-%dT%H:%M:%SZ')
    target        $URL   (port $WEB_PORT)
    VARIANT       $VARIANT     <- the build flashed on the board, as reported by
                                 the operator. Every result below is about THIS
@@ -416,27 +416,27 @@ fi
 
 if [ "$DO_WRITE" -eq 1 ]; then
   if [ "${RO:-1}" = "1" ]; then
-    bad "POST /api/pebble SKIPPED: the device reported a read-only save (ro:1). It refuses the write by design; fix the save first"
+    bad "POST /api/bug SKIPPED: the device reported a read-only save (ro:1). It refuses the write by design; fix the save first"
   elif [ "${BOX_USED:-0}" = "0" ]; then
-    bad "POST /api/pebble SKIPPED: the Box is empty, so the device answers 409 nopet by design. Hatch the starter first"
+    bad "POST /api/bug SKIPPED: the Box is empty, so the device answers 409 nopet by design. Hatch the starter first"
   elif [ "${BOX_FREE:-0}" = "0" ] || [ "${CS_FREE:-0}" = "0" ]; then
-    bad "POST /api/pebble SKIPPED: no free Box slot (${BOX_FREE:-?}) or creator slot (${CS_FREE:-?}). Release one first"
+    bad "POST /api/bug SKIPPED: no free Box slot (${BOX_FREE:-?}) or creator slot (${CS_FREE:-?}). Release one first"
   else
-    req POST /api/pebble "$PIN" --data-binary "@$TMP/doc.json" -H 'Content-Type: application/json'
-    expect 200 "POST /api/pebble created a Pebble"
+    req POST /api/bug "$PIN" --data-binary "@$TMP/doc.json" -H 'Content-Type: application/json'
+    expect 200 "POST /api/bug created a Bug"
     if [ "$STATUS" = "200" ]; then
       note "box slot $(json_num slot), creator slot $(json_num cs), species $(json_num species), id $(json_num id)"
-      note "THIS PEBBLE IS REAL AND IS CALLED SMOKE. Release it from the BOX when you are done."
+      note "THIS BUG IS REAL AND IS CALLED SMOKE. Release it from the BOX when you are done."
     fi
   fi
 else
-  note "POST /api/pebble skipped (--no-write): six of the seven routes were driven"
+  note "POST /api/bug skipped (--no-write): six of the seven routes were driven"
 fi
 
 # The catch-all, which is a route in every sense that matters: it is registered
 # LAST with the same body hook, and it is what stops POST /anything with a
 # nine-digit Content-Length walking the core's malloc growth loop.
-req GET /api/pebbles -
+req GET /api/bugs -
 if [ "$STATUS" = "404" ] || [ "$STATUS" = "302" ]; then
   ok "an unknown path is answered by the registered catch-all (HTTP $STATUS), not by a missing handler"
 else
@@ -477,9 +477,9 @@ else
   #
   # SO A 404 HERE IS A FAILURE, AND IT IS THE FAILURE THAT MATTERS. The gate in
   # tools/check.sh holds the source half; nothing but a socket holds this half.
-  # /api/pebbles is the script's designated unmatched path (it is excluded from
+  # /api/bugs is the script's designated unmatched path (it is excluded from
   # the route-set comparison by name for exactly this reason).
-  req POST /api/pebbles - --data-binary "@$TMP/big.bin" -H 'Content-Type: application/json'
+  req POST /api/bugs - --data-binary "@$TMP/big.bin" -H 'Content-Type: application/json'
   if [ "$STATUS" = "413" ]; then
     ok "an oversize POST to an UNMATCHED path is answered 413 by the registered catch-all - the body was bounded before it was read"
   else
@@ -587,7 +587,7 @@ req GET /api/state "$PIN"; expect 200 "the counter is cleared again"
 #  these probes existed, no check in the repository - host binary, browser
 #  harness or bench script - ever sent an unauthenticated POST with a VALID
 #  body, and section 67's "PIN required" box pointed at an instrument that
-#  would have reported all green against a firmware where POST /api/pebble
+#  would have reported all green against a firmware where POST /api/bug
 #  needed no PIN at all. Measured at the exit: making pin_after_body() return
 #  true unconditionally built clean (release 1,326,274 / 59,396, 0 warnings),
 #  passed ALL PASS 49/49 and passed every networking gate in tools/check.sh.
@@ -607,13 +607,13 @@ req GET /api/state "$PIN"; expect 200 "the counter is cleared again"
 #     box.used - the "cs" object follows it.
 req GET /api/state "$PIN"
 BOX_BEFORE="$(json_num used)"
-req POST /api/pebble - --data-binary "@$TMP/doc.json" -H 'Content-Type: application/json'
-expect 403 "POST /api/pebble with a VALID document and no X-Pin is refused"
+req POST /api/bug - --data-binary "@$TMP/doc.json" -H 'Content-Type: application/json'
+expect 403 "POST /api/bug with a VALID document and no X-Pin is refused"
 if [ "$(json_str err)" = "pin" ]; then ok "and it is refused for the PIN, not for the document"
 else bad "the unauthenticated write answered \"$(json_str err)\", expected \"pin\""; fi
 req GET /api/state "$PIN"
 if [ "$(json_num used)" = "$BOX_BEFORE" ]; then
-  ok "and NOTHING was written - the Box still holds $BOX_BEFORE Pebble(s)"
+  ok "and NOTHING was written - the Box still holds $BOX_BEFORE Bug(s)"
 else
   bad "the Box moved from $BOX_BEFORE to $(json_num used) on a request that was refused 403 -- the refusal came after the write"
 fi

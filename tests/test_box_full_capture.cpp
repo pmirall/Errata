@@ -1,14 +1,14 @@
 // =============================================================================
-//  PEBBLEBOL host test - test_box_full_capture.cpp
+//  ERRATA host test - test_box_full_capture.cpp
 //  THE FULL-BOX BRANCH OF CAPTURE (spec section 23, section 68 r14, P5-C4).
 //
 //  Spec section 23: "if the Box is full, the player must decide whether to
 //  release/replace; never silently discard", and "the encounter must never
-//  delete the active Pebble".
+//  delete the active Bug".
 //
-//  The plan asks that BOTH branches leave ten valid Pebbles, and that is what
+//  The plan asks that BOTH branches leave ten valid Bugs, and that is what
 //  this file measures rather than asserts: after the refusal, and after the
-//  release-then-retry, the Box holds ten Pebbles and every one of them returns
+//  release-then-retry, the Box holds ten Bugs and every one of them returns
 //  VR_OK. Its own binary, linking what it drives and nothing else, for the
 //  reason tests/test_battle_screen.cpp has its own.
 //
@@ -52,7 +52,7 @@ static EncounterResult wild(uint8_t species, uint8_t level)
   return r;
 }
 
-// Ten captured Pebbles, filed by the real capture path so the fixture is the
+// Ten captured Bugs, filed by the real capture path so the fixture is the
 // thing under test rather than a hand-built Box.
 static void fill_box(void)
 {
@@ -77,10 +77,10 @@ static void check_ten_valid(void)
   CHECK_EQ(box_count(), (uint8_t)BOX_SLOTS);
   int seen = 0;
   for (uint8_t s = 0; s < (uint8_t)BOX_SLOTS; ++s) {
-    const PebbleInstance* p = box_peek(s);
+    const BugInstance* p = box_peek(s);
     CHECK(p != nullptr);
     if (!p) continue;
-    CHECK_EQ((uint8_t)validate_pebble(*p), (uint8_t)VR_OK);
+    CHECK_EQ((uint8_t)validate_bug(*p), (uint8_t)VR_OK);
     CHECK(p->id != 0u);
     seen++;
   }
@@ -142,7 +142,7 @@ TEST(releasing_a_stored_slot_lets_the_same_encounter_land_and_leaves_ten_valid) 
 
   CHECK(box_release(victim, true));
   CHECK_EQ(box_count(), (uint8_t)(BOX_SLOTS - 1));
-  CHECK_EQ(box_active(), active);            // the active Pebble is untouched
+  CHECK_EQ(box_active(), active);            // the active Bug is untouched
 
   CaptureState st; cap_reset(st);
   CaptureReport rep;
@@ -151,17 +151,17 @@ TEST(releasing_a_stored_slot_lets_the_same_encounter_land_and_leaves_ten_valid) 
                     sealed_genome(0x5150u), 77u, 1700000000u, rep));
   CHECK_EQ(rep.outcome, (uint8_t)CAP_CAUGHT);
   CHECK_EQ(rep.reject, (uint8_t)VR_OK);
-  // BOTH BRANCHES LEAVE TEN VALID PEBBLES - the plan's own wording.
+  // BOTH BRANCHES LEAVE TEN VALID BUGS - the plan's own wording.
   check_ten_valid();
   // The new one is genuinely new, and the released one is genuinely gone.
   CHECK(box_peek(rep.slot)->id != victim_id);
   for (uint8_t s = 0; s < (uint8_t)BOX_SLOTS; ++s)
     CHECK(box_peek(s)->id != victim_id);
-  // The active Pebble is STILL the one the player was carrying (section 23).
+  // The active Bug is STILL the one the player was carrying (section 23).
   CHECK_EQ(box_active(), active);
 }
 
-TEST(the_active_pebble_can_never_be_the_slot_a_capture_frees) {
+TEST(the_active_bug_can_never_be_the_slot_a_capture_frees) {
   fill_box();
   const uint8_t active = box_active();
   const uint32_t active_id = box_peek(active)->id;

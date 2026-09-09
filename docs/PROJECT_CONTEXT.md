@@ -1,7 +1,7 @@
-# Pebblebol — project context
+# Errata — project context
 
 **Purpose of this file.** A single briefing an AI assistant can read to talk
-about Pebblebol accurately, without opening the repository. It is a *summary of
+about Errata accurately, without opening the repository. It is a *summary of
 sources*, not a source: every claim below is traceable to a file named beside it,
 and where the repository and this file disagree, **the repository wins**.
 
@@ -27,7 +27,7 @@ trade.
 
 The central fiction, from §0 of the product spec:
 
-> A Pebble is a small digital creature — a **computer bug** — trapped in wireless
+> A Bug is a small digital creature — a **computer bug** — trapped in wireless
 > networks.
 > *"There are bugs hiding in the networks around me. I take mine with me,
 > discover them, collect them, and make it stronger."*
@@ -35,7 +35,7 @@ The central fiction, from §0 of the product spec:
 The device **never connects** to the networks it scans. It hashes what it sees
 and throws the rest away (§44, privacy).
 
-**Naming.** The device is a *Pebblebol*; a creature is a *Pebble*; the collection
+**Naming.** The device is a *Errata*; a creature is a *Bug*; the collection
 is the *Box* (10 slots, exactly one active). The UI is **Spanish**; the code,
 comments and documents are **English** (decision D4, closed).
 
@@ -51,7 +51,7 @@ comments and documents are **English** (decision D4, closed).
 | Box | 10 slots |
 | Minigames | 6 |
 | Screens | ~20 `ScreenId`s |
-| Source | 226 files, ~67,100 lines under `Pebblebol/src/` |
+| Source | 226 files, ~67,100 lines under `Errata/src/` |
 | Host tests | **59 binaries**, ~6.2 M assertions, 75 PBM goldens |
 
 ---
@@ -78,7 +78,7 @@ compiles:
 | `PIN_VBAT_ADC` | 0 | reserved; **no divider fitted**, so there is no battery reading at all |
 
 `config.h` carries seven `static_assert`s that a confirmed map must satisfy. They
-are **dormant** because `PB_PINS_CONFIRMED` is never defined. Define it and the
+are **dormant** because `ER_PINS_CONFIRMED` is never defined. Define it and the
 build stops on `PIN_BTN_R`. Genuinely spare GPIOs: **1, 4, 6, 7**.
 
 Archived Spanish documentation (`docs/legacy/README.es.md`) describes a
@@ -108,7 +108,7 @@ approximated daylight table.
 
 ## 3. Architecture
 
-Ten layers under `Pebblebol/src/`. The rule that organises everything is **which
+Ten layers under `Errata/src/`. The rule that organises everything is **which
 layers may touch Arduino**:
 
 ```
@@ -168,8 +168,8 @@ move is a pure module beside it (`ui/petfx_core.cpp`, `app/onboarding.cpp`,
 ### Care
 
 Five stats, `CareId` order: **HUNGER, HAPPINESS, HEALTH, CLEANLINESS, ENERGY**,
-each 0..`PB_CARE_MILLI_MAX` milli-points. Deliberately more relaxed than a
-Tamagotchi (§1.1): only the active Pebble needs care, stored Pebbles recover
+each 0..`ER_CARE_MILLI_MAX` milli-points. Deliberately more relaxed than a
+Tamagotchi (§1.1): only the active Bug needs care, stored Bugs recover
 passively over ~24 h, and §57 requires that ignoring the device for 8 hours never
 drops health below 60 %.
 
@@ -198,7 +198,7 @@ overturned the plan's original text:**
    *¡Exploit!* on that hit and nothing after. With the cap the six off-diagonal
    1v1 cells land at 40–63 %.
 2. **Evasion exists so SPD has a second job.** Under the original formulas SPD
-   only broke turn order, so a fast Pebble paid 6–7 of its stat points for a
+   only broke turn order, so a fast Bug paid 6–7 of its stat points for a
    tiebreak (FAST won 24 % of stage-0 duels, EVASIVE 31 %). Effective accuracy is
    now reduced by `EVASION_PER_SPD` per point of SPD gap, capped at −30. The
    constant was raised 2 → 3 after `balance_matrix.cpp` fought **all 3,600
@@ -206,7 +206,7 @@ overturned the plan's original text:**
    2, SIGNAL/CORRUPT/SYSTEM sat at 42.9/56.8/50.3 %; at 3, 46.6/55.0/48.5 %; at 4
    the correction overshoots. 3 is the measured answer, not the largest one.
 
-Battle is 3-Pebble teams, 1v1 active, turn-based, four moves, switching costs the
+Battle is 3-Bug teams, 1v1 active, turn-based, four moves, switching costs the
 whole turn.
 
 ### XP and progression
@@ -230,7 +230,7 @@ venue tokens: `movistar`, `vodafone`, `eduroam`, `invitados`, `renfe`…). The S
 and BSSID **never leave the function**; what survives is an FNV-1a hash of
 `BSSID‖SSID‖device_id`.
 
-Outcomes: `WILD_PEBBLE`, `ITEM`, `SPECIAL_EVENT`, `NOTHING` (≥ 15 %). Cooldown
+Outcomes: `WILD_BUG`, `ITEM`, `SPECIAL_EVENT`, `NOTHING` (≥ 15 %). Cooldown
 ≈ 2 h per network, timestamped so it survives reboots and a dead battery.
 
 Capture is `CAPTURE_BASE_PERMILLE[rarity]` − 12‰ per level the wild creature is
@@ -240,12 +240,12 @@ impossible. Two failures and it flees.
 
 ### Corruption — the signature mechanic (§55)
 
-`PBS_CORRUPTED`, 24 hours. It never destroys a Pebble, and it is **the only route
+`PBS_CORRUPTED`, 24 hours. It never destroys a Bug, and it is **the only route
 to two of the sixty species** (Errox → Panika, Artefax → Burnix). Effects:
 +1 ATK / −1 DEF stage in battle; an `IDLE_CORRUPT` animation set (the blink is
 replaced by a one-frame horizontal tear, the walk drops every fourth step); and a
 sprite glitch — three 24 px rows XORed with a per-hour noise word, one frame in
-eight, seeded from `pebble.id ^ (epoch/3600)`, so the glitch is stable within an
+eight, seeded from `bug.id ^ (epoch/3600)`, so the glitch is stable within an
 hour and moves between hours. It never touches the stored sprite. Sources: the
 SPECIAL encounter, and attack 12 *Infectar* — a battle that ends with the loser
 still carrying `EFF_CORRUPT` has a 12.0 % chance of it persisting, which is the
@@ -267,7 +267,7 @@ power cap and budget).
 ### The creator (§33)
 
 A phone reaches a PIN-protected local page by scanning a QR off the device's own
-screen; Wi-Fi is an AP that exists only while the editor is open. A custom Pebble
+screen; Wi-Fi is an AP that exists only while the editor is open. A custom Bug
 is capped at the **stage-1** budget (22 stat points, 185 attack budget) so it can
 never out-stat a final evolution, and it is priced by the same
 `budget_cost` rule as the built-in roster — never hand-typed.
@@ -276,7 +276,7 @@ never out-stat a final evolution, and it is priced by the same
 
 ## 5. Content, and how it is generated
 
-`tools/content/*.json` → `tools/gen_content.py` → `Pebblebol/src/data/*.h`.
+`tools/content/*.json` → `tools/gen_content.py` → `Errata/src/data/*.h`.
 `tools/content/verify.py` validates the pack against the design rules
 independently, importing nothing from the generator. `CONTENT_VERSION` is a
 **hash of the pack**, not a counter, stamped into the save header, every
@@ -315,7 +315,7 @@ corner of the type chart: Paketo, Buggo, Daemi.
 ### The art
 
 `tools/sprites/*.txt` (ASCII, `#` = lit pixel) → `tools/gen_sprites.py` →
-`data/sprites_pebbles.h`. **60 bodies × 2 frames × 24×24 = 8,640 B**, flat — all
+`data/sprites_bugs.h`. **60 bodies × 2 frames × 24×24 = 8,640 B**, flat — all
 three stages are the same size. The legacy Nottamagochi atlas (36 addressable
 bodies) was deleted in P9-C3; it was the reason the roster was clamped to 36
 species, because `sprite_id == id - 1` means species *N* needs the *N*-th body.
@@ -331,7 +331,7 @@ from the art* by the generator rather than hand-tabulated.
 ## 6. Persistence
 
 `SAVE_SCHEMA_VERSION` is **3**. Seven blob types in NVS. Five are **pairs** — Box
-header, config, inventory, cooldown table, and each of the ten Pebble slots —
+header, config, inventory, cooldown table, and each of the ten Bug slots —
 written twice as `<key>0`/`<key>1` with a sequence number. Every write goes to
 the copy a reader would *not* pick, then reads back and compares, so a torn or
 rotted copy always leaves the other intact (`LOAD_RECOVERED_PAIR`, not data
@@ -369,7 +369,7 @@ All of this is proved against a RAM NVS with fault injection
 ## 7. Radio
 
 **ESP-NOW**, not BLE (decision D2). `docs/protocol.md` is the contract: a wire
-Pebble is **48 bytes**, the state table is lockstep with three invariants, and §7
+Bug is **48 bytes**, the state table is lockstep with three invariants, and §7
 of that document enumerates what a malicious peer can still do. Trades are
 atomic and journalled.
 
@@ -428,7 +428,7 @@ easiest way to mislead someone.
 
 - **Sixteen** because nobody has watched a device do the thing.
 - **One** (`Device boots reliably`) waits on decision D1, the pin map.
-- **Two** — breeding compatibility, and generated Pebbles staying balanced —
+- **Two** — breeding compatibility, and generated Bugs staying balanced —
   wait on a module that **was never written**: `networking/breed_link.cpp` was
   planned in P7-C5 and does not exist. `DISC_CAP_BREED` is not claimed and the
   LINK screen's *CRIAR* row answers *«Aún no está listo»* on purpose. The
@@ -492,7 +492,7 @@ is what stops the next reader adding the real one.
 
 1. Splash with the product name and `FW_VERSION`.
 2. Load: nothing on flash → `LOAD_FRESH`. Clock stays `CAL_UNSET`.
-3. A starter Pebble is minted into slot 0 and made active **before the player is
+3. A starter Bug is minted into slot 0 and made active **before the player is
    asked anything**, so a player who reads nothing still ends up with a working
    device.
 4. **No toast.** The boot greeting is suppressed while setup is pending. The
@@ -541,9 +541,9 @@ native USB CDC has no DTR auto-reset, so opening the monitor does not restart it
 ```
 README.md                  1,149 lines; §1 pin map, §2 the bench list
 CHANGELOG.md               English, Keep a Changelog, one entry per phase
-PEBBLEBOL_IMPLEMENTATION_PLAN.md   the plan every commit is answerable to
-PEBBLEBOL_IMPLEMENTATION_AUDIT.md  the audit of the v1 codebase this replaced
-Pebblebol/                 the sketch: Pebblebol.ino + src/ + partitions.csv
+ERRATA_IMPLEMENTATION_PLAN.md   the plan every commit is answerable to
+ERRATA_IMPLEMENTATION_AUDIT.md  the audit of the v1 codebase this replaced
+Errata/                 the sketch: Errata.ino + src/ + partitions.csv
 tests/                     59 binaries, fakes, fixtures, 75 PBM goldens
   fakes/SHADOWS.txt        the fifty shadowed functions — read before trusting green
 tools/                     build.sh · check.sh · build_matrix.sh · generators
@@ -558,8 +558,8 @@ docs/
   budget.md                where the flash and the RAM went
   content.md               the content pack and how to regenerate it
   creature_style.md        the visual language of the sixty bodies
-  PEBBLEBOL_PRODUCT_SYSTEM_SPEC.md      the product spec (§ cited throughout)
-  PEBBLEBOL_HARDWARE_AND_BATTERY_SPEC.md
+  ERRATA_PRODUCT_SYSTEM_SPEC.md      the product spec (§ cited throughout)
+  ERRATA_HARDWARE_AND_BATTERY_SPEC.md
   legacy/                  the Spanish documents this one replaced
 ```
 
@@ -569,8 +569,8 @@ docs/
 
 | Term | Meaning |
 |---|---|
-| **Pebble** | one creature |
-| **Pebblebol** | the device |
+| **Bug** | one creature |
+| **Errata** | the device |
 | **Box** | the 10-slot collection; exactly one slot is active |
 | **the gate** | `tools/check.sh`; ends in `GATE OK` or `GATE FAIL: …` |
 | **the pack** | `tools/content/*.json`, the generated source of all content tables |

@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_game_state.cpp
+//  Errata host tests - test_game_state.cpp
 //  persistence/game_state.cpp: the live GameState and the single door to flash.
 //
 //  It is what stands between a v1 owner's pet and SaveSchema v2, so:
@@ -10,7 +10,7 @@
 //    * the checkpoint in nvs2 brings a rotted Box back when the user asks.
 //
 //  P2-C10 replaced save_compat.cpp with this module: the simulation runs on
-//  PebbleInstance now, so the PetSave map and the "lgpet" companion blob are
+//  BugInstance now, so the PetSave map and the "lgpet" companion blob are
 //  gone and the tests that covered them with them.
 // =============================================================================
 #include "nt_test.h"
@@ -68,17 +68,17 @@ TEST(game_state_migrates_a_v1_save_into_slot_zero) {
   Config cfg;
   const LoadResult r = gs_load(cfg);
   CHECK_EQ((int)r, (int)LOAD_MIGRATED);
-  CHECK(gs_have_pebble());
+  CHECK(gs_have_bug());
   CHECK(!gs_readonly());
 
-  const PebbleInstance& p = gs_state().pebbles[0];
-  CHECK(!pebble_is_empty(p));
+  const BugInstance& p = gs_state().bugs[0];
+  CHECK(!bug_is_empty(p));
   CHECK(p.id != 0u);
   CHECK(p.care[CARE_HUNGER] > 0);
   CHECK_EQ((int)gs_state().box.active_slot, 0);
   // The v1 adult fixture migrates to level 15 (migrate_level_of ADULT).
   CHECK_EQ(p.level, 15);
-  // The v1 keys are gone and the Pebble is on flash.
+  // The v1 keys are gone and the Bug is on flash.
   CHECK(!kv_mem_exists(KV_MAIN, KEY_V1_SAVE));
   CHECK(kv_mem_exists(KV_MAIN, "pb00") || kv_mem_exists(KV_MAIN, "pb01"));
   // The P2-C9 companion blob is not written any more.
@@ -92,7 +92,7 @@ TEST(game_state_round_trip_keeps_every_field_v2_carries) {
   Config cfg;
   CHECK_EQ((int)gs_load(cfg), (int)LOAD_MIGRATED);
 
-  PebbleInstance& p = gs_state().pebbles[0];
+  BugInstance& p = gs_state().bugs[0];
   const uint32_t id = p.id;
   p.care[CARE_HUNGER]      = 61234;
   p.care_rem[CARE_HUNGER]  = -311;
@@ -106,8 +106,8 @@ TEST(game_state_round_trip_keeps_every_field_v2_carries) {
 
   Config cfg2;
   CHECK_EQ((int)gs_load(cfg2), (int)LOAD_OK);
-  CHECK(gs_have_pebble());
-  const PebbleInstance& back = gs_state().pebbles[0];
+  CHECK(gs_have_bug());
+  const BugInstance& back = gs_state().bugs[0];
   CHECK_EQ(back.id, id);
   CHECK_EQ(back.care[CARE_HUNGER], 61234);
   CHECK_EQ((int)back.care_rem[CARE_HUNGER], -311);
@@ -134,7 +134,7 @@ TEST(game_state_never_writes_after_a_refused_load) {
   const LoadResult r = gs_load(cfg2);
   CHECK_EQ((int)r, (int)LOAD_CORRUPT);
   CHECK(gs_readonly());
-  CHECK(!gs_have_pebble());
+  CHECK(!gs_have_bug());
 
   const uint32_t puts_before = kv_mem_puts();
   CHECK(!gs_save_active(true));
@@ -314,7 +314,7 @@ TEST(game_state_recovers_from_the_nvs2_checkpoint_when_the_user_asks) {
   if (!seed_v1()) { CHECK(false); return; }
   Config cfg;
   CHECK_EQ((int)gs_load(cfg), (int)LOAD_MIGRATED);
-  gs_state().pebbles[0].care[CARE_HAPPINESS] = 55000;
+  gs_state().bugs[0].care[CARE_HAPPINESS] = 55000;
   s_ms += 2000;
   CHECK(gs_save_active(true));
   CHECK(save_checkpoint_all());                 // the daily nvs2 copy
@@ -329,8 +329,8 @@ TEST(game_state_recovers_from_the_nvs2_checkpoint_when_the_user_asks) {
   Config cfg3;
   CHECK_EQ((int)gs_recover(cfg3), (int)LOAD_RECOVERED_CKPT);
   CHECK(!gs_readonly());
-  CHECK(gs_have_pebble());
-  CHECK_EQ(gs_state().pebbles[0].care[CARE_HAPPINESS], 55000);
+  CHECK(gs_have_bug());
+  CHECK_EQ(gs_state().bugs[0].care[CARE_HAPPINESS], 55000);
 
   // The recovered state is on KV_MAIN. The next boot still finds the rotten
   // second copy of the Box pair - commit_all() rewrote the one a reader would
@@ -339,7 +339,7 @@ TEST(game_state_recovers_from_the_nvs2_checkpoint_when_the_user_asks) {
   CHECK_EQ((int)gs_load(cfg4), (int)LOAD_RECOVERED_PAIR);
   Config cfg5;
   CHECK_EQ((int)gs_load(cfg5), (int)LOAD_OK);
-  CHECK_EQ(gs_state().pebbles[0].care[CARE_HAPPINESS], 55000);
+  CHECK_EQ(gs_state().bugs[0].care[CARE_HAPPINESS], 55000);
 }
 
 TEST(game_state_recover_with_no_checkpoint_writes_nothing) {

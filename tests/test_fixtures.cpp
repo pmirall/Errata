@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_fixtures.cpp
+//  Errata host tests - test_fixtures.cpp
 //  The committed legacy v1 blobs (tests/fixtures/*.bin, written by
 //  legacy/mkfixtures.cpp) are byte images of the v1 LegacyPetSave / Config /
 //  GainSave structs. This test pins them: size, magic, version, the stored
@@ -94,6 +94,9 @@ TEST(fixture_config_v1) {
   // same 0x04 and the bytes on disk are untouched.
   CHECK_EQ(c.flags, CF_RESERVED_BLE | CF_WEB_ENABLED);
   CHECK_STR_EQ(c.wifi_ssid, "legacy-ssid");
+  // El fixture v1 lleva "Pebble" GRABADO. Es un dato de disco de la era
+  // Nottamagochi, no un nombre de producto: renombrar la expectativa sin
+  // poder renombrar los bytes solo rompe la migracion que esto prueba.
   CHECK_STR_EQ(c.pet_name, "Pebble");
   CHECK_STR_EQ(c.tz, CFG_TZ_STRING);
   // v1 kept lat[12] at offset 224; reserved_b[] holds those retired bytes.

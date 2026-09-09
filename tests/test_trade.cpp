@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_trade.cpp
+//  Errata host tests - test_trade.cpp
 //  THE ATOMIC TRADE (spec section 16, plan P7-C4), over the REAL
 //  persistence/save_manager.cpp, the REAL game/box.cpp, the REAL section 15
 //  codec and - for the wire half - two REAL networking/session.cpp endpoints
@@ -97,27 +97,27 @@ static Genome sealed_genome(uint32_t seed)
   return genome_genesis();
 }
 
-// A legal Pebble that is NOT in any Box: the peer's offer is built from one.
-static void mk_free_pebble(PebbleInstance& p, uint8_t species, uint8_t level, uint32_t id)
+// A legal Bug that is NOT in any Box: the peer's offer is built from one.
+static void mk_free_bug(BugInstance& p, uint8_t species, uint8_t level, uint32_t id)
 {
   memset(&p, 0, sizeof p);
-  p.magic         = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver    = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic         = (uint16_t)BUG_MAGIC;
+  p.layout_ver    = (uint8_t)BUG_LAYOUT_VER;
   p.species_id    = species;
   p.id            = id;
   p.level         = level;
   p.origin        = (uint8_t)ORIGIN_WILD;
-  p.custom_sprite = (uint8_t)PB_CUSTOM_SPRITE_NONE;
+  p.custom_sprite = (uint8_t)ER_CUSTOM_SPRITE_NONE;
   p.genome        = sealed_genome(0x0BADF00Du + id);
   const SpeciesDef* sp = species_get(species);
   if (sp == nullptr) return;
   memcpy(p.moves, sp->moves, sizeof p.moves);
   p.hp_cur    = xp_hp_max(sp->base_hp, level);
   p.evo_state = (uint8_t)(sp->stage & (uint8_t)EVO_STATE_STAGE_MASK);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) p.care[i] = (int32_t)PB_CARE_MILLI_MAX;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) p.care[i] = (int32_t)ER_CARE_MILLI_MAX;
 }
 
-// Three Pebbles on a fresh device, slot 0 active, everything committed. Slot 1
+// Three Bugs on a fresh device, slot 0 active, everything committed. Slot 1
 // is the one every case offers: it is not the active one, so the offer rule
 // accepts it.
 static void device_fresh(void)
@@ -127,7 +127,7 @@ static void device_fresh(void)
   save_set_clock(&clock_ms, &clock_epoch);
 
   memset(&g_gs, 0, sizeof g_gs);
-  for (uint8_t s = 0; s < (uint8_t)BOX_SLOTS; ++s) pebble_clear(g_gs.pebbles[s]);
+  for (uint8_t s = 0; s < (uint8_t)BOX_SLOTS; ++s) bug_clear(g_gs.bugs[s]);
   box_defaults(g_gs.box);
   cfgv2_defaults(g_gs.cfg);
   inventory_defaults(g_gs.inv);
@@ -139,7 +139,7 @@ static void device_fresh(void)
   box_bind(g_gs);
 
   for (uint8_t i = 0; i < 3u; ++i) {
-    const uint8_t slot = box_new_pebble((uint8_t)(1u + i * 4u), (uint8_t)(8u + i),
+    const uint8_t slot = box_new_bug((uint8_t)(1u + i * 4u), (uint8_t)(8u + i),
                                         (uint8_t)ORIGIN_WILD,
                                         sealed_genome(0x5A5A0000u + i), 0x1000u + i,
                                         TRD_EPOCH0);
@@ -148,7 +148,7 @@ static void device_fresh(void)
   CHECK(box_set_active(0u));
 
   for (uint8_t s = 0; s < (uint8_t)BOX_SLOTS; ++s) {
-    if (box_occupied(s)) CHECK(save_pebble(s, g_gs.pebbles[s], true));
+    if (box_occupied(s)) CHECK(save_bug(s, g_gs.bugs[s], true));
   }
   CHECK(save_box_header(g_gs.box));
   CHECK(save_config(g_gs.cfg));
@@ -180,12 +180,12 @@ static bool st_write_journal(void* ctx, const PendingTrade& t)
 }
 // THE SHAPE OF THE SHIPPING SHIMS, and it must stay that shape: ui/ui.cpp's
 // ui_tr_store_slot() and app/app.cpp's app_trade_write_slot() both call
-// save_pebble_now(). A fixture that called save_pebble(..., true) here would be
+// save_bug_now(). A fixture that called save_bug(..., true) here would be
 // testing a store the release artefact does not have.
 static bool st_write_slot(void* ctx, uint8_t slot)
 {
   (void)ctx; g_store_writes++;
-  return save_pebble_now(slot, g_gs.pebbles[slot]);
+  return save_bug_now(slot, g_gs.bugs[slot]);
 }
 static bool st_write_box(void* ctx)
 {
@@ -210,10 +210,10 @@ static TradeStore real_store(void)
 // =============================================================================
 struct BoxFacts {
   uint8_t  count;
-  bool     has_out;          // the Pebble we were giving away
+  bool     has_out;          // the Bug we were giving away
   uint8_t  traded;           // how many carry PBF_TRADED / ORIGIN_TRADED
   uint32_t traded_id;
-  bool     bystanders_ok;    // the two Pebbles that were never part of the trade
+  bool     bystanders_ok;    // the two Bugs that were never part of the trade
 };
 
 static BoxFacts box_facts(uint32_t out_id, uint32_t bystander_a, uint32_t bystander_b)
@@ -221,7 +221,7 @@ static BoxFacts box_facts(uint32_t out_id, uint32_t bystander_a, uint32_t bystan
   BoxFacts f; memset(&f, 0, sizeof f);
   bool saw_a = false, saw_b = false;
   for (uint8_t s = 0; s < (uint8_t)BOX_SLOTS; ++s) {
-    const PebbleInstance* p = box_peek(s);
+    const BugInstance* p = box_peek(s);
     if (p == nullptr) continue;
     f.count++;
     if (p->id == out_id)       f.has_out = true;
@@ -238,14 +238,14 @@ static BoxFacts box_facts(uint32_t out_id, uint32_t bystander_a, uint32_t bystan
 static uint8_t box_quarantine_mask(void) { return (uint8_t)save_quarantine_mask(); }
 
 // B1..B5 of game/box.h, plus the one validator on every occupied slot. A trade
-// that leaves the right NUMBER of Pebbles but a broken Box has still failed.
+// that leaves the right NUMBER of Bugs but a broken Box has still failed.
 static void check_box_is_sane(const char* where)
 {
   uint32_t ids[BOX_SLOTS];
   uint8_t  n = 0;
   uint16_t mask = 0;
   for (uint8_t s = 0; s < (uint8_t)BOX_SLOTS; ++s) {
-    const PebbleInstance* p = box_peek(s);
+    const BugInstance* p = box_peek(s);
     if (p == nullptr) continue;
     mask |= (uint16_t)(1u << s);
     if (p->id == 0u) fprintf(stderr, "    %s: slot %u has id 0\n", where, (unsigned)s);
@@ -255,7 +255,7 @@ static void check_box_is_sane(const char* where)
       CHECK(ids[k] != p->id);                               // B2
     }
     ids[n++] = p->id;
-    const VReject v = validate_pebble(*p);
+    const VReject v = validate_bug(*p);
     if (v != VR_OK)
       fprintf(stderr, "    %s: slot %u is %s\n", where, (unsigned)s,
               validate_reject_name(v));
@@ -270,9 +270,9 @@ static void check_box_is_sane(const char* where)
 }
 
 // =============================================================================
-//  PART 1 - THE RULES. Which Pebble may be offered, and which may be taken.
+//  PART 1 - THE RULES. Which Bug may be offered, and which may be taken.
 // =============================================================================
-TEST(the_pebble_you_are_holding_is_not_for_sale_and_every_refusal_is_named) {
+TEST(the_bug_you_are_holding_is_not_for_sale_and_every_refusal_is_named) {
   device_fresh();
   CHECK_EQ((int)box_active(), 0);
 
@@ -284,14 +284,14 @@ TEST(the_pebble_you_are_holding_is_not_for_sale_and_every_refusal_is_named) {
   // An empty slot and one past the end.
   CHECK_EQ((int)trade_offer_check(5u, 0u), (int)TDR_NO_SLOT);
   CHECK_EQ((int)trade_offer_check(99u, 0u), (int)TDR_NO_SLOT);
-  // save_manager.h: "A quarantined Pebble may be shown to its owner. It may NOT
+  // save_manager.h: "A quarantined Bug may be shown to its owner. It may NOT
   // enter a battle or a trade." This is where P7 discharges that sentence.
   CHECK_EQ((int)trade_offer_check(1u, (uint16_t)(1u << 1)), (int)TDR_QUARANTINED);
   CHECK_EQ((int)trade_offer_check(2u, (uint16_t)(1u << 1)), (int)TDR_OK);
-  // A Pebble the one validator refuses is not offerable either, whatever the
+  // A Bug the one validator refuses is not offerable either, whatever the
   // quarantine mask says - the mask is a snapshot from the last load and the
-  // Pebble may have been edited since.
-  PebbleInstance* p = box_slot(2u);
+  // Bug may have been edited since.
+  BugInstance* p = box_slot(2u);
   CHECK(p != nullptr);
   const uint8_t keep = p->moves[0];
   p->moves[0] = 11u;
@@ -301,12 +301,12 @@ TEST(the_pebble_you_are_holding_is_not_for_sale_and_every_refusal_is_named) {
 }
 
 // THIS CASE EXISTS BECAUSE A SEPARATE RULE FOR IT WAS WRITTEN AND MEASURED TO BE
-// UNREACHABLE. "The last Pebble on the device cannot be given away" is real, and
+// UNREACHABLE. "The last Bug on the device cannot be given away" is real, and
 // TDR_ACTIVE plus game/box.h invariant B3 already hold it: box_active() runs
 // mask_sync(), which repairs an active_slot pointing at an empty slot to the
-// lowest occupied one, so a Box with one Pebble ALWAYS reports that Pebble as
+// lowest occupied one, so a Box with one Bug ALWAYS reports that Bug as
 // active. The dedicated code came out; the property is asserted here instead.
-TEST(the_last_pebble_on_the_device_is_the_active_one_and_that_is_what_refuses_it) {
+TEST(the_last_bug_on_the_device_is_the_active_one_and_that_is_what_refuses_it) {
   device_fresh();
   CHECK(box_release(2u, true));
   CHECK(box_release(1u, true));
@@ -316,7 +316,7 @@ TEST(the_last_pebble_on_the_device_is_the_active_one_and_that_is_what_refuses_it
 
   // Even with the header hand-broken to say "nothing is active", which invariant
   // B3 forbids: mask_sync() repairs it before the rule is applied, so there is
-  // no window in which the only Pebble is offerable.
+  // no window in which the only Bug is offerable.
   device_fresh();
   CHECK(box_release(2u, true));
   CHECK(box_set_active(1u));
@@ -327,11 +327,11 @@ TEST(the_last_pebble_on_the_device_is_the_active_one_and_that_is_what_refuses_it
   CHECK_EQ((int)box_active(), 1);                  // repaired, not left at NONE
 }
 
-TEST(a_tainted_pebble_cannot_enter_a_clean_dynasty_through_a_trade) {
+TEST(a_tainted_bug_cannot_enter_a_clean_dynasty_through_a_trade) {
   device_fresh();
-  PebbleInstance incoming;
-  mk_free_pebble(incoming, 7u, 11u, 0x77770001u);
-  const PebbleInstance* mine = box_peek(1u);
+  BugInstance incoming;
+  mk_free_bug(incoming, 7u, 11u, 0x77770001u);
+  const BugInstance* mine = box_peek(1u);
   CHECK(mine != nullptr);
 
   CHECK_EQ((int)trade_accept_check(*mine, incoming, DEV_A, DEV_B), (int)TDR_OK);
@@ -339,19 +339,19 @@ TEST(a_tainted_pebble_cannot_enter_a_clean_dynasty_through_a_trade) {
   // MARKER 1: the genome bit, which genome_breed() would then propagate into
   // every descendant as A | B.
   gene_set_tainted(incoming.genome, 1u);
-  CHECK(pb_is_tainted(incoming));
+  CHECK(bug_is_tainted(incoming));
   CHECK_EQ((int)trade_accept_check(*mine, incoming, DEV_A, DEV_B), (int)TDR_TAINT);
 
   // A TAINTED UNIT ACCEPTS ANYTHING (game/taint.h): two testers keep a
   // playground with each other.
-  PebbleInstance mine_dirty = *mine;
+  BugInstance mine_dirty = *mine;
   gene_set_tainted(mine_dirty.genome, 1u);
   CHECK_EQ((int)trade_accept_check(mine_dirty, incoming, DEV_A, DEV_B), (int)TDR_OK);
 
   // MARKER 2: the instance FLAG on its own, which persistence/migration.cpp
   // sets from a v1 save without touching the genome. Reading only the genome is
   // the hole this half names.
-  mk_free_pebble(incoming, 7u, 11u, 0x77770002u);
+  mk_free_bug(incoming, 7u, 11u, 0x77770002u);
   incoming.flags = (uint8_t)(incoming.flags | (uint8_t)PBF_GOD_TAINTED);
   CHECK_EQ((int)gene_tainted(incoming.genome), 0);
   CHECK_EQ((int)trade_accept_check(*mine, incoming, DEV_A, DEV_B), (int)TDR_TAINT);
@@ -359,23 +359,23 @@ TEST(a_tainted_pebble_cannot_enter_a_clean_dynasty_through_a_trade) {
 
 TEST(a_peer_that_is_us_or_sends_an_id_we_already_hold_is_refused_by_name) {
   device_fresh();
-  PebbleInstance incoming;
-  mk_free_pebble(incoming, 7u, 11u, 0x77770003u);
-  const PebbleInstance* mine = box_peek(1u);
+  BugInstance incoming;
+  mk_free_bug(incoming, 7u, 11u, 0x77770003u);
+  const BugInstance* mine = box_peek(1u);
   CHECK(mine != nullptr);
 
   CHECK_EQ((int)trade_accept_check(*mine, incoming, DEV_A, DEV_A), (int)TDR_SELF);
   CHECK_EQ((int)trade_accept_check(*mine, incoming, DEV_A, 0u), (int)TDR_SELF);
 
-  // A peer sending a Pebble whose id we already hold. box_add() would re-mint
+  // A peer sending a Bug whose id we already hold. box_add() would re-mint
   // it silently; spec section 15's first sentence says refuse rather than mend.
-  PebbleInstance clash = incoming;
+  BugInstance clash = incoming;
   clash.id = box_peek(2u)->id;
-  pebble_seal(clash);
+  bug_seal(clash);
   CHECK_EQ((int)trade_accept_check(*mine, clash, DEV_A, DEV_B), (int)TDR_DUPLICATE_ID);
 
   // And an object the one validator refuses.
-  PebbleInstance bad = incoming;
+  BugInstance bad = incoming;
   bad.level = 0u;
   CHECK_EQ((int)trade_accept_check(*mine, bad, DEV_A, DEV_B), (int)TDR_PEER_INVALID);
 }
@@ -401,16 +401,16 @@ TEST(every_trade_reject_and_resolution_has_a_name) {
 //  PART 2 - THE KILL SWEEP. The whole chunk is here.
 // =============================================================================
 struct TradeFixture {
-  uint32_t out_id;                 // the Pebble this device is giving
+  uint32_t out_id;                 // the Bug this device is giving
   uint32_t bystander_a, bystander_b;
   uint8_t  wire[TR_WIRE_BYTES];    // the peer's record, as it arrived
 };
 
-// A device three Pebbles deep with the journal already at TRADE_RECEIVED:
+// A device three Bugs deep with the journal already at TRADE_RECEIVED:
 // our offer is out (W1) and theirs is journalled (W2). Both writes are asserted
 // to have LANDED, so a sweep that cuts inside trade_execute() is cutting where
 // it means to.
-static TradeFixture arm_trade(uint32_t peer_pebble_id)
+static TradeFixture arm_trade(uint32_t peer_bug_id)
 {
   device_fresh();
   device_boot();
@@ -421,8 +421,8 @@ static TradeFixture arm_trade(uint32_t peer_pebble_id)
   f.out_id      = box_peek(1u)->id;
   f.bystander_b = box_peek(2u)->id;
 
-  PebbleInstance peer;
-  mk_free_pebble(peer, 7u, 11u, peer_pebble_id);
+  BugInstance peer;
+  mk_free_bug(peer, 7u, 11u, peer_bug_id);
   pbw_encode(peer, f.wire);
 
   PendingTrade t;
@@ -459,7 +459,7 @@ static TradeResolution reboot_and_resolve(const TradeFixture& f, const char* whe
   return res;
 }
 
-TEST(a_clean_trade_moves_exactly_one_pebble_each_way_and_clears_its_journal) {
+TEST(a_clean_trade_moves_exactly_one_bug_each_way_and_clears_its_journal) {
   const TradeFixture f = arm_trade(0x77770200u);
   g_store_writes = 0;
   const uint32_t puts_before = kv_mem_puts();
@@ -481,11 +481,11 @@ TEST(a_clean_trade_moves_exactly_one_pebble_each_way_and_clears_its_journal) {
   CHECK(!b.has_out);
   CHECK_EQ((int)b.traded, 1);
 
-  // The incoming Pebble is OURS now: a fresh local id, the flag, the origin and
+  // The incoming Bug is OURS now: a fresh local id, the flag, the origin and
   // the counter, and it passes the one validator on the way back off flash.
-  const PebbleInstance* got = nullptr;
+  const BugInstance* got = nullptr;
   for (uint8_t s = 0; s < (uint8_t)BOX_SLOTS; ++s) {
-    const PebbleInstance* p = box_peek(s);
+    const BugInstance* p = box_peek(s);
     if (p != nullptr && (p->flags & (uint8_t)PBF_TRADED) != 0u) got = p;
   }
   CHECK(got != nullptr);
@@ -495,7 +495,7 @@ TEST(a_clean_trade_moves_exactly_one_pebble_each_way_and_clears_its_journal) {
     CHECK_EQ((int)got->trades, 1);
     CHECK(got->id != 0x77770200u);                 // NOT the sender's id
     CHECK(got->id != f.out_id);
-    CHECK_EQ((int)validate_pebble(*got), (int)VR_OK);
+    CHECK_EQ((int)validate_bug(*got), (int)VR_OK);
   }
 }
 
@@ -553,8 +553,8 @@ TEST(a_power_cut_while_the_journal_is_being_opened_rolls_the_trade_back) {
     f.bystander_a = box_peek(0u)->id;
     f.out_id      = box_peek(1u)->id;
     f.bystander_b = box_peek(2u)->id;
-    PebbleInstance peer;
-    mk_free_pebble(peer, 7u, 11u, 0x77770400u + k);
+    BugInstance peer;
+    mk_free_bug(peer, 7u, 11u, 0x77770400u + k);
     pbw_encode(peer, f.wire);
 
     PendingTrade t;
@@ -671,7 +671,7 @@ TEST(a_write_that_did_not_land_stops_the_sequence_where_it_failed) {
   }
 }
 
-TEST(the_journal_names_the_id_the_incoming_pebble_will_have_here) {
+TEST(the_journal_names_the_id_the_incoming_bug_will_have_here) {
   // THE IDEMPOTENCE HINGE (game/trade.h). Without it a replayed COMMIT would
   // mint a DIFFERENT id and the resolver could not tell "already done" from
   // "not yet started" - so the record is checked to carry the local id, and
@@ -689,7 +689,7 @@ TEST(the_journal_names_the_id_the_incoming_pebble_will_have_here) {
   CHECK_EQ((long long)j.out_id, (long long)f.out_id);
   CHECK_EQ((long long)j.peer_id, (long long)DEV_B);
 
-  PebbleInstance in;
+  BugInstance in;
   CHECK_EQ((int)trade_wire_codec().decode(j.in_wire, in), (int)VR_OK);  // still decodes
   CHECK(in.id != 0x77770600u);                          // NOT the sender's id
   CHECK(!box_id_in_use(in.id));                         // not filed yet
@@ -716,10 +716,10 @@ TEST(a_commit_record_whose_wire_bytes_rotted_undoes_the_trade_instead_of_guessin
   CHECK_EQ((int)g_gs.trade.phase, (int)TRADE_COMMIT);
 
   PendingTrade j = g_gs.trade;
-  j.in_wire[PBW_OFF_LEVEL] = 0u;                 // VR_BAD_LEVEL, resealed below
-  const uint16_t crc = crc16_ccitt(j.in_wire, (size_t)PBW_CRC_BYTES);
-  j.in_wire[PBW_OFF_CRC + 0] = (uint8_t)(crc & 0xFFu);
-  j.in_wire[PBW_OFF_CRC + 1] = (uint8_t)((crc >> 8) & 0xFFu);
+  j.in_wire[BUGW_OFF_LEVEL] = 0u;                 // VR_BAD_LEVEL, resealed below
+  const uint16_t crc = crc16_ccitt(j.in_wire, (size_t)BUGW_CRC_BYTES);
+  j.in_wire[BUGW_OFF_CRC + 0] = (uint8_t)(crc & 0xFFu);
+  j.in_wire[BUGW_OFF_CRC + 1] = (uint8_t)((crc >> 8) & 0xFFu);
 
   CHECK_EQ((int)trade_resolve(j, trade_wire_codec(), real_store(), TRD_EPOCH0),
            (int)TRS_ROLLED_BACK);
@@ -733,13 +733,13 @@ TEST(a_commit_record_whose_wire_bytes_rotted_undoes_the_trade_instead_of_guessin
 }
 
 // THE ONE OUTCOME NOBODY WANTS, AND IT HAS A NAME RATHER THAN SILENCE. The
-// outgoing Pebble has already left and the incoming record will not decode:
+// outgoing Bug has already left and the incoming record will not decode:
 // nothing in game/trade.cpp can bring it back, so the journal is cleared and
 // the answer is TRS_LOST - NOT TRS_ROLLED_BACK, because nothing was rolled
 // back. It is unreachable while this module writes the record and the 64 B CRC
 // holds; it is reachable HERE because the resolver's input is a persisted blob,
 // and that is exactly the reason the code exists.
-TEST(a_pebble_that_left_before_its_record_rotted_is_reported_as_lost_not_undone) {
+TEST(a_bug_that_left_before_its_record_rotted_is_reported_as_lost_not_undone) {
   const TradeFixture f = arm_trade(0x77770B10u);
   PendingTrade t = g_gs.trade;
   kv_mem_fail_after_n_puts(2u);        // W3 lands, B1 lands, B2's write dies
@@ -751,16 +751,16 @@ TEST(a_pebble_that_left_before_its_record_rotted_is_reported_as_lost_not_undone)
   CHECK_EQ((int)box_count(), 2);
 
   PendingTrade j = g_gs.trade;
-  j.in_wire[PBW_OFF_LEVEL] = 0u;                   // and theirs will not decode
-  const uint16_t crc = crc16_ccitt(j.in_wire, (size_t)PBW_CRC_BYTES);
-  j.in_wire[PBW_OFF_CRC + 0] = (uint8_t)(crc & 0xFFu);
-  j.in_wire[PBW_OFF_CRC + 1] = (uint8_t)((crc >> 8) & 0xFFu);
+  j.in_wire[BUGW_OFF_LEVEL] = 0u;                   // and theirs will not decode
+  const uint16_t crc = crc16_ccitt(j.in_wire, (size_t)BUGW_CRC_BYTES);
+  j.in_wire[BUGW_OFF_CRC + 0] = (uint8_t)(crc & 0xFFu);
+  j.in_wire[BUGW_OFF_CRC + 1] = (uint8_t)((crc >> 8) & 0xFFu);
 
   CHECK_EQ((int)trade_resolve(j, trade_wire_codec(), real_store(), TRD_EPOCH0),
            (int)TRS_LOST);
   CHECK_EQ((int)trade_last_reject(), (int)TDR_LOST);
   g_gs.trade = j;
-  check_box_is_sane("after a lost pebble");
+  check_box_is_sane("after a lost bug");
   CHECK_EQ((int)box_count(), 2);                   // and it stays lost
   CHECK_EQ((int)g_gs.trade.phase, (int)TRADE_IDLE);
   // The next boot has nothing left to do, which is what makes the report the
@@ -771,10 +771,10 @@ TEST(a_pebble_that_left_before_its_record_rotted_is_reported_as_lost_not_undone)
            (int)TRS_NONE);
 }
 
-TEST(a_trade_journal_that_names_a_pebble_this_device_does_not_hold_is_refused) {
+TEST(a_trade_journal_that_names_a_bug_this_device_does_not_hold_is_refused) {
   const TradeFixture f = arm_trade(0x77770800u);
   PendingTrade t = g_gs.trade;
-  t.out_id = 0xDEADBEEFu;                        // a Pebble we never had
+  t.out_id = 0xDEADBEEFu;                        // a Bug we never had
   CHECK_EQ((int)trade_execute(t, trade_wire_codec(), real_store(), TRD_EPOCH0),
            (int)TDR_NO_SLOT);
   check_box_is_sane("after a bad out_id");
@@ -845,13 +845,13 @@ static bool mp_sent(void* ctx, uint32_t out_id, uint32_t peer_id)
   m.journal_sent++; m.out_id = out_id;
   return m.store_ok != 0u;
 }
-static uint8_t mp_judge(void* ctx, const uint8_t rec[PBW_BYTES])
+static uint8_t mp_judge(void* ctx, const uint8_t rec[BUGW_BYTES])
 {
   ModelPeer& m = *(ModelPeer*)ctx;
   (void)rec;
   return m.judge_code;
 }
-static bool mp_recv(void* ctx, const uint8_t rec[PBW_BYTES])
+static bool mp_recv(void* ctx, const uint8_t rec[BUGW_BYTES])
 {
   ModelPeer& m = *(ModelPeer*)ctx;
   (void)rec; m.journal_recv++;
@@ -885,16 +885,16 @@ static bool dev_sent(void* ctx, uint32_t out_id, uint32_t peer_id)
   trade_journal_sent(t, out_id, peer_id);
   return st_write_journal(nullptr, t);
 }
-static uint8_t dev_judge(void* ctx, const uint8_t rec[PBW_BYTES])
+static uint8_t dev_judge(void* ctx, const uint8_t rec[BUGW_BYTES])
 {
   (void)ctx;
-  PebbleInstance in;
+  BugInstance in;
   if (pbw_decode(rec, in) != VR_OK) return (uint8_t)TDR_PEER_INVALID;
-  const PebbleInstance* mine = box_peek(g_dev_out_slot);
+  const BugInstance* mine = box_peek(g_dev_out_slot);
   if (mine == nullptr) return (uint8_t)TDR_NO_SLOT;
   return (uint8_t)trade_accept_check(*mine, in, DEV_A, g_dev_peer_id);
 }
-static bool dev_recv(void* ctx, const uint8_t rec[PBW_BYTES])
+static bool dev_recv(void* ctx, const uint8_t rec[BUGW_BYTES])
 {
   (void)ctx;
   PendingTrade t = g_gs.trade;
@@ -939,10 +939,10 @@ struct Wire {
 
 static Wire& wire_arena(void) { static Wire w; return w; }
 
-// Endpoint 0's Pebble is slot g_dev_out_slot of the REAL Box; endpoint 1's is a
+// Endpoint 0's Bug is slot g_dev_out_slot of the REAL Box; endpoint 1's is a
 // free-standing legal one. Both sides run the identical shipping code.
 static void wire_begin(Wire& W, uint32_t seed, const LoopbackFault& f,
-                       uint32_t peer_pebble_id)
+                       uint32_t peer_bug_id)
 {
   memset(&W, 0, sizeof W);
   loopback_init(W.lk, seed, f);
@@ -967,13 +967,13 @@ static void wire_begin(Wire& W, uint32_t seed, const LoopbackFault& f,
     session_init(W.s[i], cfg);
   }
 
-  const PebbleInstance* mine = box_peek(g_dev_out_slot);
+  const BugInstance* mine = box_peek(g_dev_out_slot);
   CHECK(mine != nullptr);
   CHECK_EQ((int)session_set_trade(W.s[0], *mine), (int)VR_OK);
   trade_link_init(W.tl[0], W.s[0], mine->id, device_hooks());
 
-  PebbleInstance theirs;
-  mk_free_pebble(theirs, 7u, 11u, peer_pebble_id);
+  BugInstance theirs;
+  mk_free_bug(theirs, 7u, 11u, peer_bug_id);
   CHECK_EQ((int)session_set_trade(W.s[1], theirs), (int)VR_OK);
   trade_link_init(W.tl[1], W.s[1], theirs.id, model_hooks(W.peer));
 
@@ -1018,7 +1018,7 @@ static bool wire_run_until_consent(Wire& W, uint32_t max_iters = 200000u)
   return true;
 }
 
-TEST(two_devices_that_both_consent_swap_exactly_one_pebble_each) {
+TEST(two_devices_that_both_consent_swap_exactly_one_bug_each) {
   Wire& W = wire_arena();
   LoopbackFault clean; memset(&clean, 0, sizeof clean);
   wire_begin(W, 1u, clean, 0x77770A00u);
@@ -1049,7 +1049,7 @@ TEST(two_devices_that_both_consent_swap_exactly_one_pebble_each) {
   CHECK_EQ((int)g_dev_applied, 1);
   CHECK_EQ((int)W.peer.applied, 1);
 
-  // And on flash, after a reboot: our Pebble is gone, theirs is here, the
+  // And on flash, after a reboot: our Bug is gone, theirs is here, the
   // journal is clear and the two bystanders never moved.
   device_boot();
   check_box_is_sane("after a wire trade");
@@ -1103,11 +1103,11 @@ TEST(a_tainted_offer_is_refused_on_the_wire_by_name_and_moves_nothing) {
   // Re-freeze the peer's record with the god-taint bit set. The peer's own
   // judge still says yes, so the refusal is entirely ours - which is what
   // game/taint.h means by "both sides evaluate it on their own incoming record".
-  PebbleInstance dirty;
-  mk_free_pebble(dirty, 7u, 11u, 0x77770C01u);
+  BugInstance dirty;
+  mk_free_bug(dirty, 7u, 11u, 0x77770C01u);
   gene_set_tainted(dirty.genome, 1u);
   CHECK_EQ((int)session_set_trade(W.s[1], dirty), (int)VR_OK);
-  memcpy(W.tl[1].out_rec, W.s[1].my_rec[0], (size_t)PBW_BYTES);
+  memcpy(W.tl[1].out_rec, W.s[1].my_rec[0], (size_t)BUGW_BYTES);
 
   wire_run(W);
   CHECK(!W.hung);
@@ -1133,7 +1133,7 @@ TEST(a_battle_session_and_a_trade_session_refuse_each_other_by_name) {
   LoopbackFault clean; memset(&clean, 0, sizeof clean);
   wire_begin(W, 4u, clean, 0x77770D00u);
   // Endpoint 1 came to fight. The operation is agreed in the handshake, at the
-  // last moment before a Pebble is on the wire.
+  // last moment before a Bug is on the wire.
   W.s[1].op = (uint8_t)SOP_BATTLE;
   wire_run(W);
   CHECK(!W.hung);
@@ -1238,7 +1238,7 @@ TEST(a_lossy_link_either_completes_the_trade_on_both_sides_or_on_neither) {
   // cannot make an exchange atomic, so this case REPORTS the residual instead
   // of asserting it away - and asserts the two things that ARE guaranteed: the
   // device's own Box is whole after every trial, and no trial ends with this
-  // device holding both Pebbles or neither.
+  // device holding both Bugs or neither.
   struct Arm { const char* name; uint16_t drop, dup, reorder; uint8_t window; };
   static const Arm ARMS[] = {
     { "clean",                     0u,   0u,   0u, 0u },
@@ -1288,7 +1288,7 @@ TEST(a_lossy_link_either_completes_the_trade_on_both_sides_or_on_neither) {
     CHECK(bf.bystanders_ok);
     CHECK((bf.has_out && bf.traded == 0u) || (!bf.has_out && bf.traded == 1u));
     // And what the device did matches what it decided: applied means the
-    // Pebble left, not applied means it stayed.
+    // Bug left, not applied means it stayed.
     CHECK_EQ((int)(a != 0), (int)(!bf.has_out));
   }
   printf("     %-26s %d trials: %3d completed on both, %3d on neither, "

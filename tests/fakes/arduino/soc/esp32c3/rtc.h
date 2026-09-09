@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL - tests/fakes/arduino/soc/esp32c3/rtc.h
+//  ERRATA - tests/fakes/arduino/soc/esp32c3/rtc.h
 //  The one ESP-IDF symbol hardware/gametime.cpp's device branch reads.
 //
 //  esp_rtc_get_time_us() is THE RTC COUNTER, not the wall clock: settimeofday()
@@ -8,11 +8,11 @@
 //  directory name the real header lives at, so the #include line in
 //  gametime.cpp is the real one and not a test-only spelling.
 // =============================================================================
-#ifndef PB_FAKE_ESP32C3_RTC_H
-#define PB_FAKE_ESP32C3_RTC_H
+#ifndef ER_FAKE_ESP32C3_RTC_H
+#define ER_FAKE_ESP32C3_RTC_H
 
 #include <stdint.h>
 
 uint64_t esp_rtc_get_time_us(void);
 
-#endif  // PB_FAKE_ESP32C3_RTC_H
+#endif  // ER_FAKE_ESP32C3_RTC_H

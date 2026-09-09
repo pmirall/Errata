@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL host test - test_content.cpp
+//  ERRATA host test - test_content.cpp
 //  EVERY PLAN 1.5.2 COMPILE-TIME GUARD, RE-ASSERTED AT RUNTIME (P4-C1).
 //
 //  The generated headers static_assert all of this, so a bad table is a BUILD
@@ -33,16 +33,16 @@
 #include "data/items_table.h"
 #include "data/species_table.h"
 #include "data/sprites.h"
-#include "data/sprites_pebbles.h"
+#include "data/sprites_bugs.h"
 #include "core/version.h"
 #include "game/evolution.h"
 #include "game/species.h"
 #include "game/xp.h"
 
-static void make_pebble(PebbleInstance& p, uint8_t species, uint8_t level) {
+static void make_bug(BugInstance& p, uint8_t species, uint8_t level) {
   memset(&p, 0, sizeof p);
-  p.magic      = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic      = (uint16_t)BUG_MAGIC;
+  p.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   p.species_id = species;
   p.id         = 0x5EED0002u;
   p.level      = level;
@@ -156,9 +156,9 @@ TEST(species_two_and_three_keep_their_frozen_columns) {
   CHECK_STR_EQ(S(s3->name_idx), "Rafag\xc3\xb3n");
 
   // The pack's tuned learnsets, which P4-C1 adopts.
-  const uint8_t want2[PB_MOVE_COUNT] = { 5, 27, 31, 33 };
-  const uint8_t want3[PB_MOVE_COUNT] = { 3, 27, 33, 31 };
-  for (uint8_t i = 0; i < (uint8_t)PB_MOVE_COUNT; ++i) {
+  const uint8_t want2[ER_MOVE_COUNT] = { 5, 27, 31, 33 };
+  const uint8_t want3[ER_MOVE_COUNT] = { 3, 27, 33, 31 };
+  for (uint8_t i = 0; i < (uint8_t)ER_MOVE_COUNT; ++i) {
     CHECK_EQ(s2->moves[i], want2[i]);
     CHECK_EQ(s3->moves[i], want3[i]);
   }
@@ -202,7 +202,7 @@ TEST(species_rows_are_well_formed_at_runtime) {
 // `SPR_BABY_BLOB + sprite_id` was arithmetically inside SPRITE_SETS - and
 // NOTHING EVALUATED THAT SUM TO DRAW ANYTHING. P9-C3 made the sum real: the
 // atlas is 4 fixed slots plus one 24x24 body per species, and
-// PB_SPRITE_BODY_FIRST + sprite_id IS the expression sprite_set_id() evaluates.
+// ER_SPRITE_BODY_FIRST + sprite_id IS the expression sprite_set_id() evaluates.
 //
 // THREE PROPERTIES, THREE CASES, ONE INPUT EACH. They were one case with three
 // CHECKs until P9-C3, which is the aggregate shape phase 8 was caught with: a
@@ -224,12 +224,12 @@ TEST(every_species_sprite_id_is_its_id_minus_one) {
 TEST(every_species_body_slot_is_inside_the_atlas) {
   for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
     const SpeciesDef& sp = SPECIES_TABLE[i];
-    // The sum the firmware performs. Past the end of PB_SPRITE_SETS is not a
+    // The sum the firmware performs. Past the end of ER_SPRITE_SETS is not a
     // crash and not a wrong picture: sprite_set() clamps the ID, so the pet
     // silently becomes an egg - which is why this is asserted rather than
     // trusted to be noticed.
-    CHECK((int)sp.sprite_id < (int)PB_SPRITE_BODY_COUNT);
-    CHECK((int)PB_SPRITE_BODY_FIRST + (int)sp.sprite_id < (int)SPRITE_SET_COUNT);
+    CHECK((int)sp.sprite_id < (int)ER_SPRITE_BODY_COUNT);
+    CHECK((int)ER_SPRITE_BODY_FIRST + (int)sp.sprite_id < (int)SPRITE_SET_COUNT);
   }
 }
 
@@ -246,10 +246,10 @@ TEST(every_species_row_draws_a_creature_body) {
       CHECK(id <= SPRITE_BODY_LAST);
       // Never an egg and never one of the two pose sets - a species drawn as
       // furniture still draws 24x24 pixels and still animates.
-      CHECK(id != (uint8_t)PBSPR_EGG_IDLE);
-      CHECK(id != (uint8_t)PBSPR_EGG_CRACK);
-      CHECK(id != (uint8_t)PBSPR_SLEEP);
-      CHECK(id != (uint8_t)PBSPR_SICK);
+      CHECK(id != (uint8_t)BUGSPR_EGG_IDLE);
+      CHECK(id != (uint8_t)BUGSPR_EGG_CRACK);
+      CHECK(id != (uint8_t)BUGSPR_SLEEP);
+      CHECK(id != (uint8_t)BUGSPR_SICK);
     }
   }
 }
@@ -292,7 +292,7 @@ TEST(no_species_resolves_onto_something_that_is_not_a_body) {
   uint8_t first_bad  = 0;
   for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
     const SpeciesDef& sp = SPECIES_TABLE[i];
-    const uint16_t slot = (uint16_t)(PB_SPRITE_BODY_FIRST + sp.sprite_id);
+    const uint16_t slot = (uint16_t)(ER_SPRITE_BODY_FIRST + sp.sprite_id);
     if (slot < SPRITE_BODY_FIRST || slot > SPRITE_BODY_LAST) {
       if (!not_a_body) first_bad = sp.id;
       ++not_a_body;
@@ -323,7 +323,7 @@ TEST(no_species_resolves_onto_something_that_is_not_a_body) {
 //  THE SECOND HALF IS A PIN THAT P9-C3 IS MEANT TO BREAK. When the art pass
 //  lands 60 bodies, `SPECIES_TABLE_COUNT == SPRITE_SET_COUNT - SPR_BABY_BLOB`
 //  fails, and the correct repair is to raise ROSTER_FAMILIES to 20 and re-point
-//  this case at PB_SPRITE_BODY_COUNT - not to delete it. It is the same shape as
+//  this case at ER_SPRITE_BODY_COUNT - not to delete it. It is the same shape as
 //  the_naive_sprite_sum_would_mis_draw_a_third_of_the_roster above.
 TEST(the_pack_is_complete_and_the_whole_pack_ships) {
   CHECK(SPECIES_PACK_COUNT >= 60);
@@ -334,16 +334,16 @@ TEST(the_pack_is_complete_and_the_whole_pack_ships) {
   // carried was `SPECIES_TABLE_COUNT == SPRITE_SET_COUNT - SPR_BABY_BLOB` and
   // `== 36`, with a comment saying P9-C3 was meant to break it and that the
   // repair was to raise ROSTER_FAMILIES to 20 and re-point the case at
-  // PB_SPRITE_BODY_COUNT rather than delete it. That is what happened.
+  // ER_SPRITE_BODY_COUNT rather than delete it. That is what happened.
   CHECK_EQ((int)SPECIES_TABLE_COUNT, (int)SPECIES_PACK_COUNT);
   CHECK_EQ((int)SPECIES_TABLE_COUNT, 60);
 
   // The roster may still never exceed what the atlas can draw - the direction
   // that matters is unchanged, it is only satisfied differently now. Shipping
   // 63 species against 60 drawn bodies would put three of them on an egg.
-  CHECK_EQ((int)SPECIES_TABLE_COUNT, (int)PB_SPRITE_BODY_COUNT);
+  CHECK_EQ((int)SPECIES_TABLE_COUNT, (int)ER_SPRITE_BODY_COUNT);
   CHECK_EQ((int)SPRITE_SET_COUNT,
-           (int)PB_SPRITE_BODY_FIRST + (int)PB_SPRITE_BODY_COUNT);
+           (int)ER_SPRITE_BODY_FIRST + (int)ER_SPRITE_BODY_COUNT);
 }
 
 // plan 1.5.2's `sum(spawn_weight) > 0 per category`, and the reason the table
@@ -419,7 +419,7 @@ TEST(every_learnset_resolves_and_is_legal) {
   for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
     const SpeciesDef& sp = SPECIES_TABLE[i];
     bool has_damage = false;
-    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) {
+    for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m) {
       CHECK(sp.moves[m] >= 1 && sp.moves[m] <= ATTACK_COUNT);
       const AttackDef* a = attack_get(sp.moves[m]);
       CHECK(a != nullptr);
@@ -427,7 +427,7 @@ TEST(every_learnset_resolves_and_is_legal) {
       // Own type or NEUTRAL, spec section 13.
       CHECK(a->type == sp.type || a->type == (uint8_t)TYPE_NEUTRAL);
       if (a->power > 0) has_damage = true;
-      for (uint8_t n = (uint8_t)(m + 1u); n < (uint8_t)PB_MOVE_COUNT; ++n)
+      for (uint8_t n = (uint8_t)(m + 1u); n < (uint8_t)ER_MOVE_COUNT; ++n)
         CHECK(sp.moves[m] != sp.moves[n]);          // four DISTINCT moves
     }
     CHECK(has_damage);
@@ -466,7 +466,7 @@ TEST(the_roster_spans_all_three_types_so_the_chart_is_reachable) {
   // ...and two shipped species really do have a non-zero matchup.
   int nonzero = 0;
   for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i)
-    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m)
+    for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m)
       for (uint8_t j = 0; j < SPECIES_TABLE_COUNT; ++j)
         if (species_type_mod(SPECIES_TABLE[i].moves[m], SPECIES_TABLE[j].id) != 0) nonzero++;
   CHECK(nonzero > 0);
@@ -482,7 +482,7 @@ TEST(the_two_orphan_attacks_are_on_a_learnset) {
   // orphans them again fails rather than passing quietly.
   int on26 = 0, on30 = 0;
   for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i)
-    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) {
+    for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m) {
       if (SPECIES_TABLE[i].moves[m] == 26) on26++;
       if (SPECIES_TABLE[i].moves[m] == 30) on30++;
     }
@@ -513,7 +513,7 @@ TEST(the_two_orphan_attacks_are_on_a_learnset) {
 TEST(every_unreachable_attack_belongs_to_a_family_not_yet_shipped) {
   bool used[64] = { false };
   for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i)
-    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m)
+    for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m)
       used[SPECIES_TABLE[i].moves[m]] = true;
 
   int unreachable = 0;
@@ -743,7 +743,7 @@ TEST(evolution_rows_are_well_formed_at_runtime) {
     CHECK(r.target != r.species);
     CHECK_EQ(t->family, s->family);
     CHECK_EQ((int)t->stage, (int)s->stage + 1);
-    CHECK(r.level >= 1 && r.level <= (uint8_t)PB_LEVEL_MAX);
+    CHECK(r.level >= 1 && r.level <= (uint8_t)ER_LEVEL_MAX);
     CHECK(r.cond < (uint8_t)EVOC_COUNT);
     // The pack's ordering invariant: evo_rule == (family - 1) * 2 + stage.
     CHECK_EQ((int)i, (int)(s->family - 1) * 2 + (int)s->stage);
@@ -840,7 +840,7 @@ TEST(encounter_rows_are_well_formed_at_runtime) {
 // EVERY WILD ROW RESOLVES. This is the guard the generator's rarity clamp keeps
 // true: a row whose band holds no shipped species is an outcome the picker
 // cannot answer, and P5-C3 would have to invent one.
-TEST(every_wild_encounter_row_can_actually_produce_a_pebble) {
+TEST(every_wild_encounter_row_can_actually_produce_a_bug) {
   for (uint8_t i = 0; i < ENCOUNTER_ROW_COUNT; ++i) {
     const EncounterRow& r = ENCOUNTER_TABLE[i];
     if (r.outcome != (uint8_t)ENC_OUT_WILD) continue;
@@ -974,9 +974,9 @@ TEST(every_item_encounter_row_can_actually_produce_an_item) {
 //  tests/test_evolution.cpp said so instead of pretending otherwise. Rule 7
 //  (Artefax -> Burnix, level 20, EVOC_CORRUPTED) makes them reachable.
 // =============================================================================
-TEST(apply_refuses_when_the_condition_is_false_and_leaves_the_pebble_alone) {
-  PebbleInstance p;
-  make_pebble(p, 11, 20);            // Artefax, level 20: the LEVEL gate is met
+TEST(apply_refuses_when_the_condition_is_false_and_leaves_the_bug_alone) {
+  BugInstance p;
+  make_bug(p, 11, 20);            // Artefax, level 20: the LEVEL gate is met
   const uint16_t hp0 = p.hp_cur;
   const uint8_t  evo0 = p.evo_state;
 
@@ -1001,8 +1001,8 @@ TEST(apply_refuses_when_the_condition_is_false_and_leaves_the_pebble_alone) {
 TEST(apply_refuses_when_the_condition_input_was_never_supplied) {
   // The rule that matters most: an UNSUPPLIED input refuses. A context that
   // says nothing must not be read as "the requirement is met".
-  PebbleInstance p;
-  make_pebble(p, 11, 20);
+  BugInstance p;
+  make_bug(p, 11, 20);
   EvoContext empty;
   evo_context_clear(empty);
   CHECK_EQ(evolution_ready(p, empty), 0);
@@ -1038,8 +1038,8 @@ TEST(apply_refuses_when_the_condition_input_was_never_supplied) {
   // The same shape on the OTHER shipped conditional rule: HAPPINESS_GE 70 with
   // a passing happiness and the bit withheld. Its clear-context cases refuse on
   // 0 < 70 for the same reason, so they do not reach its have-bit either.
-  PebbleInstance q;
-  make_pebble(q, 32, 24);            // Servik -> Kernon, HAPPINESS_GE 70
+  BugInstance q;
+  make_bug(q, 32, 24);            // Servik -> Kernon, HAPPINESS_GE 70
   EvoContext lying_happy;
   evo_context_clear(lying_happy);
   lying_happy.have      = 0u;
@@ -1050,8 +1050,8 @@ TEST(apply_refuses_when_the_condition_input_was_never_supplied) {
 }
 
 TEST(apply_succeeds_the_moment_the_condition_becomes_true) {
-  PebbleInstance p;
-  make_pebble(p, 11, 20);
+  BugInstance p;
+  make_bug(p, 11, 20);
   const uint16_t hp_before = p.hp_cur;
 
   EvoContext ctx;
@@ -1065,7 +1065,7 @@ TEST(apply_succeeds_the_moment_the_condition_becomes_true) {
   CHECK_EQ((int)(p.evo_state & EVO_STATE_STAGE_MASK), 2);
   CHECK_EQ((int)(p.evo_state & EVO_STATE_PENDING), 0);   // final stage: no re-raise
   CHECK_EQ(p.evolutions, 1);
-  // A full Pebble stays full across the base_hp change (4 -> 6).
+  // A full Bug stays full across the base_hp change (4 -> 6).
   const SpeciesDef* to = species_get(12);
   CHECK(to != nullptr);
   if (to) CHECK_EQ(p.hp_cur, xp_hp_max(to->base_hp, 20));
@@ -1073,8 +1073,8 @@ TEST(apply_succeeds_the_moment_the_condition_becomes_true) {
 }
 
 TEST(the_level_gate_still_binds_when_the_condition_holds) {
-  PebbleInstance p;
-  make_pebble(p, 11, 19);            // one level short
+  BugInstance p;
+  make_bug(p, 11, 19);            // one level short
   EvoContext ctx;
   evo_context_clear(ctx);
   ctx.have = EVOCTX_CORRUPTED;
@@ -1086,8 +1086,8 @@ TEST(the_level_gate_still_binds_when_the_condition_holds) {
 }
 
 TEST(the_happiness_condition_compares_against_the_rules_own_value) {
-  PebbleInstance p;
-  make_pebble(p, 32, 24);            // Servik -> Kernon, HAPPINESS_GE 70
+  BugInstance p;
+  make_bug(p, 32, 24);            // Servik -> Kernon, HAPPINESS_GE 70
   EvoContext ctx;
   evo_context_clear(ctx);
   ctx.have = EVOCTX_HAPPINESS;
@@ -1114,7 +1114,7 @@ TEST(every_builtin_row_respects_the_budgets_the_creator_is_held_to) {
 
     uint16_t cost = 0;
     uint8_t  cap  = 0;
-    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) {
+    for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m) {
       const AttackDef* a = attack_get(sp.moves[m]);
       CHECK(a != nullptr);
       if (!a) continue;

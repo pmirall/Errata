@@ -1,9 +1,9 @@
-# Pebblebol link protocol — spec §15 as implemented (P4-C5)
+# Errata link protocol — spec §15 as implemented (P4-C5)
 
 This is the wire format, the state table and the honest limits of the
 device-to-device battle protocol. It documents what is **in the tree at this
 commit**, not what is planned: everything below is implemented in
-`Pebblebol/src/networking/{protocol,session,battle_link,transport_loopback}.cpp`
+`Errata/src/networking/{protocol,session,battle_link,transport_loopback}.cpp`
 and exercised by `tests/test_protocol.cpp` (**25 cases, 234,356 checks**) and
 `tests/test_session.cpp` (**41 cases, 2,493 checks**), re-counted from the
 binaries' own output at every commit that touches them. *(This line said 24 and
@@ -20,8 +20,8 @@ Spec §15 has two governing sentences and everything here serves them:
 
 > Never transmit raw unvalidated game objects and trust the peer.
 >
-> The same validator used for custom Pebbles should be used for exchanged
-> Pebbles.
+> The same validator used for custom Bugs should be used for exchanged
+> Bugs.
 
 ---
 
@@ -63,13 +63,13 @@ anything else with `PE_TYPE`, so there was no way to add a message without one.
 
 | type | name | len | payload |
 |---|---|---|---|
-| 13 | `TRADE_OFFER` | 52 | 4 reserved bytes, then the 48 B wire Pebble **kept raw** — the caller runs `pbw_decode()` straight into the instance it means to fill, exactly as `TEAM_SUBMIT`'s records are |
-| 14 | `TRADE_READY` | 4 | `verdict` (a `VReject`), `policy` (a `TradeReject`), `offer_crc_echo`. **Two refusal bytes and not one**, because they are two enums: the record was refused by the one validator, or it is a legal Pebble this device will not take. The one type in the protocol with no reserved payload byte |
+| 13 | `TRADE_OFFER` | 52 | 4 reserved bytes, then the 48 B wire Bug **kept raw** — the caller runs `pbw_decode()` straight into the instance it means to fill, exactly as `TEAM_SUBMIT`'s records are |
+| 14 | `TRADE_READY` | 4 | `verdict` (a `VReject`), `policy` (a `TradeReject`), `offer_crc_echo`. **Two refusal bytes and not one**, because they are two enums: the record was refused by the one validator, or it is a legal Bug this device will not take. The one type in the protocol with no reserved payload byte |
 | 15 | `TRADE_CONFIRM` | 4 | `accept`, 1 reserved, `pair_crc` |
 | 16 | `TRADE_COMMIT` | 4 | 2 reserved, `pair_crc` |
 
 There is **no `offer_crc` field**: the 48 B record already carries its own CRC at
-`PBW_OFF_CRC`, so `trade_rec_crc()` reads the offer's identity out of the record
+`BUGW_OFF_CRC`, so `trade_rec_crc()` reads the offer's identity out of the record
 rather than transmitting a second copy that could disagree with it.
 `trade_pair_crc()` is one CRC over **both** records in the canonical order (the
 initiator's first) — deliberately **order-dependent**, because a symmetric
@@ -89,7 +89,7 @@ seed. A header-embedded CRC splits the covered span into two runs and would need
 a scratch copy or a new core API. Trailing gives one call over exactly the bytes
 received, puts the header *inside* the span — an attacker cannot flip `type` or
 `session` for free — and matches the tree's own convention
-(`PebbleInstance.crc16` at 126 over 0..125, `PendingTrade` at 62 over 0..61).
+(`BugInstance.crc16` at 126 over 0..125, `PendingTrade` at 62 over 0..61).
 
 ### Decode order, pinned. Each step uses only fields already proved.
 
@@ -165,9 +165,9 @@ protocol can see.
 
 ---
 
-## 2. The wire Pebble — 48 bytes, and 64 is not available
+## 2. The wire Bug — 48 bytes, and 64 is not available
 
-`PBW_BYTES` = 48, `static_assert`ed equal to `TR_WIRE_BYTES`. That constant lives
+`BUGW_BYTES` = 48, `static_assert`ed equal to `TR_WIRE_BYTES`. That constant lives
 inside `PendingTrade`, a **persisted** 64 B blob pinned by four `static_assert`s,
 and `save_schema.h`'s own rule is that a persisted layout is never edited in
 place. §15's "the same validator" sentence makes the battle record and the trade
@@ -175,8 +175,8 @@ record one object, so choosing 64 now would mean two wire forms across time.
 
 | off | sz | field | rule on ingest |
 |---|---|---|---|
-| 0 | 2 | `magic` | `PBW_MAGIC` — **not** `PEBBLE_MAGIC`: a 48 B wire record and a 128 B save blob must not answer to one magic |
-| 2 | 1 | `wire_ver` | `PBW_LAYOUT_VER` — its own number, not the protocol's and not the save schema's |
+| 0 | 2 | `magic` | `BUGW_MAGIC` — **not** `BUG_MAGIC`: a 48 B wire record and a 128 B save blob must not answer to one magic |
+| 2 | 1 | `wire_ver` | `BUGW_LAYOUT_VER` — its own number, not the protocol's and not the save schema's |
 | 3 | 1 | `species_id` | a real row; 200..209 refused with its own code |
 | 4 | 4 | `id` | non-zero, distinct across all six members |
 | 8 | 2 | `hp_cur` | `1 <= hp_cur <=` the **derived** hp_max |
@@ -196,7 +196,7 @@ record one object, so choosing 64 now would mean two wire forms across time.
 are `species_get(id)->stage` and the PENDING bit is `evolution_level_ready()`, a
 pure function of species and level — so the receiver computes it from **its own**
 tables and §15's "invalid evolution state" is answered by **inexpressibility**
-rather than by a check. One behavioural consequence, stated: a Pebble may arrive
+rather than by a check. One behavioural consequence, stated: a Bug may arrive
 with PENDING **set** where the sender had it clear.
 
 **Not transmitted at all:** `nickname[13]`, `care[5]`, `care_rem[5]`, all four
@@ -214,16 +214,16 @@ transmitting it deletes the class instead of guarding it, and after this **every
 wire field is a bounded integer and there is no string parsing on the ingest
 path at all**.
 
-**The decoder produces a complete `PebbleInstance`, not a wire object.**
+**The decoder produces a complete `BugInstance`, not a wire object.**
 `pbw_decode()` fills a **local**, derives `evo_state`, stamps the save magic,
-runs `validate_pebble()` — the one validator, one call, no policy flag — and
+runs `validate_bug()` — the one validator, one call, no policy flag — and
 copies to the caller **only** on `VR_OK`, memsetting on any reject. There is no
 window in which a caller holds a half-trusted instance, and the wire path
 **refuses where `ui/screen_battle.cpp:205`'s `copy_from_box()` mends**: that is
-defensible for a Pebble this device created and not for one a peer sent.
+defensible for a Bug this device created and not for one a peer sent.
 
 **The local team goes through the same decoder.** `session_set_team()` encodes
-this device's own Pebbles to the 48 B form and `link_begin()` decodes them back
+this device's own Bugs to the 48 B form and `link_begin()` decodes them back
 into the setup, so the two endpoints' 780 B `BattleSetup`s are **byte-identical**
 and the lockstep rests on an object both sides built the same way.
 (`the_local_team_enters_the_engine_through_the_decoder_the_peer_s_team_uses`.)
@@ -346,7 +346,7 @@ SESSION_REQUEST*: dropped and counted — both-initiator glare is forbidden by t
 device-id rule, so it is a modified or reflected peer, not a race.
 
 **SS_TRADE** (P7-C4, `networking/trade_link.cpp`) — *rx TRADE_OFFER, first one*:
-`pbw_decode()` (which IS `validate_pebble()`), then the game layer's POLICY hook;
+`pbw_decode()` (which IS `validate_bug()`), then the game layer's POLICY hook;
 on OK journal `W2` and send TRADE_READY(OK, OK); on either refusal send
 TRADE_READY carrying it and `SE_REJECTED`. *rx TRADE_OFFER, same bytes*: a
 re-answer — send TRADE_READY again, advance nothing, leash 16. *rx TRADE_OFFER,
@@ -376,13 +376,13 @@ tree, never a peer capability, and the peer is not blamed**.
 
 **`validate_battle_ready` is the last link in that chain and it was missing.**
 `hp_cur == 0` is a legal thing to have **stored** and an illegal thing to bring
-to a battle, so `validate_pebble()`, `validate_team()` and `pbw_decode()` all
+to a battle, so `validate_bug()`, `validate_team()` and `pbw_decode()` all
 answered `VR_OK` for it and `battle_init()` answered `BR_MEMBER_FAINTED` — and
 the driver above turned that into `SE_PROTOCOL(SD_INTERNAL)` with
 `bad_index == 0xFF`. That is **this device recording a bug in its own validator
 for a lie the peer told**, byte for byte the class the cross-team id check had
 already fixed once, and it fired with no adversary at all: an honest player whose
-own team held a fainted Pebble got `VR_OK` from `session_set_team()` and then
+own team held a fainted Bug got `VR_OK` from `session_set_team()` and then
 watched **both** endpoints close `SD_INTERNAL`. `PBS_FAINTED` cannot make the
 trip (`VR_WIRE_STATUS_BITS` refuses it), so `hp_cur` was the single field that
 got through. The rule is now named `VR_MEMBER_FAINTED`, it runs on the **local**
@@ -733,10 +733,10 @@ sees.
     and the layer above misattributed it (§3, SS_TEAM). The rules that exist only in `validate.cpp` (the genome seal, the xp
     curve, the status masks, the evolution state, the reserved bytes, the wire
     seal) are guarded by nothing but their own tests.
-16. **A Pebble's history cannot be checked.** `battles_won`, `age_s`, `trades`
+16. **A Bug's history cannot be checked.** `battles_won`, `age_s`, `trades`
     and every epoch are not on the wire at all, and their stored values are
     checked against nothing, because no rule exists to check them against.
-17. **This pre-commits P7's trade path.** A traded Pebble will arrive unnamed, at
+17. **This pre-commits P7's trade path.** A traded Bug will arrive unnamed, at
     zero care, zero age and zero counters, with `evo_state` recomputed from the
     receiver's tables, and with the custom flags refused. The record is full at
     48 B with nine spare bytes and a nickname needs thirteen, so reversing any of
@@ -817,7 +817,7 @@ section is the design and the evidence.
              either has seen the other's - so no player can choose what to give
              after seeing what is on offer
   validate   each side decodes the other's through pbw_decode(), which IS
-             validate_pebble(), and then applies the POLICY its game layer owns
+             validate_bug(), and then applies the POLICY its game layer owns
   READY      each side reports its two verdicts: a VReject and a TradeReject
   CONFIRM    each player presses A on their own device
   COMMIT     "I have applied it" - and it IMPLIES its sender's CONFIRM
@@ -887,7 +887,7 @@ the arrival that happened to be last instead of from its own state.**
 ### 26. The operation is negotiated in the handshake, at the last cheap moment
 
 `SESSION_REQUEST.rules` carries the `SessionOp` and `SESSION_ACCEPT.op_echo`
-answers it. A mismatch is `SE_REJECTED(SD_OP)` on **both** sides before a Pebble
+answers it. A mismatch is `SE_REJECTED(SD_OP)` on **both** sides before a Bug
 is on the wire. It is checked **before the level band**, because a band is a rule
 about a battle and refusing "1..30 is outside my band" to a device that came to
 trade would answer the wrong question.

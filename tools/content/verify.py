@@ -29,7 +29,7 @@ J = lambda n: json.load(open(os.path.join(HERE, n), encoding="utf-8"))
 # different curve from the one the firmware compiles, 36,453 points against
 # 8,845 - and P9-C4 deleted it, because two curves in two files is a second
 # source of truth and no amount of checking either one catches the pair
-# disagreeing. The curve now lives in exactly one place, Pebblebol/src/data/
+# disagreeing. The curve now lives in exactly one place, Errata/src/data/
 # balance.h, and the checks that were about it read it FROM THERE.
 #
 # This does not weaken the docstring's claim. That claim is about the
@@ -43,7 +43,7 @@ J = lambda n: json.load(open(os.path.join(HERE, n), encoding="utf-8"))
 # words that "a gate that decides not to run must say so", and a curve check
 # that silently passes because it could not find the curve is the exact shape
 # of defect this project keeps shipping.
-_BALANCE_H = os.path.join(HERE, "..", "..", "Pebblebol", "src", "data", "balance.h")
+_BALANCE_H = os.path.join(HERE, "..", "..", "Errata", "src", "data", "balance.h")
 
 
 def _shipped_xp_table(path=_BALANCE_H):
@@ -336,8 +336,8 @@ check("a klass with no target vocabulary carries none",
            or i["clears"]]))
 check("no item sets both duration and clears (they are one emitted byte)",
       all(not (i["duration"] and i["clears"]) for i in ITEMS))
-check("every cleared status is a real PEBBLE_STATUS_BITS name",
-      all(b in BAL["PEBBLE_STATUS_BITS"] for i in ITEMS for b in i["clears"]))
+check("every cleared status is a real BUG_STATUS_BITS name",
+      all(b in BAL["BUG_STATUS_BITS"] for i in ITEMS for b in i["clears"]))
 check("no item is reachable and does nothing (spec 24)",
       all(i["value"] > 0 or i["klass"] == "EVOLUTION" for i in ITEMS),
       str([i["id"] for i in ITEMS if i["value"] == 0 and i["klass"] != "EVOLUTION"]))
@@ -485,7 +485,7 @@ check("XP_TABLE rises strictly over 1..29 and is 0 at both ends",
 # files would silently disagree again exactly as they did for five phases.
 check("balance.json carries NO second XP curve (P9-C4 deleted it)",
       not any(k in BAL for k in ("XP_TABLE", "XP_TOTAL_TO_MAX")),
-      "the curve lives only in Pebblebol/src/data/balance.h")
+      "the curve lives only in Errata/src/data/balance.h")
 check("TYPE_CHART is the SIGNAL>CORRUPT>SYSTEM>SIGNAL triangle",
       BAL["TYPE_CHART"] == [[0,1,-1],[-1,0,1],[1,-1,0]])
 check("TYPE_MOD_SCALE shipped as a real key (draft_B graft)", "TYPE_MOD_SCALE" in BAL)
@@ -510,7 +510,7 @@ sc = BAL["XP_CANDY_SCALE"]
 P("  candy anchoring (value * XP_CANDY_SCALE=%d):" % sc)
 for i in ITEMS:
     if i["klass"] == "XP_CANDY":
-        P("    %-11s %5d XP  -> %5.1f of them to take one Pebble 1 -> 30"
+        P("    %-11s %5d XP  -> %5.1f of them to take one Bug 1 -> 30"
           % (i["name"], i["value"]*sc, sum(xp)/(i["value"]*sc)))
 
 # flash budget (shared gap 8: nobody costed the strings)

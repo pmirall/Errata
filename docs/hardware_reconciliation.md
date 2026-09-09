@@ -1,6 +1,6 @@
 # Hardware baseline: what it changes for the firmware
 
-**Input:** `docs/PEBBLEBOL_HARDWARE_AND_BATTERY_SPEC.md` (V1 hardware baseline).
+**Input:** `docs/ERRATA_HARDWARE_AND_BATTERY_SPEC.md` (V1 hardware baseline).
 **Written:** 2026-09-02, against branch `claude/repo-exploration-sync-bbonku` at P2-C6.
 **Purpose:** reconcile the hardware spec with the implementation plan, flag what the
 firmware cannot fix, and schedule what it can.
@@ -149,7 +149,7 @@ Worth stating so these do not get "optimized" again later:
 | Where | Change |
 |---|---|
 | **P6-C1** | `motion_null.cpp` stays (no accelerometer in V1 — the hardware spec puts it in §29 future upgrades), but `audio.h` stops being a null stub. |
-| **P6-C3** | Gains the piezo-aware sleep rules from §20: every GPIO to a known state before sleeping, PWM off, no floating inputs. Deep sleep still blocked behind `PB_PINS_CONFIRMED` by D1, and the hardware spec §8 independently confirms the GPIO0-5 wake constraint that made me flag it. |
+| **P6-C3** | Gains the piezo-aware sleep rules from §20: every GPIO to a known state before sleeping, PWM off, no floating inputs. Deep sleep still blocked behind `ER_PINS_CONFIRMED` by D1, and the hardware spec §8 independently confirms the GPIO0-5 wake constraint that made me flag it. |
 | **P10-C2** | `audio_null.cpp` becomes a real `audio_piezo.cpp` tone engine, and the sound setting finally does something. Moved earlier if the piezo arrives before Phase 10. |
 | **New: battery monitor** | §26 wants NORMAL/LOW/CRITICAL. `PIN_VBAT_ADC 0` is already reserved and GPIO0 is ADC1_CH0, so this needs only two resistors as a divider. Recorded as **D10**; the firmware side is small and lands with the power states. |
 | **§21 audit** | Release build disables verbose serial. Already scheduled in P10-C5's release target; now it has a battery justification, not just a tidiness one. |

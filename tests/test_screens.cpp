@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_screens.cpp
+//  Errata host tests - test_screens.cpp
 //  The spec section 63 gate: every migrated screen is rendered at the REAL
 //  128x64 into tests/fakes/gfx_fb.cpp and then
 //    (a) asserted to have made ZERO out-of-bounds drawing calls, and
@@ -9,11 +9,11 @@
 //  commit that means to change what a screen looks like, and read the diff.
 //
 //  P2-C11a migrated BOOT, LOAD_SAVE and ERROR; P2-C11b added HOME, MENU, the
-//  CARE and PLAY lists, both PEBBLE pages, SETTINGS (list and "Acerca de") and
+//  CARE and PLAY lists, both BUG pages, SETTINGS (list and "Acerca de") and
 //  the TIME entry screen; P2-C11c added LINK, EVOLUTION, DIAG, CREATOR and the
 //  CONFIRM / ALERT / HELP overlays. Every later screen adds its fixtures here.
 //
-//  TWO FIXTURES render on every screen that shows a Pebble: a fresh starter,
+//  TWO FIXTURES render on every screen that shows a Bug: a fresh starter,
 //  and a MAXED one whose nickname is the full twelve characters the schema
 //  allows and whose every stat is at 100. The second one is the layout test:
 //  a 12-character name beside a two-digit level, six three-digit percentages
@@ -228,7 +228,7 @@ void ui_creator_info(CreatorInfo& out) {
   out.ap_up  = g_ap_up;
   out.idle_expired = g_idle_exp;
   out.pin    = g_pin;
-  snprintf(out.ssid, sizeof out.ssid, "PEBBLEBOL-1234");
+  snprintf(out.ssid, sizeof out.ssid, "ERRATA-1234");
   snprintf(out.ip,   sizeof out.ip,   "192.168.4.1");
   // NO "?k=NNNN" SINCE P8-C1. net_url() lost the PIN and the argument that
   // carried it (spec section 39); this fixture matches what net.cpp now emits,
@@ -242,7 +242,7 @@ uint32_t ui_btn_hold_ms(uint8_t)  { return 0; }
 void ui_info_lines(char lines[UI_INFO_LINES][UI_INFO_CAP]) {
   // Fixed text: the real ones carry a heap figure and an IP, neither of which
   // a golden could ever be stable about.
-  snprintf(lines[0], UI_INFO_CAP, "PEBBLEBOL 0.2.0");
+  snprintf(lines[0], UI_INFO_CAP, "ERRATA 0.2.0");
   snprintf(lines[1], UI_INFO_CAP, "IP 0.0.0.0  rssi 0");
   snprintf(lines[2], UI_INFO_CAP, "PIN 1234  spr rev 1");
   snprintf(lines[3], UI_INFO_CAP, "heap 200000  nvs 00");
@@ -318,9 +318,9 @@ Genome ui_fresh_genome(void) {
   genome_seal(g);
   return g;
 }
-static PebbleInstance* g_active_p = nullptr;
+static BugInstance* g_active_p = nullptr;
 void ui_award_xp(uint16_t amount, uint8_t src) { g_xp_amt = amount; g_xp_src = src; }
-PebbleInstance* ui_active_pebble(void) { return g_active_p; }
+BugInstance* ui_active_bug(void) { return g_active_p; }
 
 // Everything but the cooldown table, so a case can prove that a network stays
 // armed across a second visit to the screen.
@@ -349,16 +349,16 @@ static void explore_reset(void) {
 }
 
 // =============================================================================
-//  THE TWO PEBBLE FIXTURES
+//  THE TWO BUG FIXTURES
 // =============================================================================
-static PebbleView g_view;
+static BugView g_view;
 
-static const PebbleView* fixture_view(void) { return &g_view; }
+static const BugView* fixture_view(void) { return &g_view; }
 
 static void fixture_common(void) {
   memset(&g_view, 0, sizeof g_view);
   g_view.present     = 1;
-  // A fixed genome: deterministic, and every gene accessor the PEBBLE page
+  // A fixed genome: deterministic, and every gene accessor the BUG page
   // reads is a plain bit field, so no seeding is involved.
   g_view.genome.magic_ver  = GENOME_MAGIC_VER;
   g_view.genome.lineage_id = 0x0BADF00Du;
@@ -386,12 +386,12 @@ static void fixture_starter(void) {
 }
 
 // The widest frame this UI can be asked to draw: twelve characters of
-// nickname (PB_NICKNAME_CAP - 1), level 30, and every meter pinned at 100.
+// nickname (ER_NICKNAME_CAP - 1), level 30, and every meter pinned at 100.
 static void fixture_maxed(void) {
   fixture_common();
   snprintf(g_view.name, sizeof g_view.name, "ABCDEFGHIJKL");
   // Level 30 is the top of the curve: xp_for_level() answers 0 there and the
-  // Pebble holds no in-level XP, which is what makes the HOME rule solid.
+  // Bug holds no in-level XP, which is what makes the HOME rule solid.
   g_view.level    = 30;
   g_view.xp       = 0;
   g_view.xp_next  = 0;
@@ -1587,7 +1587,7 @@ static int sweep_species_on_home(uint8_t stage, uint8_t pose, uint8_t frame) {
 // =============================================================================
 //  THE CREATURE THE PLAYER DREW (P10-C4b)
 //
-//  REPORTED FROM A BOARD, AND IT WAS REAL: a Pebble made in the creator showed
+//  REPORTED FROM A BOARD, AND IT WAS REAL: a Bug made in the creator showed
 //  up in the BOX by name and then walked onto HOME wearing SOMEBODY ELSE'S
 //  BODY. csp_install() had always parked CustomSpeciesRec.sprite - 144 bytes
 //  the player drew a pixel at a time - in a record NOTHING EVER READ. A grep
@@ -1605,7 +1605,7 @@ static int sweep_species_on_home(uint8_t stage, uint8_t pose, uint8_t frame) {
 // the VALIDATOR is the oracle instead: the first four-move set it accepts is by
 // definition legal, and if the table ever stops containing one this fails
 // loudly rather than installing a record the registry would refuse.
-static_assert(PB_MOVE_COUNT == 4, "the search below fills exactly four slots");
+static_assert(ER_MOVE_COUNT == 4, "the search below fills exactly four slots");
 static bool cs_find_moves(CustomSpeciesRec& c)
 {
   for (uint8_t a = 1u; a <= (uint8_t)ATTACK_COUNT; ++a)
@@ -1756,7 +1756,7 @@ TEST(a_roster_species_still_wears_the_atlas_body) {
     CHECK(csp_sprite(csp_species_id(slot), 0u) == nullptr);
 }
 
-TEST(an_egg_and_a_sick_pebble_are_never_the_players_drawing) {
+TEST(an_egg_and_a_sick_bug_are_never_the_players_drawing) {
   // ui/pet_art.h names three poses it will not override and gives a reason for
   // each. Two of them are decided HERE, and they are decided because a player
   // reads "sick" off a shared silhouette and an egg off a shell: replacing
@@ -1790,12 +1790,12 @@ TEST(an_egg_and_a_sick_pebble_are_never_the_players_drawing) {
   csp_reset();
 }
 
-TEST(two_drawn_pebbles_do_not_share_one_derived_sleeper) {
+TEST(two_drawn_bugs_do_not_share_one_derived_sleeper) {
   // THE CACHE KEY, and it is the bug this file caught while the fix was being
   // written. screen_home.cpp derives the sleeping body from the idle one and
   // caches it under (atlas set id, frame) - and TWO creator species fold onto
   // the SAME atlas set id, because neither has a row of its own. Without the
-  // source frame in the key, the second custom Pebble to fall asleep wears the
+  // source frame in the key, the second custom Bug to fall asleep wears the
   // first one's face.
   seams2_reset();
   fixture_starter();
@@ -1881,7 +1881,7 @@ TEST(every_species_draws_on_the_battle_field_without_clipping) {
   for (uint8_t id = 1; id <= (uint8_t)SPECIES_TABLE_COUNT; ++id) {
     const uint8_t key = pet_art_key(id, 0u);
     const uint8_t set = br_body_set_id(key);
-    CHECK_EQ((int)set, (int)PB_SPRITE_BODY_FIRST + (int)(id - 1u));
+    CHECK_EQ((int)set, (int)ER_SPRITE_BODY_FIRST + (int)(id - 1u));
     CHECK_EQ(sprite_set(set).w, (uint8_t)BR_BODY_W);
     CHECK_EQ(sprite_set(set).h, (uint8_t)BR_BODY_H);
     for (uint8_t frame = 0; frame < 2u; ++frame) {
@@ -1938,7 +1938,7 @@ TEST(every_species_draws_on_the_battle_field_without_clipping) {
       // mirror to itself. None of the sixty is, and if one ever is, it should
       // be named here rather than allowed to pass silently.
       if (mirror_diff == 0)
-        nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[set]);
+        nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[set]);
     }
   }
 }
@@ -1946,7 +1946,7 @@ TEST(every_species_draws_on_the_battle_field_without_clipping) {
 TEST(snapshot_home_empty) {
   seams2_reset();
   fixture_none();
-  snapshot(SCR_HOME, "home_no_pebble");
+  snapshot(SCR_HOME, "home_no_bug");
 }
 
 // The ring REMEMBERS where it was left, exactly as it always did, so every
@@ -1961,8 +1961,8 @@ static void menu_to(uint8_t item) {
 
 TEST(snapshot_menu) {
   seams2_reset();
-  menu_to(MENU_PEBBLE);
-  snapshot(SCR_MENU, "menu_pebble");
+  menu_to(MENU_BUG);
+  snapshot(SCR_MENU, "menu_bug");
 }
 
 // The last ring item, and the drain bar of navigation invariant 3 at the same
@@ -2021,7 +2021,7 @@ TEST(snapshot_status_a_corrupted) {
   snapshot(SCR_STATUS, "status_a_corrupted");
 }
 
-TEST(the_status_page_says_a_pebble_is_corrupted_and_for_how_much_longer) {
+TEST(the_status_page_says_a_bug_is_corrupted_and_for_how_much_longer) {
   // The page is DIFFERENT when the status is set - which is the whole finding:
   // rendering STATUS_A with and without the bit gave a diff of exactly zero.
   seams2_reset();
@@ -2118,10 +2118,10 @@ TEST(snapshot_time_entry) {
 // two that have no screen yet must SAY so rather than doing nothing at all.
 TEST(menu_goes_where_section_8_says) {
   seams2_reset();
-  menu_to(MENU_PEBBLE);
+  menu_to(MENU_BUG);
 
   struct { uint8_t item; int pushes; uint8_t to; } kWant[] = {
-    { MENU_PEBBLE,   1, SCR_STATUS },
+    { MENU_BUG,   1, SCR_STATUS },
     { MENU_CARE,     1, SCR_CARE     },
     { MENU_PLAY,     1, SCR_PLAY     },
     { MENU_BOX,      1, SCR_BOX      },
@@ -2138,12 +2138,12 @@ TEST(menu_goes_where_section_8_says) {
     CHECK(kWant[i].pushes == 1);
     menu_input(GST_TAP_L);                     // on to the next item
   }
-  CHECK_EQ(menu_cursor(), (uint8_t)MENU_PEBBLE);   // invariant 4: it is a ring
+  CHECK_EQ(menu_cursor(), (uint8_t)MENU_BUG);   // invariant 4: it is a ring
 }
 
 TEST(menu_help_and_the_ring_wraps_back_to_the_first_item) {
   seams2_reset();
-  menu_to(MENU_PEBBLE);
+  menu_to(MENU_BUG);
   menu_input(GST_BOTH);
   CHECK_EQ(g_help, STR_HLP_STATUS);
 
@@ -2154,7 +2154,7 @@ TEST(menu_help_and_the_ring_wraps_back_to_the_first_item) {
   // its only caller (it is in no spec section and its "nothing to repeat"
   // path toasted "bad argument").
   for (uint8_t i = 0; i < (uint8_t)MENU_ITEM_COUNT; ++i) menu_input(GST_TAP_L);
-  CHECK_EQ(menu_cursor(), (uint8_t)MENU_PEBBLE);
+  CHECK_EQ(menu_cursor(), (uint8_t)MENU_BUG);
 }
 
 // An accepted care action leaves the player on HOME watching the film; a
@@ -2365,7 +2365,7 @@ TEST(time_entry_starts_from_the_known_clock) {
 // is not SF_STICKY, it is empty until the last UI_COUNTDOWN_MS, and it shrinks.
 TEST(the_countdown_bar_drains) {
   seams2_reset();
-  menu_to(MENU_PEBBLE);
+  menu_to(MENU_BUG);
 
   auto bar_width = [](void) {
     int w = 0;
@@ -2572,7 +2572,7 @@ TEST(creator_encodes_the_join_string_and_the_url_and_nothing_else) {
   g_ap_up = 1;
   creator_enter();
   CHECK_EQ(creator_variant(), (uint8_t)1);
-  CHECK_STR_EQ(creator_payload(), "WIFI:S:PEBBLEBOL-1234;;");
+  CHECK_STR_EQ(creator_payload(), "WIFI:S:ERRATA-1234;;");
 
   creator_input(GST_TAP_L);                       // flip to the URL
   CHECK_EQ(creator_variant(), (uint8_t)0);
@@ -2583,7 +2583,7 @@ TEST(creator_encodes_the_join_string_and_the_url_and_nothing_else) {
 //
 // A substring search would be the obvious test and it is the WRONG one: the
 // SSID is AP_SSID_PREFIX plus four hex characters of the device id, so
-// "PEBBLEBOL-1234" is a perfectly ordinary real SSID and a search for the
+// "ERRATA-1234" is a perfectly ordinary real SSID and a search for the
 // digits "1234" inside it reports a leak that is not there. What is actually
 // being claimed is stronger and has no false positive: the bytes encoded at
 // every PIN are the SAME bytes, so no addition anywhere in build() can be
@@ -2957,15 +2957,15 @@ static void box_fixture(uint8_t occupied) {
   gen.generation = 3;
   for (uint8_t i = 0; i < occupied; ++i) {
     // Species 1 for all three: the roster is one species until Phase 9 fills
-    // data/species_table.h, and box_new_pebble() correctly refuses an id that
+    // data/species_table.h, and box_new_bug() correctly refuses an id that
     // has no row.
-    const uint8_t slot = box_new_pebble(1u, (uint8_t)(1u + i * 3u),
+    const uint8_t slot = box_new_bug(1u, (uint8_t)(1u + i * 3u),
                                         ORIGIN_STARTER, gen, 0xC0FFEEu + i, 1000u);
     CHECK(slot != BOX_SLOT_NONE);
-    PebbleInstance* p = box_slot(slot);
+    BugInstance* p = box_slot(slot);
     if (!p) continue;
-    for (uint8_t c = 0; c < PB_CARE_COUNT; ++c)
-      p->care[c] = (int32_t)(PB_CARE_MILLI_MAX - (int32_t)c * 12000);
+    for (uint8_t c = 0; c < ER_CARE_COUNT; ++c)
+      p->care[c] = (int32_t)(ER_CARE_MILLI_MAX - (int32_t)c * 12000);
     p->hp_cur = (uint16_t)(15u + i);
     // The second row carries the longest nickname the schema allows: the list
     // has a number, a marker, a name and a right-aligned level to fit in 128 px.
@@ -2991,7 +2991,7 @@ TEST(every_species_draws_in_the_box_list_without_clipping) {
     gen.lineage_id = 0x0BADF00Du;
     gen.g0 = 0x1234u; gen.g1 = 0x5678u; gen.g2 = 0x9ABCu;
     gen.generation = 3;
-    const uint8_t slot = box_new_pebble(id, 30u, ORIGIN_STARTER, gen,
+    const uint8_t slot = box_new_bug(id, 30u, ORIGIN_STARTER, gen,
                                         0xC0FFEEu + id, 1000u);
     CHECK(slot != BOX_SLOT_NONE);
     if (slot == BOX_SLOT_NONE) continue;
@@ -3044,18 +3044,18 @@ TEST(snapshot_box_card) {
   box_fixture(3);
   box_input(GST_TAP_L);
   box_input(GST_TAP_R);                // the action list for slot 2
-  box_input(GST_TAP_R);                // BOXA_VIEW: a stored Pebble's card
+  box_input(GST_TAP_R);                // BOXA_VIEW: a stored Bug's card
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_CARD);
   snapshot(SCR_BOX, "box_card");
 }
 
 // Spec section 9, and invariants B3 / B4: select active, swap, and a release
-// that refuses the Pebble you are carrying before any dialog is opened.
+// that refuses the Bug you are carrying before any dialog is opened.
 TEST(box_does_what_section_9_says) {
   seams2_reset();
   box_fixture(3);
 
-  // VIEW on the ACTIVE slot goes to the PEBBLE pages, because that one IS the
+  // VIEW on the ACTIVE slot goes to the BUG pages, because that one IS the
   // simulated pet; a stored one gets the card above instead.
   CHECK_EQ(box_screen_cursor(), (uint8_t)0);
   box_input(GST_TAP_R);
@@ -3086,7 +3086,7 @@ TEST(box_does_what_section_9_says) {
   CHECK_EQ(g_box_swap_b, (uint8_t)1);
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_LIST);
 
-  // B4: the active Pebble is refused before a dialog is ever opened.
+  // B4: the active Bug is refused before a dialog is ever opened.
   box_enter();                          // opens on the active slot
   const uint8_t active = box_active();
   CHECK(active != BOX_ACTIVE_NONE);
@@ -3517,7 +3517,7 @@ TEST(snapshot_sequence_answer) {
 //  field gone through render.h, none of it could have been snapshotted and the
 //  goldens would have been of the chrome around a hole.
 //
-//  DETERMINISM: one fixed seed, a Box built by box_new_pebble(), a clock the
+//  DETERMINISM: one fixed seed, a Box built by box_new_bug(), a clock the
 //  seams hold still, and every gesture below is one a player could make.
 // =============================================================================
 static void battle_choose(uint8_t n) {
@@ -3638,7 +3638,7 @@ static void protect_fixture(void) {
   gen.g0 = 0x1234u; gen.g1 = 0x5678u; gen.g2 = 0x9ABCu;
   gen.generation = 3;
   for (uint8_t i = 0; i < 3u; ++i) {
-    const uint8_t slot = box_new_pebble(2u, (uint8_t)(6u + i), ORIGIN_STARTER,
+    const uint8_t slot = box_new_bug(2u, (uint8_t)(6u + i), ORIGIN_STARTER,
                                         gen, 0xC0FFEEu + i, 1000u);
     CHECK(slot != BOX_SLOT_NONE);
   }
@@ -3965,7 +3965,7 @@ TEST(the_encounter_transient_draws_all_four_outcomes_and_only_wild_can_be_steere
 
   // LUCHAR hands the ENCOUNTER'S OWN creature to the battle - the species and
   // the level the player was just looking at, not a re-roll - and it does NOT
-  // push, because a beaten wild Pebble must not be left underneath still
+  // push, because a beaten wild Bug must not be left underneath still
   // offering to be caught.
   g_push = 0xFF; g_wild_starts = 0;
   encounter_input((Gesture)GST_TAP_L);
@@ -4035,7 +4035,7 @@ TEST(the_encounter_transient_draws_all_four_outcomes_and_only_wild_can_be_steere
 //  these two can be snapshotted, bounded and interrupted under test.
 // =============================================================================
 
-// A caught wild Pebble. The roll and the device seed are the two numbers
+// A caught wild Bug. The roll and the device seed are the two numbers
 // game/capture.cpp mixes, and these two produce CAP_CAUGHT on the first throw;
 // the Box is empty, so nothing can refuse the file.
 static void caught_fixture(void) {
@@ -4235,13 +4235,13 @@ TEST(a_catch_tells_the_commit_which_slot_it_filled) {
   memset(&g_gs, 0, sizeof g_gs);
   box_bind(g_gs);
 
-  // A PEBBLE IN SLOT 0 FIRST, AND THAT IS THE WHOLE POINT OF THE FIXTURE.
+  // A BUG IN SLOT 0 FIRST, AND THAT IS THE WHOLE POINT OF THE FIXTURE.
   // caught_fixture() catches into an EMPTY Box, so the catch lands in slot 0,
   // which is also box_active() - the ONE case the broken commit handled. The
   // defect only appears from the SECOND creature onward.
   Genome gen; memset(&gen, 0, sizeof gen);
   gen = genome_genesis();
-  const uint8_t starter = box_new_pebble(1u, 5u, (uint8_t)ORIGIN_STARTER,
+  const uint8_t starter = box_new_bug(1u, 5u, (uint8_t)ORIGIN_STARTER,
                                          gen, 0xC0FFEEu, 1700300000u);
   CHECK_EQ((int)starter, 0);
   CHECK(box_set_active(starter));
@@ -4592,7 +4592,7 @@ TEST(the_exploration_screens_render_without_drawing_off_the_panel) {
 //  bag_use() declared an ItemEffect, handed it to inv_use(), and never read a
 //  field of it. Every successful use of every item in the game answered
 //  "Usado": filling five care bars from empty, curing SICK and CORRUPTED at
-//  once and jumping a Pebble eight levels were the same single word, on the
+//  once and jumping a Bug eight levels were the same single word, on the
 //  half of the care loop that carries the rewards from exploring - and there is
 //  no item description anywhere in the product, so the bag row ("NAME xN") is
 //  all a player ever learns about what they are holding.
@@ -4604,8 +4604,8 @@ TEST(the_exploration_screens_render_without_drawing_off_the_panel) {
 TEST(using_an_item_says_which_thing_it_did_and_not_just_that_it_was_used) {
   // TWO ACCEPTABLE ANSWERS PER KLASS, BECAUSE THE LADDER IS ORDERED AND THE
   // PACK DECIDES WHICH RUNG IT LANDS ON - and my first draft of this case got
-  // that wrong twice: "Parche" heals a Pebble whose status bits are set, so it
-  // reports the CURE rather than the bar, and "Bit Dulce" on a level-5 Pebble
+  // that wrong twice: "Parche" heals a Bug whose status bits are set, so it
+  // reports the CURE rather than the bar, and "Bit Dulce" on a level-5 Bug
   // crosses a level boundary, so it reports the LEVEL rather than the XP. Both
   // times the code was right and the expectation was a guess. What the case
   // states is the property that matters: the answer is a REACTION to what the
@@ -4624,12 +4624,12 @@ TEST(using_an_item_says_which_thing_it_did_and_not_just_that_it_was_used) {
     if (id == 0) continue;                       // no such klass in the pack
     seams2_reset();
     explore_reset();
-    PebbleInstance pet;
+    BugInstance pet;
     memset(&pet, 0, sizeof pet);
-    pet.magic = (uint16_t)PEBBLE_MAGIC;
-    pet.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+    pet.magic = (uint16_t)BUG_MAGIC;
+    pet.layout_ver = (uint8_t)BUG_LAYOUT_VER;
     pet.species_id = 1; pet.id = 0x5EED1000u + a; pet.level = 5;
-    for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) pet.care[i] = 0;
+    for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) pet.care[i] = 0;
     g_active_p = &pet;
     CHECK_EQ(inv_add(g_inv, id, 1), 1);
     care_enter();
@@ -4655,10 +4655,10 @@ TEST(using_an_item_says_which_thing_it_did_and_not_just_that_it_was_used) {
   if (candy != 0) {
     seams2_reset();
     explore_reset();
-    PebbleInstance pet;
+    BugInstance pet;
     memset(&pet, 0, sizeof pet);
-    pet.magic = (uint16_t)PEBBLE_MAGIC;
-    pet.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+    pet.magic = (uint16_t)BUG_MAGIC;
+    pet.layout_ver = (uint8_t)BUG_LAYOUT_VER;
     pet.species_id = 1; pet.id = 0x5EED2000u; pet.level = 1; pet.xp = 0;
     g_active_p = &pet;
     CHECK_EQ(inv_add(g_inv, candy, 1), 1);
@@ -4667,7 +4667,7 @@ TEST(using_an_item_says_which_thing_it_did_and_not_just_that_it_was_used) {
     care_input(GST_TAP_R);
     g_toast = STR_EMPTY;
     care_input(GST_TAP_R);
-    // A level-1 Pebble handed a candy either levels or does not; whichever it
+    // A level-1 Bug handed a candy either levels or does not; whichever it
     // is, the toast must be the one that matches what the pack recorded.
     CHECK(g_toast == (uint16_t)STR_ITEM_LEVELED || g_toast == (uint16_t)STR_ITEM_XP);
     CHECK_EQ(g_toast == (uint16_t)STR_ITEM_LEVELED, pet.level > 1u);
@@ -4709,7 +4709,7 @@ TEST(the_bag_lists_what_is_held_uses_one_and_walks_back_out) {
   care_input(GST_HOLD_R);
   CHECK_EQ(care_mode(), (uint8_t)CAREM_LIST);
 
-  // Two kinds in the bag, one of them a care item the active Pebble needs.
+  // Two kinds in the bag, one of them a care item the active Bug needs.
   uint8_t care_id = 0, cap_id = 0;
   for (uint8_t i = 0; i < ITEM_COUNT; ++i) {
     if (ITEMS_TABLE[i].klass == (uint8_t)ITEM_KLASS_CARE && care_id == 0)
@@ -4722,12 +4722,12 @@ TEST(the_bag_lists_what_is_held_uses_one_and_walks_back_out) {
   CHECK_EQ(inv_add(g_inv, cap_id, 1), 1);
   CHECK_EQ(care_bag_rows(), 2);
 
-  PebbleInstance pet;
+  BugInstance pet;
   memset(&pet, 0, sizeof pet);
-  pet.magic = (uint16_t)PEBBLE_MAGIC;
-  pet.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  pet.magic = (uint16_t)BUG_MAGIC;
+  pet.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   pet.species_id = 1; pet.id = 0x5EED0009u; pet.level = 5;
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) pet.care[i] = 0;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) pet.care[i] = 0;
   g_active_p = &pet;
 
   care_input(GST_TAP_R);                       // open the bag again
@@ -4745,7 +4745,7 @@ TEST(the_bag_lists_what_is_held_uses_one_and_walks_back_out) {
 
   while (care_bag_cursor() != care_row) care_input(GST_TAP_L);
   care_input(GST_TAP_R);
-  // P10-C6: the toast now says WHAT HAPPENED. This is a CARE item on a Pebble
+  // P10-C6: the toast now says WHAT HAPPENED. This is a CARE item on a Bug
   // whose bars are all empty, so the reaction is the one for a bar that moved.
   CHECK_EQ(g_toast, (uint16_t)STR_ITEM_FED);
   CHECK_EQ(inv_count(g_inv, care_id), 1);
@@ -4768,7 +4768,7 @@ TEST(the_bag_lists_what_is_held_uses_one_and_walks_back_out) {
   g_active_p = nullptr;
 }
 
-TEST(an_item_used_with_no_active_pebble_is_refused_by_name_and_kept) {
+TEST(an_item_used_with_no_active_bug_is_refused_by_name_and_kept) {
   seams2_reset();
   explore_reset();
   g_active_p = nullptr;
@@ -4842,12 +4842,12 @@ static void audit_full_box(void) {
     // Different species per slot, so the list is not ten copies of one row and
     // the badge column varies with it.
     const uint8_t sp = (uint8_t)(1u + ((uint16_t)i * 6u) % (uint16_t)SPECIES_TABLE_COUNT);
-    const uint8_t slot = box_new_pebble(sp, 30u, ORIGIN_STARTER, gen,
+    const uint8_t slot = box_new_bug(sp, 30u, ORIGIN_STARTER, gen,
                                         0xC0FFEEu + i, 1000u);
     CHECK(slot != BOX_SLOT_NONE);
-    PebbleInstance* p = box_slot(slot);
+    BugInstance* p = box_slot(slot);
     if (!p) continue;
-    for (uint8_t c = 0; c < PB_CARE_COUNT; ++c) p->care[c] = (int32_t)PB_CARE_MILLI_MAX;
+    for (uint8_t c = 0; c < ER_CARE_COUNT; ++c) p->care[c] = (int32_t)ER_CARE_MILLI_MAX;
     p->hp_cur = 250u;
     // The STORED form: raw Latin-1, exactly as networking/creator_parse.cpp
     // writes one and as game/validate.cpp accepts one.
@@ -5211,7 +5211,7 @@ TEST(a_full_box_draws_at_every_cursor_position) {
 TEST(snapshot_box_full) {
   audit_model();
   box_enter();
-  // Park the cursor on the last Pebble so the window has SCROLLED and the
+  // Park the cursor on the last Bug so the window has SCROLLED and the
   // scrollbar is at the bottom of its track - the state no golden had.
   for (uint8_t i = 0; i < (uint8_t)(BOX_SLOTS - 1u); ++i) box_input(GST_TAP_L);
   // LET THE HIGHLIGHT SETTLE ON THE ROW IT WAS SENT TO. cursor_y() retargets on
@@ -5376,7 +5376,7 @@ TEST(a_player_who_reads_nothing_still_reaches_a_playable_device) {
     CHECK_EQ((int)ob_step(g_cfg), (int)ob_next(kSteps[i]));
     CHECK_EQ((int)g_root, (int)ob_screen_for(ob_next(kSteps[i])));
     // Nothing was destroyed on the way past: no name written, no starter
-    // rerolled, and the Box is still ten Pebbles.
+    // rerolled, and the Box is still ten Bugs.
     CHECK_EQ((int)g_cfg.pet_name[0], 0);
     CHECK_EQ((int)g_starter_calls, 0);
     CHECK_EQ(box_count(), (uint8_t)BOX_SLOTS);

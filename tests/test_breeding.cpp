@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_breeding.cpp
+//  Errata host tests - test_breeding.cpp
 //  game/breeding.h (plan P7-C5, spec section 17) over the REAL game/genome.cpp,
 //  the REAL game/box.cpp and the REAL game/validate.cpp. Nothing is faked: a
 //  parent is built by the tree's one constructor and a child is filed by it.
@@ -28,7 +28,7 @@
 #include "game/box.h"
 #include "game/breeding.h"
 #include "game/genome.h"
-#include "game/pebble.h"
+#include "game/bug.h"
 #include "game/species.h"
 #include "game/taint.h"
 #include "game/validate.h"
@@ -43,8 +43,8 @@ static void box_fixture(void)
 {
   memset(&g_state, 0, sizeof g_state);
   for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
-    g_state.pebbles[i].magic      = (uint16_t)PEBBLE_MAGIC;
-    g_state.pebbles[i].layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+    g_state.bugs[i].magic      = (uint16_t)BUG_MAGIC;
+    g_state.bugs[i].layout_ver = (uint8_t)BUG_LAYOUT_VER;
   }
   g_state.box.magic           = (uint16_t)BOX_MAGIC;
   g_state.box.active_slot     = (uint8_t)BOX_ACTIVE_NONE;
@@ -53,11 +53,11 @@ static void box_fixture(void)
   box_bind(g_state);
 }
 
-// A parent through box_new_pebble(), so it passes validate_pebble() for the
-// same reason every other Pebble in the tree does. `g` must already be sealed.
-static PebbleInstance* make_parent(uint8_t species_id, uint8_t level, const Genome& g)
+// A parent through box_new_bug(), so it passes validate_bug() for the
+// same reason every other Bug in the tree does. `g` must already be sealed.
+static BugInstance* make_parent(uint8_t species_id, uint8_t level, const Genome& g)
 {
-  const uint8_t slot = box_new_pebble(species_id, level, (uint8_t)ORIGIN_WILD,
+  const uint8_t slot = box_new_bug(species_id, level, (uint8_t)ORIGIN_WILD,
                                       g, 0x5EEDu + species_id, BRD_EPOCH0);
   if (slot == (uint8_t)BOX_SLOT_NONE) return nullptr;
   return box_slot(slot);
@@ -120,8 +120,8 @@ TEST(the_compat_matrix_is_the_whole_roster_and_every_answer_is_named) {
       const SpeciesDef& sb = SPECIES_TABLE[ib];
 
       box_fixture();
-      PebbleInstance* a = make_parent(sa.id, 10, seeded_genesis(0x1111u + ia));
-      PebbleInstance* b = make_parent(sb.id, 10, seeded_genesis(0x2222u + ib));
+      BugInstance* a = make_parent(sa.id, 10, seeded_genesis(0x1111u + ia));
+      BugInstance* b = make_parent(sb.id, 10, seeded_genesis(0x2222u + ib));
       if (a == nullptr || b == nullptr) { CHECK(false); continue; }
 
       BreedReject want;
@@ -157,15 +157,15 @@ TEST(the_compat_matrix_is_the_whole_roster_and_every_answer_is_named) {
   CHECK(group > 0);
 }
 
-TEST(one_pebble_cannot_breed_with_itself_and_the_code_says_which_rule) {
+TEST(one_bug_cannot_breed_with_itself_and_the_code_says_which_rule) {
   box_fixture();
-  PebbleInstance* a = make_parent(2, 10, seeded_genesis(0x31u));
+  BugInstance* a = make_parent(2, 10, seeded_genesis(0x31u));
   CHECK(a != nullptr);
   CHECK_EQ((int)breed_check(*a, *a), (int)BRD_SAME_UNIT);
 
-  // Two DIFFERENT Pebbles of the SAME species are a perfectly good pair: the
+  // Two DIFFERENT Bugs of the SAME species are a perfectly good pair: the
   // rule is about units, not about species.
-  PebbleInstance* b = make_parent(2, 10, seeded_genesis(0x32u));
+  BugInstance* b = make_parent(2, 10, seeded_genesis(0x32u));
   CHECK(b != nullptr);
   CHECK(a->id != b->id);
   CHECK_EQ((int)breed_check(*a, *b), (int)BRD_OK);
@@ -173,15 +173,15 @@ TEST(one_pebble_cannot_breed_with_itself_and_the_code_says_which_rule) {
 
 TEST(a_parent_the_one_validator_refuses_is_refused_here_by_its_own_name) {
   box_fixture();
-  PebbleInstance* a = make_parent(2, 10, seeded_genesis(0x41u));
-  PebbleInstance* b = make_parent(2, 10, seeded_genesis(0x42u));
+  BugInstance* a = make_parent(2, 10, seeded_genesis(0x41u));
+  BugInstance* b = make_parent(2, 10, seeded_genesis(0x42u));
   CHECK(a != nullptr && b != nullptr);
   CHECK_EQ((int)breed_check(*a, *b), (int)BRD_OK);
 
   // A move the species cannot learn: VR_UNLEARNABLE_MOVESET one layer down.
   const uint8_t keep = b->moves[0];
   b->moves[0] = 11u;
-  CHECK(validate_pebble(*b) != VR_OK);
+  CHECK(validate_bug(*b) != VR_OK);
   CHECK_EQ((int)breed_check(*a, *b), (int)BRD_INVALID_PARENT);
   b->moves[0] = keep;
   CHECK_EQ((int)breed_check(*a, *b), (int)BRD_OK);
@@ -192,8 +192,8 @@ TEST(a_parent_the_one_validator_refuses_is_refused_here_by_its_own_name) {
 // -----------------------------------------------------------------------------
 TEST(a_clean_dynasty_refuses_a_tainted_parent_and_a_tainted_one_accepts_anything) {
   box_fixture();
-  PebbleInstance* clean = make_parent(2, 10, seeded_genesis(0x51u));
-  PebbleInstance* dirty = make_parent(5, 10, seeded_genesis(0x52u));
+  BugInstance* clean = make_parent(2, 10, seeded_genesis(0x51u));
+  BugInstance* dirty = make_parent(5, 10, seeded_genesis(0x52u));
   CHECK(clean != nullptr && dirty != nullptr);
   // Same compat group is needed or the taint would never be reached: 2 and 5
   // are groups 1 and 2, so use two of group 2 instead.
@@ -206,8 +206,8 @@ TEST(a_clean_dynasty_refuses_a_tainted_parent_and_a_tainted_one_accepts_anything
   // MARKER 1: the genome bit, which is what god_enter() sets and what
   // genome_breed() propagates as A | B.
   gene_set_tainted(dirty->genome, 1u);
-  CHECK(pb_is_tainted(*dirty));
-  CHECK(!pb_is_tainted(*clean));
+  CHECK(bug_is_tainted(*dirty));
+  CHECK(!bug_is_tainted(*clean));
   CHECK_EQ((int)breed_check(*clean, *dirty), (int)BRD_TAINT);
   CHECK_EQ((int)breed_check(*dirty, *clean), (int)BRD_TAINT);   // symmetric
 
@@ -225,7 +225,7 @@ TEST(a_clean_dynasty_refuses_a_tainted_parent_and_a_tainted_one_accepts_anything
   CHECK_EQ((int)breed_check(*clean, *dirty), (int)BRD_OK);
   dirty->flags = (uint8_t)(dirty->flags | (uint8_t)PBF_GOD_TAINTED);
   CHECK_EQ((int)gene_tainted(dirty->genome), 0);      // the OTHER marker is clear
-  CHECK(pb_is_tainted(*dirty));
+  CHECK(bug_is_tainted(*dirty));
   CHECK_EQ((int)breed_check(*clean, *dirty), (int)BRD_TAINT);
 }
 
@@ -238,8 +238,8 @@ TEST(the_offspring_is_the_base_stage_of_a_parents_family_and_passes_the_validato
     box_fixture();
     // Two DIFFERENT families inside one compat group (1 and 7 are both group 1),
     // so "the family of the parent chosen by the shared seed" is observable.
-    PebbleInstance* a = make_parent(2,  12, seeded_genesis(0x6000u + seed));
-    PebbleInstance* b = make_parent(20, 14, seeded_genesis(0x7000u + seed));
+    BugInstance* a = make_parent(2,  12, seeded_genesis(0x6000u + seed));
+    BugInstance* b = make_parent(20, 14, seeded_genesis(0x7000u + seed));
     CHECK(a != nullptr && b != nullptr);
 
     BreedPlan plan;
@@ -259,10 +259,10 @@ TEST(the_offspring_is_the_base_stage_of_a_parents_family_and_passes_the_validato
     uint8_t slot = (uint8_t)BOX_SLOT_NONE;
     CHECK_EQ((int)breed_commit(plan, BRD_EPOCH0, slot), (int)BRD_OK);
     CHECK(slot != (uint8_t)BOX_SLOT_NONE);
-    const PebbleInstance* c = box_peek(slot);
+    const BugInstance* c = box_peek(slot);
     CHECK(c != nullptr);
     if (c == nullptr) break;
-    CHECK_EQ((int)validate_pebble(*c), (int)VR_OK);
+    CHECK_EQ((int)validate_bug(*c), (int)VR_OK);
     CHECK_EQ((int)c->origin, (int)ORIGIN_BRED);
     CHECK((c->flags & (uint8_t)PBF_BRED) != 0u);
     CHECK(c->id != 0u && c->id != a->id && c->id != b->id);
@@ -286,8 +286,8 @@ TEST(the_generation_counter_climbs_and_saturates_and_the_taint_is_never_cleared)
   gb.generation = 253; genome_seal(gb);
   gene_set_tainted(ga, 1u);
 
-  PebbleInstance* a = make_parent(5, 10, ga);
-  PebbleInstance* b = make_parent(14, 10, gb);
+  BugInstance* a = make_parent(5, 10, ga);
+  BugInstance* b = make_parent(14, 10, gb);
   CHECK(a != nullptr && b != nullptr);
   // Both parents tainted, so the gate lets the pair through and the CHILD's
   // taint is genome_breed()'s A | B.
@@ -314,28 +314,28 @@ TEST(the_generation_counter_climbs_and_saturates_and_the_taint_is_never_cleared)
 // -----------------------------------------------------------------------------
 TEST(the_battle_variation_ceiling_is_structural_and_this_case_says_so) {
   // game/validate.h rule (b): the gene masks make a range check a test that
-  // cannot fail, and game/pebble.h folds 0..15 to 0..2. THIS CASE CANNOT FAIL
+  // cannot fail, and game/bug.h folds 0..15 to 0..2. THIS CASE CANNOT FAIL
   // and it is written down as such - the ceiling that CAN be broken is the
   // genesis envelope, and the case below is the one that guards it.
   uint8_t worst[3] = { 0, 0, 0 };
   for (uint32_t seed = 1; seed <= 2000u; ++seed) {
     box_fixture();
-    PebbleInstance* a = make_parent(5,  30, seeded_genesis(0x9000u + seed));
-    PebbleInstance* b = make_parent(14, 30, seeded_genesis(0xA000u + seed));
+    BugInstance* a = make_parent(5,  30, seeded_genesis(0x9000u + seed));
+    BugInstance* b = make_parent(14, 30, seeded_genesis(0xA000u + seed));
     CHECK(a != nullptr && b != nullptr);
     BreedPlan plan;
     if (breed_compute(*a, *b, seed, plan) != BRD_OK) { CHECK(false); break; }
     uint8_t v[3];
-    pebble_genome_vars(plan.genome, v);
+    bug_genome_vars(plan.genome, v);
     for (int i = 0; i < 3; ++i) {
-      CHECK(v[i] <= (uint8_t)PEBBLE_GENOME_VAR_MAX);
+      CHECK(v[i] <= (uint8_t)BUG_GENOME_VAR_MAX);
       if (v[i] > worst[i]) worst[i] = v[i];
     }
   }
   printf("     worst bred genome variation over 2,000 pairs: atk +%u def +%u spd +%u "
          "(ceiling %d, and it is held by the fold, not by breeding.cpp)\n",
          (unsigned)worst[0], (unsigned)worst[1], (unsigned)worst[2],
-         (int)PEBBLE_GENOME_VAR_MAX);
+         (int)BUG_GENOME_VAR_MAX);
 }
 
 // The one that CAN fail: delete clamp_to_genesis_envelope()'s call and this
@@ -354,9 +354,9 @@ TEST(ten_thousand_bred_pairs_never_leave_the_genesis_care_envelope) {
     static const uint8_t GRP2[] = { 5, 6, 14, 15, 23, 24 };
     const uint8_t sa = GRP2[rng_next_below(r, (uint32_t)(sizeof GRP2)) ];
     const uint8_t sb = GRP2[rng_next_below(r, (uint32_t)(sizeof GRP2)) ];
-    PebbleInstance* a = make_parent(sa, (uint8_t)(1 + rng_next_below(r, 30)),
+    BugInstance* a = make_parent(sa, (uint8_t)(1 + rng_next_below(r, 30)),
                                     seeded_genesis(rng_next(r) | 1u));
-    PebbleInstance* b = make_parent(sb, (uint8_t)(1 + rng_next_below(r, 30)),
+    BugInstance* b = make_parent(sb, (uint8_t)(1 + rng_next_below(r, 30)),
                                     seeded_genesis(rng_next(r) | 1u));
     if (a == nullptr || b == nullptr) { CHECK(false); break; }
     if (a->id == b->id) continue;
@@ -430,8 +430,8 @@ TEST(an_unclamped_dynasty_drifts_out_of_the_band_and_a_clamped_one_does_not) {
     Genome cb = genome_genesis();
     for (int gen = 0; gen < GENERATIONS; ++gen) {
       box_fixture();
-      PebbleInstance* a = make_parent(5,  20, ca);
-      PebbleInstance* b = make_parent(14, 20, cb);
+      BugInstance* a = make_parent(5,  20, ca);
+      BugInstance* b = make_parent(14, 20, cb);
       if (a == nullptr || b == nullptr) { CHECK(false); break; }
       BreedPlan plan;
       if (breed_compute(*a, *b, 0xC0DEu + (uint32_t)(d * 64 + gen), plan) != BRD_OK) {
@@ -468,8 +468,8 @@ TEST(two_devices_with_the_same_seed_compute_a_byte_identical_child) {
   int differed_by_seed = 0;
   for (uint32_t seed = 1; seed <= 256u; ++seed) {
     box_fixture();
-    PebbleInstance* a = make_parent(5,  17, seeded_genesis(0xB100u));
-    PebbleInstance* b = make_parent(14, 23, seeded_genesis(0xB200u));
+    BugInstance* a = make_parent(5,  17, seeded_genesis(0xB100u));
+    BugInstance* b = make_parent(14, 23, seeded_genesis(0xB200u));
     CHECK(a != nullptr && b != nullptr);
 
     // Device 1.
@@ -509,8 +509,8 @@ TEST(breeding_never_reseeds_or_consumes_the_shared_breeding_stream) {
 
   genome_seed(0x1234u);
   box_fixture();
-  PebbleInstance* a = make_parent(5,  10, seeded_genesis(0xC1u));
-  PebbleInstance* b = make_parent(14, 10, seeded_genesis(0xC2u));
+  BugInstance* a = make_parent(5,  10, seeded_genesis(0xC1u));
+  BugInstance* b = make_parent(14, 10, seeded_genesis(0xC2u));
   CHECK(a != nullptr && b != nullptr);
   genome_seed(0x1234u);                    // make_parent's rolls are not the point
   BreedPlan plan;
@@ -526,8 +526,8 @@ TEST(the_two_ends_must_agree_on_which_parent_is_a) {
   int same = 0, diff = 0;
   for (uint32_t seed = 1; seed <= 200u; ++seed) {
     box_fixture();
-    PebbleInstance* a = make_parent(5,  10, seeded_genesis(0xD100u + seed));
-    PebbleInstance* b = make_parent(14, 10, seeded_genesis(0xD200u + seed));
+    BugInstance* a = make_parent(5,  10, seeded_genesis(0xD100u + seed));
+    BugInstance* b = make_parent(14, 10, seeded_genesis(0xD200u + seed));
     CHECK(a != nullptr && b != nullptr);
     BreedPlan pab, pba;
     CHECK_EQ((int)breed_compute(*a, *b, seed, pab), (int)BRD_OK);
@@ -543,8 +543,8 @@ TEST(the_two_ends_must_agree_on_which_parent_is_a) {
 // -----------------------------------------------------------------------------
 TEST(a_full_box_refuses_the_child_by_name_and_writes_nothing) {
   box_fixture();
-  PebbleInstance* a = make_parent(5,  10, seeded_genesis(0xE1u));
-  PebbleInstance* b = make_parent(14, 10, seeded_genesis(0xE2u));
+  BugInstance* a = make_parent(5,  10, seeded_genesis(0xE1u));
+  BugInstance* b = make_parent(14, 10, seeded_genesis(0xE2u));
   CHECK(a != nullptr && b != nullptr);
   BreedPlan plan;
   CHECK_EQ((int)breed_compute(*a, *b, 0x99u, plan), (int)BRD_OK);

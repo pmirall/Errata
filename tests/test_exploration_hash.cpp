@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_exploration_hash.cpp
+//  Errata host tests - test_exploration_hash.cpp
 //  P5-C1: the network classifier, the salted identity, the ScanResult layout
 //  and the scan job's timeout and cancel.
 //

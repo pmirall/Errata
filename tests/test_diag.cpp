@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_diag.cpp
+//  Errata host tests - test_diag.cpp
 //  dev/diag_core.cpp: the arithmetic half of the diagnostics surface (P10-C1,
 //  spec sections 49 and 66).
 //
@@ -15,9 +15,9 @@
 //  THE CASE THIS FILE IS REALLY FOR is the taint. game/sim.cpp's god hooks set
 //  PF_GOD_TAINTED themselves; game/box.cpp's constructor does not, and it
 //  memsets flags to 0 and takes the genome as given. So a `spawn` written the
-//  obvious way mints a CLEAN Pebble inside god mode, which passes
+//  obvious way mints a CLEAN Bug inside god mode, which passes
 //  taint_gate_ok() and can be traded into an honest player's dynasty. The
-//  checks below do not assert "a flag is set": they hand the minted Pebble to
+//  checks below do not assert "a flag is set": they hand the minted Bug to
 //  taint_gate_ok() against a clean local one and require the REFUSAL, which is
 //  the thing game/trade.cpp:87 and game/breeding.cpp:84 actually ask.
 // =============================================================================
@@ -49,7 +49,7 @@ static Genome clean_genome(void) {
   return g;
 }
 
-// A bound Box with `n` Pebbles, slot 0 active and the simulation bound to it.
+// A bound Box with `n` Bugs, slot 0 active and the simulation bound to it.
 // Every one of them is CLEAN: no genome taint bit, no PBF_GOD_TAINTED. That is
 // the precondition every taint case below depends on, so it is asserted here
 // rather than assumed.
@@ -57,8 +57,8 @@ static void fixture(uint8_t n) {
   rng_seed_all(0xC0FFEEu);
   memset(&g_state, 0, sizeof g_state);
   for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
-    g_state.pebbles[i].magic      = (uint16_t)PEBBLE_MAGIC;
-    g_state.pebbles[i].layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+    g_state.bugs[i].magic      = (uint16_t)BUG_MAGIC;
+    g_state.bugs[i].layout_ver = (uint8_t)BUG_LAYOUT_VER;
   }
   g_state.box.magic           = (uint16_t)BOX_MAGIC;
   g_state.box.schema_version  = (uint8_t)SAVE_SCHEMA_VERSION;
@@ -70,10 +70,10 @@ static void fixture(uint8_t n) {
   box_bind(g_state);
 
   for (uint8_t i = 0; i < n; ++i) {
-    const uint8_t s = box_new_pebble(SPECIES_ID_STARTER, 5, (uint8_t)ORIGIN_WILD,
+    const uint8_t s = box_new_bug(SPECIES_ID_STARTER, 5, (uint8_t)ORIGIN_WILD,
                                      clean_genome(), 0x3000u + i, DG_EPOCH0);
     CHECK(s != (uint8_t)BOX_SLOT_NONE);
-    CHECK(!pb_is_tainted(*box_slot(s)));
+    CHECK(!bug_is_tainted(*box_slot(s)));
   }
   if (n) {
     CHECK(box_set_active(0));
@@ -104,13 +104,13 @@ static uint8_t run(const char* line, uint8_t* commit_out = nullptr) {
 
 static bool has(const char* needle) { return strstr(g_buf, needle) != nullptr; }
 
-// A clean Pebble that is NOT in the Box: the honest player's dynasty, for the
+// A clean Bug that is NOT in the Box: the honest player's dynasty, for the
 // gate to refuse against.
-static PebbleInstance clean_stranger(void) {
-  PebbleInstance p;
+static BugInstance clean_stranger(void) {
+  BugInstance p;
   memset(&p, 0, sizeof p);
-  p.magic      = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic      = (uint16_t)BUG_MAGIC;
+  p.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   p.species_id = (uint8_t)SPECIES_ID_STARTER;
   p.id         = 0xABCD1234u;
   p.level      = 5;
@@ -121,33 +121,33 @@ static PebbleInstance clean_stranger(void) {
 //  1. THE TAINT RULE - the reason this file exists
 // =============================================================================
 
-// spawn goes through box_new_pebble(), which memsets flags to 0 and takes the
+// spawn goes through box_new_bug(), which memsets flags to 0 and takes the
 // genome AS GIVEN, and genome_genesis() CLEARS the taint bit. So without
-// diag_taint() this Pebble is clean and tradeable. Delete the diag_taint() call
+// diag_taint() this Bug is clean and tradeable. Delete the diag_taint() call
 // from mint_one() in diag_core.cpp and this fails by name.
-TEST(spawn_mints_a_pebble_an_honest_dynasty_refuses) {
+TEST(spawn_mints_a_bug_an_honest_dynasty_refuses) {
   fixture(1);
   const uint8_t before = box_count();
   CHECK_EQ(run("spawn 1 7"), (uint8_t)DGR_OK);
   CHECK_EQ((int)box_count(), (int)before + 1);
 
   // Find the one that was just filed.
-  const PebbleInstance* spawned = nullptr;
+  const BugInstance* spawned = nullptr;
   for (uint8_t s = 0; s < (uint8_t)BOX_SLOTS; ++s) {
     if (!box_occupied(s)) continue;
-    const PebbleInstance* p = box_peek(s);
+    const BugInstance* p = box_peek(s);
     if (p && p->level == 7) spawned = p;
   }
   CHECK(spawned != nullptr);
 
   // BOTH markers, because game/taint.h reads both and a writer that set only
-  // one leaves a hole for either a migrated v1 save or an unbound Pebble.
+  // one leaves a hole for either a migrated v1 save or an unbound Bug.
   CHECK(gene_tainted(spawned->genome) != 0u);
   CHECK((spawned->flags & (uint8_t)PBF_GOD_TAINTED) != 0u);
 
   // THE ACTUAL QUESTION game/trade.cpp:87 and game/breeding.cpp:84 ask.
-  const PebbleInstance honest = clean_stranger();
-  CHECK(!pb_is_tainted(honest));
+  const BugInstance honest = clean_stranger();
+  CHECK(!bug_is_tainted(honest));
   CHECK(!taint_gate_ok(honest, *spawned));   // a clean unit REFUSES it
   CHECK(taint_gate_ok(*spawned, honest));    // a tainted one accepts anything
 }
@@ -159,10 +159,10 @@ TEST(fill_box_taints_every_slot_it_mints) {
   CHECK_EQ((int)box_count(), (int)BOX_SLOTS);
   CHECK((commit & DGCOMMIT_SLOTS) != 0u);
 
-  const PebbleInstance honest = clean_stranger();
+  const BugInstance honest = clean_stranger();
   uint8_t minted = 0;
   for (uint8_t s = 0; s < (uint8_t)BOX_SLOTS; ++s) {
-    const PebbleInstance* p = box_peek(s);
+    const BugInstance* p = box_peek(s);
     CHECK(p != nullptr);
     if (p->level != 3) continue;             // the fixture's own level-5 slot
     ++minted;
@@ -171,11 +171,11 @@ TEST(fill_box_taints_every_slot_it_mints) {
   CHECK(minted >= 9);
 }
 
-// Level lives on the PebbleInstance and there is no sim_god_set_level(), so
+// Level lives on the BugInstance and there is no sim_god_set_level(), so
 // nothing but the explicit diag_taint() in this arm marks it.
-TEST(set_level_taints_the_pebble_it_edits) {
+TEST(set_level_taints_the_bug_it_edits) {
   fixture(1);
-  const PebbleInstance honest = clean_stranger();
+  const BugInstance honest = clean_stranger();
   CHECK(taint_gate_ok(honest, *box_peek(0)));     // clean before
 
   CHECK_EQ(run("set_level 30"), (uint8_t)DGR_OK);
@@ -193,7 +193,7 @@ TEST(heal_clears_sickness_and_taints_through_the_sim_hook) {
   // sim_god_set_sick() taints on its own, so re-arm a clean fixture to make the
   // heal arm answer for itself.
   fixture(1);
-  const PebbleInstance honest = clean_stranger();
+  const BugInstance honest = clean_stranger();
   CHECK(taint_gate_ok(honest, *box_peek(0)));
 
   CHECK_EQ(run("heal"), (uint8_t)DGR_OK);
@@ -205,11 +205,11 @@ TEST(heal_clears_sickness_and_taints_through_the_sim_hook) {
 
 // THE TABLE-DRIVEN ONE, and it is the case that catches the NEXT command
 // somebody adds. Every DCF_TAINTS row is executed on a fresh clean fixture and
-// the Box must come back holding at least one Pebble a clean dynasty refuses.
+// the Box must come back holding at least one Bug a clean dynasty refuses.
 // A minting command added without the flag fails HERE by name, not in a review.
-TEST(every_command_marked_DCF_TAINTS_produces_a_refused_pebble) {
+TEST(every_command_marked_DCF_TAINTS_produces_a_refused_bug) {
   const DiagCmdSpec* t = diag_cmd_table();
-  const PebbleInstance honest = clean_stranger();
+  const BugInstance honest = clean_stranger();
   uint8_t checked = 0;
 
   for (uint8_t i = 0; i < (uint8_t)DGC_COUNT; ++i) {
@@ -233,7 +233,7 @@ TEST(every_command_marked_DCF_TAINTS_produces_a_refused_pebble) {
 
     bool any_refused = false;
     for (uint8_t s = 0; s < (uint8_t)BOX_SLOTS; ++s) {
-      const PebbleInstance* p = box_peek(s);
+      const BugInstance* p = box_peek(s);
       if (p && !taint_gate_ok(honest, *p)) any_refused = true;
     }
     CHECK(any_refused);
@@ -255,7 +255,7 @@ TEST(every_command_marked_DCF_TAINTS_produces_a_refused_pebble) {
 // decision lives.
 TEST(give_item_changes_the_bag_and_taints_nothing_itself) {
   fixture(1);
-  const PebbleInstance honest = clean_stranger();
+  const BugInstance honest = clean_stranger();
   uint8_t commit = 0;
   CHECK_EQ(run("give_item 1 5", &commit), (uint8_t)DGR_OK);
   CHECK_EQ((int)inv_count(g_state.inv, 1), 5);
@@ -266,17 +266,17 @@ TEST(give_item_changes_the_bag_and_taints_nothing_itself) {
 }
 
 TEST(diag_taint_sets_both_markers_and_either_one_alone_is_a_hole) {
-  PebbleInstance p = clean_stranger();
-  const PebbleInstance honest = clean_stranger();
+  BugInstance p = clean_stranger();
+  const BugInstance honest = clean_stranger();
   CHECK(taint_gate_ok(honest, p));
 
   // The genome bit alone: what a v1 save cannot carry.
-  PebbleInstance a = p;
+  BugInstance a = p;
   gene_set_tainted(a.genome, 1);
   CHECK(!taint_gate_ok(honest, a));
 
   // The flag alone: what persistence/migration.cpp produces from a v1 save.
-  PebbleInstance b = p;
+  BugInstance b = p;
   b.flags = (uint8_t)(b.flags | (uint8_t)PBF_GOD_TAINTED);
   CHECK(!taint_gate_ok(honest, b));
 
@@ -563,13 +563,13 @@ TEST(spawn_fills_the_box_and_then_refuses_with_a_named_reason) {
 // interactions and reports what the score actually became.
 TEST(set_activity_records_interactions_and_reports_the_derived_score) {
   fixture(1);
-  const PebbleInstance honest = clean_stranger();
+  const BugInstance honest = clean_stranger();
   uint8_t commit = 0;
   CHECK_EQ(run("set_activity 3", &commit), (uint8_t)DGR_OK);
   CHECK_EQ((int)commit, (int)(DGCOMMIT_CDS | DGCOMMIT_ACTIVE));
   CHECK(has("derived, not set"));
   CHECK(has("notes=3"));
-  // The XP those notes will pay lands on the active Pebble through
+  // The XP those notes will pay lands on the active Bug through
   // app_pay_activity(), so the creature is marked here rather than being left
   // clean while carrying XP nobody earned.
   CHECK(!taint_gate_ok(honest, *box_peek(0)));
@@ -655,7 +655,7 @@ static DiagFields sample_fields(void) {
   f.net_mode = 2; f.net_phase = 3; f.net_err = 0; f.ap_up = 1;
   f.save_schema = 2; f.save_migrated = 1; f.quarantine_mask = 0x0005u;
   f.load_result = 3; f.content_version = 0x5B4Au;
-  f.pebbles = 4;
+  f.bugs = 4;
   f.scan_valid = 1; f.scan_seen = 7; f.scan_fresh = 2; f.scan_phase = 1;
   f.kv_healthy = 1; f.kv_error = 0x11u; f.kv_write_fails = 0;
   f.uptime_s = 3600;
@@ -689,7 +689,7 @@ TEST(battery_and_ble_report_absence_with_a_reason) {
   diag_out_init(o, g_buf, (uint16_t)sizeof(g_buf));
   diag_fmt_field((uint8_t)DGD_BATTERY, f, o);
   CHECK(has("n/a"));
-  CHECK(has("PB_PINS_CONFIRMED"));
+  CHECK(has("ER_PINS_CONFIRMED"));
 
   diag_out_init(o, g_buf, (uint16_t)sizeof(g_buf));
   diag_fmt_field((uint8_t)DGD_BLE, f, o);

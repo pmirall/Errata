@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - fakes/link_fake.cpp
+//  Errata host tests - fakes/link_fake.cpp
 //  See link_fake.h.
 // =============================================================================
 #include "link_fake.h"
@@ -248,9 +248,9 @@ static bool lf_journal_sent(void* ctx, uint32_t out_id, uint32_t peer_id)
 static uint8_t lf_judge(void* ctx, const uint8_t rec[48])
 {
   (void)ctx;
-  PebbleInstance in;
+  BugInstance in;
   if (pbw_decode(rec, in) != VR_OK) return (uint8_t)TDR_PEER_INVALID;
-  const PebbleInstance* mine = box_peek(link_trade_slot());
+  const BugInstance* mine = box_peek(link_trade_slot());
   if (mine == nullptr) return (uint8_t)TDR_NO_SLOT;
   return (uint8_t)trade_accept_check(*mine, in, 0xA0A0A0A0u, link_trade_peer_id());
 }

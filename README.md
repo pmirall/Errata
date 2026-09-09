@@ -1,4 +1,4 @@
-# Pebblebol
+# Errata
 
 A creature that lives on a coin-sized ESP32-C3 behind a 128×64 monochrome OLED
 and two buttons. You feed it, it grows, it fights and trades with a second one
@@ -30,7 +30,7 @@ documentation, and it does not satisfy the assertions this repository wrote for
 it.** Decision **D1** is open and has been deferred by the owner
 (`docs/decisions.md`).
 
-What `Pebblebol/src/core/config.h` compiles today:
+What `Errata/src/core/config.h` compiles today:
 
 | Signal | GPIO | Note |
 |---|---|---|
@@ -43,11 +43,11 @@ What `Pebblebol/src/core/config.h` compiles today:
 | `PIN_VBAT_ADC` | 0 | reserved; **no divider is fitted**, so there is no battery reading (decision D10, open) |
 
 `config.h` carries seven `static_assert`s that a confirmed map must satisfy.
-They are dormant because `PB_PINS_CONFIRMED` is never defined anywhere. Define
+They are dormant because `ER_PINS_CONFIRMED` is never defined anywhere. Define
 it and the build stops:
 
 ```console
-$ g++ -DPB_PINS_CONFIRMED -fsyntax-only Pebblebol/src/core/config.h
+$ g++ -DER_PINS_CONFIRMED -fsyntax-only Errata/src/core/config.h
 core/config.h:114: error: static assertion failed: D1: no button on a strapping pin (GPIO2/8/9)
 note: the comparison reduces to '(2 != 2)'
 ```
@@ -64,7 +64,7 @@ conflict and the owner's deferral.
 
 **So: decide D1 and D8 first, edit the six `#define`s they own (the seventh,
 `PIN_VBAT_ADC`, belongs to D10 and there is no divider fitted), define
-`PB_PINS_CONFIRMED`, and let the assertions check your map.** Every pin number
+`ER_PINS_CONFIRMED`, and let the assertions check your map.** Every pin number
 in the firmware comes from that one block — `tools/check.sh` fails any other
 file that defines a `PIN_` macro, so there is no second place to look.
 
@@ -83,7 +83,7 @@ for the battery divider. GPIO11–19 are not brought out.
 **Eighteen of the spec's §67 acceptance boxes are open.** Sixteen are open
 because nobody has watched a device do the thing; one (`Device boots reliably`)
 waits on decision **D1** above; and two — breeding compatibility and generated
-Pebbles staying balanced — wait on a module that **was never written**, which is
+Bugs staying balanced — wait on a module that **was never written**, which is
 a different sentence and is spelled out at item 29 below. *(Seventeen until the
 final review, which UNTICKED "Two-button input is robust": its first named
 artefact — P2-C6's 5 ms sampler and edge ring — is behind `#if defined(ARDUINO)`
@@ -150,7 +150,7 @@ prove; the bracketed code is its section. Nothing here has been run.
 
 ### Before anything (blocks all 41 items)
 
-1. **Decide D1 and D8, wire a board, define `PB_PINS_CONFIRMED`.** §1 above.
+1. **Decide D1 and D8, wire a board, define `ER_PINS_CONFIRMED`.** §1 above.
    Until this, nothing below can run. `[§0]`
 
    > ⚠ **§1 does not mention D5 (SSD1306 vs SH1106), and `docs/decisions.md`
@@ -258,7 +258,7 @@ prove; the bracketed code is its section. Nothing here has been run.
    `GOD_MODE_ENABLED 0` is why the rest is absent. If it lists `spawn`, you are
    holding the baseline image. `[E1]`
 9. On **`baseline`**: `spawn 1 5`, then `show_save`. The GOD bar must appear on
-   the first mutating command and the Pebble must carry the taint ribbon.
+   the first mutating command and the Bug must carry the taint ribbon.
    `[E2]`
 10. `info`'s twelve §49 fields. Battery must read `n/a` (there is no
     `PIN_BATT`, no divider, decision **D10** is open) and BLE `none`. `[E3]`
@@ -421,7 +421,7 @@ prove; the bracketed code is its section. Nothing here has been run.
     > the species word ("Paketo"), not a blank row. *(Fixed: with a creator
     > custom species active, an unnamed device produced an EMPTY name, beaconed
     > twelve zero bytes, and appeared on the other board as "Buscando
-    > Pebbles..." — visible but anonymous.)*
+    > Bugs..." — visible but anonymous.)*
 
 20. **Pull the power in the middle of the flow.** The device must come back on
     the question it was on, with the name already stored. The single most
@@ -478,7 +478,7 @@ prove; the bracketed code is its section. Nothing here has been run.
     > on `release`:**
     > **(a)** `beacons_tx == 0` on the accented board → the name/encoding defect
     > is back. **(b)** `beacons_tx` climbing on A but `rx_beacon == 0` on B → the
-    > frame never arrived: wrong channel (`PB_LINK_CHANNEL` is 1) or the radio
+    > frame never arrived: wrong channel (`ER_LINK_CHANNEL` is 1) or the radio
     > never came up. **(c)** `beacons_tx` climbing on A **and** `rx_beacon`
     > climbing on B but B's list stays empty → the frame arrived and was refused.
     > **Put the boards 30 cm apart and retry; if the peer appears, it was RSSI.**
@@ -550,7 +550,7 @@ prove; the bracketed code is its section. Nothing here has been run.
     > no acceptance number.
 28. §67 **Trade is atomic**, the cross-pair half: trade, then trade again and
     **pull the battery on one board between the two presses**. Each Box holds
-    the outgoing Pebble or the incoming one, never both, never neither. `[B6]`
+    the outgoing Bug or the incoming one, never both, never neither. `[B6]`
     > ⚠ **Make Box room first, or pass `--no-write` to the smoke script.** Each
     > writing run consumes one Box slot and one of the ten creator-species slots
     > (see item 30's ordering note). Do this item before you burn slots on the
@@ -559,7 +559,7 @@ prove; the bracketed code is its section. Nothing here has been run.
     > `count=` are the three fields that settle it. Four readings: both boards,
     > both reboots. It answers on `release`.
 
-29. §67 **Breeding compatibility works** and **Generated Pebbles remain
+29. §67 **Breeding compatibility works** and **Generated Bugs remain
     balanced**. **These cannot be run and it is not a scheduling problem:
     `networking/breed_link.cpp` does not exist** — it was planned in P7-C5 and
     never written, `DISC_CAP_BREED` is not claimed, and the LINK card's CRIAR
@@ -617,7 +617,7 @@ prove; the bracketed code is its section. Nothing here has been run.
 ### The first five minutes — ADDED AT THE FINAL REVIEW
 
 > These three are not in the original 38 and the omission is why they matter.
-> **Five §67 boxes — Care works, Active Pebble can be selected, XP and leveling
+> **Five §67 boxes — Care works, Active Bug can be selected, XP and leveling
 > work, At least 5 minigames, Minigames transition cleanly — are proven at BOTH
 > ENDS and, until this commit, at neither point in the middle.** The screen
 > picks the right action id (a screen test), the model does the right thing with
@@ -811,12 +811,12 @@ forever)`.
 # the artefact that ships
 tools/build.sh --variant release --define GOD_MODE_ENABLED=0 --build-path build/release
 arduino-cli upload -p /dev/ttyACM0 --input-dir build/release \
-  --fqbn esp32:esp32:esp32c3:PartitionScheme=huge_app,CDCOnBoot=cdc Pebblebol
+  --fqbn esp32:esp32:esp32c3:PartitionScheme=huge_app,CDCOnBoot=cdc Errata
 
 # the dev build, for the DIAG screens a few bench items read
 tools/build.sh --variant baseline --build-path build/baseline
 arduino-cli upload -p /dev/ttyACM0 --input-dir build/baseline \
-  --fqbn esp32:esp32:esp32c3:PartitionScheme=huge_app,CDCOnBoot=cdc Pebblebol
+  --fqbn esp32:esp32:esp32c3:PartitionScheme=huge_app,CDCOnBoot=cdc Errata
 ```
 
 `build/` is already in `.gitignore`. `GOD_MODE_ENABLED=0` is what ships; the
@@ -851,7 +851,7 @@ to.
 
 ## 5. Partition table
 
-`Pebblebol/partitions.csv` is flashed, not the board menu's table — arduino-cli
+`Errata/partitions.csv` is flashed, not the board menu's table — arduino-cli
 copies a sketch-local `partitions.csv` into the build directory and esptool
 writes that one.
 
@@ -886,7 +886,7 @@ No OTA slot. An update arrives over USB.
 
 ## 6. Architecture
 
-`Pebblebol/src/` is ten layers. The rule that matters is **which of them may
+`Errata/src/` is ten layers. The rule that matters is **which of them may
 touch Arduino**:
 
 ```
@@ -968,7 +968,7 @@ for exactly this reason) and leave the Arduino file as the caller.
 ## 7. The save
 
 Seven blob types in NVS. Five of them are **pairs** — the Box header, the
-config, the inventory, the cooldown table and each of the ten Pebble slots —
+config, the inventory, the cooldown table and each of the ten Bug slots —
 written twice under `<key>0` / `<key>1` with a sequence number. Every write goes
 to the copy a reader would *not* pick, then reads back and compares, so one torn
 or rotted copy always leaves the other intact: that is `LOAD_RECOVERED_PAIR`,
@@ -1005,7 +1005,7 @@ What a genuinely fresh device does, in order:
 
 1. Splash with the product name and `FW_VERSION`.
 2. Load: nothing on flash, so `LOAD_FRESH`. Clock stays `CAL_UNSET`.
-3. A starter Pebble is minted into slot 0 and made active — **before** the
+3. A starter Bug is minted into slot 0 and made active — **before** the
    player is asked anything, so a player who reads nothing still ends up with a
    working device.
 4. **No toast.** The boot greeting `STR_BOOT_FIRST` is *suppressed* while the
@@ -1080,9 +1080,9 @@ paragraph above says.
 ```
 README.md                  this file
 CHANGELOG.md               English, Keep a Changelog, one entry per phase
-PEBBLEBOL_IMPLEMENTATION_PLAN.md   the plan every commit is answerable to
-PEBBLEBOL_IMPLEMENTATION_AUDIT.md  the audit of the v1 codebase this replaced
-Pebblebol/                 the sketch (Pebblebol.ino + src/ + partitions.csv)
+ERRATA_IMPLEMENTATION_PLAN.md   the plan every commit is answerable to
+ERRATA_IMPLEMENTATION_AUDIT.md  the audit of the v1 codebase this replaced
+Errata/                 the sketch (Errata.ino + src/ + partitions.csv)
 tests/                     59 host binaries, fakes, fixtures, 75 PBM goldens
   fakes/SHADOWS.txt        THE FIFTY SHIPPING FUNCTIONS THE HOST FAKES STAND
                            IN FOR, enumerated and classified. Every host
@@ -1112,8 +1112,8 @@ docs/
   protocol.md              the radio contract
   budget.md                where the flash and the RAM went
   content.md               the content pack and how to regenerate it
-  PEBBLEBOL_PRODUCT_SYSTEM_SPEC.md    the product spec (§ numbers cited
-  PEBBLEBOL_HARDWARE_AND_BATTERY_SPEC.md   throughout the code)
+  ERRATA_PRODUCT_SYSTEM_SPEC.md    the product spec (§ numbers cited
+  ERRATA_HARDWARE_AND_BATTERY_SPEC.md   throughout the code)
   hardware_reconciliation.md
   legacy/                  the Spanish documents this one replaced
 ```

@@ -62,7 +62,7 @@ static void put_hex(const char* key, const uint8_t* p, uint32_t n)
 //
 //  The page implements creator_power_pct()'s arithmetic and tools/page_test.mjs
 //  compares the two ACROSS THE WHOLE INPUT DOMAIN rather than at the one input
-//  a drawn Pebble happens to produce. That is not thoroughness for its own
+//  a drawn Bug happens to produce. That is not thoroughness for its own
 //  sake: the first version of that check compared a single pair, and replacing
 //  the page's integer form with balance.json's FLOAT sentence left it green -
 //  the two agree on all 14,837 pairs, so one input can never tell them apart.

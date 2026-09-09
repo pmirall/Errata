@@ -1,7 +1,7 @@
-# Pebblebol — SaveSchema v2
+# Errata — SaveSchema v2
 
 Everything that reaches flash, and nothing else. This document is written from
-`Pebblebol/src/persistence/save_schema.h`; that header is the authority, and any
+`Errata/src/persistence/save_schema.h`; that header is the authority, and any
 disagreement is a bug in this file. Plan §1.5.
 
 - **Endianness:** little (ESP32-C3, and every blob is memcpy'd whole).
@@ -29,7 +29,7 @@ The device side of the key/value seam is `hardware/kv_nvs.cpp` and it is the
 only translation unit in the tree allowed to open `Preferences`. The host side
 is `tests/fakes/kv_mem.cpp`.
 
-## 2. Partition table (`Pebblebol/partitions.csv`, decision D6)
+## 2. Partition table (`Errata/partitions.csv`, decision D6)
 
 | Name | Type | SubType | Offset | Size |
 |---|---|---|---|---|
@@ -49,7 +49,7 @@ menu still owns the compile-time size ceiling, which is why the FQBN keeps
 
 ## 3. Layouts
 
-### PebbleInstance — 128 B, keys `pb<slot><copy>` (pair)
+### BugInstance — 128 B, keys `pb<slot><copy>` (pair)
 
 | Off | Size | Field | Notes |
 |---|---|---|---|
@@ -70,7 +70,7 @@ menu still owns the compile-time size ceiling, which is why the FQBN keeps
 | 60 | 1 | `status` | `PBS_*` |
 | 61 | 1 | `flags` | `PBF_*` |
 | 62 | 4 | `moves[4]` | AttackId, 0 = empty |
-| 66 | 1 | `origin` | `PebbleOrigin` |
+| 66 | 1 | `origin` | `BugOrigin` |
 | 67 | 1 | `trait_id` | |
 | 68 | 6 | `battles_won/lost`, `minigames_won` | |
 | 74 | 2 | `evolutions`, `trades` | |
@@ -126,7 +126,7 @@ abstract identity from the scanner: no SSID or BSSID ever reaches flash.
 **`act_day` + `act_score` were `reserved_a[4]` until P6-C2**, and they are the
 whole persisted half of the daily activity score (spec §25): the UTC day index
 the counters belong to, and that day's total, already capped per term. **No
-schema bump**, on the same argument `PebbleInstance.corrupt_until_epoch` was
+schema bump**, on the same argument `BugInstance.corrupt_until_epoch` was
 carved out of `reserved[12]` at P5-C3: an old blob reads 0 in both, day index 0
 is 1970 and can never be a real day, so 0 is unambiguously *no day opened yet* —
 which is the correct state for every save written before the commit. Nothing in
@@ -161,14 +161,14 @@ so a rebooting player reaches the honest daily ceiling sooner but never higher).
 
 `magic 0x5343` · `version` · `slot` · `budget_used` · `type` · `compat_group` ·
 `base[4]` · `moves[4]` · `name[13]` · `reserved[17]` · `sprite[2][72]` ·
-`crc16`. A bad CRC here costs a sprite, never a Pebble.
+`crc16`. A bad CRC here costs a sprite, never a Bug.
 
 ### PendingTrade — 64 B, key `tr` (single)
 
 `magic 0x5254` · `version` · `phase` · `out_id` · `peer_id` · `in_wire[48]` ·
 `reserved[2]` · `crc16`. Written BEFORE either side of a trade commits and
 resolved at the next boot, so a power cut can neither duplicate nor vaporise a
-Pebble.
+Bug.
 
 **IT HAS A READER SINCE P7-C4, AND UNTIL THEN IT DID NOT.** `save_load_all()`
 loaded the record into `gs.trade` and `grep -rn 'gs.trade' app/ ui/ game/`
@@ -183,9 +183,9 @@ what each phase means:
 | `TRADE_RECEIVED` | **roll back**: ditto. The peer's record was journalled, never filed |
 | `TRADE_COMMIT` | **roll forward, idempotently**: two independent presence tests, each a no-op when already done |
 
-**`in_wire` carries the id the incoming Pebble will have LOCALLY, not the id its
+**`in_wire` carries the id the incoming Bug will have LOCALLY, not the id its
 sender gave it.** The local id is minted with `box_mint_id()` *before* the COMMIT
-record is written, patched into the record at `PBW_OFF_ID` and the record's own
+record is written, patched into the record at `BUGW_OFF_ID` and the record's own
 CRC resealed. Minting it afterwards would produce a *different* id on a replayed
 COMMIT — `next_id_counter` moves — and the resolver could not tell "already
 done" from "not yet started". `reserved[2]` cannot hold a `uint32_t`, which is
@@ -218,7 +218,7 @@ NUL). `save_schema.h` §9 is the only place they are spelled.
 
 | Key | Blob | Partition |
 |---|---|---|
-| `pb<slot><copy>` | PebbleInstance | `KV_MAIN` |
+| `pb<slot><copy>` | BugInstance | `KV_MAIN` |
 | `box0` / `box1` | BoxHeader | `KV_MAIN` |
 | `cfg0` / `cfg1` | ConfigV2 | `KV_MAIN` |
 | `inv0` / `inv1` | Inventory | `KV_MAIN` |
@@ -282,7 +282,7 @@ Cadence, all in `config.h`:
 |---|---|---|
 | unforced pet write | `SAVE_FULL_PERIOD_S` 300 s | `force=true` means "state changed" and is deferred by the 1 s floor, never dropped |
 | key `t` | `SAVE_LASTSEEN_PERIOD_S` 60 s | the RTC mirror is updated every tick and costs nothing |
-| checkpoint | `SAVE_CKPT_PERIOD_S` 86400 s | plus level-up, evolution, capture and trade — the events that change what a Pebble *is* |
+| checkpoint | `SAVE_CKPT_PERIOD_S` 86400 s | plus level-up, evolution, capture and trade — the events that change what a Bug *is* |
 
 ## 7. Loading
 
@@ -295,7 +295,7 @@ Cadence, all in `config.h`:
 | `LOAD_MIGRATED` | an older schema was read and converted | yes, the converted state |
 | `LOAD_RECOVERED_PAIR` | one copy of some blob was bad; the other served | yes, the repair |
 | `LOAD_RECOVERED_CKPT` | `KV_MAIN` had nothing; `nvs2` served | yes, the recovered state |
-| `LOAD_CORRUPT` | both copies of the Box or of the active Pebble are bad | **no** |
+| `LOAD_CORRUPT` | both copies of the Box or of the active Bug are bad | **no** |
 | `LOAD_FOREIGN_NEWER` | a save from a newer firmware | **no** |
 
 The last two are the point of the whole design. The v1 loader answered a
@@ -400,7 +400,7 @@ shows what it is holding up:
    part of the state the chain transforms, so their upgrade lives in
    `custom_species_install_all()`. Without it `validate_custom_species()`
    refuses the record by name (`VR_CS_BAD_HEADER`), the slot stays empty, and
-   every Pebble pointing at it comes back `VR_UNKNOWN_SPECIES`: the creature the
+   every Bug pointing at it comes back `VR_UNKNOWN_SPECIES`: the creature the
    owner designed, gone on the first boot after a firmware update.
 
 The checkpoint path needed the same treatment (`checkpoint_load()` reads through
@@ -421,7 +421,7 @@ blob, with no rule of its own, because the upgraded copy carries the highest
 `seq` and `pair_write()`'s ordinary "overwrite the older one" already points at
 the spare.
 
-Driven by `tests/test_persistence.cpp` §8b: a whole played save (two Pebbles,
+Driven by `tests/test_persistence.cpp` §8b: a whole played save (two Bugs,
 one of them a creator species, a changed config, a bag, a cooldown, a trade
 journal, both copies of every pair written) stamped back down to v2 and read by
 this firmware.
@@ -429,7 +429,7 @@ this firmware.
 ## 9. The temporary bridge — GONE
 
 `persistence/save_compat.cpp` and the `lgpet` key were the P2-C9 bridge that
-mapped a live v1 `PetSave`/`Config` onto `PebbleInstance` slot 0 while the
+mapped a live v1 `PetSave`/`Config` onto `BugInstance` slot 0 while the
 simulation still ran on the v1 types. **P2-C10 deleted the module and the key**,
 as the section itself said it would; this section described both in the present
 tense for two more phases, which P4-C6 corrects. Neither exists in the tree —

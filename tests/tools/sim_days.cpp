@@ -24,7 +24,7 @@
 //
 //  The other definition in the tree is data/balance.h's own sentence: "a meal
 //  buys about 7 h of satiety, a clean about 12 h of cleanliness, so 3-4 touches
-//  a day is a well-kept Pebble". The NORMAL profile below is built to be that
+//  a day is a well-kept Bug". The NORMAL profile below is built to be that
 //  player and the printout says how many touches it actually landed, so the
 //  claim can be checked rather than assumed.
 //
@@ -73,11 +73,11 @@
 //  THE SECTION 57 CRITERION, AND WHERE IT IS NOT
 // -----------------------------------------------------------------------------
 //  "Ignoring the game for 8 h never drops health below 60 %" is checked here
-//  from a well-kept Pebble, over every start hour of the day, and it is a real
+//  from a well-kept Bug, over every start hour of the day, and it is a real
 //  spec 57 line.
 //
 //  "Level 30 is 3-4 weeks of normal play" IS NOT IN SPEC SECTION 57. It appears
-//  only in PEBBLEBOL_IMPLEMENTATION_PLAN.md, where it is attributed to that
+//  only in ERRATA_IMPLEMENTATION_PLAN.md, where it is attributed to that
 //  section; grepping the spec for "week", "level 30" or "3-4" returns nothing.
 //  It is the PLAN'S GLOSS, it is the criterion the two XP curves disagree about,
 //  and this file measures against it while saying that is what it is.
@@ -140,7 +140,7 @@ static const uint16_t PACK_XP_TABLE[XP_LEVEL_MAX + 1] = {
 //  `touches_day == 0` is the SATURATE profile: try every care action every
 //  minute, which is the upper bound on what the device will pay at all.
 //
-//  "3-4 touches a day is a well-kept Pebble" is data/balance.h's own sentence,
+//  "3-4 touches a day is a well-kept Bug" is data/balance.h's own sentence,
 //  and the NORMAL profile is built to be that player.
 // -----------------------------------------------------------------------------
 struct Profile {
@@ -161,7 +161,7 @@ static const Profile PROFILES[] = {
   { "light",     2u, 19u,  3u,  1u, 600u,  0u,   0u, 2u,
     "evening only: two device-ON hours, three touches, one minigame, no battles" },
   { "normal",    8u,  9u,  4u,  4u, 750u,  4u,  60u, 4u,
-    "data/balance.h's own well-kept Pebble: 8 device-ON h, 3-4 touches, four "
+    "data/balance.h's own well-kept Bug: 8 device-ON h, 3-4 touches, four "
     "minigames, four practice battles, one network per encounter bucket" },
   { "heavy",    14u,  8u, 10u, 12u, 900u, 12u,  80u, 8u,
     "the player who is trying: 14 device-ON h and three times the intent" },
@@ -175,7 +175,7 @@ static const Profile PROFILES[] = {
 //  ONE RUN'S ACCUMULATORS
 // -----------------------------------------------------------------------------
 struct DayRow {
-  uint8_t  level;               // PebbleInstance.level - see the STAGE FLOOR note
+  uint8_t  level;               // BugInstance.level - see the STAGE FLOOR note
   uint8_t  xp_level_ship;       // level from the XP stream alone, shipped curve
   uint8_t  xp_level_pack;       // ...and the pack's
   uint32_t xp_day;              // XP GRANTED that day, all sources
@@ -202,7 +202,7 @@ struct Run {
   uint32_t asleep_min, awake_min;
 };
 
-static PebbleInstance g_pet;
+static BugInstance g_pet;
 static SimEnv         g_env;
 static Run            g_run;
 
@@ -243,7 +243,7 @@ static bool try_care(ActionId a)
   return true;
 }
 
-// THE PLAYER'S ONE TOUCH: the neediest thing the Pebble wants right now. The
+// THE PLAYER'S ONE TOUCH: the neediest thing the Bug wants right now. The
 // thresholds are the balance.h ones the action itself is gated on, so the
 // player is not asking for something the sim is certain to refuse.
 static bool one_touch(void)
@@ -258,7 +258,7 @@ static bool one_touch(void)
 }
 
 // -----------------------------------------------------------------------------
-//  THE FIXTURE. tests/test_care.cpp's hatched Pebble, PLUS a species row and an
+//  THE FIXTURE. tests/test_care.cpp's hatched Bug, PLUS a species row and an
 //  id - without both, game/xp.cpp's xp_add() returns on its first line
 //  ("an empty slot is not a creature") and every award is silently worth zero.
 //  That is not a detail: the first draft of this file did not set them and
@@ -274,15 +274,15 @@ static void new_pet(uint32_t seed, uint8_t hour)
   sim_new_pet(genome_genesis(), SD_EPOCH0, 0);
   sim_hatch();
 
-  g_pet.magic      = (uint16_t)PEBBLE_MAGIC;
-  g_pet.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  g_pet.magic      = (uint16_t)BUG_MAGIC;
+  g_pet.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   g_pet.species_id = (uint8_t)SPECIES_ID_STARTER;
   g_pet.id         = 1u;
   g_pet.level      = 1u;
   g_pet.xp         = 0u;
   const SpeciesDef* sp = species_get(g_pet.species_id);
   if (sp) {
-    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) g_pet.moves[m] = sp->moves[m];
+    for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m) g_pet.moves[m] = sp->moves[m];
     g_pet.hp_cur = xp_hp_max(sp->base_hp, 1u);
   }
 
@@ -481,7 +481,7 @@ static void run_profile(const Profile& pr, uint32_t seed, uint16_t days, DayRow*
 //  SPEC 57: EIGHT IGNORED HOURS NEVER DROP HEALTH BELOW 60 %.
 //
 //  Swept over every start hour so the sleep window cannot hide the worst case,
-//  and MEASURED FROM A WELL-KEPT PEBBLE - which is what "ignoring the game"
+//  and MEASURED FROM A WELL-KEPT BUG - which is what "ignoring the game"
 //  means. The neglect-from-zero case (health floors at HEALTH_FLOOR_PCT and
 //  stays there) is tests/test_care.cpp's and is not re-tested here.
 //
@@ -497,7 +497,7 @@ static void run_profile(const Profile& pr, uint32_t seed, uint16_t days, DayRow*
 static uint8_t ignore_for(uint32_t seed, uint8_t start_hour, uint32_t hours)
 {
   new_pet(seed, start_hour);
-  // Bring the Pebble to a well-kept state first: one hour of a diligent player.
+  // Bring the Bug to a well-kept state first: one hour of a diligent player.
   for (uint16_t m = 0; m < 60u; ++m) {
     on_minute();
     if ((m % 5u) == 0u) (void)one_touch();
@@ -595,7 +595,7 @@ int main(int argc, char** argv)
   //  THE STAGE FLOOR, measured once and named before any level line is read.
   // ===========================================================================
   {
-    printf("=== THE STAGE FLOOR: WHAT LEVEL A PEBBLE REACHES ON XP ZERO ===\n");
+    printf("=== THE STAGE FLOOR: WHAT LEVEL A BUG REACHES ON XP ZERO ===\n");
     new_pet(seed, 9u);
     uint8_t lv_at[8]; uint32_t at_h[8]; uint8_t n = 0; uint8_t last = g_pet.level;
     lv_at[0] = last; at_h[0] = 0u; n = 1u;
@@ -612,13 +612,13 @@ int main(int argc, char** argv)
     printf("  game/sim.cpp advances the v1 life stage by AGE alone (config.h\n"
            "  AGE_CHILD_S 3.75 h, AGE_TEEN_S 20 h, AGE_ADULT_S 48 h, AGE_SENIOR_S\n"
            "  7 d) and stage_commit() writes that stage back into\n"
-           "  PebbleInstance.level through level_of_stage() -> 5 / 10 / 15 / 20.\n"
-           "  A Pebble that earns NO XP AT ALL therefore reaches:\n    ");
+           "  BugInstance.level through level_of_stage() -> 5 / 10 / 15 / 20.\n"
+           "  A Bug that earns NO XP AT ALL therefore reaches:\n    ");
     for (uint8_t i = 0; i < n; ++i)
       printf("level %u at %u h (%.1f d)   ", lv_at[i], at_h[i], at_h[i] / 24.0);
     printf("\n  So the first %u XP of the shipped curve and the first %u of the "
            "pack's\n  are FREE, and every level line below prints both the "
-           "PebbleInstance.level\n  (which carries this floor) and the level the XP "
+           "BugInstance.level\n  (which carries this floor) and the level the XP "
            "stream alone would buy.\n\n",
            cum_to(XP_TABLE, 20u), cum_to(PACK_XP_TABLE, 20u));
   }
@@ -706,7 +706,7 @@ int main(int argc, char** argv)
                           / (uint32_t)(XP_WIN_CARRY_S / XP_CAP_CARRY)),
            pr.on_hours, (unsigned long)(XP_WIN_CARRY_S / XP_CAP_CARRY));
 
-    printf("  LEVEL, every 5th day (inst = PebbleInstance.level, carries the "
+    printf("  LEVEL, every 5th day (inst = BugInstance.level, carries the "
            "stage floor;\n"
            "                        ship/pack = what the XP stream alone buys "
            "on each curve):\n");
@@ -773,7 +773,7 @@ int main(int argc, char** argv)
   if (!only) {
     printf("=== THE PACING CRITERION ===\n");
     printf("  \"level 30 is 3-4 weeks of normal play\" is NOT a spec 57 line. It is\n"
-           "  PEBBLEBOL_IMPLEMENTATION_PLAN.md's gloss on section 57 - grepping the\n"
+           "  ERRATA_IMPLEMENTATION_PLAN.md's gloss on section 57 - grepping the\n"
            "  spec for \"week\", \"level 30\" or \"3-4\" returns nothing - and it is\n"
            "  still the only stated pacing target, so it is what the two curves are\n"
            "  measured against. 3-4 weeks is 21 to 28 days; 24.5 is its middle.\n\n");

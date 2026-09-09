@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_pet_view.cpp
+//  Errata host tests - test_pet_view.cpp
 //  ui/pet_view.cpp is the seam P2-C11c put between the model and the two
 //  modules that animate the body. petfx.cpp and actfx.cpp read a PetView and
 //  nothing else now, so the things this file checks are exactly the things
@@ -19,7 +19,7 @@
 //  actually calls - not a function the firmware never runs.
 //
 //  WHAT WENT AWAY WITH THAT CHANGE. pet_view_fill(PetView&, const
-//  PebbleInstance&, const SpeciesDef&, uint8_t) is deleted, and the three cases
+//  BugInstance&, const SpeciesDef&, uint8_t) is deleted, and the three cases
 //  that drove it are replaced rather than removed:
 //    * its care-percentage case tested a STRAIGHT COPY of inst.care[] and was
 //      cited as proof of the CareId/StatId mapping, which lives in the OTHER
@@ -54,17 +54,17 @@
 #include "game/species_custom.h"   // the registry a drawn body comes out of
 #include "game/validate.h"         // creator_cost_of / validate_custom_species
 
-// The identity is the Pebble's own, not the genome's: two Pebbles of the SAME
+// The identity is the Bug's own, not the genome's: two Bugs of the SAME
 // species with the SAME genome must still move differently, and the same one
 // must move the same way for ever.
-TEST(identity_is_the_pebble_not_the_genome) {
-  PebbleInstance a;
+TEST(identity_is_the_bug_not_the_genome) {
+  BugInstance a;
   memset(&a, 0, sizeof a);
   a.id            = 0x00010203u;
   a.creation_seed = 0x0A0B0C0Du;
   CHECK_EQ(pet_view_identity(a), 0x0A0A0E0Eu);
 
-  PebbleInstance b = a;
+  BugInstance b = a;
   b.id = 0x00010204u;
   CHECK(pet_view_identity(b) != pet_view_identity(a));
 
@@ -92,7 +92,7 @@ TEST(attach_is_a_no_op_without_a_slot) {
   CHECK_EQ(v.species_id, (uint8_t)0);
   CHECK_EQ(v.form, form_before);
 
-  PebbleInstance p;
+  BugInstance p;
   memset(&p, 0, sizeof p);
   p.id            = 7;
   p.creation_seed = 9;
@@ -108,7 +108,7 @@ TEST(attach_is_a_no_op_without_a_slot) {
 
   // A NICKNAME IS STORED AS RAW LATIN-1 AND DRAWN AS UTF-8, and this attach is
   // the one crossing between the two (core/utf8.h). Before P10-C4 it was an
-  // snprintf("%s") that copied the byte straight through, so a Pebble called
+  // snprintf("%s") that copied the byte straight through, so a Bug called
   // "Ninon" with an n-tilde handed drawUTF8() a lone 0xF1 - which on the device
   // opens a four-byte decoder state and swallows the character after it, and on
   // the host walked past the end of the buffer.
@@ -136,7 +136,7 @@ TEST(attach_is_a_no_op_without_a_slot) {
 // =============================================================================
 
 // A bound simulation, so sim_stat_pct() answers something a test chose.
-static PebbleInstance g_live;
+static BugInstance g_live;
 
 static void live_pet(void) {
   genome_seed(0x5EED0C7Au);
@@ -176,8 +176,8 @@ TEST(care_percentages_are_care_id_indexed) {
   CHECK_EQ(v.care_pct[CARE_ENERGY],      (uint8_t)15);
   // No two of them are the same number, which is what makes the five checks
   // above able to fail one at a time.
-  for (uint8_t i = 0; i < PB_CARE_COUNT; ++i)
-    for (uint8_t j = (uint8_t)(i + 1u); j < PB_CARE_COUNT; ++j)
+  for (uint8_t i = 0; i < ER_CARE_COUNT; ++i)
+    for (uint8_t j = (uint8_t)(i + 1u); j < ER_CARE_COUNT; ++j)
       CHECK(v.care_pct[i] != v.care_pct[j]);
 
   CHECK_EQ(v.present, (uint8_t)1);
@@ -238,7 +238,7 @@ static void live_view(PetView& out, uint16_t g0, uint8_t stage,
                       uint8_t species_id) {
   SimView sv;
   sim_view_of(sv, g0, stage, 0u);
-  PebbleInstance inst;
+  BugInstance inst;
   memset(&inst, 0, sizeof inst);
   inst.id            = 0x11223344u;
   inst.creation_seed = 0x55667788u;
@@ -270,18 +270,18 @@ static uint8_t drawn_set(const PetView& v, uint8_t pose) {
 // is static and there is no accessor for it, and writing the four thresholds
 // out here would be a second copy of the ladder that could drift from the one
 // the firmware runs - which is exactly the defect that got pet_view_fill()
-// deleted. So this binds a Pebble at the level and reads the stage the
+// deleted. So this binds a Bug at the level and reads the stage the
 // SIMULATION derived for it. The bound instance is file-static because sim_bind
 // keeps a pointer to it.
-static PebbleInstance g_ladder;
+static BugInstance g_ladder;
 static uint8_t stage_at_level(uint8_t level) {
   memset(&g_ladder, 0, sizeof g_ladder);
-  g_ladder.magic      = (uint16_t)PEBBLE_MAGIC;
-  g_ladder.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  g_ladder.magic      = (uint16_t)BUG_MAGIC;
+  g_ladder.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   g_ladder.species_id = 1;
   g_ladder.id         = 0x0A0B0C0Du;
   g_ladder.level      = level;
-  for (uint8_t c = 0; c < PB_CARE_COUNT; ++c) g_ladder.care[c] = PB_CARE_MILLI_MAX;
+  for (uint8_t c = 0; c < ER_CARE_COUNT; ++c) g_ladder.care[c] = ER_CARE_MILLI_MAX;
   sim_bind(g_ladder);
   const SimView* sv = sim_view();
   return sv ? sv->stage : (uint8_t)STAGE_EGG;
@@ -408,9 +408,9 @@ TEST(every_evolution_reaches_the_body) {
 }
 
 // -----------------------------------------------------------------------------
-//  THE FALLBACK FOR A PEBBLE WITH NO SPECIES ROW.
+//  THE FALLBACK FOR A BUG WITH NO SPECIES ROW.
 //
-//  A Pebble with no row - id 0, the creator's 200..209, or anything past the
+//  A Bug with no row - id 0, the creator's 200..209, or anything past the
 //  roster - falls on the genome's species nibble. This case carried a
 //  byte-for-byte FROZEN COPY of the pre-P4-C4a resolution (legacy_set_id(),
 //  38 sets, four sleep bodies, three sick, three eat, `gene & 7` at BABY and
@@ -422,10 +422,10 @@ TEST(every_evolution_reaches_the_body) {
 //  this chunk introduced, written out as arithmetic rather than as a call to
 //  the function under test:
 //
-//      EGG                     -> PBSPR_EGG_IDLE, at every pose
-//      POSE_SLEEP, any stage   -> PBSPR_SLEEP
-//      POSE_SICK,  any stage   -> PBSPR_SICK
-//      anything else           -> PB_SPRITE_BODY_FIRST + nibble
+//      EGG                     -> BUGSPR_EGG_IDLE, at every pose
+//      POSE_SLEEP, any stage   -> BUGSPR_SLEEP
+//      POSE_SICK,  any stage   -> BUGSPR_SICK
+//      anything else           -> ER_SPRITE_BODY_FIRST + nibble
 //
 //  and, separately, that minor_form changes nothing - the property the old
 //  oracle spent two of its branches on and that P9-C3 removed.
@@ -436,14 +436,14 @@ TEST(every_evolution_reaches_the_body) {
 //  and any re-introduced fold `% P` with P <= 15.
 // -----------------------------------------------------------------------------
 static uint8_t expected_set_id(uint8_t gene, uint8_t stage, uint8_t pose) {
-  if (stage == STAGE_EGG)          return (uint8_t)PBSPR_EGG_IDLE;
-  if (pose  == POSE_SLEEP)         return (uint8_t)PBSPR_SLEEP;
-  if (pose  == POSE_SICK)          return (uint8_t)PBSPR_SICK;
-  return (uint8_t)(PB_SPRITE_BODY_FIRST
-                   + (gene < (uint8_t)PB_SPRITE_BODY_COUNT ? gene : 0u));
+  if (stage == STAGE_EGG)          return (uint8_t)BUGSPR_EGG_IDLE;
+  if (pose  == POSE_SLEEP)         return (uint8_t)BUGSPR_SLEEP;
+  if (pose  == POSE_SICK)          return (uint8_t)BUGSPR_SICK;
+  return (uint8_t)(ER_SPRITE_BODY_FIRST
+                   + (gene < (uint8_t)ER_SPRITE_BODY_COUNT ? gene : 0u));
 }
 
-TEST(a_pebble_with_no_species_row_draws_its_genome_nibbles_body) {
+TEST(a_bug_with_no_species_row_draws_its_genome_nibbles_body) {
   // 0, the whole creator range, one id past the roster and the top of the byte.
   static const uint8_t kNoRow[] = { 0, 200, 201, 202, 203, 204, 205, 206, 207,
                                     208, 209, (uint8_t)(SPECIES_TABLE_COUNT + 1u),
@@ -512,17 +512,17 @@ TEST(the_species_name_is_the_rosters_own) {
 //  LIVE view would draw, through the fill pair ui.cpp calls.
 // -----------------------------------------------------------------------------
 TEST(an_evolution_changes_the_creature_the_live_view_draws) {
-  PebbleInstance p;
+  BugInstance p;
   memset(&p, 0, sizeof p);
-  p.magic      = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic      = (uint16_t)BUG_MAGIC;
+  p.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   p.species_id = 1;
   p.id         = 0x11223344u;
   // LEVEL 15, not 8, AND THE FIX IS THE POINT. This case used to set level 8 -
   // "the level family 1's first rule asks for" - and then draw the pet at
   // STAGE_ADULT, which sim.cpp's ladder says a level-8 pet cannot be: it is
   // CHILD until 10 and TEEN until 15. So the case proved a body change at a
-  // stage its own Pebble could not have been standing at. Paketo -> Fragmar is
+  // stage its own Bug could not have been standing at. Paketo -> Fragmar is
   // still the rule under test (evolution_apply() only asks that the level is at
   // or above the rule's minimum), and 15 is a level at which the drawn body and
   // the life stage agree with each other.
@@ -559,7 +559,7 @@ TEST(an_evolution_changes_the_creature_the_live_view_draws) {
   CHECK_EQ(after.stage, before.stage);
   CHECK_EQ(after.gene_species, before.gene_species);
 
-  // And the numbers under it: hp_max moved with the species, and a full Pebble
+  // And the numbers under it: hp_max moved with the species, and a full Bug
   // came out of the ceremony full rather than hurt.
   CHECK(xp_hp_max(s2->base_hp, p.level) != xp_hp_max(s1->base_hp, p.level));
   CHECK_EQ(p.hp_cur, xp_hp_max(s2->base_hp, p.level));
@@ -674,7 +674,7 @@ TEST(every_rule_changes_the_body_at_the_level_it_actually_fires_at) {
 //  shows - and its banner forbids it from knowing what a species is. So it does
 //  not ask the registry; it reads PetView.custom_bits, which apply_species_
 //  design() fills. That single assignment is the whole device path: null it and
-//  a drawn Pebble wears the atlas body on hardware while every golden in the
+//  a drawn Bug wears the atlas body on hardware while every golden in the
 //  suite, which goes through the STILL path, stays green.
 //
 //  ui/petfx.cpp is compiled by no host binary, so this case cannot reach the
@@ -714,7 +714,7 @@ TEST(the_drawn_view_carries_the_creators_own_pixels) {
   const uint8_t id = csp_species_id(0);
   CHECK(id != 0u);
 
-  PebbleInstance p;
+  BugInstance p;
   memset(&p, 0, sizeof p);
   p.species_id = id;
   p.level      = 5u;
@@ -733,8 +733,8 @@ TEST(the_drawn_view_carries_the_creators_own_pixels) {
                   (size_t)CS_SPRITE_BYTES), 0);
 
   // AND A ROSTER SPECIES CARRIES NOTHING, so the field is a statement about
-  // creator Pebbles and not a pointer everybody now has.
-  PebbleInstance r;
+  // creator Bugs and not a pointer everybody now has.
+  BugInstance r;
   memset(&r, 0, sizeof r);
   r.species_id = 3u;
   r.level      = 5u;

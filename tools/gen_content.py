@@ -3,9 +3,9 @@
 """
 gen_content.py - THE CONTENT PIPELINE (plan P4-C1, section 1.5.2).
 
-    tools/content/*.json   ->   Pebblebol/src/data/*_table.h
-                                Pebblebol/src/data/creator_schema.h
-                                Pebblebol/src/data/content_version.h
+    tools/content/*.json   ->   Errata/src/data/*_table.h
+                                Errata/src/data/creator_schema.h
+                                Errata/src/data/content_version.h
                                 the generated block inside src/core/strings_es.h
 
 Usage
@@ -44,7 +44,7 @@ tables. The three numbers, as they were measured and as they now stand:
 
     P9-C3 DREW THE SIXTY BODIES (tools/sprites/*.txt, 24x24x2, one per roster
     id), deleted the 36 legacy body and pose sets, and pointed the lookup at
-    PB_SPRITE_BODY_FIRST + (id - 1). The same guard now reads 4 + (N-1) < 64,
+    ER_SPRITE_BODY_FIRST + (id - 1). The same guard now reads 4 + (N-1) < 64,
     i.e. N <= 60, and it is no longer a forward bound on an atlas that does not
     exist: it is the arithmetic the firmware performs to pick a body.
     game/species.cpp asserts it at compile time; tests/test_content.cpp
@@ -75,8 +75,8 @@ ROSTER_FAMILIES = 20          # 20 x 3 = 60 species, the whole pack; see the ban
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 CONTENT = os.path.join(HERE, "content")
-DATA = os.path.join(ROOT, "Pebblebol", "src", "data")
-STRINGS_H = os.path.join(ROOT, "Pebblebol", "src", "core", "strings_es.h")
+DATA = os.path.join(ROOT, "Errata", "src", "data")
+STRINGS_H = os.path.join(ROOT, "Errata", "src", "core", "strings_es.h")
 
 # The two generated regions of core/strings_es.h. The markers are DISTINCT
 # strings, not one string used twice: an enum marker that is also a substring of
@@ -213,7 +213,7 @@ class Content(object):
         care_ord, _ = enum_from(bal, "CARE_TARGET_ENUM", "CARE_TGT_")
         stat_ord, _ = enum_from(bal, "BATTLE_STAT_ENUM", "BSTAT_")
         klasses = bal["ITEM_KLASS_ENUM"]
-        bits = bal["PEBBLE_STATUS_BITS"]
+        bits = bal["BUG_STATUS_BITS"]
         for it in self.items:
             what = "items.json item %d (%s)" % (it["id"], it["name"])
             kl = it["klass"]
@@ -270,7 +270,7 @@ class Content(object):
             for b in clr:
                 if b not in bits:
                     die("%s: clears %r, which is not one of balance.json's "
-                        "PEBBLE_STATUS_BITS %r" % (what, b, sorted(bits)))
+                        "BUG_STATUS_BITS %r" % (what, b, sorted(bits)))
         for k in klasses:
             if not [it for it in self.items if it["klass"] == k]:
                 die("items.json: item class %s has no row - a class no item can "
@@ -490,7 +490,7 @@ def json_ascii_string(text):
     out.append('"')
     return "".join(out)
 
-# THE CREATOR API VERSION IS DEFINED IN Pebblebol/src/core/version.h AND COPIED
+# THE CREATOR API VERSION IS DEFINED IN Errata/src/core/version.h AND COPIED
 # HERE, not carried in tools/content/balance.json, and the reason is mechanical
 # rather than aesthetic: CONTENT_VERSION is a HASH OF THE JSON, so a key added
 # there moves the content version, which is stamped into BoxHeader and into
@@ -695,7 +695,7 @@ def selftest(families):
 # =============================================================================
 def banner(title, body):
     out = ["// " + "=" * 77,
-           "//  PEBBLEBOL - " + title,
+           "//  ERRATA - " + title,
            "//",
            "//  GENERATED FILE. Do not edit: tools/gen_content.py rewrites it from",
            "//  tools/content/*.json. `tools/gen_content.py --check` fails the gate if",
@@ -778,18 +778,18 @@ def emit_species(c):
         "",
         "Everything is `inline constexpr`, so the rows live in flash and no",
         "translation unit gets a private copy. Nothing derived is stored on a",
-        "Pebble (spec section 10): hp_max, atk, def and spd are recomputed from",
+        "Bug (spec section 10): hp_max, atk, def and spd are recomputed from",
         "these base numbers, the level and the genome on every read - see",
-        "game/pebble.h.",
+        "game/bug.h.",
         "",
         "Pure header: stdint, the save schema's shared constants and",
         "core/strings_es.h for the StrIds in name_idx / flavor_idx. No Arduino.",
     ])]
-    o.append("#ifndef PB_SPECIES_TABLE_H\n#define PB_SPECIES_TABLE_H\n")
+    o.append("#ifndef ER_SPECIES_TABLE_H\n#define ER_SPECIES_TABLE_H\n")
     o.append('#include <stdint.h>\n#include <stddef.h>\n')
     o.append('#include "../core/strings_es.h"           // StrId: name_idx / flavor_idx below')
-    o.append('#include "../persistence/save_schema.h"   // PB_MOVE_COUNT, PB_LEVEL_MAX\n')
-    o.append("""// PebbleType (spec section 12). The chart is three-cornered and TYPE_COUNT is
+    o.append('#include "../persistence/save_schema.h"   // ER_MOVE_COUNT, ER_LEVEL_MAX\n')
+    o.append("""// BugType (spec section 12). The chart is three-cornered and TYPE_COUNT is
 // its dimension: SIGNAL beats CORRUPT beats SYSTEM beats SIGNAL.
 //
 // TYPE_NEUTRAL SHARES THE VALUE 3 WITH TYPE_COUNT, AND THAT IS DELIBERATE. It
@@ -798,7 +798,7 @@ def emit_species(c):
 // column in TYPE_CHART and its modifier is 0 against everything. A SPECIES may
 // never be NEUTRAL, which is why the species guard below still reads
 // `type >= TYPE_COUNT` while the attack guard reads `type > TYPE_NEUTRAL`.
-enum PebbleType : uint8_t {
+enum BugType : uint8_t {
   TYPE_SIGNAL = 0,
   TYPE_CORRUPT = 1,
   TYPE_SYSTEM = 2,
@@ -823,9 +823,9 @@ struct SpeciesDef {                 // 24 B, plan 1.5.2
   uint8_t  id;                      // 1..199, contiguous == index + 1
   uint8_t  family;                  // 1..20+
   uint8_t  stage;                   // 0 base, 1 mid, 2 final (spec section 19)
-  uint8_t  type;                    // PebbleType (spec section 12)
+  uint8_t  type;                    // BugType (spec section 12)
   uint8_t  base_hp, base_atk, base_def, base_spd;   // 1..10 (spec section 11)
-  uint8_t  moves[PB_MOVE_COUNT];    // learnset
+  uint8_t  moves[ER_MOVE_COUNT];    // learnset
   uint8_t  evo_rule;                // index into EVOLUTION_RULES[], 0xFF = none
   uint8_t  rarity;                  // SPECIES_RARITY_*
   uint8_t  spawn_weight;            // relative weight inside its rarity band
@@ -991,12 +991,12 @@ static_assert(SPECIES_TABLE[SPECIES_ID_STARTER - 1].id == SPECIES_ID_STARTER,
 // here on the load path. The indirection exists so that species_get() STAYS THE
 // ONE ANSWER TO "what is this creature": game/validate.cpp, game/battle.cpp,
 // game/box.cpp and every screen call it unchanged and none of them has an `if`
-// about custom Pebbles in it.
+// about custom Bugs in it.
 //
 // UNBOUND IT ANSWERS nullptr, which is what every host binary that links no
 // species_custom.o gets, and what the firmware gets before the save is loaded -
 // the same "unknown species" answer the range check below has always given, so
-// a Pebble whose cs record is gone is quarantined by name rather than resolved
+// a Bug whose cs record is gone is quarantined by name rather than resolved
 // to something else.
 // -----------------------------------------------------------------------------
 typedef const SpeciesDef* (*SpeciesCustomResolver)(uint8_t id);
@@ -1014,7 +1014,7 @@ inline const SpeciesDef* species_get(uint8_t id) {
   return &SPECIES_TABLE[id - 1u];
 }
 
-#endif // PB_SPECIES_TABLE_H""")
+#endif // ER_SPECIES_TABLE_H""")
     return "\n".join(o) + "\n"
 
 
@@ -1034,9 +1034,9 @@ def emit_attacks(c):
         "This header also carries the SPECIES <-> ATTACK cross guard, because it",
         "is the first file that has seen both tables.",
     ])]
-    o.append("#ifndef PB_ATTACKS_TABLE_H\n#define PB_ATTACKS_TABLE_H\n")
+    o.append("#ifndef ER_ATTACKS_TABLE_H\n#define ER_ATTACKS_TABLE_H\n")
     o.append('#include <stdint.h>\n#include <stddef.h>\n')
-    o.append('#include "species_table.h"        // PebbleType, TYPE_CHART dimension, the roster')
+    o.append('#include "species_table.h"        // BugType, TYPE_CHART dimension, the roster')
     o.append('#include "../core/strings_es.h"   // StrId: name_idx\n')
 
     o.append("// Attack categories (spec section 13). All six ship.")
@@ -1055,7 +1055,7 @@ def emit_attacks(c):
 
     o.append("""struct AttackDef {          // 16 B, plan 1.5.2
   uint8_t  id;                // 1..ATTACK_COUNT, contiguous == index + 1
-  uint8_t  type;              // PebbleType, TYPE_NEUTRAL allowed
+  uint8_t  type;              // BugType, TYPE_NEUTRAL allowed
   uint8_t  category;          // AttackCategory
   uint8_t  power;             // 0..100, 0 for a pure status move
   uint8_t  accuracy;          // 0..100
@@ -1133,9 +1133,9 @@ constexpr bool attack_rows_are_well_formed(void) {
 constexpr bool species_learnsets_resolve(void) {
   for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
     const SpeciesDef& sp = SPECIES_TABLE[i];
-    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) {
+    for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m) {
       if (sp.moves[m] < 1u || sp.moves[m] > ATTACK_COUNT) return false;
-      for (uint8_t n = (uint8_t)(m + 1u); n < (uint8_t)PB_MOVE_COUNT; ++n)
+      for (uint8_t n = (uint8_t)(m + 1u); n < (uint8_t)ER_MOVE_COUNT; ++n)
         if (sp.moves[m] == sp.moves[n]) return false;          // 4 DISTINCT moves
     }
   }
@@ -1149,7 +1149,7 @@ constexpr bool species_learnsets_are_legal(void) {
   for (uint8_t i = 0; i < SPECIES_TABLE_COUNT; ++i) {
     const SpeciesDef& sp = SPECIES_TABLE[i];
     bool has_damage = false;
-    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) {
+    for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m) {
       // species_learnsets_resolve() above already rejects an id outside
       // 1..ATTACK_COUNT by name, and its static_assert is declared first. The
       // bound is repeated here anyway because THIS function INDEXES the table:
@@ -1177,7 +1177,7 @@ static_assert(species_learnsets_are_legal(),
               "a learnset holds an off-type attack, has no damaging move, or holds "
               "an id outside 1..ATTACK_COUNT (which the guard above names first)");
 
-// Resolves an attack id. 0 is the empty move slot of PebbleInstance.moves and
+// Resolves an attack id. 0 is the empty move slot of BugInstance.moves and
 // returns nullptr, exactly like an id past the table.
 inline const AttackDef* attack_get(uint8_t id) {
   if (id < 1u || id > ATTACK_COUNT) return nullptr;
@@ -1191,7 +1191,7 @@ inline int8_t type_mod_of(uint8_t atk_type, uint8_t def_type) {
   return TYPE_CHART[atk_type][def_type];
 }
 
-#endif // PB_ATTACKS_TABLE_H""")
+#endif // ER_ATTACKS_TABLE_H""")
     return "\n".join(o) + "\n"
 
 
@@ -1200,7 +1200,7 @@ def emit_items(c):
     kl_ord, kl_names = enum_from(bal, "ITEM_KLASS_ENUM", "ITEM_KLASS_")
     ct_ord, ct_names = enum_from(bal, "CARE_TARGET_ENUM", "CARE_TGT_")
     st_ord, _st_names = enum_from(bal, "BATTLE_STAT_ENUM", "BSTAT_")
-    pbs = bal["PEBBLE_STATUS_BITS"]
+    pbs = bal["BUG_STATUS_BITS"]
 
     # THE FIFTH CLASS, DERIVED (P5-C4). Spec section 24 names FOUR item classes
     # and the pack had a fifth kind of item with nowhere to put it: an evolution
@@ -1270,7 +1270,7 @@ def emit_items(c):
         "a NUMBER below - ITEM_CAPTURE_SCALE - so prose can no longer disagree",
         "with prose. The player-facing +15 % / +45 % won.",
     ] + hole)]
-    o.append("#ifndef PB_ITEMS_TABLE_H\n#define PB_ITEMS_TABLE_H\n")
+    o.append("#ifndef ER_ITEMS_TABLE_H\n#define ER_ITEMS_TABLE_H\n")
     o.append('#include <stdint.h>\n#include <stddef.h>\n')
     o.append('#include "species_table.h"        // SPECIES_RARITY_*')
     o.append('#include "../core/strings_es.h"   // StrId: name_idx\n')
@@ -1378,7 +1378,7 @@ constexpr bool item_targets_are_well_formed(void) {
     if (it.klass == (uint8_t)ITEM_KLASS_CARE) {
       if (it.target >= (uint8_t)CARE_TGT_COUNT)       return false;
       if (it.value == 0u || it.value > 100u)          return false;  // percent of full
-      // Every set bit must be one a Pebble can carry. Written as an OR so the
+      // Every set bit must be one a Bug can carry. Written as an OR so the
       // whole expression stays unsigned: ~ on a uint8_t promotes to a signed
       // int and this file is compiled with -Wall -Wextra -Werror.
       if ((it.param | (uint8_t)ITEM_PBS_MASK) != (uint8_t)ITEM_PBS_MASK) return false;
@@ -1411,7 +1411,7 @@ inline constexpr const ItemDef* item_get(uint8_t id) {
   return &ITEMS_TABLE[id - 1u];
 }
 
-#endif // PB_ITEMS_TABLE_H""")
+#endif // ER_ITEMS_TABLE_H""")
     return "\n".join(o) + "\n"
 
 
@@ -1436,7 +1436,7 @@ def emit_evolution(c):
         "it does not know. BATTLES_WON_GE, which the pack lists and no rule uses,",
         "stays dropped.",
     ])]
-    o.append("#ifndef PB_EVOLUTION_TABLE_H\n#define PB_EVOLUTION_TABLE_H\n")
+    o.append("#ifndef ER_EVOLUTION_TABLE_H\n#define ER_EVOLUTION_TABLE_H\n")
     o.append('#include <stdint.h>\n#include <stddef.h>\n')
     o.append('#include "species_table.h"\n')
     o.append("""enum EvoCond : uint8_t {
@@ -1502,7 +1502,7 @@ constexpr bool evo_rules_are_well_formed(void) {
     if (r.target == r.species)                   return false;
     if (s->family != t->family)                  return false;
     if ((int)t->stage != (int)s->stage + 1)      return false;
-    if (r.level == 0u || r.level > (uint8_t)PB_LEVEL_MAX) return false;
+    if (r.level == 0u || r.level > (uint8_t)ER_LEVEL_MAX) return false;
     if (r.cond >= (uint8_t)EVOC_COUNT)           return false;
     // A condition that compares against a value needs one; EVOC_NONE and
     // EVOC_CORRUPTED are the two that answer without reading cond_value.
@@ -1572,7 +1572,7 @@ static_assert(evo_final_stages_have_no_rule(),
 static_assert(evo_every_non_final_stage_has_a_rule(),
               "a stage-0 or stage-1 species has no way out of its stage");
 
-#endif  // PB_EVOLUTION_TABLE_H""")
+#endif  // ER_EVOLUTION_TABLE_H""")
     return "\n".join(o) + "\n"
 
 
@@ -1637,7 +1637,7 @@ def emit_networks(c):
         "includes this header and keeps the count cross-check against the",
         "species roster, which is the one thing this header cannot see.",
     ])]
-    o.append("#ifndef PB_NETWORK_TABLE_H\n#define PB_NETWORK_TABLE_H\n")
+    o.append("#ifndef ER_NETWORK_TABLE_H\n#define ER_NETWORK_TABLE_H\n")
     o.append("#include <stdint.h>\n#include <stddef.h>\n")
 
     o.append("// Network categories (spec section 20). ORDINALS index EncounterRow.category;")
@@ -1756,7 +1756,7 @@ static_assert(net_every_token_class_is_populated(),
 static_assert(net_rssi_bands_are_ordered(),
               "NET_RSSI_NEAR / NET_RSSI_MID are swapped or out of int8_t range");
 
-#endif // PB_NETWORK_TABLE_H""")
+#endif // ER_NETWORK_TABLE_H""")
     return "\n".join(o) + "\n"
 
 
@@ -1823,7 +1823,7 @@ def emit_encounter(c):
           "60-species roster needs no clamping."] +
          ["  %-8s rarity %d..%d -> %d" % (cn, lo, hi, nlo) for cn, lo, hi, nlo in clamped]
          if clamped else []))]
-    o.append("#ifndef PB_ENCOUNTER_TABLE_H\n#define PB_ENCOUNTER_TABLE_H\n")
+    o.append("#ifndef ER_ENCOUNTER_TABLE_H\n#define ER_ENCOUNTER_TABLE_H\n")
     o.append('#include <stdint.h>\n#include <stddef.h>\n')
     o.append('#include "network_table.h"\n#include "species_table.h"\n'
              '#include "items_table.h"\n')
@@ -2110,7 +2110,7 @@ static_assert(encounter_special_rows_have_an_event(),
 static_assert(special_kinds_are_all_populated(),
               "a SpecialKind has no event - a branch encounters.cpp could never reach");
 
-#endif // PB_ENCOUNTER_TABLE_H""")
+#endif // ER_ENCOUNTER_TABLE_H""")
     return "\n".join(o) + "\n"
 
 
@@ -2119,7 +2119,7 @@ def emit_creator_schema(c):
     o = [banner("data/creator_schema.h", [
         "THE CREATOR VALIDATION SCHEMA (spec sections 35 and 36, plan line 526).",
         "",
-        "One copy of every budget a custom Pebble is measured against, so the",
+        "One copy of every budget a custom Bug is measured against, so the",
         "on-device validator (P8) and the phone page read the same numbers.",
         "",
         "WHAT IS HERE IS WHAT THE CONTENT PACK CARRIES, AND IT IS NOT ALL OF",
@@ -2163,7 +2163,7 @@ def emit_creator_schema(c):
         "  stat rule is the one section 36 left genuinely open - see the",
         "  band argument below.",
     ])]
-    o.append("#ifndef PB_CREATOR_SCHEMA_H\n#define PB_CREATOR_SCHEMA_H\n")
+    o.append("#ifndef ER_CREATOR_SCHEMA_H\n#define ER_CREATOR_SCHEMA_H\n")
     o.append('#include <stdint.h>\n')
     o.append('#include "species_table.h"\n#include "attacks_table.h"\n'
              '#include "../core/version.h"\n')
@@ -2171,12 +2171,12 @@ def emit_creator_schema(c):
     o.append("#define CREATOR_SPECIES_ID_MIN   (SPECIES_ID_BUILTIN_MAX + 1u)")
     o.append("#define CREATOR_SPECIES_SLOTS    10u")
     o.append("#define CREATOR_SPECIES_ID_MAX   (SPECIES_ID_BUILTIN_MAX + CREATOR_SPECIES_SLOTS)\n")
-    o.append("// Spec section 36: a custom Pebble is capped at the STAGE-1 budget so it can")
+    o.append("// Spec section 36: a custom Bug is capped at the STAGE-1 budget so it can")
     o.append("// never out-stat a final evolution (spec section 68 r17).")
     o.append("#define CREATOR_TOTAL_STAT_POINTS  %d" % bal["CREATOR_TOTAL_STAT_POINTS"])
     o.append("// THE STAT RULE IS A BAND, NOT AN EQUALITY, and P8-C3 settled it because")
     o.append("// three shipped sentences disagreed. Spec section 36 writes the rule with")
-    o.append("// `<=`; the note below requires a custom Pebble to be never WEAKER than a")
+    o.append("// `<=`; the note below requires a custom Bug to be never WEAKER than a")
     o.append("// stage-0 one, which is a floor and not equality; and Appendix C's own")
     o.append("// worked example (the POWER bar at 72 %) is UNREACHABLE at a full stat")
     o.append("// budget - the cheapest legal four-move set costs 84..86 depending on type,")
@@ -2189,10 +2189,10 @@ def emit_creator_schema(c):
     o.append("// every recorded battle hash for a constant the roster does not contain.")
     o.append("#define CREATOR_STAT_POINTS_MIN    %d" % bal["TOTAL_STAT_POINTS_BY_STAGE"][0])
     o.append("#define CREATOR_ATTACK_BUDGET      %d" % bal["CREATOR_ATTACK_BUDGET"])
-    o.append("#define CREATOR_MOVE_COUNT         PB_MOVE_COUNT")
+    o.append("#define CREATOR_MOVE_COUNT         ER_MOVE_COUNT")
     o.append("#define CREATOR_BASE_STAT_MIN      %d" % bal["BASE_STAT_MIN"])
     o.append("#define CREATOR_BASE_STAT_MAX      %d\n" % bal["BASE_STAT_MAX"])
-    o.append("// The built-in budgets a custom Pebble is measured against, by stage.")
+    o.append("// The built-in budgets a custom Bug is measured against, by stage.")
     o.append("inline constexpr uint8_t CREATOR_STAT_POINTS_BY_STAGE[3] = { %s };"
              % ", ".join(str(v) for v in bal["TOTAL_STAT_POINTS_BY_STAGE"]))
     o.append("inline constexpr uint16_t CREATOR_ATTACK_BUDGET_BY_STAGE[3] = { %s };"
@@ -2201,7 +2201,7 @@ def emit_creator_schema(c):
              % ", ".join(str(v) for v in bal["POWER_CAP_BY_STAGE"]))
     o.append("inline constexpr uint8_t CREATOR_RARITY_BUDGET_BONUS[SPECIES_RARITY_COUNT] = { %s };\n"
              % ", ".join(str(v) for v in bal["RARITY_BUDGET_BONUS"]))
-    o.append("""// A custom Pebble may never be stronger than a stage-1 built-in, and never
+    o.append("""// A custom Bug may never be stronger than a stage-1 built-in, and never
 // weaker than a stage-0 one. Both halves matter: the first is spec 68 r17, the
 // second stops the creator being a way to make deliberately useless trade bait.
 static_assert(CREATOR_TOTAL_STAT_POINTS == CREATOR_STAT_POINTS_BY_STAGE[1],
@@ -2211,11 +2211,11 @@ static_assert(CREATOR_ATTACK_BUDGET == CREATOR_ATTACK_BUDGET_BY_STAGE[1],
 static_assert(CREATOR_TOTAL_STAT_POINTS >= CREATOR_STAT_POINTS_BY_STAGE[0],
               "the creator stat budget is below a stage-0 built-in");
 static_assert(CREATOR_TOTAL_STAT_POINTS < CREATOR_STAT_POINTS_BY_STAGE[2],
-              "a custom Pebble could out-stat a final evolution (spec 68 r17)");
+              "a custom Bug could out-stat a final evolution (spec 68 r17)");
 static_assert(CREATOR_BASE_STAT_MIN >= 1 && CREATOR_BASE_STAT_MAX <= 10,
               "spec section 11 fixes base stats at 1..10");
 static_assert(CREATOR_SPECIES_ID_MAX <= 255u,
-              "custom species ids must fit PebbleInstance.species_id");
+              "custom species ids must fit BugInstance.species_id");
 static_assert(CREATOR_MOVE_COUNT == 4u, "spec section 13: exactly four attacks");
 static_assert(CREATOR_STAT_POINTS_MIN == CREATOR_STAT_POINTS_BY_STAGE[0],
               "the creator stat FLOOR is the stage-0 budget: below it the creator "
@@ -2236,7 +2236,7 @@ constexpr bool builtin_rows_respect_the_creator_budgets(void) {
     // guards is ever deleted, the failure should still say what broke.
     if (sp.stage >= 3u)                       return false;
     if (sp.rarity >= (uint8_t)SPECIES_RARITY_COUNT) return false;
-    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) {
+    for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m) {
       if (sp.moves[m] < 1u || sp.moves[m] > ATTACK_COUNT) return false;
     }
     const uint16_t total = (uint16_t)sp.base_hp + sp.base_atk + sp.base_def + sp.base_spd;
@@ -2248,7 +2248,7 @@ constexpr bool builtin_rows_respect_the_creator_budgets(void) {
 
     uint16_t cost = 0;
     uint8_t  cap  = 0;
-    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) {
+    for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m) {
       const AttackDef& a = ATTACKS_TABLE[sp.moves[m] - 1u];
       cost += a.budget_cost;
       if (a.power > cap) cap = a.power;
@@ -2264,7 +2264,7 @@ static_assert(builtin_rows_respect_the_creator_budgets(),
               "power cap its own stage is held to (or its stage, rarity or a move "
               "id is out of range, which the tables themselves name first)");
 
-#endif // PB_CREATOR_SCHEMA_H""")
+#endif // ER_CREATOR_SCHEMA_H""")
     return "\n".join(o) + "\n"
 
 
@@ -2380,7 +2380,7 @@ def emit_creator_schema_json(c):
         "",
         "IT IS .rodata AND COSTS ZERO GLOBALS.",
     ])]
-    o.append("#ifndef PB_CREATOR_SCHEMA_JSON_H\n#define PB_CREATOR_SCHEMA_JSON_H\n")
+    o.append("#ifndef ER_CREATOR_SCHEMA_JSON_H\n#define ER_CREATOR_SCHEMA_JSON_H\n")
     o.append("#include <stddef.h>\n")
     o.append('#include "creator_schema.h"    // and, through it, core/version.h')
     o.append('#include "../core/config.h"     // NAME_MAX_LEN, WEB_HTML_MAX\n')
@@ -2432,7 +2432,7 @@ static_assert(CREATOR_SCHEMA_JSON_MOVES == CREATOR_MOVE_COUNT &&
 static_assert(CREATOR_SCHEMA_JSON_LEN < WEB_HTML_MAX,
               "the schema document has outgrown the page budget, which means it "
               "has stopped being a schema");""")
-    o.append("\n#endif // PB_CREATOR_SCHEMA_JSON_H")
+    o.append("\n#endif // ER_CREATOR_SCHEMA_JSON_H")
     return "\n".join(o) + "\n"
 
 
@@ -2440,7 +2440,7 @@ def emit_content_version(c, h):
     o = [banner("data/content_version.h", [
         "CONTENT_VERSION - a hash of the content, not a number somebody bumps.",
         "",
-        "PebbleInstance and the save blobs record the CONTENT_VERSION they were",
+        "BugInstance and the save blobs record the CONTENT_VERSION they were",
         "written against (persistence/save_schema.h), so a save can say which",
         "roster it means. Plan line 668 requires that this number change when",
         "the JSON changes, and a hand-maintained counter does not.",
@@ -2456,12 +2456,12 @@ def emit_content_version(c, h):
         "masked to 16 bits, with 0 remapped to 1 so the value is never the one a",
         "zeroed blob would carry.",
     ])]
-    o.append("#ifndef PB_CONTENT_VERSION_H\n#define PB_CONTENT_VERSION_H\n")
+    o.append("#ifndef ER_CONTENT_VERSION_H\n#define ER_CONTENT_VERSION_H\n")
     o.append("// %d species (%d families), %d attacks, %d items, %d evolution rules, %d encounter rows"
              % (len(c.species), c.families, len(c.attacks), len(c.items),
                 len(c.evo), len(c.encounters)))
     o.append("#define CONTENT_VERSION  0x%04Xu\n" % h)
-    o.append("#endif // PB_CONTENT_VERSION_H")
+    o.append("#endif // ER_CONTENT_VERSION_H")
     return "\n".join(o) + "\n"
 
 

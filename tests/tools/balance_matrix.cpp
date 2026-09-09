@@ -62,8 +62,8 @@
 //  THE FIXTURE
 // -----------------------------------------------------------------------------
 //  Both fighters carry a genome whose every numeric gene is 8, i.e.
-//  pebble_genome_var() == 1 on all three stats. That is the MODAL genesis roll
-//  and the point game/pebble.h says the pack's whole win-rate matrix was
+//  bug_genome_var() == 1 on all three stats. That is the MODAL genesis roll
+//  and the point game/bug.h says the pack's whole win-rate matrix was
 //  measured at ("gvar = (1,1,1,1)"). A zeroed genome would also be even-handed
 //  but would be a different point on the curve.
 //
@@ -83,7 +83,7 @@
 #include "game/battle.h"
 #include "game/battle_ai.h"
 #include "game/genome.h"
-#include "game/pebble.h"
+#include "game/bug.h"
 #include "game/xp.h"
 
 // The defaults. --level and --seeds move them; the grid never shrinks.
@@ -142,20 +142,20 @@ static void build_modal_genome(void)
   genome_seal(g_modal);
 }
 
-static void mk_member(PebbleInstance& p, uint8_t species, uint8_t level, uint32_t id)
+static void mk_member(BugInstance& p, uint8_t species, uint8_t level, uint32_t id)
 {
   memset(&p, 0, sizeof p);
-  p.magic      = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic      = (uint16_t)BUG_MAGIC;
+  p.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   p.species_id = species;
   p.id         = id;
   p.level      = level;
   p.genome     = g_modal;
   const SpeciesDef* sp = species_get(species);
   if (sp == nullptr) return;
-  for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) p.moves[m] = sp->moves[m];
-  PebbleStats st;
-  pebble_derive_stats(*sp, level, p.genome, st);
+  for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m) p.moves[m] = sp->moves[m];
+  BugStats st;
+  bug_derive_stats(*sp, level, p.genome, st);
   p.hp_cur = st.hp_max;
 }
 
@@ -237,7 +237,7 @@ int main(int argc, char** argv)
       return 2;
     }
   }
-  if (level < 1u || level > (uint8_t)PB_LEVEL_MAX) { fprintf(stderr, "level out of range\n"); return 2; }
+  if (level < 1u || level > (uint8_t)ER_LEVEL_MAX) { fprintf(stderr, "level out of range\n"); return 2; }
   if (seeds == 0u) { fprintf(stderr, "seeds must be >= 1\n"); return 2; }
 
   build_modal_genome();

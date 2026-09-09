@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - fakes/kv_mem.h
+//  Errata host tests - fakes/kv_mem.h
 //  The host implementation of persistence/kv_store.h: two RAM partitions and
 //  the fault injection the persistence tests need (plan section 1.4).
 //
@@ -9,8 +9,8 @@
 //  because a recovery path nobody can provoke is a recovery path nobody has
 //  tested.
 // =============================================================================
-#ifndef PB_KV_MEM_H
-#define PB_KV_MEM_H
+#ifndef ER_KV_MEM_H
+#define ER_KV_MEM_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -75,4 +75,4 @@ uint16_t kv_mem_key_count(KvPart part);
 // asserts it stays within NVS's 15-character limit.
 size_t   kv_mem_longest_key(void);
 
-#endif  // PB_KV_MEM_H
+#endif  // ER_KV_MEM_H

@@ -1,10 +1,10 @@
 // =============================================================================
-//  PEBBLEBOL host test - test_capture.cpp
+//  ERRATA host test - test_capture.cpp
 //  CAPTURE (game/capture.h, spec section 23, P5-C4).
 //
-//  THE HEADLINE CASE IS `a_captured_pebble_validates_across_the_whole_roster`,
+//  THE HEADLINE CASE IS `a_captured_bug_validates_across_the_whole_roster`,
 //  and it is the carried-forward debt: game/validate.h records that
-//  box_new_pebble() deliberately does NOT call validate_pebble(), which left
+//  box_new_bug() deliberately does NOT call validate_bug(), which left
 //  capture as a third minting path with no VR_OK requirement anywhere.
 //
 //  THE MUTATION THAT PROVES IT CAN FAIL is dropping the genome seal - handing
@@ -260,9 +260,9 @@ TEST(two_failures_and_the_creature_flees_and_a_third_press_buys_nothing) {
 }
 
 TEST(an_unsealed_genome_is_refused_by_name_before_anything_is_built) {
-  // THE MUTATION, AS A CASE. game/validate.h's note says box_new_pebble() has
+  // THE MUTATION, AS A CASE. game/validate.h's note says box_new_bug() has
   // never required a sealed genome; measured over the whole roster, the seal is
-  // the ONLY input that can make a constructed Pebble fail validate_pebble().
+  // the ONLY input that can make a constructed Bug fail validate_bug().
   // So capture refuses it up front, by name, and files nothing.
   fresh_box();
   const EncounterResult e = wild(1, 10);
@@ -317,9 +317,9 @@ TEST(an_encounter_that_is_not_a_wild_one_is_refused_by_name) {
 }
 
 // =============================================================================
-//  3. THE DEBT: A CAPTURED PEBBLE PASSES THE VALIDATOR
+//  3. THE DEBT: A CAPTURED BUG PASSES THE VALIDATOR
 // =============================================================================
-TEST(a_captured_pebble_validates_across_the_whole_roster_and_the_clamp_band) {
+TEST(a_captured_bug_validates_across_the_whole_roster_and_the_clamp_band) {
   // Every species, at every level a wild encounter can produce - which is the
   // whole 1..30 band, because the encounter clamp is symmetric around an active
   // level that itself spans 1..30. This is the only case that would catch a
@@ -334,12 +334,12 @@ TEST(a_captured_pebble_validates_across_the_whole_roster_and_the_clamp_band) {
       CHECK(cap_attempt(st, wild(s, lv), lv, 0, 0u, g, 0xBEEF0000u + s, 1700000000u, rep));
       CHECK_EQ(rep.outcome, (uint8_t)CAP_CAUGHT);
       CHECK_EQ(rep.reject, (uint8_t)VR_OK);
-      const PebbleInstance* p = box_peek(rep.slot);
+      const BugInstance* p = box_peek(rep.slot);
       CHECK(p != nullptr);
       if (!p) continue;
       // THE ASSERTION THE WHOLE FILE EXISTS FOR, made against the FILED slot
       // and not against a copy the test built.
-      CHECK_EQ((uint8_t)validate_pebble(*p), (uint8_t)VR_OK);
+      CHECK_EQ((uint8_t)validate_bug(*p), (uint8_t)VR_OK);
       CHECK_EQ(p->species_id, s);
       CHECK_EQ(p->level, lv);
       CHECK_EQ(p->origin, (uint8_t)ORIGIN_WILD);
@@ -371,10 +371,10 @@ TEST(the_same_roster_sweep_with_an_unsealed_genome_is_refused_every_time) {
   CHECK_EQ(refused, (int)SPECIES_TABLE_COUNT * (int)XP_LEVEL_MAX);
 }
 
-TEST(the_first_capture_into_an_empty_box_becomes_the_active_pebble) {
+TEST(the_first_capture_into_an_empty_box_becomes_the_active_bug) {
   // MEASURED, AND IT IS WHY THE UNDO PATH IS NOT WRITTEN (game/capture.h):
-  // box_new_pebble() files as it constructs and mask_sync() makes the only
-  // Pebble in a non-empty Box the active one, so a first capture IS the active
+  // box_new_bug() files as it constructs and mask_sync() makes the only
+  // Bug in a non-empty Box the active one, so a first capture IS the active
   // slot - and box_release() refuses the active slot outright.
   fresh_box();
   CHECK_EQ(box_active(), (uint8_t)BOX_ACTIVE_NONE);
@@ -387,7 +387,7 @@ TEST(the_first_capture_into_an_empty_box_becomes_the_active_pebble) {
 
   // A SECOND capture does not become active and does not disturb the first,
   // which is spec section 23's "the encounter must never delete the active
-  // Pebble" stated as a fact about the code.
+  // Bug" stated as a fact about the code.
   const uint32_t first_id = box_peek(rep.slot)->id;
   CaptureState st2; cap_reset(st2);
   CaptureReport rep2;
@@ -398,7 +398,7 @@ TEST(the_first_capture_into_an_empty_box_becomes_the_active_pebble) {
   CHECK_EQ(box_count(), 2);
 }
 
-TEST(every_captured_pebble_has_a_unique_id_and_the_box_stays_valid) {
+TEST(every_captured_bug_has_a_unique_id_and_the_box_stays_valid) {
   fresh_box();
   uint32_t ids[BOX_SLOTS];
   uint8_t n = 0;
@@ -416,8 +416,8 @@ TEST(every_captured_pebble_has_a_unique_id_and_the_box_stays_valid) {
     for (uint8_t j = (uint8_t)(i + 1u); j < n; ++j) CHECK(ids[i] != ids[j]);
   }
   for (uint8_t s = 0; s < (uint8_t)BOX_SLOTS; ++s) {
-    const PebbleInstance* p = box_peek(s);
+    const BugInstance* p = box_peek(s);
     CHECK(p != nullptr);
-    if (p) CHECK_EQ((uint8_t)validate_pebble(*p), (uint8_t)VR_OK);
+    if (p) CHECK_EQ((uint8_t)validate_bug(*p), (uint8_t)VR_OK);
   }
 }

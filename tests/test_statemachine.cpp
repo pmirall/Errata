@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_statemachine.cpp
+//  Errata host tests - test_statemachine.cpp
 //  THE NAVIGATION STATE MACHINE AND THE SCREEN TABLE (plan P2-C11d, test plan
 //  section 4).
 //
@@ -161,7 +161,7 @@ Inventory&     ui_inventory(void) { return g_sm_inv; }
 void ui_explore_commit(uint8_t)   { }
 Genome ui_fresh_genome(void)      { Genome g; memset(&g, 0, sizeof g); return g; }
 void ui_award_xp(uint16_t, uint8_t) { }
-PebbleInstance* ui_active_pebble(void) { return nullptr; }
+BugInstance* ui_active_bug(void) { return nullptr; }
 void ui_battle_result(uint8_t, uint8_t won) { g_battle_won = won; ++g_battle_reports; }
 void ui_hold_fps(uint8_t f, uint16_t) { g_hold_fps = f; }
 void ui_flash(uint16_t)           { }

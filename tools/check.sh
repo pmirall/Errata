@@ -10,7 +10,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SKETCH="${SKETCH:-$ROOT/Pebblebol}"
+SKETCH="${SKETCH:-$ROOT/Errata}"
 DO_TESTS=1
 DO_BUILD=1
 for a in "$@"; do
@@ -135,7 +135,7 @@ else
 fi
 
 # --- THE SPRITE GATE (P9-C1) -----------------------------------------------
-# src/data/sprites_pebbles.h is GENERATED from tools/sprites/*.txt exactly the
+# src/data/sprites_bugs.h is GENERATED from tools/sprites/*.txt exactly the
 # way src/data/*_table.h is generated from tools/content/*.json, and for the
 # same reason: 8.6 KB of hex is not a diff anybody reads, so the ASCII art is
 # what gets reviewed and the header has to be provably what that art produces.
@@ -164,7 +164,7 @@ if [ -f "$ROOT/tools/gen_sprites.py" ]; then
   if [ -d "$ROOT/tools/sprites" ]; then
     if command -v python3 >/dev/null 2>&1; then
       python3 "$ROOT/tools/gen_sprites.py" --check --quiet >/dev/null \
-        || fail "src/data/sprites_pebbles.h and tools/sprites/ have drifted apart "\
+        || fail "src/data/sprites_bugs.h and tools/sprites/ have drifted apart "\
 "(run: python3 tools/gen_sprites.py)"
       # AND THE PER-FILE ART CONTRACT, ADDED AT P9-C6. `--check` proves only that
       # the header matches the .txt files; it passes a frame 1 that is a byte
@@ -183,7 +183,7 @@ if [ -f "$ROOT/tools/gen_sprites.py" ]; then
       echo "check.sh: python3 not found, SKIPPING the sprite gate" >&2
     fi
   else
-    fail "tools/sprites is missing - src/data/sprites_pebbles.h is generated "\
+    fail "tools/sprites is missing - src/data/sprites_bugs.h is generated "\
 "from it and nothing else can check them against each other"
   fi
 fi
@@ -226,7 +226,7 @@ fi
 # --- P8-C4: THE PAGE CALLS NO ROUTE THE DEVICE DOES NOT SERVE --------------
 # The half `gen_index_html.py --check` structurally cannot see. It proves the
 # header matches the source; it has no idea what the source ASKS FOR. A page
-# that fetches /api/pebbles gets a 404 the user reads as "the creator is
+# that fetches /api/bugs gets a 404 the user reads as "the creator is
 # broken", and the byte-diff is green the whole time.
 #
 # NARROW ON PURPOSE: every '/api/...' literal in the page source must appear as
@@ -329,11 +329,11 @@ if [ -f "$ROOT/tools/creator_smoke.sh" ]; then
     # because a bare slash is not greppable the same way.
     reg="$( { grep -rhoE '\.on\("/api/[a-z]+"' "$SKETCH/src/networking" || true; } \
             | grep -oE '/api/[a-z]+' | sort -u )"
-    # What the script probes. /api/pebbles is DELIBERATELY absent from this set:
+    # What the script probes. /api/bugs is DELIBERATELY absent from this set:
     # the script asks for it on purpose to prove the catch-all answers, so it is
     # excluded here rather than being allowed to look like a real route.
     prb="$( { grep -ohE '(GET|POST) /api/[a-z]+' "$ROOT/tools/creator_smoke.sh" || true; } \
-            | grep -oE '/api/[a-z]+' | grep -v '^/api/pebbles$' | sort -u )"
+            | grep -oE '/api/[a-z]+' | grep -v '^/api/bugs$' | sort -u )"
     if [ "$reg" != "$prb" ]; then
       echo "GATE FAIL: tools/creator_smoke.sh and src/networking disagree about the spec 38 route set" >&2
       echo "  registered but never smoke-tested: $(comm -23 <(echo "$reg") <(echo "$prb") | tr '\n' ' ')" >&2
@@ -356,16 +356,16 @@ if [ -f "$ROOT/tools/creator_smoke.sh" ]; then
     #     MEASURED: pin_after_body() replaced by `return true;` built clean
     #     (release 1,326,274 / 59,396, 0 warnings), ran ALL PASS 49/49, and
     #     passed every networking gate above - a firmware where omitting X-Pin
-    #     creates a Pebble and sets the clock, with the whole gate green.
+    #     creates a Bug and sets the clock, with the whole gate green.
     #
     #     These three lines are narrow on purpose: they check that the probes
     #     EXIST, not what they assert. The script itself is the only thing that
     #     can check the latter, and only on a board.
-    grep -q 'req POST /api/pebble - --data-binary' "$ROOT/tools/creator_smoke.sh" \
-      || fail "tools/creator_smoke.sh never sends an unauthenticated POST with a VALID body to the route that WRITES - the PIN gate on POST /api/pebble would have no instrument anywhere (§67 'PIN required' points at this script)"
+    grep -q 'req POST /api/bug - --data-binary' "$ROOT/tools/creator_smoke.sh" \
+      || fail "tools/creator_smoke.sh never sends an unauthenticated POST with a VALID body to the route that WRITES - the PIN gate on POST /api/bug would have no instrument anywhere (§67 'PIN required' points at this script)"
     grep -q 'doc_bodypin' "$ROOT/tools/creator_smoke.sh" \
       || fail "tools/creator_smoke.sh no longer probes the BODY-carried PIN - creator_server.cpp's pin_after_body() is then executed by nothing in this tree"
-    grep -q 'req POST /api/pebbles - --data-binary' "$ROOT/tools/creator_smoke.sh" \
+    grep -q 'req POST /api/bugs - --data-binary' "$ROOT/tools/creator_smoke.sh" \
       || fail "tools/creator_smoke.sh no longer POSTs an oversize body to an UNMATCHED path - a catch-all narrowed to HTTP_GET would look identical on every other probe"
   fi
 
@@ -377,7 +377,7 @@ fi
 # NUMBERS THAT LIVE IN TWO PLACES AND NOTHING COMPARED. Every one of
 # them is in tools/content/balance.json - which feeds CONTENT_VERSION, and which
 # tools/content/sim_engine.py tuned the 36-species roster against - AND in
-# Pebblebol/src/data/balance.h, which the firmware actually compiles. balance.h
+# Errata/src/data/balance.h, which the firmware actually compiles. balance.h
 # is NOT generated, so gen_content.py --check does not see it.
 #
 # WHY IT MATTERS, and it is a P4-C5 problem rather than a tidiness one: ELEVEN
@@ -561,7 +561,7 @@ done
 
 # ONE esp_random() IN THE WHOLE FIRMWARE (plan §1.1 / §1.4, core/rng.h:12-14).
 # app.cpp seeds every stream once with it; everything else draws from rng.h, so
-# a Pebble is reproducible from its seed. ADDED BY THE P3-C5 FOLLOW-UP: the plan
+# a Bug is reproducible from its seed. ADDED BY THE P3-C5 FOLLOW-UP: the plan
 # listed this gate from P2-C2 but it had never been in this file, and as the
 # plan worded it - `grep -c "genome_rand|esp_random" src/game src/minigames` == 0
 # - it could never have passed, because genome_rand is DEFINED in
@@ -912,7 +912,7 @@ fi
 # game/activity.h's whole anti-farm argument rests on the score being NOTED in
 # several places and PAID in exactly one: the notes are capped, day-bucketed and
 # deduplicated inside the pure module, and app_pay_activity() is where the
-# result reaches app_award_xp(XP_SRC_CARRY) and the active Pebble's happiness.
+# result reaches app_award_xp(XP_SRC_CARRY) and the active Bug's happiness.
 # A screen that drained the gain itself would pay a reward outside the XP funnel
 # - the funnel is what puts the ledger decrease on flash - and would do it with
 # no place left to look for it. That is the same failure mode the navigation
@@ -1139,30 +1139,30 @@ if [ -f "$SKETCH/src/ui/screen_battle.cpp" ]; then
 fi
 
 # --- P7-C6: THE TRADE'S SLOT WRITES MAY NOT GO THROUGH THE THROTTLED PATH ---
-# save_pebble(slot, p, force) DEFERS a second write of one key inside
+# save_bug(slot, p, force) DEFERS a second write of one key inside
 # SAVE_MIN_GAP_MS and RETURNS TRUE. That is correct for the care loop, which
 # calls it every action and lets save_service() flush; it is a lie for
 # game/trade.cpp's store seam, whose whole contract is "the bytes landed".
 # The trade writes ONE key TWICE microseconds apart (B1 releases the outgoing
 # slot, box_add() refills the slot B1 just released), so with the shipping
 # millisecond clock bound the second write was deferred, reported as landed, and
-# the journal was cleared over an empty flash slot - a Pebble destroyed with no
-# record left to repair it. See persistence/save_manager.h save_pebble_now().
+# the journal was cleared over an empty flash slot - a Bug destroyed with no
+# record left to repair it. See persistence/save_manager.h save_bug_now().
 #
-# THE RULE: app/ and ui/ call save_pebble_now(). The throttled entry point has
+# THE RULE: app/ and ui/ call save_bug_now(). The throttled entry point has
 # exactly one family of callers, persistence/game_state.cpp, which already reads
-# save_pebble_landed() on every call.
+# save_bug_landed() on every call.
 #
 # ITS LIMIT, STATED: this is a call-site gate. It cannot see a THIRD shim in
-# persistence/ that returns save_pebble()'s answer without asking
-# save_pebble_landed(); tests/test_persistence.cpp's two named write-path cases
+# persistence/ that returns save_bug()'s answer without asking
+# save_bug_landed(); tests/test_persistence.cpp's two named write-path cases
 # and tests/test_trade.cpp's kill sweep (which now binds a real ms clock) are
 # the other half.
 if [ -f "$SKETCH/src/persistence/save_manager.h" ]; then
-  n=$( { grep -rnE '\bsave_pebble[[:space:]]*\(' "$SKETCH/src/app" "$SKETCH/src/ui" \
+  n=$( { grep -rnE '\bsave_bug[[:space:]]*\(' "$SKETCH/src/app" "$SKETCH/src/ui" \
           --include='*.cpp' --include='*.h' || true; } \
         | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true; } | wc -l )
-  [ "$n" -eq 0 ] || fail "save_pebble() is called from app/ or ui/ ($n) - the throttled write DEFERS and still returns true; the trade's store seam must call save_pebble_now() (persistence/save_manager.h)"
+  [ "$n" -eq 0 ] || fail "save_bug() is called from app/ or ui/ ($n) - the throttled write DEFERS and still returns true; the trade's store seam must call save_bug_now() (persistence/save_manager.h)"
 fi
 
 # --- P7-C6: A HOST BINARY THAT DRIVES save_manager BINDS A REAL ms CLOCK ---
@@ -1170,7 +1170,7 @@ fi
 # branch (`if (s_now_ms && s_have_written[slot])`), so a fixture that passes it
 # is testing a save_manager the release artefact does not execute. That is how
 # 27,819 checks, a 15-point kill sweep and an 800-trial lossy table all missed a
-# Pebble being destroyed on every clean trade. app/app.cpp binds a real one.
+# Bug being destroyed on every clean trade. app/app.cpp binds a real one.
 if [ -d "$ROOT/tests" ]; then
   n=$( { grep -rnE '\bsave_set_clock[[:space:]]*\([[:space:]]*(nullptr|NULL|0)[[:space:]]*,' \
           "$ROOT/tests" --include='*.cpp' --include='*.h' || true; } | wc -l )
@@ -1633,7 +1633,7 @@ if [ -f "$SKETCH/src/core/utf8.h" ]; then
   # ---------------------------------------------------------------------------
   # 1. THE PLAN'S OWN rd_u8g2() GATE, WHICH HAD NEVER RUN.
   #
-  # PEBBLEBOL_IMPLEMENTATION_PLAN.md:72 has carried
+  # ERRATA_IMPLEMENTATION_PLAN.md:72 has carried
   #     grep -c "rd_u8g2()" src/app src/minigames src/game == 0   (P10-C4)
   # since phase 2, and three separate things were wrong with it:
   #
@@ -1688,13 +1688,13 @@ EOF
 
   # ---------------------------------------------------------------------------
   # 2. THE CODEPOINT RULE IS ONE RULE. core/utf8.cpp exists because
-  #    ui/render.cpp, tests/fakes/gfx_fb.cpp and game/pebble.cpp each carried a
+  #    ui/render.cpp, tests/fakes/gfx_fb.cpp and game/bug.cpp each carried a
   #    private copy and the three disagreed - one of them by four bytes past a
   #    terminator, which AddressSanitizer reported as a heap over-read. A file
   #    that re-opens its own copy puts the divergence straight back, and
   #    nothing else in the tree could see it.
   for f in "$SKETCH/src/ui/render.cpp" "$ROOT/tests/fakes/gfx_fb.cpp" \
-           "$SKETCH/src/game/pebble.cpp"; do
+           "$SKETCH/src/game/bug.cpp"; do
     n=$( strip_comments10 < "$f" | { grep -cE '\bu8_(len|fit|count|cat|cat_n|cat_latin1|from_latin1|well_formed)[[:space:]]*\(' || true; } )
     [ "${n:-0}" -ge 1 ] || fail "$(basename "$f") no longer calls core/utf8.h ($n) - it carried its own copy of the codepoint rule until P10-C4 and the three copies disagreed (core/utf8.h)"
     n=$( strip_comments10 < "$f" | { grep -cE '(0xE0|0xF0|0xF8)[^\n]*(0xC0|0xE0|0xF0)' || true; } )
@@ -1746,7 +1746,7 @@ EOF
   n=$( printf '%s\n' "$body" | { grep -cE '\bcfg_persist[[:space:]]*\([[:space:]]*false' || true; } )
   [ "${n:-0}" -ge 1 ] || fail "ui_setup_persist() does not persist the Config silently ($n) - either the step is not written at all, or it is written with a toast that lands on top of the next question (ui/screen_setup.h)"
   # ui_set_starter() IS THE ONE CALL IN THE TREE THAT DESTROYS THE ACTIVE
-  # PEBBLE - game/box.cpp's box_release() refuses to, by rule B4 - so it carries
+  # BUG - game/box.cpp's box_release() refuses to, by rule B4 - so it carries
   # two independent locks and this gate is on the one a host binary cannot see.
   # game/box.cpp's lock (an untouched ORIGIN_STARTER) is driven by
   # tests/test_box.cpp; this one is "only while the flow is standing on
@@ -1755,9 +1755,9 @@ EOF
             "$SKETCH/src/ui/ui.cpp" | strip_comments10 )
   [ -n "$body" ] || fail "ui/ui.cpp has no ui_set_starter() body - the starter choice would have nothing to write (ui/ui.h)"
   n=$( printf '%s\n' "$body" | { grep -cE '\bob_step[[:space:]]*\(' || true; } )
-  [ "${n:-0}" -ge 1 ] || fail "ui_set_starter() does not check ob_step() ($n) - the one call in the tree that replaces the ACTIVE Pebble would be reachable outside the first-boot flow, on every device, for ever (ui/ui.h)"
+  [ "${n:-0}" -ge 1 ] || fail "ui_set_starter() does not check ob_step() ($n) - the one call in the tree that replaces the ACTIVE Bug would be reachable outside the first-boot flow, on every device, for ever (ui/ui.h)"
   n=$( printf '%s\n' "$body" | { grep -cE '\bbox_reroll_starter[[:space:]]*\(' || true; } )
-  [ "${n:-0}" -ge 1 ] || fail "ui_set_starter() does not go through box_reroll_starter() ($n) - the second lock, the one about the PEBBLE rather than about the moment, would be bypassed (game/box.h)"
+  [ "${n:-0}" -ge 1 ] || fail "ui_set_starter() does not go through box_reroll_starter() ($n) - the second lock, the one about the BUG rather than about the moment, would be bypassed (game/box.h)"
 
   n=$( strip_comments10 < "$SKETCH/src/app/app.cpp" | { grep -cE '\bob_boot_step[[:space:]]*\([^)]' || true; } )
   [ "${n:-0}" -ge 1 ] || fail "app/app.cpp does not call ob_boot_step() ($n) - the first-boot flow would never be entered, and no host binary compiles this file to say so (app/onboarding.h)"
@@ -1857,14 +1857,14 @@ if grep -qE '^#define[[:space:]]+SAVE_SCHEMA_INPLACE_MIN[[:space:]]+[0-9]+' \
   # cs0..cs9 are not part of the state migrate_run() transforms, so their
   # upgrade lives in custom_species_install_all(). Without it
   # validate_custom_species() refuses the record by name (VR_CS_BAD_HEADER), the
-  # slot stays empty, and every Pebble pointing at it comes back
+  # slot stays empty, and every Bug pointing at it comes back
   # VR_UNKNOWN_SPECIES - the creature the owner designed, gone on the first boot
   # after a firmware update.
   body=$( awk '/^static void custom_species_install_all\(void\) \{/{f=1} f{print} f&&/^\}/{exit}' \
             "$sm" | strip_comments11 )
   [ -n "$body" ] || fail "persistence/save_manager.cpp has no custom_species_install_all() body - species_get() resolves a creator id through that registry and through nothing else"
   n=$( printf '%s\n' "$body" | { grep -cE '\bcustom_species_seal[[:space:]]*\(' || true; } )
-  [ "${n:-0}" -ge 1 ] || fail "custom_species_install_all() does not re-seal a downlevel record ($n) - a schema bump would delete every creature made in the creator portal and quarantine the Pebbles that point at them (persistence/save_manager.cpp)"
+  [ "${n:-0}" -ge 1 ] || fail "custom_species_install_all() does not re-seal a downlevel record ($n) - a schema bump would delete every creature made in the creator portal and quarantine the Bugs that point at them (persistence/save_manager.cpp)"
 
   # ---------------------------------------------------------------------------
   # 4. THE TWO VERSION NUMBERS AGREE WITH EACH OTHER AND WITH THE TEST.
@@ -2102,14 +2102,14 @@ n=$( strip_comments12 < "$SKETCH/src/app/app.cpp" | { grep -cE '\bperf_note_pass
 #    nothing could see it. Now the claim is true.
 # Comments are stripped PER FILE, because three of the matches this gate first
 # produced were prose - "brand new creature", "a new one would resolve as", "a
-# new Pebble is a well one" - two of them trailing comments and one a string
+# new Bug is a well one" - two of them trailing comments and one a string
 # literal inside a static_assert. A line-position filter cannot see those.
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   n=$( strip_code12 < "$f" | { grep -cE '\b(malloc|calloc|realloc|strdup|aligned_alloc|free)[[:space:]]*\(' || true; } )
   [ "${n:-0}" -eq 0 ] || fail "${f#$SKETCH/src/} calls a C allocator ($n) - the pure layers allocate nothing at all, and tests/test_soak.cpp's zero is a count of operator new only, so a balanced malloc/free pair would be invisible to it AND to AddressSanitizer (which sees a leak, not churn)"
   n=$( strip_code12 < "$f" | { grep -cE '(^|[^_[:alnum:]:])new[[:space:]]+[A-Za-z_(]' || true; } )
-  [ "${n:-0}" -eq 0 ] || fail "${f#$SKETCH/src/} uses operator new ($n) - no heap in game logic (the red line in PEBBLEBOL_IMPLEMENTATION_PLAN.md section 2)"
+  [ "${n:-0}" -eq 0 ] || fail "${f#$SKETCH/src/} uses operator new ($n) - no heap in game logic (the red line in ERRATA_IMPLEMENTATION_PLAN.md section 2)"
 done <<EOF
 $(find "$SKETCH/src/game" "$SKETCH/src/minigames" -name '*.cpp' -o -name '*.h' 2>/dev/null)
 $SKETCH/src/ui/petfx_core.cpp
@@ -2181,14 +2181,14 @@ n=$( printf '%s\n' "$body" | { grep -cE '\bitem_reaction[[:space:]]*\(' || true;
 #     gates THE SET.
 #
 #     THE CLASS. tests/fakes/*.cpp defines 143 functions and FIFTY of them are
-#     also defined under Pebblebol/src, so every host binary that links a fake
+#     also defined under Errata/src, so every host binary that links a fake
 #     drives the FAKE's body while believing it drives the firmware's. Exactly
 #     this shipped two defects: P10-C6 (link_fake.cpp carried a pre-P10-C4 copy
 #     of ui_pet_name_latin1(), so a device whose owner typed an accented name
 #     emitted NO BEACON AT ALL) and, in the sibling fixture shape, P7 (a test
 #     bound save_set_clock(nullptr,...) and a 15-point power-cut sweep ran
 #     against a save manager the release artefact does not execute, while on the
-#     shipping build every clean trade destroyed a Pebble).
+#     shipping build every clean trade destroyed a Bug).
 #
 #     WHY IT HAS TO BE SOURCE-BASED, MEASURED RATHER THAN ASSUMED. Intersecting
 #     the T/t symbols the six fake objects DEFINE against those the other host
@@ -2316,9 +2316,9 @@ n=$( printf '%s\n' "$body" | { grep -cE '\bu8_from_latin1[[:space:]]*\(' || true
 #
 #     MEASURED before the fix, against the shipping objects: on a read-only
 #     session gs_save_box() correctly returned 0 while save_box_header(),
-#     save_trade_journal(), save_pebble_now(), save_cooldowns(), save_inventory()
+#     save_trade_journal(), save_bug_now(), save_cooldowns(), save_inventory()
 #     and save_touch_lastseen() all landed real bytes, and a whole trade
-#     committed TEN flash writes - the outgoing Pebble gone from flash, the
+#     committed TEN flash writes - the outgoing Bug gone from flash, the
 #     incoming one on it. docs/bench.md G3 deliberately produces that board.
 #
 #     Both files are compiled by no host binary, so this is where it is held.
@@ -2372,7 +2372,7 @@ n=$( strip_comments12 < "$SKETCH/src/app/app.cpp" | { grep -cE 'pin\.held[^;]*ui
 
 # --- the wipe paths mint through the Box's one constructor -------------------
 # Both "factory reset" paths used a bare sim_new_pet(), which writes an egg into
-# the bound PebbleInstance and MINTS NO SLOT. gs_factory_reset() has just
+# the bound BugInstance and MINTS NO SLOT. gs_factory_reset() has just
 # memset the Box, so gs_save_active() refused at its `act >= BOX_SLOTS` guard
 # and the bool was discarded: a playable creature with box_count() 0 and every
 # save from that moment a silent no-op. Same class as the capture defect the
@@ -2380,10 +2380,10 @@ n=$( strip_comments12 < "$SKETCH/src/app/app.cpp" | { grep -cE 'pin\.held[^;]*ui
 for pair in "ui/ui.cpp:CFM_WIPE2" "dev/godmode.cpp:run_wipe"; do
   f=${pair%%:*}
   n=$( strip_comments12 < "$SKETCH/src/$f" | { grep -cE '\bsim_new_pet[[:space:]]*\(' || true; } )
-  [ "${n:-0}" -eq 0 ] || fail "$f still calls sim_new_pet() ($n) - it is not a Box constructor and mints no slot, so the pet it makes after a factory reset is in no slot and can never be saved (game/box.h calls box_new_pebble() \"THE TREE'S ONE CONSTRUCTOR\")"
+  [ "${n:-0}" -eq 0 ] || fail "$f still calls sim_new_pet() ($n) - it is not a Box constructor and mints no slot, so the pet it makes after a factory reset is in no slot and can never be saved (game/box.h calls box_new_bug() \"THE TREE'S ONE CONSTRUCTOR\")"
 done
-n=$( strip_comments12 < "$SKETCH/src/dev/godmode.cpp" | { grep -cE '\bbox_new_pebble[[:space:]]*\(' || true; } )
-[ "${n:-0}" -ge 1 ] || fail "dev/godmode.cpp's wipe does not mint through box_new_pebble() ($n)"
+n=$( strip_comments12 < "$SKETCH/src/dev/godmode.cpp" | { grep -cE '\bbox_new_bug[[:space:]]*\(' || true; } )
+[ "${n:-0}" -ge 1 ] || fail "dev/godmode.cpp's wipe does not mint through box_new_bug() ($n)"
 
 # =============================================================================
 # 12. THE GATES THE FINAL REVIEW FOUND MISSING BEHIND A TICKED BOX
@@ -2464,7 +2464,7 @@ fi
 # 13. THE JOINS: FIVE section 67 BOXES ARE PROVEN AT BOTH ENDS AND NOT IN THE
 #     MIDDLE. Added at the FINAL REVIEW.
 #
-#     "Care works", "Active Pebble can be selected", "XP and leveling work",
+#     "Care works", "Active Bug can be selected", "XP and leveling work",
 #     "At least 5 minigames" and "Minigames transition cleanly" are each held by
 #     a screen test at one end (the row picks the right action id) and a model
 #     test at the other (sim_apply_action / box_set_active / xp_add / mgr_begin
@@ -2498,10 +2498,10 @@ body=$( awk '/^void ui_box_activate\(/{f=1} f{print} f&&/^\}/{exit}' \
 [ -n "$body" ] || fail "ui/ui.cpp has no ui_box_activate() body"
 for want in box_set_active sim_switch gs_save_box; do
   n=$( printf '%s\n' "$body" | { grep -cE "\\b${want}[[:space:]]*\\(" || true; } )
-  [ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp's ui_box_activate() does not call $want() ($n) - section 67's \"Active Pebble can be selected\" is proved at both ends (tests/test_box_sim.cpp) and this body is the whole of the middle. Without gs_save_box() the choice does not survive a power cut; without sim_switch() the per-Pebble accumulators are not reset and switching becomes a way to farm"
+  [ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp's ui_box_activate() does not call $want() ($n) - section 67's \"Active Bug can be selected\" is proved at both ends (tests/test_box_sim.cpp) and this body is the whole of the middle. Without gs_save_box() the choice does not survive a power cut; without sim_switch() the per-Bug accumulators are not reset and switching becomes a way to farm"
 done
 n=$( printf '%s\n' "$body" | { grep -cE '\bgs_save_active[[:space:]]*\(' || true; } )
-[ "${n:-0}" -ge 2 ] || fail "ui/ui.cpp's ui_box_activate() no longer flushes BOTH slots ($n) - gs_save_active() writes only the slot box.active_slot names, so the outgoing Pebble has to be written BEFORE the index moves and the incoming one after"
+[ "${n:-0}" -ge 2 ] || fail "ui/ui.cpp's ui_box_activate() no longer flushes BOTH slots ($n) - gs_save_active() writes only the slot box.active_slot names, so the outgoing Bug has to be written BEFORE the index moves and the incoming one after"
 
 body=$( awk '/^bool ui_act_and_show\(/{f=1} f{print} f&&/^\}/{exit}' \
           "$SKETCH/src/ui/ui.cpp" | strip_comments12 )
@@ -2515,7 +2515,7 @@ n=$( printf '%s\n' "$body" | { grep -cE '\bact_and_show[[:space:]]*\(' || true; 
 # tests/test_pet_view.cpp drives apply_species_design(), a golden holds
 # screen_home.cpp) - but species_id only ENTERS the view in pet_view_attach(),
 # the second of the two calls ui.cpp's body_view() makes. Delete or
-# short-circuit that call and every stored Pebble silently reverts to drawing
+# short-circuit that call and every stored Bug silently reverts to drawing
 # its genome body while every host golden stays green. That is the phase-9
 # blink defect's shape and the P10-C3 sleeping-body defect's shape, both of
 # which this tree has already paid for, and no bench item would show it either -
@@ -2524,7 +2524,7 @@ body=$( awk '/^static const PetView& body_view\(/{f=1} /^static PetView body_vie
           "$SKETCH/src/ui/ui.cpp" | strip_comments12 )
 if [ -n "$body" ]; then
   n=$( printf '%s\n' "$body" | { grep -cE '\bpet_view_attach[[:space:]]*\(' || true; } )
-  [ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp's body_view() does not call pet_view_attach() ($n) - species_id enters the drawn view THERE and nowhere else, so every stored Pebble would revert to its genome body with every golden still green (section 67 \"Evolution works\", P4-C4a)"
+  [ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp's body_view() does not call pet_view_attach() ($n) - species_id enters the drawn view THERE and nowhere else, so every stored Bug would revert to its genome body with every golden still green (section 67 \"Evolution works\", P4-C4a)"
 else
   n=$( strip_comments12 < "$SKETCH/src/ui/ui.cpp" | { grep -cE '\bpet_view_attach[[:space:]]*\(' || true; } )
   [ "${n:-0}" -ge 1 ] || fail "ui/ui.cpp never calls pet_view_attach() ($n) - see above"
@@ -2550,7 +2550,7 @@ body=$( awk '/^inline SpriteRef pet_body_ref\(/{f=1} f{print} f&&/^\}/{exit}' \
           "$SKETCH/src/ui/pet_art.h" | strip_comments12 )
 [ -n "$body" ] || fail "ui/pet_art.h has no pet_body_ref() body - it is the ONE lookup every body path goes through, and without it a creator species has no way to reach its own pixels"
 n=$( printf '%s\n' "$body" | { grep -cE '\bcsp_sprite[[:space:]]*\(' || true; } )
-[ "${n:-0}" -ge 1 ] || fail "ui/pet_art.h's pet_body_ref() does not ask csp_sprite() ($n) - every custom Pebble would silently fall through to the atlas row its id folds onto, which is the pre-P10-C4b bug verbatim"
+[ "${n:-0}" -ge 1 ] || fail "ui/pet_art.h's pet_body_ref() does not ask csp_sprite() ($n) - every custom Bug would silently fall through to the atlas row its id folds onto, which is the pre-P10-C4b bug verbatim"
 
 body=$( awk '/^static void draw_static_body\(/{f=1} f{print} f&&/^\}/{exit}' \
           "$SKETCH/src/ui/screen_home.cpp" | strip_comments12 )
@@ -2562,24 +2562,24 @@ body=$( awk '/^static void apply_species_design\(/{f=1} f{print} f&&/^\}/{exit}'
           "$SKETCH/src/ui/pet_view.cpp" | strip_comments12 )
 [ -n "$body" ] || fail "ui/pet_view.cpp has no apply_species_design() body - it is where a custom body enters the drawn view and the only place it can"
 n=$( printf '%s\n' "$body" | { grep -cE 'custom_bits[[:space:]]*=[[:space:]]*csp_sprite[[:space:]]*\(' || true; } )
-[ "${n:-0}" -ge 1 ] || fail "ui/pet_view.cpp's apply_species_design() does not fill custom_bits from csp_sprite() ($n) - PetView.custom_bits would be null for every Pebble and ui/petfx.cpp, which takes the pointer and never asks the registry itself, would draw the atlas body on the device while every host golden stayed green"
+[ "${n:-0}" -ge 1 ] || fail "ui/pet_view.cpp's apply_species_design() does not fill custom_bits from csp_sprite() ($n) - PetView.custom_bits would be null for every Bug and ui/petfx.cpp, which takes the pointer and never asks the registry itself, would draw the atlas body on the device while every host golden stayed green"
 
 # ui/petfx.cpp: THE DEVICE-ONLY HALF. It includes render.h, so no host binary
 # compiles it; a test cannot reach these two lines and a golden cannot show them.
 n=$( strip_comments12 < "$SKETCH/src/ui/petfx.cpp" \
        | { grep -cE 's_qry_custom[[:space:]]*=[[:space:]]*p\.custom_bits' || true; } )
-[ "${n:-0}" -ge 1 ] || fail "ui/petfx.cpp never reads PetView.custom_bits ($n) - the ANIMATED body is the one the device actually draws on HOME, so a drawn Pebble would wear a stranger's face on hardware with the whole suite green"
+[ "${n:-0}" -ge 1 ] || fail "ui/petfx.cpp never reads PetView.custom_bits ($n) - the ANIMATED body is the one the device actually draws on HOME, so a drawn Bug would wear a stranger's face on hardware with the whole suite green"
 body=$( awk '/^static void pf_cache_sync\(/{f=1} f{print} f&&/^\}/{exit}' \
           "$SKETCH/src/ui/petfx.cpp" | strip_comments12 )
 [ -n "$body" ] || fail "ui/petfx.cpp has no pf_cache_sync() body - it is the cache the animated body is drawn out of"
 n=$( printf '%s\n' "$body" | { grep -cE 'custom[[:space:]]*==[[:space:]]*s_cache_cst|s_cache_cst[[:space:]]*==[[:space:]]*custom' || true; } )
-[ "${n:-0}" -ge 1 ] || fail "ui/petfx.cpp's pf_cache_sync() no longer keys its cache on the custom body ($n) - two creator Pebbles resolve to the SAME set id (both fall back to sprite_id 0), so the second one drawn would keep the first one's face"
+[ "${n:-0}" -ge 1 ] || fail "ui/petfx.cpp's pf_cache_sync() no longer keys its cache on the custom body ($n) - two creator Bugs resolve to the SAME set id (both fall back to sprite_id 0), so the second one drawn would keep the first one's face"
 
 body=$( awk '/^static void fill_art\(/{f=1} f{print} f&&/^\}/{exit}' \
           "$SKETCH/src/ui/screen_battle.cpp" | strip_comments12 )
 [ -n "$body" ] || fail "ui/screen_battle.cpp has no fill_art() body - it is what hands the field each combatant's art"
 n=$( printf '%s\n' "$body" | { grep -cE 'out\.body[[:space:]]*=[[:space:]]*csp_sprite[[:space:]]*\(' || true; } )
-[ "${n:-0}" -ge 1 ] || fail "ui/screen_battle.cpp's fill_art() does not resolve the creator body ($n) - a drawn Pebble would change into somebody else the moment it entered a fight"
+[ "${n:-0}" -ge 1 ] || fail "ui/screen_battle.cpp's fill_art() does not resolve the creator body ($n) - a drawn Bug would change into somebody else the moment it entered a fight"
 
 
 echo "GATE OK"

@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_xp.cpp
+//  Errata host tests - test_xp.cpp
 //  game/xp.cpp: the curve, the level-up carry and the anti-farm ledger
 //  (plan P3-C2, section 4 "XP and leveling work").
 //
@@ -20,12 +20,12 @@
 
 #define SANE_EPOCH  1700000000u   // >= NT_EPOCH_SANE_MIN
 
-// A minimal but legal Pebble: xp_add() refuses an empty slot, so species_id and
+// A minimal but legal Bug: xp_add() refuses an empty slot, so species_id and
 // id have to be real. hp_cur starts at the derived maximum for `level`.
-static void make_pebble(PebbleInstance& p, uint8_t level) {
+static void make_bug(BugInstance& p, uint8_t level) {
   memset(&p, 0, sizeof p);
-  p.magic      = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic      = (uint16_t)BUG_MAGIC;
+  p.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   p.species_id = (uint8_t)SPECIES_ID_STARTER;
   p.id         = 0xABCDEF01u;
   p.level      = level;
@@ -49,7 +49,7 @@ TEST(the_curve_rises_strictly_and_fits_a_u16) {
     if (lv + 1 < (uint8_t)XP_LEVEL_MAX) CHECK(xp_for_level((uint8_t)(lv + 1)) > here);
     total += here;
   }
-  // PebbleInstance.xp is u16 and holds XP INSIDE the level, so every entry must
+  // BugInstance.xp is u16 and holds XP INSIDE the level, so every entry must
   // fit on its own; the plan additionally asks that the whole curve does, so a
   // lifetime total never needs a wider type.
   CHECK(total < 65535u);
@@ -87,7 +87,7 @@ TEST(the_shipped_curve_is_the_one_p9c4_chose_and_not_the_packs) {
 
   // (2) THE TWO TOTALS P9-C4, data/balance.h and the plan all quote. 2,660 is
   // the share game/sim.cpp's v1 stage clock gives away for free (it writes
-  // level 20 into PebbleInstance.level after 3.5 days on zero XP), so the
+  // level 20 into BugInstance.level after 3.5 days on zero XP), so the
   // honest cost of reaching 30 is the difference.
   uint32_t to20 = 0, to30 = 0;
   for (uint8_t lv = 1; lv < 20u; ++lv) to20 += xp_for_level(lv);
@@ -122,8 +122,8 @@ TEST(the_shipped_curve_is_the_one_p9c4_chose_and_not_the_packs) {
 // =============================================================================
 TEST(an_award_below_the_threshold_only_moves_xp) {
   xp_ledger_reset(1);
-  PebbleInstance p;
-  make_pebble(p, 1);
+  BugInstance p;
+  make_bug(p, 1);
 
   uint8_t ups = 9;
   CHECK(!xp_add(p, 2, XP_SRC_CARE, &ups));
@@ -134,8 +134,8 @@ TEST(an_award_below_the_threshold_only_moves_xp) {
 
 TEST(one_award_carries_across_many_levels) {
   xp_ledger_reset(1);
-  PebbleInstance p;
-  make_pebble(p, 1);
+  BugInstance p;
+  make_bug(p, 1);
 
   // Exactly what levels 1..4 cost, plus three XP of change. XP_SRC_ITEM is
   // unmetered, which is what lets a single award be this large.
@@ -150,8 +150,8 @@ TEST(one_award_carries_across_many_levels) {
 
 TEST(a_level_up_rescales_hp_and_never_heals_to_full) {
   xp_ledger_reset(1);
-  PebbleInstance p;
-  make_pebble(p, 1);
+  BugInstance p;
+  make_bug(p, 1);
   p.hp_cur = (uint16_t)(hp_max_at(1) / 2u);       // half dead going in
   const uint16_t before = p.hp_cur;
 
@@ -167,10 +167,10 @@ TEST(a_level_up_rescales_hp_and_never_heals_to_full) {
   CHECK_EQ(p.hp_cur, (uint16_t)(((uint32_t)before * hp_max_at(2)) / hp_max_at(1)));
 }
 
-TEST(a_full_pebble_stays_full_over_a_level_up) {
+TEST(a_full_bug_stays_full_over_a_level_up) {
   xp_ledger_reset(1);
-  PebbleInstance p;
-  make_pebble(p, 1);                                // hp_cur == hp_max_at(1)
+  BugInstance p;
+  make_bug(p, 1);                                // hp_cur == hp_max_at(1)
   uint8_t ups = 0;
   CHECK(xp_add(p, xp_for_level(1), XP_SRC_ITEM, &ups));
   CHECK_EQ(p.hp_cur, hp_max_at(2));                 // and not one point over
@@ -178,8 +178,8 @@ TEST(a_full_pebble_stays_full_over_a_level_up) {
 
 TEST(level_thirty_saturates) {
   xp_ledger_reset(1);
-  PebbleInstance p;
-  make_pebble(p, 29);
+  BugInstance p;
+  make_bug(p, 29);
   p.xp = 5;
 
   // Far more than the last level costs, in one unmetered award.
@@ -200,7 +200,7 @@ TEST(level_thirty_saturates) {
 
 TEST(an_empty_slot_earns_nothing_and_spends_no_budget) {
   xp_ledger_reset(1);
-  PebbleInstance p;
+  BugInstance p;
   memset(&p, 0, sizeof p);                          // species_id 0, id 0
 
   const uint16_t before = xp_daily_left(xp_ledger(), XP_SRC_CARE);
@@ -214,8 +214,8 @@ TEST(an_empty_slot_earns_nothing_and_spends_no_budget) {
 // =============================================================================
 TEST(the_hourly_care_cap_is_enforced) {
   xp_ledger_reset(1);
-  PebbleInstance p;
-  make_pebble(p, 1);
+  BugInstance p;
+  make_bug(p, 1);
 
   CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_CARE), XP_CAP_CARE);
 
@@ -260,8 +260,8 @@ TEST(the_budget_refills_on_real_time_and_never_past_the_cap) {
 // ASKS for 144 XP a day (86,400 / 600); what it gets is what the ledger allows.
 static uint32_t carry_a_day(uint8_t start_full) {
   xp_ledger_reset(start_full);
-  PebbleInstance p;
-  make_pebble(p, 1);
+  BugInstance p;
+  make_bug(p, 1);
 
   uint32_t earned = 0;
   for (uint32_t s = 0; s < 86400u; s += 60u) {
@@ -370,8 +370,8 @@ TEST(a_restore_cannot_exceed_the_cap_however_long_the_gap) {
 // screen in about fifteen seconds. That case is now the second half of this one.
 TEST(a_reboot_cannot_refill_a_spent_budget) {
   xp_ledger_reset(1);
-  PebbleInstance p;
-  make_pebble(p, 1);
+  BugInstance p;
+  make_bug(p, 1);
 
   // Spend the hour's care budget, then "power cut" one refill step later.
   for (int i = 0; i < 500; ++i) (void)xp_add(p, xp_care_action_amount(), XP_SRC_CARE, nullptr);
@@ -439,8 +439,8 @@ TEST(a_reboot_cannot_refill_a_spent_budget) {
 // survives a power cut.
 TEST(the_battle_bucket_bounds_an_afternoon_of_fighting) {
   xp_ledger_reset(1);
-  PebbleInstance p;
-  make_pebble(p, 1);
+  BugInstance p;
+  make_bug(p, 1);
 
   // A full bucket is exactly XP_CAP_BATTLE, not 0xFFFF: 0xFFFF is what
   // xp_daily_left() answers for a source with NO meter at all.
@@ -524,7 +524,7 @@ struct FarmFlash {
   CooldownTable  cds;
   uint8_t        xpts[XP_LEDGER_SLOTS];
   uint32_t       xepoch;
-  PebbleInstance pet;
+  BugInstance pet;
 };
 
 // One boot, exactly as app.cpp's setup() reaches these two modules: the per-boot
@@ -563,7 +563,7 @@ static void farm_scan(FarmFlash& f, uint32_t now) {
 
 static void farm_fresh(FarmFlash& f, uint8_t full_bucket) {
   memset(&f, 0, sizeof f);
-  make_pebble(f.pet, 1);
+  make_bug(f.pet, 1);
   act_begin();
   xp_ledger_reset(full_bucket);
   xp_ledger_snapshot(f.xpts);
@@ -585,10 +585,10 @@ TEST(a_typed_day_plus_a_reboot_cannot_refill_a_spent_activity_budget) {
     spent += farm_pay(f, now, happy);
   }
   CHECK_EQ(spent, (uint32_t)XP_CAP_CARRY);              // exactly one bucket, ever
-  CHECK(happy <= (uint32_t)PB_CARE_MILLI_MAX / 10u);    // and a tenth of the bar
+  CHECK(happy <= (uint32_t)ER_CARE_MILLI_MAX / 10u);    // and a tenth of the bar
 
   // The bucket the cheat drained is the one an honest day would have used, so
-  // there is no second bucket hiding behind a second Pebble either.
+  // there is no second bucket hiding behind a second Bug either.
   CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_CARRY), 0);
 
   // A hundred more rounds pay NOTHING, which is the shape that matters: the
@@ -607,7 +607,7 @@ TEST(a_typed_day_without_a_reboot_cannot_pay_a_second_time_either) {
   // THE HALF THAT NEEDS NO POWER CYCLE AT ALL, and the half that was worse: the
   // happiness had no meter of its own, so 100 typed days inside ONE session paid
   // 125,000 care milli-points against a bar that holds 100,000 - an empty
-  // Pebble to a full one, with no care action and no real time. It is now scaled
+  // Bug to a full one, with no care action and no real time. It is now scaled
   // by the metered XP behind it, so it stops when the bucket does.
   FarmFlash f;
   farm_fresh(f, 1);
@@ -618,8 +618,8 @@ TEST(a_typed_day_without_a_reboot_cannot_pay_a_second_time_either) {
     spent += farm_pay(f, now, happy);
   }
   CHECK_EQ(spent, (uint32_t)XP_CAP_CARRY);
-  CHECK(happy < (uint32_t)PB_CARE_MILLI_MAX);          // cannot fill the bar
-  CHECK(happy <= (uint32_t)PB_CARE_MILLI_MAX / 10u);
+  CHECK(happy < (uint32_t)ER_CARE_MILLI_MAX);          // cannot fill the bar
+  CHECK(happy <= (uint32_t)ER_CARE_MILLI_MAX / 10u);
 }
 
 TEST(an_honest_day_still_pays_what_it_always_paid) {
@@ -678,21 +678,21 @@ TEST(an_honest_day_still_pays_what_it_always_paid) {
 //  THE TOP OF THE CURVE STILL SPENDS THE METER (P7-C6)
 //
 //  xp_add() used to return at XP_LEVEL_MAX BEFORE meter_take(), so `granted`
-//  was 0 for a level-30 Pebble - and app/app.cpp scales the activity happiness
-//  by exactly that number, so the maxed Pebble earned neither XP nor happiness
+//  was 0 for a level-30 Bug - and app/app.cpp scales the activity happiness
+//  by exactly that number, so the maxed Bug earned neither XP nor happiness
 //  for a day it really lived. Moving one line fixed the happiness and changed
 //  what the device-wide ledger MEANS at level 30, and both halves are pinned
 //  here because before this pair nothing in the tree measured either.
 // =============================================================================
-TEST(a_pebble_at_the_top_of_the_curve_still_earns_its_activity_happiness) {
-  // Two identical days, one lived by a level-29 Pebble and one by a level-30.
+TEST(a_bug_at_the_top_of_the_curve_still_earns_its_activity_happiness) {
+  // Two identical days, one lived by a level-29 Bug and one by a level-30.
   // The only difference between the arms is the level.
   uint32_t happy[2] = { 0u, 0u };
   uint32_t paid[2]  = { 0u, 0u };
   for (uint8_t arm = 0; arm < 2u; ++arm) {
     FarmFlash f;
     farm_fresh(f, 1);
-    make_pebble(f.pet, (uint8_t)(arm == 0u ? XP_LEVEL_MAX - 1u : XP_LEVEL_MAX));
+    make_bug(f.pet, (uint8_t)(arm == 0u ? XP_LEVEL_MAX - 1u : XP_LEVEL_MAX));
     uint32_t now = FARM_EPOCH;
     for (uint32_t s = 0; s < (uint32_t)ACT_CAP_CARRY_MIN * 60u; s += 60u) {
       xp_ledger_tick(60u);
@@ -715,7 +715,7 @@ TEST(a_pebble_at_the_top_of_the_curve_still_earns_its_activity_happiness) {
   // AND THE LEVEL IS STILL CAPPED. Spending the meter is not gaining a level.
   FarmFlash f;
   farm_fresh(f, 1);
-  make_pebble(f.pet, (uint8_t)XP_LEVEL_MAX);
+  make_bug(f.pet, (uint8_t)XP_LEVEL_MAX);
   uint8_t ups = 0xFFu;
   CHECK(!xp_add(f.pet, 500u, XP_SRC_CARRY, &ups));
   CHECK_EQ((int)ups, 0);
@@ -726,15 +726,15 @@ TEST(a_pebble_at_the_top_of_the_curve_still_earns_its_activity_happiness) {
 TEST(the_meter_is_spent_at_the_top_of_the_curve_for_every_metered_source) {
   // THE OTHER HALF OF THE ONE-LINE MOVE, AND THE COST IT BUYS. The device-wide
   // ledger now counts XP HANDED OUT rather than XP that found a home, so a
-  // maxed Pebble DRAINS a source's daily budget it used to leave untouched -
+  // maxed Bug DRAINS a source's daily budget it used to leave untouched -
   // and a Box-mate that plays later gets less. That is a real change of meaning
   // and this case is its owner: it says, source by source, exactly what a
   // level-30 award costs the day.
   uint8_t metered_seen = 0u;
   for (uint8_t src = 0; src < (uint8_t)XP_SRC_COUNT; ++src) {
-    PebbleInstance maxed, growing;
-    make_pebble(maxed,   (uint8_t)XP_LEVEL_MAX);
-    make_pebble(growing, (uint8_t)1u);
+    BugInstance maxed, growing;
+    make_bug(maxed,   (uint8_t)XP_LEVEL_MAX);
+    make_bug(growing, (uint8_t)1u);
 
     xp_ledger_reset(1);
     const uint16_t cap = xp_daily_left(xp_ledger(), (XpSource)src);
@@ -747,10 +747,10 @@ TEST(the_meter_is_spent_at_the_top_of_the_curve_for_every_metered_source) {
     (void)xp_add(growing, 3u, (XpSource)src, nullptr);
     const uint16_t left_growing = xp_daily_left(xp_ledger(), (XpSource)src);
 
-    // Whatever the source's own cap does, the two Pebbles cost the day the SAME.
+    // Whatever the source's own cap does, the two Bugs cost the day the SAME.
     CHECK_EQ(left_maxed, left_growing);
     // 0xFFFF is xp_daily_left()'s word for "this source has no meter", and a
-    // source with no meter cannot be drained by either Pebble - so the "it
+    // source with no meter cannot be drained by either Bug - so the "it
     // really was spent" half only applies to the metered ones, and saying so
     // is what stops this loop passing vacuously on a tree where none are.
     if (cap != 0u && cap != 0xFFFFu) {
@@ -763,13 +763,13 @@ TEST(the_meter_is_spent_at_the_top_of_the_curve_for_every_metered_source) {
 
   // An UNMETERED or absent award still costs nothing, at either level: the move
   // did not turn xp_add() into something that always spends.
-  PebbleInstance maxed;
-  make_pebble(maxed, (uint8_t)XP_LEVEL_MAX);
+  BugInstance maxed;
+  make_bug(maxed, (uint8_t)XP_LEVEL_MAX);
   xp_ledger_reset(1);
   const uint16_t before = xp_daily_left(xp_ledger(), XP_SRC_CARRY);
   CHECK(!xp_add(maxed, 0u, XP_SRC_CARRY, nullptr));          // a zero award
   CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_CARRY), before);
-  PebbleInstance empty;
+  BugInstance empty;
   memset(&empty, 0, sizeof empty);
   CHECK(!xp_add(empty, 10u, XP_SRC_CARRY, nullptr));         // an empty slot
   CHECK_EQ(xp_daily_left(xp_ledger(), XP_SRC_CARRY), before);

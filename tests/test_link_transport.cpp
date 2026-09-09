@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL host test - test_link_transport.cpp
+//  ERRATA host test - test_link_transport.cpp
 //  P7-C1: THE RING THE RADIO CALLBACK POSTS INTO, AND THE SEAM OVER IT.
 //
 //  TWO HALVES, AND THE SECOND IS THE ONE THAT ANSWERS THE CHUNK'S QUESTION.
@@ -37,7 +37,7 @@
 #include "game/battle_ai.h"
 #include "game/evolution.h"
 #include "game/genome.h"
-#include "game/pebble.h"
+#include "game/bug.h"
 #include "game/validate.h"
 #include "game/xp.h"
 #include "core/config.h"
@@ -381,16 +381,16 @@ static Genome sealed_genome(uint32_t lineage)
   return g;
 }
 
-static void mk_valid(PebbleInstance& p, uint8_t species, uint8_t level, uint32_t id)
+static void mk_valid(BugInstance& p, uint8_t species, uint8_t level, uint32_t id)
 {
   memset(&p, 0, sizeof p);
-  p.magic         = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver    = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic         = (uint16_t)BUG_MAGIC;
+  p.layout_ver    = (uint8_t)BUG_LAYOUT_VER;
   p.species_id    = species;
   p.id            = id;
   p.level         = level;
   p.origin        = (uint8_t)ORIGIN_WILD;
-  p.custom_sprite = (uint8_t)PB_CUSTOM_SPRITE_NONE;
+  p.custom_sprite = (uint8_t)ER_CUSTOM_SPRITE_NONE;
   p.genome        = sealed_genome(0x0BADF00Du + id);
   const SpeciesDef* sp = species_get(species);
   if (sp == nullptr) return;
@@ -411,7 +411,7 @@ struct RingEndpoint {
   RingPort       port;
   Transport      tp;
   BattleAi       ai;
-  PebbleInstance box[BATTLE_TEAM_MAX];
+  BugInstance box[BATTLE_TEAM_MAX];
 };
 
 struct RingTrial {

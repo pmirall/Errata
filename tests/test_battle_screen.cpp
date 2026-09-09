@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_battle_screen.cpp
+//  Errata host tests - test_battle_screen.cpp
 //  THE BATTLE SCREEN'S BEHAVIOUR (plan P4-C4). The PIXELS are
 //  tests/test_screens.cpp's five goldens; this file is everything else, and it
 //  drives the REAL screen over the REAL engine and the REAL AI - ui/
@@ -21,7 +21,7 @@
 //  box_peek / box_occupied / box_count, so THAT file cannot corrupt anything -
 //  which is the structural claim, and it is the one these cases can hold. A
 //  battle that is WON does reach the Box one hop away: ui.cpp's
-//  ui_battle_result() calls app_award_xp(), which writes the ACTIVE Pebble's
+//  ui_battle_result() calls app_award_xp(), which writes the ACTIVE Bug's
 //  level, xp and hp_cur and flushes. That path is host-unreachable from here
 //  (ui_battle_result is stubbed below and app.cpp is on no test link line), so
 //  a_battle_leaves_the_box_byte_identical is a statement about the screen and
@@ -152,7 +152,7 @@ static int notes_in(uint8_t sfx) {
 }
 
 // =============================================================================
-//  A REAL BOX, exactly as tests/test_screens.cpp builds one: box_new_pebble()
+//  A REAL BOX, exactly as tests/test_screens.cpp builds one: box_new_bug()
 //  rather than a hand-drawn mock, so the movesets, the ids and the levels are
 //  the ones the firmware would actually hand the engine.
 // =============================================================================
@@ -168,12 +168,12 @@ static void box_fixture(uint8_t occupied) {
   gen.g0 = 0x1234u; gen.g1 = 0x5678u; gen.g2 = 0x9ABCu;
   gen.generation = 3;
   for (uint8_t i = 0; i < occupied; ++i) {
-    const uint8_t slot = box_new_pebble((uint8_t)(1u + i * 4u), (uint8_t)(6u + i * 2u),
+    const uint8_t slot = box_new_bug((uint8_t)(1u + i * 4u), (uint8_t)(6u + i * 2u),
                                         ORIGIN_STARTER, gen, 0xC0FFEEu + i, 1000u);
     CHECK(slot != BOX_SLOT_NONE);
-    PebbleInstance* p = box_slot(slot);
+    BugInstance* p = box_slot(slot);
     if (!p) continue;
-    for (uint8_t c = 0; c < PB_CARE_COUNT; ++c) p->care[c] = PB_CARE_MILLI_MAX;
+    for (uint8_t c = 0; c < ER_CARE_COUNT; ++c) p->care[c] = ER_CARE_MILLI_MAX;
     if (i == 1u) snprintf(p->nickname, sizeof p->nickname, "ABCDEFGHIJKL");
   }
   if (occupied) CHECK(box_set_active(0));
@@ -449,7 +449,7 @@ TEST(a_wild_win_reports_the_wild_entry_exactly_once) {
   seams_reset();
   box_fixture(3);
 
-  // A level-1 foe against a Box the fixture filled: the player's active Pebble
+  // A level-1 foe against a Box the fixture filled: the player's active Bug
   // wins this, and the case says so rather than assuming it.
   battle_arm_wild(0x7A1D0001u, 1u, 1u);
   battle_enter();
@@ -543,12 +543,12 @@ TEST(a_battle_leaves_the_box_byte_identical) {
   CHECK(r.hit_beats > 0);
 }
 
-// A stored Pebble at 1 HP can still practise, because the team is a COPY and
+// A stored Bug at 1 HP can still practise, because the team is a COPY and
 // the copy is healed. The Box's own hp_cur is what must not move.
 TEST(a_practice_team_is_a_healed_copy_and_the_stored_one_is_not_touched) {
   seams_reset();
   box_fixture(3);
-  PebbleInstance* p = box_slot(0);
+  BugInstance* p = box_slot(0);
   CHECK(p != nullptr);
   if (!p) return;
   p->hp_cur = 1u;
@@ -738,9 +738,9 @@ TEST(an_empty_box_cannot_start_a_practice_battle) {
   battle_leave();
 }
 
-// A battle can be fought with ONE Pebble. Spec section 67 asks for a 3-Pebble
+// A battle can be fought with ONE Bug. Spec section 67 asks for a 3-Bug
 // team, not for three to be compulsory.
-TEST(one_pebble_is_a_legal_team) {
+TEST(one_bug_is_a_legal_team) {
   seams_reset();
   box_fixture(3);
   battle_arm(BT_ENTRY_PRACTICE, 0x8200u);
@@ -749,12 +749,12 @@ TEST(one_pebble_is_a_legal_team) {
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_INTRO);
   battle_input(GST_TAP_R);
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_MENU);
-  // With one Pebble there is nothing to switch to, so the CAMBIAR row is one
+  // With one Bug there is nothing to switch to, so the CAMBIAR row is one
   // of the rows the ring steps over.
   CHECK(battle_screen_blocked_rows() > 0u);
   for (uint8_t k = 0; k < 8u; ++k) {
     CHECK_EQ(battle_screen_cursor_reject(), (uint8_t)BR_OK);
-    CHECK(battle_screen_cursor() < (uint8_t)PB_MOVE_COUNT);
+    CHECK(battle_screen_cursor() < (uint8_t)ER_MOVE_COUNT);
     battle_input(GST_TAP_L);
   }
   battle_leave();
@@ -852,7 +852,7 @@ TEST(every_species_has_its_own_combat_body) {
     // inside SPRITE_BODY_FIRST..LAST for every row and still passes a
     // window check. Asserting the arithmetic per species is what makes that
     // fail, and it fails naming the species rather than the roster.
-    CHECK_EQ((int)set, (int)PB_SPRITE_BODY_FIRST + (int)sp->sprite_id);
+    CHECK_EQ((int)set, (int)ER_SPRITE_BODY_FIRST + (int)sp->sprite_id);
     CHECK(set >= SPRITE_BODY_FIRST);
     CHECK(set <= SPRITE_BODY_LAST);
     // 24x24, which is what the field geometry is laid out against.
@@ -889,7 +889,7 @@ TEST(every_species_has_its_own_combat_body) {
 //
 //  ui/battle_renderer.cpp resolves a body from an ATLAS SET ID, and a creator
 //  species has no atlas row - it folds onto somebody else's. Until this change
-//  the 144 bytes the player drew were read by nothing at all, so a drawn Pebble
+//  the 144 bytes the player drew were read by nothing at all, so a drawn Bug
 //  walked into a fight wearing a stranger's silhouette. The renderer stays a
 //  renderer: it draws the bits the caller brings and never learns that a
 //  creator exists, which is what these two cases are about - one for the seam,
@@ -942,7 +942,7 @@ TEST(a_body_the_caller_brings_is_drawn_instead_of_the_atlas_row) {
   CHECK_EQ(mirrored, BR_BODY_W * BR_BODY_H);
 }
 
-TEST(a_drawn_pebble_fights_in_its_own_body) {
+TEST(a_drawn_bug_fights_in_its_own_body) {
   seams_reset();
   csp_reset();
 
@@ -984,11 +984,11 @@ TEST(a_drawn_pebble_fights_in_its_own_body) {
   gen.lineage_id = 0x0BADF00Du;
   gen.g0 = 0x1234u; gen.g1 = 0x5678u; gen.g2 = 0x9ABCu;
   gen.generation = 3;
-  const uint8_t slot = box_new_pebble(id, 12u, ORIGIN_CREATOR, gen, 0xC0FFEEu, 1000u);
+  const uint8_t slot = box_new_bug(id, 12u, ORIGIN_CREATOR, gen, 0xC0FFEEu, 1000u);
   CHECK(slot != BOX_SLOT_NONE);
-  PebbleInstance* p = box_slot(slot);
+  BugInstance* p = box_slot(slot);
   CHECK(p != nullptr);
-  if (p) for (uint8_t k = 0; k < PB_CARE_COUNT; ++k) p->care[k] = PB_CARE_MILLI_MAX;
+  if (p) for (uint8_t k = 0; k < ER_CARE_COUNT; ++k) p->care[k] = ER_CARE_MILLI_MAX;
   CHECK(box_set_active(slot));
 
   battle_arm_wild(0x00D0D0u, 9u, 12u);       // the FOE is a roster species
@@ -1012,7 +1012,7 @@ TEST(a_drawn_pebble_fights_in_its_own_body) {
   //  observed failure into a constant.
   //
   //  So the field is rendered TWICE with two different drawings on the same
-  //  Pebble, and the pixels that MOVE are the statement: they must lie inside
+  //  Bug, and the pixels that MOVE are the statement: they must lie inside
   //  the player's body box, they must be exactly the pixels the two drawings
   //  disagree on there, and nothing else on the panel may move at all. Under
   //  the old renderer both frames are identical, so the count is zero and this
@@ -1055,7 +1055,7 @@ TEST(a_drawn_pebble_fights_in_its_own_body) {
   CHECK_EQ(moved_outside, 0);           // and it reached nothing else
   CHECK_EQ(disagreed, moved);           // every moved pixel is one they differ on
   CHECK_EQ(wrong, 0);                   // and each holds its own drawing's bit
-  printf("  a drawn Pebble moves %d pixels of the field and none outside its "
+  printf("  a drawn Bug moves %d pixels of the field and none outside its "
          "own %dx%d body box\n", moved, (int)BR_BODY_W, (int)BR_BODY_H);
 
   // AND THE FOE, A ROSTER SPECIES, IS UNTOUCHED - which moved_outside already
@@ -1254,7 +1254,7 @@ TEST(every_menu_the_ring_can_reach_has_a_legal_row) {
   CHECK(battle_every_learnset_has_an_always_ready_move());
   int ready_moves = 0;
   for (uint8_t i = 0; i < (uint8_t)SPECIES_TABLE_COUNT; ++i)
-    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) {
+    for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m) {
       const uint8_t id = SPECIES_TABLE[i].moves[m];
       CHECK(id >= 1u && id <= (uint8_t)ATTACK_COUNT);
       if (id >= 1u && id <= (uint8_t)ATTACK_COUNT &&
@@ -1273,7 +1273,7 @@ TEST(every_menu_the_ring_can_reach_has_a_legal_row) {
     for (int guard = 0; guard < 4000 && battle_screen_mode() != BTM_RESULT; ++guard) {
       const uint8_t m = battle_screen_mode();
       if (m == BTM_MENU || m == BTM_SWITCH) {
-        const int rows = (m == BTM_MENU) ? (int)PB_MOVE_COUNT + 1
+        const int rows = (m == BTM_MENU) ? (int)ER_MOVE_COUNT + 1
                                          : (int)BATTLE_TEAM_MAX + 1;
         const int legal = rows - (int)battle_screen_blocked_rows();
         CHECK(legal >= 1);

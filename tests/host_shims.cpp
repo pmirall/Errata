@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - host_shims.cpp
+//  Errata host tests - host_shims.cpp
 //  Provides the host hooks the sketch declares when ARDUINO is not defined:
 //    input.cpp    extern "C" uint32_t nt_input_test_millis(void);
 //                 extern "C" int      nt_input_test_level(int idx);

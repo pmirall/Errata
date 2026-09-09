@@ -20,7 +20,7 @@
 # P10-C3 LOOKED AT THIS AGAIN AND KEPT IT SHARED, DELIBERATELY. Its sister pose
 # went the other way: SLEEP is DERIVED from each species' own body now
 # (ui/petfx_core.cpp's pf_build_sleep - eyes shut with the blink's own routine,
-# the top two ink rows merged, the bottom four splayed), so a sleeping Pebble
+# the top two ink rows merged, the bottom four splayed), so a sleeping Bug
 # keeps its silhouette. SICK cannot follow it, and the reason is that every
 # cheap derivation is already taken or already known bad:
 #   * the squash IS the sleep pose, and also the landing and the yawn;
@@ -32,7 +32,7 @@
 # So this drawing stays, and the identity loss is accepted rather than denied.
 # THE OWNER STEP, priced: twenty family sick bodies (20 x 144 = 2,880 B), which
 # does NOT fit the 1,024 B the atlas has free - it is a re-plan of
-# PB_DATA_BYTES_MAX here and SPRITE_DATA_BYTES_MAX in data/sprites.h, plus a
+# ER_DATA_BYTES_MAX here and SPRITE_DATA_BYTES_MAX in data/sprites.h, plus a
 # contact sheet somebody looks at.
 name: SICK
 size: 24x24

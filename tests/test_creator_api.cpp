@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL host test - test_creator_api.cpp
+//  ERRATA host test - test_creator_api.cpp
 //  THE RAW-BODY CAP AND THE FIXED-SCHEMA READER (P8-C3, spec section 38,
 //  audit section 12 "Body limits: none").
 //
@@ -31,7 +31,7 @@
 //      drives the PIN's clocks and tests/test_game_state.cpp drives the store.
 //
 //   4. THE END-TO-END CASE COPIES THE NAME ITS OWN WAY (added at the phase-8
-//      exit; the list above said THREE and there were four). h_pebble() does
+//      exit; the list above said THREE and there were four). h_bug() does
 //      `memcpy(p->nickname, rec.name, CS_NAME_CAP)` - a fixed 13 bytes, under
 //      a static_assert that the two fields are the same size - and the case
 //      below does memset+memcpy of strlen(rec.name). The results are identical
@@ -43,7 +43,7 @@
 //
 //  WHAT IS REAL HERE: game/validate.cpp, game/species_custom.cpp and
 //  game/box.cpp are the shipping objects, so the end-to-end case files a REAL
-//  Pebble through the tree's ONE constructor and runs the tree's ONE validator
+//  Bug through the tree's ONE constructor and runs the tree's ONE validator
 //  on it.
 //
 //  =========================================================================
@@ -305,7 +305,7 @@ TEST(a_negative_content_length_is_hostile_and_not_a_short_body) {
 TEST(an_absent_or_chunked_content_length_is_never_an_empty_upload) {
   // The core sets _clientContentLength to 0 for BOTH, so the read loop never
   // runs and the handler is offered a legitimate-looking empty body. That is
-  // exactly how a validator ends up being handed an empty Pebble and told a
+  // exactly how a validator ends up being handed an empty Bug and told a
   // client sent it, so it is CB_NO_LENGTH and creator_server answers 411.
   CreatorBody b;
   feed_body(b, (const uint8_t*)"", 0u, 0);
@@ -475,7 +475,7 @@ TEST(a_body_that_is_not_a_document_is_refused_by_name) {
 //    printf '{"v":1,"name":"Bicho","base":[6,5,5,5],"moves":[1,6,32,34]}'
 //      piped into tests/bin/creator_decode
 //  answered cp=CP_OK vr=VR_OK type=0 with both sprite frames all zero: a
-//  type-defaulted, entirely blank creature accepted by POST /api/pebble.
+//  type-defaulted, entirely blank creature accepted by POST /api/bug.
 //
 //  TWO OF THE SIX HAVE NO DOWNSTREAM GUARD AT ALL, which is what makes the mask
 //  load-bearing rather than belt-and-braces: a zeroed `type` is 0 = TYPE_SIGNAL,
@@ -734,7 +734,7 @@ TEST(the_name_is_utf8_in_and_latin1_out_and_says_so_when_it_cannot_convert) {
   CHECK_EQ((int)parse_str(buf, c, pin), (int)CP_STRING_LEN);
 
   NAMEBODY("\"\"");
-  CHECK_EQ((int)parse_str(buf, c, pin), (int)CP_STRING_LEN);   // a Pebble needs a name
+  CHECK_EQ((int)parse_str(buf, c, pin), (int)CP_STRING_LEN);   // a Bug needs a name
   NAMEBODY("\" Bi\"");
   CHECK_EQ((int)parse_str(buf, c, pin), (int)CP_NAME_CHAR);    // refused, not trimmed
   NAMEBODY("\"Bi \"");
@@ -1019,7 +1019,7 @@ TEST(the_served_schema_document_carries_the_compiled_numbers) {
 
   // EVERY ATTACK ROW, positionally, against the compiled table. This is the
   // half that would catch a generator whose defines are right and whose rows
-  // are stale - the page prices a Pebble from a[4] and the device prices it
+  // are stale - the page prices a Bug from a[4] and the device prices it
   // from AttackDef.budget_cost, and a disagreement there is a user who is shown
   // 68 % and refused at 101 %.
   for (uint8_t i = 0; i < ATTACK_COUNT; ++i) {
@@ -1170,8 +1170,8 @@ static void box_fixture(void)
 {
   memset(&g_box_state, 0, sizeof g_box_state);
   for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
-    g_box_state.pebbles[i].magic      = (uint16_t)PEBBLE_MAGIC;
-    g_box_state.pebbles[i].layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+    g_box_state.bugs[i].magic      = (uint16_t)BUG_MAGIC;
+    g_box_state.bugs[i].layout_ver = (uint8_t)BUG_LAYOUT_VER;
   }
   g_box_state.box.magic           = (uint16_t)BOX_MAGIC;
   g_box_state.box.active_slot     = (uint8_t)BOX_ACTIVE_NONE;
@@ -1180,7 +1180,7 @@ static void box_fixture(void)
   box_bind(g_box_state);
 }
 
-TEST(an_uploaded_document_becomes_a_pebble_the_one_validator_accepts) {
+TEST(an_uploaded_document_becomes_a_bug_the_one_validator_accepts) {
   // THE WHOLE PIPELINE creator_server.cpp runs, with the socket replaced by
   // feed_body() and nothing else replaced at all: the same accumulator, the
   // same reader, the same pricing, the same validator, the same registry and
@@ -1208,10 +1208,10 @@ TEST(an_uploaded_document_becomes_a_pebble_the_one_validator_accepts) {
 
   CHECK(csp_install(rec));
   const uint8_t species_id = csp_species_id(rec.slot);
-  const uint8_t slot = box_new_pebble(species_id, 1u, (uint8_t)ORIGIN_CREATOR,
+  const uint8_t slot = box_new_bug(species_id, 1u, (uint8_t)ORIGIN_CREATOR,
                                       genome_genesis(), 0xC0FFEEu, 1700000000u);
   CHECK(slot != (uint8_t)BOX_SLOT_NONE);
-  PebbleInstance* p = box_slot(slot);
+  BugInstance* p = box_slot(slot);
   CHECK(p != nullptr);
   if (p == nullptr) { csp_reset(); return; }
   p->flags = (uint8_t)(p->flags | PBF_CUSTOM | PBF_HAS_CUSTOM_SPRITE);
@@ -1219,7 +1219,7 @@ TEST(an_uploaded_document_becomes_a_pebble_the_one_validator_accepts) {
   memset(p->nickname, 0, sizeof p->nickname);
   memcpy(p->nickname, rec.name, strlen(rec.name));
 
-  const VReject r = validate_pebble(*p);
+  const VReject r = validate_bug(*p);
   if (r != VR_OK) fprintf(stderr, "    pipeline -> %s\n", validate_reject_name(r));
   CHECK_EQ((int)r, (int)VR_OK);
   CHECK_EQ((int)p->origin, (int)ORIGIN_CREATOR);
@@ -1230,7 +1230,7 @@ TEST(an_uploaded_document_becomes_a_pebble_the_one_validator_accepts) {
   // ui/pet_art.h promises pet_species_name() answers "nullptr - never a
   // placeholder" for three inputs, one of which is "a creator custom
   // (200..209)". With a row actually INSTALLED that was false: csp_install()
-  // sets name_idx = STR_EMPTY ("the name lives on the PebbleInstance's
+  // sets name_idx = STR_EMPTY ("the name lives on the BugInstance's
   // nickname, not in a StrId"), species_get(200) therefore returns a real row,
   // and S(STR_EMPTY) is the EMPTY STRING - which is not nullptr.
   //
@@ -1245,7 +1245,7 @@ TEST(an_uploaded_document_becomes_a_pebble_the_one_validator_accepts) {
   // creature the phone block mints. An unnamed device carrying one produced ""
   // for its own name; disc_encode() ACCEPTS that (name_ok() is true for an
   // all-zero field), so the board beaconed twelve zero bytes, the far board's
-  // LINK row fell back to "Buscando Pebbles..." and its card header to
+  // LINK row fell back to "Buscando Bugs..." and its card header to
   // "ENLACE", and two such devices were indistinguishable on the air.
   CHECK(species_get(CREATOR_SPECIES_ID_MIN) != nullptr);   // the row IS there
   if (pet_species_name(CREATOR_SPECIES_ID_MIN) != nullptr)
@@ -1278,13 +1278,13 @@ TEST(a_full_box_and_a_full_registry_are_asked_about_before_anything_is_written) 
   for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
     Genome g; memset(&g, 0, sizeof g);
     g.lineage_id = 0x100u + i; g.generation = 1u; genome_seal(g);
-    CHECK(box_new_pebble(1u, 5u, (uint8_t)ORIGIN_WILD, g, 1u + i, 1000u)
+    CHECK(box_new_bug(1u, 5u, (uint8_t)ORIGIN_WILD, g, 1u + i, 1000u)
           != (uint8_t)BOX_SLOT_NONE);
   }
   CHECK_EQ((int)box_count(), (int)BOX_SLOTS);
   rec.slot = csp_free_slot();
   CHECK(csp_install(rec));
-  CHECK_EQ((int)box_new_pebble(csp_species_id(rec.slot), 1u,
+  CHECK_EQ((int)box_new_bug(csp_species_id(rec.slot), 1u,
                                (uint8_t)ORIGIN_CREATOR, genome_genesis(),
                                1u, 1000u),
            (int)BOX_SLOT_NONE);

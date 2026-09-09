@@ -1,21 +1,21 @@
-# Adding content to Pebblebol
+# Adding content to Errata
 
 Written for the person who opens this a year from now wanting to add a species,
 retune an attack or draw a body — not as a record of what P9-C1 built.
 
 Everything the player meets is **generated from data files**. There is no
 species defined in C++, no attack table anybody edits by hand, no sprite typed
-as hex. If you are about to edit something under `Pebblebol/src/data/`, stop:
+as hex. If you are about to edit something under `Errata/src/data/`, stop:
 that directory is output.
 
 ```
-tools/content/*.json  --(tools/gen_content.py)-->  Pebblebol/src/data/*_table.h
-                                                   Pebblebol/src/data/creator_schema*.h
-                                                   Pebblebol/src/data/content_version.h
+tools/content/*.json  --(tools/gen_content.py)-->  Errata/src/data/*_table.h
+                                                   Errata/src/data/creator_schema*.h
+                                                   Errata/src/data/content_version.h
                                                    the generated blocks in src/core/strings_es.h
 
-tools/sprites/*.txt   --(tools/gen_sprites.py)-->  Pebblebol/src/data/sprites_pebbles.h
-web/creator/*         --(tools/gen_index_html.py)->Pebblebol/src/data/index_html.h
+tools/sprites/*.txt   --(tools/gen_sprites.py)-->  Errata/src/data/sprites_bugs.h
+web/creator/*         --(tools/gen_index_html.py)->Errata/src/data/index_html.h
 ```
 
 `tools/check.sh` regenerates all three in memory and fails on any byte of drift,
@@ -31,7 +31,7 @@ $EDITOR tools/content/species.json          # 1. edit the source
 cd tools/content && python3 verify.py       # 2. the pack's own gate, all 60 species
 cd ../.. && python3 tools/gen_content.py    # 3. rewrite the headers
 tools/check.sh                              # 4. build, host tests, size gates, grep gates
-git add tools/content/species.json Pebblebol/src/data/ Pebblebol/src/core/strings_es.h
+git add tools/content/species.json Errata/src/data/ Errata/src/core/strings_es.h
 ```
 
 **Commit the source and the regenerated headers together.** They are one change;
@@ -109,7 +109,7 @@ least one learnset: an attack nobody can hold is content nobody will see, and
 ### An evolution rule (`evolution.json`)
 
 Target is **the next stage of the same family** — not a different family, not two
-stages up. `level` 1..`PB_LEVEL_MAX`. A `cond` other than `NONE` needs its
+stages up. `level` 1..`ER_LEVEL_MAX`. A `cond` other than `NONE` needs its
 `cond_value`. Conditions are mapped **by name**, never by the pack's ordinal:
 the pack and the firmware order `EvoCond` differently, and mapping by ordinal
 would turn the `CORRUPTED` families into `EVOC_ITEM`. Keep `EVO_COND_CORRUPTED`
@@ -146,7 +146,7 @@ one change, because the three are one change: a roster wider than the atlas puts
 a species on an egg, and an atlas wider than the roster is art that never ships.
 Both directions are asserted — `test_content.cpp`'s
 `the_pack_is_complete_and_the_whole_pack_ships` pins
-`SPECIES_TABLE_COUNT == PB_SPRITE_BODY_COUNT == 60`.
+`SPECIES_TABLE_COUNT == ER_SPRITE_BODY_COUNT == 60`.
 
 **RAISING IT AGAIN IS THE SAME PACKAGE DEAL.** A 21st family needs:
 
@@ -155,7 +155,7 @@ Both directions are asserted — `test_content.cpp`'s
    the species block is an ordered, gapless tail and the generator refuses
    anything else;
 3. `ROSTER_FAMILIES` raised and everything regenerated;
-4. `PB_DATA_BYTES_MAX` (`tools/gen_sprites.py`, 10,240) and
+4. `ER_DATA_BYTES_MAX` (`tools/gen_sprites.py`, 10,240) and
    `SPRITE_DATA_BYTES_MAX` (`data/sprites.h`, 11,264) raised **together** and said
    out loud in the commit. They are the end state plus a stated margin now, not a
    transition allowance with room to hide in: 1,017 B, which is seven more sets.
@@ -224,11 +224,11 @@ values.
 | `tools/gen_content.py` | the generator. Its banner carries the roster-size reasoning. |
 | `tools/sprites/` | the art, as text. `README.md` there is the format contract. |
 | `tools/gen_sprites.py` | the sprite generator |
-| `Pebblebol/src/data/*_table.h` | **generated.** Do not edit. |
-| `Pebblebol/src/data/sprites_pebbles.h` | **generated.** Do not edit. |
-| `Pebblebol/src/data/sprites.h` | the legacy hand-written atlas, still what the firmware draws |
-| `Pebblebol/src/data/sprite_types.h` | the XBM contract: stride, bit order, frame layout, size guards |
-| `Pebblebol/src/core/strings_es.h` | every user-facing string; two generated blocks inside a hand-written file |
+| `Errata/src/data/*_table.h` | **generated.** Do not edit. |
+| `Errata/src/data/sprites_bugs.h` | **generated.** Do not edit. |
+| `Errata/src/data/sprites.h` | the legacy hand-written atlas, still what the firmware draws |
+| `Errata/src/data/sprite_types.h` | the XBM contract: stride, bit order, frame layout, size guards |
+| `Errata/src/core/strings_es.h` | every user-facing string; two generated blocks inside a hand-written file |
 | `tests/test_content.cpp` | every compile-time content guard, re-asserted at runtime |
 | `tests/test_sprite_pipeline.cpp` | the atlas's assertions, including the bit-order pin |
 | `tests/tools/sprite_dump.cpp` | renders the compiled atlas for a human |

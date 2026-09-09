@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL - tests/fakes/arduino/Arduino.h
+//  ERRATA - tests/fakes/arduino/Arduino.h
 //  A FAKE Arduino.h, and it exists for exactly one file.
 //
 //  hardware/gametime.cpp's gt_mono_ms() has two bodies, and the DEVICE one -
@@ -19,8 +19,8 @@
 //  enforces. A wider fake would start being a second Arduino core that can
 //  drift from the real one without anyone noticing.
 // =============================================================================
-#ifndef PB_FAKE_ARDUINO_H
-#define PB_FAKE_ARDUINO_H
+#ifndef ER_FAKE_ARDUINO_H
+#define ER_FAKE_ARDUINO_H
 
 #include <stdint.h>
 
@@ -36,4 +36,4 @@ void     fake_uptime_set_ms(unsigned long ms);
 void     fake_rtc_set_us(uint64_t us);
 void     fake_clocks_advance_ms(unsigned long ms);   // both clocks together
 
-#endif  // PB_FAKE_ARDUINO_H
+#endif  // ER_FAKE_ARDUINO_H

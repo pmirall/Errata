@@ -1,0 +1,108 @@
+// =============================================================================
+//  ERRATA - persistence/migration.h
+//  Reading a save written by an older firmware. Plan section 1.4 / 1.5.4.
+//
+//  A migration is a one-way, total function from the frozen bytes of an older
+//  schema (persistence/legacy_v1.h) to a live GameState. It never guesses and
+//  never partially applies: either the whole state is produced and the caller
+//  commits it, or nothing at all is written and the old keys stay untouched.
+//
+//  Chaining is table-driven, so v3 adds a row instead of a branch:
+//      migrate_run(found_version, out)  ->  1 -> 2 -> ... -> SAVE_SCHEMA_VERSION
+//
+//  Pure module: no Arduino, no allocation. It talks to flash only through
+//  persistence/kv_store.h, so the host tests drive it against tests/fakes.
+// =============================================================================
+#ifndef ER_MIGRATION_H
+#define ER_MIGRATION_H
+
+#include <stdint.h>
+#include <stddef.h>
+
+#include "save_schema.h"
+
+enum MigrateResult : uint8_t {
+  MIGRATE_OK = 0,        // 'out' holds a complete v2 state, ready to commit
+  MIGRATE_NONE,          // there was nothing older to read
+  MIGRATE_BAD_BLOB,      // the old blob failed magic / version / CRC
+  MIGRATE_UNSUPPORTED    // no path exists from that version to this one
+};
+
+// True when a save carrying schema version 'found' must be converted before it
+// can be used: older than this firmware, and not zero (0 = no save at all).
+// A version ABOVE SAVE_SCHEMA_VERSION is not a migration, it is
+// LOAD_FOREIGN_NEWER - see schema_is_foreign_newer().
+bool migration_needed(uint8_t found);
+
+// The v1 -> v2 transform. Pure: 'petsave128' and 'cfg256' are the raw NVS bytes
+// of the legacy "save" and "cfg" keys; 'cfg256' may be null, in which case the
+// config half falls back to cfgv2_defaults(). 'out' is fully overwritten,
+// sealed and internally consistent (one Bug in slot 0, marked active).
+//
+// FIELD MAP (plan P2-C9a), asserted field by field in tests/test_persistence.cpp:
+//   species        gene_species(genome) & 7 -> LEGACY_FAMILY_SPECIES[]
+//   stage          -> level: EGG/BABY 1, CHILD 5, TEEN 10, ADULT 15, SENIOR 20
+//   stat[]         -> care[]      reordered from v1 StatId to v2 CareId
+//   stat_rem[]     -> care_rem[]  same reorder; milli-points and remainders
+//                                 both carry over unchanged
+//   Genome         copied whole
+//   pet_name       -> nickname; NO name at all when v1 had none, so the
+//                  species name reaches HOME (P4-C4 follow-up)
+//   birth_epoch    -> birth_epoch
+//   last_seen      -> last_updated_epoch
+//   age_s          -> age_s
+//   flags          SICK/ASLEEP -> status, GOD_TAINTED -> flags; LIGHT_ON is
+//                  dropped (P3-C2b deleted the light mechanic)
+//   minigames_won  -> minigames_won
+//   Config.tz/brightness/mute/statusbar -> ConfigV2
+//   the "gl" gain ledger is NOT touched: it keeps its own key and layout
+MigrateResult migrate_v1_to_v2(const uint8_t* petsave128, const uint8_t* cfg256,
+                               GameState& out);
+
+// Runs every step from 'from' up to SAVE_SCHEMA_VERSION. Writes nothing:
+// committing the result and erasing the legacy keys is save_manager's job, so a
+// power cut in the middle of a migration leaves the old save intact and the
+// migration simply runs again.
+//
+// A STEP TAKES ONE OF TWO SHAPES and 'out' is what tells them apart. The v1 hop
+// READS KV_MAIN's legacy keys and fills 'out' from nothing, because v1 is a
+// different set of keys holding differently shaped structs. Every hop from v2
+// onwards TRANSFORMS 'out' IN PLACE, because those generations share every key
+// and every layout and the caller has already loaded them - so 'out' must
+// already hold the loaded state when 'from' is 2 or more, and is ignored on
+// entry when 'from' is 1. persistence/save_manager.cpp's upgrade_in_place() is
+// the only caller of the second shape.
+MigrateResult migrate_run(uint8_t from, GameState& out);
+
+// True when KV_MAIN still holds a legacy v1 "save" blob (magic and version only
+// - the CRC is checked by the migration itself).
+bool migrate_v1_present(void);
+
+// migrate_default_name() was here and is deleted (P4-C4 follow-up). It wrote
+// the v1 dynasty name into a nickname the owner had never typed, which pinned
+// every migrated device to the first rung of ui_pet_name()'s ladder and stopped
+// the species name from ever appearing.
+//
+// THIS USED TO END "ui.cpp's ui_name_for() still produces exactly that word as
+// the ladder's LAST rung, so nothing is lost" (P4-C6 struck the same sentence
+// from migration.cpp and left its twin here - both were born in ee75076).
+// IT IS FALSE, and the tree already says so in three other places
+// (docs/save_schema.md section 8, and two cases in tests/test_persistence.cpp).
+// ui_pet_name() reaches ui_name_for() only when pet_species_name(species_id)
+// is nullptr, and migrate_species_of() always returns a real roster id: it
+// indexes SPECIES_BASE_OF_FAMILY with (legacy & 7) % 12, so the eight
+// destinations it can reach are {1, 4, 7, 10, 13, 16, 19, 22} and every one of
+// them is a shipped stage-0 row - so a migrated pet NEVER reaches that rung.
+// The v1 dynasty word is gone from the device for good, and V1 has no rename
+// screen to type it back.
+// It is still the right trade, and the trade is argued where it is made: the
+// nickname block in migration.cpp.
+
+// Legacy family (gene species & 7) -> v2 species id. Exposed so the test can
+// assert the map instead of re-deriving it.
+uint8_t migrate_species_of(const Genome& g);
+
+// stage -> level, exposed for the same reason.
+uint8_t migrate_level_of(uint8_t legacy_stage);
+
+#endif // ER_MIGRATION_H

@@ -1,4 +1,4 @@
-# Pebblebol — the bench list
+# Errata — the bench list
 
 **What this file is.** Everything in the product that this repository cannot check, in the order
 one person should run it, with two boards, a phone and a serial terminal. Nothing here is a
@@ -31,8 +31,8 @@ in the host suite if they come back.
 
 | | |
 |---|---|
-| **Hardware** | 2 x ESP32-C3 wired to the map decision **D1** settles on (`Pebblebol/src/core/config.h` §2 today; `docs/legacy/README.es.md` §2 documents the other, contradicting one. **Neither spec has a pin map** - §68 is twenty prose rules for the coding agent and the hardware spec ends at §33 - so an earlier version of this line pointing at "the §68 pin map" pointed at nothing), 2 x SSD1306/SH1106 128x64 on I2C 0x3C, 2 x piezo on `PIN_PIEZO`, one phone with a camera and a browser, one USB serial console at 115200. |
-| **Blocked on** | **decision D1 (the pin map) is still open and `PB_PINS_CONFIRMED` is never defined.** Nothing below can run until a board is wired to a decided map. This is the first thing the owner owes, and it gates all **thirty-eight** items. |
+| **Hardware** | 2 x ESP32-C3 wired to the map decision **D1** settles on (`Errata/src/core/config.h` §2 today; `docs/legacy/README.es.md` §2 documents the other, contradicting one. **Neither spec has a pin map** - §68 is twenty prose rules for the coding agent and the hardware spec ends at §33 - so an earlier version of this line pointing at "the §68 pin map" pointed at nothing), 2 x SSD1306/SH1106 128x64 on I2C 0x3C, 2 x piezo on `PIN_PIEZO`, one phone with a camera and a browser, one USB serial console at 115200. |
+| **Blocked on** | **decision D1 (the pin map) is still open and `ER_PINS_CONFIRMED` is never defined.** Nothing below can run until a board is wired to a decided map. This is the first thing the owner owes, and it gates all **thirty-eight** items. |
 | **Variants** | `tools/build_matrix.sh` builds six. Only two matter here: **`release`** (`GOD_MODE_ENABLED=0`) is the artefact that ships and the one every acceptance claim must be made about; **`baseline`** has the god console and is the only build with a DIAG screen at all. **Every item below names its variant, or inherits one from its section heading, and where a
 reading only exists on a console page the item ALSO gives the release-side cross-check that
 section I's recording rule requires. A reading taken on the wrong variant is not a reading** — `docs/budget.md` §8 records a phase-7 exit that quoted a dev build against a shipping one. |
@@ -96,7 +96,7 @@ half of a frame, and why HOME's host number is a count of a composition that doe
    * a **Wi-Fi scan in flight** on NETWORK (the ladder is clamped at DIM and stage 7 spins without
      the `delay(1)` — `app.cpp`'s own `!pin.held` exception says so);
    * a **phone holding a slow POST** to the creator portal, e.g.
-     `curl --limit-rate 200 -X POST http://192.168.4.1/api/pebble -H 'X-Pin: NNNN' -d @body.json`
+     `curl --limit-rate 200 -X POST http://192.168.4.1/api/bug -H 'X-Pin: NNNN' -d @body.json`
      — this is `WebServer::handleClient()` -> `readBytesWithTimeout()`, which `core/config.h`'s
      `CS_BODY_MAX` comment says outright blocks the whole firmware, and it is the single largest
      loop risk in the tree;
@@ -221,16 +221,16 @@ battery draining in a pocket. *Also closes half of §67 "Wi-Fi shuts down after 
 
 **B6. §67 "Trade is atomic" — the cross-pair half. — variant `release`, both boards.** Trade between the two boards, then do it
 again and **pull the battery on one board between the two A presses**. After both reboot, each
-Box holds either the outgoing Pebble or the incoming one — never both, never neither. The
+Box holds either the outgoing Bug or the incoming one — never both, never neither. The
 within-device half is swept exhaustively on the host (every flash write, ten per committed trade,
 plus nine points inside the resolver); two parties over a lossy link with no third party cannot
 make an exchange atomic, so this run is the residual and it is what the box waits for.
 
-**B7. §67 "Breeding compatibility works" and "Generated Pebbles remain balanced". — no variant:
+**B7. §67 "Breeding compatibility works" and "Generated Bugs remain balanced". — no variant:
 nothing to run.** These need
 `networking/breed_link.cpp` **built and `DISC_CAP_BREED` claimed**, which no phase did. The
 compat matrix is swept over all roster pairs on the host and the 10,000-pair gene ceiling is
-measured; neither is a sentence about two Pebblebols. **These two boxes are not merely unrun —
+measured; neither is a sentence about two Erratas. **These two boxes are not merely unrun —
 they are unbuildable today**, and that is the honest state of them.
 
 **B8. A beacon goes out whatever the device is called. ADDED AT THE P10-C6 EXIT, because until
@@ -326,7 +326,7 @@ Trigger each of the seven and confirm each is audible and distinguishable from i
 feed (CARE → *Comida*), clean (CARE → LIMPIAR), a hit and a faint (a practice battle from the
 BATTLE screen), a protect beat (needs a species that knows one — species 1 does not, which is why
 this effect went five phases without a picture either), a level-up (use a *Megadulce* from the
-bag), and an error tone (a refused care action — feed a full Pebble). Then SETTINGS → *Sonido* →
+bag), and an error tone (a refused care action — feed a full Bug). Then SETTINGS → *Sonido* →
 off, **power-cycle**, and confirm the piezo is silent and stays silent. The persistence half is
 host-proved through the real `save_manager` into the fake NVS; the audible half is this item.
 
@@ -350,7 +350,7 @@ instance: v1 folded `ESP_RST_DEEPSLEEP` into `BOOT_SOFT_RESET` and lost every sl
 time.**
 
 **(a) `BootKind` 4 (DEEPSLEEP) IS UNREACHABLE ON THIS ARTEFACT, so the old step 3 could never
-produce a third number.** `grep -rn 'esp_deep_sleep_start' Pebblebol/src` returns NOTHING.
+produce a third number.** `grep -rn 'esp_deep_sleep_start' Errata/src` returns NOTHING.
 `hardware/power.cpp` calls `esp_light_sleep_start()`, and `hardware/power.h` says in its own words
 why a deep rung is deliberately not built ("a DEEP sleep does not resync `esp_timer`, so a deep rung
 would take that clock back to zero on every wake"). **A light-sleep wake is not a reset**:
@@ -471,7 +471,7 @@ answer, and `help` must list only the four and say `GOD_MODE_ENABLED 0` is why t
 absent.
 
 **E2.** On `baseline`, type `spawn 1 5` then `show_save`. The GOD bar must appear on the first
-mutating command and the spawned Pebble must show the taint ribbon.
+mutating command and the spawned Bug must show the taint ribbon.
 
 **E3.** `info`'s twelve §49 fields: confirm **battery reads `n/a`** (there is no `PIN_BATT`, no
 divider fitted and no ADC read anywhere — D10 must be decided and a divider fitted before any code
@@ -496,7 +496,7 @@ onboarding flow: **whether a person who has never seen the device can get throug
 needs a person, a board and no explanation.
 
 **F1. A genuinely fresh board.** `esptool erase_flash`, then flash `release`. Expected, in order:
-splash → "Cargando la partida..." → **the intro** → **ELIGE PEBBLE**. Not a toast over it: the
+splash → "Cargando la partida..." → **the intro** → **ELIGE BUG**. Not a toast over it: the
 greeting is drawn on the screen itself (`STR_SU_HELLO`, on the naming screen, which is the SECOND
 question now), because the toast band is rows 45–55 and both instruction lines live there. **If a
 toast covers the bottom two lines, that is the defect P10-C4 fixed coming back.**
@@ -504,14 +504,14 @@ toast covers the bottom two lines, that is the defect P10-C4 fixed coming back.*
 **F0. THE INTRO, AND IT IS THE ONE ITEM THIS WHOLE SECTION EXISTS FOR NOW. — variant `release`.**
 It is the first sixteen seconds of the product and the only part of it a host golden cannot judge,
 because `tests/fakes/gfx_fb.cpp` draws no real glyphs — the typed listing is a stack of bars in
-every golden of it, and whether `pebble_t nuevo(void) {` is *legible at 4x6 on a 0.96" panel* is a
+every golden of it, and whether `bug_t nuevo(void) {` is *legible at 4x6 on a 0.96" panel* is a
 question only the panel answers. Watch it end to end, once, without touching a button:
 
   1. The listing types itself, left to right, one character at a time, with a caret after the last
      one and a click roughly every two characters. **Every line must fit the panel width.** A line
      that runs off the right edge is the `static_assert` on `GFX_ADV_TINY` having been defeated by
      a font change.
-  2. The header reads `pebble.c`, then gains **COMPILANDO** and a bar. The bar must **stop short of
+  2. The header reads `bug.c`, then gains **COMPILANDO** and a bar. The bar must **stop short of
      full** and stay there — a bar that reaches 100 % and then reports a failure lied about its
      last frame.
   3. `ERROR: 3 BUGS`, and the band tears into jumping scanlines. The tear must **jump**, not slide.
@@ -520,7 +520,7 @@ question only the panel answers. Watch it end to end, once, without touching a b
      that appear are the selection frame, the species name and the hint. `tests/test_screens.cpp`
      asserts this on the host, so a visible jump here means the panel and the fake disagree about
      `gfx_xbm_t()` — the P10-C3 seam again.
-  6. Total elapsed, splash to ELIGE PEBBLE: **under 25 s.** Time it. The whole budget is "cinematic
+  6. Total elapsed, splash to ELIGE BUG: **under 25 s.** Time it. The whole budget is "cinematic
      plus three questions under two minutes" and the questions are the player's to pace.
 
 Then repeat and **press a button in the middle**: the intro must stop immediately, the picker must
@@ -537,11 +537,11 @@ test can see, because the host fake is not u8g2.
 **F3. The starter, then the name, then the date. — variant `release`.** THE ORDER CHANGED: the
 picker is FIRST now. Pick the third creature — HOLD L must go **forward** to PONLE NOMBRE, not
 back — then type the name (F2), then the date. HOLD L on the date must go **forward to HOME**. On
-HOME the Pebble must be the third creature, at level 1, with the name from F2.
+HOME the Bug must be the third creature, at level 1, with the name from F2.
 
 **F4. THE POWER CUT, and this is the item worth the trip. — variant `release`.** Repeat F1, pick a
 starter, and **pull the power while the naming screen is up**. On the next boot the device must
-come back **on the naming screen with the starter already minted** — not at ELIGE PEBBLE, not on
+come back **on the naming screen with the starter already minted** — not at ELIGE BUG, not on
 HOME, and **without replaying the intro**: the cinematic is armed only on `BOOT_FIRST_RUN`, and a
 resumed flow that plays it again is sixteen seconds charged to somebody whose battery died. Repeat
 with the cut after the name is accepted: it must come back on the date screen. Then finish the
@@ -549,7 +549,7 @@ flow, power cycle twice more, and confirm **no setup screen is ever shown again*
 
 **F5. The player who reads nothing.** From a fresh board, skip the intro with one press, then hold
 both buttons on the first screen.
-The device must land on HOME with a working Pebble (species 1, the historical starter), no name,
+The device must land on HOME with a working Bug (species 1, the historical starter), no name,
 and the clock unset — and it must never ask again.
 
 **F6. A board that has been played.** Flash `release` over a device that already has a save from an
@@ -588,7 +588,7 @@ DIAG,scr,<t+...>,20=CAPTURE               <- only if you press A on CAPTURAR
 
 B is BACK on the **HOLD** and CHOOSE on the **TAP**. Walk it:
 
-1. HOME → hold A to open the MENU. Tap A to walk the ring. **Tap B** on PEBBLE: it must OPEN.
+1. HOME → hold A to open the MENU. Tap A to walk the ring. **Tap B** on BUG: it must OPEN.
    **Hold B**: it must go back to the MENU. Hold B again: HOME.
 2. The affordance strip on every list must read **`SEL/ATRÁS`** — tap first, hold second.
 3. BOX: tap B walks IN (list → actions → swap) and hold B walks OUT one rung at a time. Holding
@@ -596,7 +596,7 @@ B is BACK on the **HOLD** and CHOOSE on the **TAP**. Walk it:
 4. A confirm dialog (SETTINGS → *Reiniciar*): tap A moves the cursor, **tap B** acts on it,
    **hold B** cancels. The cursor starts on NO, so a stray tap declines.
 5. **THE THREE THAT DID NOT MOVE, and each is a real reason - check them too:**
-   - **TIME / PONLE NOMBRE / ELIGE PEBBLE**: B is "+1 on the field", and HOLDING it must
+   - **TIME / PONLE NOMBRE / ELIGE BUG**: B is "+1 on the field", and HOLDING it must
      auto-repeat. If holding B goes back instead, typing a name is unusable.
    - **Inside a minigame**: hold B pauses. A tap must NOT pause - it is a play input, and one
      press doing both is the P3-C4a defect.

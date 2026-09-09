@@ -1,8 +1,8 @@
 // =============================================================================
-//  PEBBLEBOL CREATOR - THE SPRITE EDITOR (P8-C4, spec section 37, plan T13).
+//  ERRATA CREATOR - THE SPRITE EDITOR (P8-C4, spec section 37, plan T13).
 //
 //  24 x 24, TWO frames, one bit per pixel. It owns the pixels and nothing
-//  else: it does not know what a Pebble is, it never talks to the device, and
+//  else: it does not know what a Bug is, it never talks to the device, and
 //  the only thing it hands out is hex.
 //
 //  ==========================================================================

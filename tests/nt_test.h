@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - nt_test.h
+//  Errata host tests - nt_test.h
 //  Minimal single-header harness (plan §4.1). No external framework, no
 //  Arduino headers, no allocation beyond what the tests themselves do.
 //

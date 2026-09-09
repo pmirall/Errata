@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - fakes/kv_mem.cpp
+//  Errata host tests - fakes/kv_mem.cpp
 //  See kv_mem.h. Fixed-size tables, no allocation: the whole point is that a
 //  test failure is a logic bug in the save manager, never in this fake.
 // =============================================================================

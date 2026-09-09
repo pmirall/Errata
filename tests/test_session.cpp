@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL host test - test_session.cpp
+//  ERRATA host test - test_session.cpp
 //  THE SESSION FSM, THE LOCKSTEP AND THE FAULT-INJECTING LOOPBACK (P4-C5).
 //
 //  WHAT THIS FILE HAS TO PROVE, in the plan's own words: "full battle between
@@ -36,7 +36,7 @@
 #include "game/battle_ai.h"
 #include "game/evolution.h"
 #include "game/genome.h"
-#include "game/pebble.h"
+#include "game/bug.h"
 #include "game/validate.h"
 #include "game/xp.h"
 #include "networking/battle_link.h"
@@ -58,17 +58,17 @@ static Genome sealed_genome(uint32_t lineage)
   return g;
 }
 
-// A Pebble validate_pebble() accepts AND the wire may carry.
-static void mk_valid(PebbleInstance& p, uint8_t species, uint8_t level, uint32_t id)
+// A Bug validate_bug() accepts AND the wire may carry.
+static void mk_valid(BugInstance& p, uint8_t species, uint8_t level, uint32_t id)
 {
   memset(&p, 0, sizeof p);
-  p.magic         = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver    = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic         = (uint16_t)BUG_MAGIC;
+  p.layout_ver    = (uint8_t)BUG_LAYOUT_VER;
   p.species_id    = species;
   p.id            = id;
   p.level         = level;
   p.origin        = (uint8_t)ORIGIN_WILD;
-  p.custom_sprite = (uint8_t)PB_CUSTOM_SPRITE_NONE;
+  p.custom_sprite = (uint8_t)ER_CUSTOM_SPRITE_NONE;
   p.genome        = sealed_genome(0x0BADF00Du + id);
   const SpeciesDef* sp = species_get(species);
   if (sp == nullptr) return;
@@ -78,7 +78,7 @@ static void mk_valid(PebbleInstance& p, uint8_t species, uint8_t level, uint32_t
   if (evolution_level_ready(p) != 0u) p.evo_state |= (uint8_t)EVO_STATE_PENDING;
 }
 
-static void mk_team(PebbleInstance* m, uint8_t s0, uint8_t s1, uint8_t s2,
+static void mk_team(BugInstance* m, uint8_t s0, uint8_t s1, uint8_t s2,
                     uint8_t level, uint32_t id_base)
 {
   mk_valid(m[0], s0, level, id_base + 0u);
@@ -100,8 +100,8 @@ struct Endpoint {
   LoopbackPort   port;
   Transport      tp;
   BattleAi       ai;
-  PebbleInstance box[BATTLE_TEAM_MAX];      // "the Box": the caller's Pebbles
-  PebbleInstance box_before[BATTLE_TEAM_MAX];
+  BugInstance box[BATTLE_TEAM_MAX];      // "the Box": the caller's Bugs
+  BugInstance box_before[BATTLE_TEAM_MAX];
   uint8_t        count;
 };
 
@@ -403,7 +403,7 @@ TEST(the_local_team_enters_the_engine_through_the_decoder_the_peer_s_team_uses)
 {
   Trial& T = arena();
   trial_begin(T, 0x77u, CLEAN);
-  // Give the local Pebbles a nickname, care and a battle history: none of it is
+  // Give the local Bugs a nickname, care and a battle history: none of it is
   // on the wire, so if the local team took a shortcut into the setup the two
   // endpoints would build DIFFERENT setups and this case would show it.
   for (uint8_t i = 0; i < 3u; ++i) {
@@ -976,17 +976,17 @@ TEST(losing_one_frame_of_every_type_in_turn_still_finishes_the_battle)
 // a device whose OWN records are broken - which fails on its own load path and
 // never exercises the receiving validator at all.
 static bool poison_in_flight(Trial& T, uint8_t dst, uint8_t slot,
-                             void (*edit)(PebbleInstance&))
+                             void (*edit)(BugInstance&))
 {
   const int at = wait_for_frame(T, dst, (uint8_t)PT_TEAM_SUBMIT);
   if (at < 0) return false;
   uint8_t* f = T.lk.inbox[dst].frame[at];
   const uint16_t n = T.lk.inbox[dst].len[at];
-  PebbleInstance p = T.e[dst ^ 1u].box[slot];
+  BugInstance p = T.e[dst ^ 1u].box[slot];
   edit(p);
-  uint8_t rec[PBW_BYTES];
+  uint8_t rec[BUGW_BYTES];
   pbw_encode(p, rec);
-  memcpy(f + PROTO_HDR_BYTES + 4 + (size_t)slot * PBW_BYTES, rec, PBW_BYTES);
+  memcpy(f + PROTO_HDR_BYTES + 4 + (size_t)slot * BUGW_BYTES, rec, BUGW_BYTES);
   // team_crc is left AS THE SENDER WROTE IT: a modified peer lies consistently,
   // and TEAM_VALIDATION echoes that number back so the sender can tell whose
   // team the verdict is about. Rewriting it here would make the honest reply
@@ -995,27 +995,27 @@ static bool poison_in_flight(Trial& T, uint8_t dst, uint8_t slot,
   return true;
 }
 
-static void ed_level31(PebbleInstance& p)   { p.level = 31u; }
-static void ed_species(PebbleInstance& p)   { p.species_id = 99u; }
-static void ed_three_moves(PebbleInstance& p){ p.moves[3] = 0u; }
-static void ed_stolen_move(PebbleInstance& p){ p.moves[1] = 11u; }
-static void ed_hp_over(PebbleInstance& p)   { p.hp_cur = (uint16_t)(p.hp_cur + 1u); }
-static void ed_genome_crc(PebbleInstance& p){ p.genome.crc16 = (uint16_t)(p.genome.crc16 ^ 1u); }
+static void ed_level31(BugInstance& p)   { p.level = 31u; }
+static void ed_species(BugInstance& p)   { p.species_id = 99u; }
+static void ed_three_moves(BugInstance& p){ p.moves[3] = 0u; }
+static void ed_stolen_move(BugInstance& p){ p.moves[1] = 11u; }
+static void ed_hp_over(BugInstance& p)   { p.hp_cur = (uint16_t)(p.hp_cur + 1u); }
+static void ed_genome_crc(BugInstance& p){ p.genome.crc16 = (uint16_t)(p.genome.crc16 ^ 1u); }
 // The one rule NO per-member check can own: two members of one team sharing an
-// id. pbw_decode() runs validate_pebble() on each record and would accept both,
+// id. pbw_decode() runs validate_bug() on each record and would accept both,
 // so this is the vector that makes deleting validate_team() fail a named case
 // rather than passing on the strength of the decoder underneath it.
-static void ed_same_id(PebbleInstance& p)   { p.id = 0x200u; }
+static void ed_same_id(BugInstance& p)   { p.id = 0x200u; }
 // THE LAST THING THREE CHECKERS ACCEPTED AND THE ENGINE REFUSED. hp_cur == 0 is
-// a legal STORED state, so validate_pebble(), validate_team() and pbw_decode()
+// a legal STORED state, so validate_bug(), validate_team() and pbw_decode()
 // all answer VR_OK for it; battle_init() answers BR_MEMBER_FAINTED. Before
 // validate_battle_ready() this vector closed the honest endpoint SE_PROTOCOL /
 // SD_INTERNAL with bad_index 0xFF - measured - which is this device recording a
 // bug in its own validator for a lie the peer told. PBS_FAINTED cannot make the
 // trip (VR_WIRE_STATUS_BITS refuses it), so hp_cur is the only way through.
-static void ed_fainted(PebbleInstance& p)   { p.hp_cur = 0u; }
+static void ed_fainted(BugInstance& p)   { p.hp_cur = 0u; }
 
-struct PoisonCase { void (*edit)(PebbleInstance&); VReject want; const char* what; };
+struct PoisonCase { void (*edit)(BugInstance&); VReject want; const char* what; };
 
 TEST(a_team_the_peer_could_not_have_raised_is_refused_by_the_right_code)
 {
@@ -1026,7 +1026,7 @@ TEST(a_team_the_peer_could_not_have_raised_is_refused_by_the_right_code)
     { &ed_stolen_move, VR_UNLEARNABLE_MOVESET,  "a move it cannot learn" },
     { &ed_hp_over,     VR_HP_OVER_MAX,          "hp above the derived max" },
     { &ed_genome_crc,  VR_BAD_GENOME,           "a broken genome seal" },
-    { &ed_same_id,     VR_DUPLICATE_ID,         "one Pebble sent twice" },
+    { &ed_same_id,     VR_DUPLICATE_ID,         "one Bug sent twice" },
     { &ed_fainted,     VR_MEMBER_FAINTED,       "a member that has fainted" },
   };
   for (uint8_t k = 0; k < sizeof CASES / sizeof CASES[0]; ++k) {
@@ -1055,7 +1055,7 @@ TEST(a_team_the_peer_could_not_have_raised_is_refused_by_the_right_code)
   }
 }
 
-TEST(a_peer_that_echoes_our_own_pebble_ids_is_refused_as_a_duplicate)
+TEST(a_peer_that_echoes_our_own_bug_ids_is_refused_as_a_duplicate)
 {
   // WITHOUT THIS RULE THE DEVICE BLAMES ITSELF. battle_init() refuses
   // BR_DUPLICATE_ID across ALL SIX members, so a peer that copies one of our
@@ -1114,7 +1114,7 @@ TEST(a_fainted_member_is_the_peer_s_lie_and_our_own_teams_refusal_never_an_inter
   CHECK_EQ(session_state(T.e[0].s), SS_IDLE);
 
   // (c) THE POSITIVE CONTROL, IN THE SAME FUNCTION: PBS_FAINTED on a full-hp
-  //     Pebble is the other half of the engine's own rule, and healing the hp
+  //     Bug is the other half of the engine's own rule, and healing the hp
   //     alone must not make the team eligible.
   T.e[0].box[2].hp_cur = T.e[0].box[0].hp_cur;
   T.e[0].box[2].status = (uint8_t)PBS_FAINTED;
@@ -1145,7 +1145,7 @@ TEST(the_agreed_level_band_is_refused_before_a_team_is_ever_sent)
   CHECK_EQ(T.e[0].s.team_seen, 0);
 }
 
-TEST(a_level_outside_an_agreed_band_is_refused_even_when_the_pebble_is_legal)
+TEST(a_level_outside_an_agreed_band_is_refused_even_when_the_bug_is_legal)
 {
   // The band accepted the SESSION, and the team is still out of it: the rule
   // has to fire on the members and not only on the request.
@@ -2020,7 +2020,7 @@ TEST(the_abort_record_is_forty_bytes_and_the_session_fits_the_budget_it_claims)
 // P4-C6. session_reason_name() had a caller and its two siblings did not: a
 // P4-C6 sweep for symbols present in an object file and absent from the linked
 // ELF found session_state_name() and session_detail_name() uncalled ANYWHERE -
-// not in Pebblebol/src, not in tests/ - and unlike proto_err_name() and
+// not in Errata/src, not in tests/ - and unlike proto_err_name() and
 // validate_reject_name() neither had the totality case its enum deserves. Both
 // are wired into the acceptance census above now, and this is the case they
 // were missing: a name that is not distinct is a name that cannot tell two
