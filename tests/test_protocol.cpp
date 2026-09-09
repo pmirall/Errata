@@ -163,6 +163,18 @@ static void mk_msg(ProtoMsg& m, ProtoType t)
       m.p.tconfirm.accept = 1u; m.p.tconfirm.pair_crc = 0xB19Du; break;
     case PT_TRADE_COMMIT:
       m.p.tcommit.pair_crc = 0xB19Du; break;
+    case PT_BREED_OFFER: {
+      BugInstance p; mk_valid(p, 9u, 14u, 0x8B2u);
+      pbw_encode(p, m.p.boffer.rec);
+      break;
+    }
+    case PT_BREED_READY:
+      m.p.bready.verdict = (uint8_t)VR_OK; m.p.bready.pair_reject = 0u;
+      m.p.bready.offer_crc_echo = 0x5D8Cu; break;
+    case PT_BREED_CONFIRM:
+      m.p.bconfirm.accept = 1u; m.p.bconfirm.plan_crc = 0xC2AEu; break;
+    case PT_BREED_DONE:
+      m.p.bdone.reject = 0u; m.p.bdone.plan_crc = 0xC2AEu; break;
     default: break;
   }
 }
@@ -471,6 +483,22 @@ static void expect_same_payload(const ProtoMsg& a, const ProtoMsg& b)
       break;
     case PT_TRADE_COMMIT:
       CHECK_EQ((int)a.p.tcommit.pair_crc, (int)b.p.tcommit.pair_crc);
+      break;
+    case PT_BREED_OFFER:
+      CHECK_EQ(memcmp(a.p.boffer.rec, b.p.boffer.rec, (size_t)BUGW_BYTES), 0);
+      break;
+    case PT_BREED_READY:
+      CHECK_EQ((int)a.p.bready.verdict, (int)b.p.bready.verdict);
+      CHECK_EQ((int)a.p.bready.pair_reject, (int)b.p.bready.pair_reject);
+      CHECK_EQ((int)a.p.bready.offer_crc_echo, (int)b.p.bready.offer_crc_echo);
+      break;
+    case PT_BREED_CONFIRM:
+      CHECK_EQ((int)a.p.bconfirm.accept, (int)b.p.bconfirm.accept);
+      CHECK_EQ((int)a.p.bconfirm.plan_crc, (int)b.p.bconfirm.plan_crc);
+      break;
+    case PT_BREED_DONE:
+      CHECK_EQ((int)a.p.bdone.reject, (int)b.p.bdone.reject);
+      CHECK_EQ((int)a.p.bdone.plan_crc, (int)b.p.bdone.plan_crc);
       break;
     default: CHECK(false); break;
   }
@@ -806,7 +834,13 @@ TEST(a_reserved_payload_byte_that_carries_a_value_is_refused_by_name) {
     { PT_GOODBYE,         1 }, { PT_GOODBYE,         3 },
     { PT_TRADE_OFFER,     0 }, { PT_TRADE_OFFER,     3 },
     { PT_TRADE_CONFIRM,   1 },
-    { PT_TRADE_COMMIT,    0 }, { PT_TRADE_COMMIT,    1 }
+    { PT_TRADE_COMMIT,    0 }, { PT_TRADE_COMMIT,    1 },
+    // The breeding's reserved bytes, on the same rule: a byte the encoder
+    // leaves zero must be REFUSED when it arrives non-zero, or it is a place a
+    // future field can be smuggled into without a version change.
+    { PT_BREED_OFFER,     0 }, { PT_BREED_OFFER,     3 },
+    { PT_BREED_CONFIRM,   1 },
+    { PT_BREED_DONE,      1 }
   };
   for (size_t i = 0; i < sizeof POKES / sizeof POKES[0]; ++i) {
     ProtoMsg m; mk_msg(m, POKES[i].t);

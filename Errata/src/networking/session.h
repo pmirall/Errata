@@ -179,6 +179,11 @@ enum SessionState : uint8_t {
   // in docs/protocol.md carries the reading order; this enum carries the
   // numbering, and the two are allowed to differ as long as one of them says so.
   SS_TRADE,      // TRADE_OFFER / READY / CONFIRM / COMMIT (networking/trade_link.cpp)
+  // P7-C5, APPENDED FOR THE REASON THE BLOCK ABOVE GIVES. It sits after
+  // SS_TRADE and before SS_CLOSED: SS_CLOSED's number moves by one, which is
+  // safe because every comparison against it is `==` or `!=` and never `<`.
+  // The three `<` comparisons name SS_SESSION and SS_TEAM, and neither moves.
+  SS_BREED,      // BREED_OFFER / READY / CONFIRM / DONE (networking/breed_link.cpp)
   SS_CLOSED,     // terminal
   SS_STATE_COUNT
 };
@@ -194,6 +199,10 @@ enum SessionState : uint8_t {
 enum SessionOp : uint8_t {
   SOP_BATTLE = 0,
   SOP_TRADE,
+  // P7-C5. Appended: this byte travels in ProtoSessionReq.rules and is echoed
+  // in ProtoSessionAcc.op_echo, so renumbering SOP_TRADE would make two builds
+  // of this firmware agree on a word and mean two different things by it.
+  SOP_BREED,
   SOP_COUNT
 };
 
@@ -256,6 +265,21 @@ enum SessionDetail : uint8_t {
                        // A local fault, named as one rather than blamed on the
                        // peer, and the journal is what finishes it at the next
                        // boot
+  // --- P7-C5, THE BREEDING. Three of its own rather than three reused: a
+  //     terminal's whole job is to be answerable without a rerun, and
+  //     "SD_TRADE_REFUSED" on a session that never traded anything is a log
+  //     line that sends the next reader to the wrong module.
+  SD_BREED_REFUSED,    // the peer's BreedReject on the pair, or its player said
+                       // no. NOT a VReject: both parents are legal Bugs and the
+                       // refusal is about the two of them together
+  SD_BREED_PLAN,       // the two ends computed DIFFERENT children from what was
+                       // supposed to be the same pair and the same seed. The
+                       // desync networking/breed_link.h section 2 exists to
+                       // catch, caught before either child is filed
+  SD_BREED_STORE,      // OUR OWN flash refused the child after both people had
+                       // agreed to it. A local fault, named as one. There is no
+                       // journal to finish it at the next boot and there does
+                       // not need to be: nothing was taken from anybody
   SD_DETAIL_COUNT
 };
 
@@ -340,6 +364,7 @@ const LinkEvent* link_log_at(const LinkLog& l, uint16_t i);
 //  the one ui/screen_battle.cpp already owns at file scope.
 // -----------------------------------------------------------------------------
 struct TradeLink;           // networking/trade_link.h, caller-owned like the rest
+struct BreedLink;           // networking/breed_link.h, ditto
 
 struct SessionCfg {
   const Transport* tp;
@@ -348,6 +373,7 @@ struct SessionCfg {
   BattleLog*       blog;      // may be nullptr
   LinkLog*         llog;      // may be nullptr
   TradeLink*       tl;        // may be nullptr; REQUIRED when op is SOP_TRADE
+  BreedLink*       bl;        // may be nullptr; REQUIRED when op is SOP_BREED
   uint32_t         device_id; // the tie-break that fixes the roles
   uint32_t         nonce;     // from RNG_MISC ("tokens, nonces, PINs, canaries")
   uint8_t          op;        // SessionOp, agreed with the peer in SS_SESSION
@@ -363,6 +389,7 @@ struct Session {
   BattleLog*       blog;
   LinkLog*         llog;
   TradeLink*       tl;
+  BreedLink*       bl;
 
   // --- identity
   uint32_t device_id, peer_device_id;
@@ -433,6 +460,18 @@ void session_init(Session& s, const SessionCfg& cfg);
 // body. Everything else is identical - the Bug is encoded to the 48 B record
 // and the record is the only copy the session ever reads again.
 VReject session_set_trade(Session& s, const BugInstance& p);
+
+// THE PARENT THIS DEVICE BRINGS. Same shape and same storage as the trade's
+// one record - my_rec[0] and team_crc_local - because a breeding puts exactly
+// one Bug on the wire too, and a second copy of "one record, its CRC" is a
+// second place for the two to disagree.
+//
+// validate_bug() AND NOTHING ELSE, for the trade's reason one step further on:
+// breeding eligibility is a property of the PAIR (game/breeding.h's BreedReject
+// - stage, compat group, taint, same unit), and a pair does not exist until the
+// peer's record has arrived. Refusing here on a rule that needs two Bugs would
+// be refusing on half its input.
+VReject session_set_breed(Session& s, const BugInstance& p);
 
 // Freezes the local team: it is ENCODED to the wire here and decoded back
 // through pbw_decode() when the battle is built, so the local team enters the

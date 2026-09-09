@@ -136,6 +136,21 @@ enum ProtoType : uint8_t {
   PT_TRADE_READY,         // 14  "I decoded and validated yours": a VReject
   PT_TRADE_CONFIRM,       // 15  "my player pressed A on this exact pair"
   PT_TRADE_COMMIT,        // 16  "I have applied it" - and it IMPLIES my CONFIRM
+  // --- P7-C5, THE BREEDING (spec section 17). Appended for the same reason the
+  //     trade's four were, and NOT numbered among them.
+  //
+  //     PROTO_VERSION IS NOT BUMPED AND THAT IS THE DESIGN. A peer built before
+  //     these types exists cannot place them - but it never receives one,
+  //     because DISC_CAP_BREED is what opens a breeding session and a peer that
+  //     does not have this code does not claim that bit. The capability IS the
+  //     negotiation; that is what capability bits are for. Bumping the version
+  //     instead would refuse the whole session to an older peer, including the
+  //     battle and the trade it CAN still do, which is a worse answer to a
+  //     smaller problem.
+  PT_BREED_OFFER,         // 17  the 48 B wire Bug this device brings as a parent
+  PT_BREED_READY,         // 18  "I decoded and judged the pair": VReject + BreedReject
+  PT_BREED_CONFIRM,       // 19  "my player pressed A on this exact pair"
+  PT_BREED_DONE,          // 20  "I filed my child" - or why I could not
   PT_TYPE_COUNT           // one past the last legal type, never a type itself
 };
 #define PROTO_TYPE_MAX  ((uint8_t)(PT_TYPE_COUNT - 1))
@@ -163,7 +178,11 @@ inline constexpr uint16_t PROTO_LEN_OF[(size_t)PT_TYPE_COUNT] = {
   4 + BUGW_BYTES,           // 13 TRADE_OFFER   (52)
   4,                       // 14 TRADE_READY
   4,                       // 15 TRADE_CONFIRM
-  4                        // 16 TRADE_COMMIT
+  4,                       // 16 TRADE_COMMIT
+  4 + BUGW_BYTES,           // 17 BREED_OFFER   (52)
+  4,                       // 18 BREED_READY
+  4,                       // 19 BREED_CONFIRM
+  4                        // 20 BREED_DONE
 };
 
 // Which types carry a ROUND in the header. Every other type must send 0 there:
@@ -177,6 +196,8 @@ inline constexpr bool PROTO_HAS_ROUND[(size_t)PT_TYPE_COUNT] = {
   false, false,
   // A trade has no rounds. The four below must send 0 there, exactly as the
   // handshake types do, and proto_decode() refuses any other value at step 9.
+  false, false, false, false,
+  // Neither has a breeding: one pair, one child, no turns.
   false, false, false, false
 };
 
@@ -403,6 +424,25 @@ struct ProtoTradeReady   { uint16_t offer_crc_echo; uint8_t verdict, policy; };
 struct ProtoTradeConfirm { uint16_t pair_crc; uint8_t accept; };
 struct ProtoTradeCommit  { uint16_t pair_crc; };
 
+// --- P7-C5, THE BREEDING -----------------------------------------------------
+// The parent this device brings. Same shape and same argument as the trade's
+// offer: the 48 B record carries its own CRC, so there is no second copy of its
+// identity on the wire to disagree with it.
+struct ProtoBreedOffer   { uint8_t  rec[BUGW_BYTES]; };
+// TWO REFUSAL BYTES for the trade's reason, and the second one is a DIFFERENT
+// second enum: `verdict` is a VReject on the RECORD, `pair_reject` is a
+// game/breeding.h BreedReject on the PAIR. A BreedReject is not a TradeReject
+// and the two must not share a byte's meaning - BRD_COMPAT_GROUP and
+// TR_DUPLICATE_ID would be the same number saying different things.
+struct ProtoBreedReady   { uint16_t offer_crc_echo; uint8_t verdict, pair_reject; };
+// THE PLAN CRC IS THE POINT OF THIS MESSAGE. Both ends ran breed_compute() over
+// the same two parents and the same derived seed and must have got the same
+// child; carrying its CRC is what turns "must have" into something checked.
+struct ProtoBreedConfirm { uint16_t plan_crc; uint8_t accept; };
+// `reject` is the local breed_commit() answer, so a peer whose Box was full can
+// say so instead of leaving the other end claiming a success only it had.
+struct ProtoBreedDone    { uint16_t plan_crc; uint8_t reject; };
+
 // The identity of one offer: the record's OWN trailing CRC, read in the codec's
 // own little-endian convention. Used to echo "the offer I validated" in READY
 // without a second field on the wire.
@@ -456,6 +496,10 @@ struct ProtoMsg {
     ProtoTradeReady   tready;
     ProtoTradeConfirm tconfirm;
     ProtoTradeCommit  tcommit;
+    ProtoBreedOffer   boffer;
+    ProtoBreedReady   bready;
+    ProtoBreedConfirm bconfirm;
+    ProtoBreedDone    bdone;
   } p;
 };
 

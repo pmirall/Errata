@@ -15,6 +15,7 @@
 #include "../core/crc16.h"
 #include "../data/content_version.h"
 #include "battle_link.h"
+#include "breed_link.h"
 #include "trade_link.h"
 
 // -----------------------------------------------------------------------------
@@ -101,7 +102,7 @@ uint16_t session_team_crc(const uint8_t rec[BATTLE_TEAM_MAX][BUGW_BYTES])
 // -----------------------------------------------------------------------------
 static const char* const SS_NAMES[] = {
   "SS_IDLE", "SS_HELLO", "SS_CAPS", "SS_SESSION", "SS_TEAM", "SS_VERIFY",
-  "SS_BATTLE", "SS_ENDING", "SS_TRADE", "SS_CLOSED"
+  "SS_BATTLE", "SS_ENDING", "SS_TRADE", "SS_BREED", "SS_CLOSED"
 };
 static_assert(sizeof(SS_NAMES) / sizeof(SS_NAMES[0]) == (size_t)SS_STATE_COUNT,
               "a SessionState was added without its name");
@@ -118,7 +119,8 @@ static const char* const SD_NAMES[] = {
   "SD_OPEN_HASH", "SD_INPUTS", "SD_RULES", "SD_RESTATED", "SD_PROBE",
   "SD_ROUND_GAP", "SD_SETUP", "SD_END_DISAGREE", "SD_PEER_GOODBYE",
   "SD_INTERNAL", "SD_BO_ABORT", "SD_ACTION_REJECT", "SD_RX_BUDGET",
-  "SD_TX_BUDGET", "SD_BAND", "SD_VERDICT", "SD_OP", "SD_TRADE_REFUSED", "SD_TRADE_STORE"
+  "SD_TX_BUDGET", "SD_BAND", "SD_VERDICT", "SD_OP", "SD_TRADE_REFUSED", "SD_TRADE_STORE",
+  "SD_BREED_REFUSED", "SD_BREED_PLAN", "SD_BREED_STORE"
 };
 static_assert(sizeof(SD_NAMES) / sizeof(SD_NAMES[0]) == (size_t)SD_DETAIL_COUNT,
               "a SessionDetail was added without its name");
@@ -309,6 +311,7 @@ void session_init(Session& s, const SessionCfg& cfg)
   s.blog   = cfg.blog;
   s.llog   = cfg.llog;
   s.tl     = cfg.tl;
+  s.bl     = cfg.bl;
   s.op     = (cfg.op < (uint8_t)SOP_COUNT) ? cfg.op : (uint8_t)SOP_BATTLE;
   s.device_id   = cfg.device_id;
   s.nonce_local = cfg.nonce;
@@ -330,6 +333,24 @@ VReject session_set_trade(Session& s, const BugInstance& p)
   // THE ONE VALIDATOR, and ONLY it. validate_battle_ready() is deliberately not
   // called - see session.h. A trade is not a battle and a fainted Bug is a
   // legal thing to give away.
+  const VReject r = validate_bug(p);
+  if (r != VR_OK) return r;
+  pbw_encode(p, s.my_rec[0]);
+  s.my_count = 1u;
+  s.team_crc_local = session_team_crc(s.my_rec);
+  return VR_OK;
+}
+
+VReject session_set_breed(Session& s, const BugInstance& p)
+{
+  // THE SAME BODY AS session_set_trade() AND DELIBERATELY NOT A CALL TO IT.
+  // They agree today by accident of both putting one record in my_rec[0]; the
+  // trade's may grow a rule about the id it is journalling (it already carries
+  // out_id) and a breeding must not inherit it. Two short functions that say
+  // the same thing are cheaper than one that has to be read twice to find out
+  // which caller a line is for.
+  memset(s.my_rec, 0, sizeof s.my_rec);
+  s.my_count = 0u;
   const VReject r = validate_bug(p);
   if (r != VR_OK) return r;
   pbw_encode(p, s.my_rec[0]);
@@ -588,6 +609,7 @@ static bool band_acceptable(const Session& s, uint8_t lo, uint8_t hi)
 static void enter_operation(Session& s)
 {
   if (s.op == (uint8_t)SOP_TRADE) { trade_link_begin(s); return; }
+  if (s.op == (uint8_t)SOP_BREED) { breed_link_begin(s); return; }
   if (!load_own_team(s)) { session_close(s, SE_PROTOCOL, (uint8_t)SD_INTERNAL); return; }
   send_team(s);
   s.waiting_for = (uint8_t)PT_TEAM_VALIDATION;
@@ -719,7 +741,8 @@ bool session_reanswer_earlier_phase(Session& s, const ProtoMsg& m)
       // so the "we are past the handshake" test is spelt out rather than left
       // to a comparison that would be false for exactly one state.
       if (s.role != (uint8_t)SR_RESPONDER) return false;
-      if (s.state < (uint8_t)SS_TEAM && s.state != (uint8_t)SS_TRADE) return false;
+      if (s.state < (uint8_t)SS_TEAM && s.state != (uint8_t)SS_TRADE &&
+          s.state != (uint8_t)SS_BREED) return false;
       s.hs_reack++;
       session_note(s, LEK_REACK, m.type, 0u, 0u, m.seq);
       ProtoMsg r; session_prepare(s, r, PT_SESSION_ACCEPT, 0u);
@@ -807,6 +830,9 @@ static void dispatch(Session& s, const ProtoMsg& m)
     case SS_ENDING:
       link_on_msg(s, m);
       break;
+    case SS_BREED:
+      breed_link_on_msg(s, m);
+      break;
     case SS_TRADE:
       trade_link_on_msg(s, m);
       break;
@@ -877,6 +903,9 @@ static void resend(Session& s)
     case SS_BATTLE:
     case SS_ENDING:
       link_resend(s);
+      break;
+    case SS_BREED:
+      breed_link_resend(s);
       break;
     case SS_TRADE:
       trade_link_resend(s);

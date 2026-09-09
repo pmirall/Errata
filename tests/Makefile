@@ -310,7 +310,7 @@ $(BIN)/test_protocol:   $(OBJ)/protocol.o $(OBJ)/validate.o $(OBJ)/bug.o \
 # trial is a whole battle between two engines and not a script. box.o comes
 # along for nothing else than the shared fixture builder the validator test
 # already uses.
-$(BIN)/test_session:    $(OBJ)/session.o $(OBJ)/battle_link.o \
+$(BIN)/test_session:    $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/battle_link.o \
                         $(OBJ)/trade_link.o \
                         $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
                         $(OBJ)/validate.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
@@ -469,7 +469,7 @@ $(BIN)/test_discovery:  $(OBJ)/discovery.o $(OBJ)/activity.o $(OBJ)/crc16.o
 # so the claim "the session runs over the radio's ring with NO change to
 # session.cpp" is a thing this binary demonstrates rather than a sentence in a
 # header. That is why the session's whole object set is here.
-$(BIN)/test_link_transport: $(OBJ)/rxring.o $(OBJ)/session.o $(OBJ)/battle_link.o \
+$(BIN)/test_link_transport: $(OBJ)/rxring.o $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/battle_link.o \
                         $(OBJ)/trade_link.o \
                         $(OBJ)/protocol.o $(OBJ)/validate.o $(OBJ)/battle.o \
                         $(OBJ)/battle_ai.o $(OBJ)/bug.o $(OBJ)/evolution.o \
@@ -499,9 +499,27 @@ $(BIN)/test_breeding:   $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/validate.o \
 # pair it always drags (evolution.o + xp.o call each other); species.o is the
 # accessor layer AND the translation unit that instantiates every generated
 # table's compile-time guards.
+# P7-C5: THE BREEDING OVER THE REAL WIRE. Two endpoints, the real session, the
+# real loopback and the REAL game/breeding.cpp on both sides - because the one
+# thing this module can get wrong is computing two different children from what
+# is supposed to be one pair, and a test against a fake of either end could not
+# see it. Endpoint 0 files into the real Box; endpoint 1 is a model, which is
+# enough because the claim is about the PLAN and breed_link_plan() exposes it
+# on both sides.
+$(BIN)/test_breed_link: $(OBJ)/breed_link.o $(OBJ)/session.o $(OBJ)/battle_link.o \
+                        $(OBJ)/trade_link.o $(OBJ)/trade.o \
+                        $(OBJ)/breeding.o $(OBJ)/protocol.o $(OBJ)/rxring.o \
+                        $(OBJ)/transport_loopback.o $(OBJ)/battle.o \
+                        $(OBJ)/battle_ai.o $(OBJ)/box.o $(OBJ)/validate.o \
+                        $(OBJ)/species.o $(OBJ)/bug.o $(OBJ)/evolution.o \
+                        $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
+                        $(OBJ)/corruption.o $(OBJ)/inventory.o $(OBJ)/kv_mem.o \
+                        $(OBJ)/species_custom.o $(OBJ)/save_manager.o \
+                        $(OBJ)/migration.o
+
 $(BIN)/test_trade:      $(OBJ)/trade.o $(OBJ)/box.o $(OBJ)/save_manager.o \
                         $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/species_custom.o \
-                        $(OBJ)/trade_link.o $(OBJ)/session.o \
+                        $(OBJ)/trade_link.o $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/species.o \
                         $(OBJ)/battle_link.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
                         $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
                         $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/bug.o \
@@ -639,7 +657,7 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/screen_time.o $(OBJ)/screen_view.o \
                $(OBJ)/screen_setup.o $(OBJ)/onboarding.o \
                $(OBJ)/screen_link.o $(OBJ)/screen_diag.o \
-               $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/battle_link.o \
+               $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/battle_link.o \
                $(OBJ)/trade_link.o $(OBJ)/trade.o \
                $(OBJ)/protocol.o $(OBJ)/link_fake.o \
                $(OBJ)/screen_evolution.o $(OBJ)/screen_creator.o \
@@ -797,7 +815,7 @@ $(BIN)/screen_capture: $(OBJ)/test_screens_capture.o $(CAPTURE_OBJS) | $(BIN)
 # because the team the screen offers comes out of the tree's one Box.
 $(BIN)/test_link_screen: $(OBJ)/screen_link.o $(OBJ)/screen_battle.o \
                         $(OBJ)/battle_renderer.o $(OBJ)/xbm_mirror.o \
-                        $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/battle_link.o \
+                        $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/battle_link.o \
                         $(OBJ)/trade_link.o $(OBJ)/trade.o \
                         $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
                         $(OBJ)/validate.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \

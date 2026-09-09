@@ -641,8 +641,8 @@ fi
 # THE TWO LISTS BELOW ARE DEFINED ONCE AND USED BY ALL OF THEM. Gates 1, 2 and
 # 2b read the same names, because two lists that must agree is the disagreement
 # this project keeps finding.
-PURE_NET="protocol.h protocol.cpp session.h session.cpp battle_link.h battle_link.cpp trade_link.h trade_link.cpp transport.h transport_loopback.cpp net_classify.h net_classify.cpp wifi_scanner.h wifi_scanner.cpp rxring.h rxring.cpp discovery.h discovery.cpp creator_gate.h creator_gate.cpp creator_body.h creator_body.cpp creator_parse.h creator_parse.cpp"
-PURE_NET_CPP="protocol.cpp session.cpp battle_link.cpp trade_link.cpp transport_loopback.cpp net_classify.cpp wifi_scanner.cpp rxring.cpp discovery.cpp creator_gate.cpp creator_body.cpp creator_parse.cpp"
+PURE_NET="protocol.h protocol.cpp session.h session.cpp battle_link.h battle_link.cpp trade_link.h trade_link.cpp breed_link.h breed_link.cpp transport.h transport_loopback.cpp net_classify.h net_classify.cpp wifi_scanner.h wifi_scanner.cpp rxring.h rxring.cpp discovery.h discovery.cpp creator_gate.h creator_gate.cpp creator_body.h creator_body.cpp creator_parse.h creator_parse.cpp"
+PURE_NET_CPP="protocol.cpp session.cpp battle_link.cpp trade_link.cpp breed_link.cpp transport_loopback.cpp net_classify.cpp wifi_scanner.cpp rxring.cpp discovery.cpp creator_gate.cpp creator_body.cpp creator_parse.cpp"
 # transport_espnow.* is IMPURE and that is HONEST rather than a dodge: esp_now.h's
 # two callback typedefs have no user-context argument at all, so the sink a
 # callback posts into is forced to be file-scope. A device has one radio and a

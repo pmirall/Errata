@@ -382,6 +382,22 @@ ProtoErr proto_encode(const ProtoMsg& m, uint8_t* buf, size_t cap, size_t& n_out
     case PT_TRADE_COMMIT:
       put_u16(q + 2, m.p.tcommit.pair_crc);
       break;                                        // q[0..1] reserved
+    case PT_BREED_OFFER:
+      memcpy(q + 4, m.p.boffer.rec, (size_t)BUGW_BYTES);
+      break;                                        // q[0..3] reserved
+    case PT_BREED_READY:
+      q[0] = m.p.bready.verdict;
+      q[1] = m.p.bready.pair_reject;
+      put_u16(q + 2, m.p.bready.offer_crc_echo);
+      break;
+    case PT_BREED_CONFIRM:
+      q[0] = m.p.bconfirm.accept;
+      put_u16(q + 2, m.p.bconfirm.plan_crc);
+      break;
+    case PT_BREED_DONE:
+      q[0] = m.p.bdone.reject;
+      put_u16(q + 2, m.p.bdone.plan_crc);
+      break;                                        // q[1] reserved
     default:
       return PE_TYPE;         // unreachable: header_rules_ok() already refused
   }
@@ -569,6 +585,26 @@ ProtoErr proto_decode(const uint8_t* buf, size_t n, uint32_t expect_session,
     case PT_TRADE_COMMIT:
       if (!all_zero(q + 0, 2)) return PE_RESERVED;
       m.p.tcommit.pair_crc = get_u16(q + 2);
+      break;
+    case PT_BREED_OFFER:
+      if (!all_zero(q + 0, 4)) return PE_RESERVED;
+      // RAW, exactly as the trade's offer and TEAM_SUBMIT's records are.
+      memcpy(m.p.boffer.rec, q + 4, (size_t)BUGW_BYTES);
+      break;
+    case PT_BREED_READY:
+      m.p.bready.verdict        = q[0];
+      m.p.bready.pair_reject    = q[1];
+      m.p.bready.offer_crc_echo = get_u16(q + 2);
+      break;
+    case PT_BREED_CONFIRM:
+      if (q[1] != 0u) return PE_RESERVED;
+      m.p.bconfirm.accept   = q[0];
+      m.p.bconfirm.plan_crc = get_u16(q + 2);
+      break;
+    case PT_BREED_DONE:
+      if (q[1] != 0u) return PE_RESERVED;
+      m.p.bdone.reject   = q[0];
+      m.p.bdone.plan_crc = get_u16(q + 2);
       break;
     default:
       return PE_TYPE;         // unreachable: step 6 already refused
