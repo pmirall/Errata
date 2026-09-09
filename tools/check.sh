@@ -2560,6 +2560,20 @@ PY
 )
   [ -z "$n" ] || fail "a manual section has no content: $n"
 
+  # THE COMMITTED PDF MAY NOT DRIFT FROM ITS SOURCES. docs/manual/manual-draft.pdf
+  # is in git so the booklet can be read without a toolchain, and an artefact
+  # that cannot be compared to its input is a file that goes quietly stale -
+  # the same failure mode as the firmware version below and the screen SVGs
+  # above. The build is byte-reproducible (SOURCE_DATE_EPOCH), so the check is
+  # an exact compare rather than a heuristic. Skipped where typst is absent,
+  # because a gate nobody can satisfy is a gate people learn to disable.
+  if command -v typst >/dev/null 2>&1; then
+    "$ROOT/tools/build_manual.sh" --draft --verify >/dev/null \
+      || fail "docs/manual/manual-draft.pdf is stale (tools/build_manual.sh --draft)"
+  else
+    echo "check: typst not installed, committed manual PDF not verified"
+  fi
+
   # THE MANUAL'S FIRMWARE VERSION IS A FACT ABOUT THE PRODUCT, and it had
   # drifted: the booklet's back cover still said 0.2.0-dev against a tree at
   # 1.0.0-rc1. Nothing could see it, because product_facts.toml is data and

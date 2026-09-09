@@ -22,17 +22,27 @@
 #      then again with the blank leaves needed before the back cover.
 set -euo pipefail
 
+# THE BUILD IS BYTE-REPRODUCIBLE, and that is load-bearing rather than tidy:
+# docs/manual/manual-draft.pdf is COMMITTED so that reading the manual needs no
+# toolchain, and a committed artefact that cannot be compared to its source is
+# just a file that goes quietly stale. Typst stamps /CreationDate from the wall
+# clock unless SOURCE_DATE_EPOCH says otherwise, which alone made two builds of
+# identical input differ.
+export SOURCE_DATE_EPOCH=0
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANUAL="$ROOT/docs/manual"
 OUT="$MANUAL/out"
 MODE=draft
 WANT_PNG=0
+VERIFY=0
 
 for a in "$@"; do
   case "$a" in
     --draft) MODE=draft ;;
     --print) MODE=print ;;
     --png)   WANT_PNG=1 ;;
+    --verify) VERIFY=1 ;;
     *) echo "build_manual.sh: unknown argument $a" >&2; exit 2 ;;
   esac
 done
@@ -130,5 +140,24 @@ if [ "$WANT_PNG" -eq 1 ]; then
   python3 "$ROOT/tools/page_fill.py" "$OUT" || fail "orphan page(s); rebalance the section before them"
 fi
 
+# --- 6. the committed copy ----------------------------------------------------
+# docs/manual/manual-draft.pdf is in git. --verify rebuilds and compares instead
+# of writing, which is what tools/check.sh calls: the committed PDF may not
+# drift from the sources next to it.
+PUBLISHED="$MANUAL/manual-draft.pdf"
+if [ "$MODE" = draft ]; then
+  if [ "$VERIFY" -eq 1 ]; then
+    if ! cmp -s "$OUT/$NAME.pdf" "$PUBLISHED"; then
+      echo "MANUAL FAIL: docs/manual/manual-draft.pdf is stale." >&2
+      echo "             Rebuild it with tools/build_manual.sh --draft" >&2
+      exit 1
+    fi
+    echo "manual: committed PDF matches the sources"
+    exit 0
+  fi
+  cp "$OUT/$NAME.pdf" "$PUBLISHED"
+fi
+
 echo "manual: $NAME.pdf, $n pages (pad $pad), A6 105x148 mm + 3 mm bleed"
 echo "        $OUT/$NAME.pdf"
+[ "$MODE" = draft ] && echo "        published to docs/manual/manual-draft.pdf"

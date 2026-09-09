@@ -11,6 +11,18 @@ tools/build_manual.sh --print         # refuses to build with any hole left
 
 Output lands in `docs/manual/out/`, which is not tracked.
 
+**The built booklet is committed**, at `docs/manual/manual-draft.pdf`, so it can
+be read without installing anything. It is a DRAFT: every legal fact that is
+still missing prints as a black `TODO:` block, and `--print` refuses to build
+until they are filled in. Do not send it to a printer.
+
+A committed artefact that cannot be compared to its sources is a file that goes
+quietly stale, so the build is byte-reproducible - `SOURCE_DATE_EPOCH=0`,
+because Typst otherwise stamps the wall clock into `/CreationDate` and two
+builds of identical input differ. `tools/check.sh` rebuilds and compares, and
+fails if the committed PDF has drifted. A normal `--draft` build refreshes it
+for you; `--verify` compares instead of writing.
+
 ## Installing Typst
 
 Typst is a single static binary and is not vendored here.
