@@ -861,6 +861,7 @@ enum StrId : uint16_t {
   // ...and the corruption readout, spec section 55. The state lasted 24 h with
   // one line of onset text and no way to check it afterwards.
   STR_ST_CORRUPT,
+  STR_LK_BR_STAGE,      // a stage-0 Bug cannot breed, whatever the peer brings
   // The MANUAL screen (P10-C7). Two blocks beside one static QR.
   STR_MAN_TITLE,
   STR_MAN_HINT,
@@ -1595,6 +1596,7 @@ inline constexpr const char* const ES[] = {
   , /* STR_ITEM_BOOST */          "Listo para el combate"
   , /* STR_ITEM_EVOLVED */        "¡Algo está cambiando!"
   , /* STR_ST_CORRUPT */          "Corrupto"
+  , /* STR_LK_BR_STAGE */         "Ese bug es muy peque\xc3\xb1o a\xc3\xban"
   , /* STR_MAN_TITLE */           "MANUAL"
   , /* STR_MAN_HINT */            "Escanea para leerlo en el móvil."
 };

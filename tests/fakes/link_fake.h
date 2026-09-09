@@ -103,4 +103,12 @@ int      lf_trade_commits(void);             // times the commit hook ran and wo
 int      lf_trade_aborts(void);
 uint32_t lf_trade_out_id(void);              // what W1 recorded
 
+// The breeding hooks the LINK screen reaches through ui_breed_hooks().
+// The COMMIT is game/breeding.cpp's real one against the test's own Box;
+// only the flush is faked, because a screen binary has no NVS.
+uint32_t lf_breed_commits(void);
+uint32_t lf_breed_saves(void);
+void     lf_breed_force(uint8_t breed_reject);
+void     lf_breed_reset(void);
+
 #endif  // ER_TESTS_LINK_FAKE_H

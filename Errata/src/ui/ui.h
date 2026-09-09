@@ -472,7 +472,13 @@ uint32_t ui_link_nonce(void);
 //  device cannot trade" rather than as a fault.
 // -----------------------------------------------------------------------------
 struct TradeHooks;
+struct BreedHooks;          // networking/breed_link.h, same argument
 const TradeHooks* ui_trade_hooks(void);
+
+// The breeding's two, against the trade's five. networking/breed_link.h section
+// 1 argues the difference: a breeding creates and a trade moves, so there is no
+// journal here to open, judge or roll back.
+const BreedHooks* ui_breed_hooks(void);
 
 // persistence/save_manager.h's save_quarantine_mask(). game/trade.h takes it as
 // a PARAMETER and not an include, because the RULE ("a quarantined Bug may

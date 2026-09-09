@@ -138,6 +138,7 @@ ui_pet_name        ui/ui.cpp  link_fake.cpp  INJECTOR   One rung (a test-set str
 ui_pet_name_latin1 ui/ui.cpp  link_fake.cpp  INJECTOR   As ui_pet_name. THIS IS THE P10-C6 FUNCTION: the fake carried a stale copy and the firmware's own body was reachable by nothing. It is now gated on BOTH sides - the fake by check.sh section 1, the shipping body by check.sh section 10.
 ui_trade_hooks     ui/ui.cpp  link_fake.cpp  INJECTOR   A RAM PendingTrade; the shipping hooks write the flash journal and the Box header. tests/test_trade.cpp is where the store arms belong.
 ui_trade_quarantine ui/ui.cpp link_fake.cpp  INJECTOR   A test-set bitmask standing in for save_quarantine_mask().
+ui_breed_hooks     ui/ui.cpp  link_fake.cpp  INJECTOR   THE COMMIT IS THE REAL ONE: game/breeding.cpp's breed_commit() against the test's own bound Box, so a case that drives CRIAR to the end really does gain a Bug. Only the FLUSH differs - the fake counts, the shipping hook calls gs_save_box() - because a screen binary has no NVS. lf_breed_force() is the injector half, and it exists so BRD_BOX_FULL is reachable without filling ten slots.
 ui_link_battle_done         ui/ui.cpp link_fake.cpp RECORDER One-line forward into the REAL ui/screen_link.cpp, which this fake links. Identical on both sides.
 ui_link_battle_move_ms_left ui/ui.cpp link_fake.cpp RECORDER As ui_link_battle_done.
 ui_link_battle_pump         ui/ui.cpp link_fake.cpp RECORDER As ui_link_battle_done.

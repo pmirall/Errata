@@ -68,6 +68,7 @@
 #include "screen_network.h"  // network_screen_busy(): the power ladder's `held` input
 #include "screen_link.h"     // link_screen_busy() and the P7-C3 session seams
 #include "../game/trade.h"           // the P7-C4 journal, driven from here
+#include "../networking/breed_link.h"
 #include "../networking/trade_link.h" // TradeHooks: the screen's trade seam
 #include "../networking/net.h"
 #include "../networking/webui.h"      // web_pin() only - no network header comes with it
@@ -2278,6 +2279,38 @@ static void ui_tr_abort(void* ctx)
   PendingTrade t;
   trade_journal_idle(t);
   (void)ui_tr_store_journal(nullptr, t);
+}
+
+// -----------------------------------------------------------------------------
+//  THE BREEDING'S TWO. There are two and the trade has five, which is the whole
+//  difference between the operations stated in code: a breeding writes nothing
+//  until both people have agreed, and then writes ONE new Bug. There is no
+//  journal to open, no record to judge on arrival and nothing to roll back.
+//
+//  game/breeding.cpp performs NO I/O by contract - breed_commit() fills a Box
+//  slot and returns - so the flush is a separate hook and not an assumption.
+// -----------------------------------------------------------------------------
+static uint8_t ui_br_commit(void* ctx, const BreedPlan& plan, uint8_t& slot_out)
+{
+  (void)ctx;
+  return (uint8_t)breed_commit(plan, gt_now(), slot_out);
+}
+
+static bool ui_br_save(void* ctx)
+{
+  (void)ctx;
+  // THE CHILD MUST REACH FLASH BEFORE THE SCREEN CLAIMS IT. A Bug that exists
+  // only in RAM is one the next boot has never heard of, and the player would
+  // have watched it hatch.
+  return gs_save_box();
+}
+
+static void ui_br_abort(void* ctx) { (void)ctx; }
+
+const BreedHooks* ui_breed_hooks(void)
+{
+  static const BreedHooks H = { &ui_br_commit, &ui_br_save, &ui_br_abort, nullptr };
+  return &H;
 }
 
 const TradeHooks* ui_trade_hooks(void)

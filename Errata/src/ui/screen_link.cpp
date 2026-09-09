@@ -15,7 +15,9 @@
 #include "../networking/battle_link.h"
 #include "../networking/discovery.h"
 #include "../networking/session.h"
+#include "../networking/breed_link.h"   // the P7-C5 breeding driver
 #include "../networking/trade_link.h"   // the P7-C4 trade driver
+#include "../game/evolution.h"          // EVO_STATE_STAGE_MASK
 #include "../game/trade.h"                // trade_offer_check()
 #include "../data/species_table.h"        // the two species names on the review line
 #include "gfx.h"
@@ -69,6 +71,7 @@ static Session  s_sess;
 // are, and for the same reason networking/trade_link.h gives: two endpoints
 // share one host process and a module that held its own could not.
 static TradeLink s_tl;
+static BreedLink s_bl;
 static uint8_t   s_trade_slot = (uint8_t)BOX_SLOT_NONE;
 
 static uint8_t  s_mode      = LKM_BROWSE;
@@ -103,6 +106,16 @@ uint32_t link_trade_peer_id(void)  { return s_live ? s_sess.peer_device_id : 0u;
 uint8_t  link_trade_phase(void)    { return s_live ? s_tl.phase : (uint8_t)TLP_IDLE; }
 bool     link_trade_wants_consent(void) {
   return s_live && s_op == (uint8_t)LOP_TRADE && trade_link_wants_consent(s_sess);
+}
+uint8_t  link_breed_phase(void)    { return s_live ? s_bl.phase : (uint8_t)BLP_IDLE; }
+bool     link_breed_wants_consent(void) {
+  return s_live && s_op == (uint8_t)LOP_BREED && breed_link_wants_consent(s_sess);
+}
+const BreedPlan* link_breed_plan(void) {
+  return (s_live && s_op == (uint8_t)LOP_BREED) ? breed_link_plan(s_sess) : nullptr;
+}
+uint8_t link_breed_slot(void) {
+  return (s_live && s_op == (uint8_t)LOP_BREED) ? s_bl.slot : (uint8_t)BOX_SLOT_NONE;
 }
 
 uint8_t link_screen_session_state(void) {
@@ -151,7 +164,12 @@ bool link_screen_busy(void) { return link_is_busy(s_job); }
 //  it - and it is also what makes THIS line the one that has to move when
 //  breed_link.cpp lands, rather than something noticing on its own.
 // -----------------------------------------------------------------------------
-#define LK_SELF_CAPS  ((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE))
+// DISC_CAP_BREED JOINS THE WORD HERE AND NOT ONE COMMIT EARLIER. It was
+// deliberately absent for three phases because networking/breed_link.cpp did
+// not exist, and a beacon claiming an operation the device cannot perform is a
+// promise its own owner cannot keep. The module landed; the screen below can
+// now open a SOP_BREED session; so the bit is honest.
+#define LK_SELF_CAPS  ((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE | DISC_CAP_BREED))
 
 static void fill_self(DiscBeacon& b) {
   memset(&b, 0, sizeof b);
@@ -163,6 +181,11 @@ static void fill_self(DiscBeacon& b) {
   // accent lands. See ui.h and the note above ui_pet_name_latin1().
   ui_pet_name_latin1(b.name, sizeof b.name);
 }
+
+// EXPOSED FOR THE TESTS, because "this device advertises what it can do" is a
+// claim about a WORD OF BITS and a host binary has no radio to sniff it off.
+// Same reason link_trade_phase() and the rest are exported.
+void link_screen_self_beacon(DiscBeacon& b) { fill_self(b); }
 
 // -----------------------------------------------------------------------------
 //  THE PEER LIST
@@ -302,12 +325,31 @@ static bool open_session(void) {
   const DiscPeer* p = nth_qualified(s_cur);
   if (p == nullptr) { ui_toast(STR_LK_NOBODY); return false; }
 
-  const bool trading = (s_op == (uint8_t)LOP_TRADE);
+  const bool trading  = (s_op == (uint8_t)LOP_TRADE);
+  const bool breeding = (s_op == (uint8_t)LOP_BREED);
   BugInstance team[BATTLE_TEAM_MAX];
   uint8_t n = 0;
   uint8_t offer_slot = (uint8_t)BOX_SLOT_NONE;
 
-  if (trading) {
+  if (breeding) {
+    // THE ACTIVE BUG IS THE PARENT, and it is not a shortcut. A trade picks a
+    // slot the player is not attached to (pick_trade_slot() refuses the active
+    // one on purpose); a breeding is the opposite - the creature the player has
+    // been looking after is the one they mean, and it is the one on the home
+    // screen when they walked over to the other device.
+    offer_slot = box_active();
+    if (offer_slot >= (uint8_t)BOX_SLOTS) { ui_toast(STR_LK_NO_TEAM); return false; }
+    const BugInstance* mine = box_peek(offer_slot);
+    if (mine == nullptr) { ui_toast(STR_LK_NO_TEAM); return false; }
+    // ONE PAIR RULE IS KNOWABLE WITHOUT THE PEER and it is worth spending here:
+    // an egg or a stage-0 Bug cannot breed whatever the other device brings, so
+    // refusing now costs a toast instead of a radio session and nine seconds.
+    // Every other BreedReject needs two parents and is answered over the wire.
+    if ((uint8_t)(mine->evo_state & (uint8_t)EVO_STATE_STAGE_MASK) == 0u) {
+      ui_toast(STR_LK_BR_STAGE);
+      return false;
+    }
+  } else if (trading) {
     if (ui_trade_hooks() == nullptr) { ui_toast(STR_UI_SOON); return false; }
     uint8_t why = (uint8_t)TDR_NO_SLOT;
     offer_slot = pick_trade_slot(why);
@@ -356,11 +398,23 @@ static bool open_session(void) {
   // last cheap moment for two devices to discover they came here to do
   // different things: the beacon does not carry it (spec 43/44 lists what a
   // beacon may say and an intention is not on the list).
-  cfg.op        = trading ? (uint8_t)SOP_TRADE : (uint8_t)SOP_BATTLE;
-  cfg.tl        = trading ? &s_tl : nullptr;
+  cfg.op        = breeding ? (uint8_t)SOP_BREED
+                : trading  ? (uint8_t)SOP_TRADE
+                           : (uint8_t)SOP_BATTLE;
+  cfg.tl        = trading  ? &s_tl : nullptr;
+  cfg.bl        = breeding ? &s_bl : nullptr;
   session_init(s_sess, cfg);
 
-  if (trading) {
+  if (breeding) {
+    const BugInstance* mine = box_peek(offer_slot);
+    if (mine == nullptr) { ui_link_unbind(); ui_toast(STR_LK_NO_TEAM); return false; }
+    if (session_set_breed(s_sess, *mine) != VR_OK) {
+      ui_link_unbind();
+      ui_toast(STR_LK_TEAM_BAD);
+      return false;
+    }
+    breed_link_init(s_bl, s_sess, *ui_breed_hooks());
+  } else if (trading) {
     const BugInstance* mine = box_peek(offer_slot);
     if (mine == nullptr) { ui_link_unbind(); ui_toast(STR_LK_NO_TEAM); return false; }
     // session_set_trade() runs the ONE validator and NOT validate_battle_ready():
@@ -744,7 +798,8 @@ static void draw_wait(void) {
   // A IS OFFERED ONLY WHERE IT MEANS SOMETHING. Before the review there is
   // nothing for the player to agree to and a second A would be a second consent
   // for a session that already has ours.
-  gfx_affordance(link_trade_wants_consent() ? S(STR_AF_OK) : nullptr,
+  gfx_affordance((link_trade_wants_consent() || link_breed_wants_consent())
+                     ? S(STR_AF_OK) : nullptr,
                  S(STR_AF_CANCEL));
 }
 
@@ -818,30 +873,14 @@ static void choose_op(void) {
       s_mode = LKM_BROWSE;
       gfx_list_reset();
       return;
-    case LOP_BREED:
-      // CRIAR IS STILL AN ENTRY POINT AND NOT AN OPERATION. game/breeding.cpp
-      // is complete and tested, and no wire driver carries a breeding: the
-      // networking/breed_link.cpp P7-C5 planned WAS NEVER WRITTEN (it is not
-      // "not built" - no such file has ever existed in this tree), and
-      // DISC_CAP_BREED is therefore not claimed. Nothing is opened here and no
-      // radio state changes.
-      //
-      // THE ANSWER IS UNCONDITIONAL, AND THAT IS THE P10-C6 FIX. It used to be
-      // op_offered(s_op) ? STR_UI_SOON : STR_LK_NO_CAP - and LK_SELF_CAPS does
-      // not include DISC_CAP_BREED, so no Errata running any build of this
-      // firmware ever advertises it, op_offered(LOP_BREED) is false against
-      // every real peer, and the only sentence a player could ever get was
-      // "El otro no puede eso": this device blaming the other player's device
-      // for a feature NEITHER has. Two owners with two identical boards would
-      // each conclude the other one was broken or out of date. The honest
-      // branch, STR_UI_SOON, was unreachable in the release artefact, and the
-      // test that covered it reached it only by fabricating a peer claiming a
-      // capability no artefact can broadcast.
-      //
-      // The reason breeding does not run is LOCAL and SYMMETRIC, so the message
-      // says so whatever the peer advertises.
-      ui_toast(STR_UI_SOON);
-      return;
+    // LOP_BREED USED TO END HERE WITH ui_toast(STR_UI_SOON) AND A LONG
+    // ARGUMENT FOR WHY THAT WAS THE HONEST ANSWER: networking/breed_link.cpp
+    // did not exist, so DISC_CAP_BREED was not claimed, so op_offered() was
+    // false against every real peer, and the only sentence a player could get
+    // was "El otro no puede eso" - this device blaming the other for a feature
+    // NEITHER had. The module exists now and LK_SELF_CAPS claims the bit, so
+    // the row falls through to the ordinary path below and the capability check
+    // there means what it says.
     default:
       break;
   }
@@ -886,6 +925,11 @@ void link_input(Gesture g) {
       // to THESE TWO BUGS, which neither player could see until both records
       // were on the table. Nothing moves without it: networking/trade_link.cpp
       // applies only where it holds BOTH confirms.
+      if (g == GST_TAP_R && link_breed_wants_consent()) {
+        breed_link_accept(s_sess);
+        ui_request_frame();
+        return;
+      }
       if (g == GST_TAP_R && link_trade_wants_consent()) {
         trade_link_accept(s_sess);
         ui_request_frame();

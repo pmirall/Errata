@@ -659,7 +659,7 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/screen_link.o $(OBJ)/screen_diag.o \
                $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/battle_link.o \
                $(OBJ)/trade_link.o $(OBJ)/trade.o \
-               $(OBJ)/protocol.o $(OBJ)/link_fake.o \
+               $(OBJ)/protocol.o $(OBJ)/link_fake.o $(OBJ)/breeding.o \
                $(OBJ)/screen_evolution.o $(OBJ)/screen_creator.o \
                $(OBJ)/screen_network.o $(OBJ)/screen_encounter.o \
                $(OBJ)/screen_manual.o $(OBJ)/qr_paint.o $(OBJ)/qr.o \
@@ -826,7 +826,7 @@ $(BIN)/test_link_screen: $(OBJ)/screen_link.o $(OBJ)/screen_battle.o \
                         $(OBJ)/inventory.o $(OBJ)/corruption.o \
                         $(OBJ)/audio.o $(OBJ)/genome.o $(OBJ)/crc16.o \
                         $(OBJ)/rng.o $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o \
-                        $(OBJ)/link_fake.o
+                        $(OBJ)/link_fake.o $(OBJ)/breeding.o
 
 # THE BATTLE SCREEN'S BEHAVIOUR (P4-C4). Deliberately NOT $(SCREEN_OBJS): this
 # binary links the battle screen and the things it actually calls, and nothing

@@ -91,6 +91,8 @@
 #include <stdint.h>
 
 #include "../core/nt_types.h"
+#include "../networking/breed_link.h"   // BreedPlan, BreedLinkPhase
+#include "../networking/discovery.h"    // DiscBeacon
 
 // Spec section 42's menu, in the order it lists them. LOP_CANCEL is a row and
 // not an absence: a card with no way off it is a screen with a dead end.
@@ -180,6 +182,17 @@ uint8_t  link_trade_slot(void);        // the Box slot being offered, or BOX_SLO
 uint32_t link_trade_peer_id(void);     // the peer's device id, or 0
 uint8_t  link_trade_phase(void);       // TradeLinkPhase, TLP_IDLE when there is none
 bool     link_trade_wants_consent(void);   // both records validated; the player decides
+
+// The breeding's four, same shape and same reason: a host test has no radio and
+// no second board, so what the screen knows has to be readable.
+uint8_t          link_breed_phase(void);         // BreedLinkPhase
+bool             link_breed_wants_consent(void); // the pair is legal on both sides
+const BreedPlan* link_breed_plan(void);          // the child, or nullptr
+uint8_t          link_breed_slot(void);          // where ours landed, or BOX_SLOT_NONE
+
+// The beacon this device broadcasts. A host binary has no radio, so what the
+// board CLAIMS it can do is only checkable through a seam.
+void link_screen_self_beacon(DiscBeacon& b);
 
 // -----------------------------------------------------------------------------
 //  THE LINKED BATTLE'S SEAM (P7-C3)

@@ -660,47 +660,126 @@ TEST(an_operation_the_peer_cannot_do_is_refused_by_name_and_opens_nothing) {
   CHECK_EQ(g_backs, 0);
 }
 
-// A CAPABILITY THIS BUILD HAS NO PROTOCOL FOR STILL GETS THE HONEST ANSWER, and
-// after P7-C4 that is CRIAR and no longer INTERCAMBIO. game/breeding.cpp is
-// complete and tested; no wire driver carries a breeding, and the row says so
-// rather than opening a session that could only ever end in a timeout.
-// P10-C6: DRIVEN AGAINST A PEER A REAL BOARD CAN BE, WHICH IS THE WHOLE POINT.
-// This case used to fabricate a peer advertising DISC_CAP_BREED - a beacon no
-// artefact can produce, since LK_SELF_CAPS is BATTLE|TRADE - so it reached a
-// branch the release build could never take, while the sentence every actual
-// player got ("El otro no puede eso", this device blaming the other player's
-// device for a feature neither has) was asserted nowhere. The refusal is
-// unconditional now: the reason breeding does not run is local and symmetric.
-TEST(a_capability_this_build_has_no_protocol_for_says_so_and_opens_nothing) {
-  // Both peers, the one a board really is and the impossible one, must answer
-  // the same way - otherwise the message is about the peer again.
-  const uint16_t kCaps[2] = {
-    (uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE),                    // a real board
-    (uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE | DISC_CAP_BREED)    // a future one
-  };
-  for (uint8_t c = 0; c < 2u; ++c) {
-    harness_reset(0x11110000u, 0x22220000u);
-    see_peer(kCaps[c], -40, 0u);
-    link_input(GST_TAP_R);
-    while (link_screen_op() != (uint8_t)LOP_BREED) link_input(GST_TAP_L);
-    g_toast = STR_EMPTY;
-    link_input(GST_TAP_R);
-    CHECK_EQ(g_toast, STR_UI_SOON);
-    CHECK(g_toast != STR_LK_NO_CAP);
-    CHECK_EQ(lf_binds(), 0);
-    CHECK_EQ(link_screen_session_state(), (uint8_t)SS_IDLE);
-    CHECK_EQ(link_screen_mode(), (uint8_t)LKM_CARD);
+// CRIAR OPENS A BREEDING NOW, AND THIS CASE REPLACES THE ONE THAT ASSERTED IT
+// COULD NOT. That case was called
+// `a_capability_this_build_has_no_protocol_for_says_so_and_opens_nothing` and
+// it was CORRECT for three phases: networking/breed_link.cpp did not exist,
+// LK_SELF_CAPS was BATTLE|TRADE, and the row answered STR_UI_SOON because the
+// honest sentence was a local one - "not built here" rather than "the other
+// device cannot". The module landed, the capability is claimed, and an
+// assertion that the feature is missing is now a test that would FAIL on the
+// fix. It is replaced rather than deleted: what it really guarded is that the
+// row does not open a session it cannot finish, and that is still checked - by
+// driving it to a session that CAN finish.
+// A GROWN PARENT. box_new_bug() takes evo_state from the species row and the
+// harness fills the Box with base-stage starters, so its active Bug is stage 0
+// - which cannot breed, whatever the peer brings. That is the subject of the
+// case BELOW; this one needs a Bug that CAN, so it grows the active one first.
+// THE SPECIES IS FOUND, NOT THE FIELD FORCED. The first draft of this just set
+// evo_state to stage 1 on the starter already there, and validate_bug() refused
+// it (STR_LK_TEAM_BAD) - correctly: a stage byte that disagrees with its
+// species row is not a grown Bug, it is a corrupt one. So a species whose ROW
+// is past stage 0 is looked up and a real Bug of it is filed instead.
+static void grow_the_active_bug(void) {
+  uint8_t grown = 0u;
+  for (uint8_t id = 1u; id <= (uint8_t)SPECIES_TABLE_COUNT && grown == 0u; ++id) {
+    const SpeciesDef* sp = species_get(id);
+    if (sp != nullptr && (uint8_t)(sp->stage & (uint8_t)EVO_STATE_STAGE_MASK) > 0u &&
+        sp->compat_group != 0u)
+      grown = id;
   }
-  // ANTI-VACUITY: STR_LK_NO_CAP is still the answer where it is TRUE - a peer
-  // that really cannot trade. Without this the case above would pass with the
-  // capability check deleted from the whole screen.
+  CHECK(grown != 0u);
+  if (grown == 0u) return;
+  Genome gen;
+  memset(&gen, 0, sizeof gen);
+  gen.magic_ver  = GENOME_MAGIC_VER;
+  gen.lineage_id = 0x0BADF00Du;
+  gen.g0 = 0x1234u; gen.g1 = 0x5678u; gen.g2 = 0x9ABCu;
+  gen.generation = 3;
+  genome_seal(gen);
+  const uint8_t slot = box_new_bug(grown, 14u, ORIGIN_STARTER, gen, 0x51DE9001u, 1000u);
+  CHECK(slot != BOX_SLOT_NONE);
+  if (slot == BOX_SLOT_NONE) return;
+  BugInstance* p = box_slot(slot);
+  if (p != nullptr)
+    for (uint8_t c = 0; c < ER_CARE_COUNT; ++c) p->care[c] = ER_CARE_MILLI_MAX;
+  CHECK(box_set_active(slot));
+}
+
+TEST(criar_opens_a_breeding_session_against_a_peer_that_can_breed) {
   harness_reset(0x11110000u, 0x22220000u);
-  see_peer((uint16_t)DISC_CAP_BATTLE, -40, 0u);
+  grow_the_active_bug();
+  see_peer((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE | DISC_CAP_BREED), -40, 0u);
   link_input(GST_TAP_R);
-  while (link_screen_op() != (uint8_t)LOP_TRADE) link_input(GST_TAP_L);
+  while (link_screen_op() != (uint8_t)LOP_BREED) link_input(GST_TAP_L);
+  g_toast = STR_EMPTY;
+  link_input(GST_TAP_R);
+
+  // A REAL SESSION, FOR THE RIGHT OPERATION. Before this commit the same three
+  // gestures produced a toast and nothing else.
+  CHECK_EQ(g_toast, STR_EMPTY);
+  CHECK_EQ(lf_binds(), 1);
+  CHECK(link_screen_session_state() != (uint8_t)SS_IDLE);
+  CHECK_EQ(link_screen_mode(), (uint8_t)LKM_WAIT);
+  CHECK_EQ((int)link_screen_op(), (int)LOP_BREED);
+
+  // AND THE BREEDING HAS NOT STARTED YET, WHICH IS RIGHT. The first draft
+  // asserted BLP_OFFERED here and was wrong about the protocol, not about the
+  // screen: breed_link_begin() runs from session.cpp's enter_operation(), and
+  // that is reached when the HANDSHAKE has agreed the operation - two frames
+  // and a peer later. At the instant a player presses CRIAR there is a session
+  // for a breeding and no breeding yet.
+  CHECK_EQ((int)link_breed_phase(), (int)BLP_IDLE);
+  CHECK(link_breed_plan() == nullptr);
+  CHECK(!link_breed_wants_consent());
+}
+
+// AND THE CAPABILITY CHECK STILL MEANS SOMETHING. A peer that cannot breed is
+// refused by name and opens nothing - which is the half of the old case that
+// was never about breeding at all, kept because deleting it would leave
+// op_offered() unguarded for the row that just started using it.
+// AN EGG OR A BABY CANNOT BREED AND THE DEVICE SAYS SO WITHOUT A RADIO. Every
+// other BreedReject needs two parents and is answered over the wire; this one
+// is knowable alone, so spending it here costs a toast instead of a session and
+// nine seconds of a player watching a spinner.
+TEST(a_stage_zero_bug_is_refused_before_any_radio_is_touched) {
+  harness_reset(0x11110000u, 0x22220000u);       // starters, stage 0 by construction
+  see_peer((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE | DISC_CAP_BREED), -40, 0u);
+  link_input(GST_TAP_R);
+  while (link_screen_op() != (uint8_t)LOP_BREED) link_input(GST_TAP_L);
+  g_toast = STR_EMPTY;
+  link_input(GST_TAP_R);
+  CHECK_EQ(g_toast, STR_LK_BR_STAGE);
+  CHECK_EQ(lf_binds(), 0);                        // the radio was never bound
+  CHECK_EQ(link_screen_session_state(), (uint8_t)SS_IDLE);
+  CHECK_EQ(link_screen_mode(), (uint8_t)LKM_CARD);
+}
+
+TEST(a_peer_that_cannot_breed_is_refused_by_name_and_opens_nothing) {
+  harness_reset(0x11110000u, 0x22220000u);
+  grow_the_active_bug();
+  see_peer((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE), -40, 0u);
+  link_input(GST_TAP_R);
+  while (link_screen_op() != (uint8_t)LOP_BREED) link_input(GST_TAP_L);
   g_toast = STR_EMPTY;
   link_input(GST_TAP_R);
   CHECK_EQ(g_toast, STR_LK_NO_CAP);
+  CHECK_EQ(lf_binds(), 0);
+  CHECK_EQ(link_screen_session_state(), (uint8_t)SS_IDLE);
+  CHECK_EQ(link_screen_mode(), (uint8_t)LKM_CARD);
+}
+
+// AND THIS DEVICE ADVERTISES WHAT IT CAN ACTUALLY DO. LK_SELF_CAPS is what a
+// board broadcasts; the old build left DISC_CAP_BREED out of it deliberately,
+// so no Errata ever offered a breeding to anybody. A claim without a driver is
+// a promise its owner cannot keep, so the bit and the module ship together.
+TEST(this_build_advertises_the_breeding_it_can_now_perform) {
+  harness_reset(0x11110000u, 0x22220000u);
+  DiscBeacon b;
+  link_screen_self_beacon(b);
+  CHECK((b.caps & (uint16_t)DISC_CAP_BREED) != 0u);
+  CHECK((b.caps & (uint16_t)DISC_CAP_BATTLE) != 0u);
+  CHECK((b.caps & (uint16_t)DISC_CAP_TRADE) != 0u);
 }
 
 // =============================================================================

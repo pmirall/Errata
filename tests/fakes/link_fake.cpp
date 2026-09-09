@@ -11,6 +11,8 @@
 #include "game/trade.h"
 #include "networking/discovery.h"
 #include "networking/protocol.h"
+#include "game/breeding.h"
+#include "networking/breed_link.h"
 #include "networking/trade_link.h"
 #include "networking/transport.h"
 #include "core/utf8.h"
@@ -285,6 +287,39 @@ static const TradeHooks g_trade_hooks = {
 };
 
 const TradeHooks* ui_trade_hooks(void)  { return &g_trade_hooks; }
+
+// THE BREEDING'S TWO, AND THE COMMIT IS THE REAL ONE. game/breeding.cpp's
+// breed_commit() writes into whatever Box box_bind() bound, which in a screen
+// test is the test's own - so a case that drives CRIAR to the end really does
+// gain a Bug, and "the child reached the Box" is checkable rather than assumed.
+// Only the FLUSH is faked, because a screen binary has no NVS.
+static uint32_t g_breed_commits = 0;
+static uint32_t g_breed_saves   = 0;
+static uint8_t  g_breed_force   = (uint8_t)BRD_OK;
+
+static uint8_t lf_breed_commit(void* ctx, const BreedPlan& plan, uint8_t& slot_out)
+{
+  (void)ctx;
+  if (g_breed_force != (uint8_t)BRD_OK) return g_breed_force;
+  const uint8_t r = (uint8_t)breed_commit(plan, 1700000000u, slot_out);
+  if (r == (uint8_t)BRD_OK) ++g_breed_commits;
+  return r;
+}
+static bool lf_breed_save(void* ctx)  { (void)ctx; ++g_breed_saves; return true; }
+static void lf_breed_abort(void* ctx) { (void)ctx; }
+
+static const BreedHooks g_breed_hooks = {
+  &lf_breed_commit, &lf_breed_save, &lf_breed_abort, nullptr
+};
+
+const BreedHooks* ui_breed_hooks(void)  { return &g_breed_hooks; }
+
+uint32_t lf_breed_commits(void) { return g_breed_commits; }
+uint32_t lf_breed_saves(void)   { return g_breed_saves; }
+void     lf_breed_force(uint8_t r) { g_breed_force = r; }
+void     lf_breed_reset(void) {
+  g_breed_commits = 0; g_breed_saves = 0; g_breed_force = (uint8_t)BRD_OK;
+}
 uint16_t ui_trade_quarantine(void)      { return g_quarantine; }
 
 void lf_trade_reset(void)
