@@ -1,6 +1,6 @@
 # The creature style guide
 
-**What this is.** The rules that decide whether a 24x24 grid looks like a Pebble.
+**What this is.** The rules that decide whether a 24x24 grid looks like a Bug.
 They are not checked by anything, and they cannot be: `tools/sprites/README.md`
 says so in as many words — *"The pipeline cannot tell you whether a body looks
 like a creature. A 24x24 of noise passes every check in this directory."*
@@ -21,7 +21,7 @@ can go and check.
 
 ---
 
-## 1. What a Pebble is, visually
+## 1. What a Bug is, visually
 
 > **A solid shape with holes punched in it, that fails a little more at each
 > stage.**
@@ -31,7 +31,7 @@ That is the whole language. It is not a decorative choice: it is what a 1-bit
 consequence of it.
 
 The fiction (§0 of the product spec) asks for a computer bug — a *defect*, not an
-animal. The roster answers that by making **damage the growth axis**. A Pebble
+animal. The roster answers that by making **damage the growth axis**. A Bug
 does not get bigger or angrier from stage 0 to stage 2. It gets **more broken**,
 inside the same silhouette and the same 24x24 box.
 
@@ -245,7 +245,7 @@ invisible there, it is not a mechanic.
 ## 6. What this means for the creator (P8)
 
 The mobile sprite editor ships a 24x24 grid to players. The five laws are what
-separates a player's Pebble from a 24x24 of noise, and three of them can be
+separates a player's Bug from a 24x24 of noise, and three of them can be
 enforced or nudged in the editor cheaply:
 
 - **one mass** — the editor already needs a connectivity count; show it;
@@ -253,7 +253,7 @@ enforced or nudged in the editor cheaply:
   enclosed hole, so show the player which holes will blink;
 - **nothing is one pixel** — flag hairlines the way `--self-check` does.
 
-Growth-by-degradation does not apply: a custom Pebble has one stage.
+Growth-by-degradation does not apply: a custom Bug has one stage.
 
 ---
 

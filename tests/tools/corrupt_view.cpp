@@ -45,7 +45,7 @@
 #include <string.h>
 
 #include "data/sprites.h"
-#include "data/sprites_pebbles.h"
+#include "data/sprites_bugs.h"
 #include "ui/corrupt_fx.h"
 
 // The panel, as ui/render.cpp sees it.
@@ -161,7 +161,7 @@ static void fb_print(const CfxRect& box, bool mark)
 // cfx_rows().
 static SpriteRef place(uint8_t sid, uint8_t frame, int x, CfxRect& box)
 {
-  const uint8_t set = (uint8_t)(PB_SPRITE_BODY_FIRST + (sid - 1u));
+  const uint8_t set = (uint8_t)(ER_SPRITE_BODY_FIRST + (sid - 1u));
   const SpriteRef s = sprite_frame(set, frame);
   const Ink k = scan_ink(s);
   int y = VIEW_FLOOR_Y - k.b - 1;
@@ -177,13 +177,13 @@ static SpriteRef place(uint8_t sid, uint8_t frame, int x, CfxRect& box)
 
 static void show_species(uint8_t sid, int want_slots)
 {
-  if (sid < 1u || sid > (uint8_t)PB_SPRITE_BODY_COUNT) sid = 1u;
-  const uint8_t set = (uint8_t)(PB_SPRITE_BODY_FIRST + (sid - 1u));
+  if (sid < 1u || sid > (uint8_t)ER_SPRITE_BODY_COUNT) sid = 1u;
+  const uint8_t set = (uint8_t)(ER_SPRITE_BODY_FIRST + (sid - 1u));
   const uint32_t seed = 0xA5C3F17Bu ^ (0x9E3779B9u * sid);
   const int x = VIEW_STAGE_L + 40;
 
   printf("species %u  atlas set %u  %s   seed 0x%08X\n",
-         (unsigned)sid, (unsigned)set, PB_SPRITE_NAMES[set], (unsigned)seed);
+         (unsigned)sid, (unsigned)set, ER_SPRITE_NAMES[set], (unsigned)seed);
   printf("gate: %u ms slots, about 1 in %u lit\n\n",
          (unsigned)CFX_GLITCH_SLOT_MS, (unsigned)CFX_GLITCH_ONE_IN);
 

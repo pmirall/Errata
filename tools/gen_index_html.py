@@ -3,7 +3,7 @@
 """
 gen_index_html.py - THE CREATOR PAGE PIPELINE (plan P8-C4, spec sections 33-38).
 
-    web/creator/index.html        ->   Pebblebol/src/data/index_html.h
+    web/creator/index.html        ->   Errata/src/data/index_html.h
     web/creator/app.js
     web/creator/sprite_editor.js
 
@@ -91,9 +91,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 SRC = os.path.join(ROOT, "web", "creator")
-DATA = os.path.join(ROOT, "Pebblebol", "src", "data")
-CONFIG_H = os.path.join(ROOT, "Pebblebol", "src", "core", "config.h")
-VERSION_H = os.path.join(ROOT, "Pebblebol", "src", "core", "version.h")
+DATA = os.path.join(ROOT, "Errata", "src", "data")
+CONFIG_H = os.path.join(ROOT, "Errata", "src", "core", "config.h")
+VERSION_H = os.path.join(ROOT, "Errata", "src", "core", "version.h")
 OUT = os.path.join(DATA, "index_html.h")
 
 # The raw-string delimiter the emitted header uses. Chosen so that the
@@ -259,7 +259,7 @@ def build_page():
 # =============================================================================
 
 BANNER = """// =============================================================================
-//  PEBBLEBOL - data/index_html.h
+//  ERRATA - data/index_html.h
 //
 //  GENERATED FILE. Do not edit: tools/gen_index_html.py rewrites it from
 //  web/creator/*. `tools/gen_index_html.py --check` fails the gate if this

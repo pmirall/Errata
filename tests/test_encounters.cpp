@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL host test - test_encounters.cpp
+//  ERRATA host test - test_encounters.cpp
 //  THE ENCOUNTER ROLL (game/encounters.h, spec sections 20 and 22, P5-C3).
 //
 //  THE RULES THIS FILE OBEYS, copied from tests/test_validate.cpp because this
@@ -539,7 +539,7 @@ TEST(a_wild_species_always_matches_its_rows_category_mask_and_rarity_band) {
 
 TEST(a_wild_level_is_the_active_level_plus_or_minus_two_and_clamped_to_the_band) {
   // Both ends of the clamp, and the spread itself. The clamp is what keeps
-  // every capture inside validate_pebble()'s level band.
+  // every capture inside validate_bug()'s level band.
   for (uint8_t lv = 1; lv <= (uint8_t)XP_LEVEL_MAX; ++lv) {
     EncounterInput in = mk_in((uint8_t)NET_CAT_HOME);
     in.active_level = lv;
@@ -803,19 +803,19 @@ TEST(encounter_event_of_refuses_everything_that_is_not_a_real_special) {
 //  it are tested here, where they are produced. P9-C5 grows game/corruption.cpp
 //  with the EFFECTS and keeps these.
 // =============================================================================
-static void mk_pebble(PebbleInstance& p, uint8_t species, uint8_t level)
+static void mk_bug(BugInstance& p, uint8_t species, uint8_t level)
 {
   memset(&p, 0, sizeof p);
-  p.magic      = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic      = (uint16_t)BUG_MAGIC;
+  p.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   p.species_id = species;
   p.id         = 0x5EED0003u;
   p.level      = level;
 }
 
-TEST(corrupting_a_pebble_arms_a_twenty_four_hour_deadline_and_it_expires_on_time) {
-  PebbleInstance p;
-  mk_pebble(p, 1, 5);
+TEST(corrupting_a_bug_arms_a_twenty_four_hour_deadline_and_it_expires_on_time) {
+  BugInstance p;
+  mk_bug(p, 1, 5);
   const uint32_t t0 = 1700000000u;
   CHECK(!cor_is_corrupted(p));
 
@@ -842,8 +842,8 @@ TEST(an_uncalibrated_clock_can_neither_arm_nor_expire_a_corruption) {
   // game/cooldowns.h met the same problem and answered it with a per-boot RAM
   // table; corruption answers it by not arming at all, because a 24 h effect
   // has nowhere to live on a device with no idea what 24 h is.
-  PebbleInstance p;
-  mk_pebble(p, 1, 5);
+  BugInstance p;
+  mk_bug(p, 1, 5);
   CHECK(!cor_apply(p, 3600u, (uint8_t)CAL_UNSET));
   CHECK(!cor_is_corrupted(p));
   CHECK_EQ(p.corrupt_until_epoch, 0u);
@@ -862,8 +862,8 @@ TEST(an_uncalibrated_clock_can_neither_arm_nor_expire_a_corruption) {
 }
 
 TEST(re_corrupting_refreshes_the_deadline_and_never_shortens_it) {
-  PebbleInstance p;
-  mk_pebble(p, 1, 5);
+  BugInstance p;
+  mk_bug(p, 1, 5);
   const uint32_t t0 = 1700000000u;
   CHECK(cor_apply(p, t0, (uint8_t)CAL_USER));
   const uint32_t first = p.corrupt_until_epoch;
@@ -881,9 +881,9 @@ TEST(re_corrupting_refreshes_the_deadline_and_never_shortens_it) {
   CHECK(cor_is_corrupted(p));
 }
 
-TEST(the_cure_needs_no_clock_and_a_corrupted_pebble_with_no_deadline_is_freed) {
-  PebbleInstance p;
-  mk_pebble(p, 1, 5);
+TEST(the_cure_needs_no_clock_and_a_corrupted_bug_with_no_deadline_is_freed) {
+  BugInstance p;
+  mk_bug(p, 1, 5);
   CHECK(cor_apply(p, 1700000000u, (uint8_t)CAL_USER));
   // The item route works on an uncalibrated device: the cure must never be the
   // thing that gets stuck (spec section 47).
@@ -902,7 +902,7 @@ TEST(the_cure_needs_no_clock_and_a_corrupted_pebble_with_no_deadline_is_freed) {
 }
 
 TEST(an_empty_slot_is_never_ill) {
-  PebbleInstance p;
+  BugInstance p;
   memset(&p, 0, sizeof p);
   CHECK(!cor_apply(p, 1700000000u, (uint8_t)CAL_USER));
   CHECK(!cor_is_corrupted(p));

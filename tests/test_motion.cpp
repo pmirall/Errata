@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_motion.cpp
+//  Errata host tests - test_motion.cpp
 //  THE MOTION CAPABILITY (P6-C1; hardware/motion.h + hardware/motion_null.cpp).
 //
 //  There is no IMU on this board (audit section 6) and spec section 68 r3

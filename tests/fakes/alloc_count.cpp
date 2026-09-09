@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - fakes/alloc_count.cpp
+//  Errata host tests - fakes/alloc_count.cpp
 //  See fakes/alloc_count.h. Kept in its own translation unit on purpose.
 // =============================================================================
 #include "alloc_count.h"

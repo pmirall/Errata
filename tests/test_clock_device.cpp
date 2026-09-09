@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_clock_device.cpp
+//  Errata host tests - test_clock_device.cpp
 //
 //  THE DEVICE BRANCH OF gt_mono_ms(), WHICH NO HOST BINARY COULD SEE UNTIL NOW.
 //

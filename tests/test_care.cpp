@@ -1,20 +1,20 @@
 // =============================================================================
-//  Pebblebol host tests - test_care.cpp
-//  Spec section 27, "Pebbles should be inconveniently unhappy at worst, not
+//  Errata host tests - test_care.cpp
+//  Spec section 27, "Bugs should be inconveniently unhappy at worst, not
 //  permanently destroyed". P2-C7 removed death outright and gave HEALTH a
 //  floor; this pins both, in the only way that matters - by playing the worst
-//  possible player for a month and checking the pebble is still there.
+//  possible player for a month and checking the bug is still there.
 //
 //  P3-C1 moved the whole model onto the HOURS scale of spec section 27 and
 //  added the five cases the plan names for it: eight ignored hours are still a
-//  happy pebble, a day of neglect never crosses the floor, a week in the Box
+//  happy bug, a day of neglect never crosses the floor, a week in the Box
 //  comes back full, one big catch-up equals many small ones, and the sleep
 //  window really does at least halve the decay. Plus one the plan implies and
 //  the balance table states outright: a refused action is a toast, not a fine.
 //
 //  P3-C2b deleted the light mechanic and put the sleep window on the
 //  approximated daylight table (game/daylight.h). Sections 12 to 15 below are
-//  the behaviour that replaces it: the pebble sleeps by the sun, three nudges
+//  the behaviour that replaces it: the bug sleeps by the sun, three nudges
 //  inside ten seconds wake it for a player who wants to play at night, it
 //  relapses when left alone again, and none of that costs a stat.
 // =============================================================================
@@ -26,6 +26,7 @@
 #include "data/balance.h"
 #include "data/species_table.h"
 #include "game/sim.h"
+#include "game/xp.h"       // xp_minigame_amount(): the floor must still pay one
 #include "game/genome.h"
 #include "game/box.h"
 #include "persistence/save_schema.h"
@@ -34,15 +35,15 @@
 #define CARE_EPOCH0  1700000000u
 #define CARE_DAYS    30u
 
-static PebbleInstance g_care;
+static BugInstance g_care;
 
 // A hatched baby with a valid clock at `hour` local on day `doy`, and nothing
 // else. Day 100 is mid-April: sunrise about 07:20, sunset about 20:55, so
 // bedtime lands about 22:25 (game/daylight.h).
-static void care_pet_at_day(PebbleInstance& p, uint8_t hour, uint16_t doy) {
+static void care_pet_at_day(BugInstance& p, uint8_t hour, uint16_t doy) {
   genome_seed(CARE_SEED);
   sim_seed(CARE_SEED);
-  memset(&p, 0, sizeof(PebbleInstance));
+  memset(&p, 0, sizeof(BugInstance));
   sim_bind(p);
   sim_new_pet(genome_genesis(), CARE_EPOCH0, 0);
   sim_hatch();
@@ -57,11 +58,11 @@ static void care_pet_at_day(PebbleInstance& p, uint8_t hour, uint16_t doy) {
   sim_set_env(env);
 }
 
-static void care_pet_at(PebbleInstance& p, uint8_t hour) {
+static void care_pet_at(BugInstance& p, uint8_t hour) {
   care_pet_at_day(p, hour, 100);
 }
 
-// The original fixture: the same pebble, at 10:00.
+// The original fixture: the same bug, at 10:00.
 static void care_pet(void) { care_pet_at(g_care, 10); }
 
 // Advances the wall clock and the sim by one minute, keeping SimEnv in step.
@@ -103,7 +104,7 @@ TEST(care_thirty_days_of_neglect_never_kills_the_pet) {
   CHECK_EQ((int)min_health, (int)HEALTH_FLOOR_PCT);
   CHECK_EQ(sim_stat_pct(ST_HUNGER), 0);
   CHECK_EQ(sim_stat_pct(ST_HAPPINESS), 0);
-  // And it grew up regardless: a neglected pebble is still a pebble.
+  // And it grew up regardless: a neglected bug is still a bug.
   CHECK(sim_view()->stage > stage0);
   CHECK(sim_view()->stage < STAGE_COUNT);
 }
@@ -154,7 +155,7 @@ TEST(care_a_month_offline_also_stops_at_the_floor) {
 
 // -----------------------------------------------------------------------------
 //  4. Health recovers once the core stats are back up
-//     A floor that only ever floors would be a different bug: the pebble has to
+//     A floor that only ever floors would be a different bug: the bug has to
 //     be able to come back from it.
 // -----------------------------------------------------------------------------
 TEST(care_health_regenerates_after_the_neglect_ends) {
@@ -176,13 +177,13 @@ TEST(care_health_regenerates_after_the_neglect_ends) {
 }
 
 // -----------------------------------------------------------------------------
-//  5. Swapping the active Pebble is not a way to farm (plan P2-C10)
-//     sim_switch() resets the PER-PEBBLE accumulators and keeps the DEVICE-WIDE
-//     hourly gain ledger, so ten Pebbles share one hour's points.
+//  5. Swapping the active Bug is not a way to farm (plan P2-C10)
+//     sim_switch() resets the PER-BUG accumulators and keeps the DEVICE-WIDE
+//     hourly gain ledger, so ten Bugs share one hour's points.
 // -----------------------------------------------------------------------------
-static PebbleInstance g_other;
+static BugInstance g_other;
 
-TEST(care_switching_the_active_pebble_keeps_the_gain_ledger) {
+TEST(care_switching_the_active_bug_keeps_the_gain_ledger) {
   care_pet();
 
   // Spend the satiety budget down on the pet we are holding.
@@ -192,25 +193,25 @@ TEST(care_switching_the_active_pebble_keeps_the_gain_ledger) {
   const uint16_t left_after_meal = sim_gain_left(ST_HUNGER);
   CHECK(left_after_meal < (uint16_t)GAIN_CAP_HUNGER_H);
 
-  // A second Pebble, straight out of the Box.
+  // A second Bug, straight out of the Box.
   memset(&g_other, 0, sizeof g_other);
-  g_other.magic      = (uint16_t)PEBBLE_MAGIC;
-  g_other.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  g_other.magic      = (uint16_t)BUG_MAGIC;
+  g_other.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   g_other.species_id = 1;
   g_other.id         = 0x2222u;
   g_other.level      = 1;
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
-    g_other.care[i] = (int32_t)PB_CARE_MILLI_MAX;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
+    g_other.care[i] = (int32_t)ER_CARE_MILLI_MAX;
   }
   g_other.care[CARE_HUNGER] = 0;
 
   sim_switch(g_other);
-  CHECK_EQ(sim_pebble(), &g_other);
+  CHECK_EQ(sim_bug(), &g_other);
 
   // The ledger did NOT restart with the new creature: that is the whole point.
   CHECK_EQ(sim_gain_left(ST_HUNGER), left_after_meal);
 
-  // Per-Pebble state DID: the new Pebble carries no care quality, no poop and
+  // Per-Bug state DID: the new Bug carries no care quality, no poop and
   // no wish of the old one.
   CHECK_EQ((int)sim_view()->poop_count, 0);
   CHECK_EQ((int)sim_view()->cq, (int)CQ_START);
@@ -221,7 +222,7 @@ TEST(care_switching_the_active_pebble_keeps_the_gain_ledger) {
 }
 
 // -----------------------------------------------------------------------------
-//  6. Eight ignored hours are still a happy pebble (plan P3-C1)
+//  6. Eight ignored hours are still a happy bug (plan P3-C1)
 //     The point of the hours scale: a working day away from the device costs
 //     real points and nothing else. Happiness decays at 3.000 milli/h, so eight
 //     hours - six of them before the loneliness multiplier even starts - land
@@ -244,7 +245,7 @@ TEST(care_eight_ignored_hours_stay_above_sixty_percent_happiness) {
 //     just empty by then, and a bar that does bottom out costs health nothing
 //     for the first CARE_ZERO_GRACE_S and then bleeds so slowly that a whole
 //     day still ends far above the floor. Since P3-C2b the day also contains a
-//     night, which the pebble spends asleep recharging, so this is now the
+//     night, which the bug spends asleep recharging, so this is now the
 //     easier case rather than the harder one.
 // -----------------------------------------------------------------------------
 TEST(care_twentyfour_hours_of_neglect_never_crosses_the_floor) {
@@ -268,16 +269,16 @@ TEST(care_twentyfour_hours_of_neglect_never_crosses_the_floor) {
 
 // -----------------------------------------------------------------------------
 //  8. A week in the Box comes back full (spec section 9 / section 27)
-//     Stored Pebbles are not simulated: they only recover, at BOX_RECOVER_MPH,
+//     Stored Bugs are not simulated: they only recover, at BOX_RECOVER_MPH,
 //     which fills an empty bar in about a day. A week is far past that.
 // -----------------------------------------------------------------------------
 static GameState g_box_state;
 
-TEST(care_a_pebble_stored_for_a_week_comes_back_full) {
+TEST(care_a_bug_stored_for_a_week_comes_back_full) {
   memset(&g_box_state, 0, sizeof g_box_state);
   for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
-    g_box_state.pebbles[i].magic      = (uint16_t)PEBBLE_MAGIC;
-    g_box_state.pebbles[i].layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+    g_box_state.bugs[i].magic      = (uint16_t)BUG_MAGIC;
+    g_box_state.bugs[i].layout_ver = (uint8_t)BUG_LAYOUT_VER;
   }
   g_box_state.box.magic           = (uint16_t)BOX_MAGIC;
   g_box_state.box.active_slot     = (uint8_t)BOX_ACTIVE_NONE;
@@ -287,28 +288,28 @@ TEST(care_a_pebble_stored_for_a_week_comes_back_full) {
 
   Genome gz;
   memset(&gz, 0, sizeof gz);
-  const uint8_t held   = box_new_pebble(SPECIES_ID_STARTER, 1, (uint8_t)ORIGIN_STARTER,
+  const uint8_t held   = box_new_bug(SPECIES_ID_STARTER, 1, (uint8_t)ORIGIN_STARTER,
                                         gz, 0x1001u, CARE_EPOCH0);
-  const uint8_t stored = box_new_pebble(SPECIES_ID_STARTER, 1, (uint8_t)ORIGIN_WILD,
+  const uint8_t stored = box_new_bug(SPECIES_ID_STARTER, 1, (uint8_t)ORIGIN_WILD,
                                         gz, 0x1002u, CARE_EPOCH0);
   CHECK(held   != (uint8_t)BOX_SLOT_NONE);
   CHECK(stored != (uint8_t)BOX_SLOT_NONE);
   CHECK(box_set_active(held));
 
-  PebbleInstance* p = box_slot(stored);
+  BugInstance* p = box_slot(stored);
   CHECK(p != nullptr);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) { p->care[i] = 0; p->care_rem[i] = 0; }
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) { p->care[i] = 0; p->care_rem[i] = 0; }
 
   // A single day already fills it; a week cannot do less and cannot overshoot.
   box_recover(stored, 86400u);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
-    CHECK_EQ(p->care[i], (int32_t)PB_CARE_MILLI_MAX);
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
+    CHECK_EQ(p->care[i], (int32_t)ER_CARE_MILLI_MAX);
   }
 
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) { p->care[i] = 0; p->care_rem[i] = 0; }
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) { p->care[i] = 0; p->care_rem[i] = 0; }
   box_recover(stored, 7u * 86400u);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
-    CHECK_EQ(p->care[i], (int32_t)PB_CARE_MILLI_MAX);
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
+    CHECK_EQ(p->care[i], (int32_t)ER_CARE_MILLI_MAX);
     CHECK_EQ((int)p->care_rem[i], 0);
   }
   // Stored means stored: the sim never ran, so nothing else moved.
@@ -340,12 +341,12 @@ TEST(care_a_pebble_stored_for_a_week_comes_back_full) {
 //     sim_tick a chunk above the grid over a span that HAS a rate change in
 //     it - the one shape that can tell a chopped tick from an unchopped one.
 // -----------------------------------------------------------------------------
-static PebbleInstance g_chunk_a;
-static PebbleInstance g_chunk_b;
-static PebbleInstance g_chunk_fresh;
+static BugInstance g_chunk_a;
+static BugInstance g_chunk_b;
+static BugInstance g_chunk_fresh;
 
-static void care_check_same(const PebbleInstance& a, const PebbleInstance& b) {
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+static void care_check_same(const BugInstance& a, const BugInstance& b) {
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
     CHECK_EQ(b.care[i], a.care[i]);
     CHECK_EQ((int)b.care_rem[i], (int)a.care_rem[i]);
   }
@@ -353,19 +354,19 @@ static void care_check_same(const PebbleInstance& a, const PebbleInstance& b) {
   CHECK_EQ(b.last_updated_epoch, a.last_updated_epoch);
   CHECK_EQ((int)b.status, (int)a.status);
   // And nothing else moved either: the whole 128 B instance, byte for byte.
-  CHECK(memcmp(&a, &b, sizeof(PebbleInstance)) == 0);
+  CHECK(memcmp(&a, &b, sizeof(BugInstance)) == 0);
 }
 
 // Runs `total_s` from `hour` local on day 100 in fixed `chunk` handovers, with
 // the wall clock FROZEN at `hour`: SimEnv is set once and never advanced. The
-// pebble settles into whatever the start hour implies on its first sub-step and
+// bug settles into whatever the start hour implies on its first sub-step and
 // stays there, so NO sleep/wake edge can fall inside the span - which is what
 // sections 9, 9b and 9c(a,b) want, because it isolates the poop and loneliness
 // rate changes. care_run_chunked_clock() below is the one that moves the clock.
 //
 // `chunk` must divide `total_s`, or the loop overshoots and the case silently
 // measures a longer span than the one it names.
-static void care_run_chunked(PebbleInstance& p, uint8_t hour,
+static void care_run_chunked(BugInstance& p, uint8_t hour,
                              uint32_t total_s, uint32_t chunk) {
   CHECK_EQ((int)(total_s % chunk), 0);
   care_pet_at_day(p, hour, 100);
@@ -376,7 +377,7 @@ static void care_run_chunked(PebbleInstance& p, uint8_t hour,
 // the sleep window's edges - bedtime and sunrise, the model's LARGEST rate
 // change (section 9c) - land inside the span. The frozen-clock helper above
 // cannot reach them at any chunk size.
-static void care_run_chunked_clock(PebbleInstance& p, uint8_t hour,
+static void care_run_chunked_clock(BugInstance& p, uint8_t hour,
                                    uint32_t total_s, uint32_t chunk) {
   CHECK_EQ((int)(total_s % chunk), 0);
   care_pet_at_day(p, hour, 100);
@@ -399,10 +400,10 @@ TEST(care_one_hour_of_catch_up_is_the_same_however_it_is_chunked) {
   // as well when sim_tick() does nothing at all: with the tick stubbed out to a
   // no-op this case passed all of its checks. So pin that the hour happened.
   care_pet_at_day(g_chunk_fresh, 10, 100);
-  const PebbleInstance fresh = g_chunk_fresh;
+  const BugInstance fresh = g_chunk_fresh;
 
   care_run_chunked(g_chunk_a, 10, 3600u, 3600u);
-  const PebbleInstance one_call = g_chunk_a;
+  const BugInstance one_call = g_chunk_a;
   CHECK_EQ(one_call.age_s, 3600u);
   CHECK(one_call.care[CARE_HUNGER] < fresh.care[CARE_HUNGER]);
 
@@ -418,7 +419,7 @@ TEST(care_one_hour_of_catch_up_is_the_same_however_it_is_chunked) {
 
   // 3600 x 1 s: below the grid. Exact equality is the right contract for THIS
   // hour because 10:00 -> 11:00 on a fresh hatchling contains no rate CHANGE -
-  // no poop lands, the loneliness multiplier is six hours away, and the pebble
+  // no poop lands, the loneliness multiplier is six hours away, and the bug
   // neither falls asleep nor wakes. Every integrator carries its remainder, so
   // with the rates held constant the chunk size cannot matter. Section 9c
   // states what happens once a rate change is in the span.
@@ -432,10 +433,10 @@ TEST(care_one_hour_of_catch_up_is_the_same_however_it_is_chunked) {
 //  9b. The poop clock advances at every step size, asleep included
 //      WHAT THE 1 s CASE FOUND. poop_step() scaled its advance by MULT_SLEEP
 //      (x0.35) and TRUNCATED it every sub-step with no carry: (1 * 350) / 1000
-//      is 0, so at the 1 s step the device runs, a SLEEPING pebble never
+//      is 0, so at the 1 s step the device runs, a SLEEPING bug never
 //      advanced its timer at all and could not poop overnight, ever - while an
 //      offline catch-up over the same night (60 s sub-steps, an exact 21)
-//      produced two. Same night, same pebble, two different models, and the
+//      produced two. Same night, same bug, two different models, and the
 //      whole "sleeping the pet before bed is a real strategy" line in
 //      poop_step() was accidentally absolute on hardware.
 //
@@ -443,7 +444,7 @@ TEST(care_one_hour_of_catch_up_is_the_same_however_it_is_chunked) {
 //      Measured over eight hours from 23:00 before the fix: 2 poops at every
 //      step of 10 s or more, 1 at 5 s, 0 at 2 s and 0 at 1 s.
 // -----------------------------------------------------------------------------
-static PebbleInstance g_poop_chunk;
+static BugInstance g_poop_chunk;
 
 TEST(care_the_poop_clock_advances_at_every_step_size) {
   // Every divisor of the sub-step, plus two chunk sizes above it.
@@ -510,13 +511,13 @@ TEST(care_the_poop_clock_advances_at_every_step_size) {
                                  - (int32_t)CARE_DECAY_MPH[CARE_ENERGY]) \
                                 * (int32_t)SIM_SUBSTEP_S / 3600)
 
-static PebbleInstance g_grid_a;
-static PebbleInstance g_grid_b;
+static BugInstance g_grid_a;
+static BugInstance g_grid_b;
 
 // The worst per-stat distance between the two runs just performed.
 static int32_t care_grid_worst(void) {
   int32_t worst = 0;
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
     int32_t d = g_grid_b.care[i] - g_grid_a.care[i];
     if (d < 0) d = -d;
     if (d > worst) worst = d;
@@ -628,9 +629,9 @@ TEST(care_a_finer_step_moves_a_rate_change_by_less_than_one_substep) {
 //      both 60 and the chunks below): on time to the second with the carry, 90 s
 //      and 100 s late with `= 0`.
 // -----------------------------------------------------------------------------
-static PebbleInstance g_stage_chunk;
+static BugInstance g_stage_chunk;
 
-// Sim time at which the pebble is first seen past STAGE_BABY, driven `chunk` at
+// Sim time at which the bug is first seen past STAGE_BABY, driven `chunk` at
 // a time. 0 if it never happens inside `limit_s`.
 static uint32_t care_child_seen_at(uint32_t chunk, uint32_t limit_s) {
   care_pet_at_day(g_stage_chunk, 10, 100);
@@ -662,8 +663,8 @@ TEST(care_the_stage_check_keeps_its_cadence_at_any_chunk_size) {
 //     one. Asserting "at most half" is the contract; the exact factor is a
 //     tuning value and the golden pins that.
 // -----------------------------------------------------------------------------
-static PebbleInstance g_awake;
-static PebbleInstance g_asleep;
+static BugInstance g_awake;
+static BugInstance g_asleep;
 
 TEST(care_the_sleep_window_at_least_halves_the_decay) {
   // Awake: 10:00 -> 11:00, broad daylight.
@@ -700,13 +701,13 @@ TEST(care_the_sleep_window_at_least_halves_the_decay) {
 // -----------------------------------------------------------------------------
 // 11. A refused action is a friendly toast, never a penalty (balance.h section 2)
 // -----------------------------------------------------------------------------
-static PebbleInstance g_refuse;
+static BugInstance g_refuse;
 
 TEST(care_a_refused_action_costs_the_player_nothing) {
   care_pet_at(g_refuse, 10);
 
-  int32_t before[PB_CARE_COUNT];
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) before[i] = g_refuse.care[i];
+  int32_t before[ER_CARE_COUNT];
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) before[i] = g_refuse.care[i];
   const int16_t cq_before = sim_view()->cq;
 
   // Full satiety: a meal is refused.
@@ -717,7 +718,7 @@ TEST(care_a_refused_action_costs_the_player_nothing) {
   CHECK(!sim_apply_action(ACT_MEDICINE, r));
   CHECK_EQ((int)r.err, (int)AERR_NOT_SICK);
 
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
     CHECK_EQ(g_refuse.care[i], before[i]);
   }
   CHECK_EQ((int)sim_view()->cq, (int)cq_before);
@@ -730,10 +731,10 @@ TEST(care_a_refused_action_costs_the_player_nothing) {
 // 12. The sleep window follows the sun, not a pair of fixed hours (P3-C2b)
 //     Day 14 is mid-January (sunrise 08:35, sunset 18:00) and day 195 is
 //     mid-July (07:00 / 21:40). Both are night at 03:00 and day at 10:00, and
-//     the pebble has to agree with the table in both.
+//     the bug has to agree with the table in both.
 // -----------------------------------------------------------------------------
-static PebbleInstance g_jan;
-static PebbleInstance g_jul;
+static BugInstance g_jan;
+static BugInstance g_jul;
 
 TEST(care_sleeps_at_three_in_the_morning_in_january_and_in_july) {
   SimEnv env;
@@ -782,10 +783,10 @@ TEST(care_goes_to_bed_earlier_in_january_than_in_july) {
 // -----------------------------------------------------------------------------
 // 13. Insistence wakes it, and only insistence (P3-C2b)
 // -----------------------------------------------------------------------------
-static PebbleInstance g_nudge;
+static BugInstance g_nudge;
 
-// Puts the pebble to sleep at 23:00 in mid-April and returns the live SimEnv.
-static SimEnv care_sleeping_pet(PebbleInstance& p) {
+// Puts the bug to sleep at 23:00 in mid-April and returns the live SimEnv.
+static SimEnv care_sleeping_pet(BugInstance& p) {
   care_pet_at(p, 23);
   SimEnv env = sim_env();
   care_minute(env);
@@ -819,7 +820,7 @@ TEST(care_three_nudges_inside_the_window_wake_the_pet) {
   CHECK_EQ((int)r.err, (int)AERR_NONE);
 }
 
-static PebbleInstance g_nudge_slow;
+static BugInstance g_nudge_slow;
 
 TEST(care_three_nudges_spread_over_an_hour_do_not_wake_the_pet) {
   SimEnv env = care_sleeping_pet(g_nudge_slow);
@@ -842,16 +843,16 @@ TEST(care_three_nudges_spread_over_an_hour_do_not_wake_the_pet) {
 }
 
 // Waking is free. Spec section 27 forbids punishing the player, and the energy
-// that drains while awake is cost enough - CLEAN on a spotless pebble is the
+// that drains while awake is cost enough - CLEAN on a spotless bug is the
 // gesture that proves it, because the wake is then the ONLY thing that happened
 // and the action itself is refused on its own merits, not on AERR_ASLEEP.
-static PebbleInstance g_nudge_free;
+static BugInstance g_nudge_free;
 
 TEST(care_waking_the_pet_costs_no_stat) {
   care_sleeping_pet(g_nudge_free);
 
-  int32_t before[PB_CARE_COUNT];
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) before[i] = g_nudge_free.care[i];
+  int32_t before[ER_CARE_COUNT];
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) before[i] = g_nudge_free.care[i];
   const int16_t cq_before = sim_view()->cq;
 
   ActionResult r;
@@ -863,7 +864,7 @@ TEST(care_waking_the_pet_costs_no_stat) {
   CHECK_EQ((int)r.err, (int)AERR_NOTHING_TODO);   // awake, and nothing to clean
 
   CHECK((sim_view()->flags & PF_ASLEEP) == 0);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
     CHECK_EQ(g_nudge_free.care[i], before[i]);
   }
   CHECK_EQ((int)sim_view()->cq, (int)cq_before);
@@ -872,7 +873,7 @@ TEST(care_waking_the_pet_costs_no_stat) {
 // -----------------------------------------------------------------------------
 // 14. ...and it goes back to sleep when left alone again (P3-C2b)
 // -----------------------------------------------------------------------------
-static PebbleInstance g_relapse;
+static BugInstance g_relapse;
 
 TEST(care_goes_back_to_sleep_after_the_relapse_period) {
   SimEnv env = care_sleeping_pet(g_relapse);
@@ -895,14 +896,14 @@ TEST(care_goes_back_to_sleep_after_the_relapse_period) {
 
 // -----------------------------------------------------------------------------
 // 15. THE REGRESSION DECISION D13 EXISTED FOR
-//     A whole day with zero interaction: the pebble must spend the night
+//     A whole day with zero interaction: the bug must spend the night
 //     asleep, recharge while it is there, and cross the boundary exactly once
-//     in each direction. Before P3-C2b it never slept at all (a fresh pebble
+//     in each direction. Before P3-C2b it never slept at all (a fresh bug
 //     was handed over with its light ON), so energy pinned at 0 after 16.7 h
 //     and health bled to the floor by about 64 h - the worst outcome in the
 //     game, reached by doing nothing.
 // -----------------------------------------------------------------------------
-static PebbleInstance g_night;
+static BugInstance g_night;
 
 TEST(care_a_full_night_of_neglect_is_spent_asleep_and_recharging) {
   care_pet_at(g_night, 10);          // 10:00 -> 10:00 the next morning
@@ -921,7 +922,7 @@ TEST(care_a_full_night_of_neglect_is_spent_asleep_and_recharging) {
     if (sim_view()->flags & PF_ASLEEP) asleep_minutes++;
   }
 
-  // Once asleep, ONCE awake. The old rule woke the pebble the moment energy
+  // Once asleep, ONCE awake. The old rule woke the bug the moment energy
   // filled and the window put it straight back, which flip-flopped every
   // substep for the rest of the night.
   CHECK_EQ((int)sleeps, 1);
@@ -929,7 +930,7 @@ TEST(care_a_full_night_of_neglect_is_spent_asleep_and_recharging) {
   // Mid-April: bedtime about 22:25, sunrise about 07:20, so about 9 h of it.
   CHECK(asleep_minutes > 8u * 60u);
   CHECK(asleep_minutes < 11u * 60u);
-  // And the night did its job: a pebble nobody touched wakes up rested.
+  // And the night did its job: a bug nobody touched wakes up rested.
   CHECK((sim_view()->flags & PF_ASLEEP) == 0);
   CHECK(sim_stat_pct(ST_ENERGY) > 60);
 }
@@ -938,11 +939,11 @@ TEST(care_a_full_night_of_neglect_is_spent_asleep_and_recharging) {
 // 16. THE PHASE-3 EXIT SOAK (plan P3-C5)
 //     The criterion the plan carried in was "no stat pinned at 0 for more than
 //     6 simulated hours of neglect". Before P3-C2b closed D13 that was
-//     unreachable: a pebble whose light nobody switched off never slept and
+//     unreachable: a bug whose light nobody switched off never slept and
 //     energy pinned at 0 for ever. It is reachable now - but only for the one
 //     stat the simulation refills BY ITSELF. Restated and measured:
 //
-//       Fourteen simulated days of total neglect - a hatched pebble, a
+//       Fourteen simulated days of total neglect - a hatched bug, a
 //       trustworthy clock, and not one action for a fortnight.
 //
 //       ENERGY, the one core stat the simulation restores on its own, is never
@@ -974,7 +975,7 @@ TEST(care_a_full_night_of_neglect_is_spent_asleep_and_recharging) {
 //     over all 366 start days: 5.40 h, still under 6.
 //
 //     SCOPED TO A VALID CLOCK ON PURPOSE. Without one there is no night -
-//     is_night() refuses to answer - the pebble never sleeps, and energy pins
+//     is_night() refuses to answer - the bug never sleeps, and energy pins
 //     at 0 for 322.78 h of the same 336. That is D13's known cost, not a defect
 //     in this model, and section 13 of docs/decisions.md records it.
 // -----------------------------------------------------------------------------
@@ -982,7 +983,7 @@ TEST(care_a_full_night_of_neglect_is_spent_asleep_and_recharging) {
 #define SOAK_ENERGY_MAX_S    (6u * 3600u)     // the criterion
 #define SOAK_PLAYER_MIN_S    (24u * 3600u)    // what the player is for
 
-static PebbleInstance g_soak;
+static BugInstance g_soak;
 
 TEST(care_a_fortnight_of_neglect_only_pins_the_stats_the_player_owns) {
   care_pet_at(g_soak, 10);
@@ -1056,7 +1057,7 @@ TEST(care_a_fortnight_of_neglect_only_pins_the_stats_the_player_owns) {
 //  A sleep gap is not a special kind of time. The whole of the power ladder's
 //  correctness, once elapsed time is right (tests/test_clock.cpp), is that the
 //  gap reaches the same two integrators a boot gap reaches: sim_catch_up_ex()
-//  for the active pebble and box_recover() for the stored ones. These cases pin
+//  for the active bug and box_recover() for the stored ones. These cases pin
 //  that at the plan's own bench number - "a 30 min deep sleep charges 30 min of
 //  care and box recovery" - so the acceptance can be read off a host run
 //  instead of a multimeter.
@@ -1078,28 +1079,28 @@ TEST(care_thirty_minutes_of_care_is_the_same_however_a_sleep_slices_it) {
   // comes back and settles up through the ordinary 1 Hz tick with the whole
   // slice as its step (app.cpp, logic_tick(owed)). PWR_SLEEP_SLICE_MS is 8 s,
   // so half an hour of sleeping is 225 of those.
-  static int32_t awake[PB_CARE_COUNT];
+  static int32_t awake[ER_CARE_COUNT];
   care_pet_at(g_care, 10);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
-    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)ER_CARE_MILLI_MAX / 2;
     g_care.care_rem[i] = 0;
   }
   for (uint16_t sec = 0; sec < 1800u; ++sec) sim_tick(1);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) awake[i] = g_care.care[i];
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) awake[i] = g_care.care[i];
 
   // The same half hour, spent asleep in eight-second slices.
   care_pet_at(g_care, 10);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
-    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)ER_CARE_MILLI_MAX / 2;
     g_care.care_rem[i] = 0;
   }
   const uint32_t slice_s = (uint32_t)PWR_SLEEP_SLICE_MS / 1000u;
   for (uint32_t t = 0; t < 1800u; t += slice_s) sim_tick(slice_s);
 
   bool moved = false;
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
     CHECK_EQ(g_care.care[i], awake[i]);                        // to the byte
-    if (g_care.care[i] != (int32_t)PB_CARE_MILLI_MAX / 2) moved = true;
+    if (g_care.care[i] != (int32_t)ER_CARE_MILLI_MAX / 2) moved = true;
   }
   // Not every bar decays in half an hour (health regenerates while the others
   // are still above their thresholds), so the claim is that the half hour was
@@ -1108,12 +1109,12 @@ TEST(care_thirty_minutes_of_care_is_the_same_however_a_sleep_slices_it) {
 
   // And in one call, which is what a stall-shaped catch-up would hand over.
   care_pet_at(g_care, 10);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
-    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)ER_CARE_MILLI_MAX / 2;
     g_care.care_rem[i] = 0;
   }
   sim_tick(1800);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) CHECK_EQ(g_care.care[i], awake[i]);
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) CHECK_EQ(g_care.care[i], awake[i]);
 }
 
 TEST(care_a_sleep_the_scheduler_resynchronised_away_would_charge_one_second) {
@@ -1122,23 +1123,23 @@ TEST(care_a_sleep_the_scheduler_resynchronised_away_would_charge_one_second) {
   // resynchronised past anything longer than four seconds, so an eight-second
   // sleep slice would have reached the pet as ONE second. This is what that
   // looks like: thirty minutes of sleeping charged as 225 seconds.
-  static int32_t slept[PB_CARE_COUNT];
+  static int32_t slept[ER_CARE_COUNT];
   care_pet_at(g_care, 10);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
-    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)ER_CARE_MILLI_MAX / 2;
     g_care.care_rem[i] = 0;
   }
   for (uint32_t t = 0; t < 1800u; t += 8u) sim_tick(8);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) slept[i] = g_care.care[i];
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) slept[i] = g_care.care[i];
 
   care_pet_at(g_care, 10);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
-    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)ER_CARE_MILLI_MAX / 2;
     g_care.care_rem[i] = 0;
   }
   for (uint32_t t = 0; t < 1800u; t += 8u) sim_tick(1);        // one per wake
   bool any_lost = false;
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
     if (g_care.care[i] > slept[i]) any_lost = true;            // decayed less
   }
   CHECK(any_lost);
@@ -1152,8 +1153,8 @@ TEST(care_a_sleep_charged_as_an_unknown_clock_would_move_nothing_at_all) {
   // sleep wrongly classed as a crash or a soft reset looks exactly like this,
   // and it is silent. tests/test_clock.cpp holds the list that decides it.
   care_pet_at(g_care, 10);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
-    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)ER_CARE_MILLI_MAX / 2;
     g_care.care_rem[i] = 0;
   }
   SimEnv env;
@@ -1169,14 +1170,14 @@ TEST(care_a_sleep_charged_as_an_unknown_clock_would_move_nothing_at_all) {
   sim_catch_up_ex(1800u, 0 /* no trustworthy clock */, rep);
   CHECK_EQ(rep.clock_known, 0);
   CHECK_EQ(rep.absence_s, 0u);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
-    CHECK_EQ(g_care.care[i], (int32_t)PB_CARE_MILLI_MAX / 2);
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
+    CHECK_EQ(g_care.care[i], (int32_t)ER_CARE_MILLI_MAX / 2);
   }
 
   // And with the clock known - which is what BOOT_DEEPSLEEP gets - the same
   // gap is integrated in full.
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
-    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)ER_CARE_MILLI_MAX / 2;
     g_care.care_rem[i] = 0;
   }
   sim_set_env(env);
@@ -1184,22 +1185,22 @@ TEST(care_a_sleep_charged_as_an_unknown_clock_would_move_nothing_at_all) {
   CHECK_EQ(rep.clock_known, 1);
   CHECK_EQ(rep.absence_s, 1800u);
   bool moved = false;
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
-    if (g_care.care[i] != (int32_t)PB_CARE_MILLI_MAX / 2) moved = true;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
+    if (g_care.care[i] != (int32_t)ER_CARE_MILLI_MAX / 2) moved = true;
   }
   CHECK(moved);
 }
 
-TEST(care_a_stored_pebble_recovers_across_a_sleep_exactly_as_it_does_across_a_boot) {
+TEST(care_a_stored_bug_recovers_across_a_sleep_exactly_as_it_does_across_a_boot) {
   // box_recover() is the OTHER half of the plan's bench line ("a 30 min sleep
-  // charges 30 min of care AND box recovery"). Stored pebbles are not
+  // charges 30 min of care AND box recovery"). Stored bugs are not
   // simulated, they only refill - so the property to pin is that the sleep gap
   // reaches them at all, and that thirty minutes of it is thirty minutes' worth
   // and not a day's.
   memset(&g_sleep_state, 0, sizeof g_sleep_state);
   for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
-    g_sleep_state.pebbles[i].magic      = (uint16_t)PEBBLE_MAGIC;
-    g_sleep_state.pebbles[i].layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+    g_sleep_state.bugs[i].magic      = (uint16_t)BUG_MAGIC;
+    g_sleep_state.bugs[i].layout_ver = (uint8_t)BUG_LAYOUT_VER;
   }
   g_sleep_state.box.magic           = (uint16_t)BOX_MAGIC;
   g_sleep_state.box.active_slot     = (uint8_t)BOX_ACTIVE_NONE;
@@ -1209,41 +1210,41 @@ TEST(care_a_stored_pebble_recovers_across_a_sleep_exactly_as_it_does_across_a_bo
 
   Genome gz;
   memset(&gz, 0, sizeof gz);
-  // TWO pebbles, and the first is made active: box_recover() refuses the active
+  // TWO bugs, and the first is made active: box_recover() refuses the active
   // slot outright, because the sim owns that one.
-  const uint8_t held   = box_new_pebble(SPECIES_ID_STARTER, 1, (uint8_t)ORIGIN_STARTER,
+  const uint8_t held   = box_new_bug(SPECIES_ID_STARTER, 1, (uint8_t)ORIGIN_STARTER,
                                         gz, 0x1003u, CARE_EPOCH0);
-  const uint8_t stored = box_new_pebble(SPECIES_ID_STARTER, 1, (uint8_t)ORIGIN_WILD,
+  const uint8_t stored = box_new_bug(SPECIES_ID_STARTER, 1, (uint8_t)ORIGIN_WILD,
                                         gz, 0x1004u, CARE_EPOCH0);
   CHECK(held   != (uint8_t)BOX_SLOT_NONE);
   CHECK(stored != (uint8_t)BOX_SLOT_NONE);
   CHECK(box_set_active(held));
-  PebbleInstance* p = box_slot(stored);
+  BugInstance* p = box_slot(stored);
   CHECK(p != nullptr);
 
-  static int32_t half_hour[PB_CARE_COUNT];
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) { p->care[i] = 0; p->care_rem[i] = 0; }
+  static int32_t half_hour[ER_CARE_COUNT];
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) { p->care[i] = 0; p->care_rem[i] = 0; }
   box_recover(stored, 1800u);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
     half_hour[i] = p->care[i];
     CHECK(half_hour[i] > 0);                                  // the gap arrived
-    CHECK(half_hour[i] < (int32_t)PB_CARE_MILLI_MAX);         // and only that much
+    CHECK(half_hour[i] < (int32_t)ER_CARE_MILLI_MAX);         // and only that much
   }
 
   // Three ten-minute slices - the shape the ladder really produces - land on
   // the same bytes as one thirty-minute gap. That is what care_rem is for, and
   // it is the property a sliced sleep needs.
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) { p->care[i] = 0; p->care_rem[i] = 0; }
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) { p->care[i] = 0; p->care_rem[i] = 0; }
   box_recover(stored, 600u);
   box_recover(stored, 600u);
   box_recover(stored, 600u);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) CHECK_EQ(p->care[i], half_hour[i]);
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) CHECK_EQ(p->care[i], half_hour[i]);
 
   // A sleep of zero seconds - a wake on the very millisecond it slept - charges
   // nothing and cannot overshoot.
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) { p->care[i] = 0; p->care_rem[i] = 0; }
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) { p->care[i] = 0; p->care_rem[i] = 0; }
   box_recover(stored, 0u);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) CHECK_EQ(p->care[i], 0);
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) CHECK_EQ(p->care[i], 0);
 }
 
 // -----------------------------------------------------------------------------
@@ -1275,17 +1276,17 @@ TEST(care_a_freshly_bound_sim_advances_one_real_second_per_tick) {
   // And the value is not just non-zero, it is ONE REAL SECOND: app.cpp's own
   // expression over a half-hour sleep must land on the same bytes as the half
   // hour this file already pins one second at a time.
-  static int32_t by_the_second[PB_CARE_COUNT];
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
-    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+  static int32_t by_the_second[ER_CARE_COUNT];
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)ER_CARE_MILLI_MAX / 2;
     g_care.care_rem[i] = 0;
   }
   for (uint16_t s = 0; s < 1800u; ++s) sim_tick(1);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) by_the_second[i] = g_care.care[i];
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) by_the_second[i] = g_care.care[i];
 
   care_pet_at(g_care, 10);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
-    g_care.care[i]     = (int32_t)PB_CARE_MILLI_MAX / 2;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
+    g_care.care[i]     = (int32_t)ER_CARE_MILLI_MAX / 2;
     g_care.care_rem[i] = 0;
   }
   const uint32_t owed = (uint32_t)PWR_SLEEP_SLICE_MS / 1000u;   // one sleep slice
@@ -1293,14 +1294,14 @@ TEST(care_a_freshly_bound_sim_advances_one_real_second_per_tick) {
   for (uint32_t t = 0; t < 1800u; t += owed) {
     sim_tick(sim_step_seconds() * owed);                        // app.cpp, verbatim
   }
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
     CHECK_EQ(g_care.care[i], by_the_second[i]);
-    if (g_care.care[i] != (int32_t)PB_CARE_MILLI_MAX / 2) moved = true;
+    if (g_care.care[i] != (int32_t)ER_CARE_MILLI_MAX / 2) moved = true;
   }
   CHECK(moved);                                   // the half hour was CHARGED
 
   // God mode is an OVERRIDE of that 1, and a zero is not a speed: it is a stop,
-  // so the setter clamps it. Binding another Pebble must not cancel an
+  // so the setter clamps it. Binding another Bug must not cancel an
   // acceleration the player is watching either - the default is set only when
   // the scale is still unset.
   sim_set_time_scale(60u);
@@ -1332,6 +1333,105 @@ static int32_t gain_typed_day_round(uint32_t saved_epoch, uint32_t claimed_now)
   care_pet();                                    // a power cycle: sim_bind() zeroes it
   (void)sim_gain_restore(g_gain_snap, (uint8_t)ST_COUNT, saved_epoch, claimed_now);
   return (int32_t)sim_gain_left(ST_HAPPINESS);
+}
+
+// =============================================================================
+//  PLAYING BACK TO BACK
+//
+//  THE OWNER'S BRIEF, VERBATIM: "I want to use this when I'm in the bathroom for
+//  three minutes, and one minigame doesn't last three minutes. If it's for
+//  balance, balance it so that playing a lot in a row rewards you exponentially
+//  less, but don't stop me from playing."
+//
+//  So the 120 s MG_COOLDOWN_S is gone and data/balance.h's decay curve is the
+//  whole anti-farm. That trade only holds if BOTH halves are true, and neither
+//  half was driven by a single case in this repository before now - which is
+//  how a 120 s lockout survived ten phases without one test noticing it existed.
+//
+//    (a) A RUN IS NEVER REFUSED for having been preceded by another run.
+//    (b) THE REWARD FALLS, AND IT NEVER REACHES ZERO. A payout of nothing is a
+//        lockout wearing a different hat, and it is what the old curve did at
+//        its sixth step.
+// =============================================================================
+TEST(a_minigame_is_never_refused_for_following_another_one) {
+  care_pet();
+  // Energy is the ONE floor that stays, and it is about the creature rather
+  // than the clock - so it is held up here to keep this case about the cooldown.
+  ActionResult r;
+  for (uint8_t i = 0; i < 12u; ++i) {
+    sim_god_set_stat(ST_ENERGY, 100);
+    if (!sim_apply_play_result(1000u, r)) {
+      fprintf(stderr, "  run %u was REFUSED: err=%u cooldown=%u s\n",
+              (unsigned)i, (unsigned)r.err, (unsigned)r.cooldown_s);
+      CHECK(false);
+    }
+    CHECK(r.ok);
+    // Not one second passes between them: this is twelve presses in a row.
+  }
+}
+
+TEST(playing_in_a_row_pays_exponentially_less_and_never_nothing) {
+  care_pet();
+  ActionResult r;
+
+  // The curve as the player meets it: a perfect run, over and over, with the
+  // happiness read back from what the call SAYS it paid rather than from the
+  // table it read.
+  uint16_t paid[PLAY_DECAY_STEPS + 4];
+  for (uint8_t i = 0; i < (uint8_t)(PLAY_DECAY_STEPS + 4); ++i) {
+    sim_god_set_stat(ST_ENERGY, 100);
+    CHECK(sim_apply_play_result(1000u, r, &paid[i]));
+  }
+
+  // (a) IT FALLS. Every step is worth no more than the one before it.
+  for (uint8_t i = 1; i < (uint8_t)(PLAY_DECAY_STEPS + 4); ++i) {
+    if (paid[i] > paid[i - 1]) {
+      fprintf(stderr, "  run %u paid %u, more than run %u's %u - the curve went "
+                      "back up\n", (unsigned)i, (unsigned)paid[i],
+              (unsigned)(i - 1), (unsigned)paid[i - 1]);
+      CHECK(false);
+    }
+  }
+
+  // (b) IT FALLS FAST. The brief said exponentially, so the second run must be
+  // worth well under three quarters of the first and the fourth well under half
+  // the second. Stated as ratios rather than as the table's own numbers, so a
+  // rebalance that keeps the SHAPE keeps this case.
+  CHECK(paid[0] == 1000u);
+  CHECK(paid[1] * 4u < paid[0] * 3u);
+  CHECK(paid[3] * 2u < paid[1]);
+
+  // (c) AND IT NEVER REACHES ZERO - not at the floor, and not four steps past
+  // the end of the table. This is the half that makes "you can always play"
+  // true of the REWARD and not only of the button.
+  for (uint8_t i = 0; i < (uint8_t)(PLAY_DECAY_STEPS + 4); ++i) {
+    CHECK(paid[i] >= (uint16_t)PLAY_DECAY_FLOOR);
+    // ...and a whole XP, which is the smallest unit the player can see.
+    CHECK(xp_minigame_amount(paid[i]) >= 1u);
+  }
+}
+
+// AND THE WINDOW ROLLS. An hour of not playing puts the curve back at the top,
+// which is what makes it a rate and not a budget - the thing the old cooldown
+// was not, because it never recovered any faster than 120 s at a time.
+TEST(an_hour_away_from_the_games_puts_the_curve_back_at_the_top) {
+  care_pet();
+  ActionResult r;
+  uint16_t first = 0, worn = 0, again = 0;
+
+  sim_god_set_stat(ST_ENERGY, 100);
+  CHECK(sim_apply_play_result(1000u, r, &first));
+  for (uint8_t i = 0; i < (uint8_t)PLAY_DECAY_STEPS; ++i) {
+    sim_god_set_stat(ST_ENERGY, 100);
+    CHECK(sim_apply_play_result(1000u, r, &worn));
+  }
+  CHECK(worn < first);
+
+  // PLAY_DECAY_WINDOW_S of uptime, in the sixty-second steps sim_tick() takes.
+  for (uint32_t t = 0; t < (uint32_t)PLAY_DECAY_WINDOW_S + 60u; t += 60u) sim_tick(60);
+  sim_god_set_stat(ST_ENERGY, 100);
+  CHECK(sim_apply_play_result(1000u, r, &again));
+  CHECK_EQ((int)again, (int)first);
 }
 
 TEST(a_typed_hour_and_a_reboot_cannot_refill_a_spent_gain_budget) {

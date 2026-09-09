@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_rng.cpp
+//  Errata host tests - test_rng.cpp
 //  The named xorshift32 streams of rng.h: determinism per stream, stream
 //  independence, rng_below bounds, the seed-0 remap and the exact legacy
 //  sequence (the care golden depends on it).

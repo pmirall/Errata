@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_battle_screen.cpp
+//  Errata host tests - test_battle_screen.cpp
 //  THE BATTLE SCREEN'S BEHAVIOUR (plan P4-C4). The PIXELS are
 //  tests/test_screens.cpp's five goldens; this file is everything else, and it
 //  drives the REAL screen over the REAL engine and the REAL AI - ui/
@@ -21,7 +21,7 @@
 //  box_peek / box_occupied / box_count, so THAT file cannot corrupt anything -
 //  which is the structural claim, and it is the one these cases can hold. A
 //  battle that is WON does reach the Box one hop away: ui.cpp's
-//  ui_battle_result() calls app_award_xp(), which writes the ACTIVE Pebble's
+//  ui_battle_result() calls app_award_xp(), which writes the ACTIVE Bug's
 //  level, xp and hp_cur and flushes. That path is host-unreachable from here
 //  (ui_battle_result is stubbed below and app.cpp is on no test link line), so
 //  a_battle_leaves_the_box_byte_identical is a statement about the screen and
@@ -43,7 +43,10 @@
 #include "fakes/gfx_fb.h"
 #include "game/battle.h"
 #include "game/box.h"
+#include "data/attacks_table.h"    // ATTACK_COUNT: the move-set search walks it
 #include "game/genome.h"
+#include "game/species_custom.h"   // the registry a drawn body comes out of
+#include "game/validate.h"         // creator_cost_of / validate_custom_species
 #include "ui/battle_renderer.h"
 #include "ui/pet_art.h"
 #include "game/inventory.h"
@@ -149,7 +152,7 @@ static int notes_in(uint8_t sfx) {
 }
 
 // =============================================================================
-//  A REAL BOX, exactly as tests/test_screens.cpp builds one: box_new_pebble()
+//  A REAL BOX, exactly as tests/test_screens.cpp builds one: box_new_bug()
 //  rather than a hand-drawn mock, so the movesets, the ids and the levels are
 //  the ones the firmware would actually hand the engine.
 // =============================================================================
@@ -165,12 +168,12 @@ static void box_fixture(uint8_t occupied) {
   gen.g0 = 0x1234u; gen.g1 = 0x5678u; gen.g2 = 0x9ABCu;
   gen.generation = 3;
   for (uint8_t i = 0; i < occupied; ++i) {
-    const uint8_t slot = box_new_pebble((uint8_t)(1u + i * 4u), (uint8_t)(6u + i * 2u),
+    const uint8_t slot = box_new_bug((uint8_t)(1u + i * 4u), (uint8_t)(6u + i * 2u),
                                         ORIGIN_STARTER, gen, 0xC0FFEEu + i, 1000u);
     CHECK(slot != BOX_SLOT_NONE);
-    PebbleInstance* p = box_slot(slot);
+    BugInstance* p = box_slot(slot);
     if (!p) continue;
-    for (uint8_t c = 0; c < PB_CARE_COUNT; ++c) p->care[c] = PB_CARE_MILLI_MAX;
+    for (uint8_t c = 0; c < ER_CARE_COUNT; ++c) p->care[c] = ER_CARE_MILLI_MAX;
     if (i == 1u) snprintf(p->nickname, sizeof p->nickname, "ABCDEFGHIJKL");
   }
   if (occupied) CHECK(box_set_active(0));
@@ -185,11 +188,11 @@ static void box_fixture(uint8_t occupied) {
 // occupied slots and on the LISTO row, so walking it is how a slot is reached.
 static void pick_team(uint8_t n) {
   for (uint8_t i = 0; i < n; ++i) {
-    battle_input(GST_HOLD_R);                 // toggle the slot under the cursor
+    battle_input(GST_TAP_R);                 // toggle the slot under the cursor
     battle_input(GST_TAP_L);                  // and step to the next legal row
   }
   while (battle_screen_cursor() < (uint8_t)BOX_SLOTS) battle_input(GST_TAP_L);
-  battle_input(GST_HOLD_R);                   // LISTO
+  battle_input(GST_TAP_R);                   // LISTO
 }
 
 // Walk the whole ring of the current mode and require the engine to accept
@@ -227,7 +230,7 @@ static void run_battle(uint32_t seed, uint8_t entry, RunStats& out) {
     pick_team((uint8_t)BATTLE_TEAM_MAX);
   }
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_INTRO);
-  battle_input(GST_HOLD_R);                   // skip the stare-down
+  battle_input(GST_TAP_R);                   // skip the stare-down
 
   for (int guard = 0; guard < 4000; ++guard) {
     const uint8_t m = battle_screen_mode();
@@ -235,7 +238,7 @@ static void run_battle(uint32_t seed, uint8_t entry, RunStats& out) {
     if (m == BTM_MENU || m == BTM_SWITCH) {
       sweep_ring(out.stops, out.blocked_seen);
       ++out.rounds;
-      battle_input(GST_HOLD_R);
+      battle_input(GST_TAP_R);
       continue;
     }
     if (m == BTM_RESOLVE) {
@@ -296,7 +299,7 @@ TEST(a_forced_replacement_has_no_way_out_but_a_replacement) {
   battle_arm(BT_ENTRY_PRACTICE, 0x51DE0001u);
   battle_enter();
   pick_team((uint8_t)BATTLE_TEAM_MAX);
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
 
   int forced = 0, dead_ends = 0;
   for (int guard = 0; guard < 4000 && battle_screen_mode() != BTM_RESULT; ++guard) {
@@ -320,13 +323,13 @@ TEST(a_forced_replacement_has_no_way_out_but_a_replacement) {
       // that is one press from continuing.
       const int w = g_wiggles;
       const uint8_t before = battle_screen_mode();
-      battle_input(GST_TAP_R);
+      battle_input(GST_HOLD_R);
       CHECK_EQ(battle_screen_mode(), before);
       CHECK_EQ(g_wiggles, w + 1);
       CHECK_EQ(g_backs, 0);
       ++dead_ends;
     }
-    battle_input(GST_HOLD_R);
+    battle_input(GST_TAP_R);
   }
   CHECK(forced > 0);
   CHECK_EQ(dead_ends, forced);
@@ -378,9 +381,9 @@ TEST(one_battle_reports_its_result_exactly_once) {
   battle_arm(BT_ENTRY_PRACTICE, 0x3001u);
   battle_enter();
   pick_team((uint8_t)BATTLE_TEAM_MAX);
-  battle_input(GST_HOLD_R);             // INTRO -> MENU
+  battle_input(GST_TAP_R);             // INTRO -> MENU
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_MENU);
-  battle_input(GST_HOLD_R);             // one round, so the fight really started
+  battle_input(GST_TAP_R);             // one round, so the fight really started
   battle_leave();
   CHECK_EQ(g_results, 1);
   CHECK_EQ(g_res_won, 0u);
@@ -406,6 +409,68 @@ TEST(one_battle_reports_its_result_exactly_once) {
 // ui.cpp's ui_battle_result() branches on to decide that a diagnostic pays
 // nothing. (ui.cpp is not host-linkable; this is the half of that rule a host
 // test can hold.)
+// =============================================================================
+//  THE WILD ENTRY (BT_ENTRY_WILD)
+//
+//  The owner asked for it after the first hardware session: catching and walking
+//  away were a wild encounter's only two answers, so a creature you could not
+//  afford to keep was worth nothing at all.
+//
+//  IT MAKES EXACTLY ONE PROMISE AND THESE CASES ARE IT: the creature you fight
+//  is the creature the encounter rolled and SHOWED YOU. That is invisible in a
+//  rendered frame - one 24x24 body looks like another - so it is asserted on
+//  the setup, which is also the only place build_foe()'s dice could sneak back in.
+// =============================================================================
+TEST(a_wild_battle_fights_the_creature_the_encounter_showed_and_not_a_new_roll) {
+  seams_reset();
+  box_fixture(3);
+
+  // Three different creatures, each armed and entered, each checked. One would
+  // pass by luck: build_foe() draws from the whole roster and would agree with
+  // a fixed expectation about one time in the roster's length.
+  static const uint8_t kSp[3] = { 1u, 9u, 21u };
+  static const uint8_t kLv[3] = { 4u, 17u, 30u };
+  for (uint8_t i = 0; i < 3u; ++i) {
+    battle_arm_wild(0x5EED0000u + i, kSp[i], kLv[i]);
+    battle_enter();
+    // NO PICK LIST: you fight with what you were carrying.
+    CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_INTRO);
+    CHECK_EQ(battle_screen_picked(), 1);
+    CHECK_EQ(battle_screen_reject(), (uint8_t)BR_OK);
+    CHECK_EQ((int)battle_screen_foe_species(), (int)kSp[i]);
+    CHECK_EQ((int)battle_screen_foe_level(),   (int)kLv[i]);
+    battle_leave();
+  }
+}
+
+// AND A WIN REPORTS ITSELF AS A WILD WIN, which is what lets ui.cpp pay it out
+// of the SAME XP_SRC_BATTLE bucket as a practice win rather than a new one.
+TEST(a_wild_win_reports_the_wild_entry_exactly_once) {
+  seams_reset();
+  box_fixture(3);
+
+  // A level-1 foe against a Box the fixture filled: the player's active Bug
+  // wins this, and the case says so rather than assuming it.
+  battle_arm_wild(0x7A1D0001u, 1u, 1u);
+  battle_enter();
+  CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_INTRO);
+  battle_input(GST_TAP_R);                      // skip the stare-down
+
+  for (int guard = 0; guard < 4000; ++guard) {
+    const uint8_t m = battle_screen_mode();
+    if (m == BTM_RESULT) break;
+    if (m == BTM_MENU || m == BTM_SWITCH) { battle_input(GST_TAP_R); continue; }
+    if (m == BTM_RESOLVE) { battle_input(GST_TAP_L); continue; }
+    break;
+  }
+  CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_RESULT);
+  CHECK_EQ((int)battle_screen_outcome(), (int)BO_WIN_A);
+  battle_leave();
+  CHECK_EQ(g_results, 1);
+  CHECK_EQ((int)g_res_entry, (int)BT_ENTRY_WILD);
+  CHECK_EQ((int)g_res_won, 1);
+}
+
 TEST(the_diag_entry_reports_itself_as_a_diagnostic) {
   seams_reset();
   box_fixture(0);                       // a device that has never filled its Box
@@ -468,8 +533,8 @@ TEST(a_battle_leaves_the_box_byte_identical) {
   battle_arm(BT_ENTRY_PRACTICE, 0x4001u);
   battle_enter();
   pick_team((uint8_t)BATTLE_TEAM_MAX);
-  battle_input(GST_HOLD_R);
-  for (int i = 0; i < 6; ++i) battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
+  for (int i = 0; i < 6; ++i) battle_input(GST_TAP_R);
   battle_leave();
   CHECK_EQ(memcmp(&before, &g_gs, sizeof before), 0);
 
@@ -478,12 +543,12 @@ TEST(a_battle_leaves_the_box_byte_identical) {
   CHECK(r.hit_beats > 0);
 }
 
-// A stored Pebble at 1 HP can still practise, because the team is a COPY and
+// A stored Bug at 1 HP can still practise, because the team is a COPY and
 // the copy is healed. The Box's own hp_cur is what must not move.
 TEST(a_practice_team_is_a_healed_copy_and_the_stored_one_is_not_touched) {
   seams_reset();
   box_fixture(3);
-  PebbleInstance* p = box_slot(0);
+  BugInstance* p = box_slot(0);
   CHECK(p != nullptr);
   if (!p) return;
   p->hp_cur = 1u;
@@ -518,10 +583,10 @@ TEST(the_playback_draws_the_hp_of_the_beat_and_not_of_the_round_end) {
     battle_arm(BT_ENTRY_PRACTICE, 0x5000u + seed * 0x2545F491u);
     battle_enter();
     pick_team((uint8_t)BATTLE_TEAM_MAX);
-    battle_input(GST_HOLD_R);                  // INTRO -> MENU
+    battle_input(GST_TAP_R);                  // INTRO -> MENU
 
     for (int guard = 0; guard < 4000 && battle_screen_mode() != BTM_RESULT; ++guard) {
-      if (battle_screen_mode() != BTM_RESOLVE) { battle_input(GST_HOLD_R); continue; }
+      if (battle_screen_mode() != BTM_RESOLVE) { battle_input(GST_TAP_R); continue; }
       ++rounds;
       const uint16_t first0 = battle_screen_hp_shown(0);
       const uint16_t first1 = battle_screen_hp_shown(1);
@@ -646,13 +711,13 @@ TEST(the_pick_list_takes_three_occupied_slots_and_no_more) {
   CHECK_EQ(battle_screen_picked(), 0u);
 
   // Four presses on four different occupied slots; the fourth is refused.
-  for (uint8_t i = 0; i < 4u; ++i) { battle_input(GST_HOLD_R); battle_input(GST_TAP_L); }
+  for (uint8_t i = 0; i < 4u; ++i) { battle_input(GST_TAP_R); battle_input(GST_TAP_L); }
   CHECK_EQ(battle_screen_picked(), (uint8_t)BATTLE_TEAM_MAX);
   CHECK_EQ(g_toast, (uint16_t)STR_BT_FULL_TEAM);
 
   // A second press on a chosen slot takes it back out.
   while (battle_screen_cursor() != 0u) battle_input(GST_TAP_L);
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
   CHECK_EQ(battle_screen_picked(), 2u);
   battle_leave();
 }
@@ -667,29 +732,29 @@ TEST(an_empty_box_cannot_start_a_practice_battle) {
   // The ring stops only on the LISTO row, and LISTO with nothing chosen says so
   // rather than starting a battle with an empty side.
   CHECK_EQ(battle_screen_cursor(), (uint8_t)BOX_SLOTS);
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_PICK);
   CHECK_EQ(g_toast, (uint16_t)STR_BT_NO_TEAM);
   battle_leave();
 }
 
-// A battle can be fought with ONE Pebble. Spec section 67 asks for a 3-Pebble
+// A battle can be fought with ONE Bug. Spec section 67 asks for a 3-Bug
 // team, not for three to be compulsory.
-TEST(one_pebble_is_a_legal_team) {
+TEST(one_bug_is_a_legal_team) {
   seams_reset();
   box_fixture(3);
   battle_arm(BT_ENTRY_PRACTICE, 0x8200u);
   battle_enter();
   pick_team(1u);
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_INTRO);
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_MENU);
-  // With one Pebble there is nothing to switch to, so the CAMBIAR row is one
+  // With one Bug there is nothing to switch to, so the CAMBIAR row is one
   // of the rows the ring steps over.
   CHECK(battle_screen_blocked_rows() > 0u);
   for (uint8_t k = 0; k < 8u; ++k) {
     CHECK_EQ(battle_screen_cursor_reject(), (uint8_t)BR_OK);
-    CHECK(battle_screen_cursor() < (uint8_t)PB_MOVE_COUNT);
+    CHECK(battle_screen_cursor() < (uint8_t)ER_MOVE_COUNT);
     battle_input(GST_TAP_L);
   }
   battle_leave();
@@ -787,7 +852,7 @@ TEST(every_species_has_its_own_combat_body) {
     // inside SPRITE_BODY_FIRST..LAST for every row and still passes a
     // window check. Asserting the arithmetic per species is what makes that
     // fail, and it fails naming the species rather than the roster.
-    CHECK_EQ((int)set, (int)PB_SPRITE_BODY_FIRST + (int)sp->sprite_id);
+    CHECK_EQ((int)set, (int)ER_SPRITE_BODY_FIRST + (int)sp->sprite_id);
     CHECK(set >= SPRITE_BODY_FIRST);
     CHECK(set <= SPRITE_BODY_LAST);
     // 24x24, which is what the field geometry is laid out against.
@@ -817,6 +882,193 @@ TEST(every_species_has_its_own_combat_body) {
   printf("  %d species resolve onto %d distinct 24x24 combat bodies, "
          "at most %d of them sharing one\n",
          (int)SPECIES_TABLE_COUNT, n, worst);
+}
+
+// =============================================================================
+//  THE CREATURE THE PLAYER DREW, ON THE FIELD (P10-C4b)
+//
+//  ui/battle_renderer.cpp resolves a body from an ATLAS SET ID, and a creator
+//  species has no atlas row - it folds onto somebody else's. Until this change
+//  the 144 bytes the player drew were read by nothing at all, so a drawn Bug
+//  walked into a fight wearing a stranger's silhouette. The renderer stays a
+//  renderer: it draws the bits the caller brings and never learns that a
+//  creator exists, which is what these two cases are about - one for the seam,
+//  one for the screen that fills it.
+// =============================================================================
+static void mk_custom_bits(uint8_t* out, uint8_t seed) {
+  for (uint8_t i = 0; i < (uint8_t)BR_BODY_BYTES; ++i)
+    out[i] = (uint8_t)(0x55u ^ (uint8_t)(i * 7u + seed));
+}
+
+TEST(a_body_the_caller_brings_is_drawn_instead_of_the_atlas_row) {
+  static uint8_t drawn[BR_BODY_BYTES];
+  mk_custom_bits(drawn, 0x11u);
+
+  // The atlas body for the same key, which is what the field drew before and
+  // must not draw now. Read off the panel so the comparison is about PIXELS.
+  static uint8_t atlas_px[BR_BODY_H][BR_BODY_W];
+  fb_reset();
+  br_draw_body(0, 0, 3u, 0, false, false, false, false);
+  for (int y = 0; y < BR_BODY_H; ++y)
+    for (int x = 0; x < BR_BODY_W; ++x) atlas_px[y][x] = (uint8_t)fb_get(x, y);
+
+  fb_reset();
+  br_draw_body(0, 0, 3u, 0, false, false, false, false, drawn);
+  // Every pixel is the drawing's...
+  int wrong = 0;
+  for (int y = 0; y < BR_BODY_H; ++y)
+    for (int x = 0; x < BR_BODY_W; ++x)
+      if ((int)fb_get(x, y) != ((drawn[y * 3 + (x >> 3)] >> (x & 7)) & 1)) ++wrong;
+  CHECK_EQ(wrong, 0);
+  // ...and the atlas body is not what is on the panel, so "it drew something"
+  // cannot pass for "it drew the drawing".
+  int same_as_atlas = 0;
+  for (int y = 0; y < BR_BODY_H; ++y)
+    for (int x = 0; x < BR_BODY_W; ++x)
+      if ((int)fb_get(x, y) == (int)atlas_px[y][x]) ++same_as_atlas;
+  CHECK(same_as_atlas < BR_BODY_W * BR_BODY_H);
+
+  // AND THE MIRROR STILL APPLIES. A drawn body on the FOE's side has to face
+  // the player like any other, which is the whole reason it goes through the
+  // same SpriteRef rather than getting a blit of its own.
+  fb_reset();
+  br_draw_body(0, 0, 3u, 0, true, false, false, false, drawn);
+  int mirrored = 0;
+  for (int y = 0; y < BR_BODY_H; ++y)
+    for (int x = 0; x < BR_BODY_W; ++x) {
+      const int mx = BR_BODY_W - 1 - x;
+      if ((int)fb_get(x, y) == ((drawn[y * 3 + (mx >> 3)] >> (mx & 7)) & 1)) ++mirrored;
+    }
+  CHECK_EQ(mirrored, BR_BODY_W * BR_BODY_H);
+}
+
+TEST(a_drawn_bug_fights_in_its_own_body) {
+  seams_reset();
+  csp_reset();
+
+  // A creature made in the creator, put in the Box, and taken into a wild
+  // fight - which is the route the player actually walks.
+  CustomSpeciesRec c;
+  memset(&c, 0, sizeof c);
+  c.magic   = (uint16_t)CS_MAGIC;
+  c.version = (uint8_t)SAVE_SCHEMA_VERSION;
+  c.slot    = 0u;
+  c.type    = (uint8_t)TYPE_SIGNAL;
+  c.base[0] = 6u; c.base[1] = 5u; c.base[2] = 5u; c.base[3] = 5u;
+  memcpy(c.name, "Bicho", 6);
+  // The move set is FOUND rather than typed: the validator is the oracle, so
+  // this cannot rot into a record the registry silently refuses.
+  bool legal = false;
+  for (uint8_t a = 1u; a <= (uint8_t)ATTACK_COUNT && !legal; ++a)
+    for (uint8_t b = (uint8_t)(a + 1u); b <= (uint8_t)ATTACK_COUNT && !legal; ++b)
+      for (uint8_t d = (uint8_t)(b + 1u); d <= (uint8_t)ATTACK_COUNT && !legal; ++d)
+        for (uint8_t e = (uint8_t)(d + 1u); e <= (uint8_t)ATTACK_COUNT && !legal; ++e) {
+          c.moves[0] = a; c.moves[1] = b; c.moves[2] = d; c.moves[3] = e;
+          uint16_t su = 0, au = 0;
+          creator_cost_of(c, su, au);
+          c.budget_used = au;
+          legal = (validate_custom_species(c) == (uint8_t)VR_OK);
+        }
+  CHECK(legal);
+  for (uint8_t f = 0; f < (uint8_t)CS_SPRITE_FRAMES; ++f)
+    mk_custom_bits(c.sprite[f], (uint8_t)(0x20u + f * 0x33u));
+  CHECK(csp_install(c));
+  const uint8_t id = csp_species_id(0);
+  CHECK(id != 0u);
+
+  memset(&g_gs, 0, sizeof g_gs);
+  box_bind(g_gs);
+  Genome gen;
+  memset(&gen, 0, sizeof gen);
+  gen.magic_ver  = GENOME_MAGIC_VER;
+  gen.lineage_id = 0x0BADF00Du;
+  gen.g0 = 0x1234u; gen.g1 = 0x5678u; gen.g2 = 0x9ABCu;
+  gen.generation = 3;
+  const uint8_t slot = box_new_bug(id, 12u, ORIGIN_CREATOR, gen, 0xC0FFEEu, 1000u);
+  CHECK(slot != BOX_SLOT_NONE);
+  BugInstance* p = box_slot(slot);
+  CHECK(p != nullptr);
+  if (p) for (uint8_t k = 0; k < ER_CARE_COUNT; ++k) p->care[k] = ER_CARE_MILLI_MAX;
+  CHECK(box_set_active(slot));
+
+  battle_arm_wild(0x00D0D0u, 9u, 12u);       // the FOE is a roster species
+  battle_enter();
+  // BTM_INTRO IS THE MODE THAT DRAWS THE FIELD, and the first draft of this
+  // case pressed past it into BTM_MENU - where the list widget owns the content
+  // band and no body is drawn at all. It failed on BOTH combatants at once,
+  // which is what said the fault was the mode and not the wiring.
+  CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_INTRO);
+
+  // ---------------------------------------------------------------------------
+  //  TWO DRAWINGS, ONE FIELD, AND THE DIFFERENCE IS THE ASSERTION.
+  //
+  //  The first draft compared the player's body box against the record byte for
+  //  byte and failed on 39 pixels in its top three rows - and on 12 of the
+  //  ATLAS foe's, which is what proved the fault was not the change under test.
+  //  The foe's name plate is drawn AFTER both bodies and reaches down over the
+  //  top of the player's, which is the field's shipped composition (the
+  //  geometry asserts in battle_renderer.cpp cover body-vs-OWN-panel, not
+  //  body-vs-the-other-side's). Carving that band out by hand would bake an
+  //  observed failure into a constant.
+  //
+  //  So the field is rendered TWICE with two different drawings on the same
+  //  Bug, and the pixels that MOVE are the statement: they must lie inside
+  //  the player's body box, they must be exactly the pixels the two drawings
+  //  disagree on there, and nothing else on the panel may move at all. Under
+  //  the old renderer both frames are identical, so the count is zero and this
+  //  fails on its first check rather than on a hand-written band.
+  // ---------------------------------------------------------------------------
+  static uint8_t shot[2][FB_H][FB_W];
+  CustomSpeciesRec c2 = c;
+  for (uint8_t f = 0; f < (uint8_t)CS_SPRITE_FRAMES; ++f)
+    mk_custom_bits(c2.sprite[f], (uint8_t)(0x9Bu + f * 0x11u));
+
+  g_now = 100000u;
+  const uint8_t frame = (uint8_t)((g_now / UI_ANIM_FRAME_MS) & 1u);
+  for (uint8_t k = 0; k < 2u; ++k) {
+    CHECK(csp_install(k == 0u ? c : c2));    // same slot, same id, new pixels
+    fb_reset();
+    battle_render();
+    CHECK_EQ(fb_oob(), 0u);
+    for (int y = 0; y < FB_H; ++y)
+      for (int x = 0; x < FB_W; ++x) shot[k][y][x] = (uint8_t)fb_get(x, y);
+  }
+
+  int moved = 0, moved_outside = 0, disagreed = 0, wrong = 0;
+  for (int y = 0; y < FB_H; ++y) {
+    for (int x = 0; x < FB_W; ++x) {
+      const bool inside = (x >= BR_YOU_BODY_X && x < BR_YOU_BODY_X + BR_BODY_W &&
+                           y >= BR_YOU_BODY_Y && y < BR_YOU_BODY_Y + BR_BODY_H);
+      if (shot[0][y][x] == shot[1][y][x]) continue;
+      ++moved;
+      if (!inside) { ++moved_outside; continue; }
+      const int bx = x - BR_YOU_BODY_X, by = y - BR_YOU_BODY_Y;
+      const int a_bit = (c.sprite[frame][by * 3 + (bx >> 3)]  >> (bx & 7)) & 1;
+      const int b_bit = (c2.sprite[frame][by * 3 + (bx >> 3)] >> (bx & 7)) & 1;
+      if (a_bit != b_bit) ++disagreed;
+      // The pixel that moved has to hold each drawing's own bit in its own
+      // frame: "it changed" is not "it changed into the right thing".
+      if ((int)shot[0][y][x] != a_bit || (int)shot[1][y][x] != b_bit) ++wrong;
+    }
+  }
+  CHECK(moved > 0);                     // the drawing reached the field at all
+  CHECK_EQ(moved_outside, 0);           // and it reached nothing else
+  CHECK_EQ(disagreed, moved);           // every moved pixel is one they differ on
+  CHECK_EQ(wrong, 0);                   // and each holds its own drawing's bit
+  printf("  a drawn Bug moves %d pixels of the field and none outside its "
+         "own %dx%d body box\n", moved, (int)BR_BODY_W, (int)BR_BODY_H);
+
+  // AND THE FOE, A ROSTER SPECIES, IS UNTOUCHED - which moved_outside already
+  // says, but saying it by name is what makes a regression report the right
+  // half of the field.
+  int foe_moved = 0;
+  for (int y = BR_FOE_BODY_Y; y < BR_FOE_BODY_Y + BR_BODY_H; ++y)
+    for (int x = BR_FOE_BODY_X; x < BR_FOE_BODY_X + BR_BODY_W; ++x)
+      if (shot[0][y][x] != shot[1][y][x]) ++foe_moved;
+  CHECK_EQ(foe_moved, 0);
+
+  battle_leave();
+  csp_reset();
 }
 
 TEST(the_two_combatants_face_each_other) {
@@ -884,7 +1136,7 @@ TEST(a_decided_battle_left_before_its_transcript_ends_still_reports_the_win) {
     battle_arm(BT_ENTRY_PRACTICE, 0x1000u + s * 0x9E3779B9u);
     battle_enter();
     pick_team((uint8_t)BATTLE_TEAM_MAX);
-    battle_input(GST_HOLD_R);                  // INTRO -> MENU
+    battle_input(GST_TAP_R);                  // INTRO -> MENU
 
     // Play until the engine has DECIDED but the playback has not finished:
     // that is the window, and it is entered by the transcript, never by a press.
@@ -895,7 +1147,7 @@ TEST(a_decided_battle_left_before_its_transcript_ends_still_reports_the_win) {
       if (m == BTM_RESOLVE &&
           battle_screen_outcome() != (uint8_t)BO_UNDECIDED) { in_window = true; break; }
       if (m == BTM_RESOLVE) { battle_input(GST_TAP_L); continue; }
-      battle_input(GST_HOLD_R);
+      battle_input(GST_TAP_R);
     }
     if (!in_window) { battle_leave(); continue; }
     ++windows;
@@ -926,8 +1178,8 @@ TEST(a_decided_battle_left_before_its_transcript_ends_still_reports_the_win) {
   battle_arm(BT_ENTRY_PRACTICE, 0x1000u);
   battle_enter();
   pick_team((uint8_t)BATTLE_TEAM_MAX);
-  battle_input(GST_HOLD_R);
-  battle_input(GST_HOLD_R);                    // one real round
+  battle_input(GST_TAP_R);
+  battle_input(GST_TAP_R);                    // one real round
   CHECK_EQ(battle_screen_outcome(), (uint8_t)BO_UNDECIDED);
   battle_leave();
   CHECK_EQ(g_results, 1);
@@ -1002,7 +1254,7 @@ TEST(every_menu_the_ring_can_reach_has_a_legal_row) {
   CHECK(battle_every_learnset_has_an_always_ready_move());
   int ready_moves = 0;
   for (uint8_t i = 0; i < (uint8_t)SPECIES_TABLE_COUNT; ++i)
-    for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) {
+    for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m) {
       const uint8_t id = SPECIES_TABLE[i].moves[m];
       CHECK(id >= 1u && id <= (uint8_t)ATTACK_COUNT);
       if (id >= 1u && id <= (uint8_t)ATTACK_COUNT &&
@@ -1017,18 +1269,18 @@ TEST(every_menu_the_ring_can_reach_has_a_legal_row) {
     battle_arm(BT_ENTRY_PRACTICE, 0xA000u + s * 0x27D4EB2Fu);
     battle_enter();
     pick_team((uint8_t)BATTLE_TEAM_MAX);
-    battle_input(GST_HOLD_R);
+    battle_input(GST_TAP_R);
     for (int guard = 0; guard < 4000 && battle_screen_mode() != BTM_RESULT; ++guard) {
       const uint8_t m = battle_screen_mode();
       if (m == BTM_MENU || m == BTM_SWITCH) {
-        const int rows = (m == BTM_MENU) ? (int)PB_MOVE_COUNT + 1
+        const int rows = (m == BTM_MENU) ? (int)ER_MOVE_COUNT + 1
                                          : (int)BATTLE_TEAM_MAX + 1;
         const int legal = rows - (int)battle_screen_blocked_rows();
         CHECK(legal >= 1);
         if (legal < worst_legal) worst_legal = legal;
         ++menus;
       }
-      battle_input(m == BTM_RESOLVE ? GST_TAP_L : GST_HOLD_R);
+      battle_input(m == BTM_RESOLVE ? GST_TAP_L : GST_TAP_R);
     }
     battle_leave();
   }
@@ -1132,10 +1384,10 @@ TEST(no_frame_of_a_battle_allocates) {
         // counter rather than redrawing a settled frame.
         battle_input(GST_TAP_L);
         one_frame(); ++frames;
-        battle_input(GST_HOLD_R);
+        battle_input(GST_TAP_R);
         continue;
       }
-      if (m == BTM_SWITCH) { battle_input(GST_TAP_L); battle_input(GST_HOLD_R); continue; }
+      if (m == BTM_SWITCH) { battle_input(GST_TAP_L); battle_input(GST_TAP_R); continue; }
       // INTRO ends on its clock; RESOLVE advances on its own beat, so the
       // frames above are what move it - that is the point of counting them.
     }

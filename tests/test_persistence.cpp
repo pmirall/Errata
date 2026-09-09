@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_persistence.cpp
+//  Errata host tests - test_persistence.cpp
 //  SaveSchema v2 end to end (plan P2-C9a, test plan section 4.3): the layouts,
 //  the key table, the pair discipline, the tri-state load, the v1 migration and
 //  the nvs2 checkpoint - each driven against tests/fakes/kv_mem.cpp so that
@@ -22,7 +22,7 @@
 #include "game/genome.h"          // gene_set_species(), to drive the map
 #include "game/species.h"         // species_base_of_family()
 #include "game/xp.h"              // xp_hp_max()
-#include "game/pebble.h"          // pebble_name_syllables(): the dynasty hash (P9-C4)
+#include "game/bug.h"          // bug_name_syllables(): the dynasty hash (P9-C4)
 #include "game/validate.h"        // the load path is a spec 15 consumer (P4-C5)
 #include "game/species_custom.h"   // the creator registry the load path rebuilds (P8-C3)
 #include "data/creator_schema.h"
@@ -53,11 +53,11 @@ static size_t load_file(const char* rel, uint8_t* out, size_t cap) {
   return n;
 }
 
-// A Pebble with every field set to something distinctive, so a layout slip
+// A Bug with every field set to something distinctive, so a layout slip
 // shows up as a wrong value rather than as a zero that happened to match.
-static PebbleInstance sample_pebble(uint8_t slot) {
-  PebbleInstance p;
-  pebble_clear(p);
+static BugInstance sample_bug(uint8_t slot) {
+  BugInstance p;
+  bug_clear(p);
   p.species_id         = (uint8_t)(7 + slot);
   p.id                 = 0xA1B2C300u + slot;
   p.creation_seed      = 0x0BADF00Du;
@@ -67,7 +67,7 @@ static PebbleInstance sample_pebble(uint8_t slot) {
   p.xp                 = 4321;
   p.level              = 12;
   p.evo_state          = 1;
-  for (uint8_t i = 0; i < PB_CARE_COUNT; ++i) {
+  for (uint8_t i = 0; i < ER_CARE_COUNT; ++i) {
     p.care[i]     = (int32_t)(10000 + 1000 * i);
     p.care_rem[i] = (int16_t)(100 + i);
   }
@@ -90,8 +90,8 @@ static PebbleInstance sample_pebble(uint8_t slot) {
   p.genome.parent_tag = 0x55;
   p.genome.crc16      = crc16_ccitt(&p.genome, GENOME_CRC_BYTES);
   snprintf(p.nickname, sizeof p.nickname, "Pebbli%u", (unsigned)slot);
-  p.custom_sprite = PB_CUSTOM_SPRITE_NONE;
-  pebble_seal(p);
+  p.custom_sprite = ER_CUSTOM_SPRITE_NONE;
+  bug_seal(p);
   return p;
 }
 
@@ -99,7 +99,7 @@ static PebbleInstance sample_pebble(uint8_t slot) {
 //  1. Layout and keys
 // =============================================================================
 TEST(schema_sizes_are_the_wire_sizes) {
-  CHECK_EQ(sizeof(PebbleInstance),   128);
+  CHECK_EQ(sizeof(BugInstance),   128);
   CHECK_EQ(sizeof(BoxHeader),         32);
   CHECK_EQ(sizeof(ConfigV2),         256);
   CHECK_EQ(sizeof(Inventory),         32);
@@ -108,12 +108,12 @@ TEST(schema_sizes_are_the_wire_sizes) {
   CHECK_EQ(sizeof(PendingTrade),      64);
   CHECK_EQ(sizeof(GameState),       1936);
 
-  CHECK_EQ(offsetof(PebbleInstance, care),     28);
-  CHECK_EQ(offsetof(PebbleInstance, care_rem), 48);
-  CHECK_EQ(offsetof(PebbleInstance, genome),   80);
-  CHECK_EQ(offsetof(PebbleInstance, nickname), 96);
-  CHECK_EQ(offsetof(PebbleInstance, seq),     110);
-  CHECK_EQ(offsetof(PebbleInstance, crc16),   126);
+  CHECK_EQ(offsetof(BugInstance, care),     28);
+  CHECK_EQ(offsetof(BugInstance, care_rem), 48);
+  CHECK_EQ(offsetof(BugInstance, genome),   80);
+  CHECK_EQ(offsetof(BugInstance, nickname), 96);
+  CHECK_EQ(offsetof(BugInstance, seq),     110);
+  CHECK_EQ(offsetof(BugInstance, crc16),   126);
   CHECK_EQ(SAVE_SCHEMA_VERSION, 3);       // bumped 2 -> 3 by P10-C5, spec section 31
   CHECK_EQ(SAVE_SCHEMA_INPLACE_MIN, 2);   // ... and v2 is still readable in place
 }
@@ -141,11 +141,11 @@ TEST(every_nvs_key_fits_in_fifteen_chars) {
   }
   for (uint8_t slot = 0; slot < BOX_SLOTS; ++slot) {
     for (uint8_t c = 0; c < 2; ++c) {
-      key_pebble(slot, c, key);
+      key_bug(slot, c, key);
       CHECK(strlen(key) <= (size_t)KV_KEY_MAX_LEN);
       CHECK_EQ(strlen(key), 4);
     }
-    key_ck_pebble(slot, key);
+    key_ck_bug(slot, key);
     CHECK(strlen(key) <= (size_t)KV_KEY_MAX_LEN);
   }
   for (uint8_t slot = 0; slot < CUSTOM_SPECIES_SLOTS; ++slot) {
@@ -153,18 +153,18 @@ TEST(every_nvs_key_fits_in_fifteen_chars) {
     CHECK(strlen(key) <= (size_t)KV_KEY_MAX_LEN);
   }
   // The builders are total: an out-of-range index yields no key at all.
-  key_pebble(BOX_SLOTS, 0, key); CHECK_EQ(strlen(key), 0);
-  key_pebble(0, 2, key);         CHECK_EQ(strlen(key), 0);
+  key_bug(BOX_SLOTS, 0, key); CHECK_EQ(strlen(key), 0);
+  key_bug(0, 2, key);         CHECK_EQ(strlen(key), 0);
   key_custom(CUSTOM_SPECIES_SLOTS, key); CHECK_EQ(strlen(key), 0);
 
   // And every key the save manager actually used stayed inside the limit.
   begin();
   GameState gs;
   CHECK_EQ(save_load_all(gs), LOAD_FRESH);
-  gs.pebbles[3] = sample_pebble(3);
+  gs.bugs[3] = sample_bug(3);
   gs.box.slot_mask = 0x0008u;
   gs.box.active_slot = 3;
-  CHECK(save_pebble(3, gs.pebbles[3], true));
+  CHECK(save_bug(3, gs.bugs[3], true));
   CHECK(save_box_header(gs.box));
   CHECK(save_config(gs.cfg));
   CHECK(save_inventory(gs.inv));
@@ -182,8 +182,8 @@ TEST(round_trip_every_blob) {
   GameState gs;
   CHECK_EQ(save_load_all(gs), LOAD_FRESH);
 
-  gs.pebbles[0] = sample_pebble(0);
-  gs.pebbles[4] = sample_pebble(4);
+  gs.bugs[0] = sample_bug(0);
+  gs.bugs[4] = sample_bug(4);
   gs.box.slot_mask   = 0x0011u;         // slots 0 and 4
   gs.box.active_slot = 4;
   gs.box.next_id_counter = 77;
@@ -221,9 +221,9 @@ TEST(round_trip_every_blob) {
   gs.trade.peer_id = 0x0C0FFEE0u;
   for (uint8_t i = 0; i < TR_WIRE_BYTES; ++i) gs.trade.in_wire[i] = (uint8_t)(i * 5);
 
-  CHECK(save_pebble(0, gs.pebbles[0], true));
+  CHECK(save_bug(0, gs.bugs[0], true));
   advance(2000);
-  CHECK(save_pebble(4, gs.pebbles[4], true));
+  CHECK(save_bug(4, gs.bugs[4], true));
   CHECK(save_box_header(gs.box));
   CHECK(save_config(gs.cfg));
   CHECK(save_inventory(gs.inv));
@@ -237,7 +237,7 @@ TEST(round_trip_every_blob) {
   cs.type         = 2;
   cs.compat_group = 5;
   for (uint8_t i = 0; i < CS_BASE_COUNT; ++i) cs.base[i] = (uint8_t)(4 + i);
-  for (uint8_t i = 0; i < PB_MOVE_COUNT; ++i) cs.moves[i] = (uint8_t)(10 + i);
+  for (uint8_t i = 0; i < ER_MOVE_COUNT; ++i) cs.moves[i] = (uint8_t)(10 + i);
   snprintf(cs.name, sizeof cs.name, "Cuarzo");
   for (uint8_t f = 0; f < CS_SPRITE_FRAMES; ++f) {
     for (uint8_t i = 0; i < CS_SPRITE_BYTES; ++i) cs.sprite[f][i] = (uint8_t)(f * 100 + i);
@@ -247,9 +247,9 @@ TEST(round_trip_every_blob) {
   GameState back;
   CHECK_EQ(save_load_all(back), LOAD_OK);
 
-  // --- PebbleInstance -------------------------------------------------------
-  const PebbleInstance& a = gs.pebbles[4];
-  const PebbleInstance& b = back.pebbles[4];
+  // --- BugInstance -------------------------------------------------------
+  const BugInstance& a = gs.bugs[4];
+  const BugInstance& b = back.bugs[4];
   CHECK_EQ(b.species_id, a.species_id);
   CHECK_EQ(b.id, a.id);
   CHECK_EQ(b.creation_seed, a.creation_seed);
@@ -259,14 +259,14 @@ TEST(round_trip_every_blob) {
   CHECK_EQ(b.xp, a.xp);
   CHECK_EQ(b.level, a.level);
   CHECK_EQ(b.evo_state, a.evo_state);
-  for (uint8_t i = 0; i < PB_CARE_COUNT; ++i) {
+  for (uint8_t i = 0; i < ER_CARE_COUNT; ++i) {
     CHECK_EQ(b.care[i], a.care[i]);
     CHECK_EQ(b.care_rem[i], a.care_rem[i]);
   }
   CHECK_EQ(b.hp_cur, a.hp_cur);
   CHECK_EQ(b.status, a.status);
   CHECK_EQ(b.flags, a.flags);
-  for (uint8_t i = 0; i < PB_MOVE_COUNT; ++i) CHECK_EQ(b.moves[i], a.moves[i]);
+  for (uint8_t i = 0; i < ER_MOVE_COUNT; ++i) CHECK_EQ(b.moves[i], a.moves[i]);
   CHECK_EQ(b.origin, a.origin);
   CHECK_EQ(b.trait_id, a.trait_id);
   CHECK_EQ(b.battles_won, a.battles_won);
@@ -278,8 +278,8 @@ TEST(round_trip_every_blob) {
   CHECK_EQ(memcmp(&b.genome, &a.genome, sizeof(Genome)), 0);
   CHECK_STR_EQ(b.nickname, a.nickname);
   CHECK_EQ(b.custom_sprite, a.custom_sprite);
-  CHECK(pebble_blob_ok(b));
-  CHECK_EQ(back.pebbles[0].id, gs.pebbles[0].id);
+  CHECK(bug_blob_ok(b));
+  CHECK_EQ(back.bugs[0].id, gs.bugs[0].id);
 
   // --- BoxHeader ------------------------------------------------------------
   CHECK_EQ(back.box.slot_mask, 0x0011u);
@@ -347,14 +347,14 @@ TEST(crc_flip_falls_back_to_the_other_copy) {
   begin();
   GameState gs;
   save_load_all(gs);
-  gs.pebbles[0] = sample_pebble(0);
+  gs.bugs[0] = sample_bug(0);
   gs.box.slot_mask = 1; gs.box.active_slot = 0;
-  CHECK(save_pebble(0, gs.pebbles[0], true));
+  CHECK(save_bug(0, gs.bugs[0], true));
   advance(2000);
   // A second write fills the other copy of the pair, so both are now good.
-  gs.pebbles[0].xp = 5555;
-  pebble_seal(gs.pebbles[0]);
-  CHECK(save_pebble(0, gs.pebbles[0], true));
+  gs.bugs[0].xp = 5555;
+  bug_seal(gs.bugs[0]);
+  CHECK(save_bug(0, gs.bugs[0], true));
   CHECK(save_box_header(gs.box));
   CHECK(kv_mem_exists(KV_MAIN, "pb00"));
   CHECK(kv_mem_exists(KV_MAIN, "pb01"));
@@ -364,24 +364,24 @@ TEST(crc_flip_falls_back_to_the_other_copy) {
 
   GameState back;
   CHECK_EQ(save_load_all(back), LOAD_RECOVERED_PAIR);
-  CHECK_EQ(back.pebbles[0].id, gs.pebbles[0].id);
-  CHECK(pebble_blob_ok(back.pebbles[0]));
+  CHECK_EQ(back.bugs[0].id, gs.bugs[0].id);
+  CHECK(bug_blob_ok(back.bugs[0]));
 
   // The repair was written back: a second load is clean again.
   GameState again;
   CHECK_EQ(save_load_all(again), LOAD_OK);
-  CHECK_EQ(again.pebbles[0].id, gs.pebbles[0].id);
+  CHECK_EQ(again.bugs[0].id, gs.bugs[0].id);
 }
 
 TEST(both_copies_bad_is_corrupt_and_writes_nothing) {
   begin();
   GameState gs;
   save_load_all(gs);
-  gs.pebbles[0] = sample_pebble(0);
+  gs.bugs[0] = sample_bug(0);
   gs.box.slot_mask = 1; gs.box.active_slot = 0;
-  CHECK(save_pebble(0, gs.pebbles[0], true));
+  CHECK(save_bug(0, gs.bugs[0], true));
   advance(2000);
-  CHECK(save_pebble(0, gs.pebbles[0], true));
+  CHECK(save_bug(0, gs.bugs[0], true));
   CHECK(save_box_header(gs.box));
   advance(2000);
   CHECK(save_box_header(gs.box));
@@ -401,9 +401,9 @@ TEST(both_box_copies_bad_is_corrupt) {
   begin();
   GameState gs;
   save_load_all(gs);
-  gs.pebbles[0] = sample_pebble(0);
+  gs.bugs[0] = sample_bug(0);
   gs.box.slot_mask = 1; gs.box.active_slot = 0;
-  save_pebble(0, gs.pebbles[0], true);
+  save_bug(0, gs.bugs[0], true);
   save_box_header(gs.box);
   advance(2000);
   save_box_header(gs.box);
@@ -424,42 +424,42 @@ TEST(failed_put_leaves_the_previous_copy_loadable) {
   begin();
   GameState gs;
   save_load_all(gs);
-  gs.pebbles[0] = sample_pebble(0);
-  snprintf(gs.pebbles[0].nickname, sizeof gs.pebbles[0].nickname, "Antes");
+  gs.bugs[0] = sample_bug(0);
+  snprintf(gs.bugs[0].nickname, sizeof gs.bugs[0].nickname, "Antes");
   gs.box.slot_mask = 1; gs.box.active_slot = 0;
-  CHECK(save_pebble(0, gs.pebbles[0], true));
+  CHECK(save_bug(0, gs.bugs[0], true));
   advance(2000);
-  CHECK(save_pebble(0, gs.pebbles[0], true));       // both copies now good
+  CHECK(save_bug(0, gs.bugs[0], true));       // both copies now good
   CHECK(save_box_header(gs.box));
 
-  PebbleInstance next = gs.pebbles[0];
+  BugInstance next = gs.bugs[0];
   snprintf(next.nickname, sizeof next.nickname, "Despues");
-  pebble_seal(next);
+  bug_seal(next);
 
   advance(2000);
   kv_mem_fail_next_put();
-  CHECK(!save_pebble(0, next, true));               // the store refused
+  CHECK(!save_bug(0, next, true));               // the store refused
 
   GameState back;
   CHECK_EQ(save_load_all(back), LOAD_OK);
-  CHECK_STR_EQ(back.pebbles[0].nickname, "Antes");  // the old save is intact
+  CHECK_STR_EQ(back.bugs[0].nickname, "Antes");  // the old save is intact
 }
 
 TEST(deferred_write_is_never_dropped) {
   begin();
   GameState gs;
   save_load_all(gs);
-  gs.pebbles[0] = sample_pebble(0);
+  gs.bugs[0] = sample_bug(0);
   gs.box.slot_mask = 1; gs.box.active_slot = 0;
-  CHECK(save_pebble(0, gs.pebbles[0], true));
+  CHECK(save_bug(0, gs.bugs[0], true));
   CHECK(save_box_header(gs.box));
 
   // Inside the 1 s floor: the write is deferred, not performed and not lost.
   advance(100);
-  snprintf(gs.pebbles[0].nickname, sizeof gs.pebbles[0].nickname, "Tarde");
-  pebble_seal(gs.pebbles[0]);
+  snprintf(gs.bugs[0].nickname, sizeof gs.bugs[0].nickname, "Tarde");
+  bug_seal(gs.bugs[0]);
   const uint32_t before = kv_mem_puts();
-  CHECK(save_pebble(0, gs.pebbles[0], true));
+  CHECK(save_bug(0, gs.bugs[0], true));
   CHECK_EQ(kv_mem_puts(), before);
 
   save_service();                                   // still inside the floor
@@ -471,26 +471,26 @@ TEST(deferred_write_is_never_dropped) {
 
   GameState back;
   CHECK_EQ(save_load_all(back), LOAD_OK);
-  CHECK_STR_EQ(back.pebbles[0].nickname, "Tarde");
+  CHECK_STR_EQ(back.bugs[0].nickname, "Tarde");
 }
 
 TEST(unforced_writes_obey_the_wear_filter) {
   begin();
   GameState gs;
   save_load_all(gs);
-  gs.pebbles[0] = sample_pebble(0);
+  gs.bugs[0] = sample_bug(0);
   gs.box.slot_mask = 1; gs.box.active_slot = 0;
-  CHECK(save_pebble(0, gs.pebbles[0], true));
+  CHECK(save_bug(0, gs.bugs[0], true));
   const uint32_t after_first = kv_mem_puts();
 
   for (int i = 0; i < 50; ++i) {
     advance(1000);
-    CHECK(save_pebble(0, gs.pebbles[0], false));
+    CHECK(save_bug(0, gs.bugs[0], false));
   }
   CHECK_EQ(kv_mem_puts(), after_first);             // 50 s < SAVE_FULL_PERIOD_MS
 
   advance(SAVE_FULL_PERIOD_MS);
-  CHECK(save_pebble(0, gs.pebbles[0], false));
+  CHECK(save_bug(0, gs.bugs[0], false));
   CHECK(kv_mem_puts() > after_first);
 }
 
@@ -501,12 +501,12 @@ TEST(unforced_writes_obey_the_wear_filter) {
 //  THE LOAD PATH IS A SPEC SECTION 15 CONSUMER (P4-C5). save_manager.h used to
 //  advertise "runtime validation" over a pipeline whose only check was
 //  blob_ok() - magic, CRC and a version byte. It runs game/validate.h's
-//  validate_pebble() now, and the rule is QUARANTINE: flag the slot, keep the
-//  Pebble, repair nothing.
+//  validate_bug() now, and the rule is QUARANTINE: flag the slot, keep the
+//  Bug, repair nothing.
 // =============================================================================
-static PebbleInstance valid_pebble(uint8_t slot, uint8_t species, uint8_t level) {
-  PebbleInstance p;
-  pebble_clear(p);
+static BugInstance valid_bug(uint8_t slot, uint8_t species, uint8_t level) {
+  BugInstance p;
+  bug_clear(p);
   p.species_id = species;
   p.id         = 0xC0FFEE00u + slot;
   p.level      = level;
@@ -515,11 +515,11 @@ static PebbleInstance valid_pebble(uint8_t slot, uint8_t species, uint8_t level)
   memcpy(p.moves, sp->moves, sizeof p.moves);
   p.hp_cur    = xp_hp_max(sp->base_hp, level);
   p.evo_state = sp->stage;
-  for (uint8_t i = 0; i < PB_CARE_COUNT; ++i) p.care[i] = (int32_t)PB_CARE_MILLI_MAX;
+  for (uint8_t i = 0; i < ER_CARE_COUNT; ++i) p.care[i] = (int32_t)ER_CARE_MILLI_MAX;
   p.genome.lineage_id = 0x0BADF00Du + slot;
   p.genome.g0 = 0x1234; p.genome.g1 = 0x5678; p.genome.g2 = 0x09AB;
   genome_seal(p.genome);
-  pebble_seal(p);
+  bug_seal(p);
   return p;
 }
 
@@ -527,12 +527,12 @@ TEST(a_valid_box_is_quarantined_nowhere) {
   begin();
   GameState gs;
   CHECK_EQ(save_load_all(gs), LOAD_FRESH);
-  gs.pebbles[1] = valid_pebble(1, 1, 5);
-  gs.pebbles[6] = valid_pebble(6, 9, 22);            // species 9 is stage 2
+  gs.bugs[1] = valid_bug(1, 1, 5);
+  gs.bugs[6] = valid_bug(6, 9, 22);            // species 9 is stage 2
   gs.box.slot_mask   = 0x0042u;
   gs.box.active_slot = 1;
-  CHECK(save_pebble(1, gs.pebbles[1], true));
-  CHECK(save_pebble(6, gs.pebbles[6], true));
+  CHECK(save_bug(1, gs.bugs[1], true));
+  CHECK(save_bug(6, gs.bugs[6], true));
   CHECK(save_box_header(gs.box));
 
   GameState back;
@@ -540,7 +540,7 @@ TEST(a_valid_box_is_quarantined_nowhere) {
   CHECK_EQ((int)save_quarantine_mask(), 0);
   for (uint8_t slot = 0; slot < BOX_SLOTS; ++slot)
     CHECK_EQ((int)save_quarantine_reason(slot), (int)VR_OK);
-  CHECK_EQ((int)validate_pebble(back.pebbles[6]), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(back.bugs[6]), (int)VR_OK);
 }
 
 // -----------------------------------------------------------------------------
@@ -548,7 +548,7 @@ TEST(a_valid_box_is_quarantined_nowhere) {
 //
 //  THE ORDER save_load_all() RUNS IN IS THE WHOLE POINT: load, then rebuild the
 //  creator registry, THEN quarantine_scan(). Move the rebuild after the scan -
-//  or delete it - and a Pebble the user made in the creator comes back
+//  or delete it - and a Bug the user made in the creator comes back
 //  VR_UNKNOWN_SPECIES on the first power cycle, because species_get(200)
 //  resolves through that registry and through nothing else.
 // -----------------------------------------------------------------------------
@@ -569,10 +569,10 @@ static CustomSpeciesRec creator_record(uint8_t slot) {
   return c;
 }
 
-static PebbleInstance creator_pebble(uint8_t slot, uint8_t cs_slot) {
+static BugInstance creator_bug(uint8_t slot, uint8_t cs_slot) {
   const uint8_t species = (uint8_t)(CREATOR_SPECIES_ID_MIN + cs_slot);
-  PebbleInstance p;
-  pebble_clear(p);
+  BugInstance p;
+  bug_clear(p);
   p.species_id    = species;
   p.id            = 0xCEA70000u + slot;
   p.level         = 1;
@@ -582,16 +582,16 @@ static PebbleInstance creator_pebble(uint8_t slot, uint8_t cs_slot) {
   p.moves[0] = 1; p.moves[1] = 6; p.moves[2] = 32; p.moves[3] = 34;
   p.hp_cur    = xp_hp_max(6u, 1u);        // base_hp 6, the record's first stat
   p.evo_state = 1u;                       // a creator species is stage 1
-  for (uint8_t i = 0; i < PB_CARE_COUNT; ++i) p.care[i] = (int32_t)PB_CARE_MILLI_MAX;
+  for (uint8_t i = 0; i < ER_CARE_COUNT; ++i) p.care[i] = (int32_t)ER_CARE_MILLI_MAX;
   memcpy(p.nickname, "Bicho", 6);
   p.genome.lineage_id = 0x5EED0000u + slot;
   p.genome.g0 = 0x1234; p.genome.g1 = 0x5678; p.genome.g2 = 0x09AB;
   genome_seal(p.genome);
-  pebble_seal(p);
+  bug_seal(p);
   return p;
 }
 
-TEST(a_creator_pebble_survives_a_reboot_instead_of_being_quarantined) {
+TEST(a_creator_bug_survives_a_reboot_instead_of_being_quarantined) {
   begin();
   csp_reset();
   GameState gs;
@@ -599,10 +599,10 @@ TEST(a_creator_pebble_survives_a_reboot_instead_of_being_quarantined) {
 
   const CustomSpeciesRec rec = creator_record(3);
   CHECK(save_custom_species(rec));
-  gs.pebbles[2] = creator_pebble(2, 3);
+  gs.bugs[2] = creator_bug(2, 3);
   gs.box.slot_mask   = 0x0004u;
   gs.box.active_slot = 2;
-  CHECK(save_pebble(2, gs.pebbles[2], true));
+  CHECK(save_bug(2, gs.bugs[2], true));
   CHECK(save_box_header(gs.box));
 
   // Forget everything a running device would know, so the reload really is a
@@ -616,32 +616,32 @@ TEST(a_creator_pebble_survives_a_reboot_instead_of_being_quarantined) {
   CHECK(species_get((uint8_t)(CREATOR_SPECIES_ID_MIN + 3u)) != nullptr);
   CHECK_EQ((int)save_quarantine_mask(), 0);
   CHECK_EQ((int)save_quarantine_reason(2), (int)VR_OK);
-  CHECK_EQ((int)validate_pebble(back.pebbles[2]), (int)VR_OK);
-  CHECK_EQ((int)back.pebbles[2].origin, (int)ORIGIN_CREATOR);
-  CHECK_STR_EQ(back.pebbles[2].nickname, "Bicho");
+  CHECK_EQ((int)validate_bug(back.bugs[2]), (int)VR_OK);
+  CHECK_EQ((int)back.bugs[2].origin, (int)ORIGIN_CREATOR);
+  CHECK_STR_EQ(back.bugs[2].nickname, "Bicho");
   csp_reset();
 }
 
-TEST(a_creator_pebble_whose_record_is_gone_is_quarantined_by_name) {
+TEST(a_creator_bug_whose_record_is_gone_is_quarantined_by_name) {
   // The other direction, and it is what makes the case above mean something: a
-  // Pebble whose cs* record was lost or refused must be flagged BY NAME rather
+  // Bug whose cs* record was lost or refused must be flagged BY NAME rather
   // than resolved to whatever else happens to be in the registry.
   begin();
   csp_reset();
   GameState gs;
   CHECK_EQ(save_load_all(gs), LOAD_FRESH);
-  gs.pebbles[2] = creator_pebble(2, 3);      // no cs3 record is ever written
+  gs.bugs[2] = creator_bug(2, 3);      // no cs3 record is ever written
   gs.box.slot_mask   = 0x0004u;
   gs.box.active_slot = 2;
-  CHECK(save_pebble(2, gs.pebbles[2], true));
+  CHECK(save_bug(2, gs.bugs[2], true));
   CHECK(save_box_header(gs.box));
 
   GameState back;
   CHECK_EQ(save_load_all(back), LOAD_OK);
   CHECK_EQ((int)save_quarantine_mask(), 0x0004);
   CHECK_EQ((int)save_quarantine_reason(2), (int)VR_UNKNOWN_SPECIES);
-  // AND THE PEBBLE IS STILL THERE. Quarantine flags, it never destroys.
-  CHECK_EQ((unsigned long)back.pebbles[2].id, 0xCEA70002UL);
+  // AND THE BUG IS STILL THERE. Quarantine flags, it never destroys.
+  CHECK_EQ((unsigned long)back.bugs[2].id, 0xCEA70002UL);
   csp_reset();
 }
 
@@ -670,20 +670,20 @@ TEST(a_stored_record_that_breaks_the_rules_leaves_its_slot_empty) {
   csp_reset();
 }
 
-TEST(a_load_quarantines_an_invalid_pebble_by_name_and_repairs_nothing) {
+TEST(a_load_quarantines_an_invalid_bug_by_name_and_repairs_nothing) {
   begin();
   GameState gs;
   CHECK_EQ(save_load_all(gs), LOAD_FRESH);
-  // sample_pebble() is the LAYOUT fixture: every field is set to something
+  // sample_bug() is the LAYOUT fixture: every field is set to something
   // distinctive rather than to something legal, so it carries trait_id 9, a
   // moveset no species teaches and an evo_state that disagrees with its row.
   // That makes it exactly the shape of save this stage exists to notice.
-  gs.pebbles[3] = sample_pebble(3);
-  gs.pebbles[5] = valid_pebble(5, 1, 5);
+  gs.bugs[3] = sample_bug(3);
+  gs.bugs[5] = valid_bug(5, 1, 5);
   gs.box.slot_mask   = 0x0028u;
   gs.box.active_slot = 5;
-  CHECK(save_pebble(3, gs.pebbles[3], true));
-  CHECK(save_pebble(5, gs.pebbles[5], true));
+  CHECK(save_bug(3, gs.bugs[3], true));
+  CHECK(save_bug(5, gs.bugs[5], true));
   CHECK(save_box_header(gs.box));
 
   GameState back;
@@ -694,31 +694,31 @@ TEST(a_load_quarantines_an_invalid_pebble_by_name_and_repairs_nothing) {
   CHECK_EQ((int)save_quarantine_mask(), (int)(1u << 3));
   CHECK(save_quarantine_reason(3) != VR_OK);
   CHECK_EQ((int)save_quarantine_reason(3),
-           (int)validate_pebble(gs.pebbles[3]));      // the named reason, not a bool
+           (int)validate_bug(gs.bugs[3]));      // the named reason, not a bool
   CHECK_EQ((int)save_quarantine_reason(5), (int)VR_OK);
 
   // AND NOTHING WAS MENDED: every byte the GAME owns comes back unchanged. The
   // comparison stops at offsetof(seq) because seq and the CRC over it are the
-  // PAIR bookkeeping - save_pebble() stamps a fresh sequence number on every
+  // PAIR bookkeeping - save_bug() stamps a fresh sequence number on every
   // write, so those four bytes differ for a reason that has nothing to do with
   // validation.
-  CHECK_EQ(memcmp(&back.pebbles[3], &gs.pebbles[3],
-                  offsetof(PebbleInstance, seq)), 0);
-  CHECK_EQ((int)back.pebbles[3].trait_id, 9);
-  CHECK_EQ((int)back.pebbles[3].evo_state, 1);
+  CHECK_EQ(memcmp(&back.bugs[3], &gs.bugs[3],
+                  offsetof(BugInstance, seq)), 0);
+  CHECK_EQ((int)back.bugs[3].trait_id, 9);
+  CHECK_EQ((int)back.bugs[3].evo_state, 1);
 }
 
 TEST(header_slot_mismatch_self_heals) {
   begin();
   GameState gs;
   save_load_all(gs);
-  gs.pebbles[2] = sample_pebble(2);
+  gs.bugs[2] = sample_bug(2);
   gs.box.slot_mask   = 0x0004u;
   gs.box.active_slot = 2;
-  CHECK(save_pebble(2, gs.pebbles[2], true));
+  CHECK(save_bug(2, gs.bugs[2], true));
   CHECK(save_box_header(gs.box));
 
-  // A header that claims four Pebbles and an active slot that never existed.
+  // A header that claims four Bugs and an active slot that never existed.
   gs.box.slot_mask   = 0x000Fu;
   gs.box.active_slot = 7;
   CHECK(save_box_header(gs.box));
@@ -729,8 +729,8 @@ TEST(header_slot_mismatch_self_heals) {
   CHECK_EQ(save_load_all(back), LOAD_RECOVERED_PAIR);
   CHECK_EQ(back.box.slot_mask, 0x0004u);            // slot magic wins
   CHECK_EQ(back.box.active_slot, 2);
-  CHECK_EQ(back.pebbles[2].id, gs.pebbles[2].id);
-  CHECK(pebble_is_empty(back.pebbles[0]));
+  CHECK_EQ(back.bugs[2].id, gs.bugs[2].id);
+  CHECK(bug_is_empty(back.bugs[0]));
 
   GameState again;
   CHECK_EQ(save_load_all(again), LOAD_OK);          // the heal was persisted
@@ -745,9 +745,9 @@ TEST(foreign_newer_is_refused_and_nothing_is_written) {
   begin();
   GameState gs;
   save_load_all(gs);
-  gs.pebbles[0] = sample_pebble(0);
+  gs.bugs[0] = sample_bug(0);
   gs.box.slot_mask = 1; gs.box.active_slot = 0;
-  save_pebble(0, gs.pebbles[0], true);
+  save_bug(0, gs.bugs[0], true);
   save_box_header(gs.box);
 
   // Forge a box header from schema version 3, sealed correctly.
@@ -775,15 +775,15 @@ TEST(checkpoint_recovers_a_wiped_main_partition) {
   begin();
   GameState gs;
   save_load_all(gs);
-  gs.pebbles[0] = sample_pebble(0);
-  gs.pebbles[5] = sample_pebble(5);
+  gs.bugs[0] = sample_bug(0);
+  gs.bugs[5] = sample_bug(5);
   gs.box.slot_mask   = 0x0021u;
   gs.box.active_slot = 5;
   gs.cfg.device_id   = 0x12345678u;
   cfgv2_seal(gs.cfg);
-  CHECK(save_pebble(0, gs.pebbles[0], true));
+  CHECK(save_bug(0, gs.bugs[0], true));
   advance(2000);
-  CHECK(save_pebble(5, gs.pebbles[5], true));
+  CHECK(save_bug(5, gs.bugs[5], true));
   CHECK(save_box_header(gs.box));
   CHECK(save_config(gs.cfg));
   CHECK(save_checkpoint_all());
@@ -796,14 +796,14 @@ TEST(checkpoint_recovers_a_wiped_main_partition) {
   CHECK_EQ(save_load_all(back), LOAD_RECOVERED_CKPT);
   CHECK_EQ(back.box.slot_mask, 0x0021u);
   CHECK_EQ(back.box.active_slot, 5);
-  CHECK_EQ(back.pebbles[0].id, gs.pebbles[0].id);
-  CHECK_EQ(back.pebbles[5].id, gs.pebbles[5].id);
+  CHECK_EQ(back.bugs[0].id, gs.bugs[0].id);
+  CHECK_EQ(back.bugs[5].id, gs.bugs[5].id);
   CHECK_EQ(back.cfg.device_id, 0x12345678u);
 
   // The recovered state was committed back to KV_MAIN, so the next boot is OK.
   GameState again;
   CHECK_EQ(save_load_all(again), LOAD_OK);
-  CHECK_EQ(again.pebbles[5].id, gs.pebbles[5].id);
+  CHECK_EQ(again.bugs[5].id, gs.bugs[5].id);
 }
 
 TEST(both_partitions_empty_is_a_fresh_unit) {
@@ -821,9 +821,9 @@ TEST(factory_reset_clears_both_partitions) {
   begin();
   GameState gs;
   save_load_all(gs);
-  gs.pebbles[0] = sample_pebble(0);
+  gs.bugs[0] = sample_bug(0);
   gs.box.slot_mask = 1; gs.box.active_slot = 0;
-  save_pebble(0, gs.pebbles[0], true);
+  save_bug(0, gs.bugs[0], true);
   save_box_header(gs.box);
   save_checkpoint_all();
   CHECK(kv_mem_key_count(KV_MAIN) > 0);
@@ -864,7 +864,7 @@ TEST(v1_fixtures_migrate_with_the_documented_field_map) {
   CHECK_EQ(save_load_all(gs), LOAD_MIGRATED);
   CHECK(save_was_migrated());
 
-  const PebbleInstance& p = gs.pebbles[0];
+  const BugInstance& p = gs.bugs[0];
   CHECK_EQ(gs.box.slot_mask, 0x0001u);
   CHECK_EQ(gs.box.active_slot, 0);
   CHECK_EQ(gs.box.schema_version, SAVE_SCHEMA_VERSION);
@@ -911,10 +911,10 @@ TEST(v1_fixtures_migrate_with_the_documented_field_map) {
   CHECK((p.status & PBS_RESERVED_LIGHT) == 0);
   CHECK((p.status & PBS_SICK) == 0);
   CHECK(p.id != 0);
-  CHECK(pebble_blob_ok(p));
+  CHECK(bug_blob_ok(p));
 
   // pet_name -> nickname
-  CHECK_STR_EQ(p.nickname, "Pebble");
+  CHECK_STR_EQ(p.nickname, "Pebble");        // grabado en el fixture v1
 
   // Config.tz / brightness carried into ConfigV2, credentials dropped.
   CHECK_STR_EQ(gs.cfg.tz, CFG_TZ_STRING);
@@ -932,8 +932,8 @@ TEST(v1_fixtures_migrate_with_the_documented_field_map) {
   GameState again;
   CHECK_EQ(save_load_all(again), LOAD_OK);
   CHECK(!save_was_migrated());
-  CHECK_EQ(again.pebbles[0].id, p.id);
-  CHECK_STR_EQ(again.pebbles[0].nickname, "Pebble");
+  CHECK_EQ(again.bugs[0].id, p.id);
+  CHECK_STR_EQ(again.bugs[0].nickname, "Pebble");   // idem
 }
 
 // =============================================================================
@@ -967,8 +967,8 @@ static void stamp_version(KvPart part, const char* key, size_t size,
   CHECK(kv_put(part, key, buf, size));
 }
 
-// Every blob that carries SAVE_SCHEMA_VERSION, in KV_MAIN. The Pebbles are NOT
-// here: PebbleInstance.layout_ver is PEBBLE_LAYOUT_VER, a version axis of its
+// Every blob that carries SAVE_SCHEMA_VERSION, in KV_MAIN. The Bugs are NOT
+// here: BugInstance.layout_ver is BUG_LAYOUT_VER, a version axis of its
 // own that this bump does not move, and stamping it would be testing a
 // different thing under this name.
 static void stamp_main_partition(uint8_t to_ver) {
@@ -1009,15 +1009,15 @@ static bool blob_is_sealed(KvPart part, const char* key, size_t size, uint16_t m
   return stored == crc16_ccitt(buf, size - 2);
 }
 
-// A whole, ordinary save: two Pebbles, a config the player changed, a bag, a
-// cooldown and a creator species one of the Pebbles depends on.
+// A whole, ordinary save: two Bugs, a config the player changed, a bag, a
+// cooldown and a creator species one of the Bugs depends on.
 static void write_a_played_save(GameState& gs) {
   CHECK_EQ(save_load_all(gs), LOAD_FRESH);
-  // valid_pebble(), not sample_pebble(): this save has to survive the load
-  // path's quarantine scan intact, and sample_pebble() deliberately sets
+  // valid_bug(), not sample_bug(): this save has to survive the load
+  // path's quarantine scan intact, and sample_bug() deliberately sets
   // reserved status bits so that a layout slip shows up.
-  gs.pebbles[0] = valid_pebble(0, 1, 9);
-  gs.pebbles[4] = creator_pebble(4, 3);
+  gs.bugs[0] = valid_bug(0, 1, 9);
+  gs.bugs[4] = creator_bug(4, 3);
   gs.box.slot_mask     = 0x0011u;
   gs.box.active_slot   = 4;
   gs.box.next_id_counter = 77u;
@@ -1044,9 +1044,9 @@ static void write_a_played_save(GameState& gs) {
   // this section is about.
   for (int pass = 0; pass < 2; ++pass) {
     advance(5000);
-    CHECK(save_pebble(0, gs.pebbles[0], true));
+    CHECK(save_bug(0, gs.bugs[0], true));
     advance(5000);
-    CHECK(save_pebble(4, gs.pebbles[4], true));
+    CHECK(save_bug(4, gs.bugs[4], true));
     CHECK(save_box_header(gs.box));
     CHECK(save_config(gs.cfg));
     CHECK(save_inventory(gs.inv));
@@ -1083,12 +1083,12 @@ TEST(a_v2_save_is_read_carried_forward_and_re_sealed_at_v3) {
   CHECK_EQ(back.box.next_id_counter, 77u);
   CHECK_EQ(back.box.captures, 12u);
   CHECK_EQ(back.box.battles, 34u);
-  CHECK_EQ(back.pebbles[0].id, gs.pebbles[0].id);
-  CHECK_EQ(back.pebbles[0].level, 9);
-  CHECK_EQ(back.pebbles[0].hp_cur, gs.pebbles[0].hp_cur);
-  CHECK_EQ(back.pebbles[0].genome.lineage_id, gs.pebbles[0].genome.lineage_id);
-  CHECK_EQ(back.pebbles[4].id, gs.pebbles[4].id);
-  CHECK_EQ(back.pebbles[4].species_id, gs.pebbles[4].species_id);
+  CHECK_EQ(back.bugs[0].id, gs.bugs[0].id);
+  CHECK_EQ(back.bugs[0].level, 9);
+  CHECK_EQ(back.bugs[0].hp_cur, gs.bugs[0].hp_cur);
+  CHECK_EQ(back.bugs[0].genome.lineage_id, gs.bugs[0].genome.lineage_id);
+  CHECK_EQ(back.bugs[4].id, gs.bugs[4].id);
+  CHECK_EQ(back.bugs[4].species_id, gs.bugs[4].species_id);
   CHECK_EQ(back.cfg.device_id, 0xFEEDBEEFu);
   CHECK_EQ(back.cfg.brightness, 91u);
   CHECK_EQ((int)back.cfg.time_cal_state, (int)CAL_USER);
@@ -1116,7 +1116,7 @@ TEST(a_v2_save_is_read_carried_forward_and_re_sealed_at_v3) {
   CHECK_EQ((int)save_load_all(again), (int)LOAD_OK);
   CHECK(!save_was_migrated());
   CHECK_EQ(again.box.schema_version, (uint8_t)SAVE_SCHEMA_VERSION);
-  CHECK_EQ(again.pebbles[4].id, gs.pebbles[4].id);
+  CHECK_EQ(again.bugs[4].id, gs.bugs[4].id);
 }
 
 TEST(the_upgrade_converges_on_one_boot_instead_of_migrating_for_ever) {
@@ -1144,13 +1144,13 @@ TEST(the_upgrade_converges_on_one_boot_instead_of_migrating_for_ever) {
 
   GameState boot1;
   CHECK_EQ((int)save_load_all(boot1), (int)LOAD_MIGRATED);
-  // The first session after the upgrade catches a Pebble.
-  boot1.pebbles[7] = valid_pebble(7, 1, 3);
+  // The first session after the upgrade catches a Bug.
+  boot1.bugs[7] = valid_bug(7, 1, 3);
   boot1.box.slot_mask |= (uint16_t)(1u << 7);
   boot1.box.captures = 99u;
   box_seal(boot1.box);
   advance(2000);
-  CHECK(save_pebble(7, boot1.pebbles[7], true));
+  CHECK(save_bug(7, boot1.bugs[7], true));
   CHECK(save_box_header(boot1.box));
 
   GameState boot2;
@@ -1158,7 +1158,7 @@ TEST(the_upgrade_converges_on_one_boot_instead_of_migrating_for_ever) {
   CHECK(!save_was_migrated());
   CHECK_EQ(boot2.box.captures, 99u);
   CHECK(boot2.box.slot_mask & (1u << 7));
-  CHECK_EQ(boot2.pebbles[7].id, boot1.pebbles[7].id);
+  CHECK_EQ(boot2.bugs[7].id, boot1.bugs[7].id);
   CHECK_EQ(boot2.cfg.device_id, 0xFEEDBEEFu);
 
   // THE REDUNDANT COPY IS STILL AT THE OLD VERSION HERE, AND THAT IS CORRECT
@@ -1186,11 +1186,11 @@ TEST(the_upgrade_converges_on_one_boot_instead_of_migrating_for_ever) {
   }
 }
 
-TEST(a_v2_creator_species_survives_the_bump_instead_of_deleting_the_pebble) {
+TEST(a_v2_creator_species_survives_the_bump_instead_of_deleting_the_bug) {
   // The creator registry is NOT part of GameState, so the migration chain
   // cannot reach it and its upgrade lives in custom_species_install_all().
   // Without that, validate_custom_species() refuses the record by name
-  // (VR_CS_BAD_HEADER), csp_install() leaves the slot empty, and the Pebble
+  // (VR_CS_BAD_HEADER), csp_install() leaves the slot empty, and the Bug
   // that points at it comes back VR_UNKNOWN_SPECIES: the creature the owner
   // designed, gone on the first boot after a firmware update.
   begin();
@@ -1206,7 +1206,7 @@ TEST(a_v2_creator_species_survives_the_bump_instead_of_deleting_the_pebble) {
   CHECK_EQ((int)save_load_all(back), (int)LOAD_MIGRATED);
   CHECK_EQ(save_quarantine_mask(), 0u);
   CHECK_EQ((int)save_quarantine_reason(4), (int)VR_OK);
-  const SpeciesDef* sp = species_get(back.pebbles[4].species_id);
+  const SpeciesDef* sp = species_get(back.bugs[4].species_id);
   CHECK(sp != nullptr);
   CHECK_EQ(sp->base_hp,  6);        // the record's own stats, not a stand-in row
   CHECK_EQ(sp->base_atk, 5);
@@ -1243,7 +1243,7 @@ TEST(a_v2_checkpoint_restores_after_the_nvs_erase_and_comes_back_at_v3) {
   CHECK_EQ((int)save_load_all(back), (int)LOAD_RECOVERED_CKPT);
   CHECK_EQ(back.box.slot_mask, 0x0011u);
   CHECK_EQ(back.box.active_slot, 4);
-  CHECK_EQ(back.pebbles[0].id, gs.pebbles[0].id);
+  CHECK_EQ(back.bugs[0].id, gs.bugs[0].id);
   CHECK_EQ(back.cfg.device_id, 0xFEEDBEEFu);
   CHECK_EQ(back.box.schema_version, (uint8_t)SAVE_SCHEMA_VERSION);
   CHECK_EQ(back.cfg.version, (uint8_t)SAVE_SCHEMA_VERSION);
@@ -1284,7 +1284,7 @@ TEST(the_manual_restore_button_also_upgrades_a_v2_checkpoint) {
   CHECK_EQ(live.box.schema_version, (uint8_t)SAVE_SCHEMA_VERSION);
   CHECK_EQ(live.cfg.version, (uint8_t)SAVE_SCHEMA_VERSION);
   CHECK_EQ(live.box.active_slot, 4);
-  CHECK_EQ(live.pebbles[0].id, gs.pebbles[0].id);
+  CHECK_EQ(live.bugs[0].id, gs.bugs[0].id);
 }
 
 TEST(a_checkpoint_already_at_this_version_is_not_reported_as_migrated) {
@@ -1445,17 +1445,17 @@ TEST(every_legacy_family_migrates_onto_a_base_stage_species) {
 TEST(a_migrated_pet_arrives_with_a_learnset_and_at_full_health) {
   // Both fields used to be left at zero by migrate_v1_to_v2(): a pet that knew
   // no attacks (0 is the EMPTY move slot) and showed 0 % HP on every screen for
-  // ever, because hp_cur is a Pebble's own and xp_hp_rescale() scales it.
+  // ever, because hp_cur is a Bug's own and xp_hp_rescale() scales it.
   begin();
   seed_v1(true);
   GameState gs;
   CHECK_EQ(save_load_all(gs), LOAD_MIGRATED);
-  const PebbleInstance& p = gs.pebbles[0];
+  const BugInstance& p = gs.bugs[0];
 
   const SpeciesDef* sp = species_get(p.species_id);
   CHECK(sp != nullptr);
   if (!sp) return;
-  for (uint8_t i = 0; i < (uint8_t)PB_MOVE_COUNT; ++i) {
+  for (uint8_t i = 0; i < (uint8_t)ER_MOVE_COUNT; ++i) {
     CHECK(p.moves[i] != 0);
     CHECK_EQ(p.moves[i], sp->moves[i]);
   }
@@ -1473,7 +1473,7 @@ TEST(a_migrated_pet_arrives_with_a_learnset_and_at_full_health) {
 //  produces the same word from the same hash, so an empty nickname drew exactly
 //  the same thing) and it stopped being neutral when P4-C4a put the SPECIES
 //  NAME in the middle of the display ladder: persistence/game_state.cpp copies
-//  pebbles[0].nickname into Config.pet_name, ui_pet_name() answers that first,
+//  bugs[0].nickname into Config.pet_name, ui_pet_name() answers that first,
 //  and nothing ever clears it - so a migrated device showed the dynasty
 //  syllables for ever and the species name never appeared once.
 //
@@ -1489,7 +1489,7 @@ TEST(v1_without_a_config_arrives_unnamed_so_its_species_can_speak) {
   GameState gs;
   CHECK_EQ(save_load_all(gs), LOAD_MIGRATED);
 
-  const PebbleInstance& p = gs.pebbles[0];
+  const BugInstance& p = gs.bugs[0];
   // (1) NO NICKNAME. Nobody typed one, so nothing pretends anybody did.
   CHECK_EQ(p.nickname[0], '\0');
 
@@ -1497,19 +1497,19 @@ TEST(v1_without_a_config_arrives_unnamed_so_its_species_can_speak) {
   // BLOCK TRANSCRIBED THE HASH BY HAND, because ui.cpp's ui_name_for() includes
   // <Arduino.h> and no host binary could link it - a second implementation of a
   // shipped algorithm living inside a test, and the reason changing a constant
-  // in ui.cpp failed nothing anywhere. The hash moved to game/pebble.cpp and
+  // in ui.cpp failed nothing anywhere. The hash moved to game/bug.cpp and
   // this case now CALLS it, so the two cannot drift apart again.
   uint8_t syl[2];
-  pebble_name_syllables(p.genome.lineage_id, p.genome.generation, syl);
-  CHECK(syl[0] < PB_NAME_SYLLABLES);
-  CHECK(syl[1] < PB_NAME_SYLLABLES);
+  bug_name_syllables(p.genome.lineage_id, p.genome.generation, syl);
+  CHECK(syl[0] < ER_NAME_SYLLABLES);
+  CHECK(syl[1] < ER_NAME_SYLLABLES);
   CHECK(S_SYL_A(syl[0])[0] != '\0');
   CHECK(S_SYL_B(syl[1])[0] != '\0');
   // And the whole word the v1 UI drew, through the same join ui_name_for() now
   // uses - a real string comparison where there used to be two non-empty
   // checks that any hash at all would have satisfied.
   char dynasty[32];
-  const uint8_t dn = pebble_name_join(S_SYL_A(syl[0]), S_SYL_B(syl[1]),
+  const uint8_t dn = bug_name_join(S_SYL_A(syl[0]), S_SYL_B(syl[1]),
                                       dynasty, (uint16_t)sizeof dynasty);
   CHECK(dn > 0);
   // Derived independently from the rule for this fixture's genome
@@ -1533,7 +1533,7 @@ TEST(v1_with_a_typed_name_keeps_it) {
   seed_v1(true);
   GameState gs;
   CHECK_EQ(save_load_all(gs), LOAD_MIGRATED);
-  CHECK_STR_EQ(gs.pebbles[0].nickname, "Pebble");
+  CHECK_STR_EQ(gs.bugs[0].nickname, "Pebble");      // idem
 }
 
 TEST(v1_egg_fixture_migrates_to_level_one) {
@@ -1543,13 +1543,13 @@ TEST(v1_egg_fixture_migrates_to_level_one) {
            sizeof(LegacyPetSave));
   GameState gs;
   CHECK_EQ(migrate_v1_to_v2(save_bytes, nullptr, gs), MIGRATE_OK);
-  CHECK_EQ(gs.pebbles[0].level, 1);
-  CHECK_EQ(gs.pebbles[0].genome.lineage_id, 0x00C0FFEEu);
-  for (uint8_t i = 0; i < PB_CARE_COUNT; ++i) {
-    CHECK_EQ(gs.pebbles[0].care[i], LEGACY_STAT_MILLI_MAX);
+  CHECK_EQ(gs.bugs[0].level, 1);
+  CHECK_EQ(gs.bugs[0].genome.lineage_id, 0x00C0FFEEu);
+  for (uint8_t i = 0; i < ER_CARE_COUNT; ++i) {
+    CHECK_EQ(gs.bugs[0].care[i], LEGACY_STAT_MILLI_MAX);
   }
-  CHECK_EQ(gs.pebbles[0].origin, ORIGIN_STARTER);
-  CHECK(pebble_blob_ok(gs.pebbles[0]));
+  CHECK_EQ(gs.bugs[0].origin, ORIGIN_STARTER);
+  CHECK(bug_blob_ok(gs.bugs[0]));
 }
 
 TEST(a_rotten_v1_blob_is_corrupt_not_a_fresh_pet) {
@@ -1573,9 +1573,9 @@ TEST(the_checkpoint_cadence_is_daily_and_event_driven) {
   begin();
   GameState gs;
   save_load_all(gs);
-  gs.pebbles[0] = sample_pebble(0);
+  gs.bugs[0] = sample_bug(0);
   gs.box.slot_mask = 1; gs.box.active_slot = 0;
-  CHECK(save_pebble(0, gs.pebbles[0], true));
+  CHECK(save_bug(0, gs.bugs[0], true));
   CHECK(save_box_header(gs.box));
 
   // First call on a unit with no checkpoint at all: writes immediately.
@@ -1618,11 +1618,11 @@ TEST(the_gain_ledger_is_left_alone_by_the_migration) {
 // =============================================================================
 //  THE TWO SLOT-WRITE PATHS, AND WHY THERE ARE TWO (P7-C6, the blocking find)
 //
-//  save_pebble(force=true) DEFERS a second write of one key inside
+//  save_bug(force=true) DEFERS a second write of one key inside
 //  SAVE_MIN_GAP_MS and returns TRUE - correct for the care loop, which calls it
 //  on every action and relies on save_service() to flush. It is a LIE to any
 //  caller whose contract is "the bytes landed", which is why game/trade.cpp's
-//  store seam goes through save_pebble_now() instead. Both halves are pinned
+//  store seam goes through save_bug_now() instead. Both halves are pinned
 //  here, because the whole defect was that only one of them had a reader.
 // =============================================================================
 // Reads BOTH copies of a slot's pair straight out of the fake store, so a case
@@ -1633,14 +1633,14 @@ static bool flash_slot_has_level(uint8_t slot, uint8_t level) {
     char key[KV_KEY_CAP];
     key[0] = 'p'; key[1] = 'b';
     key[2] = (char)('0' + slot); key[3] = (char)('0' + copy); key[4] = '\0';
-    PebbleInstance p;
+    BugInstance p;
     if (kv_get(KV_MAIN, key, &p, sizeof p) != (int)sizeof p) continue;
     if (p.level == level) return true;
   }
   return false;
 }
 
-// A whole device with one Pebble in 'slot', so save_load_all() can read it back.
+// A whole device with one Bug in 'slot', so save_load_all() can read it back.
 static void seed_one_slot(GameState& gs, uint8_t slot) {
   CHECK_EQ(save_load_all(gs), LOAD_FRESH);
   save_bind(gs);
@@ -1658,18 +1658,18 @@ TEST(a_second_write_of_one_slot_inside_the_floor_is_deferred_and_says_so) {
   GameState gs;
   seed_one_slot(gs, 3u);
 
-  const PebbleInstance first = sample_pebble(3);
-  gs.pebbles[3] = first;
-  CHECK(save_pebble(3, first, true));
-  CHECK(save_pebble_landed());                 // the first write always lands
+  const BugInstance first = sample_bug(3);
+  gs.bugs[3] = first;
+  CHECK(save_bug(3, first, true));
+  CHECK(save_bug_landed());                 // the first write always lands
 
-  PebbleInstance second = first;
+  BugInstance second = first;
   second.level = (uint8_t)(first.level + 5u);
-  gs.pebbles[3] = second;
+  gs.bugs[3] = second;
 
   advance(SAVE_MIN_GAP_MS / 2u);               // still inside the floor
-  CHECK(save_pebble(3, second, true));         // "true" - and it did NOT land
-  CHECK(!save_pebble_landed());
+  CHECK(save_bug(3, second, true));         // "true" - and it did NOT land
+  CHECK(!save_bug_landed());
 
   // FLASH STILL HOLDS THE FIRST BYTES. This is the exact shape of the defect
   // P7-C6 found: a caller that read only the return value would have believed
@@ -1680,40 +1680,40 @@ TEST(a_second_write_of_one_slot_inside_the_floor_is_deferred_and_says_so) {
   // save_service() is what makes the deferral honest for the care loop.
   advance(SAVE_MIN_GAP_MS);
   save_service();
-  CHECK(save_pebble_landed());
+  CHECK(save_bug_landed());
   CHECK(flash_slot_has_level(3u, second.level));
 
   GameState back;
   CHECK_EQ((int)save_load_all(back), (int)LOAD_OK);
-  CHECK_EQ((int)back.pebbles[3].level, (int)second.level);
+  CHECK_EQ((int)back.bugs[3].level, (int)second.level);
 }
 
-TEST(save_pebble_now_reaches_flash_twice_inside_the_floor_and_never_says_it_did_not) {
+TEST(save_bug_now_reaches_flash_twice_inside_the_floor_and_never_says_it_did_not) {
   begin();
   GameState gs;
   seed_one_slot(gs, 2u);
 
   // THE TRADE'S SHAPE: B1 clears the outgoing slot, B2 files the incoming one
   // into the slot B1 just released, microseconds apart. Both must land.
-  PebbleInstance out = sample_pebble(2);
-  gs.pebbles[2] = out;
-  CHECK(save_pebble_now(2, out));
-  CHECK(save_pebble_landed());
+  BugInstance out = sample_bug(2);
+  gs.bugs[2] = out;
+  CHECK(save_bug_now(2, out));
+  CHECK(save_bug_landed());
 
-  PebbleInstance mid = sample_pebble(5);
+  BugInstance mid = sample_bug(5);
   mid.id = 0xFEED0001u;
-  gs.pebbles[2] = mid;
+  gs.bugs[2] = mid;
   const uint32_t puts_b1 = kv_mem_puts();
-  CHECK(save_pebble_now(2, mid));              // B1, same key, same millisecond
-  CHECK(save_pebble_landed());
+  CHECK(save_bug_now(2, mid));              // B1, same key, same millisecond
+  CHECK(save_bug_landed());
   CHECK(kv_mem_puts() > puts_b1);              // it really touched the store
 
-  PebbleInstance in = sample_pebble(9);
+  BugInstance in = sample_bug(9);
   in.id = 0xFEED0002u;
-  gs.pebbles[2] = in;
+  gs.bugs[2] = in;
   const uint32_t puts_b2 = kv_mem_puts();
-  CHECK(save_pebble_now(2, in));               // B2, same key, same millisecond
-  CHECK(save_pebble_landed());
+  CHECK(save_bug_now(2, in));               // B2, same key, same millisecond
+  CHECK(save_bug_landed());
   CHECK(kv_mem_puts() > puts_b2);              // and so did this one
 
   CHECK(flash_slot_has_level(2u, in.level));   // the LAST write is what is there
@@ -1724,19 +1724,19 @@ TEST(save_pebble_now_reaches_flash_twice_inside_the_floor_and_never_says_it_did_
   // the only thing that can actually tell the two behaviours apart.
   gs.box.slot_mask = (uint16_t)(gs.box.slot_mask | (1u << 4));
   CHECK(save_box_header(gs.box));
-  PebbleInstance stale = sample_pebble(1);
+  BugInstance stale = sample_bug(1);
   stale.id = 0xFEED0003u;
-  gs.pebbles[4] = stale;
-  CHECK(save_pebble(4, stale, true));
-  PebbleInstance newer = stale;
+  gs.bugs[4] = stale;
+  CHECK(save_bug(4, stale, true));
+  BugInstance newer = stale;
   newer.level = (uint8_t)(stale.level + 3u);
-  gs.pebbles[4] = newer;
-  CHECK(save_pebble(4, newer, true));          // deferred
-  CHECK(!save_pebble_landed());
-  PebbleInstance traded = sample_pebble(6);
+  gs.bugs[4] = newer;
+  CHECK(save_bug(4, newer, true));          // deferred
+  CHECK(!save_bug_landed());
+  BugInstance traded = sample_bug(6);
   traded.id = 0xFEED0004u;
-  gs.pebbles[4] = traded;
-  CHECK(save_pebble_now(4, traded));
+  gs.bugs[4] = traded;
+  CHECK(save_bug_now(4, traded));
   advance(SAVE_MIN_GAP_MS * 2u);
   const uint32_t puts_svc = kv_mem_puts();
   save_service();                              // must be a no-op for slot 4
@@ -1745,18 +1745,18 @@ TEST(save_pebble_now_reaches_flash_twice_inside_the_floor_and_never_says_it_did_
 
   GameState back;
   CHECK_EQ((int)save_load_all(back), (int)LOAD_OK);
-  CHECK_EQ(back.pebbles[2].id, 0xFEED0002u);
-  CHECK_EQ(back.pebbles[4].id, 0xFEED0004u);
+  CHECK_EQ(back.bugs[2].id, 0xFEED0002u);
+  CHECK_EQ(back.bugs[4].id, 0xFEED0004u);
 }
 
 TEST(a_slot_out_of_range_is_refused_by_both_write_paths) {
   begin();
   GameState gs;
   seed_one_slot(gs, 0u);
-  const PebbleInstance p = sample_pebble(0);
-  CHECK(!save_pebble((uint8_t)BOX_SLOTS, p, true));
-  CHECK(!save_pebble_now((uint8_t)BOX_SLOTS, p));
-  CHECK(!save_pebble_landed());
+  const BugInstance p = sample_bug(0);
+  CHECK(!save_bug((uint8_t)BOX_SLOTS, p, true));
+  CHECK(!save_bug_now((uint8_t)BOX_SLOTS, p));
+  CHECK(!save_bug_landed());
 }
 
 // =============================================================================
@@ -1784,10 +1784,10 @@ TEST(a_closed_main_partition_is_not_a_corrupt_save) {
   begin();
   GameState gs;
   CHECK_EQ(save_load_all(gs), LOAD_FRESH);
-  gs.pebbles[0] = sample_pebble(0);
+  gs.bugs[0] = sample_bug(0);
   gs.box.slot_mask = 0x0001u;
   gs.box.active_slot = 0;
-  CHECK(save_pebble(0, gs.pebbles[0], true));
+  CHECK(save_bug(0, gs.bugs[0], true));
   CHECK(save_box_header(gs.box));
   advance(5000); save_service();
 
@@ -1812,13 +1812,13 @@ TEST(a_closed_main_partition_still_reaches_the_checkpoint) {
   begin();
   GameState gs;
   CHECK_EQ(save_load_all(gs), LOAD_FRESH);
-  gs.pebbles[0] = sample_pebble(0);
-  gs.pebbles[0].species_id = 9u;
-  gs.pebbles[0].level      = 22u;
+  gs.bugs[0] = sample_bug(0);
+  gs.bugs[0].species_id = 9u;
+  gs.bugs[0].level      = 22u;
   gs.box.slot_mask   = 0x0001u;
   gs.box.active_slot = 0;
   save_bind(gs);
-  CHECK(save_pebble(0, gs.pebbles[0], true));
+  CHECK(save_bug(0, gs.bugs[0], true));
   CHECK(save_box_header(gs.box));
   CHECK(save_config(gs.cfg));
   CHECK(save_checkpoint_all());
@@ -1832,8 +1832,8 @@ TEST(a_closed_main_partition_still_reaches_the_checkpoint) {
   const LoadResult r = save_load_all(back);
   CHECK(r != LOAD_CORRUPT);
   CHECK_EQ((int)r, (int)LOAD_RECOVERED_CKPT);
-  CHECK_EQ((int)back.pebbles[0].species_id, 9);
-  CHECK_EQ((int)back.pebbles[0].level, 22);
+  CHECK_EQ((int)back.bugs[0].species_id, 9);
+  CHECK_EQ((int)back.bugs[0].level, 22);
 }
 
 // =============================================================================

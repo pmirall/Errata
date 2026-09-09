@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - fakes/boot_host.cpp. See boot_host.h.
+//  Errata host tests - fakes/boot_host.cpp. See boot_host.h.
 // =============================================================================
 #include "boot_host.h"
 

@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - host_shims.h
+//  Errata host tests - host_shims.h
 //  Fake clock and fake button levels for the host builds of input.cpp and
 //  gametime.cpp. The sketch declares the hooks it needs
 //  (nt_input_test_millis / nt_input_test_level / gt_host_millis32); the test

@@ -1,15 +1,15 @@
 // =============================================================================
-//  PEBBLEBOL host test - test_inventory.cpp
+//  ERRATA host test - test_inventory.cpp
 //  THE BAG AND WHAT AN ITEM DOES (game/inventory.h, spec section 24, P5-C4).
 //
 //  Two halves. The first is the bag - add, use, underflow, the seven-slot cap,
 //  the saturation - and the second is the one the carried-forward debt is
 //  about: every ItemKlass has an arm that DOES something, and this file drives
-//  all five and asserts the effect on the Pebble rather than the return value.
+//  all five and asserts the effect on the Bug rather than the return value.
 //
 //  THE ONE THAT WOULD OTHERWISE NOT BE ABLE TO FAIL: a CARE case that only
 //  asserted "IU_OK" would pass against an arm that consumed the item and
-//  changed nothing. Every arm below asserts the Pebble BEFORE and AFTER, and
+//  changed nothing. Every arm below asserts the Bug BEFORE and AFTER, and
 //  every refusal asserts that the item is STILL IN THE BAG.
 // =============================================================================
 #include "nt_test.h"
@@ -32,17 +32,17 @@ static void fresh_bag(void)
   CHECK_EQ(inv_slots_used(g_inv), 0);
 }
 
-static void mk_pebble(PebbleInstance& p, uint8_t species, uint8_t level)
+static void mk_bug(BugInstance& p, uint8_t species, uint8_t level)
 {
   memset(&p, 0, sizeof p);
-  p.magic      = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic      = (uint16_t)BUG_MAGIC;
+  p.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   p.species_id = species;
   p.id         = 0x5EED0001u;
   p.level      = level;
   const SpeciesDef* sp = species_get(species);
   p.hp_cur = sp ? xp_hp_max(sp->base_hp, level) : 0u;
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) p.care[i] = PB_CARE_MILLI_MAX;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) p.care[i] = ER_CARE_MILLI_MAX;
 }
 
 // The id of the first item of a klass, so a case names a klass and not a
@@ -136,8 +136,8 @@ TEST(an_xp_candy_really_pays_xp_and_is_consumed) {
   CHECK(id != 0);
   CHECK_EQ(inv_add(g_inv, id, 2), 2);
 
-  PebbleInstance p;
-  mk_pebble(p, 1, 3);
+  BugInstance p;
+  mk_bug(p, 1, 3);
   const uint8_t  lv0 = p.level;
   const uint16_t xp0 = p.xp;
 
@@ -146,7 +146,7 @@ TEST(an_xp_candy_really_pays_xp_and_is_consumed) {
   CHECK_EQ(eff.klass, (uint8_t)ITEM_KLASS_XP_CANDY);
   CHECK_EQ(eff.xp, item_xp_value(id));
   CHECK(eff.xp > 0);
-  // THE PEBBLE MOVED - the claim, rather than the return value.
+  // THE BUG MOVED - the claim, rather than the return value.
   CHECK(p.level > lv0 || p.xp > xp0);
   CHECK_EQ(inv_count(g_inv, id), 1);           // exactly one consumed
 }
@@ -156,10 +156,10 @@ TEST(a_candy_at_the_top_of_the_curve_is_not_consumed) {
   const uint8_t id = first_of((uint8_t)ITEM_KLASS_XP_CANDY);
   CHECK_EQ(inv_add(g_inv, id, 1), 1);
 
-  PebbleInstance p;
-  mk_pebble(p, 1, (uint8_t)XP_LEVEL_MAX);
+  BugInstance p;
+  mk_bug(p, 1, (uint8_t)XP_LEVEL_MAX);
   p.xp = 0;
-  PebbleInstance before = p;
+  BugInstance before = p;
 
   ItemEffect eff;
   CHECK_EQ(inv_use(g_inv, id, &p, 1000u, (uint8_t)CAL_USER, eff), (uint8_t)IU_NO_EFFECT);
@@ -186,14 +186,14 @@ TEST(a_care_item_restores_the_stat_its_own_row_names_and_no_other) {
 
   // THE SINGLE-STAT ITEM MOVES EXACTLY ONE BAR.
   CHECK_EQ(inv_add(g_inv, one->id, 1), 1);
-  PebbleInstance p;
-  mk_pebble(p, 1, 5);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) p.care[i] = 0;
+  BugInstance p;
+  mk_bug(p, 1, 5);
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) p.care[i] = 0;
   ItemEffect eff;
   CHECK_EQ(inv_use(g_inv, one->id, &p, 1000u, (uint8_t)CAL_USER, eff), (uint8_t)IU_OK);
   CHECK_EQ(eff.care_target, one->target);
   CHECK_EQ(eff.care_stats, 1);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) {
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) {
     if (i == (uint8_t)(one->target - 1u)) {
       // value is PERCENT OF FULL - the unit the pack now states as a number.
       CHECK_EQ(p.care[i], (int32_t)one->value * CARE_MILLI_PER_PCT);
@@ -205,16 +205,16 @@ TEST(a_care_item_restores_the_stat_its_own_row_names_and_no_other) {
   // THE ALL ITEM MOVES FIVE.
   fresh_bag();
   CHECK_EQ(inv_add(g_inv, all->id, 1), 1);
-  mk_pebble(p, 1, 5);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) p.care[i] = 0;
+  mk_bug(p, 1, 5);
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) p.care[i] = 0;
   CHECK_EQ(inv_use(g_inv, all->id, &p, 1000u, (uint8_t)CAL_USER, eff), (uint8_t)IU_OK);
   CHECK_EQ(eff.care_target, (uint8_t)CARE_TGT_ALL);
-  CHECK_EQ(eff.care_stats, (uint8_t)PB_CARE_COUNT);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i)
+  CHECK_EQ(eff.care_stats, (uint8_t)ER_CARE_COUNT);
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i)
     CHECK_EQ(p.care[i], (int32_t)all->value * CARE_MILLI_PER_PCT);
 }
 
-TEST(a_care_item_never_overfills_and_is_not_consumed_on_a_well_pebble) {
+TEST(a_care_item_never_overfills_and_is_not_consumed_on_a_well_bug) {
   fresh_bag();
   const uint8_t id = first_of((uint8_t)ITEM_KLASS_CARE);
   CHECK(id != 0);
@@ -223,19 +223,19 @@ TEST(a_care_item_never_overfills_and_is_not_consumed_on_a_well_pebble) {
   if (!it) return;
   CHECK_EQ(inv_add(g_inv, id, 2), 2);
 
-  PebbleInstance p;
-  mk_pebble(p, 1, 5);                          // every bar already full
-  PebbleInstance before = p;
+  BugInstance p;
+  mk_bug(p, 1, 5);                          // every bar already full
+  BugInstance before = p;
   ItemEffect eff;
   CHECK_EQ(inv_use(g_inv, id, &p, 1000u, (uint8_t)CAL_USER, eff), (uint8_t)IU_NO_EFFECT);
   CHECK_EQ(memcmp(&before, &p, sizeof p), 0);
   CHECK_EQ(inv_count(g_inv, id), 2);           // NOT consumed
 
   // Nearly full: it works, and it clamps rather than overflowing.
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) p.care[i] = PB_CARE_MILLI_MAX - 1;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) p.care[i] = ER_CARE_MILLI_MAX - 1;
   CHECK_EQ(inv_use(g_inv, id, &p, 1000u, (uint8_t)CAL_USER, eff), (uint8_t)IU_OK);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i)
-    CHECK_EQ(p.care[i], (int32_t)PB_CARE_MILLI_MAX);
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i)
+    CHECK_EQ(p.care[i], (int32_t)ER_CARE_MILLI_MAX);
   CHECK_EQ(inv_count(g_inv, id), 1);
 }
 
@@ -252,8 +252,8 @@ TEST(the_cure_item_clears_the_status_bits_its_own_column_names_and_the_deadline_
   if (!cure) return;
   CHECK_EQ(inv_add(g_inv, cure->id, 1), 1);
 
-  PebbleInstance p;
-  mk_pebble(p, 1, 5);
+  BugInstance p;
+  mk_bug(p, 1, 5);
   CHECK(cor_apply(p, 1700000000u, (uint8_t)CAL_USER));
   CHECK(cor_is_corrupted(p));
   CHECK(p.corrupt_until_epoch != 0u);
@@ -293,7 +293,7 @@ TEST(every_battle_modifier_is_consumed_armed_and_handed_out_exactly_once) {
     CHECK(!inv_mod_armed());
 
     ItemEffect eff;
-    // It needs no Pebble: the buff is armed for the next fight.
+    // It needs no Bug: the buff is armed for the next fight.
     CHECK_EQ(inv_use(g_inv, it.id, nullptr, 1000u, (uint8_t)CAL_USER, eff),
              (uint8_t)IU_OK);
     CHECK_EQ(inv_count(g_inv, it.id), 0);
@@ -361,9 +361,9 @@ TEST(the_evolution_key_is_offered_to_the_rules_and_never_spent_when_none_bites) 
     if (EVOLUTION_RULES[i].cond == (uint8_t)EVOC_ITEM) item_rules++;
   CHECK_EQ(item_rules, 1);          // exactly one lock in the whole roster
 
-  PebbleInstance p;
-  mk_pebble(p, 1, (uint8_t)XP_LEVEL_MAX);      // well past every evolution level
-  PebbleInstance before = p;
+  BugInstance p;
+  mk_bug(p, 1, (uint8_t)XP_LEVEL_MAX);      // well past every evolution level
+  BugInstance before = p;
   ItemEffect eff;
   CHECK_EQ(inv_use(g_inv, id, &p, 1000u, (uint8_t)CAL_USER, eff), (uint8_t)IU_NO_EFFECT);
   CHECK_EQ(eff.klass, (uint8_t)ITEM_KLASS_EVOLUTION);
@@ -374,9 +374,9 @@ TEST(the_evolution_key_is_offered_to_the_rules_and_never_spent_when_none_bites) 
   // AND IT IS NOT A CARE ITEM. The old fold made it one; nothing may read it
   // that way now, whatever the creature's state.
   CHECK_EQ(item_get(id)->klass, (uint8_t)ITEM_KLASS_EVOLUTION);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) p.care[i] = 0;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) p.care[i] = 0;
   CHECK_EQ(inv_use(g_inv, id, &p, 1000u, (uint8_t)CAL_USER, eff), (uint8_t)IU_NO_EFFECT);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) CHECK_EQ(p.care[i], 0);
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) CHECK_EQ(p.care[i], 0);
 }
 
 TEST(the_key_is_cut_for_one_lock_and_the_condition_arm_agrees) {
@@ -428,8 +428,8 @@ TEST(the_key_is_cut_for_one_lock_and_the_condition_arm_agrees) {
     CHECK_EQ((int)real->cond_value, (int)id);
     fresh_bag();
     CHECK_EQ(inv_add(g_inv, id, 2), 2);
-    PebbleInstance c;
-    mk_pebble(c, 53, real->level);
+    BugInstance c;
+    mk_bug(c, 53, real->level);
     ItemEffect eff;
     CHECK_EQ(inv_use(g_inv, id, &c, 2000u, (uint8_t)CAL_USER, eff), (uint8_t)IU_OK);
     CHECK_EQ(eff.klass, (uint8_t)ITEM_KLASS_EVOLUTION);
@@ -440,8 +440,8 @@ TEST(the_key_is_cut_for_one_lock_and_the_condition_arm_agrees) {
     // One below the rule's level and the same key does nothing and stays.
     fresh_bag();
     CHECK_EQ(inv_add(g_inv, id, 1), 1);
-    PebbleInstance young;
-    mk_pebble(young, 53, (uint8_t)(real->level - 1u));
+    BugInstance young;
+    mk_bug(young, 53, (uint8_t)(real->level - 1u));
     CHECK_EQ(inv_use(g_inv, id, &young, 2000u, (uint8_t)CAL_USER, eff),
              (uint8_t)IU_NO_EFFECT);
     CHECK_EQ(young.species_id, 53);
@@ -454,8 +454,8 @@ TEST(a_capture_item_is_never_spent_from_a_menu) {
   const uint8_t id = first_of((uint8_t)ITEM_KLASS_CAPTURE);
   CHECK(id != 0);
   CHECK_EQ(inv_add(g_inv, id, 2), 2);
-  PebbleInstance p;
-  mk_pebble(p, 1, 5);
+  BugInstance p;
+  mk_bug(p, 1, 5);
   ItemEffect eff;
   CHECK_EQ(inv_use(g_inv, id, &p, 1000u, (uint8_t)CAL_USER, eff), (uint8_t)IU_NOT_HERE);
   // The one item a player could otherwise destroy by accident stays in the bag.
@@ -467,8 +467,8 @@ TEST(a_capture_item_is_never_spent_from_a_menu) {
 // =============================================================================
 TEST(every_refusal_is_named_and_leaves_the_bag_alone) {
   fresh_bag();
-  PebbleInstance p;
-  mk_pebble(p, 1, 5);
+  BugInstance p;
+  mk_bug(p, 1, 5);
   ItemEffect eff;
 
   // UNKNOWN ITEM
@@ -484,13 +484,13 @@ TEST(every_refusal_is_named_and_leaves_the_bag_alone) {
   CHECK_EQ(inv_add(g_inv, candy, 1), 1);
   CHECK_EQ(inv_use(g_inv, candy, nullptr, 0u, (uint8_t)CAL_USER, eff), (uint8_t)IU_NO_TARGET);
   CHECK_EQ(inv_count(g_inv, candy), 1);
-  PebbleInstance empty;
+  BugInstance empty;
   memset(&empty, 0, sizeof empty);
   CHECK_EQ(inv_use(g_inv, candy, &empty, 0u, (uint8_t)CAL_USER, eff), (uint8_t)IU_NO_TARGET);
   CHECK_EQ(inv_count(g_inv, candy), 1);
 
-  // POSITIVE CONTROL: the same item, the same bag, a real Pebble.
-  mk_pebble(p, 1, 3);
+  // POSITIVE CONTROL: the same item, the same bag, a real Bug.
+  mk_bug(p, 1, 3);
   CHECK_EQ(inv_use(g_inv, candy, &p, 0u, (uint8_t)CAL_USER, eff), (uint8_t)IU_OK);
   CHECK_EQ(inv_count(g_inv, candy), 0);
 }
@@ -502,9 +502,9 @@ TEST(every_shipped_item_has_an_arm_that_answers) {
     const ItemDef& it = ITEMS_TABLE[i];
     fresh_bag();
     CHECK_EQ(inv_add(g_inv, it.id, 1), 1);
-    PebbleInstance p;
-    mk_pebble(p, 1, 4);
-    for (uint8_t c = 0; c < (uint8_t)PB_CARE_COUNT; ++c) p.care[c] = 0;
+    BugInstance p;
+    mk_bug(p, 1, 4);
+    for (uint8_t c = 0; c < (uint8_t)ER_CARE_COUNT; ++c) p.care[c] = 0;
     ItemEffect eff;
     const uint8_t r = inv_use(g_inv, it.id, &p, 1700000000u, (uint8_t)CAL_USER, eff);
     CHECK(r < (uint8_t)IU_USE_COUNT);

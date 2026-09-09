@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/build.sh — arduino-cli wrapper for the Pebblebol firmware.
+# tools/build.sh — arduino-cli wrapper for the Errata firmware.
 #
 # Compiles the sketch with --warnings all, fails on any warning that points into
 # the sketch (core/library warnings are ignored, exactly like the baseline), and
@@ -9,12 +9,12 @@
 #   --define      overrides a `#define MACRO <number>` line in config.h in a temporary
 #                 copy of the sketch (used by build_matrix.sh); the repo is untouched.
 #   --quiet       print only the summary line.
-# Environment: FQBN (default below), SKETCH (default <repo>/Pebblebol).
+# Environment: FQBN (default below), SKETCH (default <repo>/Errata).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SKETCH="${SKETCH:-$ROOT/Pebblebol}"
-# PARTITIONS (decision D6). Pebblebol/partitions.csv is the table that is
+SKETCH="${SKETCH:-$ROOT/Errata}"
+# PARTITIONS (decision D6). Errata/partitions.csv is the table that is
 # actually flashed: arduino-cli copies a sketch-local partitions.csv into the
 # build directory and esptool writes THAT, whatever the board menu says. What
 # the menu still controls is the SIZE CHECK - upload.maximum_size comes from the
@@ -86,12 +86,12 @@ fi
 # table that will be flashed is the sketch's, i.e. it has the nvs2 partition.
 if [ "$APPMAX" != "$EXPECT_APP_MAX" ]; then
   echo "BUILD FAIL variant=$VARIANT: app maximum is $APPMAX bytes, expected $EXPECT_APP_MAX" >&2
-  echo "  (the app0 size in Pebblebol/partitions.csv and the FQBN's PartitionScheme disagree - see D6)" >&2
+  echo "  (the app0 size in Errata/partitions.csv and the FQBN's PartitionScheme disagree - see D6)" >&2
   exit 1
 fi
 if ! grep -qE "^[[:space:]]*nvs2[[:space:]]*," "$BUILD_PATH/partitions.csv" 2>/dev/null; then
   echo "BUILD FAIL variant=$VARIANT: the flashed partition table has no nvs2 partition" >&2
-  echo "  (Pebblebol/partitions.csv was not picked up - see D6)" >&2
+  echo "  (Errata/partitions.csv was not picked up - see D6)" >&2
   exit 1
 fi
 

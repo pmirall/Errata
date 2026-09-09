@@ -5,7 +5,7 @@ gen_sprites.py - THE SPRITE PIPELINE (plan P9-C3, built at P9-C1).
 
     tools/sprites/atlas.txt   (ordered manifest)
     tools/sprites/*.txt       (ASCII art, one character per pixel)
-                              ->  Pebblebol/src/data/sprites_pebbles.h
+                              ->  Errata/src/data/sprites_bugs.h
 
 Usage
     python3 tools/gen_sprites.py               # write the header
@@ -59,7 +59,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 SPRITES = os.path.join(HERE, "sprites")
 CONTENT = os.path.join(HERE, "content")
-OUT_H = os.path.join(ROOT, "Pebblebol", "src", "data", "sprites_pebbles.h")
+OUT_H = os.path.join(ROOT, "Errata", "src", "data", "sprites_bugs.h")
 MANIFEST = os.path.join(SPRITES, "atlas.txt")
 
 # --- the shape of a species body, and the one place to change it -------------
@@ -92,7 +92,7 @@ MAX_FRAMES = 4
 # by the generator (with a message naming the overrun) before it reaches
 # data/sprites.h's 11,264 B static_assert, which counts the icons and emotes
 # too. Raising either is a re-plan, not a fix: say so in the commit.
-PB_DATA_BYTES_MAX = 10240
+ER_DATA_BYTES_MAX = 10240
 
 INK = "#"
 GAP = "."
@@ -272,7 +272,7 @@ def _validate_head(path, stem, head, frames):
     if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
         raise SrcError(path, name_line, 1,
                        "name %r must be UPPER_SNAKE: [A-Z][A-Z0-9_]*. It becomes "
-                       "the C enum tag PBSPR_%s and the array pb_spr_%s"
+                       "the C enum tag BUGSPR_%s and the array bug_spr_%s"
                        % (name, name, name.lower()))
     if name.lower() != stem:
         raise SrcError(path, name_line, 1,
@@ -837,7 +837,7 @@ def emit(sets):
     total = sum(set_bytes(s) for s in sets)
     o = []
     o.append("// " + "=" * 77)
-    o.append("//  PEBBLEBOL - data/sprites_pebbles.h - THE GENERATED ATLAS")
+    o.append("//  ERRATA - data/sprites_bugs.h - THE GENERATED ATLAS")
     o.append("//")
     o.append("//  GENERATED FILE. Do not edit: tools/gen_sprites.py rewrites it from")
     o.append("//  tools/sprites/*.txt (ASCII art, one character per pixel).")
@@ -851,7 +851,7 @@ def emit(sets):
     o.append("//  NOTHING IN THE FIRMWARE INCLUDES THIS HEADER YET, and that is deliberate:")
     o.append("//  P9-C1 built the pipeline, P9-C3 draws the 60 bodies and performs the swap")
     o.append("//  (delete the 36 legacy body/pose sets from data/sprites.h, point")
-    o.append("//  sprite_set_id() at PB_SPRITE_BODY_FIRST + sprite_id, re-record the nine")
+    o.append("//  sprite_set_id() at ER_SPRITE_BODY_FIRST + sprite_id, re-record the nine")
     o.append("//  goldens that contain body art). Until then the only consumer is")
     o.append("//  tests/test_sprite_pipeline.cpp, which is what keeps this file compiling")
     o.append("//  and what proves the two EGG sets here are byte-identical to the ones")
@@ -860,8 +860,8 @@ def emit(sets):
     o.append("//  %d set(s), %d species bod%s, %d B of art."
              % (len(sets), len(bodies), "y" if len(bodies) == 1 else "ies", total))
     o.append("// " + "=" * 77)
-    o.append("#ifndef PB_SPRITES_PEBBLES_H")
-    o.append("#define PB_SPRITES_PEBBLES_H")
+    o.append("#ifndef ER_SPRITES_BUGS_H")
+    o.append("#define ER_SPRITES_BUGS_H")
     o.append("")
     o.append("#include <stdint.h>")
     o.append('#include "sprite_types.h"')
@@ -878,29 +878,29 @@ def emit(sets):
     o.append("// is a DIAG readout and a cache key. The guards on the art are")
     o.append("// tools/gen_sprites.py --check (drift), the static_asserts below (geometry)")
     o.append("// and tests/test_sprite_pipeline.cpp (everything else).")
-    o.append("#define PB_SPRITE_ART_HASH 0x%04Xu" % art_hash(sets))
+    o.append("#define ER_SPRITE_ART_HASH 0x%04Xu" % art_hash(sets))
     o.append("")
     o.append("// Set ids. The ORDER IS A CONTRACT and comes from tools/sprites/atlas.txt,")
     o.append("// never from the filesystem. The species block is the tail: a body's slot is")
-    o.append("// PB_SPRITE_BODY_FIRST + (species_id - 1), which is the pack's")
+    o.append("// ER_SPRITE_BODY_FIRST + (species_id - 1), which is the pack's")
     o.append("// `sprite_id == id - 1` invariant expressed in the atlas.")
-    o.append("enum PbSpriteSetId : uint8_t {")
+    o.append("enum BugSpriteSetId : uint8_t {")
     for i, s in enumerate(sets):
-        tag = "PBSPR_%s = %d," % (s["name"], i)
+        tag = "BUGSPR_%s = %d," % (s["name"], i)
         note = "species %d" % s["species"] if s["species"] else "fixed slot"
         o.append("  %-38s // %s" % (tag, note))
-    o.append("  PB_SPRITE_SET_COUNT = %d" % len(sets))
+    o.append("  ER_SPRITE_SET_COUNT = %d" % len(sets))
     o.append("};")
     o.append("")
-    o.append("#define PB_SPRITE_BODY_FIRST  %d" % body_first)
-    o.append("#define PB_SPRITE_BODY_COUNT  %d" % len(bodies))
+    o.append("#define ER_SPRITE_BODY_FIRST  %d" % body_first)
+    o.append("#define ER_SPRITE_BODY_COUNT  %d" % len(bodies))
     o.append("")
     o.append("// The set names, for tools/ and tests/ that have to PRINT one - chiefly")
     o.append("// tests/tools/sprite_dump.cpp, which renders this atlas for a human to look")
     o.append("// at. Emitted rather than transcribed so a name list can never drift from the")
     o.append("// art it labels. `inline constexpr` and referenced by no firmware translation")
     o.append("// unit, so the linker keeps none of it in .rodata.")
-    o.append("inline constexpr const char* const PB_SPRITE_NAMES[PB_SPRITE_SET_COUNT] = {")
+    o.append("inline constexpr const char* const ER_SPRITE_NAMES[ER_SPRITE_SET_COUNT] = {")
     for s in sets:
         o.append('  "%s",' % s["name"])
     o.append("};")
@@ -915,16 +915,16 @@ def emit(sets):
                     set_bytes(s), rel(s["path"])))
         for line in s["notes"]:
             o.append("// %s" % line)
-        o.append("inline constexpr uint8_t pb_spr_%s[] = {" % s["name"].lower())
+        o.append("inline constexpr uint8_t bug_spr_%s[] = {" % s["name"].lower())
         o.append(hexrows(pack_set(s)))
         o.append("};")
     o.append("")
     o.append("// " + "-" * 77)
     o.append("//  TABLE")
     o.append("// " + "-" * 77)
-    o.append("inline constexpr SpriteSet PB_SPRITE_SETS[PB_SPRITE_SET_COUNT] = {")
+    o.append("inline constexpr SpriteSet ER_SPRITE_SETS[ER_SPRITE_SET_COUNT] = {")
     for s in sets:
-        o.append("  { pb_spr_%s, %d, %d, %d },  // %s"
+        o.append("  { bug_spr_%s, %d, %d, %d },  // %s"
                  % (s["name"].lower(), s["w"], s["h"], len(s["frames"]), s["name"]))
     o.append("};")
     o.append("")
@@ -951,7 +951,7 @@ def emit(sets):
     o.append("//  { 255, 0, 0, 0 } means THIS BODY DOES NOT BLINK: y1 < y0, which")
     o.append("//  pf_build_lids() already answers 0 for. It is what a body with no")
     o.append("//  small enclosed hole gets, and it is a legal answer.")
-    o.append("inline constexpr SpriteEyeBand PB_SPRITE_EYES[PB_SPRITE_SET_COUNT][%d] = {"
+    o.append("inline constexpr SpriteEyeBand ER_SPRITE_EYES[ER_SPRITE_SET_COUNT][%d] = {"
              % max(len(s["frames"]) for s in sets))
     for s in sets:
         cells = []
@@ -966,7 +966,7 @@ def emit(sets):
     o.append("// ((w+7)>>3)*h bytes with no bound of its own, so a row that disagrees with")
     o.append("// its array is a silent read into the NEXT sprite - see data/sprite_types.h.")
     for s in sets:
-        o.append("NT_SPR_SET_FITS(pb_spr_%s, PB_SPRITE_SETS, PBSPR_%s);"
+        o.append("NT_SPR_SET_FITS(bug_spr_%s, ER_SPRITE_SETS, BUGSPR_%s);"
                  % (s["name"].lower(), s["name"]))
     o.append("")
     o.append("// The art budget, MEASURED by the compiler through the table. The declared")
@@ -974,16 +974,16 @@ def emit(sets):
     o.append("// disagreement between the two a named build failure instead of a comment.")
     o.append("constexpr unsigned pb_sprite_atlas_bytes() {")
     o.append("  unsigned n = 0;")
-    o.append("  for (unsigned i = 0; i < (unsigned)PB_SPRITE_SET_COUNT; ++i)")
-    o.append("    n += spr_set_bytes(PB_SPRITE_SETS[i]);")
+    o.append("  for (unsigned i = 0; i < (unsigned)ER_SPRITE_SET_COUNT; ++i)")
+    o.append("    n += spr_set_bytes(ER_SPRITE_SETS[i]);")
     o.append("  return n;")
     o.append("}")
-    o.append("#define PB_SPRITE_DATA_BYTES          (pb_sprite_atlas_bytes())")
-    o.append("#define PB_SPRITE_DATA_BYTES_DECLARED %du" % total)
-    o.append("#define PB_SPRITE_DATA_BYTES_MAX      %du" % PB_DATA_BYTES_MAX)
-    o.append("static_assert(PB_SPRITE_DATA_BYTES == PB_SPRITE_DATA_BYTES_DECLARED,")
+    o.append("#define ER_SPRITE_DATA_BYTES          (pb_sprite_atlas_bytes())")
+    o.append("#define ER_SPRITE_DATA_BYTES_DECLARED %du" % total)
+    o.append("#define ER_SPRITE_DATA_BYTES_MAX      %du" % ER_DATA_BYTES_MAX)
+    o.append("static_assert(ER_SPRITE_DATA_BYTES == ER_SPRITE_DATA_BYTES_DECLARED,")
     o.append('              "generated atlas size disagrees with the generator");')
-    o.append("static_assert(PB_SPRITE_DATA_BYTES <= PB_SPRITE_DATA_BYTES_MAX,")
+    o.append("static_assert(ER_SPRITE_DATA_BYTES <= ER_SPRITE_DATA_BYTES_MAX,")
     o.append('              "generated sprite art over its half of the flash budget");')
     o.append("")
     o.append("// EVERY EYE BAND LIES INSIDE THE BODY IT BELONGS TO. pf_build_lids() blits")
@@ -994,12 +994,12 @@ def emit(sets):
     o.append("// change to eye_band() or to the sprite dimensions, which is the whole reason")
     o.append("// it is a compile error and not a comment.")
     o.append("constexpr bool pb_sprite_eyes_fit() {")
-    o.append("  for (unsigned i = 0; i < (unsigned)PB_SPRITE_SET_COUNT; ++i)")
+    o.append("  for (unsigned i = 0; i < (unsigned)ER_SPRITE_SET_COUNT; ++i)")
     o.append("    for (unsigned f = 0; f < 2u; ++f) {")
-    o.append("      const SpriteEyeBand& e = PB_SPRITE_EYES[i][f];")
+    o.append("      const SpriteEyeBand& e = ER_SPRITE_EYES[i][f];")
     o.append("      if (e.y1 < e.y0) continue;            // 'does not blink'")
-    o.append("      if (e.y1 >= PB_SPRITE_SETS[i].h) return false;")
-    o.append("      if (e.x1 >= PB_SPRITE_SETS[i].w) return false;")
+    o.append("      if (e.y1 >= ER_SPRITE_SETS[i].h) return false;")
+    o.append("      if (e.x1 >= ER_SPRITE_SETS[i].w) return false;")
     o.append("      if (e.x1 < e.x0) return false;")
     o.append("    }")
     o.append("  return true;")
@@ -1007,7 +1007,7 @@ def emit(sets):
     o.append("static_assert(pb_sprite_eyes_fit(),")
     o.append('              "an eye band runs outside the sprite it indexes");')
     o.append("")
-    o.append("#endif  // PB_SPRITES_PEBBLES_H")
+    o.append("#endif  // ER_SPRITES_BUGS_H")
     text = "\n".join(ln.rstrip() for ln in o)
     return text.rstrip("\n") + "\n"
 
@@ -1130,12 +1130,12 @@ def main():
     # P9-C3 (eight spare effect sets appended); a documented refusal that does
     # not refuse is the same defect as a test that cannot fail.
     total_art = sum(set_bytes(s) for s in sets)
-    if total_art > PB_DATA_BYTES_MAX:
+    if total_art > ER_DATA_BYTES_MAX:
         die("%d B of art is over the %d B budget by %d B (%d sets). This is a "
-            "re-plan, not a build error: raise PB_DATA_BYTES_MAX in "
+            "re-plan, not a build error: raise ER_DATA_BYTES_MAX in "
             "tools/gen_sprites.py AND SPRITE_DATA_BYTES_MAX in "
-            "Pebblebol/src/data/sprites.h together, and say so in the commit"
-            % (total_art, PB_DATA_BYTES_MAX, total_art - PB_DATA_BYTES_MAX,
+            "Errata/src/data/sprites.h together, and say so in the commit"
+            % (total_art, ER_DATA_BYTES_MAX, total_art - ER_DATA_BYTES_MAX,
                len(sets)))
 
     if args.render:
@@ -1197,7 +1197,7 @@ def self_check(files):
         same = warn_identical_frames(sets)
         total = sum(set_bytes(s) for s in sets)
         print("self-check: %d set(s) OK, %d B of art, %d over budget"
-              % (len(sets), total, max(0, total - PB_DATA_BYTES_MAX)))
+              % (len(sets), total, max(0, total - ER_DATA_BYTES_MAX)))
         rc = 0
         # A SET WHOSE TWO FRAMES ARE THE SAME BYTES IS AN ERROR HERE TOO (P9-C6).
         # The per-file path has failed on it since P9-C3 ("this body does not
@@ -1209,9 +1209,9 @@ def self_check(files):
             sys.stderr.write("gen_sprites.py: %d set(s) do not animate: %s\n"
                              % (len(same), ", ".join(same)))
             rc = 1
-        if total > PB_DATA_BYTES_MAX:
+        if total > ER_DATA_BYTES_MAX:
             sys.stderr.write("gen_sprites.py: %d B of art over the %d B budget\n"
-                             % (total, PB_DATA_BYTES_MAX))
+                             % (total, ER_DATA_BYTES_MAX))
             rc = 1
         return rc
 

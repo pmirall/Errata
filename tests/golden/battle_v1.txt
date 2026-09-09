@@ -1,11 +1,11 @@
-seed=2468ACE0 engine=3 content=E426 level=14
+seed=2468ACE0 engine=3 content=A78B level=14
 team s=0 i=0 spc=9 lvl=14 ty=0 hp=38 atk=11 def=9 spd=13 mv=8,28,1,6
 team s=0 i=1 spc=14 lvl=14 ty=0 hp=38 atk=8 def=12 spd=7 mv=8,27,34,6
 team s=0 i=2 spc=6 lvl=14 ty=0 hp=38 atk=10 def=10 spd=13 mv=8,2,27,6
 team s=1 i=0 spc=22 lvl=14 ty=1 hp=34 atk=9 def=8 spd=6 mv=12,27,29,16
 team s=1 i=1 spc=27 lvl=14 ty=1 hp=36 atk=14 def=8 spd=12 mv=9,28,17,33
 team s=1 i=2 spc=36 lvl=14 ty=2 hp=42 atk=10 def=14 spd=7 mv=20,26,28,31
-r=001 ROUND_BEGIN h=0C13F96D
+r=001 ROUND_BEGIN h=EB8CF7B5
 r=001 ACTION      s=0 i=0 a=1 b=3
 r=001 ACTION      s=1 i=0 a=1 b=0
 r=001 ORDER       s=0 i=0 a=0 b=13
@@ -16,8 +16,8 @@ r=001 HIT         s=1 i=0 a=0 b=4
 r=001 HP          s=0 i=0 a=0 b=34
 r=001 CORRUPT     s=0 i=0 a=0 b=3
 r=001 CORRUPT     s=0 i=0 a=0 b=2
-r=001 ROUND_END   h=1CB4061B
-r=002 ROUND_BEGIN h=61CBD622
+r=001 ROUND_END   h=956D9973
+r=002 ROUND_BEGIN h=A52B9B1A
 r=002 ACTION      s=0 i=0 a=1 b=2
 r=002 ACTION      s=1 i=0 a=1 b=3
 r=002 ORDER       s=0 i=0 a=0 b=13
@@ -27,8 +27,8 @@ r=002 HP          s=1 i=0 a=0 b=23
 r=002 HIT         s=1 i=0 a=3 b=0
 r=002 STAGE       s=1 i=0 a=0 b=130
 r=002 CORRUPT     s=0 i=0 a=0 b=1
-r=002 ROUND_END   h=F3F1EDC4
-r=003 ROUND_BEGIN h=135051B3
+r=002 ROUND_END   h=280CD1AC
+r=003 ROUND_BEGIN h=F42CC29B
 r=003 ACTION      s=0 i=0 a=1 b=1
 r=003 ACTION      s=1 i=0 a=1 b=2
 r=003 ORDER       s=0 i=0 a=0 b=13
@@ -39,8 +39,8 @@ r=003 FAINT       s=1 i=0 a=0 b=0
 r=003 CORRUPT     s=0 i=0 a=0 b=0
 r=003 STAGE       s=0 i=0 a=0 b=128
 r=003 STAGE       s=1 i=0 a=0 b=128
-r=003 ROUND_END   h=65FFFA99
-r=004 ROUND_BEGIN h=29CEE07D
+r=003 ROUND_END   h=5BB3CB91
+r=004 ROUND_BEGIN h=B7C9EEB5
 r=004 ACTION      s=0 i=0 a=1 b=0
 r=004 ACTION      s=1 i=0 a=2 b=1
 r=004 ORDER       s=1 i=0 a=1 b=6
@@ -48,8 +48,8 @@ r=004 SWITCH      s=1 i=1 a=0 b=36
 r=004 HIT         s=0 i=0 a=0 b=17
 r=004 HP          s=1 i=1 a=0 b=19
 r=004 HP          s=0 i=0 a=0 b=30
-r=004 ROUND_END   h=4B6EF78C
-r=005 ROUND_BEGIN h=5EB9C340
+r=004 ROUND_END   h=C608A774
+r=005 ROUND_BEGIN h=3E5C8268
 r=005 ACTION      s=0 i=0 a=2 b=1
 r=005 ACTION      s=1 i=1 a=1 b=0
 r=005 ORDER       s=0 i=0 a=0 b=13
@@ -57,8 +57,8 @@ r=005 SWITCH      s=0 i=1 a=0 b=38
 r=005 TYPE_EDGE   s=1 i=1 a=2 b=0
 r=005 HIT         s=1 i=1 a=0 b=5
 r=005 HP          s=0 i=1 a=0 b=33
-r=005 ROUND_END   h=79370FC7
-r=006 ROUND_BEGIN h=76EE3ACA
+r=005 ROUND_END   h=DDEF74AF
+r=006 ROUND_BEGIN h=75282672
 r=006 ACTION      s=0 i=1 a=1 b=2
 r=006 ACTION      s=1 i=1 a=1 b=3
 r=006 ORDER       s=0 i=1 a=0 b=7
@@ -66,8 +66,8 @@ r=006 HIT         s=0 i=1 a=2 b=0
 r=006 CLEANSE     s=0 i=1 a=0 b=0
 r=006 HIT         s=1 i=1 a=3 b=0
 r=006 HP          s=1 i=1 a=0 b=28
-r=006 ROUND_END   h=C2A69CE6
-r=007 ROUND_BEGIN h=09B136C5
+r=006 ROUND_END   h=A93FAE4E
+r=007 ROUND_BEGIN h=43D3BE6D
 r=007 ACTION      s=0 i=1 a=1 b=1
 r=007 ACTION      s=1 i=1 a=1 b=2
 r=007 ORDER       s=1 i=1 a=1 b=12
@@ -76,8 +76,8 @@ r=007 HP          s=0 i=1 a=0 b=17
 r=007 STAGE       s=1 i=1 a=1 b=127
 r=007 HIT         s=0 i=1 a=1 b=9
 r=007 HP          s=1 i=1 a=0 b=19
-r=007 ROUND_END   h=B3BBCF63
-r=008 ROUND_BEGIN h=182927F6
+r=007 ROUND_END   h=10603E9B
+r=008 ROUND_BEGIN h=D6784AAE
 r=008 ACTION      s=0 i=1 a=1 b=0
 r=008 ACTION      s=1 i=1 a=1 b=1
 r=008 ORDER       s=1 i=1 a=1 b=12
@@ -88,8 +88,8 @@ r=008 HIT         s=0 i=1 a=0 b=17
 r=008 HP          s=1 i=1 a=0 b=2
 r=008 HP          s=0 i=1 a=0 b=0
 r=008 FAINT       s=0 i=1 a=0 b=0
-r=008 ROUND_END   h=FC0ECE5E
-r=009 ROUND_BEGIN h=2E34295B
+r=008 ROUND_END   h=CE666676
+r=009 ROUND_BEGIN h=CFDDF213
 r=009 ACTION      s=0 i=1 a=2 b=0
 r=009 ACTION      s=1 i=1 a=1 b=0
 r=009 ORDER       s=0 i=1 a=0 b=7
@@ -97,8 +97,8 @@ r=009 SWITCH      s=0 i=0 a=0 b=30
 r=009 HIT         s=1 i=1 a=0 b=8
 r=009 HP          s=0 i=0 a=0 b=22
 r=009 STAGE       s=1 i=1 a=1 b=128
-r=009 ROUND_END   h=3550CBCC
-r=010 ROUND_BEGIN h=98F2E7BE
+r=009 ROUND_END   h=8359EDF4
+r=010 ROUND_BEGIN h=E2D4B766
 r=010 ACTION      s=0 i=0 a=1 b=2
 r=010 ACTION      s=1 i=1 a=1 b=0
 r=010 ORDER       s=0 i=0 a=0 b=13
@@ -106,15 +106,15 @@ r=010 HIT         s=0 i=0 a=2 b=6
 r=010 HP          s=1 i=1 a=0 b=0
 r=010 SKIPPED     s=1 i=1 a=1 b=0
 r=010 FAINT       s=1 i=1 a=0 b=0
-r=010 ROUND_END   h=E9F40FC8
-r=011 ROUND_BEGIN h=BDA81C8A
+r=010 ROUND_END   h=A2EB91E0
+r=011 ROUND_BEGIN h=E4E4F442
 r=011 ACTION      s=0 i=0 a=1 b=1
 r=011 ACTION      s=1 i=1 a=2 b=2
 r=011 ORDER       s=1 i=1 a=1 b=12
 r=011 SWITCH      s=1 i=2 a=0 b=42
 r=011 MISS        s=0 i=0 a=1 b=0
-r=011 ROUND_END   h=EADD5C91
-r=012 ROUND_BEGIN h=5287E464
+r=011 ROUND_END   h=2E0FE3C9
+r=012 ROUND_BEGIN h=7C075EBC
 r=012 ACTION      s=0 i=0 a=1 b=0
 r=012 ACTION      s=1 i=2 a=1 b=1
 r=012 ORDER       s=0 i=0 a=0 b=13
@@ -125,16 +125,16 @@ r=012 TYPE_EDGE   s=1 i=2 a=1 b=0
 r=012 HIT         s=1 i=2 a=1 b=18
 r=012 HP          s=0 i=0 a=0 b=2
 r=012 STUN        s=1 i=2 a=0 b=1
-r=012 ROUND_END   h=FD86977C
-r=013 ROUND_BEGIN h=31F15FC3
+r=012 ROUND_END   h=035A55A4
+r=013 ROUND_BEGIN h=E8750DAB
 r=013 ACTION      s=0 i=0 a=1 b=3
 r=013 ACTION      s=1 i=2 a=1 b=0
 r=013 ORDER       s=0 i=0 a=0 b=13
 r=013 HIT         s=0 i=0 a=3 b=0
 r=013 STAGE       s=0 i=0 a=0 b=129
 r=013 SKIPPED     s=1 i=2 a=0 b=0
-r=013 ROUND_END   h=EA226EE2
-r=014 ROUND_BEGIN h=29B892A3
+r=013 ROUND_END   h=4FDFCFBA
+r=014 ROUND_BEGIN h=D28E437B
 r=014 ACTION      s=0 i=0 a=1 b=2
 r=014 ACTION      s=1 i=2 a=1 b=3
 r=014 ORDER       s=1 i=2 a=1 b=7
@@ -143,8 +143,8 @@ r=014 PROTECT     s=1 i=2 a=0 b=2
 r=014 HIT         s=0 i=0 a=2 b=2
 r=014 HP          s=1 i=2 a=0 b=29
 r=014 PROTECT     s=1 i=2 a=0 b=1
-r=014 ROUND_END   h=881FC1EF
-r=015 ROUND_BEGIN h=01764220
+r=014 ROUND_END   h=198B3E27
+r=015 ROUND_BEGIN h=D9981398
 r=015 ACTION      s=0 i=0 a=1 b=1
 r=015 ACTION      s=1 i=2 a=1 b=2
 r=015 ORDER       s=0 i=0 a=0 b=13
@@ -153,8 +153,8 @@ r=015 HP          s=1 i=2 a=0 b=22
 r=015 MISS        s=1 i=2 a=2 b=0
 r=015 STAGE       s=0 i=0 a=0 b=128
 r=015 PROTECT     s=1 i=2 a=0 b=0
-r=015 ROUND_END   h=07F2C821
-r=016 ROUND_BEGIN h=61C81434
+r=015 ROUND_END   h=44ECA559
+r=016 ROUND_BEGIN h=646033CC
 r=016 ACTION      s=0 i=0 a=1 b=0
 r=016 ACTION      s=1 i=2 a=1 b=1
 r=016 ORDER       s=0 i=0 a=0 b=13
@@ -163,23 +163,23 @@ r=016 HIT         s=1 i=2 a=1 b=16
 r=016 HP          s=0 i=0 a=0 b=0
 r=016 STUN        s=1 i=2 a=0 b=1
 r=016 FAINT       s=0 i=0 a=0 b=0
-r=016 ROUND_END   h=B3FD0CD1
-r=017 ROUND_BEGIN h=A575705E
+r=016 ROUND_END   h=ECFB7BE9
+r=017 ROUND_BEGIN h=0412F616
 r=017 ACTION      s=0 i=0 a=2 b=2
 r=017 ACTION      s=1 i=2 a=1 b=0
 r=017 ORDER       s=0 i=0 a=0 b=13
 r=017 SWITCH      s=0 i=2 a=0 b=38
 r=017 SKIPPED     s=1 i=2 a=0 b=0
-r=017 ROUND_END   h=D38C15C2
-r=018 ROUND_BEGIN h=7305D5A4
+r=017 ROUND_END   h=F685C8FA
+r=018 ROUND_BEGIN h=4123615C
 r=018 ACTION      s=0 i=2 a=1 b=2
 r=018 ACTION      s=1 i=2 a=1 b=0
 r=018 ORDER       s=0 i=2 a=0 b=13
 r=018 HIT         s=0 i=2 a=2 b=5
 r=018 HP          s=1 i=2 a=0 b=17
 r=018 MISS        s=1 i=2 a=0 b=0
-r=018 ROUND_END   h=1B8AD4DF
-r=019 ROUND_BEGIN h=B45AD298
+r=018 ROUND_END   h=95709A27
+r=019 ROUND_BEGIN h=4F875340
 r=019 ACTION      s=0 i=2 a=1 b=1
 r=019 ACTION      s=1 i=2 a=1 b=2
 r=019 ORDER       s=0 i=2 a=0 b=13
@@ -188,8 +188,8 @@ r=019 HIT         s=0 i=2 a=1 b=6
 r=019 HP          s=1 i=2 a=0 b=11
 r=019 HIT         s=1 i=2 a=2 b=15
 r=019 HP          s=0 i=2 a=0 b=23
-r=019 ROUND_END   h=82582437
-r=020 ROUND_BEGIN h=311AC1B2
+r=019 ROUND_END   h=0769EB8F
+r=020 ROUND_BEGIN h=C1777D4A
 r=020 ACTION      s=0 i=2 a=1 b=0
 r=020 ACTION      s=1 i=2 a=1 b=1
 r=020 ORDER       s=0 i=2 a=0 b=13
@@ -197,8 +197,8 @@ r=020 HIT         s=0 i=2 a=0 b=9
 r=020 HP          s=1 i=2 a=0 b=2
 r=020 HP          s=0 i=2 a=0 b=21
 r=020 MISS        s=1 i=2 a=1 b=0
-r=020 ROUND_END   h=BEB505DC
-r=021 ROUND_BEGIN h=897C23DF
+r=020 ROUND_END   h=34DBA224
+r=021 ROUND_BEGIN h=F3C47027
 r=021 ACTION      s=0 i=2 a=1 b=3
 r=021 ACTION      s=1 i=2 a=1 b=0
 r=021 ORDER       s=0 i=2 a=0 b=13
@@ -206,8 +206,8 @@ r=021 HIT         s=0 i=2 a=3 b=0
 r=021 STAGE       s=0 i=2 a=0 b=129
 r=021 HIT         s=1 i=2 a=0 b=11
 r=021 HP          s=0 i=2 a=0 b=10
-r=021 ROUND_END   h=BB705FF8
-r=022 ROUND_BEGIN h=7D891011
+r=021 ROUND_END   h=1CAE9860
+r=022 ROUND_BEGIN h=88BB8C19
 r=022 ACTION      s=0 i=2 a=1 b=2
 r=022 ACTION      s=1 i=2 a=1 b=3
 r=022 ORDER       s=1 i=2 a=1 b=7
@@ -217,6 +217,6 @@ r=022 HIT         s=0 i=2 a=2 b=2
 r=022 HP          s=1 i=2 a=0 b=0
 r=022 FAINT       s=1 i=2 a=0 b=0
 r=022 PROTECT     s=1 i=2 a=0 b=1
-r=022 ROUND_END   h=71C23A03
+r=022 ROUND_END   h=310E72EB
 r=022 BATTLE_END  s=255 i=255 a=1 b=0
-final outcome=1 round=23 hash=71C23A03 rng=4797CEC9
+final outcome=1 round=23 hash=310E72EB rng=4797CEC9

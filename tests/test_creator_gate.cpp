@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL host tests - test_creator_gate.cpp (P8-C1/C2)
+//  ERRATA host tests - test_creator_gate.cpp (P8-C1/C2)
 //
 //  THE PIN STATE MACHINE AND THE IDLE TIMER, DRIVEN DIRECTLY.
 //

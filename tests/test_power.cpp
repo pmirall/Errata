@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_power.cpp
+//  Errata host tests - test_power.cpp
 //  P6-C3: the idle ladder (hardware/power.h) and the carried radio debt.
 //
 //  THE WHOLE LADDER RUNS HERE WITH NO BOARD, which is the reason power.cpp is

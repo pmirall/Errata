@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_care_golden.cpp
+//  Errata host tests - test_care_golden.cpp
 //  Pins the care trajectory of the legacy simulation (plan P2-C2, §4.2).
 //
 //  Fixed seeds, a fixed SimEnv and a scripted six hours: a meal every hour,
@@ -7,7 +7,7 @@
 //  stats in StatId order plus the legacy PF_* word and appends one line; the
 //  whole transcript must match tests/golden/care_v2.txt byte for byte.
 //
-//  P2-C10 moved the sim onto PebbleInstance. The hash is re-derived THROUGH the
+//  P2-C10 moved the sim onto BugInstance. The hash is re-derived THROUGH the
 //  field map (stat[] -> care[] under CareId, ST_BOND -> the sim's RAM copy,
 //  flags -> the SimView word), so the bytes hashed are the same bytes in the
 //  same order and the golden file did NOT change. This is not a retune.
@@ -106,7 +106,7 @@ static void golden_run(char* text, size_t cap) {
   const Genome g = genome_genesis();
   sim_seed(GOLDEN_SEED);
 
-  static PebbleInstance save;
+  static BugInstance save;
   memset(&save, 0, sizeof(save));
   sim_bind(save);
   sim_new_pet(g, GOLDEN_EPOCH0, 0);

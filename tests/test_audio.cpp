@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_audio.cpp
+//  Errata host tests - test_audio.cpp
 //  THE TONE ENGINE (P6-C1; hardware/audio.{h,cpp}, hardware spec 18 and 19).
 //
 //  hardware/audio.cpp reaches the piezo through a two-function AudioSink, so

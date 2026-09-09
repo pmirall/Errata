@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL host test - test_battle.cpp
+//  ERRATA host test - test_battle.cpp
 //  EVERY spec section 50 BATTLE case, over the real game/battle.cpp (P4-C2).
 //
 //    type advantage / damage / speed order / switching / fainting / buffs /
@@ -44,7 +44,7 @@
 #include <type_traits>
 
 #include "game/battle.h"
-#include "game/pebble.h"
+#include "game/bug.h"
 #include "game/xp.h"
 
 // -----------------------------------------------------------------------------
@@ -80,17 +80,17 @@
 // =============================================================================
 //  FIXTURES
 // =============================================================================
-static void mk_member(PebbleInstance& p, uint8_t species, uint8_t level, uint32_t id)
+static void mk_member(BugInstance& p, uint8_t species, uint8_t level, uint32_t id)
 {
   memset(&p, 0, sizeof p);
-  p.magic      = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic      = (uint16_t)BUG_MAGIC;
+  p.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   p.species_id = species;
   p.id         = id;
   p.level      = level;
   const SpeciesDef* sp = species_get(species);
   if (sp == nullptr) return;
-  for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) p.moves[m] = sp->moves[m];
+  for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m) p.moves[m] = sp->moves[m];
   p.hp_cur = xp_hp_max(sp->base_hp, level);
 }
 
@@ -134,7 +134,7 @@ static void arm(BattleCombatant& c, uint8_t type, uint8_t atk, uint8_t def, uint
   c.hp_max     = hp;
   c.hp_cur     = hp;
   c.moves[0]   = m0; c.moves[1] = m1; c.moves[2] = m2; c.moves[3] = m3;
-  for (uint8_t i = 0; i < (uint8_t)PB_MOVE_COUNT; ++i) c.cooldown[i] = 0u;
+  for (uint8_t i = 0; i < (uint8_t)ER_MOVE_COUNT; ++i) c.cooldown[i] = 0u;
   for (uint8_t k = 0; k < (uint8_t)BSTAT_COUNT; ++k) { c.stage[k] = 0; c.stage_left[k] = 0u; }
   c.protect_left = 0u; c.dot_value = 0u; c.dot_left = 0u; c.stun_left = 0u;
   c.corrupt_left = 0u; c.type_edge_left = (uint8_t)TYPE_MOD_MAX_HITS;
@@ -289,8 +289,8 @@ TEST(init_derives_every_stat_through_the_one_owner) {
       CHECK(sp != nullptr);
       if (!sp) continue;
       Genome g; memset(&g, 0, sizeof g);
-      PebbleStats want;
-      pebble_derive_stats(*sp, 17u, g, want);
+      BugStats want;
+      bug_derive_stats(*sp, 17u, g, want);
       const BattleCombatant* c = battle_combatant(st, s, i);
       CHECK(c != nullptr);
       if (!c) continue;
@@ -346,7 +346,7 @@ TEST(init_refuses_every_illegal_team_by_name) {
 
   mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u); s.member[0][0].level = 0u;
   init_refuses(s, BR_BAD_LEVEL);
-  mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u); s.member[1][0].level = (uint8_t)(PB_LEVEL_MAX + 1u);
+  mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u); s.member[1][0].level = (uint8_t)(ER_LEVEL_MAX + 1u);
   init_refuses(s, BR_BAD_LEVEL);
 
   mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u); s.member[0][2].moves[3] = 0u;
@@ -363,7 +363,7 @@ TEST(init_refuses_every_illegal_team_by_name) {
   mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u); s.member[0][1].status |= PBS_FAINTED;
   init_refuses(s, BR_MEMBER_FAINTED);
 
-  // A peer sending one Pebble three times (spec section 9), inside one team...
+  // A peer sending one Bug three times (spec section 9), inside one team...
   mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u); s.member[0][2].id = s.member[0][0].id;
   init_refuses(s, BR_DUPLICATE_ID);
   // ...and across the two teams, which the naive "walk my own team" loop misses.
@@ -382,17 +382,17 @@ TEST(init_refuses_every_illegal_team_by_name) {
 
 // Copies one species' learnset verbatim onto a setup member, so a case can say
 // exactly whose four moves that member is carrying.
-static void give_learnset(PebbleInstance& p, uint8_t from_species)
+static void give_learnset(BugInstance& p, uint8_t from_species)
 {
   const SpeciesDef* sp = species_get(from_species);
   CHECK(sp != nullptr);
   if (sp == nullptr) return;
-  for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) p.moves[m] = sp->moves[m];
+  for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m) p.moves[m] = sp->moves[m];
 }
 
 // SPEC SECTION 67, and the hole the P4-C2/C3 review found: until that follow-up
 // battle_init() checked only that the four move ids RESOLVED, so a peer could
-// hand its Pebble any of the 34 attacks. The engine measured the cost itself - a
+// hand its Bug any of the 34 attacks. The engine measured the cost itself - a
 // species-1 Paketo that wins 0 of 200 scripted 1v1 seeds against species 17 wins
 // 100 with attack 11 Plaga written into slot 0, and 103 with the ON-TYPE attack
 // 3 Rafaga - so this is a cheat that decides fights, and a type-only rule would
@@ -432,7 +432,7 @@ TEST(init_refuses_a_moveset_no_species_in_this_family_could_teach) {
 
   // A REAL LEARNSET FROM THE RIGHT FAMILY, BUT FROM AHEAD OF IT. Species 1 is
   // stage 0 and species 2 is stage 1 of the same family: moves travel FORWARD
-  // through an evolution and never backward, so a stage-0 Pebble holding its
+  // through an evolution and never backward, so a stage-0 Bug holding its
   // own evolution's kit is a lie. A rule that dropped `stage <=` accepts this.
   mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u);
   give_learnset(s.member[0][0], 2u);
@@ -451,7 +451,7 @@ TEST(init_refuses_a_moveset_no_species_in_this_family_could_teach) {
   init_refuses(s, BR_UNLEARNABLE_MOVE);
 
   // THE ARM THAT MAKES THE RULE MORE THAN "moves must equal MY learnset", and
-  // the reason a per-species membership test is wrong: an evolved Pebble keeps
+  // the reason a per-species membership test is wrong: an evolved Bug keeps
   // the kit it grew up with. game/evolution.cpp deliberately leaves moves[]
   // alone, so a species-2 Fragmar legitimately carries species 1's {1,6,7,27},
   // which is NOT species 2's own {5,27,31,33}. This MUST be accepted.
@@ -461,7 +461,7 @@ TEST(init_refuses_a_moveset_no_species_in_this_family_could_teach) {
   give_learnset(s.member[0][0], 1u);
   CHECK_EQ(battle_init(st, s), BR_OK);
 
-  // ...and so must the same Pebble one stage further on, still carrying the
+  // ...and so must the same Bug one stage further on, still carrying the
   // base stage's kit: species 3 is stage 2 of that same family.
   mk_setup(s, 7u, TEAM_A, 3u, TEAM_B, 3u, 10u);
   s.member[0][0].species_id = 3u;
@@ -474,7 +474,7 @@ TEST(init_refuses_a_moveset_no_species_in_this_family_could_teach) {
   CHECK_EQ(battle_init(st, s), BR_OK);
 }
 
-TEST(a_one_pebble_team_is_legal_and_a_short_team_leaves_the_rest_absent) {
+TEST(a_one_bug_team_is_legal_and_a_short_team_leaves_the_rest_absent) {
   BattleSetup s;
   BattleState st;
   mk_setup(s, 7u, TEAM_A, 1u, TEAM_B, 2u, 10u);
@@ -539,7 +539,7 @@ TEST(switching_to_a_fainted_slot_is_refused) {
   accepts(st, 0u, ACT(BACT_SWITCH, 1u));
 }
 
-TEST(acting_for_a_fainted_pebble_is_refused_and_only_a_switch_is_left) {
+TEST(acting_for_a_fainted_bug_is_refused_and_only_a_switch_is_left) {
   BattleState st;
   fixture(st);
   st.side[0].team[0].hp_cur = 0u;
@@ -616,7 +616,7 @@ TEST(garbage_bytes_are_refused_by_the_guard_that_names_them) {
   refuses(st, 0u,   ACT(200u, 0u),        BR_BAD_KIND);
   refuses(st, 0u,   ACT(BACT_NONE, 0u),   BR_BAD_KIND);
   refuses(st, 0u,   ACT(BACT_KIND_COUNT, 0u), BR_BAD_KIND);
-  refuses(st, 0u,   ACT(BACT_ATTACK, (uint8_t)PB_MOVE_COUNT), BR_BAD_INDEX);
+  refuses(st, 0u,   ACT(BACT_ATTACK, (uint8_t)ER_MOVE_COUNT), BR_BAD_INDEX);
   refuses(st, 0u,   ACT(BACT_ATTACK, 200u), BR_BAD_INDEX);
   refuses(st, 0u,   ACT(BACT_SWITCH, (uint8_t)BATTLE_TEAM_MAX), BR_BAD_INDEX);
   refuses(st, 0u,   ACT(BACT_SWITCH, 200u), BR_BAD_INDEX);
@@ -912,7 +912,7 @@ TEST(protection_halves_after_the_roll_and_never_below_one) {
   // branch could be deleted with the entire suite still green. atk 1 into def
   // 200 gives raw 1, the NEUTRAL move keeps it at 1, roll 0 leaves 1 to halve,
   // and 1 / PROTECT_DIVISOR is 0 in integers: the floor is the only thing
-  // between a protected Pebble and a hit that costs nothing.
+  // between a protected Bug and a hit that costs nothing.
   duel(st, TYPE_SIGNAL, TYPE_SIGNAL, 1u, 200u, 400u);
   st.side[1].team[0].protect_left = 1u;
   const uint16_t hp_min = st.side[1].team[0].hp_cur;
@@ -1056,7 +1056,7 @@ TEST(a_dot_ticks_on_every_status_step_and_stops_on_the_round_after_its_last) {
 TEST(a_dot_kills_on_the_status_tick_and_the_second_faint_pass_is_what_sees_it) {
   BattleSetup s;
   BattleState st;
-  mk_setup(s, 3u, TEAM_A, 3u, TEAM_B, 1u, 10u);          // side B has ONE Pebble
+  mk_setup(s, 3u, TEAM_A, 3u, TEAM_B, 1u, 10u);          // side B has ONE Bug
   CHECK_EQ(battle_init(st, s), BR_OK);
   arm(st.side[0].team[0], TYPE_SIGNAL, 10u, 5u, 9u, 400u,
       MV_AMPLIFICAR, MV_ANTENA, MV_CHOQUE, MV_PING);
@@ -1096,7 +1096,7 @@ TEST(step_six_is_idempotent_which_is_the_property_step_eight_leans_on) {
   CHECK_EQ(battle_state_hash(st), h);
 }
 
-TEST(a_faster_pebble_acts_first_and_a_tie_is_broken_by_the_battle_rng) {
+TEST(a_faster_bug_acts_first_and_a_tie_is_broken_by_the_battle_rng) {
   BattleState st;
   duel(st, TYPE_SIGNAL, TYPE_CORRUPT);
   st.side[0].team[0].spd = 9u;
@@ -1151,7 +1151,7 @@ TEST(priority_beats_effective_speed_and_a_switch_outruns_every_attack) {
                                          battle_s2_priority(st, 1u)), 1);
 }
 
-TEST(switching_costs_the_turn_and_the_incoming_pebble_is_the_one_that_is_hit) {
+TEST(switching_costs_the_turn_and_the_incoming_bug_is_the_one_that_is_hit) {
   BattleState st;
   duel(st, TYPE_SIGNAL, TYPE_CORRUPT);
   arm(st.side[1].team[1], TYPE_CORRUPT, 10u, 5u, 4u, 400u,
@@ -1199,7 +1199,7 @@ TEST(a_switch_clears_the_position_and_keeps_what_rides_the_creature) {
   CHECK_EQ(c.type_edge_left, 0);
 }
 
-TEST(a_pebble_that_walks_in_arrives_with_a_clean_position_of_its_own) {
+TEST(a_bug_that_walks_in_arrives_with_a_clean_position_of_its_own) {
   // THE OTHER HALF, and it needs its own case: the switch clears the position
   // on the way OUT and again on the way IN, and until this existed the outgoing
   // clear covered for the incoming one - a mutation that deleted the incoming
@@ -1519,7 +1519,7 @@ TEST(the_round_cap_is_broken_by_the_hp_fraction_and_not_by_raw_hp) {
   CHECK_EQ(battle_s9_check_victory(st), BO_WIN_A);
 
   // A fainted member contributes 0 hp and its FULL maximum, which is what
-  // penalises the side that lost Pebbles.
+  // penalises the side that lost Bugs.
   mk_setup(s, 9u, TEAM_A, 2u, TEAM_B, 1u, 10u);
   CHECK_EQ(battle_init(st, s), BR_OK);
   st.round = (uint16_t)(BATTLE_MAX_ROUNDS + 1u);
@@ -1974,11 +1974,11 @@ TEST(battle_move_ready_answers_for_itself_and_each_of_its_guards_is_reachable) {
   // Said through offsetof rather than by indexing moves[4] here: the point is
   // that the FUNCTION must not make that read, and a test that makes it itself
   // is undefined behaviour of its own (UBSAN says so out loud).
-  CHECK_EQ(offsetof(BattleCombatant, cooldown), offsetof(BattleCombatant, moves) + PB_MOVE_COUNT);
-  CHECK_EQ(offsetof(BattleCombatant, stage), offsetof(BattleCombatant, cooldown) + PB_MOVE_COUNT);
+  CHECK_EQ(offsetof(BattleCombatant, cooldown), offsetof(BattleCombatant, moves) + ER_MOVE_COUNT);
+  CHECK_EQ(offsetof(BattleCombatant, stage), offsetof(BattleCombatant, cooldown) + ER_MOVE_COUNT);
   c.cooldown[0] = MV_CHOQUE;      // == moves[4] to anything that ignores the bound
   CHECK_EQ(c.stage[0], 0);        // == cooldown[4], so the move would read as READY
-  CHECK(!battle_move_ready(c, (uint8_t)PB_MOVE_COUNT));
+  CHECK(!battle_move_ready(c, (uint8_t)ER_MOVE_COUNT));
   c.cooldown[0] = 0u;
   CHECK(battle_move_ready(c, 0u));                        // and slot 0 is free again
 

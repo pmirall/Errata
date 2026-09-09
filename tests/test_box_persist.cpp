@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_box_persist.cpp
+//  Errata host tests - test_box_persist.cpp
 //
 //  THE SEAM BETWEEN game/box.cpp AND persistence/game_state.cpp.
 //
@@ -12,7 +12,7 @@
 //  power cut" - was asked by nothing.
 //
 //  It shipped a defect. ui/screen_encounter.cpp's throw_once() minted a
-//  captured Pebble through box_new_pebble() (RAM only, by design) and then
+//  captured Bug through box_new_bug() (RAM only, by design) and then
 //  committed with ui_explore_commit(), which writes cooldowns, inventory and
 //  gs_save_active() - and gs_save_active() only ever writes the slot
 //  box.active_slot names. A capture lands in first_free(), which is the active
@@ -78,7 +78,7 @@ static void boot_with_starter(void) {
   memset(&cfg, 0, sizeof cfg);
   CHECK_EQ((int)gs_load(cfg), (int)LOAD_FRESH);
   box_bind(gs_state());
-  const uint8_t slot = box_new_pebble(1u, 3u, (uint8_t)ORIGIN_STARTER,
+  const uint8_t slot = box_new_bug(1u, 3u, (uint8_t)ORIGIN_STARTER,
                                       Genome(), 0xC0FFEEu, s_epoch);
   CHECK_EQ((int)slot, 0);
   CHECK(box_set_active(0u));
@@ -113,13 +113,13 @@ TEST(the_starter_survives_a_reboot) {
 }
 
 // =============================================================================
-//  THE CAPTURE. This is the case that was failing: a second Pebble minted into
+//  THE CAPTURE. This is the case that was failing: a second Bug minted into
 //  a NON-ACTIVE slot and committed the way ui/screen_encounter.cpp commits.
 // =============================================================================
-TEST(a_captured_pebble_is_on_flash_before_the_next_power_cut) {
+TEST(a_captured_bug_is_on_flash_before_the_next_power_cut) {
   boot_with_starter();
 
-  const uint8_t slot = box_new_pebble(2u, 5u, (uint8_t)ORIGIN_WILD,
+  const uint8_t slot = box_new_bug(2u, 5u, (uint8_t)ORIGIN_WILD,
                                       Genome(), 0xBEEF01u, s_epoch);
   CHECK_EQ((int)slot, 1);                 // first_free(), not the active slot
   CHECK(slot != box_active());
@@ -140,7 +140,7 @@ TEST(a_captured_pebble_is_on_flash_before_the_next_power_cut) {
 
 // The same thing through the real cap_attempt(), so the constructor under test
 // is the one the firmware calls rather than a hand-rolled stand-in.
-TEST(a_real_cap_attempt_files_a_pebble_that_survives) {
+TEST(a_real_cap_attempt_files_a_bug_that_survives) {
   boot_with_starter();
 
   // A wild encounter, minted the way ui/screen_encounter.cpp mints one.
@@ -186,9 +186,9 @@ TEST(a_real_cap_attempt_files_a_pebble_that_survives) {
 //  THE SIBLING MUTATIONS. These were already correct; they are here so the
 //  seam has a row per Box door rather than a row for the one that broke.
 // =============================================================================
-TEST(a_release_removes_the_pebble_from_flash_too) {
+TEST(a_release_removes_the_bug_from_flash_too) {
   boot_with_starter();
-  const uint8_t slot = box_new_pebble(2u, 5u, (uint8_t)ORIGIN_WILD,
+  const uint8_t slot = box_new_bug(2u, 5u, (uint8_t)ORIGIN_WILD,
                                       Genome(), 0xBEEF02u, s_epoch);
   CHECK(gs_save_slot(slot, true));
   CHECK(gs_save_box());
@@ -206,7 +206,7 @@ TEST(a_release_removes_the_pebble_from_flash_too) {
 
 TEST(activating_the_other_slot_survives_a_reboot) {
   boot_with_starter();
-  const uint8_t slot = box_new_pebble(2u, 5u, (uint8_t)ORIGIN_WILD,
+  const uint8_t slot = box_new_bug(2u, 5u, (uint8_t)ORIGIN_WILD,
                                       Genome(), 0xBEEF03u, s_epoch);
   CHECK(gs_save_slot(slot, true));
   settle();
@@ -222,7 +222,7 @@ TEST(activating_the_other_slot_survives_a_reboot) {
 
 TEST(a_swap_moves_both_slots_on_flash) {
   boot_with_starter();
-  const uint8_t slot = box_new_pebble(2u, 5u, (uint8_t)ORIGIN_WILD,
+  const uint8_t slot = box_new_bug(2u, 5u, (uint8_t)ORIGIN_WILD,
                                       Genome(), 0xBEEF04u, s_epoch);
   CHECK(gs_save_slot(slot, true));
   settle();
@@ -248,7 +248,7 @@ TEST(a_swap_moves_both_slots_on_flash) {
 // =============================================================================
 TEST(gs_save_active_does_not_write_the_other_slots) {
   boot_with_starter();
-  const uint8_t slot = box_new_pebble(2u, 5u, (uint8_t)ORIGIN_WILD,
+  const uint8_t slot = box_new_bug(2u, 5u, (uint8_t)ORIGIN_WILD,
                                       Genome(), 0xBEEF05u, s_epoch);
   CHECK_EQ((int)slot, 1);
   CHECK(slot != box_active());
@@ -259,7 +259,7 @@ TEST(gs_save_active_does_not_write_the_other_slots) {
   // THE SAVE IS LEFT INCONSISTENT, AND THIS IS WORSE THAN "THE CREATURE IS
   // LOST". gs_save_active() writes the active slot's blob AND THEN mirrors the
   // Box header through gs_save_box() - and mask_sync() had already put the new
-  // slot into box.slot_mask when box_new_pebble() filed it. So flash ends up
+  // slot into box.slot_mask when box_new_bug() filed it. So flash ends up
   // with a header claiming a slot whose blob was never written, and the next
   // boot does not come back clean: it reports LOAD_RECOVERED_PAIR, having
   // served the older copy of something to reconcile the two.
@@ -272,7 +272,7 @@ TEST(gs_save_active_does_not_write_the_other_slots) {
 }
 
 // =============================================================================
-//  A FACTORY RESET LEAVES A PEBBLE THAT IS ACTUALLY IN THE BOX
+//  A FACTORY RESET LEAVES A BUG THAT IS ACTUALLY IN THE BOX
 //  Added at the FINAL REVIEW. It is the SAME CLASS as the capture defect above,
 //  one door along, and it had been standing since the reset was written.
 //
@@ -295,7 +295,7 @@ TEST(gs_save_active_does_not_write_the_other_slots) {
 //  Neither wipe path is compiled by any host binary (ui/ui.cpp and
 //  dev/godmode.cpp are both in the never-compiled set), so this case pins the
 //  SEQUENCE they must both use, and tools/check.sh gates that each body uses it.
-//  game/box.h calls box_new_pebble() "THE TREE'S ONE CONSTRUCTOR"; this is what
+//  game/box.h calls box_new_bug() "THE TREE'S ONE CONSTRUCTOR"; this is what
 //  goes wrong when a caller goes round it.
 // =============================================================================
 TEST(a_factory_reset_leaves_a_starter_the_save_manager_can_actually_write) {
@@ -315,7 +315,7 @@ TEST(a_factory_reset_leaves_a_starter_the_save_manager_can_actually_write) {
   // rest of this case stops meaning anything.
   CHECK(!gs_save_active(true));
 
-  const uint8_t sl = box_new_pebble(1u, 1u, (uint8_t)ORIGIN_STARTER,
+  const uint8_t sl = box_new_bug(1u, 1u, (uint8_t)ORIGIN_STARTER,
                                     genome_genesis(), 0xC0DE01u, s_epoch);
   CHECK(sl != (uint8_t)BOX_SLOT_NONE);
   CHECK(box_set_active(sl));

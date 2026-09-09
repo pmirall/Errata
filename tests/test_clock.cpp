@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_clock.cpp
+//  Errata host tests - test_clock.cpp
 //  gametime.cpp on the host, compiled with GT_HOST_NEVER_VALID so the module
 //  stays on the estimated-clock path and the 32-bit millis() wrap extension
 //  can be driven across 2^32 with the fake clock from host_shims.

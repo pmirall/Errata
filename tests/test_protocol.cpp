@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL host test - test_protocol.cpp
+//  ERRATA host test - test_protocol.cpp
 //  THE SPEC SECTION 15 CODEC (networking/protocol.h, plan P4-C5).
 //
 //  WHAT THIS FILE HAS TO PROVE, in the plan's own words: "Decode must be total:
@@ -49,7 +49,7 @@
 #include "data/species_table.h"
 #include "game/evolution.h"
 #include "game/genome.h"
-#include "game/pebble.h"
+#include "game/bug.h"
 #include "game/validate.h"
 #include "game/xp.h"
 #include "networking/protocol.h"
@@ -70,18 +70,18 @@ static Genome sealed_genome(uint32_t lineage)
   return g;
 }
 
-// A Pebble that validate_pebble() accepts AND that is legal on the wire (no
+// A Bug that validate_bug() accepts AND that is legal on the wire (no
 // custom species, no custom flag, no status bit the wire forbids).
-static void mk_valid(PebbleInstance& p, uint8_t species, uint8_t level, uint32_t id)
+static void mk_valid(BugInstance& p, uint8_t species, uint8_t level, uint32_t id)
 {
   memset(&p, 0, sizeof p);
-  p.magic         = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver    = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic         = (uint16_t)BUG_MAGIC;
+  p.layout_ver    = (uint8_t)BUG_LAYOUT_VER;
   p.species_id    = species;
   p.id            = id;
   p.level         = level;
   p.origin        = (uint8_t)ORIGIN_WILD;
-  p.custom_sprite = (uint8_t)PB_CUSTOM_SPRITE_NONE;
+  p.custom_sprite = (uint8_t)ER_CUSTOM_SPRITE_NONE;
   p.genome        = sealed_genome(0x0BADF00Du + id);
   const SpeciesDef* sp = species_get(species);
   if (sp == nullptr) return;
@@ -103,9 +103,9 @@ static void mk_msg(ProtoMsg& m, ProtoType t)
     case PT_HELLO:
       m.p.hello.device_id = 0xA1B2C3D4u; m.p.hello.hello_nonce = 0x55667788u; break;
     case PT_CAPABILITIES:
-      m.p.caps.wire_ver    = (uint8_t)PBW_LAYOUT_VER;
+      m.p.caps.wire_ver    = (uint8_t)BUGW_LAYOUT_VER;
       m.p.caps.team_max    = (uint8_t)BATTLE_TEAM_MAX;
-      m.p.caps.level_max   = (uint8_t)PB_LEVEL_MAX;
+      m.p.caps.level_max   = (uint8_t)ER_LEVEL_MAX;
       m.p.caps.engine_ver  = 2u;
       m.p.caps.hash_ver    = 3u;
       m.p.caps.content_ver = 0x5B4Au;
@@ -126,7 +126,7 @@ static void mk_msg(ProtoMsg& m, ProtoType t)
       m.p.team.count    = (uint8_t)BATTLE_TEAM_MAX;
       m.p.team.team_crc = 0x9E3Au;
       for (uint8_t i = 0; i < (uint8_t)BATTLE_TEAM_MAX; ++i) {
-        PebbleInstance p; mk_valid(p, (uint8_t)(1u + i * 4u), (uint8_t)(10u + i), 0x300u + i);
+        BugInstance p; mk_valid(p, (uint8_t)(1u + i * 4u), (uint8_t)(10u + i), 0x300u + i);
         pbw_encode(p, m.p.team.rec[i]);
       }
       break;
@@ -152,7 +152,7 @@ static void mk_msg(ProtoMsg& m, ProtoType t)
     case PT_GOODBYE:
       m.p.bye.reason = 4u; break;
     case PT_TRADE_OFFER: {
-      PebbleInstance p; mk_valid(p, 5u, 12u, 0x7A1u);
+      BugInstance p; mk_valid(p, 5u, 12u, 0x7A1u);
       pbw_encode(p, m.p.toffer.rec);
       break;
     }
@@ -241,7 +241,7 @@ static const uint8_t GOLDEN_ACTION_FRAME[24] = {
 };
 
 // THE TRADE FRAME, PINNED THE SAME WAY (P7-C4). The 48 B record inside it is
-// GOLDEN_WIRE_PEBBLE below, so this array pins only what is NEW: the type byte,
+// GOLDEN_WIRE_BUG below, so this array pins only what is NEW: the type byte,
 // the 52-byte length, the four reserved bytes before the record and the offset
 // the record sits at. A golden that re-pinned the record would be a second copy
 // of a fact the next case already owns.
@@ -264,15 +264,15 @@ TEST(the_trade_offer_frame_is_pinned_and_carries_the_record_at_offset_four) {
   }
   // The record is at payload offset 4 and is byte-identical to what
   // pbw_encode() produced - no re-framing, no second copy.
-  CHECK_EQ(memcmp(buf + PROTO_HDR_BYTES + 4, m.p.toffer.rec, (size_t)PBW_BYTES), 0);
+  CHECK_EQ(memcmp(buf + PROTO_HDR_BYTES + 4, m.p.toffer.rec, (size_t)BUGW_BYTES), 0);
   // A trade has no round, and the decoder refuses one at step 9.
   CHECK_EQ((int)buf[3], 0);
   CHECK(!PROTO_HAS_ROUND[(int)PT_TRADE_OFFER]);
   // trade_rec_crc() reads the identity out of the record itself rather than out
   // of a field the frame would otherwise have to carry twice.
   CHECK_EQ((int)trade_rec_crc(m.p.toffer.rec),
-           (int)((uint16_t)m.p.toffer.rec[PBW_OFF_CRC] |
-                 ((uint16_t)m.p.toffer.rec[PBW_OFF_CRC + 1] << 8)));
+           (int)((uint16_t)m.p.toffer.rec[BUGW_OFF_CRC] |
+                 ((uint16_t)m.p.toffer.rec[BUGW_OFF_CRC + 1] << 8)));
   // And it survives the round trip, which is what a READY echoes.
   CHECK_EQ((int)guarded_decode(buf, n, TEST_SESSION), (int)PE_OK);
   CHECK_EQ((int)trade_rec_crc(g_arena.m.p.toffer.rec),
@@ -281,8 +281,8 @@ TEST(the_trade_offer_frame_is_pinned_and_carries_the_record_at_offset_four) {
 
 TEST(the_pair_identity_is_order_dependent_and_that_is_the_whole_point) {
   ProtoMsg a; mk_msg(a, PT_TRADE_OFFER);
-  PebbleInstance other; mk_valid(other, 9u, 7u, 0x7B2u);
-  uint8_t rec_b[PBW_BYTES];
+  BugInstance other; mk_valid(other, 9u, 7u, 0x7B2u);
+  uint8_t rec_b[BUGW_BYTES];
   pbw_encode(other, rec_b);
 
   const uint16_t ab = trade_pair_crc(a.p.toffer.rec, rec_b);
@@ -292,9 +292,9 @@ TEST(the_pair_identity_is_order_dependent_and_that_is_the_whole_point) {
 
   // One flipped byte in either record changes it: the identity covers both
   // whole records and not just their two CRCs.
-  uint8_t poked[PBW_BYTES];
+  uint8_t poked[BUGW_BYTES];
   memcpy(poked, rec_b, sizeof poked);
-  poked[PBW_OFF_LEVEL] = (uint8_t)(poked[PBW_OFF_LEVEL] ^ 0x01u);
+  poked[BUGW_OFF_LEVEL] = (uint8_t)(poked[BUGW_OFF_LEVEL] ^ 0x01u);
   CHECK(trade_pair_crc(a.p.toffer.rec, poked) != ab);
 }
 
@@ -332,47 +332,47 @@ TEST(one_known_frame_is_pinned_byte_for_byte_and_field_by_field) {
   CHECK_EQ((int)(n - 2u), (int)(PROTO_HDR_BYTES + 8u));
 }
 
-static const uint8_t GOLDEN_WIRE_PEBBLE[48] = {
+static const uint8_t GOLDEN_WIRE_BUG[48] = {
   0x50, 0x57, 0x01, 0x05, 0xEE, 0xFF, 0xC0, 0x00, 0x20, 0x00, 0x03, 0x00,
   0x0C, 0x00, 0x01, 0x00, 0x01, 0x00, 0x21, 0x1B, 0x01, 0x20, 0x51, 0x4E,
   0x0D, 0xF0, 0xAD, 0x0B, 0x34, 0x12, 0x78, 0x56, 0xAB, 0x09, 0x03, 0x00,
   0xC1, 0x26, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x8C, 0xD2
 };
 
-TEST(one_known_wire_pebble_is_pinned_byte_for_byte_and_field_by_field) {
-  PebbleInstance p;
+TEST(one_known_wire_bug_is_pinned_byte_for_byte_and_field_by_field) {
+  BugInstance p;
   memset(&p, 0, sizeof p);
-  p.magic = (uint16_t)PEBBLE_MAGIC; p.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic = (uint16_t)BUG_MAGIC; p.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   p.species_id = 5u; p.id = 0x00C0FFEEu; p.level = 12u; p.xp = 3u;
-  p.origin = 1u; p.custom_sprite = (uint8_t)PB_CUSTOM_SPRITE_NONE;
+  p.origin = 1u; p.custom_sprite = (uint8_t)ER_CUSTOM_SPRITE_NONE;
   p.status = (uint8_t)PBS_SICK;
   const SpeciesDef* sp = species_get(5);
   memcpy(p.moves, sp->moves, sizeof p.moves);
   p.hp_cur    = xp_hp_max(sp->base_hp, 12u);
   p.evo_state = sp->stage;
   p.genome    = sealed_genome(0x0BADF00Du);
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 
-  uint8_t rec[PBW_BYTES];
+  uint8_t rec[BUGW_BYTES];
   pbw_encode(p, rec);
-  for (size_t i = 0; i < (size_t)PBW_BYTES; ++i) {
-    if (rec[i] != GOLDEN_WIRE_PEBBLE[i])
+  for (size_t i = 0; i < (size_t)BUGW_BYTES; ++i) {
+    if (rec[i] != GOLDEN_WIRE_BUG[i])
       fprintf(stderr, "    rec byte %u: got 0x%02X want 0x%02X\n",
-              (unsigned)i, (unsigned)rec[i], (unsigned)GOLDEN_WIRE_PEBBLE[i]);
-    CHECK_EQ((int)rec[i], (int)GOLDEN_WIRE_PEBBLE[i]);
+              (unsigned)i, (unsigned)rec[i], (unsigned)GOLDEN_WIRE_BUG[i]);
+    CHECK_EQ((int)rec[i], (int)GOLDEN_WIRE_BUG[i]);
   }
   // Hand-read positions, little-endian by explicit shift and not by memcpy.
-  CHECK_EQ((int)rec[PBW_OFF_MAGIC], (int)(PBW_MAGIC & 0xFFu));
-  CHECK_EQ((int)rec[PBW_OFF_MAGIC + 1], (int)((PBW_MAGIC >> 8) & 0xFFu));
-  CHECK_EQ((int)rec[PBW_OFF_SPECIES], 5);
-  CHECK_EQ((int)rec[PBW_OFF_ID], 0xEE);      // 0x00C0FFEE little-endian
-  CHECK_EQ((int)rec[PBW_OFF_ID + 3], 0x00);
-  CHECK_EQ((int)rec[PBW_OFF_LEVEL], 12);
-  CHECK_EQ((int)rec[PBW_OFF_RESERVED0], 0);  // where evo_state would have gone
-  for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m)
-    CHECK_EQ((int)rec[PBW_OFF_MOVES + m], (int)sp->moves[m]);
-  const uint16_t c = crc16_ccitt(rec, (size_t)PBW_CRC_BYTES);
-  CHECK_EQ((int)rec[PBW_OFF_CRC], (int)(c & 0xFFu));
+  CHECK_EQ((int)rec[BUGW_OFF_MAGIC], (int)(BUGW_MAGIC & 0xFFu));
+  CHECK_EQ((int)rec[BUGW_OFF_MAGIC + 1], (int)((BUGW_MAGIC >> 8) & 0xFFu));
+  CHECK_EQ((int)rec[BUGW_OFF_SPECIES], 5);
+  CHECK_EQ((int)rec[BUGW_OFF_ID], 0xEE);      // 0x00C0FFEE little-endian
+  CHECK_EQ((int)rec[BUGW_OFF_ID + 3], 0x00);
+  CHECK_EQ((int)rec[BUGW_OFF_LEVEL], 12);
+  CHECK_EQ((int)rec[BUGW_OFF_RESERVED0], 0);  // where evo_state would have gone
+  for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m)
+    CHECK_EQ((int)rec[BUGW_OFF_MOVES + m], (int)sp->moves[m]);
+  const uint16_t c = crc16_ccitt(rec, (size_t)BUGW_CRC_BYTES);
+  CHECK_EQ((int)rec[BUGW_OFF_CRC], (int)(c & 0xFFu));
 }
 
 // =============================================================================
@@ -458,7 +458,7 @@ static void expect_same_payload(const ProtoMsg& a, const ProtoMsg& b)
       CHECK_EQ((int)a.p.bye.reason, (int)b.p.bye.reason);
       break;
     case PT_TRADE_OFFER:
-      CHECK_EQ(memcmp(a.p.toffer.rec, b.p.toffer.rec, (size_t)PBW_BYTES), 0);
+      CHECK_EQ(memcmp(a.p.toffer.rec, b.p.toffer.rec, (size_t)BUGW_BYTES), 0);
       break;
     case PT_TRADE_READY:
       CHECK_EQ((int)a.p.tready.verdict, (int)b.p.tready.verdict);
@@ -503,12 +503,12 @@ TEST(the_payload_cap_is_the_widest_message_and_a_frame_fits_one_datagram) {
     if (PROTO_LEN_OF[t] > widest) { widest = PROTO_LEN_OF[t]; widest_type = t; }
   CHECK_EQ((int)widest, (int)PROTO_PAYLOAD_MAX);
   CHECK_EQ(widest_type, (int)PT_TEAM_SUBMIT);
-  CHECK_EQ((int)PROTO_LEN_OF[PT_TEAM_SUBMIT], (int)(4u + 3u * PBW_BYTES));
+  CHECK_EQ((int)PROTO_LEN_OF[PT_TEAM_SUBMIT], (int)(4u + 3u * BUGW_BYTES));
   CHECK_EQ((int)PROTO_FRAME_MAX, (int)(PROTO_HDR_BYTES + PROTO_PAYLOAD_MAX + 2u));
   CHECK((int)PROTO_FRAME_MAX <= 250);
   CHECK_EQ((int)PROTO_FRAME_MIN, (int)(PROTO_HDR_BYTES + 2u));
   CHECK_EQ((int)PROTO_LEN_OF[0], 0);       // type 0 is reserved and never valid
-  CHECK_EQ((int)PBW_BYTES, (int)TR_WIRE_BYTES);
+  CHECK_EQ((int)BUGW_BYTES, (int)TR_WIRE_BYTES);
 }
 
 // =============================================================================
@@ -870,17 +870,17 @@ TEST(a_team_slot_above_the_count_that_is_not_empty_is_refused_by_name) {
   // rejection instead of 48 bytes nobody looked at.
   ProtoMsg m; mk_msg(m, PT_TEAM_SUBMIT);
   m.p.team.count = 1u;
-  memset(m.p.team.rec[1], 0, PBW_BYTES);
-  memset(m.p.team.rec[2], 0, PBW_BYTES);
+  memset(m.p.team.rec[1], 0, BUGW_BYTES);
+  memset(m.p.team.rec[2], 0, BUGW_BYTES);
   uint8_t buf[PROTO_FRAME_MAX];
   const size_t n = encode_ok(m, buf, sizeof buf);
   CHECK_EQ((int)guarded_decode(buf, n, TEST_SESSION), (int)PE_OK);
 
   for (uint8_t slot = 1; slot < (uint8_t)BATTLE_TEAM_MAX; ++slot) {
-    for (uint16_t byte = 0; byte < PBW_BYTES; byte += 7u) {
+    for (uint16_t byte = 0; byte < BUGW_BYTES; byte += 7u) {
       uint8_t b2[PROTO_FRAME_MAX];
       memcpy(b2, buf, n);
-      b2[PROTO_HDR_BYTES + 4u + slot * PBW_BYTES + byte] = 0x01u;
+      b2[PROTO_HDR_BYTES + 4u + slot * BUGW_BYTES + byte] = 0x01u;
       reseal(b2, n);
       CHECK_EQ((int)guarded_decode(b2, n, TEST_SESSION), (int)PE_TEAM_PAD);
     }
@@ -965,21 +965,21 @@ TEST(the_ack_field_is_carried_and_never_acted_on) {
 }
 
 // =============================================================================
-//  5. THE WIRE PEBBLE - spec section 15's reject list, on the record
+//  5. THE WIRE BUG - spec section 15's reject list, on the record
 // =============================================================================
-TEST(a_wire_pebble_round_trips_and_the_receiver_derives_what_it_was_not_sent) {
+TEST(a_wire_bug_round_trips_and_the_receiver_derives_what_it_was_not_sent) {
   for (uint8_t s = 1; s <= (uint8_t)SPECIES_TABLE_COUNT; ++s) {
-    for (uint8_t lv = 1; lv <= (uint8_t)PB_LEVEL_MAX; lv = (uint8_t)(lv + 6u)) {
-      PebbleInstance p; mk_valid(p, s, lv, 0x400u + s * 32u + lv);
+    for (uint8_t lv = 1; lv <= (uint8_t)ER_LEVEL_MAX; lv = (uint8_t)(lv + 6u)) {
+      BugInstance p; mk_valid(p, s, lv, 0x400u + s * 32u + lv);
       // Fields the wire deliberately drops, set to values that must NOT survive.
       snprintf(p.nickname, sizeof p.nickname, "NOMBRE");
       p.age_s = 999u; p.battles_won = 7u; p.creation_seed = 0xABCDEF01u;
-      for (uint8_t c = 0; c < (uint8_t)PB_CARE_COUNT; ++c) p.care[c] = 12345;
-      CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+      for (uint8_t c = 0; c < (uint8_t)ER_CARE_COUNT; ++c) p.care[c] = 12345;
+      CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 
-      uint8_t rec[PBW_BYTES];
+      uint8_t rec[BUGW_BYTES];
       pbw_encode(p, rec);
-      PebbleInstance q;
+      BugInstance q;
       memset(&q, 0xA5, sizeof q);
       const VReject r = pbw_decode(rec, q);
       if (r != VR_OK) fprintf(stderr, "    species %u level %u -> %s\n",
@@ -1001,10 +1001,10 @@ TEST(a_wire_pebble_round_trips_and_the_receiver_derives_what_it_was_not_sent) {
       CHECK_EQ((long long)q.age_s, 0LL);
       CHECK_EQ((int)q.battles_won, 0);
       CHECK_EQ((long long)q.creation_seed, 0LL);
-      for (uint8_t c = 0; c < (uint8_t)PB_CARE_COUNT; ++c) CHECK_EQ((long long)q.care[c], 0LL);
-      CHECK_EQ((int)q.custom_sprite, (int)PB_CUSTOM_SPRITE_NONE);
-      CHECK_EQ((int)q.magic, (int)PEBBLE_MAGIC);
-      CHECK_EQ((int)q.layout_ver, (int)PEBBLE_LAYOUT_VER);
+      for (uint8_t c = 0; c < (uint8_t)ER_CARE_COUNT; ++c) CHECK_EQ((long long)q.care[c], 0LL);
+      CHECK_EQ((int)q.custom_sprite, (int)ER_CUSTOM_SPRITE_NONE);
+      CHECK_EQ((int)q.magic, (int)BUG_MAGIC);
+      CHECK_EQ((int)q.layout_ver, (int)BUG_LAYOUT_VER);
       // The save seal belongs to persistence/save_manager.cpp and this layer
       // does not link it, so the blob CRC is left for whoever stores it.
       CHECK_EQ((int)q.crc16, 0);
@@ -1015,9 +1015,9 @@ TEST(a_wire_pebble_round_trips_and_the_receiver_derives_what_it_was_not_sent) {
                (int)(evolution_level_ready(q) != 0u));
 
       // Re-encoding what came back gives the SAME 48 bytes.
-      uint8_t again[PBW_BYTES];
+      uint8_t again[BUGW_BYTES];
       pbw_encode(q, again);
-      CHECK_EQ(memcmp(rec, again, PBW_BYTES), 0);
+      CHECK_EQ(memcmp(rec, again, BUGW_BYTES), 0);
     }
   }
 }
@@ -1027,50 +1027,50 @@ TEST(the_evolution_state_is_unrepresentable_on_the_wire_rather_than_checked) {
   // rejected by the right code. IT CANNOT BE SENT: the byte where it would have
   // lived is reserved and must be zero, and the receiver computes the field
   // from its own tables. This case pins BOTH halves of that claim.
-  PebbleInstance mid; mk_valid(mid, 5, 12, 0x501u);       // species 5 is stage 1
+  BugInstance mid; mk_valid(mid, 5, 12, 0x501u);       // species 5 is stage 1
   CHECK_EQ((int)species_get(5)->stage, 1);
-  uint8_t rec[PBW_BYTES];
+  uint8_t rec[BUGW_BYTES];
   pbw_encode(mid, rec);
-  CHECK_EQ((int)rec[PBW_OFF_RESERVED0], 0);               // nothing to lie with
+  CHECK_EQ((int)rec[BUGW_OFF_RESERVED0], 0);               // nothing to lie with
 
-  PebbleInstance q;
+  BugInstance q;
   CHECK_EQ((int)pbw_decode(rec, q), (int)VR_OK);
   CHECK_EQ((int)(q.evo_state & EVO_STATE_STAGE_MASK), 1); // derived, not sent
 
   // A sender whose own stage bits are WRONG still produces a record the
   // receiver reads correctly, because the field never crosses.
-  PebbleInstance liar = mid;
-  liar.evo_state = 0u;                                    // a locally broken Pebble
-  CHECK_EQ((int)validate_pebble(liar), (int)VR_BAD_EVO_STAGE);
-  uint8_t rec2[PBW_BYTES];
+  BugInstance liar = mid;
+  liar.evo_state = 0u;                                    // a locally broken Bug
+  CHECK_EQ((int)validate_bug(liar), (int)VR_BAD_EVO_STAGE);
+  uint8_t rec2[BUGW_BYTES];
   pbw_encode(liar, rec2);
-  CHECK_EQ(memcmp(rec, rec2, PBW_BYTES), 0);              // byte-identical record
+  CHECK_EQ(memcmp(rec, rec2, BUGW_BYTES), 0);              // byte-identical record
   CHECK_EQ((int)pbw_decode(rec2, q), (int)VR_OK);
   CHECK_EQ((int)(q.evo_state & EVO_STATE_STAGE_MASK), 1);
 
   // And poking that reserved byte is a NAMED wire reject, not a field.
-  rec2[PBW_OFF_RESERVED0] = 0x80u;
+  rec2[BUGW_OFF_RESERVED0] = 0x80u;
   {
-    const uint16_t c = crc16_ccitt(rec2, (size_t)PBW_CRC_BYTES);
-    rec2[PBW_OFF_CRC]     = (uint8_t)(c & 0xFFu);
-    rec2[PBW_OFF_CRC + 1] = (uint8_t)((c >> 8) & 0xFFu);
+    const uint16_t c = crc16_ccitt(rec2, (size_t)BUGW_CRC_BYTES);
+    rec2[BUGW_OFF_CRC]     = (uint8_t)(c & 0xFFu);
+    rec2[BUGW_OFF_CRC + 1] = (uint8_t)((c >> 8) & 0xFFu);
   }
   CHECK_EQ((int)pbw_decode(rec2, q), (int)VR_WIRE_RESERVED);
 }
 
 TEST(every_wire_reject_is_reachable_and_the_output_is_never_partially_written) {
-  PebbleInstance base; mk_valid(base, 1, 10, 0x600u);
-  uint8_t clean[PBW_BYTES];
+  BugInstance base; mk_valid(base, 1, 10, 0x600u);
+  uint8_t clean[BUGW_BYTES];
   pbw_encode(base, clean);
 
   bool seen[VR_REJECT_COUNT];
   memset(seen, 0, sizeof seen);
 
-  PebbleInstance out;
-  uint8_t rec[PBW_BYTES];
+  BugInstance out;
+  uint8_t rec[BUGW_BYTES];
   #define WIRE_CASE(code, mutate)                                             \
     do {                                                                      \
-      memcpy(rec, clean, PBW_BYTES);                                          \
+      memcpy(rec, clean, BUGW_BYTES);                                          \
       { mutate; }                                                             \
       memset(&out, 0xA5, sizeof out);                                         \
       const VReject r_ = pbw_decode(rec, out);                                \
@@ -1083,50 +1083,50 @@ TEST(every_wire_reject_is_reachable_and_the_output_is_never_partially_written) {
       for (size_t i_ = 0; i_ < sizeof out; ++i_) CHECK_EQ((int)ob_[i_], 0);   \
     } while (0)
   #define RESEAL_REC()                                                        \
-    do { const uint16_t c_ = crc16_ccitt(rec, (size_t)PBW_CRC_BYTES);         \
-         rec[PBW_OFF_CRC] = (uint8_t)(c_ & 0xFFu);                            \
-         rec[PBW_OFF_CRC + 1] = (uint8_t)((c_ >> 8) & 0xFFu); } while (0)
+    do { const uint16_t c_ = crc16_ccitt(rec, (size_t)BUGW_CRC_BYTES);         \
+         rec[BUGW_OFF_CRC] = (uint8_t)(c_ & 0xFFu);                            \
+         rec[BUGW_OFF_CRC + 1] = (uint8_t)((c_ >> 8) & 0xFFu); } while (0)
 
   // The positive control first: the untouched record decodes.
   CHECK_EQ((int)pbw_decode(clean, out), (int)VR_OK);
 
-  WIRE_CASE(VR_WIRE_MAGIC,   rec[PBW_OFF_MAGIC] ^= 0x01u; RESEAL_REC());
-  WIRE_CASE(VR_WIRE_VERSION, rec[PBW_OFF_WIRE_VER] = 2u; RESEAL_REC());
-  WIRE_CASE(VR_WIRE_CRC,     rec[PBW_OFF_CRC] ^= 0x01u);
-  WIRE_CASE(VR_WIRE_RESERVED, rec[PBW_OFF_RESERVED0] = 1u; RESEAL_REC());
-  WIRE_CASE(VR_WIRE_RESERVED, rec[PBW_OFF_RESERVED + 7] = 1u; RESEAL_REC());
+  WIRE_CASE(VR_WIRE_MAGIC,   rec[BUGW_OFF_MAGIC] ^= 0x01u; RESEAL_REC());
+  WIRE_CASE(VR_WIRE_VERSION, rec[BUGW_OFF_WIRE_VER] = 2u; RESEAL_REC());
+  WIRE_CASE(VR_WIRE_CRC,     rec[BUGW_OFF_CRC] ^= 0x01u);
+  WIRE_CASE(VR_WIRE_RESERVED, rec[BUGW_OFF_RESERVED0] = 1u; RESEAL_REC());
+  WIRE_CASE(VR_WIRE_RESERVED, rec[BUGW_OFF_RESERVED + 7] = 1u; RESEAL_REC());
   // A custom species and a custom flag are ONE code, because in P8 they become
   // one meaning and a silent remap then would be the bug.
-  WIRE_CASE(VR_WIRE_CUSTOM_UNRESOLVED, rec[PBW_OFF_SPECIES] = 200u; RESEAL_REC());
-  WIRE_CASE(VR_WIRE_CUSTOM_UNRESOLVED, rec[PBW_OFF_FLAGS] = PBF_CUSTOM; RESEAL_REC());
+  WIRE_CASE(VR_WIRE_CUSTOM_UNRESOLVED, rec[BUGW_OFF_SPECIES] = 200u; RESEAL_REC());
+  WIRE_CASE(VR_WIRE_CUSTOM_UNRESOLVED, rec[BUGW_OFF_FLAGS] = PBF_CUSTOM; RESEAL_REC());
   WIRE_CASE(VR_WIRE_CUSTOM_UNRESOLVED,
-            rec[PBW_OFF_FLAGS] = PBF_HAS_CUSTOM_SPRITE; RESEAL_REC());
+            rec[BUGW_OFF_FLAGS] = PBF_HAS_CUSTOM_SPRITE; RESEAL_REC());
   // The three status bits the wire refuses, each for its own reason.
-  WIRE_CASE(VR_WIRE_STATUS_BITS, rec[PBW_OFF_STATUS] = PBS_FAINTED; RESEAL_REC());
-  WIRE_CASE(VR_WIRE_STATUS_BITS, rec[PBW_OFF_STATUS] = PBS_CORRUPTED; RESEAL_REC());
-  WIRE_CASE(VR_WIRE_STATUS_BITS, rec[PBW_OFF_STATUS] = PBS_RESERVED_LIGHT; RESEAL_REC());
+  WIRE_CASE(VR_WIRE_STATUS_BITS, rec[BUGW_OFF_STATUS] = PBS_FAINTED; RESEAL_REC());
+  WIRE_CASE(VR_WIRE_STATUS_BITS, rec[BUGW_OFF_STATUS] = PBS_CORRUPTED; RESEAL_REC());
+  WIRE_CASE(VR_WIRE_STATUS_BITS, rec[BUGW_OFF_STATUS] = PBS_RESERVED_LIGHT; RESEAL_REC());
 
   // THE SIX SECTION 15 VECTORS THE PLAN NAMES, each rejected by the RIGHT code
   // and each produced by the SHARED validator rather than by a wire rule.
-  WIRE_CASE(VR_BAD_LEVEL,  rec[PBW_OFF_LEVEL] = 31u; RESEAL_REC());
+  WIRE_CASE(VR_BAD_LEVEL,  rec[BUGW_OFF_LEVEL] = 31u; RESEAL_REC());
   WIRE_CASE(VR_UNKNOWN_SPECIES,
-            rec[PBW_OFF_SPECIES] = (uint8_t)(SPECIES_TABLE_COUNT + 1u); RESEAL_REC());
-  WIRE_CASE(VR_UNKNOWN_MOVE, rec[PBW_OFF_MOVES + 3] = 0u; RESEAL_REC());
-  WIRE_CASE(VR_UNLEARNABLE_MOVESET, rec[PBW_OFF_MOVES] = MV_PLAGA; RESEAL_REC());
+            rec[BUGW_OFF_SPECIES] = (uint8_t)(SPECIES_TABLE_COUNT + 1u); RESEAL_REC());
+  WIRE_CASE(VR_UNKNOWN_MOVE, rec[BUGW_OFF_MOVES + 3] = 0u; RESEAL_REC());
+  WIRE_CASE(VR_UNLEARNABLE_MOVESET, rec[BUGW_OFF_MOVES] = MV_PLAGA; RESEAL_REC());
   WIRE_CASE(VR_HP_OVER_MAX,
-            rec[PBW_OFF_HP_CUR] = 0xFFu; rec[PBW_OFF_HP_CUR + 1] = 0xFFu; RESEAL_REC());
-  WIRE_CASE(VR_BAD_GENOME, rec[PBW_OFF_GENOME + 14] ^= 0x01u; RESEAL_REC());
+            rec[BUGW_OFF_HP_CUR] = 0xFFu; rec[BUGW_OFF_HP_CUR + 1] = 0xFFu; RESEAL_REC());
+  WIRE_CASE(VR_BAD_GENOME, rec[BUGW_OFF_GENOME + 14] ^= 0x01u; RESEAL_REC());
   // And three more the same call site owns.
-  WIRE_CASE(VR_NULL_ID, memset(rec + PBW_OFF_ID, 0, 4); RESEAL_REC());
+  WIRE_CASE(VR_NULL_ID, memset(rec + BUGW_OFF_ID, 0, 4); RESEAL_REC());
   WIRE_CASE(VR_BAD_XP,
-            rec[PBW_OFF_XP] = 0xFFu; rec[PBW_OFF_XP + 1] = 0xFFu; RESEAL_REC());
-  WIRE_CASE(VR_BAD_ORIGIN, rec[PBW_OFF_ORIGIN] = (uint8_t)ORIGIN_COUNT; RESEAL_REC());
-  WIRE_CASE(VR_BAD_TRAIT, rec[PBW_OFF_TRAIT] = 1u; RESEAL_REC());
+            rec[BUGW_OFF_XP] = 0xFFu; rec[BUGW_OFF_XP + 1] = 0xFFu; RESEAL_REC());
+  WIRE_CASE(VR_BAD_ORIGIN, rec[BUGW_OFF_ORIGIN] = (uint8_t)ORIGIN_COUNT; RESEAL_REC());
+  WIRE_CASE(VR_BAD_TRAIT, rec[BUGW_OFF_TRAIT] = 1u; RESEAL_REC());
   #undef WIRE_CASE
   #undef RESEAL_REC
 
   // ALL SIX wire codes were produced, and by this function alone
-  // (tests/test_validate.cpp asserts validate_pebble() never produces one).
+  // (tests/test_validate.cpp asserts validate_bug() never produces one).
   for (int r = (int)VR_WIRE_MAGIC; r <= (int)VR_WIRE_STATUS_BITS; ++r) {
     if (!seen[r]) fprintf(stderr, "    unreachable: %s\n",
                           validate_reject_name((VReject)r));
@@ -1137,25 +1137,25 @@ TEST(every_wire_reject_is_reachable_and_the_output_is_never_partially_written) {
 TEST(a_team_submit_carrying_a_bad_member_is_refused_by_the_right_code) {
   // The plan's TEAM_SUBMIT list, driven end to end: a legal frame whose only
   // defect is inside ONE 48 B record, decoded exactly as the session layer will
-  // decode it - straight into a caller-owned PebbleInstance.
+  // decode it - straight into a caller-owned BugInstance.
   struct Vec { const char* what; uint16_t off; uint8_t val; VReject want; };
   static const Vec V[] = {
-    { "level 31",        PBW_OFF_LEVEL,     31u, VR_BAD_LEVEL },
-    { "unknown species", PBW_OFF_SPECIES,   99u, VR_UNKNOWN_SPECIES },
-    { "three moves",     PBW_OFF_MOVES + 3,  0u, VR_UNKNOWN_MOVE },
-    { "a stolen move",   PBW_OFF_MOVES,   MV_PLAGA, VR_UNLEARNABLE_MOVESET },
-    { "hp over max",     PBW_OFF_HP_CUR,  0xFFu, VR_HP_OVER_MAX },
-    { "a bad genome",    PBW_OFF_GENOME + 14, 0x00u, VR_BAD_GENOME }
+    { "level 31",        BUGW_OFF_LEVEL,     31u, VR_BAD_LEVEL },
+    { "unknown species", BUGW_OFF_SPECIES,   99u, VR_UNKNOWN_SPECIES },
+    { "three moves",     BUGW_OFF_MOVES + 3,  0u, VR_UNKNOWN_MOVE },
+    { "a stolen move",   BUGW_OFF_MOVES,   MV_PLAGA, VR_UNLEARNABLE_MOVESET },
+    { "hp over max",     BUGW_OFF_HP_CUR,  0xFFu, VR_HP_OVER_MAX },
+    { "a bad genome",    BUGW_OFF_GENOME + 14, 0x00u, VR_BAD_GENOME }
   };
   for (size_t i = 0; i < sizeof V / sizeof V[0]; ++i) {
     ProtoMsg m; mk_msg(m, PT_TEAM_SUBMIT);
     // The defect goes in the SECOND member, so a decoder that stopped at the
     // first would pass this case without ever seeing it.
     m.p.team.rec[1][V[i].off] = V[i].val;
-    if (V[i].off == PBW_OFF_HP_CUR) m.p.team.rec[1][PBW_OFF_HP_CUR + 1] = 0xFFu;
-    const uint16_t c = crc16_ccitt(m.p.team.rec[1], (size_t)PBW_CRC_BYTES);
-    m.p.team.rec[1][PBW_OFF_CRC]     = (uint8_t)(c & 0xFFu);
-    m.p.team.rec[1][PBW_OFF_CRC + 1] = (uint8_t)((c >> 8) & 0xFFu);
+    if (V[i].off == BUGW_OFF_HP_CUR) m.p.team.rec[1][BUGW_OFF_HP_CUR + 1] = 0xFFu;
+    const uint16_t c = crc16_ccitt(m.p.team.rec[1], (size_t)BUGW_CRC_BYTES);
+    m.p.team.rec[1][BUGW_OFF_CRC]     = (uint8_t)(c & 0xFFu);
+    m.p.team.rec[1][BUGW_OFF_CRC + 1] = (uint8_t)((c >> 8) & 0xFFu);
 
     uint8_t buf[PROTO_FRAME_MAX];
     const size_t n = encode_ok(m, buf, sizeof buf);
@@ -1164,7 +1164,7 @@ TEST(a_team_submit_carrying_a_bad_member_is_refused_by_the_right_code) {
     // "impossible stats".
     CHECK_EQ((int)guarded_decode(buf, n, TEST_SESSION), (int)PE_OK);
 
-    PebbleInstance team[BATTLE_TEAM_MAX];
+    BugInstance team[BATTLE_TEAM_MAX];
     VReject worst = VR_OK;
     uint8_t bad_at = 0xFFu;
     for (uint8_t k = 0; k < g_arena.m.p.team.count; ++k) {

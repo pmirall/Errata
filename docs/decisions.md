@@ -1,4 +1,4 @@
-# Pebblebol — decisions log
+# Errata — decisions log
 
 > ## THIS LOG IS CLOSED (P10-C5, the last build chunk)
 >
@@ -36,7 +36,7 @@
 
 Every decision that changes hardware mapping, persisted names, transport choice or
 language policy gets a row here. Closed decisions record the commit that applied them.
-Evidence and defaults come from `PEBBLEBOL_IMPLEMENTATION_PLAN.md` §0.
+Evidence and defaults come from `ERRATA_IMPLEMENTATION_PLAN.md` §0.
 
 Status values: **OPEN** (owner must decide), **DEFAULT** (plan default in force, owner
 may override), **CLOSED** (decided; commit named). At the close, a decision that is
@@ -46,19 +46,19 @@ still OPEN carries an owner step instead of a resolution.
 
 | # | Decision | Status | Evidence | Default in force | Blocks | Outcome |
 |---|---|---|---|---|---|---|
-| **D1** | GPIO map (pin conflict) | **OPEN AT SHIP (P10-C5).** Deferred by the owner 2026-09-02; never revisited, because no board exists. Owner step in "THE STATE AT SHIP" at the end of this file. It gates every item in `docs/bench.md`. | `config.h` compiles `PIN_SDA 8, PIN_SCL 9, PIN_BTN_L 10, PIN_BTN_R 2, PIN_LED 5` with the human comments "tu cableado actual del TinyLLM" / "OBLIGATORIO cambiarlo: 8 ya es SDA". README §2, CHANGELOG, `render.h`, `render.cpp` all document the other map (SDA=6, SCL=7, BTN_L=3, BTN_R=4, LED=8) and warn that GPIO2/8/9 are strapping pins. Nothing has ever run on hardware. | **Values stay exactly as committed.** `PB_PINS_CONFIRMED` is NOT defined, so the guard `static_assert`s added in P2-C8 stay dormant. | P2-C0 first flash (hardware track only), P6-C3 deep sleep | Owner defers; consequences recorded below the table. |
+| **D1** | GPIO map (pin conflict) | **OPEN AT SHIP (P10-C5).** Deferred by the owner 2026-09-02; never revisited, because no board exists. Owner step in "THE STATE AT SHIP" at the end of this file. It gates every item in `docs/bench.md`. | `config.h` compiles `PIN_SDA 8, PIN_SCL 9, PIN_BTN_L 10, PIN_BTN_R 2, PIN_LED 5` with the human comments "tu cableado actual del TinyLLM" / "OBLIGATORIO cambiarlo: 8 ya es SDA". README §2, CHANGELOG, `render.h`, `render.cpp` all document the other map (SDA=6, SCL=7, BTN_L=3, BTN_R=4, LED=8) and warn that GPIO2/8/9 are strapping pins. Nothing has ever run on hardware. | **Values stay exactly as committed.** `ER_PINS_CONFIRMED` is NOT defined, so the guard `static_assert`s added in P2-C8 stay dormant. | P2-C0 first flash (hardware track only), P6-C3 deep sleep | Owner defers; consequences recorded below the table. |
 | **D2** | Peer-session transport: BLE vs Wi-Fi (ESP-NOW) | **CLOSED — ESP-NOW (2026-09-02, owner). BUILT IN PHASE 7 AND UNPROVEN ON HARDWARE: the BLE deletion the decision authorises is still pending a two-board bench test — see "Phase-7 exit" at the end of this file.** | The legacy BLE advert carries 19 B/frame and cannot carry the §15 message set; GATT was rejected by the original author for stability; each BLE bring-up burns one of 32 sessions with a claimed ~672 B Bluedroid leak; BLE costs 721,632 B flash / 23,688 B static RAM **as measured in phase 1 — re-measured at the phase-4 exit as 712,466 B / 23,504 B (baseline minus `no-ble`); the phase-1 pair is kept because it is what the owner decided on, and the correction is worked through under "D2 — consequences"**. ESP-NOW ships in the core (250 B/frame, unicast + send-callback ACK) and needs the same `WIFI_STA` residency the §40 scanner already requires. | ESP-NOW is the transport, behind the §59 `Transport` seam. `FEATURE_BLE 0` in the release build. | P7-C1 | Decided: ESP-NOW. See the consequences below the table. |
-| **D3** | Sketch folder rename and product identity in persisted names | DEFAULT | `sketch_aug30b/` → `Pebblebol/`; `NVS_NS "notta"`, AP prefix `NOTTAMAGOCHI-`, mDNS `nottamagochi.local`. No device has ever run this firmware, so renaming orphans nothing real. | Folder renamed in P2-C1; NVS namespace `"pbbl"` in P2-C9 with a one-shot import of a legacy `"notta"` save; AP prefix `PEBBLEBOL-` in P8-C2; mDNS deleted in P2-C5. | P2-C1, P2-C9 | **CLOSED (P2-C9b, 2026-09-03).** Namespace is `"pbbl"` (`hardware/kv_nvs.h`, `PB_NVS_NAMESPACE`). `kv_begin()` performs a ONE-SHOT import: the raw v1 blobs (`save`, `cfg`, `gl`, `t`) are copied out of `"notta"` under their old key names into `"pbbl"`, where `persistence/migration.cpp` finds them, and `"notta"` is then cleared so a later factory reset cannot resurrect a deleted pet. It runs only when `"pbbl"` holds neither a v2 Box nor an already-imported v1 save, so it can never overwrite live state, and it is idempotent across a power cut in the middle. Verified by `tests/test_compat.cpp` (`compat_migrates_a_v1_save_into_the_live_pet`) and `tests/test_persistence.cpp` (the v1 fixtures). AP prefix and mDNS are unaffected (mDNS was deleted in P2-C5). **The AP prefix landed in P8-C2: `AP_SSID_PREFIX` is `"PEBBLEBOL-"` and the SSID is `PEBBLEBOL-XXXX`, 14 chars, inside `net.h`'s `SSID_MAX_LEN >= 15` assertion. D3 has nothing open.** |
+| **D3** | Sketch folder rename and product identity in persisted names | DEFAULT | `sketch_aug30b/` → `Errata/`; `NVS_NS "notta"`, AP prefix `NOTTAMAGOCHI-`, mDNS `nottamagochi.local`. No device has ever run this firmware, so renaming orphans nothing real. | Folder renamed in P2-C1; NVS namespace `"pbbl"` in P2-C9 with a one-shot import of a legacy `"notta"` save; AP prefix `ERRATA-` in P8-C2; mDNS deleted in P2-C5. | P2-C1, P2-C9 | **CLOSED (P2-C9b, 2026-09-03).** Namespace is `"pbbl"` (`hardware/kv_nvs.h`, `ER_NVS_NAMESPACE`). `kv_begin()` performs a ONE-SHOT import: the raw v1 blobs (`save`, `cfg`, `gl`, `t`) are copied out of `"notta"` under their old key names into `"pbbl"`, where `persistence/migration.cpp` finds them, and `"notta"` is then cleared so a later factory reset cannot resurrect a deleted pet. It runs only when `"pbbl"` holds neither a v2 Box nor an already-imported v1 save, so it can never overwrite live state, and it is idempotent across a power cut in the middle. Verified by `tests/test_compat.cpp` (`compat_migrates_a_v1_save_into_the_live_pet`) and `tests/test_persistence.cpp` (the v1 fixtures). AP prefix and mDNS are unaffected (mDNS was deleted in P2-C5). **The AP prefix landed in P8-C2: `AP_SSID_PREFIX` is `"ERRATA-"` and the SSID is `ERRATA-XXXX`, 14 chars, inside `net.h`'s `SSID_MAX_LEN >= 15` assertion. D3 has nothing open.** |
 | **D4** | Language of user-facing UI strings | **CLOSED AT SHIP (P10-C5)** — Spanish UI, English code and documents; the Spanish documents are archived under `docs/legacy/` and the English `README.md` exists (plan T12/G8). | Spanish `strings_es.h` (439 strings, `StrId` mechanism) vs English. Spec header allows Spanish UI. | Keep Spanish; new BOX/BATTLE/NET/LINK/CREATOR/ERROR/TIME blocks written in Spanish in the same mechanism. An `strings_en.h` twin is a one-file swap later. | P2-C11 | — |
 | **D5** | Panel variant SSD1306 vs SH1106 | **OPEN AT SHIP (P10-C5)** — a property of the panel in front of you, not of this repository. Both drivers link and both variants are green in the matrix. Owner step at the end of this file. | `DISPLAY_IS_SH1106` (`config.h:64`); both drivers verified to link. | Keep 0 (SSD1306). Flip only with the panel in front of you (README §3 symptoms). | P2-C0 | — |
-| **D6** | Partition table / OTA room (§61) | **CLOSED (P2-C9d)** | `huge_app.csv` = nvs 20 KB, otadata 8 KB, app0 3 MB, spiffs 896 KB unused, coredump 64 KB; no OTA slot. Core 3.1.1 honours a `partitions.csv` in the sketch folder. `initArduino()` erases the whole `nvs` partition on `ESP_ERR_NVS_NO_FREE_PAGES` / `NEW_VERSION_FOUND` before `setup()`. | Custom `Pebblebol/partitions.csv`: `nvs 0x9000 0x5000 · otadata 0xE000 0x2000 · app0 0x10000 0x300000 · nvs2 0x310000 0x10000 · spiffs 0x320000 0xD0000 (reserved) · coredump 0x3F0000 0x10000`. `nvs2` = checkpoint partition. OTA stays a V1 non-goal. | P2-C9d | **CLOSED (P2-C9d, 2026-09-03).** `Pebblebol/partitions.csv` committed exactly as proposed: `nvs 0x9000 0x5000 · otadata 0xE000 0x2000 · app0 0x10000 0x300000 · nvs2 0x310000 0x10000 · spiffs 0x320000 0xD0000 · coredump 0x3F0000 0x10000`, filling 4 MB with no gap. **`PartitionScheme=huge_app` STAYS in the FQBN**, contrary to the plan's wording, and the reason is worth recording: arduino-cli copies a sketch-local `partitions.csv` into the build directory and esptool flashes THAT — so the table in force is ours either way — but `upload.maximum_size`, the ceiling the compile is checked against, comes from the board menu. Dropping the option left the check at the default scheme's 1,310,720 B and failed a 1.87 MB build that fits `app0` perfectly. `huge_app`'s ceiling is 3,145,728 B, which is exactly `app0` in our CSV, so the two agree. `tools/build.sh` now gates both facts: the reported app maximum must equal 3,145,728, and the partition table about to be flashed must contain `nvs2`. |
+| **D6** | Partition table / OTA room (§61) | **CLOSED (P2-C9d)** | `huge_app.csv` = nvs 20 KB, otadata 8 KB, app0 3 MB, spiffs 896 KB unused, coredump 64 KB; no OTA slot. Core 3.1.1 honours a `partitions.csv` in the sketch folder. `initArduino()` erases the whole `nvs` partition on `ESP_ERR_NVS_NO_FREE_PAGES` / `NEW_VERSION_FOUND` before `setup()`. | Custom `Errata/partitions.csv`: `nvs 0x9000 0x5000 · otadata 0xE000 0x2000 · app0 0x10000 0x300000 · nvs2 0x310000 0x10000 · spiffs 0x320000 0xD0000 (reserved) · coredump 0x3F0000 0x10000`. `nvs2` = checkpoint partition. OTA stays a V1 non-goal. | P2-C9d | **CLOSED (P2-C9d, 2026-09-03).** `Errata/partitions.csv` committed exactly as proposed: `nvs 0x9000 0x5000 · otadata 0xE000 0x2000 · app0 0x10000 0x300000 · nvs2 0x310000 0x10000 · spiffs 0x320000 0xD0000 · coredump 0x3F0000 0x10000`, filling 4 MB with no gap. **`PartitionScheme=huge_app` STAYS in the FQBN**, contrary to the plan's wording, and the reason is worth recording: arduino-cli copies a sketch-local `partitions.csv` into the build directory and esptool flashes THAT — so the table in force is ours either way — but `upload.maximum_size`, the ceiling the compile is checked against, comes from the board menu. Dropping the option left the check at the default scheme's 1,310,720 B and failed a 1.87 MB build that fits `app0` perfectly. `huge_app`'s ceiling is 3,145,728 B, which is exactly `app0` in our CSV, so the two agree. `tools/build.sh` now gates both facts: the reported app maximum must equal 3,145,728, and the partition table about to be flashed must contain `nvs2`. |
 | **D7** | Creator inactivity grace (§34) | **CLOSED (P8-C2)** — but nothing writes the field, so the value in force is the default; that is a UI gap, not an open decision. | 120 s vs 300 s. | `ConfigV2.creator_idle_s` default 300, editable in SETTINGS. | P8-C2 | **CLOSED (P8-C2, 2026-09-05).** 300 s, and `cfgv2_defaults()` already shipped that value. The timer is `networking/creator_gate.cpp`'s `cg_idle_expired()`, measured on `gt_mono32()`, and it is reset **only by a request that passed the PIN gate** - an unauthenticated client in radio range must not be able to hold the access point open. A persisted `0` (a save older than the field) resolves to the default rather than to an instant shutdown, and a value above `CREATOR_IDLE_S_MAX` is clamped. The SETTINGS editor is not built: nothing writes `creator_idle_s` yet, so the value in force is the default. Driven case by case in `tests/test_creator_gate.cpp`; **observed on hardware: NO.** |
 | **D8** | Piezo GPIO (new hardware, V1 baseline §6) | **OPEN AT SHIP (P10-C5)** — owner confirms when soldering. Nothing has ever been heard. Owner step at the end of this file. | A passive ~15 mm piezo joins the V1 BOM. Free, non-strapping GPIOs on this board: 3, 4, 6, 7. GPIO0 is kept for the battery divider (D10). `tone()`/`noTone()` and the LEDC driver are both in the installed core, so no library is needed. | `PIN_PIEZO 3` is now **committed as the proposal** in `core/config.h` §2 (P6-C1). The tone engine is written against the macro, so changing it is a one-line edit, and `tools/check.sh` fails any other file that defines a `PIN_` macro. | P6-C3 (sleep GPIO states); the tone engine landed EARLY, in **P6-C1**, not P10-C2 | **The engine shipped against an open decision — see "D8 — the tone engine landed…" below.** The pin itself is unconfirmed and nothing has been heard. |
 | **D9** | Supply architecture for 2×AAA | **CLOSED — 3.3 V boost converter (2026-09-03, owner)** | Alkaline AAA pairs sag from ~2.8 V loaded to ~2.4 V at 80 % discharge, while the core arms brownout at level 7 (~3.0 V, verified `CONFIG_ESP_BROWNOUT_DET_LVL 7`), and the board's LDO cannot step 3.0 V up. A boost module removes the whole problem: the 3.3 V rail stays flat across the discharge curve and ~90 % of cell capacity becomes usable. | Boost module fitted, feeding 3.3 V. The board's always-on power LED is being desoldered (it cost ~48 mAh/day, more than the rest of the device combined). | — | Decided: boost. Two follow-ups it creates are tracked as D11 and D12. |
 | **D10** | Battery sense divider on GPIO0 | **OPEN AT SHIP (P10-C5)** — no divider is fitted, so spec §26's NORMAL/LOW/CRITICAL levels cannot exist and every battery field reads `n/a` with a reason. Owner step at the end of this file. | Spec §26 wants NORMAL/LOW/CRITICAL levels. `PIN_VBAT_ADC 0` is already reserved and GPIO0 is ADC1_CH0, so this needs only two resistors. Without it those levels cannot exist and a flat pack corrupts a save instead of warning. | Two resistors; the firmware side lands with the power states in P6-C3. | P6-C3 | — |
 | **D11** | Boost module quiescent current | **OPEN AT SHIP (P10-C5) — the single biggest factor in battery life**, a 100x spread between modules. Owner step at the end of this file. | With the voltage window solved and the power LED gone, the dominant idle load is whatever the boost module draws doing nothing. Cheap PFM modules range from ~20 µA to ~2 mA, a 100× spread that decides the runtime outright. Budget from ~680 mAh of usable energy at 3.3 V and the spec's 60 min/day profile: 25 µA idle → ~26 days · 200 µA → ~23 days · 1 mA → ~14 days · 2 mA → ~9 days. | Measure it: multimeter in series with the cells, ESP32 in deep sleep, OLED off, radios off. Anything above ~200 µA and the ≥30-day target needs a different module, not firmware work. | Battery-life target | — |
 | **D12** | Bulk capacitor on the boost output | **OPEN AT SHIP (P10-C5)** — a few cents, before the Wi-Fi scan test. Owner step at the end of this file. | The ESP32-C3 pulls ~350 mA in Wi-Fi TX. Drawn through a boost from 2.4 V cells that have ~0.3 Ω internal resistance, that transient can collapse the rail and trip exactly the reset the hardware checklist §30 asks about ("Wi-Fi scan does not cause resets"). | A 100–470 µF electrolytic across the boost output, for a few cents. Firmware already helps: the scanner is specified `passive=true` (plan P5-C1), so it listens rather than sending probe requests, which is the cheap half of a scan. | P5-C1 bench test | — |
-| **D13** | Light ON by default, and what it does to a hands-off player | **CLOSED — delete the light (2026-09-03, owner)** | `sim_new_pet()` set `PF_LIGHT_ON`, and `sleep_machine()` auto-slept only when it was night AND the light was off. A player who never found the light toggle therefore owned a Pebble that **never slept**: energy pinned at 0 after 16.7 h, the 2 h zero-dwell grace started, and health bled to the 10 % floor at about 64 h. Spec-compliant (section 27: inconveniently unhappy, never destroyed) but the WORST case reachable, and reached by doing nothing — the opposite of what "fun even if you ignore it for hours" is meant to feel like. Measured during P3-C1's retune. | — (superseded) | P3-C5's soak criterion | **The light mechanic is deleted, not defaulted (P3-C2b).** The owner's judgement was that the switch "doesn't add anything": neither of the two one-line fixes was taken. Sleep now follows an approximated daylight table and a player who insists can wake the creature. See the consequences below the table. |
+| **D13** | Light ON by default, and what it does to a hands-off player | **CLOSED — delete the light (2026-09-03, owner)** | `sim_new_pet()` set `PF_LIGHT_ON`, and `sleep_machine()` auto-slept only when it was night AND the light was off. A player who never found the light toggle therefore owned a Bug that **never slept**: energy pinned at 0 after 16.7 h, the 2 h zero-dwell grace started, and health bled to the 10 % floor at about 64 h. Spec-compliant (section 27: inconveniently unhappy, never destroyed) but the WORST case reachable, and reached by doing nothing — the opposite of what "fun even if you ignore it for hours" is meant to feel like. Measured during P3-C1's retune. | — (superseded) | P3-C5's soak criterion | **The light mechanic is deleted, not defaulted (P3-C2b).** The owner's judgement was that the switch "doesn't add anything": neither of the two one-line fixes was taken. Sleep now follows an approximated daylight table and a player who insists can wake the creature. See the consequences below the table. |
 
 ## D1 — consequences of deferring (recorded 2026-09-02)
 
@@ -94,7 +94,7 @@ phase re-derives them:
      dressed as a pin decision, and it is the reason the ladder stops at light sleep.
   2. **It would also make every wake a reset taken with a finger on GPIO2**, which
      `config.h` §2 lists as a strapping pin ("never wire a button to them" — and
-     `PIN_BTN_R` is 2, which is why the dormant `PB_PINS_CONFIRMED` assert would fail
+     `PIN_BTN_R` is 2, which is why the dormant `ER_PINS_CONFIRMED` assert would fail
      today). Whether the C3 re-samples GPIO2 into a different boot mode at a
      deep-sleep wake could not be established from any installed header, so it is an
      **unresolved bench risk**, not an asserted failure. Deep sleep on this map must not be
@@ -109,8 +109,8 @@ phase re-derives them:
      number that appears nowhere in this repo and is the weakest input.
 
   **The earlier wording of this bullet said the deep-sleep path would be kept "behind
-  `PB_PINS_CONFIRMED` so it turns on by itself the day the map is confirmed". P6-C3 did
-  not do that, deliberately, and this records why.** `PB_PINS_CONFIRMED` is not the
+  `ER_PINS_CONFIRMED` so it turns on by itself the day the map is confirmed". P6-C3 did
+  not do that, deliberately, and this records why.** `ER_PINS_CONFIRMED` is not the
   condition — a *confirmed* map with `PIN_BTN_L 10` still cannot deep-sleep on two buttons,
   and a confirmed map with `PIN_BTN_R 2` fails the strapping assert. The real condition is
   "are both buttons inside the wake mask", so `hardware/power.h` computes exactly that as
@@ -144,7 +144,7 @@ phase re-derives them:
 - **D8 (piezo GPIO) IS STILL OPEN AFTER PHASE 6, and `PIN_PIEZO 3` is a PROPOSAL.** P6-C1
   shipped the tone engine against the macro, so the pin is a one-line change; `PIN_PIEZO`
   is defined once, in `core/config.h`, and `tools/check.sh` fails any `#define PIN_` that
-  appears anywhere else. `PB_PINS_CONFIRMED` is still not defined anywhere in the tree, so
+  appears anywhere else. `ER_PINS_CONFIRMED` is still not defined anywhere in the tree, so
   the guard `static_assert`s stay dormant. **No tone has ever been heard.**
 
   One thing for the owner to hear before the soldering iron comes out, because it couples
@@ -178,11 +178,11 @@ phase re-derives them:
   §40 scanner already needs, so the single-radio invariant holds without tearing a stack
   down and bringing another up mid-session — which was the weakest point of the BLE path.
 - **Same-channel constraint.** ESP-NOW peers must sit on the same Wi-Fi channel. The
-  discovery beacon announces the channel and the session pins it to `PB_LINK_CHANNEL`;
+  discovery beacon announces the channel and the session pins it to `ER_LINK_CHANNEL`;
   P7-C1 must handle a peer found on another channel by re-tuning before HELLO, not by
   failing.
   **NARROWED BY WHAT P7-C1 ACTUALLY BUILT.** The beacon carries NO channel field and there is
-  NO re-tune path: both devices apply `PB_LINK_CHANNEL` on every LINK bring-up, so a peer on
+  NO re-tune path: both devices apply `ER_LINK_CHANNEL` on every LINK bring-up, so a peer on
   another channel is not discoverable at all and there is nothing to re-tune to. The cost,
   stated: a device left on another channel by something outside this firmware is invisible to
   LINK, and this firmware cannot tell that from an empty room.
@@ -214,7 +214,7 @@ Recorded here for traceability; each is one commit to reverse.
 | # | Decision | Applied in |
 |---|---|---|
 | T1 | Always-buildable strangler-fig: every commit passes the gate (`tools/check.sh`); removals one subsystem per commit in the flat layout before the `src/` move. | Phase 2 |
-| T2 | Reuse over rewrite: file names and `sim_/rd_/gt_/net_/store_` prefixes kept; `render.cpp` and `sim.cpp` stay single TUs; 16 B `Genome` embedded in `PebbleInstance`; milli-point integrator kept. | Phase 2 |
+| T2 | Reuse over rewrite: file names and `sim_/rd_/gt_/net_/store_` prefixes kept; `render.cpp` and `sim.cpp` stay single TUs; 16 B `Genome` embedded in `BugInstance`; milli-point integrator kept. | Phase 2 |
 | T3 | ENERGY kept as a fifth, mostly internal care stat. | P2-C7 |
 | T4 | Content = generated `constexpr` tables from committed JSON (`tools/content/*.json` → `src/data/*_table.h`), never parsed at runtime. | P4-C1 |
 | T5 | Persistence = versioned blob pairs (`<key>0`/`<key>1`, `seq`) + `nvs2` checkpoint partition. | P2-C9 |
@@ -224,7 +224,7 @@ Recorded here for traceability; each is one commit to reverse.
 | T8 | Input: double-tap retired (tap latency 305 ms → ~25 ms); 5 ms `esp_timer` button sampler; A = TAP_L, B = TAP_R. | P2-C6, P3-C4 |
 | T9 | Unknown clock charges zero absence; cooldowns fall back to a per-boot RAM table while uncalibrated. | P2-C6, P5-C2 |
 | T10 | `rd_fatal()` replaced by the `ERROR` state in Phase 2. | P2-C11 |
-| T11 | Sketch folder renamed `Pebblebol/`, `.ino` → `Pebblebol.ino`. | P2-C1 |
+| T11 | Sketch folder renamed `Errata/`, `.ino` → `Errata.ino`. | P2-C1 |
 | T12 | UI strings stay Spanish; identifiers, comments and docs English; Spanish docs archived under `docs/legacy/`. | P2-C8, P10-C5 |
 | T13 | Roster sprites 24x24, 2 frames, XBM (72 B/frame); creator sprites use the same format. | P9-C3 |
 
@@ -259,7 +259,7 @@ length; the variant still proves the alternate driver builds and links (D5).
 **D3 outcome.** Closed in P2-C9b and recorded in the table above: the persisted namespace
 is `"pbbl"`, `kv_begin()` performs the one-shot import of a legacy `"notta"` save, the
 folder rename landed in P2-C1 and mDNS was deleted in P2-C5. **P8-C2 landed the last piece:
-`AP_SSID_PREFIX` is `"PEBBLEBOL-"`.**
+`AP_SSID_PREFIX` is `"ERRATA-"`.**
 
 **A DECISION P8-C2 HAD TO MAKE AND THE PLAN DID NOT LIST: the soft AP stays OPEN, and
 `ConfigV2.ap_pass` still has no producer.** The P8-C2 box asked for a generated `ap_pass` and
@@ -267,14 +267,14 @@ a WPA access point. It cannot be had together with the join QR, and the arithmet
 decisive rather than a preference:
 
 ```
-"WIFI:T:WPA;S:"  13   +  SSID "PEBBLEBOL-A1B2"  14
+"WIFI:T:WPA;S:"  13   +  SSID "ERRATA-A1B2"  14
 ";P:"             3   +  ";;"                    2      = 32 B before one passphrase character
 QR version 2-L byte capacity (ui/qr.cpp)               =  32 B
 WPA2-PSK minimum passphrase                             =   8 characters
 => shortest legal payload 40 B -> version 3 -> 29 modules -> 70 px on a 64-row panel
 ```
 
-Dropping the `-XXXX` suffix leaves 35 B; dropping the `PEBBLEBOL-` prefix entirely leaves
+Dropping the `-XXXX` suffix leaves 35 B; dropping the `ERRATA-` prefix entirely leaves
 35 B **and breaks D3**. Turning WPA on anyway produces two silent failures no host test can
 see: `screen_creator.cpp`'s `draw_symbol()` clamps to 1 px per module and paints an
 unscannable 35 px symbol, and its `snprintf` truncates the payload at `CREATOR_TEXT_MAX` 39
@@ -340,7 +340,7 @@ first flash. The soak is listed below with the other first-hardware measurements
 
 - **There is no light any more.** `PF_LIGHT_ON`, `ACT_LIGHT_TOGGLE`, `MULT_LIGHT_ON_SLEEP`,
   the CARE row, the SETTINGS row and the five `STR_*_LIGHT` strings are gone. Bit 0x0004
-  of the live flag word and bit 0x10 of `PebbleInstance.status` (`PBS_RESERVED_LIGHT`) are
+  of the live flag word and bit 0x10 of `BugInstance.status` (`PBS_RESERVED_LIGHT`) are
   **reserved**: never reused, never written, and no other bit moved — the 128 B layout is
   pinned by `offsetof` asserts and the save schema is versioned. The v1 migration DROPS the
   old light bit rather than carrying it into a v2 save.
@@ -354,7 +354,7 @@ first flash. The soak is listed below with the other first-hardware measurements
   (peninsular Spain, where the default `CFG_TZ_STRING` points) in LOCAL OFFICIAL time: the
   TZ string has already applied daylight saving, so nothing downstream may apply it twice.
   A player at another latitude sees a drift. That cost was accepted with the mechanic.
-- **Insistence wakes it, and costs nothing.** The first gesture against a sleeping pebble
+- **Insistence wakes it, and costs nothing.** The first gesture against a sleeping bug
   does not act; three inside ten seconds wake it and the third one then lands. The counter
   decays, so taps hours apart never accumulate. Five quiet minutes put it back to sleep
   while the window is still open. No happiness or health is charged for waking — §27 forbids
@@ -394,7 +394,7 @@ first flash. The soak is listed below with the other first-hardware measurements
   table resolves until P4-C1 (deliberately — they are the FINAL ids, so P4-C1 adds the table
   and the cross-reference guard without touching these rows), and `sprite_id` is placeholder
   art until the P10 art pass.
-- **Consequence: the starter's base_hp moved from 5 to 4**, so a fresh Pebble's derived
+- **Consequence: the starter's base_hp moved from 5 to 4**, so a fresh Bug's derived
   `hp_max` at level 1 is 19 rather than 21. Everything reads it through `species_get()`, so
   no test hard-codes it — but it did expose a real defect in `ui/pet_view.cpp`, where the
   `> 100` clamp on `hp_pct` ran AFTER the narrowing cast and a corrupt `hp_cur` of 60,000
@@ -448,11 +448,11 @@ the baseline sits at 79 % of the flash cap and the release build at 37 % of the 
 ### The soak criterion, restated and measured
 
 The phase-3 exit criterion the plan carried in was *"no stat pinned at 0 for more than 6
-simulated hours of neglect"*. Before D13 closed that was unreachable — a pebble whose light
+simulated hours of neglect"*. Before D13 closed that was unreachable — a bug whose light
 nobody switched off never slept, and energy pinned at 0 for ever. It is reachable now, but
 only for the one stat the simulation refills by itself, so it is restated:
 
-> **Fourteen simulated days of total neglect** — a hatched pebble, a trustworthy clock, and
+> **Fourteen simulated days of total neglect** — a hatched bug, a trustworthy clock, and
 > not one action for a fortnight, recording the longest CONTINUOUS run each stat spends at 0.
 > **ENERGY**, the one core stat the simulation restores on its own, **is never at 0 for more
 > than 6 continuous simulated hours, and is back above 90 % at every sunrise.**
@@ -493,7 +493,7 @@ Measured on that fixture (seed `0x5EED0C7A`, 10:00, day 100, 336 h):
 | cleanliness | 24.7 h | **311.4 h** | 311.4 h | 0 % |
 | health | never | **0.0 h** | 0.0 h | 10 % |
 
-14 wake-ups in 14 nights, every one of them above 90 % energy (99 % each time). The pebble
+14 wake-ups in 14 nights, every one of them above 90 % energy (99 % each time). The bug
 is asleep for 124.6 h of the 336, sick for 329.9 h, and sits at the 10 % health floor for
 267.4 h — inconveniently unhappy, exactly as spec §27 asks, and still alive.
 
@@ -542,7 +542,7 @@ rate protects near there is the OTHER half of the criterion, energy above 90 % a
 and that first fails around 12,100.
 
 **And the dependence is not monotonic**, so no sentence of the form "dropped much below X
-breaks it" can be true. Below about 5,000 the pebble is too flat at sunrise to satisfy
+breaks it" can be true. Below about 5,000 the bug is too flat at sunrise to satisfy
 `SIM_WAKE_DAY_ENERGY_PCT` (60, `game/sim.cpp:672`), so instead of being pinned awake at 0 it
 simply stays asleep into the day and keeps charging. The same harness counting minutes spent
 asleep while it is light: **0** across all 480 fortnights at 20,000, 11,000 and 8,000;
@@ -562,7 +562,7 @@ Two things the criterion could not honestly leave out:
   Hunger and cleanliness genuinely do stay empty.
 
 **Scoped to a valid clock on purpose.** With `clock_valid = 0` there is no night —
-`daylight_is_night()` is not asked without a trustworthy clock — the pebble never sleeps,
+`daylight_is_night()` is not asked without a trustworthy clock — the bug never sleeps,
 and energy sits at 0 for **322.78 h of the same 336**, with 0.00 h asleep. That is D13
 reproduced exactly, on a device that has never had SNTP and learns the date from a human.
 It is the documented cost of the mechanic, not a defect in `game/sim.cpp`, but a criterion
@@ -578,10 +578,10 @@ later it does not, and the cause was not rounding:
 
 **`poop_step()` scaled its advance by `MULT_SLEEP` (×0.35) and truncated it every sub-step
 with no carry.** `(1 * 350) / 1000` is 0 — and **1 s is the step the live device runs**
-(`app/app.cpp` → `sim_step_seconds()`, which is 1 outside god mode). So a pebble asleep on
+(`app/app.cpp` → `sim_step_seconds()`, which is 1 outside god mode). So a bug asleep on
 real hardware never advanced its poop timer at all and **could not poop overnight, ever**,
 while an offline catch-up over the same night (60 s sub-steps, an exact 21) produced two.
-Same night, same pebble, two different models — and `poop_step()`'s own comment, "an 8 h
+Same night, same bug, two different models — and `poop_step()`'s own comment, "an 8 h
 night produces 5 poops… sleeping the pet before bed is a real strategy", was accidentally
 absolute on-device: sleeping the pet was not a discount, it was total immunity.
 
@@ -604,13 +604,13 @@ field and its three resets all removed: 1,893,072 → 1,893,044. Removing only t
 arithmetic and keeping the field costs 14 B (1,893,058). Globals are 70,348 in all three
 builds, so "0 B of static RAM" is exact. No reconstruction reproduces 32 B.
 
-**How far it reached, precisely.** `POOP_MAX` is 4, and a pebble already holding four
+**How far it reached, precisely.** `POOP_MAX` is 4, and a bug already holding four
 uncleaned poops has nowhere to put a fifth: the `poop_count` branch is not taken and the
-trajectory is unchanged. So the *neglected* pebble — the one every long-run case in
+trajectory is unchanged. So the *neglected* bug — the one every long-run case in
 `test_care.cpp` plays — never saw this bug at all; reintroducing the truncation leaves the
 thirty-day, month-offline, fortnight and week-in-the-Box cases and the golden green, and
-fails only the two cases that play a pebble which goes to bed clean. That is the played pet,
-so the fix matters, but "a sleeping pebble could not poop overnight" is a statement about the
+fails only the two cases that play a bug which goes to bed clean. That is the played pet,
+so the fix matters, but "a sleeping bug could not poop overnight" is a statement about the
 timer, not about every save file.
 
 What remains is a bound, not a bug, and the test says that plainly: a rate CHANGE — a poop
@@ -661,7 +661,7 @@ carry fails 11 checks across sections 9b and 9c — 6 before this follow-up wide
 - **P3-C3's "`test_pet_view` proves the body the view describes really changes" is not true
   of the shipping build**, and the box has been split so that the false half is now an OPEN
   item. `pet_view_fill()` — the only path that feeds `evo_state`'s stage bits to
-  `sprite_form_of()`, and the one the test drives — **has no caller in `Pebblebol/src`**. The
+  `sprite_form_of()`, and the one the test drives — **has no caller in `Errata/src`**. The
   firmware fills the active pet through `pet_view_fill_sim()`, whose `form` comes from the
   genome, the minor form and the life stage, none of which an evolution moves;
   `sprite_lookup_pose()` never sees `species_id`, `SpeciesDef.sprite_id` is read by nothing,
@@ -719,7 +719,7 @@ anyone when it was written.
   the two places a reader actually meets the test: the §P3-C3 banner and case name in
   `tests/test_pet_view.cpp`, and the `tests/Makefile` comment above its link line. Both now
   say what the case covers — the MODEL half, on `pet_view_fill()`, a path with no caller in
-  `Pebblebol/src` — and point at the open P3-C3 bullet. The case is renamed
+  `Errata/src` — and point at the open P3-C3 bullet. The case is renamed
   `an_evolution_changes_the_body_the_view_would_describe`. Its banner also carried the same
   4.5 s figure corrected above.
 - **The exit's "Cost: 32 B of flash" for the poop carry does not reproduce**; 28 B does. See
@@ -764,7 +764,7 @@ it runs on every gate instead of once, by hand, on a board nobody has.
 | **release** | `GOD_MODE_ENABLED=0 FEATURE_BLE=0` (D2) | **1,191,426** | **49,004** | +22,654 | +2,296 |
 
 A whole phase — a generated content pack and a 36-species roster, the deterministic battle
-engine, the AI, the battle on the device with six pixel goldens, one Pebble validator, the
+engine, the AI, the battle on the device with six pixel goldens, one Bug validator, the
 §15 codec and a lockstep session proven over a faulty loopback — cost **22,582 B of flash
 and 2,328 B of static RAM** on the baseline. Caps are `GATE_FLASH_MAX` 2,400,000 and
 `GATE_GLOBALS_MAX` 90,000 (`config.h`), so the baseline sits at **79.8 % of the flash cap**
@@ -793,7 +793,7 @@ Two corrections are folded into that table and named here rather than quietly ap
 because the first version of this ledger was the seventh wide sentence of the kind this
 exit exists to catch. It said **"P4-C1 and P4-C2 moved the baseline not at all"**: that is
 true of GLOBALS and **false of flash**, where P4-C1 cost **+3,022 B**, exactly as
-`git log -1 993e3b0` and `PEBBLEBOL_IMPLEMENTATION_PLAN.md:529` both record in bold. One
+`git log -1 993e3b0` and `ERRATA_IMPLEMENTATION_PLAN.md:529` both record in bold. One
 axis's true number had been generalised onto both, and the missing 3,022 B — 13.4 % of the
 phase's whole flash bill — was left attributed to nothing. It also gave P4-C5a as **+658 B**,
 which is 1,915,696 − 1,915,038, i.e. measured across the skipped `ee75076` follow-up rather
@@ -853,7 +853,7 @@ ships sits at 54.4 % of the globals cap with 40,996 B free.
 **THE CAVEAT, and it is load-bearing: none of P4-C5's NETWORKING is linked yet.** The
 heading used to read "none of P4-C5 is linked", which is wider than the evidence under it:
 P4-C5a's other half, `game/validate.cpp`, **is** linked — `riscv32-esp-elf-nm -C` on the
-baseline ELF shows `T validate_pebble(PebbleInstance const&)`, reached from
+baseline ELF shows `T validate_bug(BugInstance const&)`, reached from
 `persistence/save_manager.cpp:610`. It is also, by elimination, where P4-C5a's **+782 B**
 went: that chunk shipped the validator and the codec, and `--gc-sections` drops every symbol
 of the codec, so the only half of it in the image is this one.
@@ -889,7 +889,7 @@ build the firmware on a toolchain that does not have these sanitizers.
 
 ### D2 was already closed, and P4-C6's own plan bullet asked for it again
 
-`PEBBLEBOL_IMPLEMENTATION_PLAN.md` carried "D2 decision formally requested from the owner
+`ERRATA_IMPLEMENTATION_PLAN.md` carried "D2 decision formally requested from the owner
 with the §0.2 evidence (needed by P7-C1)" in the P4-C6 box. **That obligation was already
 discharged.** The owner-decision table at the top of this file records D2 as
 **CLOSED — ESP-NOW (2026-09-02, owner)** (line 15), the consequences are written out under
@@ -1132,10 +1132,10 @@ not N neutralised lines in a hand-copied tree.
   `evolution.json`'s single `EVOC_ITEM` rule is species 53 → 54 and 53 is past the 36-species
   prefix. `the_evolution_key_has_its_own_class_and_no_shipped_rule_spends_it` asserts that
   emptiness, so the day P9 lands the rule the case fails and points at the paragraph.
-- **One mutant survives.** Deleting `cap_attempt()`'s `validate_pebble()` post-condition
+- **One mutant survives.** Deleting `cap_attempt()`'s `validate_bug()` post-condition
   leaves every host case green, because with a sealed genome the validator answers `VR_OK` on
   all 1,080 roster × level rows and the post-condition has no reachable falsifier at this
-  roster — including under adversarial caller inputs, since `box_new_pebble()` clamps the
+  roster — including under adversarial caller inputs, since `box_new_bug()` clamps the
   level and a bad species is refused before construction. The **pre**-check is where the
   requirement bites and it is covered: dropping it turns all 1,080 rows red by name.
 - **One commit title in this phase is wider than its own tree and cannot be edited.**
@@ -1168,10 +1168,10 @@ The gate matches `#define` lines only, so prose may name the macro, and it says 
 about a bare number handed to `pinMode()` — that is a different and much harder grep, and
 this is a check on a SECOND DEFINITION, which is the failure that survives review.
 
-**`PB_PINS_CONFIRMED` is still not defined anywhere.** Two dormant `static_assert`s were
+**`ER_PINS_CONFIRMED` is still not defined anywhere.** Two dormant `static_assert`s were
 added for D8 (the piezo may not share a pin with SDA, SCL, either button, the LED or the
 battery divider; and it may not sit on a strapping pin), and they were checked by mutation
-rather than by reading: compiled with `-DPB_PINS_CONFIRMED`, moving the piezo to 5 fails
+rather than by reading: compiled with `-DER_PINS_CONFIRMED`, moving the piezo to 5 fails
 *"D8: the piezo needs a pin of its own"* and moving it to 8 fails *"D8: no piezo on a
 strapping pin (GPIO2/8/9)"*. **That compile also found a real latent defect and it is
 fixed**: `PIN_VBAT_ADC` was declared *after* the guard block, so a build with the macro
@@ -1253,7 +1253,7 @@ each, and the residual each decision leaves.
 `CooldownTable.reserved_a[4]` became `act_day` (u16, the UTC day index) + `act_score`
 (u16, that day's total, already capped per term). The blob is still 272 B, `rows` is still
 at offset 12, and two new `offsetof` asserts pin the new fields — the same carve
-`PebbleInstance.corrupt_until_epoch` got out of `reserved[12]` at P5-C3, on the same
+`BugInstance.corrupt_until_epoch` got out of `reserved[12]` at P5-C3, on the same
 argument: **an old blob reads 0 in both, day index 0 is 1970 and can never be a real day,
 so 0 is unambiguously "no day opened yet"** — which is the correct state for every save
 written before this commit. Nothing in the load path or `game/validate.cpp` checks a
@@ -1414,7 +1414,7 @@ exactly four commits and the four sum to the table above:
 The overrun is almost entirely two ESP-IDF drivers arriving in the tree for the first time —
 LEDC with the first PWM output (~7.5 KB, P6-C1) and `esp_sleep` with the first
 `esp_light_sleep_start()` (~9.6 KB, P6-C3). Both are paid once and reused: a later LED
-effect and a deep-sleep rung link no new driver. Pebblebol's own phase-6 code is roughly
+effect and a deep-sleep rung link no new driver. Errata's own phase-6 code is roughly
 3.8 KB. **It is immaterial against the cap that matters** — 375,790 B of release flash remain
 against an 80–115 KB forecast for P7–P10 — and it is the scarce axis that stayed healthy.
 
@@ -1425,7 +1425,7 @@ IRAM-resident assert strings named by diffing the two images' `.dram0.data`. P6-
 four-entry peer set 16, six counters, a seconds remainder, the pending gain, the dirty flag)
 — **the persisted half costs 0**, because `act_day` and `act_score` are four bytes that were
 already `CooldownTable.reserved_a[4]`. P6-C3 192 B: ~148 B of ESP-IDF's own sleep state
-(`esp_sleep`'s `s_config` 80 B plus six smaller objects) against ~44 B of Pebblebol —
+(`esp_sleep`'s `s_config` 80 B plus six smaller objects) against ~44 B of Errata —
 DIAG loop counters 16, the ladder's state 17, `app.cpp`'s idle clock 9. P6-C4 0 B.
 
 ### Three defects were fixed before the tag was cut
@@ -1462,7 +1462,7 @@ screen; one window of "elapsed" refills a whole bucket.
 
 **Measured, before:** 100 rounds of (clock +1 day, reboot, one Wi-Fi scan of the SAME ten
 access points) spent **990 metered XP and 125,000 care milli-points in ZERO real seconds**,
-against **37.8 XP for an honest day at full tilt** and a happiness bar (`PB_CARE_MILLI_MAX`)
+against **37.8 XP for an honest day at full tilt** and a happiness bar (`ER_CARE_MILLI_MAX`)
 that holds 100,000. The controls show each layer holds alone: 100 reboots with the clock left
 where it was spent 0; 100 clock jumps with no reboot spent 0 metered XP — **but 125,000
 milli of happiness, because the happiness half had no meter at all and needed no reboot.**
@@ -1530,7 +1530,7 @@ OF CLOCK is executed rather than grepped — is written into the P7-C6 box, not 
 
 ### Sentences narrowed at this exit
 
-- `PEBBLEBOL_IMPLEMENTATION_PLAN.md`'s P6-C2 box listed five anti-farm layers and ended
+- `ERRATA_IMPLEMENTATION_PLAN.md`'s P6-C2 box listed five anti-farm layers and ended
   "…and `XP_SRC_CARRY`'s meter underneath everything, **which a reboot cannot refill** and
   which `xp_ledger_restore()` re-seeds to ZERO on an untrusted clock". The last clause was
   false and it was the clause the list leaned on. Corrected in place, with the measurement.
@@ -1581,7 +1581,7 @@ OF CLOCK is executed rather than grepped — is written into the P7-C6 box, not 
   to raise a stat by a care action, and the actions have their own cooldowns — so it was left
   alone rather than swept into this chunk's blast radius. It is written into the P7-C6 box
   with that number.
-- **A Pebble at `XP_LEVEL_MAX` now earns no activity happiness**, because `xp_add()` returns
+- **A Bug at `XP_LEVEL_MAX` now earns no activity happiness**, because `xp_add()` returns
   at the top of the curve before it spends the meter and the happiness is scaled by what the
   meter spent. A loss, not a hole — the safe direction — recorded in `game/activity.h` with
   its one-line remedy, and carried to P7-C6 rather than decided at an exit.
@@ -1676,9 +1676,9 @@ does not store it, and does not show it to the player or to the game.
 ### 4. A NARROWING OF D2's "same-channel constraint", recorded
 
 D2's consequences say: *"the discovery beacon announces the channel and the session pins it
-to `PB_LINK_CHANNEL`; P7-C1 must handle a peer found on another channel by re-tuning before
+to `ER_LINK_CHANNEL`; P7-C1 must handle a peer found on another channel by re-tuning before
 HELLO, not by failing."* **What was built is smaller than that sentence.** The beacon carries
-no channel field and there is no re-tune path. Both devices apply `PB_LINK_CHANNEL` on every
+no channel field and there is no re-tune path. Both devices apply `ER_LINK_CHANNEL` on every
 LINK bring-up, so a peer on another channel is not discoverable at all rather than
 discoverable-and-unreachable — there is nothing to re-tune *to*, because a beacon from
 another channel never lands in the callback.
@@ -1689,7 +1689,7 @@ Only a bench can say whether that happens in practice. The channel is re-applied
 bring-up rather than once at boot because it is not stored in NVS and the section 40 scan
 sweeps 1..13 and leaves the radio wherever its last dwell ended.
 
-`PB_LINK_CHANNEL` must be 1..11 and `transport_espnow.cpp` static_asserts it:
+`ER_LINK_CHANNEL` must be 1..11 and `transport_espnow.cpp` static_asserts it:
 `WiFi.setChannel()` refuses a channel outside the country range and the default country is
 world-safe `"01"` (schan 1, nchan 11), so a 12 or 13 would be silently ignored and every
 beacon would miss.
@@ -1986,23 +1986,23 @@ answer was to widen the test rather than to accept the green.**
 
 | # | mutation | what failed |
 |---|---|---|
-| 1 | `W3` (the COMMIT record) is never written to flash | `a_power_cut_at_every_single_flash_write_leaves_the_box_whole` (5), `a_power_cut_inside_the_resolver_is_finished_by_the_next_boot` (55), `the_journal_names_the_id_the_incoming_pebble_will_have_here` (6), and two more |
+| 1 | `W3` (the COMMIT record) is never written to flash | `a_power_cut_at_every_single_flash_write_leaves_the_box_whole` (5), `a_power_cut_inside_the_resolver_is_finished_by_the_next_boot` (55), `the_journal_names_the_id_the_incoming_bug_will_have_here` (6), and two more |
 | 2 | the incoming id is minted at APPLY time instead of before `W3` | six cases, including both wire cases — a replayed COMMIT mints a different id and the resolver cannot tell "done" from "not started" |
-| 3 | the incoming presence test is dropped (`if (!box_id_in_use(in.id))` → `if (true)`) | the sweep (11) and the resolver sweep (14): a replay files the Pebble twice |
+| 3 | the incoming presence test is dropped (`if (!box_id_in_use(in.id))` → `if (true)`) | the sweep (11) and the resolver sweep (14): a replay files the Bug twice |
 | 4 | a record below COMMIT rolls FORWARD instead of back | `a_power_cut_while_the_journal_is_being_opened_rolls_the_trade_back` (6) and two more |
 | 5 | a COMMIT record rolls BACK instead of forward | four cases (24 checks) |
 | 6 | a write that did not land is IGNORED (every `if (!write) return TDR_STORE` deleted) | **NOT CAUGHT.** See below |
-| 7 | the quarantine rule is dropped from the offer path | `the_pebble_you_are_holding_is_not_for_sale_and_every_refusal_is_named` |
-| 8 | the god-taint gate is dropped from the accept path | `a_tainted_pebble_cannot_enter_a_clean_dynasty_through_a_trade`, `a_tainted_offer_is_refused_on_the_wire_by_name_and_moves_nothing` |
+| 7 | the quarantine rule is dropped from the offer path | `the_bug_you_are_holding_is_not_for_sale_and_every_refusal_is_named` |
+| 8 | the god-taint gate is dropped from the accept path | `a_tainted_bug_cannot_enter_a_clean_dynasty_through_a_trade`, `a_tainted_offer_is_refused_on_the_wire_by_name_and_moves_nothing` |
 | 9 | `commit_all()` stops writing the journal (the pre-existing defect, restored) | `the_checkpoint_recovery_path_no_longer_leaves_a_stale_journal_behind` |
 | 10 | `maybe_ask_player()` is not called from `on_offer()` | `a_ready_that_arrives_before_its_own_offer_still_reaches_the_player` |
 | 11 | the ladder's `SESSION_REQUEST` drops the operation byte | `the_retransmitted_session_request_still_says_which_operation_it_is` |
 | 12 | consent is not required to apply (`local_accept` no longer checked) | four cases, both files |
 | 13 | COMMIT no longer implies its sender's CONFIRM | `a_commit_frame_carries_its_senders_confirm_and_that_is_what_saves_the_pair` |
 | 14 | the responder ignores `SESSION_REQUEST.rules` | `a_battle_session_and_a_trade_session_refuse_each_other_by_name` |
-| 15 | the trade offer skips `game/trade.cpp`'s rules entirely | `the_pebble_the_player_is_holding_is_never_the_one_put_on_the_wire` (6) |
+| 15 | the trade offer skips `game/trade.cpp`'s rules entirely | `the_bug_the_player_is_holding_is_never_the_one_put_on_the_wire` (6) |
 | 16 | walking away leaves the journal behind | `a_trade_the_local_player_never_accepts_moves_nothing_and_clears_its_journal` |
-| 17 | a completed trade is reported as a lost link | `two_players_who_both_press_a_swap_one_pebble_each_and_the_box_says_so` |
+| 17 | a completed trade is reported as a lost link | `two_players_who_both_press_a_swap_one_bug_each_and_the_box_says_so` |
 | 18 | the session is opened as a BATTLE whatever the player picked | two cases (12 checks) |
 | 19 | the second A is not required (the review auto-accepts) | two cases (17 checks) |
 | 20 | the envelope clamp is deleted | `ten_thousand_bred_pairs_never_leave_the_genesis_care_envelope` |
@@ -2038,12 +2038,12 @@ hide a defect at another**, which is why the case reports a table of four.
 
 ### A named reject nothing can return is a name, not a rule
 
-`TDR_LAST_PEBBLE` was written, measured to be unreachable and deleted:
+`TDR_LAST_BUG` was written, measured to be unreachable and deleted:
 `box_active()` runs `mask_sync()`, which repairs an `active_slot` pointing
-nowhere to the lowest occupied slot, so a Box holding one Pebble always reports
-that Pebble as active and `TDR_ACTIVE` answers first. The same test was applied
+nowhere to the lowest occupied slot, so a Box holding one Bug always reports
+that Bug as active and `TDR_ACTIVE` answers first. The same test was applied
 to `BRD_UNKNOWN_SPECIES` in breeding, which WAS unreachable in the order first
-written (`validate_pebble()` answers `VR_UNKNOWN_SPECIES` before the species
+written (`validate_bug()` answers `VR_UNKNOWN_SPECIES` before the species
 lookup could) — there the fix was to reorder the two checks so the code has a
 producer, because "this content pack does not carry that species" deserves its
 own word.
@@ -2106,23 +2106,23 @@ exactly four commits and the four sum to the table above:
 
 **The exit's own +8 B of globals, attributed** (`riscv32-esp-elf-nm -S` over the release
 `.elf`): `s_tick_lost_s` 4 + `s_tick_stalls` 2 = **6 B of symbols**, plus 2 B of link
-alignment. `save_pebble_now()`, `act_adopt()` and the narrowed `sim_gain_restore()` add no
+alignment. `save_bug_now()`, `act_adopt()` and the narrowed `sim_gain_restore()` add no
 state at all; the +506 B of flash is those three functions and `pwr_tick_budget()`.
 
 **AND EVERY ONE OF THEM IS IN THE RELEASE ARTEFACT, CHECKED RATHER THAN ASSUMED.**
-`riscv32-esp-elf-nm -C` over the `release` `.elf` finds `save_pebble_now`, `act_adopt`,
+`riscv32-esp-elf-nm -C` over the `release` `.elf` finds `save_bug_now`, `act_adopt`,
 `pwr_tick_budget` and `sim_gain_restore` as text symbols. That check is here because of what
 the phase-6 exit found — the shipping build never advanced game time for four phases, because
 a default lived inside a dev-only function — and a fix that is not in the shipping image is
 not a fix.
 
-### The blocking finding this exit opened with: a successful trade destroyed a Pebble
+### The blocking finding this exit opened with: a successful trade destroyed a Bug
 
-**On the SHIPPING build, every clean trade lost a Pebble, and the boot resolver carried the
+**On the SHIPPING build, every clean trade lost a Bug, and the boot resolver carried the
 identical defect through the identical shim.** `game/trade.cpp`'s apply step writes B1 (clear
 the outgoing slot) then B2 (file the incoming one), and `box_add()` fills `first_free()` —
 which is the slot B1 just released. So B1 and B2 write **the same key microseconds apart**.
-`save_manager.cpp`'s `save_pebble()` DEFERS a second write of one key inside
+`save_manager.cpp`'s `save_bug()` DEFERS a second write of one key inside
 `SAVE_MIN_GAP_MS` (1,000 ms) — `force` does not bypass that branch — **and returns true**.
 The two P7-C4 shims returned that `true` straight back as `TradeStore.write_slot`, whose
 contract in `game/trade.h` is literally "every function returns whether the bytes LANDED". B2
@@ -2132,7 +2132,7 @@ IDLE, so nothing was left to repair it.
 **Reproduced independently before it was fixed, and it is worse than the report said.** With
 `app/app.cpp`'s own clock wiring bound in `tests/test_trade.cpp` — one line,
 `save_set_clock(&clock_ms, &clock_epoch)` instead of `save_set_clock(nullptr, ...)` — the
-CLEAN trade case fails with **no fault injection at all**: the Box holds 2 Pebbles instead of
+CLEAN trade case fails with **no fault injection at all**: the Box holds 2 Bugs instead of
 3, `traded == 0`, and the trade costs **9 flash writes instead of 10**. The 15-point kill
 sweep then fails at every cut point past the third.
 
@@ -2143,11 +2143,11 @@ entire wear-filter branch (`if (s_now_ms && s_have_written[slot])`). A 15-point 
 release artefact does not execute**. Phase 6 found a default living inside a dev-only path;
 here the DEFAULT is the safe one and the SHIPPING wiring is the dangerous one.
 
-**The fix is a second entry point, not a widened flag.** `save_pebble_now()` writes with no
+**The fix is a second entry point, not a widened flag.** `save_bug_now()` writes with no
 filter and no deferral and returns whether the bytes landed — there is no third answer.
 `force=true` was deliberately NOT widened to mean this: `persistence/game_state.cpp` calls it
 on every care action and RELIES on the deferral for flash wear. Two gates now hold it:
-`save_pebble()` may not be called from `app/` or `ui/` at all, and no host test may bind
+`save_bug()` may not be called from `app/` or `ui/` at all, and no host test may bind
 `save_set_clock(nullptr, ...)`. Both were proven to bite.
 
 ### Where the trade's atomicity claim stands after that
@@ -2176,7 +2176,7 @@ pending.**
 | ESP-NOW behind the §59 `Transport` seam | **DONE and demonstrated.** `networking/transport_espnow.cpp` is the only file in the tree that includes `esp_now.h`. `networking/session.cpp` took the radio with no widening, no new field and no `#ifdef`, and a gate fails the build if it grows one. |
 | The game never learns which transport carried a packet | **DONE and gated.** `tests/test_link_transport.cpp` runs a whole battle between two real sessions over a `Transport` whose `recv()` **is** `rxring_pop()`. |
 | No stack flip during a link session | **DONE.** ESP-NOW rides the same `WIFI_STA` residency the §40 scanner needs; `espnow_end()` is inside `wifi_down()` so it cannot outlive the driver. |
-| Same-channel constraint, "the beacon announces the channel and P7-C1 re-tunes" | **NARROWED, and the narrowing is a cost.** The beacon carries no channel field and there is no re-tune path: both devices apply `PB_LINK_CHANNEL` on every LINK bring-up, so a peer on another channel is not discoverable at all rather than discoverable-and-unreachable. A device left on another channel by something outside this firmware is invisible to LINK, and this firmware cannot tell that from an empty room. |
+| Same-channel constraint, "the beacon announces the channel and P7-C1 re-tunes" | **NARROWED, and the narrowing is a cost.** The beacon carries no channel field and there is no re-tune path: both devices apply `ER_LINK_CHANNEL` on every LINK bring-up, so a peer on another channel is not discoverable at all rather than discoverable-and-unreachable. A device left on another channel by something outside this firmware is invisible to LINK, and this firmware cannot tell that from an empty room. |
 | The Bluedroid leak no longer needs measuring | **CORRECT — it was never measured, and it did not need to be.** |
 | **`FEATURE_BLE 0` in the release build; `ble_social.cpp` becomes a removal candidate in P7-C1** | **NOT DONE, DELIBERATELY, AND THIS IS THE ONE OPEN CLAUSE.** See below. |
 
@@ -2215,7 +2215,7 @@ None was dropped.
 | # | Debt | Verdict | What was done |
 |---|---|---|---|
 | D1 | `sim_gain_restore()`'s typed-clock hole | **DEFECT — FIXED** | The `elapsed * cap / 3600` term is gone. Both epochs are wall clocks a player types on the time screen, and one hour of "elapsed" refilled a whole cap: 100 rounds of (clock +1 h, reboot) from a spent ledger manufactured **4,000** happiness gain points against a cap of 40. Same shape `xp_ledger_restore()` lost at P6-C4, closed the same way. |
-| D2 | A Pebble at `XP_LEVEL_MAX` earns no activity happiness | **DEFECT — FIXED** | `meter_take()` moved above the top-of-curve early return in `xp_add()`. Measured before: level 29 paid 5,500 milli of the 5,500 owed, level 30 paid **0**. |
+| D2 | A Bug at `XP_LEVEL_MAX` earns no activity happiness | **DEFECT — FIXED** | `meter_take()` moved above the top-of-curve early return in `xp_add()`. Measured before: level 29 paid 5,500 milli of the 5,500 owed, level 30 paid **0**. |
 | D3 | No test for `gt_mono_ms()`'s choice of clock | **COVERAGE GAP — CLOSED** | `tests/fakes/arduino/` (two headers, one symbol each) + `gametime_arduino.o` + `tests/test_clock_device.cpp`: 4 cases driving the DEVICE branch across a wake that zeroes uptime while the RTC keeps counting. |
 | D4 | Nothing counts a dropped tick | **DIAGNOSTICS GAP — CLOSED** | `pwr_tick_budget()` in `hardware/power.cpp` (so a host binary can drive arithmetic `app/app.cpp` cannot compile), two saturating counters on the ENERGIA page, and a case that asserts BOTH halves — the counter moved AND exactly one second was charged. |
 | D5(a) | `CooldownTable.act_day` never validated on load | **DEFECT — FIXED** | `act_adopt()`, called once at boot. Measured: ten simulated years score **146,000** points from an honest table and **440** from one carrying `act_day = 0xFFFF`, because `open_day()`'s only roll condition is `day > t.act_day` and a u16 holds 65,535 while the widest day a u32 epoch can name is 49,710. |
@@ -2228,13 +2228,13 @@ Every fix above was mutation-tested; each mutation made a NAMED case or a NAMED 
 
 | Mutation | What failed |
 |---|---|
-| The trade's slot shim returns `save_pebble(..., true)` | `a_clean_trade_moves_exactly_one_pebble_each_way_and_clears_its_journal` (4), `a_power_cut_at_every_single_flash_write_leaves_the_box_whole` (46), `a_power_cut_inside_the_resolver_is_finished_by_the_next_boot` (32), `a_write_that_did_not_land_stops_the_sequence_where_it_failed` (7), and four more |
-| `save_pebble_now()` honours the wear floor | `save_pebble_now_reaches_flash_twice_inside_the_floor_and_never_says_it_did_not` (5) + the whole trade sweep |
-| `save_pebble_now()` does not cancel a pending deferral | `save_pebble_now_reaches_flash_twice_inside_the_floor_and_never_says_it_did_not` (1, on the put COUNT) |
-| GATE: `ui/ui.cpp`'s shim back to `save_pebble()` | `GATE FAIL: save_pebble() is called from app/ or ui/ (1)` |
+| The trade's slot shim returns `save_bug(..., true)` | `a_clean_trade_moves_exactly_one_bug_each_way_and_clears_its_journal` (4), `a_power_cut_at_every_single_flash_write_leaves_the_box_whole` (46), `a_power_cut_inside_the_resolver_is_finished_by_the_next_boot` (32), `a_write_that_did_not_land_stops_the_sequence_where_it_failed` (7), and four more |
+| `save_bug_now()` honours the wear floor | `save_bug_now_reaches_flash_twice_inside_the_floor_and_never_says_it_did_not` (5) + the whole trade sweep |
+| `save_bug_now()` does not cancel a pending deferral | `save_bug_now_reaches_flash_twice_inside_the_floor_and_never_says_it_did_not` (1, on the put COUNT) |
+| GATE: `ui/ui.cpp`'s shim back to `save_bug()` | `GATE FAIL: save_bug() is called from app/ or ui/ (1)` |
 | GATE: a host test binds `save_set_clock(nullptr, ...)` | `GATE FAIL: a host test binds save_set_clock(nullptr, ...) (2)` |
 | `sim_gain_restore()` ages the snapshot forward again | `a_typed_hour_and_a_reboot_cannot_refill_a_spent_gain_budget` (202) |
-| `xp_add()` returns at the top of the curve before `meter_take()` | `a_pebble_at_the_top_of_the_curve_still_earns_its_activity_happiness` (2), `the_meter_is_spent_at_the_top_of_the_curve_for_every_metered_source` (8) |
+| `xp_add()` returns at the top of the curve before `meter_take()` | `a_bug_at_the_top_of_the_curve_still_earns_its_activity_happiness` (2), `the_meter_is_spent_at_the_top_of_the_curve_for_every_metered_source` (8) |
 | `act_adopt()`'s bound is 60,000 instead of `ACT_DAY_MAX_INDEX` | `a_day_index_beyond_the_clock_freezes_the_score_and_the_boot_clamp_removes_it` (2) |
 | `act_adopt()` clamps the day and keeps the score | the same case (1) |
 | `pwr_tick_budget()` does not count the stall | `a_gap_wider_than_the_bound_charges_one_second_and_says_it_lost_the_rest` (3) |
@@ -2261,7 +2261,7 @@ Every fix above was mutation-tested; each mutation made a NAMED case or a NAMED 
   `end.detail` today, so it is a trap for a log reader rather than a live defect; the header
   now says all four readings.
 - **A pathspec trap for the next verifier.** The source tree is nested at
-  `Pebblebol/Pebblebol/src/`, not `Pebblebol/src/`. `git diff v0.6.0-activity HEAD --
+  `Errata/src/`, not `src/`. `git diff v0.6.0-activity HEAD --
   src/networking/session.cpp` matches nothing and **exits 0**, which reads exactly like "the
   seam held". Any exit check written with the short path is a test that cannot fail.
 
@@ -2381,7 +2381,7 @@ the reasoning lives.
 Three shipped sentences disagreed about what `hp+atk+def+spd` must be:
 
 * **Spec §36** writes the rule with `<=`.
-* **`data/creator_schema.h`** says a custom Pebble must be *"never weaker than a stage-0 one"*
+* **`data/creator_schema.h`** says a custom Bug must be *"never weaker than a stage-0 one"*
   — a FLOOR of 16, which is not equality either.
 * **`builtin_rows_respect_the_creator_budgets()`** requires EXACT equality — of built-in rows.
 
@@ -2421,36 +2421,36 @@ Spec §35's thirteenth validation input is "evolution validity", and `CustomSpec
   FAMILIES and already refuses a zero compat group by name (`BRD_COMPAT_GROUP`).
   `validate_custom_species()` refuses a non-zero one (`VR_CS_BAD_COMPAT`) so the property
   cannot be undone by setting a field.
-* **Never a wild encounter.** The creator makes one Pebble, not a species the world hands out.
-* **`stage = 1`**, because that is the budget it was measured against — and `validate_pebble()`
+* **Never a wild encounter.** The creator makes one Bug, not a species the world hands out.
+* **`stage = 1`**, because that is the budget it was measured against — and `validate_bug()`
   checks `evo_state`'s stage bits against the row, so any other value would be
   `VR_BAD_EVO_STAGE` on the creature the upload produces.
 
 **AND IT DOES NOT TRAVEL.** `networking/protocol.cpp` refuses any wire record with
 `species > SPECIES_ID_BUILTIN_MAX` as `VR_WIRE_CUSTOM_UNRESOLVED`, because the receiver holds no
-`cs*` record. A custom Pebble is therefore **untradeable and unbattleable over the link in
+`cs*` record. A custom Bug is therefore **untradeable and unbattleable over the link in
 phase 8**. That is defensible and it is now written down; sending the record alongside the
-Pebble is a later phase's work, not an accident of this one.
+Bug is a later phase's work, not an accident of this one.
 
 ### 3. THE DEVICE PICKS THE `cs` SLOT, AND A FULL BOX IS ASKED ABOUT BEFORE ANYTHING IS WRITTEN
 
 The upload document has **no `slot` field and no `budget_used` field**, and both omissions are
 load-bearing. A page-chosen slot is an attacker-chosen slot: writing `cs4` would silently change
-the species of a Pebble already in the Box. A page-supplied budget is a page that can price its
-own Pebble at zero. `POST /api/pebble` picks the lowest free slot, recomputes the cost, and
+the species of a Bug already in the Box. A page-supplied budget is a page that can price its
+own Bug at zero. `POST /api/bug` picks the lowest free slot, recomputes the cost, and
 tells the page which slot it used.
 
 `POST /api/validate` reports the free Box and `cs` slots so the page can say "free a slot"
 **before** the user has spent five minutes on a sprite — which is `game/capture.h`'s rule
 applied here ("if the Box is full the player must decide", because discovering it afterwards
-spends the attempt). On a full Box `POST /api/pebble` answers 409 and **writes nothing, not
-even the `cs` record**: an accepted definition whose Pebble could not be filed would leak a
+spends the attempt). On a full Box `POST /api/bug` answers 409 and **writes nothing, not
+even the `cs` record**: an accepted definition whose Bug could not be filed would leak a
 slot the user has no way to reclaim.
 
-**WHAT FREES A `cs` SLOT IS STILL OPEN.** `box_release()` releases a Pebble and nothing
+**WHAT FREES A `cs` SLOT IS STILL OPEN.** `box_release()` releases a Bug and nothing
 reference-counts the record. `csp_forget()` exists and no shipping path calls it. The rule that
 belongs in P8-C4's screen is: a `cs` slot is freed only by an explicit CREATOR-screen action,
-and only when no Pebble in the Box points at it.
+and only when no Bug in the Box points at it.
 
 ### 4. THE 413 BAND, AND WHY THERE ARE TWO OF THEM
 
@@ -2492,7 +2492,7 @@ takes its record `const` so it could not mend if it wanted to.
 ### 1. THE PAGE IS COMMITTED SOURCE AND THE HEADER IS GENERATED — AND THE GENERATOR HAS NO MINIFIER
 
 `web/creator/{index.html,app.js,sprite_editor.js}` is what gets reviewed;
-`Pebblebol/src/data/index_html.h` is what gets compiled, and `tools/gen_index_html.py --check`
+`Errata/src/data/index_html.h` is what gets compiled, and `tools/gen_index_html.py --check`
 in `tools/check.sh` fails the gate on any byte between them. That is the same shape as
 `gen_content.py --check` and it exists for the same reason: **a 42 KB C string literal is not a
 diff anybody reads.**
@@ -2606,7 +2606,7 @@ bit-order error, a byte-order error and a stray flip are three different failure
 `app.js`'s `pct()` is `creator_power_pct()`'s expression character for character.
 
 **AND REPLACING IT WITH `balance.json`'s FLOAT SENTENCE SURVIVED THE FIRST MUTATION SWEEP.** The
-single-input check compared the bar and the device on the one Pebble the harness had drawn, and
+single-input check compared the bar and the device on the one Bug the harness had drawn, and
 the two forms agree there — they agree **everywhere**: exhaustive enumeration over S = 4..40 and
 A = 0..400, all 14,837 pairs, found **zero** disagreements. The float sentence is an **equivalent
 mutant in JavaScript**, stated here rather than hidden.
@@ -2702,11 +2702,11 @@ handed. **A PIN appended there would have shipped with the whole gate green.**
 So the screen exports the bytes it encoded, and `tests/test_screens.cpp` reads them back. Three
 cases, and the middle one is the property:
 
-* the payload is exactly `WIFI:S:PEBBLEBOL-1234;;` or `http://192.168.4.1/`, by variant;
+* the payload is exactly `WIFI:S:ERRATA-1234;;` or `http://192.168.4.1/`, by variant;
 * **the payload is byte-identical at every PIN `cg_mint_pin()` can produce — all 9,999 of them,
   both symbols.** A substring search for the digits would have been the obvious test and is the
   wrong one: the SSID is `AP_SSID_PREFIX` plus four hex characters of the device id, so
-  `PEBBLEBOL-1234` is an ordinary real SSID and searching it for "1234" reports a leak that is
+  `ERRATA-1234` is an ordinary real SSID and searching it for "1234" reports a leak that is
   not there. "The bytes do not depend on the PIN" has no false positive and is strictly stronger.
 * no `?`, `=` or `&` in either payload — a query parameter of **any** name, which is the claim
   the `src/networking` grep makes about one file and this makes about the encoder's input.
@@ -2767,7 +2767,7 @@ What the script *does* control, because it can:
   because the literal's own opening and closing newlines are part of it). A stale board fails at
   the first phase instead of producing a bench result about firmware nobody has.
 * **It states its side effects in its own banner**: it sets the device clock, it creates one
-  Pebble called SMOKE, and it drives the PIN failure counter to the lockout — and then waits
+  Bug called SMOKE, and it drives the PIN failure counter to the lockout — and then waits
   `CREATOR_PIN_LOCK_MS` and authorises successfully, so the device is not left armed.
 
 ### 5. THE FAILURE ARITHMETIC IN THE LOCKOUT PHASE, AND WHY IT IS WRITTEN OUT
@@ -2863,10 +2863,10 @@ request.
 
 **REPRODUCED.** `pin_after_body()` replaced by `return true;` builds clean (`release`
 1,326,274 / 59,396, 0 warnings), runs **ALL PASS 49/49**, and passes every networking gate. A
-client that simply omits `X-Pin` then creates a Pebble and sets the device clock, unauthorised,
+client that simply omits `X-Pin` then creates a Bug and sets the device clock, unauthorised,
 with the gate green.
 
-**FIXED: four probes and three gates.** The script now sends (a) `POST /api/pebble` with a
+**FIXED: four probes and three gates.** The script now sends (a) `POST /api/bug` with a
 valid document and no `X-Pin`, asserting 403 `err=pin` **and that the Box count did not move**,
 (b) `POST /api/time` with a wrong header, (c) a wrong PIN carried in the BODY, and (d) the
 **correct** PIN carried in the body, accepted — because (c) on its own passes against a
@@ -2909,7 +2909,7 @@ from `creator_parse.cpp`'s `required` mask, `CPK_V` or `CPK_NAME` still fired.
 **ALL PASS 49/49**, and
 `{"v":1,"name":"Bicho","base":[6,5,5,5],"moves":[1,6,32,34]}` through `tests/bin/creator_decode`
 answered **`cp=CP_OK vr=VR_OK type=0`** with both sprite frames all zero: a type-defaulted,
-entirely blank creature accepted by `POST /api/pebble`. Neither key has a downstream guard — a
+entirely blank creature accepted by `POST /api/bug`. Neither key has a downstream guard — a
 zeroed `type` is `TYPE_SIGNAL`, a legal value, and `validate_custom_species()` never inspects
 the sprite bytes.
 
@@ -2929,7 +2929,7 @@ exactly that selective reading.
 
 **FIXED IN §3 AND §13**, the way the P5 and P6 rows were: the P8 row is struck with SPENT
 figures on **both** axes, the overrun is named with its one address (42,404 B of the 57,274 is
-the page blob plus the served schema; Pebblebol's own phase-8 code and strings are 14,870 B),
+the page blob plus the served schema; Errata's own phase-8 code and strings are 14,870 B),
 and the ending projection is re-scored on both axes. The globals projection was already past:
 the phase-6 re-scoring expected 53,624-57,924 at the end of phase 10 and the artefact is at
 59,396 **today**.
@@ -2975,7 +2975,7 @@ is worse than a written trade.**
 * **A COMMENT CLAIMED A GUARANTEE IT DOES NOT HOLD ON ONE PATH.** `web_portal_open()` says the
   PIN is "persisted BEFORE it is shown", and in a read-only session `gs_creator_store()`
   refuses and writes nothing while the PIN is still minted and shown. Qualified in place rather
-  than changed: in a read-only session `POST /api/pebble` answers 503 anyway, so the only thing
+  than changed: in a read-only session `POST /api/bug` answers 503 anyway, so the only thing
   that PIN can authorise is reading state, and refusing to mint would leave the user staring at
   `----` with nothing to explain it.
 
@@ -2990,9 +2990,9 @@ is in the tree and not in the shipping image. `riscv32-esp-elf-nm` and `objdump 
   `cp_parse_species` → **`web_pin_present()` → `web_pin_ok_u16()`** → `creator_cost_of` →
   `validate_custom_species`. **The body-PIN half is in the artefact**, inlined but complete —
   what it has never been is executed;
-* `h_pebble` reaches `gs_readonly` → `box_count`/`csp_free_slot`/`box_capacity` →
-  `custom_species_seal` → `csp_install` → `box_new_pebble` → `validate_pebble` →
-  `save_custom_species`, with `csp_forget` and `pebble_clear` on every failure arm.
+* `h_bug` reaches `gs_readonly` → `box_count`/`csp_free_slot`/`box_capacity` →
+  `custom_species_seal` → `csp_install` → `box_new_bug` → `validate_bug` →
+  `save_custom_species`, with `csp_forget` and `bug_clear` on every failure arm.
 
 `cg_idle_seconds()` is absent as a symbol because it is inlined into `cg_open()`; the constants
 are in the image (`li a5,300` for `CREATOR_IDLE_S_DEFAULT`, the 3600 clamp, the fail-count
@@ -3219,7 +3219,7 @@ Recorded because the exit's job is the documents as much as the code.
   Deleted; the property is a build error since P9-C3 and the comment now says so.
 * **`the_name_cap_never_splits_a_utf8_sequence` had no instrument for the CAP half of its own
   name.** `test_stats` is not in `ASAN_SET`, and a stray `out[cap] = 0` — the classic one-byte
-  overflow for a bounded copy, and `pebble_name_join()` is new in P9-C4 — passed the whole
+  overflow for a bounded copy, and `bug_name_join()` is new in P9-C4 — passed the whole
   suite. The 0x7F fill was already there for exactly this; it is now inspected past the cap.
 * Also: `verify.py`'s five-key CORRUPTION mask reported four failures under ONE name and died
   with an unhandled `KeyError` on the fifth; it is five named checks now.
@@ -3238,12 +3238,12 @@ Recorded because the exit's job is the documents as much as the code.
   no traits table anywhere in the tree; `validate.h`'s `VR_BAD_TRAIT` refuses a nonzero
   `trait_id`.
 * **The v1 stage floor was measured and left.** `sim.cpp`'s `stage_commit()` still writes
-  `level_of_stage()` back into `PebbleInstance.level`, so a Pebble earning no XP reaches level
+  `level_of_stage()` back into `BugInstance.level`, so a Bug earning no XP reaches level
   20 in 3.5 days and 2,660 of the curve's 8,845 points are never earned by anybody. `sim.cpp`'s
   own comment ("this map becomes read-only") is false while that write stands. It is a
   game-model change with its own commit, not an exit edit.
 * **The care rates were measured and left.** `balance.h`'s "3-4 touches a day is a well-kept
-  Pebble" is optimistic — satiety falls 100.8 points a day against a 30-point meal — so the
+  Bug" is optimistic — satiety falls 100.8 points a day against a 30-point meal — so the
   CLAIM was corrected with the measurement and no rate moved, because moving one re-records
   `tests/golden/care_v1.txt`.
 * **The HOME layout.** A 24 px body on `HOME_FLOOR_Y` leaves 19 blank rows above it on every
@@ -3262,9 +3262,9 @@ Six are still open, and each one has a step the owner can act on — that is wha
 | # | Decision | Outcome | Applied in |
 |---|---|---|---|
 | **D2** | Peer transport | **ESP-NOW.** BLE deleted whole in P8-C0, which is where 712,466 B of flash and 23,504 B of static RAM went. | P7-C1, P8-C0 |
-| **D3** | Persisted names and product identity | NVS namespace `"pbbl"` with a one-shot import of a legacy `"notta"` save; AP prefix `PEBBLEBOL-`; mDNS deleted. | P2-C9b, P8-C2 |
+| **D3** | Persisted names and product identity | NVS namespace `"pbbl"` with a one-shot import of a legacy `"notta"` save; AP prefix `ERRATA-`; mDNS deleted. | P2-C9b, P8-C2 |
 | **D4** | UI language | Spanish user-facing strings in `core/strings_es.h`; English identifiers, comments and documents. **Completed here**: the Spanish documents are archived under `docs/legacy/` and the English `README.md` exists (plan T12/G8). | P2-C8, P2-C11, P10-C5 |
-| **D6** | Partition table | `Pebblebol/partitions.csv` with the private `nvs2` checkpoint partition; `PartitionScheme=huge_app` stays in the FQBN because the board menu supplies `upload.maximum_size`. Both facts gated by `tools/build.sh`. | P2-C9d |
+| **D6** | Partition table | `Errata/partitions.csv` with the private `nvs2` checkpoint partition; `PartitionScheme=huge_app` stays in the FQBN because the board menu supplies `upload.maximum_size`. Both facts gated by `tools/build.sh`. | P2-C9d |
 | **D7** | Creator inactivity grace | 300 s, `ConfigV2.creator_idle_s`, reset only by a request that passed the PIN gate. **Nothing writes the field** — the SETTINGS editor was never built — so the value in force is the default. That is a gap in the UI, not an open decision. | P8-C2 |
 | **D9** | Supply architecture | 3.3 V boost converter for 2×AAA; the board's always-on power LED comes off. Created D11 and D12. | owner, 2026-09-03 |
 | **D13** | The light mechanic | **Deleted, not defaulted.** Sleep follows an approximated daylight table. | P3-C2b |
@@ -3283,14 +3283,14 @@ BTN_L 3, BTN_R 4, LED 8) with a wiring diagram. Neither has been on a board, and
 the committed one **fails this repository's own assertions**:
 
 ```console
-$ g++ -DPB_PINS_CONFIRMED -fsyntax-only Pebblebol/src/core/config.h
+$ g++ -DER_PINS_CONFIRMED -fsyntax-only Errata/src/core/config.h
 core/config.h:114: error: static assertion failed: D1: no button on a strapping pin (GPIO2/8/9)
 ```
 
 **Owner step.** Inspect the physical wiring and declare one map. Edit the five
 `#define`s in `core/config.h` §2 — they are the only pin numbers in the
 firmware, and `tools/check.sh` fails any other file that defines a `PIN_` macro.
-Then **define `PB_PINS_CONFIRMED`** and let the seven `static_assert`s check
+Then **define `ER_PINS_CONFIRMED`** and let the seven `static_assert`s check
 your map. Free, non-strapping GPIOs on this board: 3, 4, 6, 7, 10; GPIO0 is
 reserved for D10.
 
@@ -3479,8 +3479,8 @@ None is new and none is reopened; each gains a sentence it needed.
   **every name the machine sees** — and never touched the one name the human
   sees: `STR_APP_NAME` was still `"NOTTAMAGOCHI"` at the P10-C5 release
   candidate, on the boot splash, the load-save splash and the header bar of the
-  menu ring, while SETTINGS → *Acerca de* two taps away printed `Pebblebol` and
-  the access point was `PEBBLEBOL-XXXX`. The same power-on drew both names
+  menu ring, while SETTINGS → *Acerca de* two taps away printed `Errata` and
+  the access point was `ERRATA-XXXX`. The same power-on drew both names
   within seconds. Fixed at the P10-C6 exit; four goldens re-recorded. The
   decision is not reopened — the omission was in what "product identity" was
   taken to cover, and it is recorded here so the scope of a CLOSED decision is

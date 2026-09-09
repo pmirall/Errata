@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_crc16.cpp
+//  Errata host tests - test_crc16.cpp
 //  crc16_ccitt() is the one CRC of the firmware (plan §1.4): every persisted
 //  blob and every wire frame is sealed with it, so its identity is pinned to
 //  the CRC-16/CCITT-FALSE catalogue values here.
@@ -18,6 +18,9 @@ TEST(crc16_known_vectors) {
   const uint8_t zero = 0x00;
   CHECK_EQ(crc16_ccitt(&zero, 1), 0xE1F0);
   CHECK_EQ(crc16_ccitt("A", 1), 0xB915);
+  // NO ES EL NOMBRE DEL PRODUCTO, ES UN VECTOR: nueve bytes concretos con
+  // una respuesta precalculada. El renombrado global lo dejo en "Errata"
+  // (seis bytes) leyendo nueve, que es UB y ademas otra entrada.
   CHECK_EQ(crc16_ccitt("Pebblebol", 9), 0xE2A7);
 }
 

@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_overflow.cpp
+//  Errata host tests - test_overflow.cpp
 //  Plan section 1.7 / risk 24: the integer edges of the time model. Every case
 //  here is a place where a u32 wrap or a backwards clock would silently turn
 //  into a punishment the player did not earn.
@@ -63,13 +63,13 @@ TEST(overflow_estimated_epoch_is_monotonic_across_the_millis_wrap) {
 #define OVF_EPOCH0  1700000000u
 
 // The plan P2-C10 field map, restated here so the test can look at the
-// remainders that live in PebbleInstance.care_rem[] under their CareId names.
+// remainders that live in BugInstance.care_rem[] under their CareId names.
 static const uint8_t CARE_OF_ST[ST_COUNT] = {
   (uint8_t)CARE_HUNGER, (uint8_t)CARE_HAPPINESS, (uint8_t)CARE_ENERGY,
   (uint8_t)CARE_CLEANLINESS, (uint8_t)CARE_HEALTH, 0xFFu /* ST_BOND: RAM only */
 };
 
-static PebbleInstance g_ovf;
+static BugInstance g_ovf;
 
 static void ovf_pet(void) {
   genome_seed(0xABCDEF01u);

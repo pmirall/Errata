@@ -1,0 +1,21 @@
+# Errata partition table - decision D6 (plan section 0, audit section 5).
+#
+# WHY THIS FILE EXISTS. Arduino's initArduino() erases the ENTIRE default "nvs"
+# partition when nvs_flash_init() returns ESP_ERR_NVS_NO_FREE_PAGES or
+# ESP_ERR_NVS_NEW_VERSION_FOUND - before setup() runs, so no amount of care in
+# this firmware can prevent it. "nvs2" is a second, private NVS partition that
+# the core never touches: the checkpoint written there (save_checkpoint_all())
+# is what turns that erase from "the pet is gone" into LOAD_RECOVERED_CKPT.
+#
+# 4 MB flash (ESP32-C3 SuperMini). Single app image, no OTA slot: 3 MB of
+# program space is what a u8g2 + Wi-Fi build needs, and an update arrives over
+# USB. The offsets are the standard ones up to app0 so a unit flashed with a
+# stock table can be reflashed with this one without moving the bootloader.
+#
+# Name,     Type, SubType,  Offset,   Size,     Flags
+nvs,        data, nvs,      0x9000,   0x5000,
+otadata,    data, ota,      0xE000,   0x2000,
+app0,       app,  ota_0,    0x10000,  0x300000,
+nvs2,       data, nvs,      0x310000, 0x10000,
+spiffs,     data, spiffs,   0x320000, 0xD0000,
+coredump,   data, coredump, 0x3F0000, 0x10000,

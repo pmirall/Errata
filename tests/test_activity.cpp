@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL host tests - test_activity.cpp
+//  ERRATA host tests - test_activity.cpp
 //  THE DAILY ACTIVITY SCORE (spec sections 25 and 57, plan P6-C2).
 //
 //  game/activity.cpp is pure and takes its clock as a struct, so every case
@@ -503,7 +503,7 @@ TEST(an_old_blob_reads_as_no_day_recorded_and_needs_no_migration) {
   // A save written before P6-C2 has zeroes in the four bytes that were
   // reserved_a[4]. Day index 0 is 1970-01-01, which is below NT_EPOCH_SANE_MIN
   // and can therefore never be a real day, so 0 is unambiguously "none yet" -
-  // exactly the argument PebbleInstance.corrupt_until_epoch was carved out of
+  // exactly the argument BugInstance.corrupt_until_epoch was carved out of
   // reserved[12] on. The first note opens today.
   CooldownTable t;
   fresh(t);

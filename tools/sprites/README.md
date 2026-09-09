@@ -1,7 +1,7 @@
 # `tools/sprites/` — the sprite source format
 
-This directory is the **source of truth for Pebblebol's creature art**. The
-pixels live here, as text. `Pebblebol/src/data/sprites_pebbles.h` is generated
+This directory is the **source of truth for Errata's creature art**. The
+pixels live here, as text. `Errata/src/data/sprites_bugs.h` is generated
 from them by `tools/gen_sprites.py` and **must never be edited by hand** — the
 gate regenerates it and fails on any byte of drift.
 
@@ -50,7 +50,7 @@ species: 1
 
 | key | required | meaning |
 |---|---|---|
-| `name:` | yes | `UPPER_SNAKE`. Becomes the enum tag `PBSPR_PAKETO` and the array `pb_spr_paketo`. **Must equal the filename**: `paketo.txt` declares `name: PAKETO` and nothing else. |
+| `name:` | yes | `UPPER_SNAKE`. Becomes the enum tag `BUGSPR_PAKETO` and the array `bug_spr_paketo`. **Must equal the filename**: `paketo.txt` declares `name: PAKETO` and nothing else. |
 | `size:` | yes | `<width>x<height>` in pixels. **A species body is exactly `24x24`.** |
 | `frames:` | yes | How many `--- frame` blocks follow. **A species body has exactly 2.** |
 | `species:` | no | The roster id this body draws (`tools/content/species.json`). Present on creature bodies, absent on eggs and effects — the atlas holds four of those: `EGG_IDLE`, `EGG_CRACK`, `SLEEP` and `SICK`. Section 6 explains what it binds. |
@@ -215,7 +215,7 @@ names the file, the line and (where a column means something) the column.
 ## 5. Regenerating, and what the gate checks
 
 ```bash
-python3 tools/gen_sprites.py            # rewrite Pebblebol/src/data/sprites_pebbles.h
+python3 tools/gen_sprites.py            # rewrite Errata/src/data/sprites_bugs.h
 python3 tools/gen_sprites.py --check    # what tools/check.sh runs; exit 1 on drift
 ```
 
@@ -233,17 +233,17 @@ On top of the text diff, the generator refuses to emit at all when:
   or names a species `tools/content/species.json` does not have;
 * a body's set name does not match the pack's name for its id
   (`Rafagón` → `RAFAGON`);
-* the art is over the byte budget — `PB_DATA_BYTES_MAX`, 10,240 B, which is the
+* the art is over the byte budget — `ER_DATA_BYTES_MAX`, 10,240 B, which is the
   atlas's 9,216 B plus seven more sets. **This line was here before the check
   was**: until P9-C3 the budget was only tested by `--self-check` with no
   arguments, so `python3 tools/gen_sprites.py` wrote a header 1,152 B over the
   ceiling and exited 0. Found by mutation, and fixed by making the sentence true.
   Raising the ceiling means raising `SPRITE_DATA_BYTES_MAX` in
-  `Pebblebol/src/data/sprites.h` in the same change.
+  `Errata/src/data/sprites.h` in the same change.
 
 ### The eye bands come out of the same file as the pixels
 
-The header also carries `PB_SPRITE_EYES`: for each set and frame, the rows a
+The header also carries `ER_SPRITE_EYES`: for each set and frame, the rows a
 blink closes, which `ui/petfx.cpp` blits as a fill strip and a lash strip. **You
 do not write these.** They are derived from the art by one stated rule —
 
@@ -302,7 +302,7 @@ a committed file rather than `os.listdir()` because the order is a contract:
    set 0 for any out-of-range id.
 2. **The species block is the tail, in roster order, with no gaps.** The pack's
    invariant is `sprite_id == id - 1`, so a body's slot is *determined*:
-   `PB_SPRITE_BODY_FIRST + (species_id - 1)`.
+   `ER_SPRITE_BODY_FIRST + (species_id - 1)`.
 
 That is why `species:` is checked so hard. A body in the wrong slot draws the
 **wrong creature** on HOME, and nothing else in the tree would notice: every id
@@ -339,10 +339,10 @@ it says.
 
 * `tools/gen_sprites.py` — the generator; its module docstring carries the rest
   of the rationale.
-* `Pebblebol/src/data/sprite_types.h` — the XBM contract: stride, bit order,
+* `Errata/src/data/sprite_types.h` — the XBM contract: stride, bit order,
   frame layout, and the two size-guard macros.
-* `Pebblebol/src/data/sprites_pebbles.h` — **generated**, do not edit.
-* `Pebblebol/src/data/sprites.h` — **no longer an atlas.** P9-C3 deleted its 36
+* `Errata/src/data/sprites_bugs.h` — **generated**, do not edit.
+* `Errata/src/data/sprites.h` — **no longer an atlas.** P9-C3 deleted its 36
   legacy Nottamagochi body and pose sets, its `SpriteSetId` enum and its
   `SPRITE_SETS` table, and pointed the lookup at the generated one. What is left
   is the icons, mini-icons, badges and emotes, the pose enum, the budget assert

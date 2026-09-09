@@ -1,7 +1,7 @@
 # `tools/content/` — the content pack
 
 The JSON in this directory is the SOURCE of every content table under
-`Pebblebol/src/data/`. Nothing here is compiled; `tools/gen_content.py` reads it
+`Errata/src/data/`. Nothing here is compiled; `tools/gen_content.py` reads it
 and writes the headers.
 
     tools/content/species.json      60 species, 20 families x 3 stages
@@ -68,7 +68,7 @@ is 20 since P9-C3, so the prefix is currently the whole pack.
 shipped `10 + L*L` and 8,845 — and this README used to explain why it was not
 emitted. P9-C4 **deleted it** rather than leaving it unemitted: two curves in two
 files is a second source of truth, and checking either one cannot catch the pair
-disagreeing. `verify.py` now reads the curve out of `Pebblebol/src/data/balance.h`
+disagreeing. `verify.py` now reads the curve out of `Errata/src/data/balance.h`
 and **fails by name if an `XP_TABLE` key reappears here**. The evidence for
 keeping the shipped curve is `tests/tools/sim_days.cpp`'s and is written out in
 `data/balance.h` §4.

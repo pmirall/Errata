@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_sound.cpp
+//  Errata host tests - test_sound.cpp
 //  "THE SOUND SETTING PERSISTS" (plan P10-C2's third bullet, spec section 64).
 //
 //  WHAT THIS FILE IS, AND WHY IT IS NOT A FOURTH COPY OF SOMETHING.

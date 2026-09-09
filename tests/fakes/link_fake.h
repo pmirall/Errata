@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - fakes/link_fake.h
+//  Errata host tests - fakes/link_fake.h
 //  THE RADIO ui/screen_link.cpp REACHES THROUGH ui.h, AND NOTHING ELSE.
 //
 //  networking/net.cpp is a device module tests/Makefile never compiles, so the
@@ -17,8 +17,8 @@
 //  a real duplicate; a green run is evidence about the SCREEN and the SESSION,
 //  never about the radio (networking/transport.h says the same of the loopback).
 // =============================================================================
-#ifndef PB_TESTS_LINK_FAKE_H
-#define PB_TESTS_LINK_FAKE_H
+#ifndef ER_TESTS_LINK_FAKE_H
+#define ER_TESTS_LINK_FAKE_H
 
 #include <stdint.h>
 
@@ -92,7 +92,7 @@ void lf_set_pet_name(const char* name);
 //  FAKE is the flash, and only the flash: neither binary that uses this fake
 //  links persistence/save_manager.cpp or tests/fakes/kv_mem.cpp, and the
 //  atomicity of those five writes is tests/test_trade.cpp's subject, not this
-//  one's. Here the subject is the SCREEN: that it offers the right Pebble,
+//  one's. Here the subject is the SCREEN: that it offers the right Bug,
 //  refuses the ones the rules refuse, asks the player before anything moves,
 //  and that the Box really swaps when both players say yes.
 // -----------------------------------------------------------------------------
@@ -103,4 +103,4 @@ int      lf_trade_commits(void);             // times the commit hook ran and wo
 int      lf_trade_aborts(void);
 uint32_t lf_trade_out_id(void);              // what W1 recorded
 
-#endif  // PB_TESTS_LINK_FAKE_H
+#endif  // ER_TESTS_LINK_FAKE_H

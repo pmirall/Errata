@@ -1,11 +1,11 @@
-# Pebblebol host test suite (plan §4). Plain g++, no external framework, no
+# Errata host test suite (plan §4). Plain g++, no external framework, no
 # Arduino include path: every sketch source compiled here must be pure C++.
 #
 #   make -C tests check      build and run every test_*.cpp (stops on first failure)
 #   make -C tests golden     re-record tests/golden/* (only from a `retune:` commit)
 #   make -C tests fixtures   rebuild tests/fixtures/*.bin from legacy/mkfixtures.cpp
 #
-# Layout: the sketch lives under ../Pebblebol/src/<layer>/ (plan section 1.2).
+# Layout: the sketch lives under ../Errata/src/<layer>/ (plan section 1.2).
 # SRC_ROOT is that src/ directory, so a test includes "game/sim.h" exactly as
 # the firmware does, and the pattern rules below find the .cpp in its layer.
 CXX      ?= g++
@@ -15,7 +15,7 @@ CXX      ?= g++
 # Proven: editing HOME_METER_Y0 in ui/screen_home.h passed 14/14 before this,
 # and fails the HOME snapshots after it.
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O1 -MMD -MP
-SRC_ROOT ?= ../Pebblebol/src
+SRC_ROOT ?= ../Errata/src
 BIN      ?= bin
 OBJ      := $(BIN)/obj
 
@@ -27,7 +27,7 @@ TESTS := $(patsubst %.cpp,$(BIN)/%,$(sort $(wildcard test_*.cpp)))
 
 # core/utf8.cpp IS LINKED INTO EVERY BINARY, and it is the one object here that
 # is named once rather than per link line. It holds THE codepoint rule (see
-# core/utf8.h): ui/render.cpp, tests/fakes/gfx_fb.cpp and game/pebble.cpp each
+# core/utf8.h): ui/render.cpp, tests/fakes/gfx_fb.cpp and game/bug.cpp each
 # carried a private copy until P10-C4 and the three disagreed, so the fix is
 # worth nothing if a binary can quietly link none of them. It is pure, it is
 # ~90 lines, and it has no dependencies at all - the same standing crc16.o would
@@ -206,7 +206,13 @@ $(BIN)/test_care_golden: $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
 # box.o comes along for the "seven days stored comes back full" case: box_recover
 # is the OTHER half of the care model (spec section 9) and P3-C1 tunes both.
+# xp.o joined at the play-decay work: with the 120 s minigame cooldown gone, the
+# curve is the whole anti-farm, and half of its promise is that at the FLOOR a
+# run still pays one whole XP. That claim joins two modules, so the case that
+# holds it has to link both rather than repeat xp_minigame_amount()'s arithmetic.
 $(BIN)/test_care:       $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o \
+                        $(OBJ)/xp.o $(OBJ)/bug.o $(OBJ)/species.o \
+                        $(OBJ)/evolution.o \
                         $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 # daylight.cpp is pure arithmetic over the balance.h table: no clock, no state.
 $(BIN)/test_daylight:   $(OBJ)/daylight.o
@@ -249,51 +255,51 @@ $(BIN)/test_anim: $(OBJ)/anim_ease.o
 
 $(BIN)/test_sprite_pipeline: $(OBJ)/petfx_core.o
 # Derived stats. genome.o drags crc16.o and rng.o, exactly as test_genome does.
-$(BIN)/test_stats:      $(OBJ)/pebble.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
+$(BIN)/test_stats:      $(OBJ)/bug.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 # The Box <-> sim seam: the real box.cpp and the real sim.cpp together, which
 # is the only way to see a swap move sim's raw pointer off its creature.
 $(BIN)/test_box_sim:    $(OBJ)/box_sim.o $(OBJ)/box.o $(OBJ)/sim.o \
                         $(OBJ)/daylight.o $(OBJ)/genome.o $(OBJ)/crc16.o \
                         $(OBJ)/rng.o
 # THE BATTLE ENGINE (P4-C2). battle.cpp is PURE, so it compiles here exactly as
-# it does in the firmware; pebble.o is the one stat derivation it calls, and
+# it does in the firmware; bug.o is the one stat derivation it calls, and
 # genome.o drags crc16.o and rng.o just as test_stats does. NO ui/ object and no
 # species.o: type_mod_of() and species_get() are inline in the generated
 # headers, so a round never leaves the data tables.
-$(BIN)/test_battle:     $(OBJ)/battle.o $(OBJ)/pebble.o $(OBJ)/genome.o \
+$(BIN)/test_battle:     $(OBJ)/battle.o $(OBJ)/bug.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
-$(BIN)/test_battle_replay: $(OBJ)/battle.o $(OBJ)/pebble.o $(OBJ)/genome.o \
+$(BIN)/test_battle_replay: $(OBJ)/battle.o $(OBJ)/bug.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
-$(BIN)/test_battle_golden: $(OBJ)/battle.o $(OBJ)/pebble.o $(OBJ)/genome.o \
+$(BIN)/test_battle_golden: $(OBJ)/battle.o $(OBJ)/bug.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
 # THE LOCAL OPPONENT (P4-C3). battle_ai.o on top of the SAME objects the engine
 # tests link, and no others: the AI reads the battle through game/battle.h's
 # const queries and needs no privileged access to anything.
-$(BIN)/test_battle_ai:  $(OBJ)/battle_ai.o $(OBJ)/battle.o $(OBJ)/pebble.o \
+$(BIN)/test_battle_ai:  $(OBJ)/battle_ai.o $(OBJ)/battle.o $(OBJ)/bug.o \
                         $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
 # THE SHARED VALIDATOR (P4-C5, spec section 15). validate.cpp is PURE, so it
-# compiles here exactly as it does in the firmware. pebble.o is the one stat
+# compiles here exactly as it does in the firmware. bug.o is the one stat
 # derivation it calls (hp_max through the SAME function battle.cpp uses),
 # evolution.o + xp.o come as the pair they always do (they call each other), and
 # genome.o drags crc16.o and rng.o. battle.o is here for the CONTAINMENT case:
 # the claim "validate_team accepts => battle_init does not refuse for any reason
 # but BR_MEMBER_FAINTED" is only checkable with the real engine in the binary.
 # species_custom.o SINCE P8-C3, and it is the point of the creator cases rather
-# than a convenience: "a creator Pebble validates" is only a claim about the
+# than a convenience: "a creator Bug validates" is only a claim about the
 # SHIPPING firmware if species_get() really resolves the id through the real
 # registry. A fixture that stubbed the resolver would have proved that the stub
 # resolves.
-$(BIN)/test_validate:   $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+$(BIN)/test_validate:   $(OBJ)/validate.o $(OBJ)/bug.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o \
                         $(OBJ)/rng.o $(OBJ)/battle.o $(OBJ)/box.o \
                         $(OBJ)/species_custom.o
 
 # THE SECTION 15 CODEC (P4-C5). protocol.o on top of the validator's objects,
-# because pbw_decode() IS a decode in front of validate_pebble(). rng.o is also
+# because pbw_decode() IS a decode in front of validate_bug(). rng.o is also
 # the fuzzer's source: every fuzz frame is a pure function of one printable u32
 # drawn through core/rng.h, so a failure reproduces from the seed alone.
-$(BIN)/test_protocol:   $(OBJ)/protocol.o $(OBJ)/validate.o $(OBJ)/pebble.o \
+$(BIN)/test_protocol:   $(OBJ)/protocol.o $(OBJ)/validate.o $(OBJ)/bug.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
 
@@ -308,7 +314,7 @@ $(BIN)/test_session:    $(OBJ)/session.o $(OBJ)/battle_link.o \
                         $(OBJ)/trade_link.o \
                         $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
                         $(OBJ)/validate.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
-                        $(OBJ)/pebble.o $(OBJ)/evolution.o $(OBJ)/xp.o \
+                        $(OBJ)/bug.o $(OBJ)/evolution.o $(OBJ)/xp.o \
                         $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
 # P5-C1: THE SCANNER, THE CLASSIFIER AND THE SALTED IDENTITY. Two objects and
@@ -328,7 +334,7 @@ $(BIN)/test_exploration_hash: $(OBJ)/net_classify.o $(OBJ)/wifi_scanner.o
 $(BIN)/test_cooldowns:  $(OBJ)/cooldowns.o $(OBJ)/save_manager.o \
                         $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/crc16.o \
                         $(OBJ)/genome.o $(OBJ)/rng.o $(OBJ)/species.o \
-                        $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/validate.o $(OBJ)/bug.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/species_custom.o
 
 # P5-C3: THE ENCOUNTER ROLL. encounters.cpp is pure and deterministic from its
@@ -343,7 +349,7 @@ $(BIN)/test_encounters: $(OBJ)/encounters.o $(OBJ)/species.o $(OBJ)/rng.o \
 
 # P9-C5: THE EFFECTS HALF OF CORRUPTION. Deliberately a WIDE link line, because
 # the claim under test is not about one module: "it never destroys" is a claim
-# about a Pebble that goes through the save validator, the wire codec, the real
+# about a Bug that goes through the save validator, the wire codec, the real
 # breeding path and a real Box, and "the modifier does not stack" is a claim
 # about the engine. Every one of those is the SHIPPED object, not a fake.
 #
@@ -353,11 +359,11 @@ $(BIN)/test_encounters: $(OBJ)/encounters.o $(OBJ)/species.o $(OBJ)/rng.o \
 # the instrument for the glitch bound - the same one every screen golden uses.
 #
 # save_manager.o + migration.o + kv_mem.o are here for one case and it is the
-# load-bearing one: PebbleInstance.corrupt_until_epoch was carved out of
+# load-bearing one: BugInstance.corrupt_until_epoch was carved out of
 # reserved[12] with NO schema bump, so "the deadline survives a reboot" is a
 # claim about the WRITER, the CRC and the migration - and a memcpy dressed up as
 # a save cannot check any of them. A lost deadline leaves the bit set with
-# nothing to end it, which is the one way this mechanic could destroy a Pebble.
+# nothing to end it, which is the one way this mechanic could destroy a Bug.
 # P10-C1: THE DIAGNOSTICS SURFACE. diag_core.o is dev/, and it is here for the
 # same reason corrupt_fx.o and petfx_core.o are ui/: dev/godmode.cpp includes
 # Arduino.h, so every rule inside the console is a rule no test in this
@@ -366,7 +372,7 @@ $(BIN)/test_encounters: $(OBJ)/encounters.o $(OBJ)/species.o $(OBJ)/rng.o \
 #
 # THE LINK LINE IS WIDE ON PURPOSE and it is the same argument test_corruption's
 # makes. "spawn taints" is not a claim about a flag: it is a claim about
-# box_new_pebble()'s real constructor, genome_genesis()'s real taint clear and
+# box_new_bug()'s real constructor, genome_genesis()'s real taint clear and
 # game/taint.h's real gate, so all three are the SHIPPED objects. sim.o (with
 # daylight.o) is here because `heal` is the first caller sim_god_set_sick() has
 # ever had outside a test; activity.o because set_activity has to answer for a
@@ -376,11 +382,11 @@ $(BIN)/test_diag:       $(OBJ)/diag_core.o $(OBJ)/box.o $(OBJ)/sim.o \
                         $(OBJ)/daylight.o $(OBJ)/inventory.o \
                         $(OBJ)/activity.o $(OBJ)/encounters.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/species.o \
-                        $(OBJ)/pebble.o $(OBJ)/corruption.o \
+                        $(OBJ)/bug.o $(OBJ)/corruption.o \
                         $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
 $(BIN)/test_corruption: $(OBJ)/corruption.o $(OBJ)/corrupt_fx.o \
-                        $(OBJ)/battle.o $(OBJ)/pebble.o \
+                        $(OBJ)/battle.o $(OBJ)/bug.o \
                         $(OBJ)/breeding.o $(OBJ)/box.o \
                         $(OBJ)/inventory.o $(OBJ)/protocol.o \
                         $(OBJ)/validate.o $(OBJ)/species.o \
@@ -391,12 +397,12 @@ $(BIN)/test_corruption: $(OBJ)/corruption.o $(OBJ)/corrupt_fx.o \
                         $(OBJ)/gfx_fb.o
 
 # P5-C4: CAPTURE. The REAL box.cpp, because the whole point of the case set is
-# that a captured Pebble comes out of the tree's one constructor and passes the
+# that a captured Bug comes out of the tree's one constructor and passes the
 # tree's one validator - a fake Box would prove neither. validate.o drags the
 # pair it always drags (evolution.o + xp.o call each other) and genome.o drags
 # crc16.o and rng.o, exactly as tests/test_validate.cpp does.
 $(BIN)/test_capture:    $(OBJ)/capture.o $(OBJ)/encounters.o $(OBJ)/box.o \
-                        $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/bug.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
 
@@ -404,16 +410,16 @@ $(BIN)/test_capture:    $(OBJ)/capture.o $(OBJ)/encounters.o $(OBJ)/box.o \
 # reason tests/test_battle_screen.cpp is: it links what it drives and nothing
 # else, so it cannot start passing because another module happened to be there.
 $(BIN)/test_box_full_capture: $(OBJ)/capture.o $(OBJ)/encounters.o $(OBJ)/box.o \
-                        $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/bug.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
 
 # P5-C4: THE INVENTORY AND WHAT AN ITEM DOES. xp.o + evolution.o are the two
-# consumers inv_use() routes to (a candy really levels a Pebble, the evolution
+# consumers inv_use() routes to (a candy really levels a Bug, the evolution
 # key really asks game/evolution.h), corruption.o is the status half a CARE
 # item's `clears` column reaches, and species.o is the accessor layer.
 $(BIN)/test_inventory:  $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/xp.o \
-                        $(OBJ)/evolution.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/evolution.o $(OBJ)/species.o $(OBJ)/bug.o \
                         $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
 # P6-C1: THE TONE ENGINE AND THE MOTION CAPABILITY. audio.cpp keeps its LEDC
@@ -466,7 +472,7 @@ $(BIN)/test_discovery:  $(OBJ)/discovery.o $(OBJ)/activity.o $(OBJ)/crc16.o
 $(BIN)/test_link_transport: $(OBJ)/rxring.o $(OBJ)/session.o $(OBJ)/battle_link.o \
                         $(OBJ)/trade_link.o \
                         $(OBJ)/protocol.o $(OBJ)/validate.o $(OBJ)/battle.o \
-                        $(OBJ)/battle_ai.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/battle_ai.o $(OBJ)/bug.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
 # P7-C5: BREEDING. The REAL game/genome.cpp (breeding is a thin policy over it),
@@ -478,7 +484,7 @@ $(BIN)/test_link_transport: $(OBJ)/rxring.o $(OBJ)/session.o $(OBJ)/battle_link.
 # a uint32_t, which is the whole reason the determinism case can run two
 # "devices" in one process.
 $(BIN)/test_breeding:   $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/validate.o \
-                        $(OBJ)/species.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/species.o $(OBJ)/bug.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
 # P7-C4: THE ATOMIC TRADE. The whole binary is REAL SHIPPING CODE and one fake:
@@ -498,7 +504,7 @@ $(BIN)/test_trade:      $(OBJ)/trade.o $(OBJ)/box.o $(OBJ)/save_manager.o \
                         $(OBJ)/trade_link.o $(OBJ)/session.o \
                         $(OBJ)/battle_link.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
                         $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
-                        $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/bug.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
 
@@ -519,7 +525,7 @@ $(BIN)/test_creator_gate: $(OBJ)/creator_gate.o
 # core's HTTP_RAW_BUFLEN chunking reproduced by the fixture; creator_parse.o is
 # the document reader; creator_gate.o is the PIN parser the reader shares;
 # validate.o + species_custom.o + box.o are the rules and the pipeline the
-# accepted document runs through, so the end-to-end case files a REAL Pebble in
+# accepted document runs through, so the end-to-end case files a REAL Bug in
 # a REAL Box through the tree's one constructor and runs the tree's one
 # validator on it.
 #
@@ -530,7 +536,7 @@ $(BIN)/test_creator_gate: $(OBJ)/creator_gate.o
 $(BIN)/test_creator_api: $(OBJ)/creator_body.o $(OBJ)/creator_parse.o \
                         $(OBJ)/creator_gate.o $(OBJ)/validate.o \
                         $(OBJ)/species_custom.o $(OBJ)/box.o $(OBJ)/species.o \
-                        $(OBJ)/pebble.o $(OBJ)/evolution.o $(OBJ)/xp.o \
+                        $(OBJ)/bug.o $(OBJ)/evolution.o $(OBJ)/xp.o \
                         $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
 $(BIN)/test_input:      $(OBJ)/input.o $(OBJ)/host_shims.o
@@ -570,7 +576,7 @@ $(BIN)/test_clock_device: $(OBJ)/gametime_arduino.o $(OBJ)/arduino_clocks.o \
                         $(OBJ)/cooldowns.o $(OBJ)/game_state.o \
                         $(OBJ)/save_manager.o $(OBJ)/migration.o $(OBJ)/kv_mem.o \
                         $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/genome.o $(OBJ)/rng.o \
-                        $(OBJ)/species.o $(OBJ)/validate.o $(OBJ)/pebble.o \
+                        $(OBJ)/species.o $(OBJ)/validate.o $(OBJ)/bug.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/species_custom.o
 $(BIN)/test_overflow:   $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o \
                         $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/genome.o \
@@ -586,7 +592,7 @@ $(BIN)/test_fixtures:   $(OBJ)/crc16.o
 $(BIN)/test_persistence: $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/crc16.o \
                         $(OBJ)/genome.o $(OBJ)/rng.o $(OBJ)/species.o \
-                        $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/validate.o $(OBJ)/bug.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/species_custom.o
 # P10-C4. THE FIRST-BOOT STEP, THROUGH THE REAL SAVE PIPELINE. It links
 # game_state.o and save_manager.o for the reason the file's banner gives: the
@@ -595,13 +601,13 @@ $(BIN)/test_persistence: $(OBJ)/save_manager.o $(OBJ)/migration.o \
 $(BIN)/test_onboarding: $(OBJ)/onboarding.o $(OBJ)/game_state.o \
                         $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o \
-                        $(OBJ)/rng.o $(OBJ)/validate.o $(OBJ)/pebble.o \
+                        $(OBJ)/rng.o $(OBJ)/validate.o $(OBJ)/bug.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
                         $(OBJ)/species_custom.o
 
 $(BIN)/test_game_state: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o \
-                        $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/validate.o $(OBJ)/bug.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/species_custom.o
 
 # THE FIRST BINARY IN THIS PROJECT THAT LINKS game/box.cpp AND
@@ -616,7 +622,7 @@ $(BIN)/test_game_state: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migrati
 # cap_attempt() rather than a hand-rolled stand-in.
 $(BIN)/test_box_persist: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o \
-                        $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/validate.o $(OBJ)/bug.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/species_custom.o \
                         $(OBJ)/box.o $(OBJ)/capture.o $(OBJ)/encounters.o \
                         $(OBJ)/species.o $(OBJ)/corruption.o $(OBJ)/activity.o
@@ -643,6 +649,7 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/encounters.o $(OBJ)/capture.o \
                $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/species.o \
                $(OBJ)/validate.o $(OBJ)/evolution.o $(OBJ)/xp.o \
+               $(OBJ)/species_custom.o \
                $(OBJ)/dialog.o $(OBJ)/qr.o $(OBJ)/box.o \
                $(OBJ)/anim_ease.o \
                $(OBJ)/anim_ease.o \
@@ -651,7 +658,7 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/audio.o \
                $(OBJ)/screen_battle.o $(OBJ)/battle_renderer.o \
                $(OBJ)/xbm_mirror.o $(OBJ)/petfx_core.o $(OBJ)/corrupt_fx.o \
-               $(OBJ)/battle.o $(OBJ)/battle_ai.o $(OBJ)/pebble.o
+               $(OBJ)/battle.o $(OBJ)/battle_ai.o $(OBJ)/bug.o
 
 # P7-C2 added the peer link's four: ui/screen_link.cpp owns a REAL LinkJob and a
 # REAL Session over a REAL codec, and the screen binaries link all of it because
@@ -684,7 +691,7 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
 # P4-C4 added the six before them. ui/screen_battle.cpp is a PURE translation unit that
 # runs the real engine and the real AI, so the host renders a real battle at
 # 128x64 rather than a mock of one: battle.o and battle_ai.o are the same
-# objects tests/test_battle.cpp links, pebble.o is the stat derivation they
+# objects tests/test_battle.cpp links, bug.o is the stat derivation they
 # call, and xbm_mirror.o is ui/petfx.cpp's own horizontal flip - which nothing
 # in this repository compiled or executed until it moved out of that device-only
 # translation unit.
@@ -793,7 +800,8 @@ $(BIN)/test_link_screen: $(OBJ)/screen_link.o $(OBJ)/screen_battle.o \
                         $(OBJ)/trade_link.o $(OBJ)/trade.o \
                         $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
                         $(OBJ)/validate.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
-                        $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/pebble.o \
+                        $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/bug.o \
+                        $(OBJ)/species_custom.o \
                         $(OBJ)/cooldowns.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/activity.o \
                         $(OBJ)/inventory.o $(OBJ)/corruption.o \
@@ -808,13 +816,20 @@ $(BIN)/test_link_screen: $(OBJ)/screen_link.o $(OBJ)/screen_battle.o \
 # and because the mirror case reads pixels back.
 # inventory.o + its two consumers since P5-C4: the battle screen takes the armed
 # BATTLE_MOD from it, which is where a capture-menu item finally reaches a fight.
+#
+# P10-C4b added species_custom.o + validate.o, and the link error that forced it
+# is the finding: ui/screen_battle.cpp now asks the creator registry for the
+# body a drawn Bug fights in, and until this line existed NO screen binary
+# linked that registry at all - which is exactly how 144 bytes of the player's
+# own drawing sat unread in a record for two phases with the suite green.
 $(BIN)/test_battle_screen: $(OBJ)/screen_battle.o $(OBJ)/battle_renderer.o \
                         $(OBJ)/audio.o \
                         $(OBJ)/xbm_mirror.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
-                        $(OBJ)/pebble.o $(OBJ)/box.o $(OBJ)/genome.o \
+                        $(OBJ)/bug.o $(OBJ)/box.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o \
                         $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/xp.o \
                         $(OBJ)/evolution.o $(OBJ)/species.o \
+                        $(OBJ)/species_custom.o $(OBJ)/validate.o \
                         $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o
 
 # P10-C2: THE PERFORMANCE INSTRUMENT'S ARITHMETIC. ONE OBJECT AND NO OTHERS,
@@ -845,7 +860,7 @@ $(BIN)/test_soak:       $(OBJ)/alloc_count.o $(OBJ)/sim.o $(OBJ)/daylight.o $(OB
                         $(OBJ)/corruption.o $(OBJ)/cooldowns.o \
                         $(OBJ)/save_manager.o \
                         $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/boot_host.o \
-                        $(OBJ)/validate.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/validate.o $(OBJ)/bug.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/species.o $(OBJ)/species_custom.o \
                         $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
@@ -863,7 +878,7 @@ $(BIN)/test_soak:       $(OBJ)/alloc_count.o $(OBJ)/sim.o $(OBJ)/daylight.o $(OB
 $(BIN)/test_sound:      $(OBJ)/audio.o $(OBJ)/game_state.o $(OBJ)/save_manager.o \
                         $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/boot_host.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o $(OBJ)/validate.o \
-                        $(OBJ)/pebble.o $(OBJ)/evolution.o $(OBJ)/xp.o \
+                        $(OBJ)/bug.o $(OBJ)/evolution.o $(OBJ)/xp.o \
                         $(OBJ)/genome.o $(OBJ)/species_custom.o
 
 # The navigation machine and the section 7 router, over the REAL table.
@@ -873,13 +888,18 @@ $(BIN)/test_statemachine: $(SCREEN_OBJS) $(OBJ)/state_machine.o \
 # pure, so it compiles here; sim.o comes with it because the live fill reads
 # sim_stat_pct() / sim_mood_score() - and since P4-C4a because the care case
 # drives a REAL bound simulation through sim_god_set_stat().
-# evolution.o + xp.o as well: the evolution cases evolve a Pebble and re-fill
+# evolution.o + xp.o as well: the evolution cases evolve a Bug and re-fill
 # its PetView through pet_view_fill_sim() + pet_view_attach(), which IS the pair
 # ui.cpp:201-203 calls. (Until P4-C4a they drove pet_view_fill(), a function no
 # firmware file called; that function is deleted and this comment no longer
 # has to explain why the case proved only the model half.)
+# species_custom.o + validate.o + species.o since P10-C4b: PetView carries the
+# creator's own 24x24 now (PetView.custom_bits), so the projection asks the
+# registry whether this species has one. A roster species answers nullptr.
 $(BIN)/test_pet_view:   $(OBJ)/pet_view.o $(OBJ)/sim.o $(OBJ)/daylight.o \
                         $(OBJ)/box.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
+                        $(OBJ)/species_custom.o $(OBJ)/validate.o \
+                        $(OBJ)/species.o $(OBJ)/bug.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o
 
 $(BIN)/test_%: test_%.cpp nt_test.h | $(BIN)
@@ -900,7 +920,7 @@ pagetool: $(BIN)/creator_decode
 
 $(BIN)/creator_decode: tools/creator_decode.cpp $(OBJ)/creator_parse.o \
                         $(OBJ)/creator_gate.o $(OBJ)/validate.o $(OBJ)/species_custom.o \
-                        $(OBJ)/species.o $(OBJ)/pebble.o $(OBJ)/evolution.o \
+                        $(OBJ)/species.o $(OBJ)/bug.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o \
                         $(OBJ)/rng.o | $(BIN)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
@@ -917,7 +937,7 @@ $(BIN)/creator_decode: tools/creator_decode.cpp $(OBJ)/creator_parse.o \
 balancetool: $(BIN)/balance_matrix $(BIN)/sim_days
 
 $(BIN)/balance_matrix: tools/balance_matrix.cpp $(OBJ)/battle_ai.o $(OBJ)/battle.o \
-                        $(OBJ)/pebble.o $(OBJ)/genome.o $(OBJ)/crc16.o \
+                        $(OBJ)/bug.o $(OBJ)/genome.o $(OBJ)/crc16.o \
                         $(OBJ)/rng.o | $(BIN)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< $(filter %.o,$^) -o $@
 
@@ -932,7 +952,7 @@ $(BIN)/balance_matrix: tools/balance_matrix.cpp $(OBJ)/battle_ai.o $(OBJ)/battle
 # which is the opposite of the truth). sim_days.cpp calls no box_* function and
 # never calls box_bind(), so box.cpp's static state stays null and none of its
 # code is reachable; game/sim.cpp does not call into it either. THE SIMULATED
-# DAY IS ONE ACTIVE PEBBLE. BOX_RECOVER_MPH governs BENCHED slots, which earn no
+# DAY IS ONE ACTIVE BUG. BOX_RECOVER_MPH governs BENCHED slots, which earn no
 # XP and take no care actions, so it is outside the question sim_days answers -
 # and the XP-curve decision P9-C4 settled rests on these numbers, so what the
 # instrument did and did not cover has to be right where a reader looks for it.

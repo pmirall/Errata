@@ -1,24 +1,24 @@
 // =============================================================================
-//  PEBBLEBOL host test - test_validate.cpp
+//  ERRATA host test - test_validate.cpp
 //  THE SHARED VALIDATOR (game/validate.h, spec section 15, plan P4-C5).
 //
 //  THREE RULES THIS FILE OBEYS, copied from tests/test_battle.cpp because this
 //  project has now shipped seventeen assertions that could not fail:
 //
-//   (a) EVERY rejection case runs on a FULLY LEGAL Pebble built by mk_valid(),
+//   (a) EVERY rejection case runs on a FULLY LEGAL Bug built by mk_valid(),
 //       in which the case's own field is the ONLY illegal thing. A zeroed
-//       PebbleInstance is refused by VR_NULL_ID before it can reach any other
+//       BugInstance is refused by VR_NULL_ID before it can reach any other
 //       guard, so a block written against `!= VR_OK` there would pass with
 //       sixteen real rules deleted.
 //   (b) EVERY case asserts the EXACT VReject, never `!= VR_OK`.
 //   (c) EVERY case carries a POSITIVE CONTROL in the same function: the same
-//       Pebble with that one field corrected must return VR_OK. The control is
+//       Bug with that one field corrected must return VR_OK. The control is
 //       what proves the case reached the guard it names instead of tripping an
 //       earlier one.
 //
 //  The six VR_WIRE_* codes are NOT exercised here: they are produced by
 //  networking/protocol.cpp's pbw_decode() and by nothing else, which is a claim
-//  this file makes negatively (validate_pebble() never returns one, over every
+//  this file makes negatively (validate_bug() never returns one, over every
 //  fixture in the file) and tests/test_protocol.cpp makes positively.
 // =============================================================================
 #include "nt_test.h"
@@ -32,7 +32,7 @@
 #include "game/box.h"
 #include "game/evolution.h"
 #include "game/genome.h"
-#include "game/pebble.h"
+#include "game/bug.h"
 #include "game/species_custom.h"
 #include "game/validate.h"
 #include "game/xp.h"
@@ -58,21 +58,21 @@ static Genome sealed_genome(uint32_t lineage)
   return g;
 }
 
-// A Pebble on which validate_pebble() returns VR_OK and every case makes
+// A Bug on which validate_bug() returns VR_OK and every case makes
 // exactly one thing wrong. Species and level are real roster values.
-static void mk_valid(PebbleInstance& p, uint8_t species, uint8_t level, uint32_t id)
+static void mk_valid(BugInstance& p, uint8_t species, uint8_t level, uint32_t id)
 {
   memset(&p, 0, sizeof p);
-  p.magic         = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver    = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic         = (uint16_t)BUG_MAGIC;
+  p.layout_ver    = (uint8_t)BUG_LAYOUT_VER;
   p.species_id    = species;
   p.id            = id;
   p.level         = level;
   p.origin        = (uint8_t)ORIGIN_WILD;
-  p.custom_sprite = (uint8_t)PB_CUSTOM_SPRITE_NONE;
+  p.custom_sprite = (uint8_t)ER_CUSTOM_SPRITE_NONE;
   p.genome        = sealed_genome(0xA5A5A500u + id);
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i)
-    p.care[i] = (int32_t)PB_CARE_MILLI_MAX;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i)
+    p.care[i] = (int32_t)ER_CARE_MILLI_MAX;
   const SpeciesDef* sp = species_get(species);
   if (sp == nullptr) return;
   memcpy(p.moves, sp->moves, sizeof p.moves);
@@ -132,10 +132,10 @@ static void mk_cs(CustomSpeciesRec& c)
   cs_moves(c, MV_PING, MV_AMPLIFICAR, MV_OVERCLOCK, MV_DEPURAR);    // cost 91
 }
 
-static uint16_t hp_max_of(const PebbleInstance& p)
+static uint16_t hp_max_of(const BugInstance& p)
 {
-  PebbleStats s;
-  CHECK(pebble_stats_of(p, s));
+  BugStats s;
+  CHECK(bug_stats_of(p, s));
   return s.hp_max;
 }
 
@@ -145,108 +145,108 @@ static uint16_t hp_max_of(const PebbleInstance& p)
 TEST(the_fixture_every_case_starts_from_is_actually_valid) {
   uint16_t seen = 0;
   for (uint8_t s = 1; s <= (uint8_t)SPECIES_TABLE_COUNT; ++s) {
-    for (uint8_t lv = 1; lv <= (uint8_t)PB_LEVEL_MAX; ++lv) {
-      PebbleInstance p;
+    for (uint8_t lv = 1; lv <= (uint8_t)ER_LEVEL_MAX; ++lv) {
+      BugInstance p;
       mk_valid(p, s, lv, 0x100u + s * 64u + lv);
-      const VReject r = validate_pebble(p);
+      const VReject r = validate_bug(p);
       if (r != VR_OK) fprintf(stderr, "    species %u level %u -> %s\n",
                               (unsigned)s, (unsigned)lv, validate_reject_name(r));
       CHECK_EQ((int)r, (int)VR_OK);
       seen++;
     }
   }
-  CHECK_EQ((int)seen, (int)SPECIES_TABLE_COUNT * (int)PB_LEVEL_MAX);
+  CHECK_EQ((int)seen, (int)SPECIES_TABLE_COUNT * (int)ER_LEVEL_MAX);
 }
 
 // =============================================================================
 //  2. ONE CASE PER CONTENT REJECT, each with its positive control
 // =============================================================================
 TEST(an_id_of_zero_is_refused_by_name) {
-  PebbleInstance p; mk_valid(p, 1, 10, 7);
+  BugInstance p; mk_valid(p, 1, 10, 7);
   p.id = 0u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_NULL_ID);
+  CHECK_EQ((int)validate_bug(p), (int)VR_NULL_ID);
   p.id = 7u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 }
 
 TEST(a_species_with_no_row_is_refused_by_name) {
-  PebbleInstance p; mk_valid(p, 1, 10, 7);
+  BugInstance p; mk_valid(p, 1, 10, 7);
   // 0 is the EMPTY marker and it arrives here through the same guard, on
   // purpose: species_get() answers nullptr for both, so one code covers one
   // question ("does this id resolve") rather than two codes covering one.
   p.species_id = 0u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_UNKNOWN_SPECIES);
+  CHECK_EQ((int)validate_bug(p), (int)VR_UNKNOWN_SPECIES);
   p.species_id = (uint8_t)(SPECIES_TABLE_COUNT + 1u);
-  CHECK_EQ((int)validate_pebble(p), (int)VR_UNKNOWN_SPECIES);
+  CHECK_EQ((int)validate_bug(p), (int)VR_UNKNOWN_SPECIES);
   p.species_id = (uint8_t)SPECIES_ID_BUILTIN_MAX;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_UNKNOWN_SPECIES);
+  CHECK_EQ((int)validate_bug(p), (int)VR_UNKNOWN_SPECIES);
   p.species_id = 1u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 }
 
 TEST(an_impossible_level_is_refused_by_name) {
-  PebbleInstance p; mk_valid(p, 1, 10, 7);
-  p.level = (uint8_t)(PB_LEVEL_MAX + 1u);          // the plan's "level 31"
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_LEVEL);
+  BugInstance p; mk_valid(p, 1, 10, 7);
+  p.level = (uint8_t)(ER_LEVEL_MAX + 1u);          // the plan's "level 31"
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_LEVEL);
   p.level = 0u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_LEVEL);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_LEVEL);
   p.level = 255u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_LEVEL);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_LEVEL);
   p.level = 10u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 }
 
 TEST(xp_at_or_past_what_the_level_costs_is_refused_by_name) {
-  PebbleInstance p; mk_valid(p, 1, 10, 7);
+  BugInstance p; mk_valid(p, 1, 10, 7);
   const uint16_t need = xp_for_level(10);
   CHECK(need > 1u);                                // the case would be vacuous at 0
   p.xp = need;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_XP);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_XP);
   p.xp = (uint16_t)(need - 1u);
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 
   // The top of the curve is its own arm: xp_for_level() answers 0 there, which
   // means "there is nothing left to buy" and not "any amount is fine".
-  PebbleInstance q; mk_valid(q, 1, (uint8_t)PB_LEVEL_MAX, 8);
-  CHECK_EQ((int)xp_for_level((uint8_t)PB_LEVEL_MAX), 0);
+  BugInstance q; mk_valid(q, 1, (uint8_t)ER_LEVEL_MAX, 8);
+  CHECK_EQ((int)xp_for_level((uint8_t)ER_LEVEL_MAX), 0);
   q.xp = 1u;
-  CHECK_EQ((int)validate_pebble(q), (int)VR_BAD_XP);
+  CHECK_EQ((int)validate_bug(q), (int)VR_BAD_XP);
   q.xp = 0u;
-  CHECK_EQ((int)validate_pebble(q), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(q), (int)VR_OK);
 }
 
 TEST(a_genome_whose_seal_fails_is_refused_by_name) {
-  PebbleInstance p; mk_valid(p, 1, 10, 7);
+  BugInstance p; mk_valid(p, 1, 10, 7);
   const Genome good = p.genome;
 
   p.genome.crc16 = (uint16_t)(good.crc16 ^ 0x0001u);        // the plan's "bad genome CRC"
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_GENOME);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_GENOME);
   p.genome = good;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 
   p.genome.lineage_id = 0u;                                  // a dynasty of nobody
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_GENOME);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_GENOME);
   p.genome = good;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 
   p.genome.magic_ver = 0u;                                   // wrong signature
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_GENOME);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_GENOME);
   p.genome = good;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 }
 
 TEST(a_move_id_no_attack_row_answers_is_refused_by_name) {
-  PebbleInstance p; mk_valid(p, 1, 10, 7);
+  BugInstance p; mk_valid(p, 1, 10, 7);
   const uint8_t good = p.moves[2];
 
   p.moves[2] = 0u;                                    // the EMPTY move slot
-  CHECK_EQ((int)validate_pebble(p), (int)VR_UNKNOWN_MOVE);
+  CHECK_EQ((int)validate_bug(p), (int)VR_UNKNOWN_MOVE);
   p.moves[2] = (uint8_t)(ATTACK_COUNT + 1u);          // past the table
-  CHECK_EQ((int)validate_pebble(p), (int)VR_UNKNOWN_MOVE);
+  CHECK_EQ((int)validate_bug(p), (int)VR_UNKNOWN_MOVE);
   p.moves[2] = 255u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_UNKNOWN_MOVE);
+  CHECK_EQ((int)validate_bug(p), (int)VR_UNKNOWN_MOVE);
   p.moves[2] = good;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 }
 
 // THE DECISIVE PAIR. Both injected moves are REAL attacks, so the previous case
@@ -254,18 +254,18 @@ TEST(a_move_id_no_attack_row_answers_is_refused_by_name) {
 // narrowed to "an attack of the right type" would still let it through - which
 // is the mutation that proves this rule is not cosmetic.
 TEST(a_real_attack_the_species_cannot_learn_is_refused_by_name) {
-  PebbleInstance p; mk_valid(p, 1, 10, 7);
+  BugInstance p; mk_valid(p, 1, 10, 7);
   const uint8_t good0 = p.moves[0];
   CHECK(attack_get(MV_PLAGA)  != nullptr);
   CHECK(attack_get(MV_RAFAGA) != nullptr);
 
   p.moves[0] = MV_PLAGA;                              // off-type, 0/200 -> 100/200
-  CHECK_EQ((int)validate_pebble(p), (int)VR_UNLEARNABLE_MOVESET);
+  CHECK_EQ((int)validate_bug(p), (int)VR_UNLEARNABLE_MOVESET);
   p.moves[0] = MV_RAFAGA;                             // ON-TYPE, 0/200 -> 103/200
-  CHECK_EQ((int)validate_pebble(p), (int)VR_UNLEARNABLE_MOVESET);
+  CHECK_EQ((int)validate_bug(p), (int)VR_UNLEARNABLE_MOVESET);
   CHECK_EQ((int)species_get(1)->type, (int)attack_get(MV_RAFAGA)->type);
   p.moves[0] = good0;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 }
 
 // The other half of the same rule: the walk goes DOWN the family, never up.
@@ -276,31 +276,31 @@ TEST(the_learnset_walk_reaches_earlier_stages_and_not_later_ones) {
   CHECK_EQ((int)base->stage, 0);
   CHECK_EQ((int)final_->stage, 2);
 
-  PebbleInstance up; mk_valid(up, 3, 20, 11);         // a final stage...
+  BugInstance up; mk_valid(up, 3, 20, 11);         // a final stage...
   memcpy(up.moves, base->moves, sizeof up.moves);     // ...keeping its baby moves
-  CHECK_EQ((int)validate_pebble(up), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(up), (int)VR_OK);
 
-  PebbleInstance down; mk_valid(down, 1, 20, 12);     // a base stage...
+  BugInstance down; mk_valid(down, 1, 20, 12);     // a base stage...
   memcpy(down.moves, final_->moves, sizeof down.moves); // ...with the final's moves
-  CHECK_EQ((int)validate_pebble(down), (int)VR_UNLEARNABLE_MOVESET);
+  CHECK_EQ((int)validate_bug(down), (int)VR_UNLEARNABLE_MOVESET);
   memcpy(down.moves, base->moves, sizeof down.moves);
-  CHECK_EQ((int)validate_pebble(down), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(down), (int)VR_OK);
 }
 
 TEST(hp_above_the_derived_maximum_is_refused_by_name) {
-  PebbleInstance p; mk_valid(p, 1, 10, 7);
+  BugInstance p; mk_valid(p, 1, 10, 7);
   const uint16_t hm = hp_max_of(p);
   CHECK(hm > 0u);
   p.hp_cur = (uint16_t)(hm + 1u);                     // the plan's "hp > max"
-  CHECK_EQ((int)validate_pebble(p), (int)VR_HP_OVER_MAX);
+  CHECK_EQ((int)validate_bug(p), (int)VR_HP_OVER_MAX);
   p.hp_cur = 0xFFFFu;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_HP_OVER_MAX);
+  CHECK_EQ((int)validate_bug(p), (int)VR_HP_OVER_MAX);
   p.hp_cur = hm;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
   // hp_cur == 0 is a legitimate STORED state and an illegal BATTLE one, so it
   // is game/battle.h's BR_MEMBER_FAINTED and deliberately not a VReject.
   p.hp_cur = 0u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 }
 
 TEST(an_evolution_stage_that_disagrees_with_the_species_row_is_refused_by_name) {
@@ -309,25 +309,25 @@ TEST(an_evolution_stage_that_disagrees_with_the_species_row_is_refused_by_name) 
   CHECK_EQ((int)species_get(5)->stage, 1);
   CHECK_EQ((int)species_get(3)->stage, 2);
 
-  PebbleInstance p; mk_valid(p, 5, 10, 7);
+  BugInstance p; mk_valid(p, 5, 10, 7);
   p.evo_state = 0u;                                   // "the plan's evo_state that
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_EVO_STAGE);  // disagrees with its row"
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_EVO_STAGE);  // disagrees with its row"
   p.evo_state = 2u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_EVO_STAGE);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_EVO_STAGE);
   p.evo_state = 1u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 
-  PebbleInstance q; mk_valid(q, 3, 10, 8);
+  BugInstance q; mk_valid(q, 3, 10, 8);
   q.evo_state = 1u;
-  CHECK_EQ((int)validate_pebble(q), (int)VR_BAD_EVO_STAGE);
+  CHECK_EQ((int)validate_bug(q), (int)VR_BAD_EVO_STAGE);
   q.evo_state = 2u;
-  CHECK_EQ((int)validate_pebble(q), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(q), (int)VR_OK);
 
   // Bits 6:2 are NOT checked, and this case pins that as a DECISION:
   // tests/test_evolution.cpp asserts junk there survives an evolution and
   // game/evolution.cpp:102 preserves it on purpose.
   q.evo_state = (uint8_t)(2u | 0x0Cu);
-  CHECK_EQ((int)validate_pebble(q), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(q), (int)VR_OK);
 }
 
 TEST(a_pending_evolution_without_the_level_gate_is_refused_by_name) {
@@ -335,102 +335,102 @@ TEST(a_pending_evolution_without_the_level_gate_is_refused_by_name) {
   CHECK(rule != nullptr);
   CHECK(rule->level > 1u);
 
-  PebbleInstance p; mk_valid(p, 1, 1, 7);
+  BugInstance p; mk_valid(p, 1, 1, 7);
   CHECK_EQ((int)evolution_level_ready(p), 0);
   p.evo_state |= (uint8_t)EVO_STATE_PENDING;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_EVO_PENDING);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_EVO_PENDING);
   p.evo_state = (uint8_t)(p.evo_state & (uint8_t)~EVO_STATE_PENDING);
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 
-  // The rule is ONE-DIRECTIONAL and that is not an oversight: box_new_pebble()
+  // The rule is ONE-DIRECTIONAL and that is not an oversight: box_new_bug()
   // mints a level directly and never runs xp_add(), so a wild capture above its
   // evolution level is legal with the bit CLEAR.
-  PebbleInstance q; mk_valid(q, 1, rule->level, 8);
+  BugInstance q; mk_valid(q, 1, rule->level, 8);
   CHECK(evolution_level_ready(q) != 0);
-  CHECK_EQ((int)validate_pebble(q), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(q), (int)VR_OK);
   q.evo_state |= (uint8_t)EVO_STATE_PENDING;
-  CHECK_EQ((int)validate_pebble(q), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(q), (int)VR_OK);
 }
 
 TEST(a_status_or_flag_bit_outside_its_mask_is_refused_by_name) {
-  PebbleInstance p; mk_valid(p, 1, 10, 7);
+  BugInstance p; mk_valid(p, 1, 10, 7);
 
   p.status = 0x20u;                                   // above PBS_RESERVED_LIGHT
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_STATUS_BITS);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_STATUS_BITS);
   p.status = 0x80u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_STATUS_BITS);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_STATUS_BITS);
   // Every bit the STORED mask names is accepted, PBS_RESERVED_LIGHT included:
   // a v2 save written before P3-C2b may still carry it and quarantining a
-  // Pebble for a field nothing reads would be a repair by another name.
+  // Bug for a field nothing reads would be a repair by another name.
   p.status = (uint8_t)(PBS_SICK | PBS_ASLEEP | PBS_CORRUPTED | PBS_FAINTED |
                        PBS_RESERVED_LIGHT);
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
   p.status = 0u;
 
   p.flags = 0x40u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_FLAGS_BITS);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_FLAGS_BITS);
   p.flags = 0x80u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_FLAGS_BITS);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_FLAGS_BITS);
   p.flags = (uint8_t)(PBF_CUSTOM | PBF_TRADED | PBF_BRED | PBF_GOD_TAINTED |
                       PBF_RARE);
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 }
 
 TEST(an_origin_a_trait_or_a_sprite_slot_that_cannot_exist_is_refused_by_name) {
-  PebbleInstance p; mk_valid(p, 1, 10, 7);
+  BugInstance p; mk_valid(p, 1, 10, 7);
 
   p.origin = (uint8_t)ORIGIN_COUNT;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_ORIGIN);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_ORIGIN);
   p.origin = (uint8_t)ORIGIN_TRADED;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 
   // No traits table exists anywhere in this tree, so a nonzero trait_id is
   // uninterpretable rather than merely unusual.
   p.trait_id = 1u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_TRAIT);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_TRAIT);
   p.trait_id = 0u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 
   p.custom_sprite = (uint8_t)CUSTOM_SPECIES_SLOTS;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_CUSTOM_SPRITE);
-  p.custom_sprite = (uint8_t)PB_CUSTOM_SPRITE_NONE;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_CUSTOM_SPRITE);
+  p.custom_sprite = (uint8_t)ER_CUSTOM_SPRITE_NONE;
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 
   // The other direction: a flag claiming a sprite that is not there.
   p.flags |= (uint8_t)PBF_HAS_CUSTOM_SPRITE;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_CUSTOM_SPRITE);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_CUSTOM_SPRITE);
   p.custom_sprite = 0u;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 }
 
 TEST(a_care_value_outside_its_band_is_refused_by_name) {
-  PebbleInstance p; mk_valid(p, 1, 10, 7);
-  p.care[2] = (int32_t)PB_CARE_MILLI_MAX + 1;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_CARE);
+  BugInstance p; mk_valid(p, 1, 10, 7);
+  p.care[2] = (int32_t)ER_CARE_MILLI_MAX + 1;
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_CARE);
   p.care[2] = -1;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_CARE);
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_CARE);
   p.care[2] = 0;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
-  p.care[2] = (int32_t)PB_CARE_MILLI_MAX;
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
+  p.care[2] = (int32_t)ER_CARE_MILLI_MAX;
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 }
 
 // THE ONE RULE THAT IS ABOUT MEMORY SAFETY AND NOT ABOUT GAME RULES.
 TEST(a_nickname_with_no_terminator_is_refused_by_name) {
-  PebbleInstance p; mk_valid(p, 1, 10, 7);
-  for (uint8_t i = 0; i < (uint8_t)PB_NICKNAME_CAP; ++i) p.nickname[i] = 'A';
-  CHECK_EQ((int)validate_pebble(p), (int)VR_BAD_NICKNAME);
-  p.nickname[PB_NICKNAME_CAP - 1] = '\0';             // the last byte is enough
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  BugInstance p; mk_valid(p, 1, 10, 7);
+  for (uint8_t i = 0; i < (uint8_t)ER_NICKNAME_CAP; ++i) p.nickname[i] = 'A';
+  CHECK_EQ((int)validate_bug(p), (int)VR_BAD_NICKNAME);
+  p.nickname[ER_NICKNAME_CAP - 1] = '\0';             // the last byte is enough
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
   memset(p.nickname, 0, sizeof p.nickname);
-  CHECK_EQ((int)validate_pebble(p), (int)VR_OK);
+  CHECK_EQ((int)validate_bug(p), (int)VR_OK);
 }
 
 // =============================================================================
 //  3. THE TEAM AND THE BAND
 // =============================================================================
 TEST(a_team_size_outside_one_to_three_is_refused_by_name) {
-  PebbleInstance m[BATTLE_TEAM_MAX];
+  BugInstance m[BATTLE_TEAM_MAX];
   for (uint8_t i = 0; i < (uint8_t)BATTLE_TEAM_MAX; ++i)
     mk_valid(m[i], (uint8_t)(1u + i), 10, 0x40u + i);
 
@@ -444,18 +444,18 @@ TEST(a_team_size_outside_one_to_three_is_refused_by_name) {
 }
 
 TEST(a_team_reports_the_offending_member_by_index) {
-  PebbleInstance m[BATTLE_TEAM_MAX];
+  BugInstance m[BATTLE_TEAM_MAX];
   for (uint8_t i = 0; i < (uint8_t)BATTLE_TEAM_MAX; ++i)
     mk_valid(m[i], (uint8_t)(1u + i), 10, 0x40u + i);
 
   uint8_t bad = 0xEE;
-  m[2].level = (uint8_t)(PB_LEVEL_MAX + 1u);
+  m[2].level = (uint8_t)(ER_LEVEL_MAX + 1u);
   CHECK_EQ((int)validate_team(m, 3u, bad), (int)VR_BAD_LEVEL);
   CHECK_EQ((int)bad, 2);
   m[2].level = 10u;
   CHECK_EQ((int)validate_team(m, 3u, bad), (int)VR_OK);
 
-  // A peer sending one Pebble three times is exactly the lie spec section 9
+  // A peer sending one Bug three times is exactly the lie spec section 9
   // refuses; the index reported is the one that made the SET illegal.
   m[1].id = m[0].id;
   CHECK_EQ((int)validate_team(m, 3u, bad), (int)VR_DUPLICATE_ID);
@@ -464,8 +464,8 @@ TEST(a_team_reports_the_offending_member_by_index) {
   CHECK_EQ((int)validate_team(m, 3u, bad), (int)VR_OK);
 }
 
-TEST(the_agreed_level_band_is_a_session_rule_and_not_a_pebble_rule) {
-  PebbleInstance m[BATTLE_TEAM_MAX];
+TEST(the_agreed_level_band_is_a_session_rule_and_not_a_bug_rule) {
+  BugInstance m[BATTLE_TEAM_MAX];
   for (uint8_t i = 0; i < (uint8_t)BATTLE_TEAM_MAX; ++i)
     mk_valid(m[i], (uint8_t)(1u + i), (uint8_t)(8u + i * 4u), 0x50u + i);   // 8, 12, 16
 
@@ -478,8 +478,8 @@ TEST(the_agreed_level_band_is_a_session_rule_and_not_a_pebble_rule) {
   CHECK_EQ((int)validate_level_band(m, 3u, 9u, 16u, bad), (int)VR_LEVEL_OUT_OF_BAND);
   CHECK_EQ((int)bad, 0);
   // The SAME team is valid in one session and out of band in the next, which is
-  // why this is not part of validate_pebble().
-  for (uint8_t i = 0; i < 3u; ++i) CHECK_EQ((int)validate_pebble(m[i]), (int)VR_OK);
+  // why this is not part of validate_bug().
+  for (uint8_t i = 0; i < 3u; ++i) CHECK_EQ((int)validate_bug(m[i]), (int)VR_OK);
 }
 
 // =============================================================================
@@ -489,31 +489,31 @@ TEST(every_content_and_team_reject_is_reachable_and_no_wire_code_is) {
   bool seen[VR_REJECT_COUNT];
   memset(seen, 0, sizeof seen);
 
-  PebbleInstance p;
+  BugInstance p;
   uint8_t bad = 0;
   #define OBSERVE(expr) do { const VReject r_ = (expr); seen[(int)r_] = true; } while (0)
 
-  mk_valid(p, 1, 10, 7); OBSERVE(validate_pebble(p));                  // VR_OK
-  mk_valid(p, 1, 10, 7); p.id = 0;              OBSERVE(validate_pebble(p));
-  mk_valid(p, 1, 10, 7); p.species_id = 0;      OBSERVE(validate_pebble(p));
-  mk_valid(p, 1, 10, 7); p.level = 31;          OBSERVE(validate_pebble(p));
-  mk_valid(p, 1, 10, 7); p.xp = 60000;          OBSERVE(validate_pebble(p));
-  mk_valid(p, 1, 10, 7); p.genome.crc16 ^= 1;   OBSERVE(validate_pebble(p));
-  mk_valid(p, 1, 10, 7); p.moves[0] = 0;        OBSERVE(validate_pebble(p));
-  mk_valid(p, 1, 10, 7); p.moves[0] = MV_PLAGA; OBSERVE(validate_pebble(p));
-  mk_valid(p, 1, 10, 7); p.hp_cur = 0xFFFF;     OBSERVE(validate_pebble(p));
-  mk_valid(p, 5, 10, 7); p.evo_state = 0;       OBSERVE(validate_pebble(p));
-  mk_valid(p, 1,  1, 7); p.evo_state |= EVO_STATE_PENDING; OBSERVE(validate_pebble(p));
-  mk_valid(p, 1, 10, 7); p.status = 0x20;       OBSERVE(validate_pebble(p));
-  mk_valid(p, 1, 10, 7); p.flags = 0x40;        OBSERVE(validate_pebble(p));
-  mk_valid(p, 1, 10, 7); p.origin = ORIGIN_COUNT; OBSERVE(validate_pebble(p));
-  mk_valid(p, 1, 10, 7); p.trait_id = 1;        OBSERVE(validate_pebble(p));
-  mk_valid(p, 1, 10, 7); p.custom_sprite = 99;  OBSERVE(validate_pebble(p));
-  mk_valid(p, 1, 10, 7); p.care[0] = -1;        OBSERVE(validate_pebble(p));
+  mk_valid(p, 1, 10, 7); OBSERVE(validate_bug(p));                  // VR_OK
+  mk_valid(p, 1, 10, 7); p.id = 0;              OBSERVE(validate_bug(p));
+  mk_valid(p, 1, 10, 7); p.species_id = 0;      OBSERVE(validate_bug(p));
+  mk_valid(p, 1, 10, 7); p.level = 31;          OBSERVE(validate_bug(p));
+  mk_valid(p, 1, 10, 7); p.xp = 60000;          OBSERVE(validate_bug(p));
+  mk_valid(p, 1, 10, 7); p.genome.crc16 ^= 1;   OBSERVE(validate_bug(p));
+  mk_valid(p, 1, 10, 7); p.moves[0] = 0;        OBSERVE(validate_bug(p));
+  mk_valid(p, 1, 10, 7); p.moves[0] = MV_PLAGA; OBSERVE(validate_bug(p));
+  mk_valid(p, 1, 10, 7); p.hp_cur = 0xFFFF;     OBSERVE(validate_bug(p));
+  mk_valid(p, 5, 10, 7); p.evo_state = 0;       OBSERVE(validate_bug(p));
+  mk_valid(p, 1,  1, 7); p.evo_state |= EVO_STATE_PENDING; OBSERVE(validate_bug(p));
+  mk_valid(p, 1, 10, 7); p.status = 0x20;       OBSERVE(validate_bug(p));
+  mk_valid(p, 1, 10, 7); p.flags = 0x40;        OBSERVE(validate_bug(p));
+  mk_valid(p, 1, 10, 7); p.origin = ORIGIN_COUNT; OBSERVE(validate_bug(p));
+  mk_valid(p, 1, 10, 7); p.trait_id = 1;        OBSERVE(validate_bug(p));
+  mk_valid(p, 1, 10, 7); p.custom_sprite = 99;  OBSERVE(validate_bug(p));
+  mk_valid(p, 1, 10, 7); p.care[0] = -1;        OBSERVE(validate_bug(p));
   mk_valid(p, 1, 10, 7); memset(p.nickname, 'x', sizeof p.nickname);
-                                                OBSERVE(validate_pebble(p));
+                                                OBSERVE(validate_bug(p));
   {
-    PebbleInstance m[BATTLE_TEAM_MAX];
+    BugInstance m[BATTLE_TEAM_MAX];
     for (uint8_t i = 0; i < 3u; ++i) mk_valid(m[i], (uint8_t)(1u + i), 10, 0x60u + i);
     OBSERVE(validate_team(m, 0u, bad));
     m[1].id = m[0].id;
@@ -591,7 +591,7 @@ TEST(every_reject_has_a_distinct_english_name_and_the_lookup_is_total) {
 // =============================================================================
 //  5. THE RELATIONSHIP WITH THE ENGINE - the claim game/validate.h makes
 // =============================================================================
-static void mk_setup_from(BattleSetup& s, const PebbleInstance* team, uint8_t count)
+static void mk_setup_from(BattleSetup& s, const BugInstance* team, uint8_t count)
 {
   battle_setup_clear(s);
   s.seed     = 0xC0FFEEu;
@@ -616,9 +616,9 @@ static void sweep_containment(bool with_battle_ready, ContainCount& c)
 {
   memset(&c, 0, sizeof c);
   for (uint8_t s = 1; s <= (uint8_t)SPECIES_TABLE_COUNT; ++s) {
-    for (uint8_t lv = 1; lv <= (uint8_t)PB_LEVEL_MAX; lv = (uint8_t)(lv + 7u)) {
+    for (uint8_t lv = 1; lv <= (uint8_t)ER_LEVEL_MAX; lv = (uint8_t)(lv + 7u)) {
       for (uint8_t variant = 0; variant < 8u; ++variant) {
-        PebbleInstance m[BATTLE_TEAM_MAX];
+        BugInstance m[BATTLE_TEAM_MAX];
         for (uint8_t i = 0; i < 3u; ++i) {
           const uint8_t sp = (uint8_t)(((s + i * 5u - 1u) % SPECIES_TABLE_COUNT) + 1u);
           mk_valid(m[i], sp, lv, 0x1000u + s * 16u + i);
@@ -700,12 +700,12 @@ TEST(the_two_learnset_checkers_agree_on_every_roster_row) {
   int learnable = 0, refused = 0;
   for (uint8_t s = 1; s <= (uint8_t)SPECIES_TABLE_COUNT; ++s) {
     for (uint8_t t = 1; t <= (uint8_t)SPECIES_TABLE_COUNT; ++t) {
-      PebbleInstance p; mk_valid(p, s, 20, 0x2000u + s * 64u + t);
+      BugInstance p; mk_valid(p, s, 20, 0x2000u + s * 64u + t);
       memcpy(p.moves, species_get(t)->moves, sizeof p.moves);
 
-      const bool v_says = (validate_pebble(p) == VR_UNLEARNABLE_MOVESET);
+      const bool v_says = (validate_bug(p) == VR_UNLEARNABLE_MOVESET);
 
-      PebbleInstance one[1] = { p };
+      BugInstance one[1] = { p };
       BattleSetup su; mk_setup_from(su, one, 1u);
       BattleState st;
       const bool e_says = (battle_init(st, su) == BR_UNLEARNABLE_MOVE);
@@ -734,8 +734,8 @@ static GameState g_box_state;
 static void box_fixture(void) {
   memset(&g_box_state, 0, sizeof g_box_state);
   for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
-    g_box_state.pebbles[i].magic      = (uint16_t)PEBBLE_MAGIC;
-    g_box_state.pebbles[i].layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+    g_box_state.bugs[i].magic      = (uint16_t)BUG_MAGIC;
+    g_box_state.bugs[i].layout_ver = (uint8_t)BUG_LAYOUT_VER;
   }
   g_box_state.box.magic           = (uint16_t)BOX_MAGIC;
   g_box_state.box.active_slot     = (uint8_t)BOX_ACTIVE_NONE;
@@ -744,24 +744,24 @@ static void box_fixture(void) {
   box_bind(g_box_state);
 }
 
-TEST(a_constructed_pebble_validates) {
-  // MEASURED AND RECORDED IN game/validate.h: box_new_pebble() does NOT call
+TEST(a_constructed_bug_validates) {
+  // MEASURED AND RECORDED IN game/validate.h: box_new_bug() does NOT call
   // the validator, because it has never required a SEALED genome and four
-  // shipped test files hand it a zeroed one. What it must do is build a Pebble
+  // shipped test files hand it a zeroed one. What it must do is build a Bug
   // the validator accepts when it IS handed a real genome - and before P4-C5 it
   // did not, because it never wrote evo_state.
   int stage_nonzero = 0;
   for (uint8_t s = 1; s <= (uint8_t)SPECIES_TABLE_COUNT; ++s) {
     for (uint8_t lv = 1; lv <= 25u; lv = (uint8_t)(lv + 8u)) {
       box_fixture();
-      const uint8_t slot = box_new_pebble(s, lv, (uint8_t)ORIGIN_WILD,
+      const uint8_t slot = box_new_bug(s, lv, (uint8_t)ORIGIN_WILD,
                                           sealed_genome(0x1234u + s), 0xC0FFEEu, 1000u);
       CHECK(slot != (uint8_t)BOX_SLOT_NONE);
-      const PebbleInstance* p = box_slot(slot);
+      const BugInstance* p = box_slot(slot);
       CHECK(p != nullptr);
       if (p == nullptr) continue;
-      const VReject r = validate_pebble(*p);
-      if (r != VR_OK) fprintf(stderr, "    box_new_pebble(%u, %u) -> %s\n",
+      const VReject r = validate_bug(*p);
+      if (r != VR_OK) fprintf(stderr, "    box_new_bug(%u, %u) -> %s\n",
                               (unsigned)s, (unsigned)lv, validate_reject_name(r));
       CHECK_EQ((int)r, (int)VR_OK);
       CHECK_EQ((int)(p->evo_state & EVO_STATE_STAGE_MASK), (int)species_get(s)->stage);
@@ -915,7 +915,7 @@ TEST(the_move_rules_are_the_ones_the_shipped_roster_is_held_to) {
   CHECK_EQ((int)validate_custom_species(c), (int)VR_OK);
 
   // FOUR STATUS MOVES CANNOT WIN A BATTLE - attacks_table.h's own rule for the
-  // built-in roster, applied to a player's Pebble by the same words.
+  // built-in roster, applied to a player's Bug by the same words.
   mk_cs(c); cs_moves(c, MV_AMPLIFICAR, MV_ANTENA, MV_DEFRAG, MV_DEPURAR);
   CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_NO_DAMAGING_MOVE);
   // One damaging move is enough, and it is the ONLY difference here.
@@ -923,11 +923,11 @@ TEST(the_move_rules_are_the_ones_the_shipped_roster_is_held_to) {
   CHECK_EQ((int)validate_custom_species(c), (int)VR_OK);
 }
 
-TEST(the_page_may_not_price_its_own_pebble) {
+TEST(the_page_may_not_price_its_own_bug) {
   CustomSpeciesRec c;
   mk_cs(c);
   const uint16_t honest = c.budget_used;
-  c.budget_used = 0u;                       // "this Pebble is free"
+  c.budget_used = 0u;                       // "this Bug is free"
   CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_BUDGET_MISMATCH);
   c.budget_used = (uint16_t)(honest + 1u);
   CHECK_EQ((int)validate_custom_species(c), (int)VR_CS_BUDGET_MISMATCH);
@@ -1026,7 +1026,7 @@ TEST(a_refused_definition_is_never_installed) {
   CHECK_EQ((int)csp_count(), 0);
   // AND THE ID STILL DOES NOT RESOLVE, which is the property that matters: a
   // record that survived a CRC and failed the rules must leave the slot EMPTY,
-  // so the Pebble pointing at it is quarantined by name at the next scan rather
+  // so the Bug pointing at it is quarantined by name at the next scan rather
   // than resolved to a creature with a 30-point stat total.
   CHECK(species_get((uint8_t)CREATOR_SPECIES_ID_MIN) == nullptr);
 
@@ -1062,12 +1062,12 @@ TEST(the_registry_hands_out_ten_slots_and_no_eleventh) {
   csp_reset();
 }
 
-TEST(a_creator_pebble_is_an_ordinary_pebble_to_the_one_validator) {
+TEST(a_creator_bug_is_an_ordinary_bug_to_the_one_validator) {
   // THE WHOLE PIPELINE MINUS THE SOCKET, over the REAL registry, the REAL
   // constructor and the REAL validator - which is the only way this claim means
   // anything about the firmware. It is also the defect that was already waiting
   // in the tree: before the registry, species_get(200) answered nullptr, so
-  // box_new_pebble() refused outright and a Pebble filed any other way was
+  // box_new_bug() refused outright and a Bug filed any other way was
   // quarantined with VR_UNKNOWN_SPECIES on the next boot.
   csp_reset();
   box_fixture();
@@ -1075,17 +1075,17 @@ TEST(a_creator_pebble_is_an_ordinary_pebble_to_the_one_validator) {
   mk_cs(c);
 
   // Before installation the constructor refuses, by name.
-  CHECK_EQ((int)box_new_pebble((uint8_t)CREATOR_SPECIES_ID_MIN, 1u,
+  CHECK_EQ((int)box_new_bug((uint8_t)CREATOR_SPECIES_ID_MIN, 1u,
                                (uint8_t)ORIGIN_CREATOR, sealed_genome(0x51u),
                                0xC0FFEEu, 1000u),
            (int)BOX_SLOT_NONE);
 
   CHECK(csp_install(c));
   const uint8_t species_id = csp_species_id(0);
-  const uint8_t slot = box_new_pebble(species_id, 1u, (uint8_t)ORIGIN_CREATOR,
+  const uint8_t slot = box_new_bug(species_id, 1u, (uint8_t)ORIGIN_CREATOR,
                                       sealed_genome(0x51u), 0xC0FFEEu, 1000u);
   CHECK(slot != (uint8_t)BOX_SLOT_NONE);
-  PebbleInstance* p = box_slot(slot);
+  BugInstance* p = box_slot(slot);
   CHECK(p != nullptr);
   if (p == nullptr) { csp_reset(); return; }
 
@@ -1096,8 +1096,8 @@ TEST(a_creator_pebble_is_an_ordinary_pebble_to_the_one_validator) {
   memset(p->nickname, 0, sizeof p->nickname);
   memcpy(p->nickname, c.name, 6);
 
-  const VReject r = validate_pebble(*p);
-  if (r != VR_OK) fprintf(stderr, "    creator Pebble -> %s\n", validate_reject_name(r));
+  const VReject r = validate_bug(*p);
+  if (r != VR_OK) fprintf(stderr, "    creator Bug -> %s\n", validate_reject_name(r));
   CHECK_EQ((int)r, (int)VR_OK);
   CHECK_EQ((int)p->origin, (int)ORIGIN_CREATOR);
   CHECK_EQ((int)(p->evo_state & EVO_STATE_STAGE_MASK), 1);
@@ -1105,16 +1105,16 @@ TEST(a_creator_pebble_is_an_ordinary_pebble_to_the_one_validator) {
   // THE LEARNSET RULE IS THE ONE THAT WOULD HAVE BROKEN SILENTLY. A custom row
   // has family 0 and no row in SPECIES_TABLE, so the family walk can never match
   // it: without "a species teaches its own learnset" this is
-  // VR_UNLEARNABLE_MOVESET one instruction after the Pebble is built.
+  // VR_UNLEARNABLE_MOVESET one instruction after the Bug is built.
   CHECK_EQ((int)species_get(species_id)->family, 0);
 
   // And the record's own moves are what the creature carries - no repair, no
   // substitution.
-  for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m)
+  for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m)
     CHECK_EQ((int)p->moves[m], (int)c.moves[m]);
 
-  // Forgetting the record makes the SAME Pebble unknown again, which is what a
+  // Forgetting the record makes the SAME Bug unknown again, which is what a
   // lost or refused cs* blob looks like on the next boot.
   csp_reset();
-  CHECK_EQ((int)validate_pebble(*p), (int)VR_UNKNOWN_SPECIES);
+  CHECK_EQ((int)validate_bug(*p), (int)VR_UNKNOWN_SPECIES);
 }

@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_onboarding.cpp
+//  Errata host tests - test_onboarding.cpp
 //  app/onboarding.cpp: WHICH first-boot question a boot resumes at.
 //
 //  THE PROPERTY THAT NEEDS A REAL SAVE PIPELINE, AND WHY IT IS THIS BINARY.
@@ -131,8 +131,8 @@ TEST(a_fresh_device_is_asked_and_a_device_with_a_save_is_not) {
 // Reverting ob_boot_step() to "ask the boot kind first" left every other case
 // in this file green, because they all pass first_run = false. The two rules
 // only disagree when a save EXISTS and hardware/boot.cpp still calls the boot a
-// first run - and that is reachable: boot_note_save() takes gs_have_pebble(),
-// so a Box that came back with no Pebble in it (a slot write that did not land)
+// first run - and that is reachable: boot_note_save() takes gs_have_bug(),
+// so a Box that came back with no Bug in it (a slot write that did not land)
 // makes the verdict BOOT_FIRST_RUN while the CONFIG, and every answer already
 // typed into it, survived intact. Under the old order the player is asked their
 // name again with their name already stored.
@@ -258,9 +258,9 @@ TEST(the_three_starters_are_three_real_and_different_creatures) {
   CHECK_EQ((int)SPECIES_TABLE[ob_starter_species(0) - 1].type, (int)TYPE_SIGNAL);
   CHECK_EQ((int)SPECIES_TABLE[ob_starter_species(1) - 1].type, (int)TYPE_CORRUPT);
   CHECK_EQ((int)SPECIES_TABLE[ob_starter_species(2) - 1].type, (int)TYPE_SYSTEM);
-  // A PLAYER WHO CHOOSES NOTHING KEEPS THE PEBBLE EVERY EARLIER DEVICE HAD.
+  // A PLAYER WHO CHOOSES NOTHING KEEPS THE BUG EVERY EARLIER DEVICE HAD.
   CHECK_EQ((int)ob_starter_species(0), (int)SPECIES_ID_STARTER);
-  // Out of range answers 0, which box_new_pebble() and box_reroll_starter()
+  // Out of range answers 0, which box_new_bug() and box_reroll_starter()
   // both refuse, rather than answering species 1 and quietly minting one.
   CHECK_EQ((int)ob_starter_species((uint8_t)OB_STARTER_COUNT), 0);
   CHECK_EQ((int)ob_starter_species(0xFF), 0);

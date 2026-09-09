@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - fakes/alloc_count.h
+//  Errata host tests - fakes/alloc_count.h
 //  THE ALLOCATION COUNTER (P10-C2, spec section 46 "per-frame heap delta 0"
 //  and "no memory leaks").
 //

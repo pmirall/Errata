@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL host test - test_sprite_pipeline.cpp
+//  ERRATA host test - test_sprite_pipeline.cpp
 //  THE GENERATED ATLAS, AND THE ONE PROPERTY THAT PROVES THE BIT ORDER (P9-C1).
 //
 //  tools/gen_sprites.py turns ASCII art into XBM. The single most expensive way
@@ -35,7 +35,7 @@
 
 #include "data/species_table.h"
 #include "data/sprites.h"
-#include "data/sprites_pebbles.h"
+#include "data/sprites_bugs.h"
 #include "ui/petfx_core.h"
 
 // The decode, written out once. Same rule as data/sprite_types.h, same rule as
@@ -67,24 +67,24 @@ TEST(the_generated_eggs_are_the_legacy_eggs_byte_for_byte) {
   static const uint8_t kEggCrackHead[12] = {
     0x00, 0x00, 0x00,  0x00, 0x7E, 0x00,  0x00, 0xE7, 0x00,  0x80, 0xE7, 0x03,
   };
-  CHECK_EQ(sizeof pb_spr_egg_idle,  144u);
-  CHECK_EQ(sizeof pb_spr_egg_crack, 144u);
-  CHECK_EQ(memcmp(pb_spr_egg_idle,  kEggIdleHead,  sizeof kEggIdleHead),  0);
-  CHECK_EQ(memcmp(pb_spr_egg_crack, kEggCrackHead, sizeof kEggCrackHead), 0);
+  CHECK_EQ(sizeof bug_spr_egg_idle,  144u);
+  CHECK_EQ(sizeof bug_spr_egg_crack, 144u);
+  CHECK_EQ(memcmp(bug_spr_egg_idle,  kEggIdleHead,  sizeof kEggIdleHead),  0);
+  CHECK_EQ(memcmp(bug_spr_egg_crack, kEggCrackHead, sizeof kEggCrackHead), 0);
 
   // ...and the table rows, so a set that happened to hold the right bytes under
   // the wrong dimensions is not mistaken for a pass.
-  CHECK_EQ(PB_SPRITE_SETS[PBSPR_EGG_IDLE].w,       24);
-  CHECK_EQ(PB_SPRITE_SETS[PBSPR_EGG_IDLE].h,       24);
-  CHECK_EQ(PB_SPRITE_SETS[PBSPR_EGG_IDLE].frames,   2);
-  CHECK_EQ(PB_SPRITE_SETS[PBSPR_EGG_CRACK].w,      24);
-  CHECK_EQ(PB_SPRITE_SETS[PBSPR_EGG_CRACK].h,      24);
-  CHECK_EQ(PB_SPRITE_SETS[PBSPR_EGG_CRACK].frames,  2);
+  CHECK_EQ(ER_SPRITE_SETS[BUGSPR_EGG_IDLE].w,       24);
+  CHECK_EQ(ER_SPRITE_SETS[BUGSPR_EGG_IDLE].h,       24);
+  CHECK_EQ(ER_SPRITE_SETS[BUGSPR_EGG_IDLE].frames,   2);
+  CHECK_EQ(ER_SPRITE_SETS[BUGSPR_EGG_CRACK].w,      24);
+  CHECK_EQ(ER_SPRITE_SETS[BUGSPR_EGG_CRACK].h,      24);
+  CHECK_EQ(ER_SPRITE_SETS[BUGSPR_EGG_CRACK].frames,  2);
 
   // The egg is still slot 0, which sprite_set() falls back to for any
   // out-of-range id. Moving it is how every bad id starts drawing a creature.
-  CHECK_EQ((int)PBSPR_EGG_IDLE, 0);
-  CHECK_EQ(sprite_set(255).bits, PB_SPRITE_SETS[PBSPR_EGG_IDLE].bits);
+  CHECK_EQ((int)BUGSPR_EGG_IDLE, 0);
+  CHECK_EQ(sprite_set(255).bits, ER_SPRITE_SETS[BUGSPR_EGG_IDLE].bits);
 }
 
 // A pixel this test can point at BY COORDINATE, so the case above cannot pass
@@ -94,7 +94,7 @@ TEST(the_generated_eggs_are_the_legacy_eggs_byte_for_byte) {
 // 0x7E reversed (0x7E is a palindrome under bit reversal - hence the SECOND
 // row, whose 0x80,0xFF,0x01 is not).
 TEST(the_leftmost_pixel_of_a_row_is_the_low_bit_of_its_first_byte) {
-  const SpriteSet& e = PB_SPRITE_SETS[PBSPR_EGG_IDLE];
+  const SpriteSet& e = ER_SPRITE_SETS[BUGSPR_EGG_IDLE];
   // Row 1: pixels 9..14 lit, 0..8 and 15..23 clear.
   for (int x = 0; x < 24; ++x)
     CHECK_EQ(pixel_at(e, 0, x, 1), (x >= 9 && x <= 14) ? 1 : 0);
@@ -103,37 +103,37 @@ TEST(the_leftmost_pixel_of_a_row_is_the_low_bit_of_its_first_byte) {
     CHECK_EQ(pixel_at(e, 0, x, 3), (x >= 7 && x <= 16) ? 1 : 0);
   // The raw bytes those two rows must be, stated rather than derived, so a
   // change to pixel_at() cannot make this case agree with itself.
-  CHECK_EQ(pb_spr_egg_idle[3 * 1 + 0], 0x00);
-  CHECK_EQ(pb_spr_egg_idle[3 * 1 + 1], 0x7E);
-  CHECK_EQ(pb_spr_egg_idle[3 * 1 + 2], 0x00);
-  CHECK_EQ(pb_spr_egg_idle[3 * 3 + 0], 0x80);
-  CHECK_EQ(pb_spr_egg_idle[3 * 3 + 1], 0xFF);
-  CHECK_EQ(pb_spr_egg_idle[3 * 3 + 2], 0x01);
+  CHECK_EQ(bug_spr_egg_idle[3 * 1 + 0], 0x00);
+  CHECK_EQ(bug_spr_egg_idle[3 * 1 + 1], 0x7E);
+  CHECK_EQ(bug_spr_egg_idle[3 * 1 + 2], 0x00);
+  CHECK_EQ(bug_spr_egg_idle[3 * 3 + 0], 0x80);
+  CHECK_EQ(bug_spr_egg_idle[3 * 3 + 1], 0xFF);
+  CHECK_EQ(bug_spr_egg_idle[3 * 3 + 2], 0x01);
 }
 
 // =============================================================================
 //  2. THE GENERATED ATLAS IS WELL FORMED
 // =============================================================================
 TEST(every_generated_row_matches_the_array_it_points_at) {
-  CHECK(PB_SPRITE_SET_COUNT >= 1);
+  CHECK(ER_SPRITE_SET_COUNT >= 1);
   unsigned total = 0;
-  for (int i = 0; i < (int)PB_SPRITE_SET_COUNT; ++i) {
-    const SpriteSet& s = PB_SPRITE_SETS[i];
+  for (int i = 0; i < (int)ER_SPRITE_SET_COUNT; ++i) {
+    const SpriteSet& s = ER_SPRITE_SETS[i];
     CHECK(s.bits != nullptr);
     CHECK(s.w >= 1 && s.h >= 1);
     CHECK(s.w <= 40 && s.h <= 40);      // PF_MAX_W/H, XBM_MIRROR_MAX_W
     CHECK(s.frames >= 1);               // sprite_frame() does `frame % frames`
-    CHECK(PB_SPRITE_NAMES[i] != nullptr && PB_SPRITE_NAMES[i][0] != '\0');
+    CHECK(ER_SPRITE_NAMES[i] != nullptr && ER_SPRITE_NAMES[i][0] != '\0');
     total += spr_set_bytes(s);
   }
   // The generator's own arithmetic, the compiler's, and this test's all agree.
-  CHECK_EQ(total, (unsigned)PB_SPRITE_DATA_BYTES);
-  CHECK_EQ(total, (unsigned)PB_SPRITE_DATA_BYTES_DECLARED);
+  CHECK_EQ(total, (unsigned)ER_SPRITE_DATA_BYTES);
+  CHECK_EQ(total, (unsigned)ER_SPRITE_DATA_BYTES_DECLARED);
 }
 
 TEST(every_generated_frame_has_ink_and_no_stray_padding_bits) {
-  for (int i = 0; i < (int)PB_SPRITE_SET_COUNT; ++i) {
-    const SpriteSet& s = PB_SPRITE_SETS[i];
+  for (int i = 0; i < (int)ER_SPRITE_SET_COUNT; ++i) {
+    const SpriteSet& s = ER_SPRITE_SETS[i];
     const int stride = ((int)s.w + 7) >> 3;
     const int pad    = stride * 8 - (int)s.w;
     const unsigned mask = pad ? (unsigned)((0xFFu << (8 - pad)) & 0xFFu) : 0u;
@@ -183,8 +183,8 @@ TEST(every_generated_frame_has_ink_and_no_stray_padding_bits) {
 // deliberately still, name it in the exception below rather than deleting the
 // case - "this one is meant to be" is a fact worth writing down.
 TEST(a_two_frame_set_actually_animates) {
-  for (int i = 0; i < (int)PB_SPRITE_SET_COUNT; ++i) {
-    const SpriteSet& s = PB_SPRITE_SETS[i];
+  for (int i = 0; i < (int)ER_SPRITE_SET_COUNT; ++i) {
+    const SpriteSet& s = ER_SPRITE_SETS[i];
     if (s.frames < 2) continue;
     // (no deliberate exceptions today)
     int diff = 0;
@@ -193,7 +193,7 @@ TEST(a_two_frame_set_actually_animates) {
         if (pixel_at(s, 0, x, y) != pixel_at(s, 1, x, y)) ++diff;
     if (diff == 0) {
       // Named, so the failure line says WHICH set was copy-pasted.
-      nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+      nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[i]);
     }
     CHECK(diff > 0);
   }
@@ -236,8 +236,8 @@ TEST(a_two_frame_set_actually_animates) {
 // decide it rather than rediscover it.
 TEST(the_idle_animation_has_an_amplitude_and_a_spread) {
   int lo = 1000, hi = 0;
-  for (int i = 0; i < (int)PB_SPRITE_SET_COUNT; ++i) {
-    const SpriteSet& s = PB_SPRITE_SETS[i];
+  for (int i = 0; i < (int)ER_SPRITE_SET_COUNT; ++i) {
+    const SpriteSet& s = ER_SPRITE_SETS[i];
     if (s.frames < 2) continue;
     int diff = 0, ink = 0;
     bool row_hit[24] = {false}, col_hit[24] = {false};
@@ -254,15 +254,15 @@ TEST(the_idle_animation_has_an_amplitude_and_a_spread) {
     for (int k = 0; k < 24; ++k) { rows += row_hit[k]; cols += col_hit[k]; }
 
     const int pct = (100 * diff) / (ink ? ink : 1);
-    if (pct < 4 || pct > 45) nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+    if (pct < 4 || pct > 45) nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[i]);
     CHECK(pct >= 4);
     CHECK(pct <= 45);
     // An absolute floor as well as a relative one: 4 % of a 300 px body is 12 px,
     // but 4 % of a 79 px body is 3, and three pixels is not an animation.
-    if (diff < 6) nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+    if (diff < 6) nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[i]);
     CHECK(diff >= 6);
     // THE SHAPE. One row of pixels flickering is the defect this half exists for.
-    if (rows < 2 || cols < 2) nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+    if (rows < 2 || cols < 2) nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[i]);
     CHECK(rows >= 2);
     CHECK(cols >= 2);
 
@@ -279,36 +279,36 @@ TEST(the_idle_animation_has_an_amplitude_and_a_spread) {
 //  3. THE SLOT CONTRACT P9-C3 INHERITS
 // =============================================================================
 // The species bodies are the TAIL of the atlas and a body's slot is
-// PB_SPRITE_BODY_FIRST + (species_id - 1) - the pack's `sprite_id == id - 1`
+// ER_SPRITE_BODY_FIRST + (species_id - 1) - the pack's `sprite_id == id - 1`
 // invariant expressed in the atlas. tools/gen_sprites.py refuses a source tree
 // that breaks it; this is the same statement over the emitted header, which is
 // what the firmware will actually index.
 TEST(the_species_block_is_the_tail_of_the_generated_atlas) {
-  CHECK_EQ((int)PB_SPRITE_BODY_FIRST,
-           (int)PB_SPRITE_SET_COUNT - (int)PB_SPRITE_BODY_COUNT);
-  CHECK(PB_SPRITE_BODY_COUNT <= PB_SPRITE_SET_COUNT);
+  CHECK_EQ((int)ER_SPRITE_BODY_FIRST,
+           (int)ER_SPRITE_SET_COUNT - (int)ER_SPRITE_BODY_COUNT);
+  CHECK(ER_SPRITE_BODY_COUNT <= ER_SPRITE_SET_COUNT);
 
   // THE LOOP WAS EMPTY AT P9-C1 AND THE COUNT WAS ASSERTED TO BE 0 so that
   // "no bodies yet" was a recorded fact rather than a vacuous loop nobody
   // noticed. P9-C3 drew them; the assertion moved with the art rather than
   // being deleted, and 60 is now the number that has to hold.
-  CHECK_EQ((int)PB_SPRITE_BODY_COUNT, 60);
-  for (int k = 0; k < (int)PB_SPRITE_BODY_COUNT; ++k) {
-    const SpriteSet& s = PB_SPRITE_SETS[PB_SPRITE_BODY_FIRST + k];
+  CHECK_EQ((int)ER_SPRITE_BODY_COUNT, 60);
+  for (int k = 0; k < (int)ER_SPRITE_BODY_COUNT; ++k) {
+    const SpriteSet& s = ER_SPRITE_SETS[ER_SPRITE_BODY_FIRST + k];
     CHECK_EQ(s.w, 24);
     CHECK_EQ(s.h, 24);
     CHECK_EQ(s.frames, 2);
   }
   // A body may never be bound to a species the roster does not ship.
-  CHECK(PB_SPRITE_BODY_COUNT <= SPECIES_PACK_COUNT);
+  CHECK(ER_SPRITE_BODY_COUNT <= SPECIES_PACK_COUNT);
   // And the four fixed slots are the four this build's lookup names. A fifth
   // effect set appended in the WRONG place would push every species body one
   // slot along and every one of them would draw its neighbour.
-  CHECK_EQ((int)PB_SPRITE_BODY_FIRST, 4);
-  CHECK_EQ((int)PBSPR_EGG_IDLE,  0);
-  CHECK_EQ((int)PBSPR_EGG_CRACK, 1);
-  CHECK_EQ((int)PBSPR_SLEEP,     2);
-  CHECK_EQ((int)PBSPR_SICK,      3);
+  CHECK_EQ((int)ER_SPRITE_BODY_FIRST, 4);
+  CHECK_EQ((int)BUGSPR_EGG_IDLE,  0);
+  CHECK_EQ((int)BUGSPR_EGG_CRACK, 1);
+  CHECK_EQ((int)BUGSPR_SLEEP,     2);
+  CHECK_EQ((int)BUGSPR_SICK,      3);
 }
 
 // EVERY SPECIES BODY IS A DIFFERENT PICTURE, not merely a different pointer.
@@ -319,16 +319,16 @@ TEST(the_species_block_is_the_tail_of_the_generated_atlas) {
 // way pointers cannot see: two files with the same pixels. This compares the
 // bytes, both frames, all 1,770 pairs.
 TEST(no_two_species_bodies_hold_the_same_pixels) {
-  for (int a = 0; a < (int)PB_SPRITE_BODY_COUNT; ++a)
-    for (int b = a + 1; b < (int)PB_SPRITE_BODY_COUNT; ++b) {
-      const SpriteSet& x = PB_SPRITE_SETS[PB_SPRITE_BODY_FIRST + a];
-      const SpriteSet& y = PB_SPRITE_SETS[PB_SPRITE_BODY_FIRST + b];
+  for (int a = 0; a < (int)ER_SPRITE_BODY_COUNT; ++a)
+    for (int b = a + 1; b < (int)ER_SPRITE_BODY_COUNT; ++b) {
+      const SpriteSet& x = ER_SPRITE_SETS[ER_SPRITE_BODY_FIRST + a];
+      const SpriteSet& y = ER_SPRITE_SETS[ER_SPRITE_BODY_FIRST + b];
       if (x.bits == y.bits) {
-        nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[PB_SPRITE_BODY_FIRST + a]);
+        nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[ER_SPRITE_BODY_FIRST + a]);
         continue;
       }
       if (memcmp(x.bits, y.bits, spr_set_bytes(x)) == 0)
-        nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[PB_SPRITE_BODY_FIRST + b]);
+        nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[ER_SPRITE_BODY_FIRST + b]);
     }
 }
 
@@ -349,14 +349,14 @@ TEST(no_two_species_bodies_hold_the_same_pixels) {
 // pixel high, which is where it has always been. Listing the two by NAME means
 // a sixty-first body that hovers cannot join them by accident.
 TEST(every_body_has_ink_on_its_last_row) {
-  for (int i = 0; i < (int)PB_SPRITE_SET_COUNT; ++i) {
-    const SpriteSet& s = PB_SPRITE_SETS[i];
-    if (i == (int)PBSPR_EGG_IDLE || i == (int)PBSPR_EGG_CRACK) continue;
+  for (int i = 0; i < (int)ER_SPRITE_SET_COUNT; ++i) {
+    const SpriteSet& s = ER_SPRITE_SETS[i];
+    if (i == (int)BUGSPR_EGG_IDLE || i == (int)BUGSPR_EGG_CRACK) continue;
     for (int f = 0; f < (int)s.frames; ++f) {
       int ink_on_last = 0;
       for (int x = 0; x < (int)s.w; ++x)
         ink_on_last += pixel_at(s, f, x, (int)s.h - 1);
-      if (ink_on_last == 0) nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+      if (ink_on_last == 0) nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[i]);
       CHECK(ink_on_last > 0);
     }
   }
@@ -364,7 +364,7 @@ TEST(every_body_has_ink_on_its_last_row) {
   // whatever they like, so a re-drawn egg that floated four pixels above the
   // floor would fail here rather than inherit the exemption.
   for (int i = 0; i < 2; ++i) {
-    const SpriteSet& s = PB_SPRITE_SETS[i];
+    const SpriteSet& s = ER_SPRITE_SETS[i];
     for (int f = 0; f < (int)s.frames; ++f) {
       int last_inked = -1;
       for (int y = 0; y < (int)s.h; ++y)
@@ -376,13 +376,13 @@ TEST(every_body_has_ink_on_its_last_row) {
 }
 
 // THE EYE BANDS ARE INSIDE THE BODIES THEY INDEX, at runtime as well as at
-// compile time. data/sprites_pebbles.h static_asserts it; this is the same rule
+// compile time. data/sprites_bugs.h static_asserts it; this is the same rule
 // as a test, for the same reason section 5 below exists - and it additionally
 // checks the property the static_assert cannot express cheaply: a band that
 // says a body blinks must actually contain an unlit pixel to close.
 //
 // THE COUNT IS PINNED AT P9-C6 AND THAT IS THE POINT OF THIS EDIT. It used to
-// read `CHECK(blinkers > PB_SPRITE_SET_COUNT)` against a value of 118, i.e. 53
+// read `CHECK(blinkers > ER_SPRITE_SET_COUNT)` against a value of 118, i.e. 53
 // of the 128 bands could be dropped ONE AT A TIME with the suite green - the
 // aggregate-mask shape the phase-8 review was caught with, and the exit review
 // demonstrated it: moving the derivation's cut from 60 % to 40 % took 26 bodies'
@@ -392,8 +392,8 @@ TEST(every_body_has_ink_on_its_last_row) {
 // count the frames that report eyes, and re-record it here in the same commit.
 TEST(every_eye_band_lies_inside_its_body_and_has_something_to_close) {
   int blinkers = 0;
-  for (int i = 0; i < (int)PB_SPRITE_SET_COUNT; ++i) {
-    const SpriteSet& s = PB_SPRITE_SETS[i];
+  for (int i = 0; i < (int)ER_SPRITE_SET_COUNT; ++i) {
+    const SpriteSet& s = ER_SPRITE_SETS[i];
     for (int f = 0; f < 2; ++f) {
       const SpriteEyeBand e = sprite_eyes((uint8_t)i, (uint8_t)f);
       if (e.y1 < e.y0) continue;        // "does not blink"
@@ -406,13 +406,13 @@ TEST(every_eye_band_lies_inside_its_body_and_has_something_to_close) {
       // would silently blink half a socket. The generator's own EYE_MAX_H is 8;
       // this is the other end of that agreement.
       if ((int)e.y1 - (int)e.y0 + 1 > PF_EYE_MAX_H)
-        nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+        nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[i]);
       CHECK((int)e.y1 - (int)e.y0 + 1 <= PF_EYE_MAX_H);
       int holes = 0;
       for (int y = e.y0; y <= (int)e.y1; ++y)
         for (int x = e.x0; x <= (int)e.x1; ++x)
           if (!pixel_at(s, f, x, y)) ++holes;
-      if (holes == 0) nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+      if (holes == 0) nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[i]);
       CHECK(holes > 0);
     }
   }
@@ -511,8 +511,8 @@ static BlinkResult blink_of(const SpriteSet& s, int frame, SpriteEyeBand e) {
 
 TEST(the_blink_closes_holes_and_never_draws_over_the_body) {
   int worst_pct = 0, blinkers = 0;
-  for (int i = 0; i < (int)PB_SPRITE_SET_COUNT; ++i) {
-    const SpriteSet& s = PB_SPRITE_SETS[i];
+  for (int i = 0; i < (int)ER_SPRITE_SET_COUNT; ++i) {
+    const SpriteSet& s = ER_SPRITE_SETS[i];
     for (int f = 0; f < (int)s.frames; ++f) {
       const SpriteEyeBand e = sprite_eyes((uint8_t)i, (uint8_t)f);
       const BlinkResult r = blink_of(s, f, e);
@@ -525,10 +525,10 @@ TEST(the_blink_closes_holes_and_never_draws_over_the_body) {
       ++blinkers;
       // A band that claims to blink and fills nothing is a lie the old
       // assertion could not tell from a blink.
-      if (r.filled == 0) nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+      if (r.filled == 0) nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[i]);
       CHECK(r.filled > 0);
       // THE PROPERTY.
-      if (r.over_body != 0) nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+      if (r.over_body != 0) nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[i]);
       CHECK_EQ(r.over_body, 0);
       // Nothing outside the sprite, ever.
       CHECK(r.max_x < (int)s.w);
@@ -564,8 +564,8 @@ TEST(the_blink_closes_holes_and_never_draws_over_the_body) {
 // derivation produced for DENYRA) and require it to say so, by name.
 TEST(the_over_fill_recorder_would_see_a_blink_that_swallowed_the_body) {
   int caught = 0, tried = 0;
-  for (int i = (int)PB_SPRITE_BODY_FIRST; i < (int)PB_SPRITE_SET_COUNT; ++i) {
-    const SpriteSet& s = PB_SPRITE_SETS[i];
+  for (int i = (int)ER_SPRITE_BODY_FIRST; i < (int)ER_SPRITE_SET_COUNT; ++i) {
+    const SpriteSet& s = ER_SPRITE_SETS[i];
     // rows 3..14 across the full width: the shape of the band the old rule
     // emitted for DENYRA ({3, 14, 0, 23}).
     SpriteEyeBand wide{3, 14, 0, (uint8_t)(s.w - 1)};
@@ -580,7 +580,7 @@ TEST(the_over_fill_recorder_would_see_a_blink_that_swallowed_the_body) {
   CHECK(caught >= 20);
   // And the one the review actually measured, by name.
   {
-    const SpriteSet& d = PB_SPRITE_SETS[PBSPR_DENYRA];
+    const SpriteSet& d = ER_SPRITE_SETS[BUGSPR_DENYRA];
     const BlinkResult r = blink_of(d, 0, SpriteEyeBand{3, 14, 0, 23});
     CHECK(r.over_body > 40);
   }
@@ -598,10 +598,10 @@ TEST(the_over_fill_recorder_would_see_a_blink_that_swallowed_the_body) {
 // =============================================================================
 TEST(the_atlas_is_at_its_end_state_and_the_transition_allowance_is_gone) {
   // 2 eggs + SLEEP + SICK + 60 bodies, every one of them 24x24x2 at 144 B.
-  CHECK_EQ((unsigned)PB_SPRITE_DATA_BYTES, 64u * 144u);
-  CHECK_EQ((unsigned)PB_SPRITE_DATA_BYTES, 9216u);
-  CHECK_EQ((unsigned)PB_SPRITE_DATA_BYTES,
-           (unsigned)PB_SPRITE_DATA_BYTES_DECLARED);
+  CHECK_EQ((unsigned)ER_SPRITE_DATA_BYTES, 64u * 144u);
+  CHECK_EQ((unsigned)ER_SPRITE_DATA_BYTES, 9216u);
+  CHECK_EQ((unsigned)ER_SPRITE_DATA_BYTES,
+           (unsigned)ER_SPRITE_DATA_BYTES_DECLARED);
 
   // The survivors data/sprites.h still owns, ASSERTED TERM BY TERM (P9-C6).
   // This used to be one CHECK_EQ on the SUM, sitting under a comment that said
@@ -620,7 +620,7 @@ TEST(the_atlas_is_at_its_end_state_and_the_transition_allowance_is_gone) {
   CHECK_EQ((unsigned)sizeof(spr_badge12), 312u);
   CHECK_EQ(emotes,                        167u);
   const unsigned survivors = (unsigned)SPRITE_DATA_BYTES
-                           - (unsigned)PB_SPRITE_DATA_BYTES;
+                           - (unsigned)ER_SPRITE_DATA_BYTES;
   CHECK_EQ(survivors, 1031u);
   CHECK_EQ(survivors, 384u + 168u + 312u + 167u);
 
@@ -647,16 +647,16 @@ TEST(the_atlas_is_at_its_end_state_and_the_transition_allowance_is_gone) {
 // =============================================================================
 TEST(every_row_matches_the_array_it_points_at) {
   unsigned total = 0;
-  for (int i = 0; i < (int)PB_SPRITE_SET_COUNT; ++i) {
-    const SpriteSet& s = PB_SPRITE_SETS[i];
+  for (int i = 0; i < (int)ER_SPRITE_SET_COUNT; ++i) {
+    const SpriteSet& s = ER_SPRITE_SETS[i];
     CHECK(s.bits != nullptr);
     CHECK(s.frames >= 1);
     CHECK(s.w >= 1 && s.h >= 1 && s.w <= 40 && s.h <= 40);
     total += spr_set_bytes(s);
     // Distinctness: two rows pointing at ONE array is how a set silently
     // becomes a copy of its neighbour.
-    for (int j = i + 1; j < (int)PB_SPRITE_SET_COUNT; ++j)
-      CHECK(PB_SPRITE_SETS[i].bits != PB_SPRITE_SETS[j].bits);
+    for (int j = i + 1; j < (int)ER_SPRITE_SET_COUNT; ++j)
+      CHECK(ER_SPRITE_SETS[i].bits != ER_SPRITE_SETS[j].bits);
   }
   CHECK_EQ(total, 9216u);
   CHECK_EQ((unsigned)SPRITE_DATA_BYTES, 10247u);
@@ -674,48 +674,48 @@ TEST(the_lookup_answers_the_body_the_species_asked_for) {
   // a pose set - a cracking egg that goes to sleep is not a picture this
   // product has.
   for (uint8_t pose = 0; pose < (uint8_t)POSE_COUNT; ++pose)
-    CHECK_EQ(sprite_set_id((uint8_t)STAGE_EGG, 7u, pose), (uint8_t)PBSPR_EGG_IDLE);
+    CHECK_EQ(sprite_set_id((uint8_t)STAGE_EGG, 7u, pose), (uint8_t)BUGSPR_EGG_IDLE);
 
   // Then the body, at every stage above EGG. The stage no longer changes it,
   // and that is the deletion this chunk made - so it is asserted, not assumed.
   for (uint8_t st = STAGE_BABY; st <= STAGE_SENIOR; ++st)
-    for (uint8_t key = 0; key < (uint8_t)PB_SPRITE_BODY_COUNT; ++key)
+    for (uint8_t key = 0; key < (uint8_t)ER_SPRITE_BODY_COUNT; ++key)
       CHECK_EQ(sprite_set_id(st, sprite_form_of(key, (Stage)st), (uint8_t)POSE_IDLE),
-               (uint8_t)(PB_SPRITE_BODY_FIRST + key));
+               (uint8_t)(ER_SPRITE_BODY_FIRST + key));
 
   // SLEEP and SICK are one set each, for every species and every stage.
   for (uint8_t st = STAGE_BABY; st <= STAGE_SENIOR; ++st) {
-    CHECK_EQ(sprite_set_id(st, 41u, (uint8_t)POSE_SLEEP), (uint8_t)PBSPR_SLEEP);
-    CHECK_EQ(sprite_set_id(st, 41u, (uint8_t)POSE_SICK),  (uint8_t)PBSPR_SICK);
+    CHECK_EQ(sprite_set_id(st, 41u, (uint8_t)POSE_SLEEP), (uint8_t)BUGSPR_SLEEP);
+    CHECK_EQ(sprite_set_id(st, 41u, (uint8_t)POSE_SICK),  (uint8_t)BUGSPR_SICK);
   }
   // EAT HAS NO ART AND FALLS THROUGH TO THE BODY - the answer P9-C3 gave to the
   // pose question, pinned so that "we dropped it" cannot decay into "we forgot
   // it". data/sprites.h's LOOKUP banner carries the argument.
   for (uint8_t st = STAGE_BABY; st <= STAGE_SENIOR; ++st)
     CHECK_EQ(sprite_set_id(st, 41u, (uint8_t)POSE_EAT),
-             (uint8_t)(PB_SPRITE_BODY_FIRST + 41u));
+             (uint8_t)(ER_SPRITE_BODY_FIRST + 41u));
 
   // THE CLAMP. A form past the end of the atlas falls back to the FIRST body,
   // never past the end of the table - and never onto an egg or a pose set,
   // which is where an unclamped add would land a save written by a build with
   // more families than this one.
-  for (unsigned bad = PB_SPRITE_BODY_COUNT; bad <= 255u; ++bad) {
+  for (unsigned bad = ER_SPRITE_BODY_COUNT; bad <= 255u; ++bad) {
     const uint8_t id = sprite_set_id((uint8_t)STAGE_ADULT, (uint8_t)bad,
                                      (uint8_t)POSE_IDLE);
-    CHECK_EQ((int)id, (int)PB_SPRITE_BODY_FIRST);
-    CHECK(id < (uint8_t)PB_SPRITE_SET_COUNT);
+    CHECK_EQ((int)id, (int)ER_SPRITE_BODY_FIRST);
+    CHECK(id < (uint8_t)ER_SPRITE_SET_COUNT);
   }
   // ...and sprite_set() clamps the ID itself, one layer further in.
-  for (unsigned bad = PB_SPRITE_SET_COUNT; bad <= 255u; ++bad)
-    CHECK_EQ(sprite_set((uint8_t)bad).bits, PB_SPRITE_SETS[PBSPR_EGG_IDLE].bits);
+  for (unsigned bad = ER_SPRITE_SET_COUNT; bad <= 255u; ++bad)
+    CHECK_EQ(sprite_set((uint8_t)bad).bits, ER_SPRITE_SETS[BUGSPR_EGG_IDLE].bits);
 }
 
 // sprite_frame() is the other half, and its `frame % frames` is the line that
 // divides by zero on a zero-frames row. NT_SPR_SET_FITS refuses such a row at
 // compile time; this checks the behaviour on the rows that exist.
 TEST(a_frame_index_past_the_end_wraps_instead_of_reading_past_the_array) {
-  for (int i = 0; i < (int)PB_SPRITE_SET_COUNT; ++i) {
-    const SpriteSet& s = PB_SPRITE_SETS[i];
+  for (int i = 0; i < (int)ER_SPRITE_SET_COUNT; ++i) {
+    const SpriteSet& s = ER_SPRITE_SETS[i];
     for (int f = 0; f < 8; ++f) {
       const SpriteRef r = sprite_frame((uint8_t)i, (uint8_t)f);
       CHECK_EQ(r.w, s.w);
@@ -757,8 +757,8 @@ TEST(every_species_derives_a_sleeping_body_that_is_still_that_species) {
   const char* worst_name = "?";
   int bodies = 0, no_band = 0, eyes_proved = 0, eyes_in_the_splay = 0;
 
-  for (int i = (int)PB_SPRITE_BODY_FIRST; i < (int)PB_SPRITE_SET_COUNT; ++i) {
-    const SpriteSet& s = PB_SPRITE_SETS[i];
+  for (int i = (int)ER_SPRITE_BODY_FIRST; i < (int)ER_SPRITE_SET_COUNT; ++i) {
+    const SpriteSet& s = ER_SPRITE_SETS[i];
     const uint8_t stride = pf_stride(s.w);
     const uint16_t fbytes = (uint16_t)stride * s.h;
     for (int f = 0; f < (int)s.frames; ++f) {
@@ -773,9 +773,9 @@ TEST(every_species_derives_a_sleeping_body_that_is_still_that_species) {
       // (b) THE FLOOR. A body that sleeps by changing nothing a player can see
       // is the defect this whole decision turns on, so it fails BY NAME.
       if (diff < (uint16_t)PF_SLEEP_MIN_DIFF)
-        nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+        nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[i]);
       CHECK(diff >= (uint16_t)PF_SLEEP_MIN_DIFF);
-      if (diff < worst_diff) { worst_diff = diff; worst_name = PB_SPRITE_NAMES[i]; }
+      if (diff < worst_diff) { worst_diff = diff; worst_name = ER_SPRITE_NAMES[i]; }
 
       uint8_t t, b, l, r;
       CHECK_EQ(pf_scan_ink(src, s.w, s.h, &t, &b, &l, &r), 1u);
@@ -793,9 +793,9 @@ TEST(every_species_derives_a_sleeping_body_that_is_still_that_species) {
           if (!inside) {
             fprintf(stderr, "  %s frame %d: sleeping pixel (%u,%u) outside the "
                             "idle ink box [%u..%u]x[%u..%u] grown by one\n",
-                    PB_SPRITE_NAMES[i], f, (unsigned)x, (unsigned)y,
+                    ER_SPRITE_NAMES[i], f, (unsigned)x, (unsigned)y,
                     (unsigned)l, (unsigned)r, (unsigned)t, (unsigned)b);
-            nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+            nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[i]);
           }
           CHECK(inside);
         }
@@ -829,7 +829,7 @@ TEST(every_species_derives_a_sleeping_body_that_is_still_that_species) {
         uint8_t fill[PF_STRIP_BYTES], cut[PF_STRIP_BYTES];
         const uint8_t bh = pf_build_lids(src, s.w, s.h, e.y0, e.y1, e.x0, e.x1,
                                          fill, cut);
-        if (bh == 0u) nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+        if (bh == 0u) nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[i]);
         int provable = 0;
         for (uint8_t rr = 0; rr < bh; ++rr) {
           const uint8_t y = (uint8_t)(e.y0 + rr);
@@ -846,8 +846,8 @@ TEST(every_species_derives_a_sleeping_body_that_is_still_that_species) {
               fprintf(stderr, "  %s frame %d: eye pixel (%u,%u) is OPEN in the "
                               "sleeping body - the pose settled but the eyes "
                               "never shut\n",
-                      PB_SPRITE_NAMES[i], f, (unsigned)x, (unsigned)y);
-              nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+                      ER_SPRITE_NAMES[i], f, (unsigned)x, (unsigned)y);
+              nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[i]);
             }
           }
         }
@@ -866,8 +866,8 @@ TEST(every_species_derives_a_sleeping_body_that_is_still_that_species) {
       CHECK(ink > 0);
       if (slp * 100 < ink * 80 || slp * 100 > ink * 160) {
         fprintf(stderr, "  %s frame %d: %d px asleep against %d awake\n",
-                PB_SPRITE_NAMES[i], f, slp, ink);
-        nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[i]);
+                ER_SPRITE_NAMES[i], f, slp, ink);
+        nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[i]);
       }
     }
   }
@@ -904,7 +904,7 @@ TEST(the_sleep_floor_would_see_a_pose_that_changed_nothing) {
   CHECK_EQ(pf_build_sleep(blank, 24, 24, 0, 0, 0, 23, out), 0u);
 
   // A frame larger than the cache geometry is refused, not truncated.
-  CHECK_EQ(pf_build_sleep(PB_SPRITE_SETS[PB_SPRITE_BODY_FIRST].bits,
+  CHECK_EQ(pf_build_sleep(ER_SPRITE_SETS[ER_SPRITE_BODY_FIRST].bits,
                           (uint8_t)(PF_MAX_W + 1), 24, 0, 0, 0, 23, out), 0u);
 
   // A body that is a single lit pixel has no second ink row to merge and no
@@ -927,7 +927,7 @@ TEST(the_sleep_floor_would_see_a_pose_that_changed_nothing) {
   // This is a QUIET BODY: a one-pixel-wide vertical bar. It is the least a real
   // silhouette can give the derivation - one row merged away at the top and two
   // columns gained on each of the bottom PF_SLEEP_SPREAD rows - and it must land
-  // UNDER the floor, because a Pebble that slept by changing this little would
+  // UNDER the floor, because a Bug that slept by changing this little would
   // not read as asleep at 1x. Together with the roster sweep's
   // `worst_diff >= PF_SLEEP_MIN_DIFF`, the floor is now pinned into a band from
   // both sides: it cannot be raised past the quietest real body (13 px on

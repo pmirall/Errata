@@ -1,6 +1,6 @@
 # =============================================================================
 #  THE SHADOWED SET
-#  Every function that tests/fakes/*.cpp DEFINES and that Pebblebol/src also
+#  Every function that tests/fakes/*.cpp DEFINES and that Errata/src also
 #  defines. Whenever a host binary links one of those fakes it drives the FAKE's
 #  body while the reader believes it is driving the firmware's.
 #
@@ -16,7 +16,7 @@
 #            off a whole branch of save_manager.cpp - so a 15-point power-cut
 #            sweep ran against a save manager the release artefact does not
 #            execute, while on the shipping build EVERY CLEAN TRADE DESTROYED A
-#            PEBBLE.
+#            BUG.
 #
 #  THE LINKER CAN NEVER CATCH THIS CLASS, and that is measured rather than
 #  assumed: intersecting the T/t symbols the six fake objects DEFINE against

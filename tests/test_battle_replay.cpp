@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL host test - test_battle_replay.cpp
+//  ERRATA host test - test_battle_replay.cpp
 //  DETERMINISM (plan P4-C2, spec section 14: "battle must be deterministic
 //  enough to reproduce bugs from logs").
 //
@@ -39,17 +39,17 @@
 static const uint8_t T_A[3] = {  3, 12, 15 };   // SIGNAL
 static const uint8_t T_B[3] = { 18, 21, 33 };   // CORRUPT, CORRUPT, SYSTEM
 
-static void mk_member(PebbleInstance& p, uint8_t species, uint8_t level, uint32_t id)
+static void mk_member(BugInstance& p, uint8_t species, uint8_t level, uint32_t id)
 {
   memset(&p, 0, sizeof p);
-  p.magic      = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic      = (uint16_t)BUG_MAGIC;
+  p.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   p.species_id = species;
   p.id         = id;
   p.level      = level;
   const SpeciesDef* sp = species_get(species);
   if (sp == nullptr) return;
-  for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) p.moves[m] = sp->moves[m];
+  for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m) p.moves[m] = sp->moves[m];
   p.hp_cur = xp_hp_max(sp->base_hp, level);
 }
 
@@ -85,8 +85,8 @@ static BattleAction script(const BattleState& st, uint8_t side)
   }
   // Cycle the four slots so the script exercises cooldowns, buffs and DOTs
   // rather than hammering one move.
-  for (uint8_t k = 0; k < (uint8_t)PB_MOVE_COUNT; ++k) {
-    const uint8_t slot = (uint8_t)((st.round + side + k) % (uint16_t)PB_MOVE_COUNT);
+  for (uint8_t k = 0; k < (uint8_t)ER_MOVE_COUNT; ++k) {
+    const uint8_t slot = (uint8_t)((st.round + side + k) % (uint16_t)ER_MOVE_COUNT);
     if (battle_move_ready(*u, slot)) { a.kind = (uint8_t)BACT_ATTACK; a.index = slot; return a; }
   }
   // Every learnset ships at least one cooldown-free move (battle.h asserts it),
@@ -316,7 +316,7 @@ TEST(one_changed_action_at_round_k_is_reported_at_exactly_round_k) {
       BattleEvent* e = (BattleEvent*)battle_log_at(mlog, i);
       if (e && e->kind == (uint8_t)RLE_ACTION && e->side == 0u && e->round == k &&
           e->a == (uint8_t)BACT_ATTACK) {
-        e->b = (uint16_t)((e->b + 1u) % (uint16_t)PB_MOVE_COUNT);
+        e->b = (uint16_t)((e->b + 1u) % (uint16_t)ER_MOVE_COUNT);
         changed = true;
         break;
       }

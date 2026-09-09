@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_link_screen.cpp
+//  Errata host tests - test_link_screen.cpp
 //  THE LINK SCREEN, ITS CONSENT GATE AND THE BATTLE OVER THE LINK
 //  (plan P7-C2 and P7-C3, spec sections 42 and 47).
 //
@@ -54,7 +54,7 @@
 #include "game/evolution.h"
 #include "game/genome.h"
 #include "game/validate.h"
-#include "game/pebble.h"
+#include "game/bug.h"
 #include "game/species.h"
 #include "networking/battle_link.h"
 #include "networking/discovery.h"
@@ -146,7 +146,7 @@ void ui_request_frame(void)       {}
 
 // =============================================================================
 //  A REAL BOX, built the way tests/test_battle_screen.cpp builds one:
-//  box_new_pebble() rather than a hand-drawn mock, so the movesets, the ids and
+//  box_new_bug() rather than a hand-drawn mock, so the movesets, the ids and
 //  the levels are the ones the firmware would hand the wire.
 // =============================================================================
 static GameState g_gs;
@@ -163,18 +163,18 @@ static void box_fixture(uint8_t occupied) {
   gen.lineage_id = 0x0BADF00Du;
   gen.g0 = 0x1234u; gen.g1 = 0x5678u; gen.g2 = 0x9ABCu;
   gen.generation = 3;
-  // SEALED. box_new_pebble() takes the genome as given and the shared validator
+  // SEALED. box_new_bug() takes the genome as given and the shared validator
   // refuses an unsealed one (VR_BAD_GENOME) - which every earlier screen test
-  // got away with because none of them put a Pebble on a wire.
+  // got away with because none of them put a Bug on a wire.
   genome_seal(gen);
   for (uint8_t i = 0; i < occupied; ++i) {
-    const uint8_t slot = box_new_pebble((uint8_t)(1u + i * 4u),
+    const uint8_t slot = box_new_bug((uint8_t)(1u + i * 4u),
                                         (uint8_t)(g_box_level + i * 2u),
                                         ORIGIN_STARTER, gen, 0x51DE0001u + i, 1000u);
     CHECK(slot != BOX_SLOT_NONE);
-    PebbleInstance* p = box_slot(slot);
+    BugInstance* p = box_slot(slot);
     if (!p) continue;
-    for (uint8_t c = 0; c < PB_CARE_COUNT; ++c) p->care[c] = PB_CARE_MILLI_MAX;
+    for (uint8_t c = 0; c < ER_CARE_COUNT; ++c) p->care[c] = ER_CARE_MILLI_MAX;
   }
   if (occupied) CHECK(box_set_active(0));
 }
@@ -210,14 +210,14 @@ static int           g_peer_moves = 0;
 
 // A synthetic member at a real roster species with ITS OWN learnset, which is
 // the only moveset battle_init() accepts without an argument.
-static void make_member(PebbleInstance& p, uint8_t species_id, uint8_t level,
+static void make_member(BugInstance& p, uint8_t species_id, uint8_t level,
                         uint32_t id) {
   memset(&p, 0, sizeof p);
   const SpeciesDef* sp = species_get(species_id);
   CHECK(sp != nullptr);
   if (!sp) return;
-  p.magic            = PEBBLE_MAGIC;
-  p.layout_ver       = PEBBLE_LAYOUT_VER;
+  p.magic            = BUG_MAGIC;
+  p.layout_ver       = BUG_LAYOUT_VER;
   p.species_id       = species_id;
   p.id               = id;
   p.level            = level;
@@ -234,10 +234,10 @@ static void make_member(PebbleInstance& p, uint8_t species_id, uint8_t level,
   // The stage bits are a PURE FUNCTION of the species row and game/validate.cpp
   // checks them against it rather than repairing them from it (VR_BAD_EVO_STAGE).
   p.evo_state = (uint8_t)(sp->stage & (uint8_t)EVO_STATE_STAGE_MASK);
-  PebbleStats st;
-  pebble_derive_stats(*sp, p.level, p.genome, st);
+  BugStats st;
+  bug_derive_stats(*sp, p.level, p.genome, st);
   p.hp_cur = st.hp_max;
-  for (uint8_t c = 0; c < PB_CARE_COUNT; ++c) p.care[c] = PB_CARE_MILLI_MAX;
+  for (uint8_t c = 0; c < ER_CARE_COUNT; ++c) p.care[c] = ER_CARE_MILLI_MAX;
 }
 
 static void peer_init(void) {
@@ -257,14 +257,14 @@ static void peer_init(void) {
   cfg.nonce     = 0x5EED0002u;
   // THE SAME BAND THE FIRMWARE OFFERS, and it has to be: session.cpp's
   // band_acceptable() requires the REQUESTED band to sit inside the responder's
-  // own, so a peer with a wider band refuses a Pebblebol's SESSION_REQUEST by
+  // own, so a peer with a wider band refuses a Errata's SESSION_REQUEST by
   // name. A second real device runs this same build and this same constant;
-  // 0xFF here would have been a peer no Pebblebol can talk to.
+  // 0xFF here would have been a peer no Errata can talk to.
   cfg.lvl_lo    = 1u;
   cfg.lvl_hi    = (uint8_t)XP_LEVEL_MAX;
   session_init(g_peer, cfg);
 
-  PebbleInstance team[BATTLE_TEAM_MAX];
+  BugInstance team[BATTLE_TEAM_MAX];
   for (uint8_t i = 0; i < (uint8_t)BATTLE_TEAM_MAX; ++i)
     make_member(team[i], (uint8_t)(2u + i * 3u), (uint8_t)(6u + i * 2u),
                 0x7EE00001u + i);
@@ -302,8 +302,8 @@ static const TradeHooks g_peer_hooks = {
   &ptr_sent, &ptr_judge, &ptr_recv, &ptr_commit, &ptr_abort, nullptr
 };
 
-// Re-opens the peer as a TRADE session offering one Pebble of its own.
-static void peer_init_trade(uint32_t pebble_id) {
+// Re-opens the peer as a TRADE session offering one Bug of its own.
+static void peer_init_trade(uint32_t bug_id) {
   memset(&g_peer, 0, sizeof g_peer);
   memset(&g_peer_tl, 0, sizeof g_peer_tl);
   g_peer_trade_commits = 0;
@@ -321,8 +321,8 @@ static void peer_init_trade(uint32_t pebble_id) {
   cfg.lvl_hi    = (uint8_t)XP_LEVEL_MAX;
   session_init(g_peer, cfg);
 
-  PebbleInstance mine;
-  make_member(mine, 7u, 11u, pebble_id);
+  BugInstance mine;
+  make_member(mine, 7u, 11u, bug_id);
   CHECK_EQ((int)session_set_trade(g_peer, mine), (int)VR_OK);
   trade_link_init(g_peer_tl, g_peer, mine.id, g_peer_hooks);
   g_peer_ai_ready = false;
@@ -337,7 +337,7 @@ static void peer_consent(void) {
 }
 
 // Set false to model a peer whose player never presses the SECOND A - the one
-// that agrees to these two Pebbles rather than to this peer.
+// that agrees to these two Bugs rather than to this peer.
 static bool g_peer_accepts_trade = true;
 
 static void peer_step(void) {
@@ -414,10 +414,10 @@ static void see_peer(uint16_t caps, int8_t rssi, uint8_t slot) {
 
 // The local player: open the card on peer 0 and press A on the row `op`.
 static void consent_to(uint8_t op) {
-  link_input(GST_HOLD_R);                            // peer -> card
+  link_input(GST_TAP_R);                            // peer -> card
   CHECK_EQ(link_screen_mode(), (uint8_t)LKM_CARD);
   while (link_screen_op() != op) link_input(GST_TAP_L);
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
 }
 
 // One frame of the whole device: the peer's loop, then the current screen's.
@@ -436,9 +436,9 @@ static void play(uint32_t dt, int max_ticks) {
     tick(dt);
     if (g_screen != (uint8_t)SCR_BATTLE) continue;
     switch (battle_screen_mode()) {
-      case BTM_INTRO:   battle_input(GST_HOLD_R); break;
+      case BTM_INTRO:   battle_input(GST_TAP_R); break;
       case BTM_MENU:
-      case BTM_SWITCH:  battle_input(GST_HOLD_R); break;
+      case BTM_SWITCH:  battle_input(GST_TAP_R); break;
       case BTM_RESOLVE: battle_input(GST_TAP_L);  break;
       case BTM_RESULT:  return;
       default: break;
@@ -552,7 +552,7 @@ TEST(the_a_press_is_the_only_thing_that_opens_a_session_or_binds_a_peer) {
   see_peer((uint16_t)DISC_CAP_BATTLE, -40, 5u);
   CHECK_EQ(lf_binds(), 0);
 
-  link_input(GST_HOLD_R);                     // opening the CARD binds nothing
+  link_input(GST_TAP_R);                     // opening the CARD binds nothing
   CHECK_EQ(link_screen_mode(), (uint8_t)LKM_CARD);
   CHECK_EQ(lf_binds(), 0);
   CHECK_EQ(link_screen_session_state(), (uint8_t)SS_IDLE);
@@ -563,7 +563,7 @@ TEST(the_a_press_is_the_only_thing_that_opens_a_session_or_binds_a_peer) {
   CHECK_EQ(lf_binds(), 0);
 
   while (link_screen_op() != (uint8_t)LOP_BATTLE) link_input(GST_TAP_L);
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   CHECK_EQ(link_screen_consents(), (uint8_t)1);
   CHECK_EQ(lf_binds(), 1);
   CHECK_EQ(lf_bound_slot(), (uint8_t)5);      // the peer's own opaque handle
@@ -622,14 +622,14 @@ TEST(a_lost_connection_offers_retry_and_exit_and_both_do_what_they_say) {
 
   // A retries: a fresh browse, and the radio is taken again.
   const int stops_before = lf_stops();
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   CHECK_EQ(link_screen_mode(), (uint8_t)LKM_BROWSE);
   CHECK_EQ(lf_starts(), 2);
   CHECK_EQ(lf_stops(), stops_before);          // it was already released
   CHECK(link_screen_busy());
 
   // B leaves, and the radio goes with it.
-  link_input(GST_TAP_R);
+  link_input(GST_HOLD_R);
   CHECK_EQ(g_backs, 1);
   CHECK_EQ(g_screen, (uint8_t)SCR_HOME);
   CHECK(!link_screen_busy());
@@ -645,17 +645,17 @@ TEST(a_lost_connection_offers_retry_and_exit_and_both_do_what_they_say) {
 TEST(an_operation_the_peer_cannot_do_is_refused_by_name_and_opens_nothing) {
   harness_reset(0x11110000u, 0x22220000u);
   see_peer((uint16_t)DISC_CAP_BATTLE, -40, 0u);   // battle only
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   while (link_screen_op() != (uint8_t)LOP_TRADE) link_input(GST_TAP_L);
   g_toast = STR_EMPTY;
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   CHECK_EQ(g_toast, STR_LK_NO_CAP);
   CHECK_EQ(lf_binds(), 0);
   CHECK_EQ(link_screen_mode(), (uint8_t)LKM_CARD);
 
   // And CANCELAR is a row, not an absence: it walks back to the list.
   while (link_screen_op() != (uint8_t)LOP_CANCEL) link_input(GST_TAP_L);
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   CHECK_EQ(link_screen_mode(), (uint8_t)LKM_BROWSE);
   CHECK_EQ(g_backs, 0);
 }
@@ -681,10 +681,10 @@ TEST(a_capability_this_build_has_no_protocol_for_says_so_and_opens_nothing) {
   for (uint8_t c = 0; c < 2u; ++c) {
     harness_reset(0x11110000u, 0x22220000u);
     see_peer(kCaps[c], -40, 0u);
-    link_input(GST_HOLD_R);
+    link_input(GST_TAP_R);
     while (link_screen_op() != (uint8_t)LOP_BREED) link_input(GST_TAP_L);
     g_toast = STR_EMPTY;
-    link_input(GST_HOLD_R);
+    link_input(GST_TAP_R);
     CHECK_EQ(g_toast, STR_UI_SOON);
     CHECK(g_toast != STR_LK_NO_CAP);
     CHECK_EQ(lf_binds(), 0);
@@ -696,10 +696,10 @@ TEST(a_capability_this_build_has_no_protocol_for_says_so_and_opens_nothing) {
   // capability check deleted from the whole screen.
   harness_reset(0x11110000u, 0x22220000u);
   see_peer((uint16_t)DISC_CAP_BATTLE, -40, 0u);
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   while (link_screen_op() != (uint8_t)LOP_TRADE) link_input(GST_TAP_L);
   g_toast = STR_EMPTY;
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   CHECK_EQ(g_toast, STR_LK_NO_CAP);
 }
 
@@ -710,25 +710,25 @@ TEST(a_capability_this_build_has_no_protocol_for_says_so_and_opens_nothing) {
 //  no back door. The journal here is a MODEL (tests/fakes/link_fake.h says
 //  exactly what is fake and what is not); the atomicity of the five flash
 //  writes is tests/test_trade.cpp's subject. What THIS binary proves is that
-//  the SCREEN offers the right Pebble, refuses the ones the rules refuse, asks
+//  the SCREEN offers the right Bug, refuses the ones the rules refuse, asks
 //  the player before anything moves, and that the real Box really swaps.
 // =============================================================================
 static uint32_t offered_id(void) {
   const uint8_t sl = link_trade_slot();
-  const PebbleInstance* p = (sl < (uint8_t)BOX_SLOTS) ? box_peek(sl) : nullptr;
+  const BugInstance* p = (sl < (uint8_t)BOX_SLOTS) ? box_peek(sl) : nullptr;
   return p ? p->id : 0u;
 }
 
 static uint8_t traded_in_box(void) {
   uint8_t n = 0;
   for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
-    const PebbleInstance* p = box_peek(i);
+    const BugInstance* p = box_peek(i);
     if (p && (p->flags & (uint8_t)PBF_TRADED) != 0u) n++;
   }
   return n;
 }
 
-TEST(two_players_who_both_press_a_swap_one_pebble_each_and_the_box_says_so) {
+TEST(two_players_who_both_press_a_swap_one_bug_each_and_the_box_says_so) {
   harness_reset(0x11110000u, 0x22220000u);
   peer_init_trade(0x7EE0BEEFu);
   see_peer((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE), -40, 0u);
@@ -760,7 +760,7 @@ TEST(two_players_who_both_press_a_swap_one_pebble_each_and_the_box_says_so) {
   // The frame the player is looking at draws inside the panel.
   fb_reset(); link_render(); CHECK_EQ(fb_oob(), 0u);
 
-  link_input(GST_HOLD_R);                       // THE SECOND CONSENT
+  link_input(GST_TAP_R);                       // THE SECOND CONSENT
   for (int i = 0; i < 400 && link_screen_mode() == (uint8_t)LKM_WAIT; ++i) tick(50u);
 
   CHECK_EQ(lf_trade_commits(), 1);
@@ -805,14 +805,14 @@ TEST(a_trade_the_local_player_never_accepts_moves_nothing_and_clears_its_journal
   CHECK_EQ(lf_unbinds(), 1);
 }
 
-TEST(the_pebble_the_player_is_holding_is_never_the_one_put_on_the_wire) {
+TEST(the_bug_the_player_is_holding_is_never_the_one_put_on_the_wire) {
   harness_reset(0x11110000u, 0x22220000u);
   peer_init_trade(0x7EE0D00Du);
   see_peer((uint16_t)(DISC_CAP_BATTLE | DISC_CAP_TRADE), -40, 0u);
 
   // The BOX armed the ACTIVE slot. game/trade.cpp refuses it, and the refusal
   // is a sentence the player can act on rather than a silent substitution of a
-  // different Pebble - which is the failure mode the comment at pick_trade_slot()
+  // different Bug - which is the failure mode the comment at pick_trade_slot()
   // names.
   link_leave();
   link_arm_intent((uint8_t)LOP_TRADE, box_active());
@@ -826,7 +826,7 @@ TEST(the_pebble_the_player_is_holding_is_never_the_one_put_on_the_wire) {
   CHECK_EQ((int)link_trade_slot(), (int)BOX_SLOT_NONE);
 
   // A QUARANTINED SLOT IS REFUSED TOO, and by its own name. save_manager.h:
-  // "A quarantined Pebble may be shown to its owner. It may NOT enter a battle
+  // "A quarantined Bug may be shown to its owner. It may NOT enter a battle
   // or a trade" - P7's obligation, discharged where the offer is made.
   link_leave();
   link_arm_intent((uint8_t)LOP_TRADE, 1u);
@@ -839,7 +839,7 @@ TEST(the_pebble_the_player_is_holding_is_never_the_one_put_on_the_wire) {
   CHECK_EQ(lf_binds(), 0);
 }
 
-TEST(a_peer_that_refuses_our_pebble_is_answered_by_name_and_nothing_moves) {
+TEST(a_peer_that_refuses_our_bug_is_answered_by_name_and_nothing_moves) {
   harness_reset(0x11110000u, 0x22220000u);
   peer_init_trade(0x7EE0FEEDu);
   g_peer_judge = (uint8_t)TDR_TAINT;        // the far device's policy says no
@@ -857,9 +857,9 @@ TEST(a_peer_that_refuses_our_pebble_is_answered_by_name_and_nothing_moves) {
   CHECK_EQ(lf_unbinds(), 1);
 }
 
-// THE BOX'S ENTRY POINT: an operation and a Pebble, pre-selected, consenting to
+// THE BOX'S ENTRY POINT: an operation and a Bug, pre-selected, consenting to
 // nothing. The armed slot leads the team the session then offers.
-TEST(the_box_pre_selects_an_operation_and_a_pebble_and_consents_to_nothing) {
+TEST(the_box_pre_selects_an_operation_and_a_bug_and_consents_to_nothing) {
   harness_reset(0x11110000u, 0x22220000u);
   link_leave();
   link_arm_intent((uint8_t)LOP_BREED, 2u);
@@ -891,7 +891,7 @@ TEST(a_peer_met_over_the_link_is_scored_once_and_the_day_is_saved) {
   CHECK_EQ(act_peers_seen(), (uint8_t)1);
   CHECK(g_commits >= 1);
 
-  // Thirty more beacons from the SAME device are the same Pebblebol.
+  // Thirty more beacons from the SAME device are the same Errata.
   const int commits = g_commits;
   for (int i = 0; i < 30; ++i) {
     lf_push_beacon(g_peer_id, "ROCOSO", (uint16_t)DISC_CAP_BATTLE, -40, 0u);
@@ -903,11 +903,11 @@ TEST(a_peer_met_over_the_link_is_scored_once_and_the_day_is_saved) {
 }
 
 // A device below the signal floor is not in the room, and one heard once is not
-// a Pebblebol - so neither reaches the list the player may pick from.
+// a Errata - so neither reaches the list the player may pick from.
 TEST(only_a_peer_heard_often_enough_and_loudly_enough_can_be_picked) {
   harness_reset(0x11110000u, 0x22220000u);
 
-  // Two devices that are NOT Pebblebols in the room: one too far away for even
+  // Two devices that are NOT Erratas in the room: one too far away for even
   // its first packet to count, one heard exactly once. Both are in the table
   // (their hits have to be able to accumulate) and NEITHER may be offered.
   lf_push_beacon(0x33330000u, "LEJOS", (uint16_t)DISC_CAP_BATTLE, -95, 1u);
@@ -972,7 +972,7 @@ TEST(two_devices_that_both_consent_fight_one_battle_reported_exactly_once) {
     const uint8_t m = battle_screen_mode();
     if (m == BTM_RESOLVE && battle_screen_round() > widest_round)
       widest_round = battle_screen_round();
-    if (m == BTM_INTRO || m == BTM_MENU || m == BTM_SWITCH) battle_input(GST_HOLD_R);
+    if (m == BTM_INTRO || m == BTM_MENU || m == BTM_SWITCH) battle_input(GST_TAP_R);
     else if (m == BTM_RESOLVE) battle_input(GST_TAP_L);
     // The screen's own side never drifts from the session's, on any frame.
     CHECK_EQ(battle_screen_side(), ui_link_battle_side());
@@ -1000,7 +1000,7 @@ TEST(two_devices_that_both_consent_fight_one_battle_reported_exactly_once) {
          g_peer_moves);
 
   // Leaving the result page hands the link back and the radio with it.
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
   CHECK_EQ(g_screen, (uint8_t)SCR_LINK);
   CHECK_EQ(link_screen_mode(), (uint8_t)LKM_ENDED);
   CHECK_EQ(g_results, 1);                       // still once
@@ -1033,7 +1033,7 @@ TEST(the_higher_device_id_plays_side_one_and_still_sees_its_own_team) {
   const uint8_t my_species = st->side[1].team[st->side[1].active].species_id;
   bool from_box = false;
   for (uint8_t i = 0; i < (uint8_t)BOX_SLOTS; ++i) {
-    const PebbleInstance* p = box_peek(i);
+    const BugInstance* p = box_peek(i);
     if (p && p->species_id == my_species) from_box = true;
   }
   CHECK(from_box);
@@ -1125,8 +1125,8 @@ TEST(a_link_that_dies_mid_battle_pays_nothing_and_is_not_a_defeat) {
   // Two rounds of a real fight, and then the room is cut in half.
   for (int i = 0; i < 40 && g_screen == (uint8_t)SCR_BATTLE; ++i) {
     tick(50u);
-    if (battle_screen_mode() == BTM_INTRO)   battle_input(GST_HOLD_R);
-    if (battle_screen_mode() == BTM_MENU)    battle_input(GST_HOLD_R);
+    if (battle_screen_mode() == BTM_INTRO)   battle_input(GST_TAP_R);
+    if (battle_screen_mode() == BTM_MENU)    battle_input(GST_TAP_R);
     if (battle_screen_mode() == BTM_RESOLVE) battle_input(GST_TAP_L);
   }
   g_lk.fault.dead = 1u;
@@ -1178,7 +1178,7 @@ TEST(a_player_who_thinks_longer_than_the_ladder_loses_the_link_and_is_paid_nothi
   // Get to the menu, which is where the lockstep is waiting for us.
   for (int i = 0; i < 200 && battle_screen_mode() != BTM_MENU; ++i) {
     tick(50u);
-    if (battle_screen_mode() == BTM_INTRO) battle_input(GST_HOLD_R);
+    if (battle_screen_mode() == BTM_INTRO) battle_input(GST_TAP_R);
   }
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_MENU);
   CHECK(ui_link_battle_wants_action());
@@ -1254,7 +1254,7 @@ TEST(the_radio_is_released_exactly_once_on_every_way_off_this_screen) {
   // (a) B from the browse.
   harness_reset(0x11110000u, 0x22220000u);
   CHECK_EQ(lf_starts(), 1);
-  link_input(GST_TAP_R);
+  link_input(GST_HOLD_R);
   CHECK_EQ(lf_stops(), 1);
   CHECK(!link_screen_busy());
 
@@ -1263,7 +1263,7 @@ TEST(the_radio_is_released_exactly_once_on_every_way_off_this_screen) {
   harness_reset(0x11110000u, 0x22220000u);
   see_peer((uint16_t)DISC_CAP_BATTLE, -40, 0u);
   consent_to((uint8_t)LOP_BATTLE);
-  link_input(GST_TAP_R);
+  link_input(GST_HOLD_R);
   CHECK_EQ(lf_stops(), 1);
   CHECK_EQ(lf_unbinds(), 1);
   CHECK(!link_screen_busy());
@@ -1319,11 +1319,11 @@ TEST(every_link_mode_draws_inside_the_panel) {
 
   see_peer((uint16_t)DISC_CAP_BATTLE, -40, 0u);
   fb_reset(); link_render(); CHECK_EQ(fb_oob(), 0u);       // browse, one peer
-  link_input(GST_HOLD_R);
+  link_input(GST_TAP_R);
   fb_reset(); link_render(); CHECK_EQ(fb_oob(), 0u);       // the card
 
   peer_consent();
-  link_input(GST_HOLD_R);                                   // consent
+  link_input(GST_TAP_R);                                   // consent
   fb_reset(); link_render(); CHECK_EQ(fb_oob(), 0u);       // the wait
 
   for (int i = 0; i < 200 && g_screen != (uint8_t)SCR_BATTLE; ++i) {
@@ -1335,12 +1335,12 @@ TEST(every_link_mode_draws_inside_the_panel) {
 
   for (int i = 0; i < 400 && battle_screen_mode() != BTM_RESULT; ++i) {
     tick(50u);
-    if (battle_screen_mode() == BTM_INTRO)   battle_input(GST_HOLD_R);
-    if (battle_screen_mode() == BTM_MENU)    battle_input(GST_HOLD_R);
+    if (battle_screen_mode() == BTM_INTRO)   battle_input(GST_TAP_R);
+    if (battle_screen_mode() == BTM_MENU)    battle_input(GST_TAP_R);
     if (battle_screen_mode() == BTM_RESOLVE) battle_input(GST_TAP_L);
     fb_reset(); battle_render(); CHECK_EQ(fb_oob(), 0u);
   }
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
   CHECK_EQ(g_screen, (uint8_t)SCR_LINK);
   fb_reset(); link_render(); CHECK_EQ(fb_oob(), 0u);       // the ended page
   // ...AND EVERY ONE OF THEM DREW TEXT THE PANEL CAN ACTUALLY SHOW.
@@ -1424,9 +1424,9 @@ TEST(no_frame_of_a_linked_battle_allocates_and_the_waiting_mode_is_drawn) {
     fb_reset();
     battle_render();
     ++frames;
-    if (m == BTM_INTRO)   battle_input(GST_HOLD_R);
-    if (m == BTM_MENU)    battle_input(GST_HOLD_R);
-    if (m == BTM_SWITCH)  battle_input(GST_HOLD_R);
+    if (m == BTM_INTRO)   battle_input(GST_TAP_R);
+    if (m == BTM_MENU)    battle_input(GST_TAP_R);
+    if (m == BTM_SWITCH)  battle_input(GST_TAP_R);
     if (m == BTM_RESOLVE) battle_input(GST_TAP_L);
     if (m == BTM_RESULT && seen[BTM_RESULT] > 4) break;
   }

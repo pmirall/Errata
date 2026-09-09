@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_evolution.cpp
+//  Errata host tests - test_evolution.cpp
 //  game/evolution.cpp over data/evolution_table.h (spec section 18, plan
 //  P3-C3, section 4 "Evolution works").
 //
@@ -11,7 +11,7 @@
 //      matters - INPUT NOT SUPPLIED REFUSES. A condition this build cannot
 //      evaluate must never answer "yes";
 //    * apply recomputes the derived stats: hp_max moves with the species, a
-//      full Pebble stays full, a hurt one keeps its fraction, hp_cur <= hp_max;
+//      full Bug stays full, a hurt one keeps its fraction, hp_cur <= hp_max;
 //    * apply on a final stage and apply with a failing condition both do
 //      NOTHING and return false;
 //    * evo_state's stage bits track the target, the pending bit clears on a
@@ -32,11 +32,11 @@
 #include "game/evolution.h"
 #include "game/xp.h"
 
-// A minimal but legal Pebble at `species` / `level`, at full derived HP.
-static void make_pebble(PebbleInstance& p, uint8_t species, uint8_t level) {
+// A minimal but legal Bug at `species` / `level`, at full derived HP.
+static void make_bug(BugInstance& p, uint8_t species, uint8_t level) {
   memset(&p, 0, sizeof p);
-  p.magic      = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic      = (uint16_t)BUG_MAGIC;
+  p.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   p.species_id = species;
   p.id         = 0x5EED0001u;
   p.level      = level;
@@ -44,7 +44,7 @@ static void make_pebble(PebbleInstance& p, uint8_t species, uint8_t level) {
   p.hp_cur = sp ? xp_hp_max(sp->base_hp, level) : 0u;
 }
 
-static uint16_t hp_max_of(const PebbleInstance& p) {
+static uint16_t hp_max_of(const BugInstance& p) {
   const SpeciesDef* sp = species_get(p.species_id);
   return sp ? xp_hp_max(sp->base_hp, p.level) : 0u;
 }
@@ -115,8 +115,8 @@ TEST(the_level_gate_opens_at_the_rule_and_not_before) {
   CHECK(r != nullptr);
   if (!r) return;
 
-  PebbleInstance p;
-  make_pebble(p, 1, (uint8_t)(r->level - 1u));
+  BugInstance p;
+  make_bug(p, 1, (uint8_t)(r->level - 1u));
   CHECK_EQ(evolution_level_ready(p), 0);         // below
   p.level = r->level;
   CHECK_EQ(evolution_level_ready(p), 1);         // exactly at
@@ -124,12 +124,12 @@ TEST(the_level_gate_opens_at_the_rule_and_not_before) {
   CHECK_EQ(evolution_level_ready(p), 1);         // above
 
   // A final stage has no gate at all, however high the level goes.
-  make_pebble(p, 3, (uint8_t)PB_LEVEL_MAX);
+  make_bug(p, 3, (uint8_t)ER_LEVEL_MAX);
   CHECK_EQ(evolution_level_ready(p), 0);
 
   // A level of 0 is a corrupt record, not level 1's twin: it reads as level 1,
   // which is below every rule this roster ships.
-  make_pebble(p, 1, 0);
+  make_bug(p, 1, 0);
   CHECK_EQ(evolution_level_ready(p), 0);
 }
 
@@ -202,8 +202,8 @@ TEST(an_unsupplied_input_refuses_it_never_passes) {
 //  4. APPLY
 // =============================================================================
 TEST(apply_moves_the_species_the_stage_bits_and_the_counter) {
-  PebbleInstance p;
-  make_pebble(p, 1, 8);
+  BugInstance p;
+  make_bug(p, 1, 8);
   p.evo_state |= (uint8_t)EVO_STATE_PENDING;
   p.evo_state |= 0x0Cu;                       // bits 6:2 are someone else's
   const uint16_t xp0 = p.xp;
@@ -219,10 +219,10 @@ TEST(apply_moves_the_species_the_stage_bits_and_the_counter) {
 }
 
 TEST(apply_leaves_the_moves_the_care_and_the_genome_alone) {
-  PebbleInstance p;
-  make_pebble(p, 1, 8);
-  for (uint8_t i = 0; i < PB_MOVE_COUNT; ++i) p.moves[i] = (uint8_t)(40 + i);
-  for (uint8_t i = 0; i < PB_CARE_COUNT; ++i) p.care[i] = 1234 + i;
+  BugInstance p;
+  make_bug(p, 1, 8);
+  for (uint8_t i = 0; i < ER_MOVE_COUNT; ++i) p.moves[i] = (uint8_t)(40 + i);
+  for (uint8_t i = 0; i < ER_CARE_COUNT; ++i) p.care[i] = 1234 + i;
   p.genome.lineage_id = 0xDEADBEEFu;
   p.trait_id = 9;
 
@@ -230,14 +230,14 @@ TEST(apply_leaves_the_moves_the_care_and_the_genome_alone) {
   // The new species' learnset is NOT applied, and since P4-C2 that is a
   // DECISION rather than a wait: the engine accepts the verbatim learnset of
   // any same-family species at a stage <= this one's (BR_UNLEARNABLE_MOVE), so
-  // an evolved Pebble keeping the moves the player raised it with is legal.
+  // an evolved Bug keeping the moves the player raised it with is legal.
   // This case used to say "there is no attack table until P4-C1"; there is one,
   // and game/evolution.cpp now carries the decision it left open.
   // The synthetic ids below (40+i) are why this case is insulated from a
   // learnset EDIT; test_content.cpp's
   // `species_two_and_three_keep_their_frozen_columns` is what pins those.
-  for (uint8_t i = 0; i < PB_MOVE_COUNT; ++i) CHECK_EQ(p.moves[i], (uint8_t)(40 + i));
-  for (uint8_t i = 0; i < PB_CARE_COUNT; ++i) CHECK_EQ(p.care[i], (int32_t)(1234 + i));
+  for (uint8_t i = 0; i < ER_MOVE_COUNT; ++i) CHECK_EQ(p.moves[i], (uint8_t)(40 + i));
+  for (uint8_t i = 0; i < ER_CARE_COUNT; ++i) CHECK_EQ(p.care[i], (int32_t)(1234 + i));
   CHECK_EQ(p.genome.lineage_id, 0xDEADBEEFu);
   CHECK_EQ(p.trait_id, 9);
 }
@@ -251,9 +251,9 @@ TEST(apply_rescales_hp_against_the_new_derived_maximum) {
   if (!s1 || !s2) return;
   CHECK(s2->base_hp != s1->base_hp);
 
-  // A full Pebble stays full.
-  PebbleInstance p;
-  make_pebble(p, 1, 8);
+  // A full Bug stays full.
+  BugInstance p;
+  make_bug(p, 1, 8);
   CHECK_EQ(p.hp_cur, hp_max_of(p));
   CHECK(evolution_apply(p, full_ctx()));
   CHECK_EQ(p.hp_cur, hp_max_of(p));
@@ -261,7 +261,7 @@ TEST(apply_rescales_hp_against_the_new_derived_maximum) {
 
   // A hurt one keeps its fraction, and never over-heals: half of 26 is 13, and
   // the truncating divide can only ever lose part of one HP.
-  make_pebble(p, 1, 8);
+  make_bug(p, 1, 8);
   const uint16_t max0 = hp_max_of(p);
   p.hp_cur = (uint16_t)(max0 / 2u);
   CHECK(evolution_apply(p, full_ctx()));
@@ -271,48 +271,48 @@ TEST(apply_rescales_hp_against_the_new_derived_maximum) {
   CHECK(p.hp_cur > 0);
 
   // Whatever the record claimed, hp_cur lands inside the new maximum.
-  make_pebble(p, 1, 8);
+  make_bug(p, 1, 8);
   p.hp_cur = 60000;
   CHECK(evolution_apply(p, full_ctx()));
   CHECK(p.hp_cur <= hp_max_of(p));
 
-  // A zero-HP Pebble stays at zero: a rescale is not a heal in either
-  // direction (a Pebble cannot die - spec section 27 - but it can be fainted).
-  make_pebble(p, 1, 8);
+  // A zero-HP Bug stays at zero: a rescale is not a heal in either
+  // direction (a Bug cannot die - spec section 27 - but it can be fainted).
+  make_bug(p, 1, 8);
   p.hp_cur = 0;
   CHECK(evolution_apply(p, full_ctx()));
   CHECK_EQ(p.hp_cur, 0);
 }
 
 TEST(apply_refuses_and_changes_nothing_when_the_rule_does_not_hold) {
-  PebbleInstance before, p;
+  BugInstance before, p;
 
   // (a) the final stage of the family.
-  make_pebble(p, 3, (uint8_t)PB_LEVEL_MAX);
+  make_bug(p, 3, (uint8_t)ER_LEVEL_MAX);
   before = p;
   CHECK(!evolution_apply(p, full_ctx()));
   CHECK_EQ(memcmp(&before, &p, sizeof p), 0);
 
   // (b) the level is not there yet.
-  make_pebble(p, 1, 7);
+  make_bug(p, 1, 7);
   before = p;
   CHECK(!evolution_apply(p, full_ctx()));
   CHECK_EQ(memcmp(&before, &p, sizeof p), 0);
 
   // (c) an empty slot and an id the roster does not know.
-  make_pebble(p, 0, 10);
+  make_bug(p, 0, 10);
   before = p;
   CHECK(!evolution_apply(p, full_ctx()));
   CHECK_EQ(memcmp(&before, &p, sizeof p), 0);
 
-  make_pebble(p, 250, 10);
+  make_bug(p, 250, 10);
   before = p;
   CHECK(!evolution_apply(p, full_ctx()));
   CHECK_EQ(memcmp(&before, &p, sizeof p), 0);
 }
 
 // A pending bit whose CONDITION fails must stay set: the offer comes back when
-// the condition is met, and nothing about the Pebble changes in the meantime.
+// the condition is met, and nothing about the Bug changes in the meantime.
 // The shipped rules are unconditional, so the refusal is driven through the
 // context - an empty one, which is exactly what a P6 rule would meet today.
 TEST(a_failing_condition_neither_evolves_nor_clears_the_pending_bit) {
@@ -329,14 +329,14 @@ TEST(a_failing_condition_neither_evolves_nor_clears_the_pending_bit) {
   // which is a different arm of the same guard.
   //
   // An earlier version of this test pretended otherwise - it copied the
-  // Pebble, called nothing, and asserted the copy still matched, which no
+  // Bug, called nothing, and asserted the copy still matched, which no
   // implementation could fail. P4-C1 ships conditional rules; the obligation
   // to drive apply through a failing condition is recorded against it in the
   // plan's test section.
-  PebbleInstance p;
-  make_pebble(p, 1, 4);
+  BugInstance p;
+  make_bug(p, 1, 4);
   p.evo_state |= (uint8_t)EVO_STATE_PENDING;
-  const PebbleInstance low = p;
+  const BugInstance low = p;
   CHECK_EQ(evolution_ready(p, full_ctx()), 0);
   CHECK(!evolution_apply(p, full_ctx()));
   CHECK_EQ(memcmp(&low, &p, sizeof p), 0);
@@ -344,13 +344,13 @@ TEST(a_failing_condition_neither_evolves_nor_clears_the_pending_bit) {
 }
 
 TEST(the_evolutions_counter_saturates_at_255) {
-  PebbleInstance p;
-  make_pebble(p, 1, 8);
+  BugInstance p;
+  make_bug(p, 1, 8);
   p.evolutions = 254;
   CHECK(evolution_apply(p, full_ctx()));
   CHECK_EQ(p.evolutions, 255);
 
-  make_pebble(p, 1, 8);
+  make_bug(p, 1, 8);
   p.evolutions = 255;
   CHECK(evolution_apply(p, full_ctx()));
   CHECK_EQ(p.evolutions, 255);            // saturated, never wrapped to 0
@@ -364,8 +364,8 @@ TEST(the_evolutions_counter_saturates_at_255) {
 // it produced is ALREADY past its own level gate - otherwise the second offer
 // stays hidden until some unrelated award happens to raise the bit.
 TEST(a_chained_evolution_re_raises_pending_without_another_award) {
-  PebbleInstance p;
-  make_pebble(p, 1, 20);              // level 20 Paketo: past BOTH gates (8, 18)
+  BugInstance p;
+  make_bug(p, 1, 20);              // level 20 Paketo: past BOTH gates (8, 18)
   p.hp_cur = hp_max_of(p);
   p.evo_state |= (uint8_t)EVO_STATE_PENDING;
 
@@ -409,7 +409,7 @@ TEST(a_chained_evolution_re_raises_pending_without_another_award) {
 // property of the roster rather than a weakness worth papering over: every rule
 // is a SINGLE step between CONSECUTIVE art keys, so `k % P != (k+1) % P` for
 // every P except 1. A pool of 3 is caught instead by test_pet_view.cpp's
-// a_pebble_with_no_species_row_draws_what_it_always_did.
+// a_bug_with_no_species_row_draws_what_it_always_did.
 TEST(every_evolution_rule_changes_the_body) {
   const uint8_t n = (uint8_t)(sizeof EVOLUTION_RULES / sizeof EVOLUTION_RULES[0]);
   CHECK(n > 0);
@@ -441,8 +441,8 @@ TEST(every_evolution_rule_changes_the_body) {
 }
 
 TEST(a_family_walk_ends_at_the_final_stage) {
-  PebbleInstance p;
-  make_pebble(p, 1, 1);
+  BugInstance p;
+  make_bug(p, 1, 1);
   CHECK_EQ(evolution_ready(p, full_ctx()), 0);      // level 1 Paketo, not yet
 
   p.level = 8;
@@ -461,7 +461,7 @@ TEST(a_family_walk_ends_at_the_final_stage) {
   CHECK_EQ((int)(p.evo_state & EVO_STATE_STAGE_MASK), 2);
   CHECK_EQ(p.evolutions, 2);
 
-  p.level = (uint8_t)PB_LEVEL_MAX;
+  p.level = (uint8_t)ER_LEVEL_MAX;
   CHECK_EQ(evolution_ready(p, full_ctx()), 0);      // final: nothing left
   CHECK(!evolution_apply(p, full_ctx()));
 }
@@ -472,8 +472,8 @@ TEST(a_family_walk_ends_at_the_final_stage) {
 TEST(xp_raises_pending_at_the_level_gate_and_apply_clears_it) {
   xp_ledger_reset(1);                     // a device with a full budget
 
-  PebbleInstance p;
-  make_pebble(p, 1, 1);
+  BugInstance p;
+  make_bug(p, 1, 1);
   CHECK_EQ((int)(p.evo_state & EVO_STATE_PENDING), 0);
 
   // Enough XP in one award to carry from level 1 to at least the gate.
@@ -494,13 +494,13 @@ TEST(xp_raises_pending_at_the_level_gate_and_apply_clears_it) {
 TEST(xp_does_not_raise_pending_below_the_gate_or_at_a_final_stage) {
   xp_ledger_reset(1);
 
-  PebbleInstance p;
-  make_pebble(p, 1, 1);
+  BugInstance p;
+  make_bug(p, 1, 1);
   CHECK(xp_add(p, xp_for_level(1), XP_SRC_ITEM, nullptr));
   CHECK_EQ(p.level, 2);
   CHECK_EQ((int)(p.evo_state & EVO_STATE_PENDING), 0);
 
-  make_pebble(p, 3, 20);                  // Rafagon has no rule to be ready for
+  make_bug(p, 3, 20);                  // Rafagon has no rule to be ready for
   (void)xp_add(p, 50, XP_SRC_ITEM, nullptr);
   CHECK_EQ((int)(p.evo_state & EVO_STATE_PENDING), 0);
 }
@@ -525,7 +525,7 @@ TEST(the_evolution_table_guards_hold_at_runtime_too) {
     CHECK(r.target != r.species);
     CHECK_EQ(t->family, s->family);
     CHECK_EQ((int)t->stage, (int)s->stage + 1);
-    CHECK(r.level >= 1 && r.level <= (uint8_t)PB_LEVEL_MAX);
+    CHECK(r.level >= 1 && r.level <= (uint8_t)ER_LEVEL_MAX);
     CHECK(r.cond < (uint8_t)EVOC_COUNT);
 
     // No species is the source of two rules.

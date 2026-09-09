@@ -146,9 +146,9 @@ why this enumeration was worth measuring instead of restating.
 | item | flash | globals |
 |---|---|---|
 | ~~P5 scanner, encounters, capture, items~~ **SPENT: +12,282 / +504** | ~~15-25 K~~ | ~~1.0-2.0 K~~ |
-| ~~P6 activity score, power states~~ **PHASE 6 CLOSED AT `v0.6.0-activity`: +20,866 flash / +400 globals** (baseline 1,927,936/73,180 -> 1,948,802/73,580; release 1,203,808/49,508 -> **1,224,210/49,924** = 76.5 % and 76.8 % of the caps `build_matrix.sh` enforces). **THE FLASH LINE WAS OVERRUN BY 74 % AND THE SCARCE LINE WAS NOT**, and the reason is worth keeping: about 17 K of the 20.9 K is two ESP-IDF drivers arriving in the tree for the FIRST time - LEDC with the first PWM output (~7.5 K, P6-C1) and `esp_sleep` with the first `esp_light_sleep_start()` (~9.6 K, P6-C3). Both are paid once and reused: a later LED effect and a deep-sleep rung link no new driver. Pebblebol's own phase-6 code is roughly 3.8 K. Per commit: P6-C1 +9,028/+136 (tone engine + motion capability), P6-C2 +1,940/+72 (activity score; its PERSISTED half costs 0 - four bytes that were already `CooldownTable.reserved_a[4]`), P6-C3 +9,698/+192 (power ladder + sleep-correct clock; ~148 B of the 192 is ESP-IDF's own sleep state, ~44 B is Pebblebol's), P6-C4 +200/+0 (the exit's three fixes, one gate, documents). **375,790 B of release flash and 15,076 B of release globals remain** against an 80-115 K / 3.7-8.0 K forecast for P7-P10. | ~~8-12 K~~ | ~~0.3-0.8 K~~ |
+| ~~P6 activity score, power states~~ **PHASE 6 CLOSED AT `v0.6.0-activity`: +20,866 flash / +400 globals** (baseline 1,927,936/73,180 -> 1,948,802/73,580; release 1,203,808/49,508 -> **1,224,210/49,924** = 76.5 % and 76.8 % of the caps `build_matrix.sh` enforces). **THE FLASH LINE WAS OVERRUN BY 74 % AND THE SCARCE LINE WAS NOT**, and the reason is worth keeping: about 17 K of the 20.9 K is two ESP-IDF drivers arriving in the tree for the FIRST time - LEDC with the first PWM output (~7.5 K, P6-C1) and `esp_sleep` with the first `esp_light_sleep_start()` (~9.6 K, P6-C3). Both are paid once and reused: a later LED effect and a deep-sleep rung link no new driver. Errata's own phase-6 code is roughly 3.8 K. Per commit: P6-C1 +9,028/+136 (tone engine + motion capability), P6-C2 +1,940/+72 (activity score; its PERSISTED half costs 0 - four bytes that were already `CooldownTable.reserved_a[4]`), P6-C3 +9,698/+192 (power ladder + sleep-correct clock; ~148 B of the 192 is ESP-IDF's own sleep state, ~44 B is Errata's), P6-C4 +200/+0 (the exit's three fixes, one gate, documents). **375,790 B of release flash and 15,076 B of release globals remain** against an 80-115 K / 3.7-8.0 K forecast for P7-P10. | ~~8-12 K~~ | ~~0.3-0.8 K~~ |
 | P7 ESP-NOW transport, link/trade/breeding | 25-35 K | 1.5-3.0 K |
-| ~~P8 PIN, creator routes, mobile page + sprite editor (PROGMEM)~~ **PHASE 8 CLOSED: +57,274 flash / +2,592 globals** on `release` (1,269,126 / 56,804 at `34aab11` -> **1,326,400 / 59,396** = 82.90 % and 91.38 % of the caps `build_matrix.sh` enforces). **THE FLASH LINE WAS OVERRUN BY 27 % AND THE SCARCE LINE WAS NOT**, and §§9-12 quoted the forecast they passed while saying nothing about the one they missed - which is the selective reading §8 was written to stop, repeated in the sections that cite §8. The overrun has ONE address: `data/index_html.h` grew from a 1,016 B placeholder to the 42,248 B committed creator page, +41,232 B of `.rodata`, and the served schema document is another 1,172 - so 42,404 of the 57,274 is DOCUMENTS, priced in §11 with the gzip lever (47,181 -> 17,947 B on this project's previous phone page) already costed if a later phase needs it back. Pebblebol's own phase-8 code and strings are **14,870 B**, inside half the forecast band on their own. Per commit, `release`: P8-C1/C2 +2,574/+16, P8-C3 +13,046/+2,576 (2,060 of the globals is `CS_BODY_MAX`), P8-C4 +41,658/+0 (all `.rodata`), P8-C5 +26/+0, P8-C6 -30/+0. **273,600 B of release flash and 5,604 B of release globals remain** against a 25-35 K / 0.7-2.0 K forecast for P9-P10. | ~~30-45 K~~ | ~~1.5-3.0 K~~ |
+| ~~P8 PIN, creator routes, mobile page + sprite editor (PROGMEM)~~ **PHASE 8 CLOSED: +57,274 flash / +2,592 globals** on `release` (1,269,126 / 56,804 at `34aab11` -> **1,326,400 / 59,396** = 82.90 % and 91.38 % of the caps `build_matrix.sh` enforces). **THE FLASH LINE WAS OVERRUN BY 27 % AND THE SCARCE LINE WAS NOT**, and §§9-12 quoted the forecast they passed while saying nothing about the one they missed - which is the selective reading §8 was written to stop, repeated in the sections that cite §8. The overrun has ONE address: `data/index_html.h` grew from a 1,016 B placeholder to the 42,248 B committed creator page, +41,232 B of `.rodata`, and the served schema document is another 1,172 - so 42,404 of the 57,274 is DOCUMENTS, priced in §11 with the gzip lever (47,181 -> 17,947 B on this project's previous phone page) already costed if a later phase needs it back. Errata's own phase-8 code and strings are **14,870 B**, inside half the forecast band on their own. Per commit, `release`: P8-C1/C2 +2,574/+16, P8-C3 +13,046/+2,576 (2,060 of the globals is `CS_BODY_MAX`), P8-C4 +41,658/+0 (all `.rodata`), P8-C5 +26/+0, P8-C6 -30/+0. **273,600 B of release flash and 5,604 B of release globals remain** against a 25-35 K / 0.7-2.0 K forecast for P9-P10. | ~~30-45 K~~ | ~~1.5-3.0 K~~ |
 | P9 roster 36→60, sprite atlas, corruption | 15-20 K | 0.2-0.5 K |
 | P10 diagnostics, animation, polish | 10-15 K | 0.5-1.5 K |
 | **total** | **105-150 K** | **5-11 K** |
@@ -222,12 +222,12 @@ now enforces `GATE_RELEASE_FLASH_MAX` / `GATE_RELEASE_GLOBALS_MAX`.**
 **Closed at P9-C3.** `data/sprites.h` carried `static_assert(SPRITE_DATA_BYTES <= 24576)` — a
 TRANSITION allowance sized for the one window in which both rosters were in the tree at once.
 Both rosters are no longer in the tree: the 36 legacy Nottamagochi body and pose sets are
-deleted, the atlas is `data/sprites_pebbles.h`, and the ceiling came down to the end state plus
+deleted, the atlas is `data/sprites_bugs.h`, and the ceiling came down to the end state plus
 a stated margin.
 
 | line | bytes | what it is |
 |---|---|---|
-| generated atlas | **9,216** | 2 eggs + SLEEP + SICK + 60 species bodies, every one 24x24x2 at 144 B (`PB_SPRITE_DATA_BYTES`) |
+| generated atlas | **9,216** | 2 eggs + SLEEP + SICK + 60 species bodies, every one 24x24x2 at 144 B (`ER_SPRITE_DATA_BYTES`) |
 | survivors | **1,031** | `spr_icon12` 384 + `spr_mini8` 168 + `spr_badge12` 312 + the twelve emotes 167 (corrected P9-C6: was "96" and "239", wrong by ∓72 B and cancelling) |
 | **end state** | **10,247** | `SPRITE_DATA_BYTES_DECLARED` |
 | margin | 1,017 | seven more 24x24x2 sets (1,008 B): one more three-stage family and four effect sets |
@@ -239,7 +239,7 @@ variant had spare at 37511d5. (Corrected at P9-C6: this sentence quoted 0.47 % o
 derived from `GATE_RELEASE_FLASH_MAX` = 1,600,000 — the two-caps confusion §4.1 and
 `docs/decisions.md` both already correct. Both halves name the same variant now.)
 There is a SECOND, TIGHTER ceiling in front of it:
-`tools/gen_sprites.py`'s `PB_DATA_BYTES_MAX = 10240` covers the generated atlas alone, so a
+`tools/gen_sprites.py`'s `ER_DATA_BYTES_MAX = 10240` covers the generated atlas alone, so a
 runaway is refused by the generator — with a message naming the overrun — before it reaches
 either static_assert. Raising them is a re-plan and both have to move together.
 
@@ -499,7 +499,7 @@ plan says so in the one place a reader will look.
 ## 7. Phase 7, chunk 6 — the exit (measured 2026-09-05)
 
 **+506 flash / +8 globals on the baseline**, **+360 / +8 on release**. This is the smallest
-chunk in the phase and it is the one that stopped the trade destroying a Pebble.
+chunk in the phase and it is the one that stopped the trade destroying a Bug.
 
 ### Where the 8 B of globals went
 
@@ -513,15 +513,15 @@ chunk in the phase and it is the one that stopped the trade destroying a Pebble.
 | | **2** | link alignment |
 | | **8** | **measured image delta** |
 
-`save_pebble_now()`, `act_adopt()` and the narrowed `sim_gain_restore()` add **no state at
+`save_bug_now()`, `act_adopt()` and the narrowed `sim_gain_restore()` add **no state at
 all** — they are a second entry point, a boot-time clamp and a deleted term. The +506 B of
 flash is those three plus `pwr_tick_budget()`.
 
 ### The one measurement this chunk exists for
 
-**A clean trade cost 9 flash writes and should have cost 10.** `save_pebble()` deferred the
+**A clean trade cost 9 flash writes and should have cost 10.** `save_bug()` deferred the
 second write of one key inside `SAVE_MIN_GAP_MS` and reported it as landed, so the incoming
-Pebble never reached flash while the journal was cleared over it. The counter is in the test
+Bug never reached flash while the journal was cleared over it. The counter is in the test
 output (`one committed trade costs 10 flash writes`), which is the cheapest possible regression
 detector for this class of bug and the reason the case prints it.
 
@@ -593,7 +593,7 @@ partition is 3.1 MB.
 ### The measurement, and the grep that nearly lied about it
 
 `riscv32-esp-elf-nm -S -C` over the release `.elf` matches **433 symbols** case-insensitively
-against `ble` — `ATTACKS_TABLE`, `soc_get_available_memory_regions`, `PebbleInstance`,
+against `ble` — `ATTACKS_TABLE`, `soc_get_available_memory_regions`, `BugInstance`,
 `mimeTable`. **Two of them are Bluetooth**, both ESP-IDF stubs the core links unconditionally:
 
 ```
@@ -1090,8 +1090,8 @@ in the release `.elf` and nothing else:
 `PF_STRIP_BYTES` is `PF_MAX_STRIDE (3) * PF_EYE_MAX_H (12)` = **36**. All four symbols and both
 constants now live in `ui/petfx_core.h`, beside the arithmetic.
 
-**NO TABLE LOST ITS `const`.** All 64 sprite arrays, `PB_SPRITE_SETS`, `PB_SPRITE_EYES` and
-`PF_TEMPER` are in `.flash.rodata` in the release image; `PB_SPRITE_NAMES` is discarded by
+**NO TABLE LOST ITS `const`.** All 64 sprite arrays, `ER_SPRITE_SETS`, `ER_SPRITE_EYES` and
+`PF_TEMPER` are in `.flash.rodata` in the release image; `ER_SPRITE_NAMES` is discarded by
 `--gc-sections` because only the tests use it. That is the property the phase was told to watch
 and it held in all six variants at every chunk.
 
@@ -1202,7 +1202,7 @@ is that 117 B of existing slack was consumed and the number a cap is applied to 
 | **Flash** (`GATE_RELEASE_FLASH_MAX`) | 1,354,812 | 1,600,000 | **245,188** | 15.3 % |
 | **Globals** (`GATE_RELEASE_GLOBALS_MAX`) | 59,468 | 65,000 | **5,532** | 8.5 % |
 | Sprite atlas (`SPRITE_DATA_BYTES_MAX`) | 10,247 | 11,264 | 1,017 | 9.0 % |
-| Pebble atlas (`PB_SPRITE_DATA_BYTES_MAX`) | 9,216 | 10,240 | 1,024 | 10.0 % |
+| Bug atlas (`ER_SPRITE_DATA_BYTES_MAX`) | 9,216 | 10,240 | 1,024 | 10.0 % |
 | `app0` partition | 1,354,812 | 3,145,728 | 1,790,916 | 56.9 % |
 
 > **This table was 1,350,840 / 59,452 until the first-impressions work, and that
@@ -1229,7 +1229,7 @@ Both caps are enforced by `tools/build_matrix.sh` and, since P10-C5, by CI — w
 been in eight phases before that.
 
 **The two atlas rows are quoted separately on purpose.** They are close enough to be confused and
-have been: `data/sprites.h` prices the POSE_SICK conversation against 1,024 B (the **pebble**
+have been: `data/sprites.h` prices the POSE_SICK conversation against 1,024 B (the **bug**
 atlas, where twenty family bodies would go) and §14.4 above prices it against 1,017 B (the
 **aggregate**). Both are right about different caps and neither said which. Twenty family sick
 bodies are 2,880 B and overrun both.
@@ -1247,7 +1247,7 @@ bodies are 2,880 B and overrun both.
   `kScreenName` pointer array is **116 B** (the perf capture goes back to raw ids, and
   `docs/bench.md` would need the mapping table pasted into it instead).
 * **The art caps are the tight ones.** 1,017 B of aggregate margin is seven more 24×24×2 sets.
-  **A per-family sleeping or sick body does not fit** and needs `PB_DATA_BYTES_MAX` and
+  **A per-family sleeping or sick body does not fit** and needs `ER_DATA_BYTES_MAX` and
   `SPRITE_DATA_BYTES_MAX` re-planned together — said out loud rather than discovered. P10-C3
   spent 0 B on the sleeping pose by DERIVING it from each species' own idle body with the blink's
   own eye-lid machinery, which is the technique to reach for first.

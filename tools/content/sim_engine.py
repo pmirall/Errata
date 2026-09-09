@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Stochastic battle simulator for the Pebblebol content set.
+"""Stochastic battle simulator for the Errata content set.
 
 Reads ONLY the shipped JSON (species/attacks/balance). Imports nothing from the
 generator, so a passing verify run proves the *deliverable* consistent, not the

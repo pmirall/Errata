@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_qr.cpp
+//  Errata host tests - test_qr.cpp
 //  The portable half of qr.cpp: version selection by byte-mode capacity at
 //  ECC L (17/32/53/78 B for v1..v4), failure modes, and two full symbols
 //  checked module-by-module against the Python `qrcode` 8.2 reference.
@@ -137,6 +137,9 @@ static const char* const REF_V2[25] = {
 };
 
 TEST(qr_v1_symbol_matches_the_python_reference) {
+  // LAS DOS CARGAS SON VECTORES, no direcciones del producto: REF_V1 y
+  // REF_V2 son las matrices que la referencia python genero PARA ESTAS
+  // CADENAS. "pebblebol.local" nunca fue un host real - solo vive aqui.
   check_against("PEBBLEBOL", REF_V1, 21);
 }
 

@@ -17,7 +17,7 @@
 //
 //  IT READS THE HEADER, NOT THE ASCII SOURCES, and that is the point. A
 //  rendering of tools/sprites/*.txt would only prove the .txt files say what
-//  they say. This walks data/sprites_pebbles.h's PB_SPRITE_SETS through the
+//  they say. This walks data/sprites_bugs.h's ER_SPRITE_SETS through the
 //  same
 //  ((w+7)>>3) / LSB-first decode the device's drawXBM performs, so what appears
 //  here is what the panel will show.
@@ -41,7 +41,7 @@
 //  a percentage.
 //
 //  A name is matched case-insensitively against the enum tag with or without
-//  its prefix: PAKETO, pb_spr_paketo and PBSPR_PAKETO all work.
+//  its prefix: PAKETO, bug_spr_paketo and BUGSPR_PAKETO all work.
 //
 //  Built by `make -C tests spritetool`, NOT by `make check`: it writes files and
 //  answers a human, which is what tests/tools/ means. It asserts nothing.
@@ -56,13 +56,13 @@
 #include <strings.h>   // strcasecmp / strncasecmp
 
 #include "data/sprites.h"
-#include "data/sprites_pebbles.h"
+#include "data/sprites_bugs.h"
 #include "ui/petfx_core.h"
 
 // THE LEGACY NAME LIST IS GONE (P9-C3). It transcribed the 38 tags of
 // data/sprites.h's hand-written `enum SpriteSetId`, because that enum carried
 // no string form; that atlas was deleted with this chunk and there is exactly
-// one atlas now, which emits its own PB_SPRITE_NAMES from tools/sprites/
+// one atlas now, which emits its own ER_SPRITE_NAMES from tools/sprites/
 // atlas.txt. So nothing here is transcribed and this tool needs no edit when a
 // body is added - which is what the P9-C1 comment predicted and is worth
 // recording as having come true.
@@ -74,13 +74,13 @@ struct Entry {
   int              index;
 };
 
-static Entry g_all[PB_SPRITE_SET_COUNT];
+static Entry g_all[ER_SPRITE_SET_COUNT];
 static int   g_n = 0;
 
 static void collect(void)
 {
-  for (int i = 0; i < (int)PB_SPRITE_SET_COUNT; ++i) {
-    Entry e = { "atlas", PB_SPRITE_NAMES[i], &PB_SPRITE_SETS[i], i };
+  for (int i = 0; i < (int)ER_SPRITE_SET_COUNT; ++i) {
+    Entry e = { "atlas", ER_SPRITE_NAMES[i], &ER_SPRITE_SETS[i], i };
     g_all[g_n++] = e;
   }
 }
@@ -308,7 +308,7 @@ static int write_sheet(const char* path, int frame)
 
   FILE* fp = fopen(path, "w");
   if (!fp) { fprintf(stderr, "sprite_dump: cannot write %s\n", path); free(fb); return 2; }
-  fprintf(fp, "P1\n# pebblebol sprite contact sheet, frame %d, %d sets\n%d %d\n",
+  fprintf(fp, "P1\n# errata sprite contact sheet, frame %d, %d sets\n%d %d\n",
           frame, g_n, W, H);
   for (int y = 0; y < H; ++y) {
     for (int x = 0; x < W; ++x) fputc(fb[(size_t)y * (size_t)W + x] ? '1' : '0', fp);
@@ -322,9 +322,9 @@ static int write_sheet(const char* path, int frame)
 
 static int name_eq(const char* a, const char* b)
 {
-  // Case-insensitive, and tolerant of the "spr_" / "SPR_" / "PBSPR_" prefixes a
+  // Case-insensitive, and tolerant of the "spr_" / "SPR_" / "BUGSPR_" prefixes a
   // reader is likely to paste in from the header.
-  static const char* const kPrefix[] = { "pbspr_", "spr_", "pb_spr_" };
+  static const char* const kPrefix[] = { "pbspr_", "spr_", "bug_spr_" };
   for (int p = 0; p < 3; ++p) {
     const size_t n = strlen(kPrefix[p]);
     if (strncasecmp(a, kPrefix[p], n) == 0) { a += n; break; }

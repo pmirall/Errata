@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - fakes/gfx_fb.h
+//  Errata host tests - fakes/gfx_fb.h
 //  The HOST side of the ui/gfx.h seam: a real 128x64 1-bit framebuffer, fixed
 //  advance font metrics, and a recorder that counts every primitive which
 //  asked to touch a pixel outside the panel.

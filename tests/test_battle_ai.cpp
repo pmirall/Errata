@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL host test - test_battle_ai.cpp
+//  ERRATA host test - test_battle_ai.cpp
 //  THE LOCAL OPPONENT (P4-C3), over the real game/battle_ai.cpp and the real
 //  game/battle.cpp.
 //
@@ -40,7 +40,7 @@
 
 #include "game/battle.h"
 #include "game/battle_ai.h"
-#include "game/pebble.h"
+#include "game/bug.h"
 #include "game/xp.h"
 
 // The three power-35, accuracy-100, no-effect, no-cooldown damage moves - one
@@ -57,17 +57,17 @@
 // =============================================================================
 //  FIXTURES
 // =============================================================================
-static void mk_member(PebbleInstance& p, uint8_t species, uint8_t level, uint32_t id)
+static void mk_member(BugInstance& p, uint8_t species, uint8_t level, uint32_t id)
 {
   memset(&p, 0, sizeof p);
-  p.magic      = (uint16_t)PEBBLE_MAGIC;
-  p.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  p.magic      = (uint16_t)BUG_MAGIC;
+  p.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   p.species_id = species;
   p.id         = id;
   p.level      = level;
   const SpeciesDef* sp = species_get(species);
   if (sp == nullptr) return;
-  for (uint8_t m = 0; m < (uint8_t)PB_MOVE_COUNT; ++m) p.moves[m] = sp->moves[m];
+  for (uint8_t m = 0; m < (uint8_t)ER_MOVE_COUNT; ++m) p.moves[m] = sp->moves[m];
   p.hp_cur = xp_hp_max(sp->base_hp, level);
 }
 
@@ -414,7 +414,7 @@ TEST(the_ai_answers_nothing_only_when_the_sweep_agrees_that_nothing_is_legal)
     CHECK_EQ(battle_validate_action(st, 0u, a), BR_OK);
   }
 
-  // --- the active slot holds no Pebble at all (only reachable from a
+  // --- the active slot holds no Bug at all (only reachable from a
   //     wire-supplied state; battle.h keeps BR_EMPTY_ACTIVE for the same reason)
   {
     BattleState st;
@@ -761,7 +761,7 @@ static void switch_fixture(BattleState& st, uint16_t active_hp,
 TEST(the_twenty_five_percent_threshold_is_strict_and_both_sides_of_it_are_pinned)
 {
   // hp_max is 100, so the rule is hp_cur * 100 < 100 * 25, i.e. hp_cur < 25.
-  // AT the threshold the Pebble stands and fights; ONE POINT BELOW it switches.
+  // AT the threshold the Bug stands and fights; ONE POINT BELOW it switches.
   // Moving BATTLE_AI_SWITCH_HP_PCT, or loosening `<` to `<=`, fails one of these
   // two arms.
   {
@@ -786,7 +786,7 @@ TEST(the_twenty_five_percent_threshold_is_strict_and_both_sides_of_it_are_pinned
   }
 
   // The rule is a FRACTION, not a raw hit-point count: the same 24 HP on a
-  // 400-point Pebble is 6 % and must still switch, and 200 of 400 is 50 % and
+  // 400-point Bug is 6 % and must still switch, and 200 of 400 is 50 % and
   // must not - so a version that compared raw HP against 25 fails here.
   {
     BattleState st;
@@ -803,7 +803,7 @@ TEST(the_twenty_five_percent_threshold_is_strict_and_both_sides_of_it_are_pinned
   }
 }
 
-TEST(a_hurt_pebble_with_no_better_type_on_the_bench_stands_and_fights)
+TEST(a_hurt_bug_with_no_better_type_on_the_bench_stands_and_fights)
 {
   // The rule is an AND, and this is the half the threshold case cannot see.
   BattleState st;
@@ -821,7 +821,7 @@ TEST(a_hurt_pebble_with_no_better_type_on_the_bench_stands_and_fights)
   CHECK(!battle_ai_wants_to_switch(st, 0u));
 
   // THE CONTROL that proves the fixture can switch at all: give slot 1 the
-  // winning type back and the same Pebble at the same 1 HP leaves.
+  // winning type back and the same Bug at the same 1 HP leaves.
   st.side[0].team[1].type = TYPE_SIGNAL;
   CHECK(battle_ai_wants_to_switch(st, 0u));
   BattleAi ai2;
@@ -860,7 +860,7 @@ TEST(a_better_type_that_cannot_legally_be_switched_to_is_not_a_reason_to_switch)
   CHECK_EQ(battle_validate_action(st, 0u, a), BR_OK);
 
   // The same for an EMPTY slot, which is the other way a bench member is not
-  // there: give slot 2 the winning type and take the Pebble away.
+  // there: give slot 2 the winning type and take the Bug away.
   st.side[0].team[1].flags = 0u;
   st.side[0].team[2].type  = TYPE_SIGNAL;
   CHECK(battle_ai_wants_to_switch(st, 0u));   // control: slot 2 lives and is better
@@ -883,7 +883,7 @@ TEST(the_three_public_queries_range_check_before_they_index)
   st.side[0].team[0].cooldown[0] = MV_CHOQUE;      // the byte just past moves[3]
 
   CHECK(battle_ai_move_score(st, 0u, 3u) > 0u);    // the control: slot 3 is real
-  CHECK_EQ(battle_ai_move_score(st, 0u, (uint8_t)PB_MOVE_COUNT), 0u);
+  CHECK_EQ(battle_ai_move_score(st, 0u, (uint8_t)ER_MOVE_COUNT), 0u);
   CHECK_EQ(battle_ai_move_score(st, 0u, 255u), 0u);
   CHECK_EQ(battle_ai_move_score(st, 2u, 0u), 0u);
   CHECK_EQ(battle_ai_move_score(st, 255u, 0u), 0u);
@@ -898,7 +898,7 @@ TEST(the_three_public_queries_range_check_before_they_index)
   CHECK_EQ(battle_ai_wants_to_switch(st, 255u), false);
 }
 
-TEST(a_healthy_pebble_never_switches_however_good_the_bench_is)
+TEST(a_healthy_bug_never_switches_however_good_the_bench_is)
 {
   BattleState st;
   switch_fixture(st, 100u);                   // full health, bench is SIGNAL
@@ -933,7 +933,7 @@ TEST(a_fainted_active_is_replaced_and_the_validator_is_the_only_thing_that_says_
   }
 
   // AND HERE IS THE MECHANISM, not just the outcome: arm the bench so that
-  // RULE 3 WOULD SAY NO - nothing on it is better typed than the Pebble that
+  // RULE 3 WOULD SAY NO - nothing on it is better typed than the Bug that
   // just fainted - and the AI must switch anyway, because the attack pool is
   // empty. If the replacement were riding on rule 3, this arm would fail.
   //
@@ -975,7 +975,7 @@ TEST(a_fainted_active_is_replaced_and_the_validator_is_the_only_thing_that_says_
 TEST(a_replacement_is_picked_by_type_first_and_by_health_second)
 {
   // Both keys of battle_ai_switch_score(), and the ORDER between them: a nearly
-  // dead Pebble with the winning type must outrank a healthy one with a losing
+  // dead Bug with the winning type must outrank a healthy one with a losing
   // type, or BATTLE_AI_SWITCH_TYPE_WEIGHT is not doing its job.
   {
     BattleState st;
@@ -1027,7 +1027,7 @@ TEST(a_replacement_is_picked_by_type_first_and_by_health_second)
 TEST(switching_costs_the_turn_and_the_ai_pays_it_like_anybody_else)
 {
   // The AI is an action producer and gets no privileges: a switch it chose
-  // resolves through the same engine, and the incoming Pebble is the one that
+  // resolves through the same engine, and the incoming Bug is the one that
   // takes the hit that round.
   BattleState st;
   switch_fixture(st, 10u);

@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_daylight.cpp
+//  Errata host tests - test_daylight.cpp
 //  The approximated daylight table and its interpolation (plan P3-C2b,
 //  decision D13). game/daylight.cpp is pure arithmetic over data/balance.h: no
 //  clock, no state, no RNG, so every case here is a value check.
@@ -22,7 +22,7 @@
 //  1. The table is reproduced exactly where it is anchored
 // -----------------------------------------------------------------------------
 TEST(daylight_reproduces_every_month_sample_at_its_anchor_day) {
-  for (uint8_t m = 0; m < (uint8_t)PB_DAYLIGHT_MONTHS; ++m) {
+  for (uint8_t m = 0; m < (uint8_t)ER_DAYLIGHT_MONTHS; ++m) {
     const uint16_t d = DAYLIGHT_ANCHOR_DOY[m];
     CHECK_EQ(daylight_sunrise_min(d), DAYLIGHT_SUNRISE_MIN[m]);
     CHECK_EQ(daylight_sunset_min(d),  DAYLIGHT_SUNSET_MIN[m]);
@@ -92,8 +92,8 @@ TEST(daylight_every_day_of_the_year_is_a_sane_day) {
     const uint16_t bed  = daylight_bedtime_min(d);
 
     CHECK(rise < set);                            // the sun rises before it sets
-    CHECK(set < PB_MINUTES_PER_DAY);
-    CHECK(bed < PB_MINUTES_PER_DAY);              // bedtime never wraps midnight
+    CHECK(set < ER_MINUTES_PER_DAY);
+    CHECK(bed < ER_MINUTES_PER_DAY);              // bedtime never wraps midnight
     CHECK(bed > rise);                            // ...so the night is one range
     // Nothing pathological: the shortest day still has 8 h of light and the
     // longest still has a night.
@@ -132,7 +132,7 @@ TEST(daylight_is_night_agrees_with_the_window_it_is_built_from) {
     CHECK_EQ((int)daylight_is_night(d, 0), 1);                   // midnight is always night
 
     // Minutes past a whole day fold rather than answering nonsense.
-    CHECK_EQ((int)daylight_is_night(d, (uint16_t)(PB_MINUTES_PER_DAY + 0u)),
+    CHECK_EQ((int)daylight_is_night(d, (uint16_t)(ER_MINUTES_PER_DAY + 0u)),
              (int)daylight_is_night(d, 0));
   }
 }

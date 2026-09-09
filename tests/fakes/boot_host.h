@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - fakes/boot_host.h
+//  Errata host tests - fakes/boot_host.h
 //  hardware/boot.cpp is Arduino-only (esp_reset_reason, RTC_NOINIT memory), so
 //  the host provides the WHOLE boot.h surface over plain RAM: ELEVEN functions,
 //  not five. The caller that needs them is persistence/game_state.cpp
@@ -47,8 +47,8 @@
 //  Every row of this file is enumerated and classified in tests/fakes/SHADOWS.txt
 //  and enforced by tools/check.sh section 10.
 // =============================================================================
-#ifndef PB_TEST_BOOT_HOST_H
-#define PB_TEST_BOOT_HOST_H
+#ifndef ER_TEST_BOOT_HOST_H
+#define ER_TEST_BOOT_HOST_H
 
 #include "hardware/boot.h"
 
@@ -57,4 +57,4 @@ void     boot_host_reset(void);
 uint32_t boot_host_mirror(void);            // the epoch last mirrored
 void     boot_host_set_rtc_last_seen(uint32_t epoch);
 
-#endif // PB_TEST_BOOT_HOST_H
+#endif // ER_TEST_BOOT_HOST_H

@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_screens.cpp
+//  Errata host tests - test_screens.cpp
 //  The spec section 63 gate: every migrated screen is rendered at the REAL
 //  128x64 into tests/fakes/gfx_fb.cpp and then
 //    (a) asserted to have made ZERO out-of-bounds drawing calls, and
@@ -9,11 +9,11 @@
 //  commit that means to change what a screen looks like, and read the diff.
 //
 //  P2-C11a migrated BOOT, LOAD_SAVE and ERROR; P2-C11b added HOME, MENU, the
-//  CARE and PLAY lists, both PEBBLE pages, SETTINGS (list and "Acerca de") and
+//  CARE and PLAY lists, both BUG pages, SETTINGS (list and "Acerca de") and
 //  the TIME entry screen; P2-C11c added LINK, EVOLUTION, DIAG, CREATOR and the
 //  CONFIRM / ALERT / HELP overlays. Every later screen adds its fixtures here.
 //
-//  TWO FIXTURES render on every screen that shows a Pebble: a fresh starter,
+//  TWO FIXTURES render on every screen that shows a Bug: a fresh starter,
 //  and a MAXED one whose nickname is the full twelve characters the schema
 //  allows and whose every stat is at 100. The second one is the layout test:
 //  a 12-character name beside a two-digit level, six three-digit percentages
@@ -72,6 +72,9 @@
 #include "ui/screen_view.h"
 #include "ui/gfx.h"        // gfx_xbm(): the clipping proof draws one directly
 #include "ui/pet_art.h"    // pet_art_key(): the body box a species-difference check measures
+#include "data/attacks_table.h"   // ATTACK_COUNT: the move-set search walks it
+#include "game/validate.h"        // creator_cost_of(): a legal record prices itself
+#include "game/species_custom.h"  // the registry the drawn body comes out of
 #include "ui/ui.h"
 
 // =============================================================================
@@ -186,6 +189,12 @@ void ui_start_minigame(uint8_t i) { g_minigame = i; }
 // these are the only three things it cannot do for itself: draw a seed, award
 // XP, and reach render.h's frame-level effects.
 void ui_start_battle(uint8_t e)          { g_battle_entry = e; g_battle_starts++; }
+// The wild fight (the encounter's third answer). Recorded rather than run: the
+// real one draws a seed and navigates, and neither belongs in a screen test.
+static uint8_t g_wild_sp = 0, g_wild_lv = 0; static int g_wild_starts = 0;
+void ui_start_wild_battle(uint8_t sp, uint8_t lv) {
+  g_wild_sp = sp; g_wild_lv = lv; ++g_wild_starts;
+}
 void ui_battle_result(uint8_t e, uint8_t won) {
   g_result_entry = e; g_result_won = won; g_results++;
 }
@@ -219,7 +228,7 @@ void ui_creator_info(CreatorInfo& out) {
   out.ap_up  = g_ap_up;
   out.idle_expired = g_idle_exp;
   out.pin    = g_pin;
-  snprintf(out.ssid, sizeof out.ssid, "PEBBLEBOL-1234");
+  snprintf(out.ssid, sizeof out.ssid, "ERRATA-1234");
   snprintf(out.ip,   sizeof out.ip,   "192.168.4.1");
   // NO "?k=NNNN" SINCE P8-C1. net_url() lost the PIN and the argument that
   // carried it (spec section 39); this fixture matches what net.cpp now emits,
@@ -233,7 +242,7 @@ uint32_t ui_btn_hold_ms(uint8_t)  { return 0; }
 void ui_info_lines(char lines[UI_INFO_LINES][UI_INFO_CAP]) {
   // Fixed text: the real ones carry a heap figure and an IP, neither of which
   // a golden could ever be stable about.
-  snprintf(lines[0], UI_INFO_CAP, "PEBBLEBOL 0.2.0");
+  snprintf(lines[0], UI_INFO_CAP, "ERRATA 0.2.0");
   snprintf(lines[1], UI_INFO_CAP, "IP 0.0.0.0  rssi 0");
   snprintf(lines[2], UI_INFO_CAP, "PIN 1234  spr rev 1");
   snprintf(lines[3], UI_INFO_CAP, "heap 200000  nvs 00");
@@ -309,9 +318,9 @@ Genome ui_fresh_genome(void) {
   genome_seal(g);
   return g;
 }
-static PebbleInstance* g_active_p = nullptr;
+static BugInstance* g_active_p = nullptr;
 void ui_award_xp(uint16_t amount, uint8_t src) { g_xp_amt = amount; g_xp_src = src; }
-PebbleInstance* ui_active_pebble(void) { return g_active_p; }
+BugInstance* ui_active_bug(void) { return g_active_p; }
 
 // Everything but the cooldown table, so a case can prove that a network stays
 // armed across a second visit to the screen.
@@ -340,16 +349,16 @@ static void explore_reset(void) {
 }
 
 // =============================================================================
-//  THE TWO PEBBLE FIXTURES
+//  THE TWO BUG FIXTURES
 // =============================================================================
-static PebbleView g_view;
+static BugView g_view;
 
-static const PebbleView* fixture_view(void) { return &g_view; }
+static const BugView* fixture_view(void) { return &g_view; }
 
 static void fixture_common(void) {
   memset(&g_view, 0, sizeof g_view);
   g_view.present     = 1;
-  // A fixed genome: deterministic, and every gene accessor the PEBBLE page
+  // A fixed genome: deterministic, and every gene accessor the BUG page
   // reads is a plain bit field, so no seeding is involved.
   g_view.genome.magic_ver  = GENOME_MAGIC_VER;
   g_view.genome.lineage_id = 0x0BADF00Du;
@@ -377,12 +386,12 @@ static void fixture_starter(void) {
 }
 
 // The widest frame this UI can be asked to draw: twelve characters of
-// nickname (PB_NICKNAME_CAP - 1), level 30, and every meter pinned at 100.
+// nickname (ER_NICKNAME_CAP - 1), level 30, and every meter pinned at 100.
 static void fixture_maxed(void) {
   fixture_common();
   snprintf(g_view.name, sizeof g_view.name, "ABCDEFGHIJKL");
   // Level 30 is the top of the curve: xp_for_level() answers 0 there and the
-  // Pebble holds no in-level XP, which is what makes the HOME rule solid.
+  // Bug holds no in-level XP, which is what makes the HOME rule solid.
   g_view.level    = 30;
   g_view.xp       = 0;
   g_view.xp_next  = 0;
@@ -1575,6 +1584,255 @@ static int sweep_species_on_home(uint8_t stage, uint8_t pose, uint8_t frame) {
   return drawn;
 }
 
+// =============================================================================
+//  THE CREATURE THE PLAYER DREW (P10-C4b)
+//
+//  REPORTED FROM A BOARD, AND IT WAS REAL: a Bug made in the creator showed
+//  up in the BOX by name and then walked onto HOME wearing SOMEBODY ELSE'S
+//  BODY. csp_install() had always parked CustomSpeciesRec.sprite - 144 bytes
+//  the player drew a pixel at a time - in a record NOTHING EVER READ. A grep
+//  for a reader across the whole tree found none, so what got drawn was
+//  whichever atlas row the id happened to fold onto.
+//
+//  So these cases assert PIXELS, and they assert the NEGATIVE alongside them.
+//  "It drew a body" would have passed before the fix, because it always drew
+//  one: what has to be true is that the ink on the panel IS the ink in the
+//  record and IS NOT the atlas body for the same key.
+// =============================================================================
+// THE MOVE SET IS FOUND, NOT TYPED. tests/test_validate.cpp holds four move ids
+// as #defines and is welcome to - it is the file about the rules. A second copy
+// of them here would be a second place the attack table can quietly outgrow, so
+// the VALIDATOR is the oracle instead: the first four-move set it accepts is by
+// definition legal, and if the table ever stops containing one this fails
+// loudly rather than installing a record the registry would refuse.
+static_assert(ER_MOVE_COUNT == 4, "the search below fills exactly four slots");
+static bool cs_find_moves(CustomSpeciesRec& c)
+{
+  for (uint8_t a = 1u; a <= (uint8_t)ATTACK_COUNT; ++a)
+    for (uint8_t b = (uint8_t)(a + 1u); b <= (uint8_t)ATTACK_COUNT; ++b)
+      for (uint8_t d = (uint8_t)(b + 1u); d <= (uint8_t)ATTACK_COUNT; ++d)
+        for (uint8_t e = (uint8_t)(d + 1u); e <= (uint8_t)ATTACK_COUNT; ++e) {
+          c.moves[0] = a; c.moves[1] = b; c.moves[2] = d; c.moves[3] = e;
+          uint16_t stat_used = 0, attack_used = 0;
+          creator_cost_of(c, stat_used, attack_used);
+          c.budget_used = attack_used;
+          if (validate_custom_species(c) == (uint8_t)VR_OK) return true;
+        }
+  return false;
+}
+
+static void mk_custom(CustomSpeciesRec& c, uint8_t slot, uint8_t seed)
+{
+  memset(&c, 0, sizeof c);
+  c.magic   = (uint16_t)CS_MAGIC;
+  c.version = (uint8_t)SAVE_SCHEMA_VERSION;
+  c.slot    = slot;
+  c.type    = (uint8_t)TYPE_SIGNAL;
+  c.base[0] = 6u; c.base[1] = 5u; c.base[2] = 5u; c.base[3] = 5u;   // 21
+  memcpy(c.name, "Bicho", 6);
+  c.compat_group = 0u;                       // a custom species does not breed
+  CHECK(cs_find_moves(c));
+
+  // A DRAWING NO ATLAS ROW COULD BE, and one whose two frames differ from each
+  // other: the frame index is folded into every byte, so "the renderer drew
+  // frame 0 twice" cannot pass as "the renderer drew the drawing".
+  for (uint8_t f = 0; f < (uint8_t)CS_SPRITE_FRAMES; ++f)
+    for (uint8_t i = 0; i < (uint8_t)CS_SPRITE_BYTES; ++i)
+      c.sprite[f][i] = (uint8_t)(0x55u ^ (uint8_t)(i * 7u + f * 33u + seed));
+}
+
+// The 24x24 box a HOME body stands in, read straight off the framebuffer and
+// packed back into XBM rows so it can be compared with the record byte for
+// byte. XBM is little-endian per row: bit 0 of a byte is its LEFTMOST pixel.
+static void read_body_box(const SpriteRef& r, uint8_t* out)
+{
+  const int bx = (int)sprite_center_x(r.w);
+  const int by = (int)HOME_FLOOR_Y - (int)r.h;
+  const int stride = (r.w + 7) / 8;
+  memset(out, 0, (size_t)stride * r.h);
+  for (int y = 0; y < (int)r.h; ++y)
+    for (int x = 0; x < (int)r.w; ++x)
+      if (fb_get(bx + x, by + y))
+        out[y * stride + (x >> 3)] |= (uint8_t)(1u << (x & 7));
+}
+
+TEST(a_creature_from_the_creator_wears_the_body_it_was_drawn_with) {
+  seams2_reset();
+  fixture_starter();
+  csp_reset();
+
+  CustomSpeciesRec c;
+  mk_custom(c, 0u, 0x11u);
+  CHECK(csp_install(c));
+
+  const uint8_t id = csp_species_id(0);
+  CHECK(id != 0u);
+  g_view.species_id = id;
+  g_view.stage      = (uint8_t)STAGE_ADULT;
+  g_view.pose       = (uint8_t)POSE_IDLE;
+
+  // The atlas body this id folds onto: the WRONG creature, and the one the
+  // device drew before this change. It has to still be there to be refused.
+  const SpriteRef atlas = sprite_lookup_pose(
+      g_view.stage,
+      sprite_form_of(pet_art_key(id, gene_species(g_view.genome)),
+                     (Stage)g_view.stage),
+      g_view.pose, 0u);
+  CHECK(atlas.bits != nullptr);
+
+  const SpriteRef r = pet_body_ref(id, gene_species(g_view.genome),
+                                   g_view.stage, g_view.pose, 0u);
+  CHECK_EQ((int)r.w, (int)CS_SPRITE_W);
+  CHECK_EQ((int)r.h, (int)CS_SPRITE_H);
+  CHECK(r.bits != atlas.bits);          // it is not the atlas row any more
+  CHECK_EQ(memcmp(r.bits, c.sprite[0], (size_t)CS_SPRITE_BYTES), 0);
+
+  // AND ON THE PANEL, which is the only claim that is about the device: the
+  // helper above is what screen_home.cpp calls, and this is what it painted.
+  fb_reset();
+  home_render();
+  CHECK_EQ(fb_oob(), 0u);
+  uint8_t seen[CS_SPRITE_BYTES];
+  read_body_box(r, seen);
+  CHECK_EQ(memcmp(seen, c.sprite[0], sizeof seen), 0);
+  CHECK(memcmp(seen, atlas.bits, sizeof seen) != 0);
+
+  csp_reset();
+}
+
+TEST(both_of_the_creators_frames_reach_home) {
+  seams2_reset();
+  fixture_starter();
+  csp_reset();
+
+  CustomSpeciesRec c;
+  mk_custom(c, 0u, 0x2Au);
+  CHECK(csp_install(c));
+  g_view.species_id = csp_species_id(0);
+
+  // The frame HOME draws is (ui_now_ms() / UI_ANIM_FRAME_MS) & 1, so the clock
+  // is what selects it - exactly as it does for an atlas body.
+  const uint32_t t0 = g_now;
+  uint8_t seen[2][CS_SPRITE_BYTES];
+  for (uint8_t f = 0; f < 2u; ++f) {
+    g_now = t0 + (uint32_t)f * UI_ANIM_FRAME_MS;
+    CHECK_EQ((int)((g_now / UI_ANIM_FRAME_MS) & 1u), (int)f);
+    const SpriteRef r = pet_body_ref(g_view.species_id,
+                                     gene_species(g_view.genome),
+                                     g_view.stage, g_view.pose, f);
+    fb_reset();
+    home_render();
+    read_body_box(r, seen[f]);
+    CHECK_EQ(memcmp(seen[f], c.sprite[f], sizeof seen[f]), 0);
+  }
+  // The record's two frames differ, so the panel's two have to as well: a
+  // renderer that ignored `frame` would pass every check above but this one.
+  CHECK(memcmp(seen[0], seen[1], sizeof seen[0]) != 0);
+  g_now = t0;
+  csp_reset();
+}
+
+TEST(a_roster_species_still_wears_the_atlas_body) {
+  // THE CONTROL. Sixty authored creatures must not have moved a pixel, and the
+  // registry must not answer for an id it was never given: csp_sprite() is
+  // keyed on the OCCUPIED MASK, so an empty slot inside the custom id range is
+  // as much "not custom" as species 3 is.
+  seams2_reset();
+  fixture_starter();
+  csp_reset();
+
+  for (uint8_t id = 1u; id <= 8u; ++id) {
+    const SpriteRef want = sprite_lookup_pose(
+        (uint8_t)STAGE_ADULT,
+        sprite_form_of(pet_art_key(id, gene_species(g_view.genome)),
+                       STAGE_ADULT),
+        (uint8_t)POSE_IDLE, 0u);
+    const SpriteRef got = pet_body_ref(id, gene_species(g_view.genome),
+                                       (uint8_t)STAGE_ADULT,
+                                       (uint8_t)POSE_IDLE, 0u);
+    CHECK(got.bits == want.bits);
+  }
+  for (uint8_t slot = 0; slot < (uint8_t)CREATOR_SPECIES_SLOTS; ++slot)
+    CHECK(csp_sprite(csp_species_id(slot), 0u) == nullptr);
+}
+
+TEST(an_egg_and_a_sick_bug_are_never_the_players_drawing) {
+  // ui/pet_art.h names three poses it will not override and gives a reason for
+  // each. Two of them are decided HERE, and they are decided because a player
+  // reads "sick" off a shared silhouette and an egg off a shell: replacing
+  // either with a drawing takes a state the player needs and hides it.
+  seams2_reset();
+  fixture_starter();
+  csp_reset();
+
+  CustomSpeciesRec c;
+  mk_custom(c, 0u, 0x71u);
+  CHECK(csp_install(c));
+  const uint8_t id = csp_species_id(0);
+  const uint8_t gs = gene_species(g_view.genome);
+
+  const SpriteRef egg  = pet_body_ref(id, gs, (uint8_t)STAGE_EGG,
+                                      (uint8_t)POSE_IDLE, 0u);
+  const SpriteRef sick = pet_body_ref(id, gs, (uint8_t)STAGE_ADULT,
+                                      (uint8_t)POSE_SICK, 0u);
+  CHECK(egg.bits  != nullptr);
+  CHECK(sick.bits != nullptr);
+  CHECK(egg.bits  != c.sprite[0]);
+  CHECK(sick.bits != c.sprite[0]);
+  CHECK_EQ(memcmp(egg.bits,  c.sprite[0], (size_t)CS_SPRITE_BYTES) != 0, true);
+  CHECK_EQ(memcmp(sick.bits, c.sprite[0], (size_t)CS_SPRITE_BYTES) != 0, true);
+
+  // But IDLE at the same stage is the drawing, so the two above are a rule and
+  // not simply a renderer that never works.
+  const SpriteRef idle = pet_body_ref(id, gs, (uint8_t)STAGE_ADULT,
+                                      (uint8_t)POSE_IDLE, 0u);
+  CHECK_EQ(memcmp(idle.bits, c.sprite[0], (size_t)CS_SPRITE_BYTES), 0);
+  csp_reset();
+}
+
+TEST(two_drawn_bugs_do_not_share_one_derived_sleeper) {
+  // THE CACHE KEY, and it is the bug this file caught while the fix was being
+  // written. screen_home.cpp derives the sleeping body from the idle one and
+  // caches it under (atlas set id, frame) - and TWO creator species fold onto
+  // the SAME atlas set id, because neither has a row of its own. Without the
+  // source frame in the key, the second custom Bug to fall asleep wears the
+  // first one's face.
+  seams2_reset();
+  fixture_starter();
+  csp_reset();
+
+  CustomSpeciesRec a, b;
+  mk_custom(a, 0u, 0x03u);
+  mk_custom(b, 1u, 0xC0u);
+  CHECK(csp_install(a));
+  CHECK(csp_install(b));
+
+  g_view.stage = (uint8_t)STAGE_ADULT;
+  g_view.pose  = (uint8_t)POSE_SLEEP;
+
+  uint8_t seen[2][CS_SPRITE_BYTES];
+  for (uint8_t k = 0; k < 2u; ++k) {
+    g_view.species_id = csp_species_id(k);
+    const SpriteRef r = pet_body_ref(g_view.species_id,
+                                     gene_species(g_view.genome),
+                                     g_view.stage, (uint8_t)POSE_IDLE, 0u);
+    CHECK_EQ(memcmp(r.bits, (k == 0u ? a.sprite[0] : b.sprite[0]),
+                    (size_t)CS_SPRITE_BYTES), 0);
+    fb_reset();
+    home_render();
+    CHECK_EQ(fb_oob(), 0u);
+    read_body_box(r, seen[k]);
+  }
+  CHECK(memcmp(seen[0], seen[1], sizeof seen[0]) != 0);
+
+  // And each sleeper really is DERIVED from its own drawing rather than being
+  // it: pf_build_sleep() closes the eye band, so the frame on the panel differs
+  // from the idle frame it came from.
+  CHECK(memcmp(seen[0], a.sprite[0], sizeof seen[0]) != 0);
+  CHECK(memcmp(seen[1], b.sprite[0], sizeof seen[1]) != 0);
+  csp_reset();
+}
+
 TEST(every_species_draws_on_home_at_every_stage_and_pose_without_clipping) {
   int drawn = 0;
   static const uint8_t kStages[] = { STAGE_BABY, STAGE_CHILD, STAGE_TEEN,
@@ -1623,7 +1881,7 @@ TEST(every_species_draws_on_the_battle_field_without_clipping) {
   for (uint8_t id = 1; id <= (uint8_t)SPECIES_TABLE_COUNT; ++id) {
     const uint8_t key = pet_art_key(id, 0u);
     const uint8_t set = br_body_set_id(key);
-    CHECK_EQ((int)set, (int)PB_SPRITE_BODY_FIRST + (int)(id - 1u));
+    CHECK_EQ((int)set, (int)ER_SPRITE_BODY_FIRST + (int)(id - 1u));
     CHECK_EQ(sprite_set(set).w, (uint8_t)BR_BODY_W);
     CHECK_EQ(sprite_set(set).h, (uint8_t)BR_BODY_H);
     for (uint8_t frame = 0; frame < 2u; ++frame) {
@@ -1680,7 +1938,7 @@ TEST(every_species_draws_on_the_battle_field_without_clipping) {
       // mirror to itself. None of the sixty is, and if one ever is, it should
       // be named here rather than allowed to pass silently.
       if (mirror_diff == 0)
-        nt_fail_at(__FILE__, __LINE__, PB_SPRITE_NAMES[set]);
+        nt_fail_at(__FILE__, __LINE__, ER_SPRITE_NAMES[set]);
     }
   }
 }
@@ -1688,7 +1946,7 @@ TEST(every_species_draws_on_the_battle_field_without_clipping) {
 TEST(snapshot_home_empty) {
   seams2_reset();
   fixture_none();
-  snapshot(SCR_HOME, "home_no_pebble");
+  snapshot(SCR_HOME, "home_no_bug");
 }
 
 // The ring REMEMBERS where it was left, exactly as it always did, so every
@@ -1703,8 +1961,8 @@ static void menu_to(uint8_t item) {
 
 TEST(snapshot_menu) {
   seams2_reset();
-  menu_to(MENU_PEBBLE);
-  snapshot(SCR_MENU, "menu_pebble");
+  menu_to(MENU_BUG);
+  snapshot(SCR_MENU, "menu_bug");
 }
 
 // The last ring item, and the drain bar of navigation invariant 3 at the same
@@ -1763,7 +2021,7 @@ TEST(snapshot_status_a_corrupted) {
   snapshot(SCR_STATUS, "status_a_corrupted");
 }
 
-TEST(the_status_page_says_a_pebble_is_corrupted_and_for_how_much_longer) {
+TEST(the_status_page_says_a_bug_is_corrupted_and_for_how_much_longer) {
   // The page is DIFFERENT when the status is set - which is the whole finding:
   // rendering STATUS_A with and without the bit gave a diff of exactly zero.
   seams2_reset();
@@ -1840,7 +2098,7 @@ TEST(snapshot_settings_info) {
   seams2_reset();
   settings_enter();
   for (uint8_t i = 0; i < SET_INFO; i++) settings_input(GST_TAP_L);
-  settings_input(GST_HOLD_R);
+  settings_input(GST_TAP_R);
   CHECK_EQ(settings_page(), 1);
   snapshot(SCR_SETTINGS, "settings_info");
 }
@@ -1860,10 +2118,10 @@ TEST(snapshot_time_entry) {
 // two that have no screen yet must SAY so rather than doing nothing at all.
 TEST(menu_goes_where_section_8_says) {
   seams2_reset();
-  menu_to(MENU_PEBBLE);
+  menu_to(MENU_BUG);
 
   struct { uint8_t item; int pushes; uint8_t to; } kWant[] = {
-    { MENU_PEBBLE,   1, SCR_STATUS },
+    { MENU_BUG,   1, SCR_STATUS },
     { MENU_CARE,     1, SCR_CARE     },
     { MENU_PLAY,     1, SCR_PLAY     },
     { MENU_BOX,      1, SCR_BOX      },
@@ -1875,17 +2133,17 @@ TEST(menu_goes_where_section_8_says) {
     seams_reset();
     g_push = 0xFF;
     CHECK_EQ(menu_cursor(), kWant[i].item);
-    menu_input(GST_HOLD_R);                    // section 7: B held chooses
+    menu_input(GST_TAP_R);                    // section 7: B held chooses
     CHECK_EQ(g_push, kWant[i].to);
     CHECK(kWant[i].pushes == 1);
     menu_input(GST_TAP_L);                     // on to the next item
   }
-  CHECK_EQ(menu_cursor(), (uint8_t)MENU_PEBBLE);   // invariant 4: it is a ring
+  CHECK_EQ(menu_cursor(), (uint8_t)MENU_BUG);   // invariant 4: it is a ring
 }
 
 TEST(menu_help_and_the_ring_wraps_back_to_the_first_item) {
   seams2_reset();
-  menu_to(MENU_PEBBLE);
+  menu_to(MENU_BUG);
   menu_input(GST_BOTH);
   CHECK_EQ(g_help, STR_HLP_STATUS);
 
@@ -1896,7 +2154,7 @@ TEST(menu_help_and_the_ring_wraps_back_to_the_first_item) {
   // its only caller (it is in no spec section and its "nothing to repeat"
   // path toasted "bad argument").
   for (uint8_t i = 0; i < (uint8_t)MENU_ITEM_COUNT; ++i) menu_input(GST_TAP_L);
-  CHECK_EQ(menu_cursor(), (uint8_t)MENU_PEBBLE);
+  CHECK_EQ(menu_cursor(), (uint8_t)MENU_BUG);
 }
 
 // An accepted care action leaves the player on HOME watching the film; a
@@ -1905,54 +2163,54 @@ TEST(care_actions_and_the_rejected_path) {
   seams2_reset();
   care_enter();
 
-  care_input(GST_HOLD_R);                        // meal
+  care_input(GST_TAP_R);                        // meal
   CHECK_EQ(g_shown, (uint8_t)ACT_FEED_MEAL);
   CHECK_EQ(g_backs, 0);
 
   g_action_ok = false;
-  care_input(GST_HOLD_R);
+  care_input(GST_TAP_R);
   CHECK_EQ(g_backs, 1);                         // refused: back to where we were
   g_action_ok = true;
 
   care_input(GST_TAP_L);                        // snack
-  care_input(GST_HOLD_R);
+  care_input(GST_TAP_R);
   CHECK_EQ(g_shown, (uint8_t)ACT_FEED_SNACK);
 
   care_input(GST_TAP_L);                        // clean
-  care_input(GST_HOLD_R);
+  care_input(GST_TAP_R);
   CHECK_EQ(g_shown, (uint8_t)ACT_CLEAN);
 
   care_input(GST_TAP_L);                        // medicine: always a confirmation
-  care_input(GST_HOLD_R);
+  care_input(GST_TAP_R);
   CHECK_EQ(g_medicine, 1);
 
   care_input(GST_TAP_L);                        // the bag: a MODE, not an action
-  care_input(GST_HOLD_R);
+  care_input(GST_TAP_R);
   CHECK_EQ(care_mode(), (uint8_t)CAREM_BAG);
-  care_input(GST_TAP_R);                        // ...and B closes it, not the screen
+  care_input(GST_HOLD_R);                        // ...and B closes it, not the screen
   CHECK_EQ(care_mode(), (uint8_t)CAREM_LIST);
   CHECK_EQ(g_backs, 1);                         // still the one from the refusal
 
   care_input(GST_TAP_L);                        // volver
   g_backs = 0;
-  care_input(GST_HOLD_R);
+  care_input(GST_TAP_R);
   CHECK_EQ(g_backs, 1);
 }
 
 TEST(play_list_starts_a_game_or_leaves) {
   seams2_reset();
   play_enter();
-  play_input(GST_HOLD_R);
+  play_input(GST_TAP_R);
   CHECK_EQ(g_minigame, (uint8_t)0);
   play_input(GST_TAP_L);
-  play_input(GST_HOLD_R);
+  play_input(GST_TAP_R);
   CHECK_EQ(g_minigame, (uint8_t)1);
   // The "jump to the last row" shortcut went with the double tap; the list
   // wraps, so one step back from the first row is the last one.
   while (play_cursor() != (uint8_t)(PLAY_ROWS - 1)) play_input(GST_TAP_L);
   CHECK_EQ(play_cursor(), (uint8_t)(PLAY_ROWS - 1));
   g_backs = 0;
-  play_input(GST_HOLD_R);
+  play_input(GST_TAP_R);
   CHECK_EQ(g_backs, 1);
 }
 
@@ -1988,24 +2246,24 @@ TEST(settings_toggles_persist_and_the_info_page_closes) {
   seams2_reset();
   settings_enter();
 
-  settings_input(GST_HOLD_R);                    // SET_SOUND
+  settings_input(GST_TAP_R);                    // SET_SOUND
   CHECK_EQ((uint8_t)(g_cfg.flags & CF_MUTE), (uint8_t)CF_MUTE);
   CHECK_EQ(g_cfg_saves, 1);
 
   settings_input(GST_TAP_L);                    // SET_WEB
-  settings_input(GST_HOLD_R);
+  settings_input(GST_TAP_R);
   CHECK_EQ((uint8_t)(g_cfg.flags & CF_WEB_ENABLED), (uint8_t)CF_WEB_ENABLED);
 
   settings_input(GST_TAP_L);                    // SET_BRIGHT: a five-step ring
   const uint8_t b0 = g_cfg.brightness;
-  settings_input(GST_HOLD_R);
+  settings_input(GST_TAP_R);
   CHECK(g_cfg.brightness != b0);
   CHECK_EQ(g_bright, g_cfg.brightness);         // and it went through the arbiter
 
   // The "Acerca de" page is read-only and any gesture gives the list back.
   settings_enter();
   for (uint8_t i = 0; i < SET_INFO; i++) settings_input(GST_TAP_L);
-  settings_input(GST_HOLD_R);
+  settings_input(GST_TAP_R);
   CHECK_EQ(settings_page(), 1);
   settings_close_page();
   CHECK_EQ(settings_page(), 0);
@@ -2014,7 +2272,7 @@ TEST(settings_toggles_persist_and_the_info_page_closes) {
   settings_enter();
   g_cfg_p = nullptr;
   g_cfg_saves = 0;
-  settings_input(GST_HOLD_R);
+  settings_input(GST_TAP_R);
   CHECK_EQ(g_toast, STR_ERR_BUSY);
   CHECK_EQ(g_cfg_saves, 0);
   g_cfg_p = &g_cfg;
@@ -2023,7 +2281,7 @@ TEST(settings_toggles_persist_and_the_info_page_closes) {
   // row carries SF_OWNS_BACK (the info page is one level below the stack).
   settings_enter();
   g_backs = 0;
-  settings_input(GST_TAP_R);
+  settings_input(GST_HOLD_R);
   CHECK_EQ(g_backs, 1);
 }
 
@@ -2039,24 +2297,24 @@ TEST(time_entry_edits_a_real_calendar) {
 
   // 2020 is a leap year: February has 29 days and the 30th is unreachable.
   time_input(GST_TAP_L);                        // -> month
-  time_input(GST_TAP_R);                        // February
+  time_input(GST_HOLD_R);                        // February
   CHECK_EQ(time_field(CLK_MONTH), (uint16_t)2);
   time_input(GST_TAP_L);                        // -> day
-  for (uint8_t i = 0; i < 28; i++) time_input(GST_TAP_R);
+  for (uint8_t i = 0; i < 28; i++) time_input(GST_HOLD_R);
   CHECK_EQ(time_field(CLK_DAY), (uint16_t)29);
-  time_input(GST_TAP_R);
+  time_input(GST_HOLD_R);
   CHECK_EQ(time_field(CLK_DAY), (uint16_t)1);   // wrapped, never a 30 February
 
   // 31 January -> February must not leave an impossible day on screen.
   time_enter();
   time_input(GST_TAP_L);
   time_input(GST_TAP_L);                        // -> day
-  for (uint8_t i = 0; i < 30; i++) time_input(GST_TAP_R);
+  for (uint8_t i = 0; i < 30; i++) time_input(GST_HOLD_R);
   CHECK_EQ(time_field(CLK_DAY), (uint16_t)31);
   // DAY -> HOUR -> MIN -> YEAR -> MONTH: the field cursor is a ring too.
   for (uint8_t i = 0; i < 4; i++) time_input(GST_TAP_L);
   CHECK_EQ(time_cursor(), (uint8_t)CLK_MONTH);
-  time_input(GST_TAP_R);
+  time_input(GST_HOLD_R);
   CHECK_EQ(time_field(CLK_DAY), (uint16_t)29);
 
   // A HOLD confirms; a tap never can. The recogniser is flushed either way, so
@@ -2107,7 +2365,7 @@ TEST(time_entry_starts_from_the_known_clock) {
 // is not SF_STICKY, it is empty until the last UI_COUNTDOWN_MS, and it shrinks.
 TEST(the_countdown_bar_drains) {
   seams2_reset();
-  menu_to(MENU_PEBBLE);
+  menu_to(MENU_BUG);
 
   auto bar_width = [](void) {
     int w = 0;
@@ -2190,7 +2448,7 @@ TEST(snapshot_link_peers) {
 TEST(snapshot_link_card) {
   link_reset_screen();
   link_make_peer(0x2001u, "PIEDRIN", (uint16_t)DISC_CAP_BATTLE, -42, 0);
-  link_input(GST_HOLD_R);                 // open the card on the first peer
+  link_input(GST_TAP_R);                 // open the card on the first peer
   CHECK_EQ(link_screen_mode(), (uint8_t)LKM_CARD);
   snapshot(SCR_LINK, "link_card");
 }
@@ -2314,7 +2572,7 @@ TEST(creator_encodes_the_join_string_and_the_url_and_nothing_else) {
   g_ap_up = 1;
   creator_enter();
   CHECK_EQ(creator_variant(), (uint8_t)1);
-  CHECK_STR_EQ(creator_payload(), "WIFI:S:PEBBLEBOL-1234;;");
+  CHECK_STR_EQ(creator_payload(), "WIFI:S:ERRATA-1234;;");
 
   creator_input(GST_TAP_L);                       // flip to the URL
   CHECK_EQ(creator_variant(), (uint8_t)0);
@@ -2325,7 +2583,7 @@ TEST(creator_encodes_the_join_string_and_the_url_and_nothing_else) {
 //
 // A substring search would be the obvious test and it is the WRONG one: the
 // SSID is AP_SSID_PREFIX plus four hex characters of the device id, so
-// "PEBBLEBOL-1234" is a perfectly ordinary real SSID and a search for the
+// "ERRATA-1234" is a perfectly ordinary real SSID and a search for the
 // digits "1234" inside it reports a leak that is not there. What is actually
 // being claimed is stronger and has no false positive: the bytes encoded at
 // every PIN are the SAME bytes, so no addition anywhere in build() can be
@@ -2668,13 +2926,13 @@ TEST(a_confirmation_starts_on_no) {
   dialog_open_confirm(CFM_WIPE2, STR_CF_WIPE2);
   CHECK_EQ(dialog_modal(), (uint8_t)MODAL_CONFIRM);
   CHECK_EQ(dialog_confirm_yes(), (uint8_t)0);
-  dialog_input(GST_HOLD_R);                    // choosing NO closes it
+  dialog_input(GST_TAP_R);                    // choosing NO closes it
   CHECK_EQ(dialog_modal(), (uint8_t)MODAL_NONE);
   CHECK_EQ(g_commits, 0);
 
   dialog_open_confirm(CFM_WIPE2, STR_CF_WIPE2);
   dialog_input(GST_TAP_L);                     // onto YES
-  dialog_input(GST_HOLD_R);
+  dialog_input(GST_TAP_R);
   CHECK_EQ(g_commits, 1);
   CHECK_EQ(g_commit_id, (uint8_t)CFM_WIPE2);
 }
@@ -2699,15 +2957,15 @@ static void box_fixture(uint8_t occupied) {
   gen.generation = 3;
   for (uint8_t i = 0; i < occupied; ++i) {
     // Species 1 for all three: the roster is one species until Phase 9 fills
-    // data/species_table.h, and box_new_pebble() correctly refuses an id that
+    // data/species_table.h, and box_new_bug() correctly refuses an id that
     // has no row.
-    const uint8_t slot = box_new_pebble(1u, (uint8_t)(1u + i * 3u),
+    const uint8_t slot = box_new_bug(1u, (uint8_t)(1u + i * 3u),
                                         ORIGIN_STARTER, gen, 0xC0FFEEu + i, 1000u);
     CHECK(slot != BOX_SLOT_NONE);
-    PebbleInstance* p = box_slot(slot);
+    BugInstance* p = box_slot(slot);
     if (!p) continue;
-    for (uint8_t c = 0; c < PB_CARE_COUNT; ++c)
-      p->care[c] = (int32_t)(PB_CARE_MILLI_MAX - (int32_t)c * 12000);
+    for (uint8_t c = 0; c < ER_CARE_COUNT; ++c)
+      p->care[c] = (int32_t)(ER_CARE_MILLI_MAX - (int32_t)c * 12000);
     p->hp_cur = (uint16_t)(15u + i);
     // The second row carries the longest nickname the schema allows: the list
     // has a number, a marker, a name and a right-aligned level to fit in 128 px.
@@ -2733,7 +2991,7 @@ TEST(every_species_draws_in_the_box_list_without_clipping) {
     gen.lineage_id = 0x0BADF00Du;
     gen.g0 = 0x1234u; gen.g1 = 0x5678u; gen.g2 = 0x9ABCu;
     gen.generation = 3;
-    const uint8_t slot = box_new_pebble(id, 30u, ORIGIN_STARTER, gen,
+    const uint8_t slot = box_new_bug(id, 30u, ORIGIN_STARTER, gen,
                                         0xC0FFEEu + id, 1000u);
     CHECK(slot != BOX_SLOT_NONE);
     if (slot == BOX_SLOT_NONE) continue;
@@ -2775,7 +3033,7 @@ TEST(snapshot_box_actions) {
   seams2_reset();
   box_fixture(3);
   box_input(GST_TAP_L);                 // onto slot 2, which is not the active one
-  box_input(GST_HOLD_R);                // choose it
+  box_input(GST_TAP_R);                // choose it
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
   CHECK_EQ(box_screen_slot(), (uint8_t)1);
   snapshot(SCR_BOX, "box_actions");
@@ -2785,66 +3043,66 @@ TEST(snapshot_box_card) {
   seams2_reset();
   box_fixture(3);
   box_input(GST_TAP_L);
-  box_input(GST_HOLD_R);                // the action list for slot 2
-  box_input(GST_HOLD_R);                // BOXA_VIEW: a stored Pebble's card
+  box_input(GST_TAP_R);                // the action list for slot 2
+  box_input(GST_TAP_R);                // BOXA_VIEW: a stored Bug's card
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_CARD);
   snapshot(SCR_BOX, "box_card");
 }
 
 // Spec section 9, and invariants B3 / B4: select active, swap, and a release
-// that refuses the Pebble you are carrying before any dialog is opened.
+// that refuses the Bug you are carrying before any dialog is opened.
 TEST(box_does_what_section_9_says) {
   seams2_reset();
   box_fixture(3);
 
-  // VIEW on the ACTIVE slot goes to the PEBBLE pages, because that one IS the
+  // VIEW on the ACTIVE slot goes to the BUG pages, because that one IS the
   // simulated pet; a stored one gets the card above instead.
   CHECK_EQ(box_screen_cursor(), (uint8_t)0);
-  box_input(GST_HOLD_R);
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
+  box_input(GST_TAP_R);
   CHECK_EQ(g_push, (uint8_t)SCR_STATUS);
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
 
   // Select active.
   box_enter();
   box_input(GST_TAP_L);                 // slot 2
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
   box_input(GST_TAP_L);                 // BOXA_ACTIVATE
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
   CHECK_EQ(g_box_active, (uint8_t)1);
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_LIST);
 
   // Swap: pick the slot, pick the target, and the exchange goes through the
   // ui.cpp seam because it has to reach flash.
   box_enter();
-  box_input(GST_HOLD_R);                // slot 1
+  box_input(GST_TAP_R);                // slot 1
   box_input(GST_TAP_L); box_input(GST_TAP_L);   // BOXA_SWAP
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_SWAP);
   CHECK_EQ(g_toast, STR_BOX_SWAP_PICK);
   box_input(GST_TAP_L);                 // onto slot 2
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
   CHECK_EQ(g_box_swap_a, (uint8_t)0);
   CHECK_EQ(g_box_swap_b, (uint8_t)1);
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_LIST);
 
-  // B4: the active Pebble is refused before a dialog is ever opened.
+  // B4: the active Bug is refused before a dialog is ever opened.
   box_enter();                          // opens on the active slot
   const uint8_t active = box_active();
   CHECK(active != BOX_ACTIVE_NONE);
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
   for (uint8_t i = 0; i < BOXA_RELEASE; ++i) box_input(GST_TAP_L);
   g_box_released = 0xFF;
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
   CHECK_EQ(g_box_released, (uint8_t)0xFF);
   CHECK_EQ(g_toast, STR_BOX_NO_RELEASE_ACTIVE);
 
   // A stored one is offered, and only to the two dialogs.
   box_enter();
   box_input(GST_TAP_L);
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
   for (uint8_t i = 0; i < BOXA_RELEASE; ++i) box_input(GST_TAP_L);
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
   CHECK_EQ(g_box_released, (uint8_t)1);
 
   // TRADE AND BREED ARE ENTRY POINTS NOW (P7-C2), not a toast. Each one
@@ -2853,30 +3111,30 @@ TEST(box_does_what_section_9_says) {
   // session still needs A on the card and A on the other device.
   box_enter();
   box_input(GST_TAP_L);
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
   for (uint8_t i = 0; i < BOXA_TRADE; ++i) box_input(GST_TAP_L);
   g_push = 0xFF;
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
   CHECK_EQ(g_push, (uint8_t)SCR_LINK);
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);   // still here underneath
 
   box_enter();
   box_input(GST_TAP_L);
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
   for (uint8_t i = 0; i < BOXA_BREED; ++i) box_input(GST_TAP_L);
   g_push = 0xFF;
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
   CHECK_EQ(g_push, (uint8_t)SCR_LINK);
 
   // B walks back through the modes and only then leaves the screen.
   box_enter();
   box_input(GST_TAP_L);
-  box_input(GST_HOLD_R);
-  g_backs = 0;
   box_input(GST_TAP_R);
+  g_backs = 0;
+  box_input(GST_HOLD_R);
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_LIST);
   CHECK_EQ(g_backs, 0);
-  box_input(GST_TAP_R);
+  box_input(GST_HOLD_R);
   CHECK_EQ(g_backs, 1);
 }
 
@@ -2891,32 +3149,32 @@ TEST(box_b_climbs_the_mode_ladder_one_rung_at_a_time) {
 
   // ACTIONS -> CARD -> ACTIONS, on the row that opened it.
   box_input(GST_TAP_L);                 // slot 2, a stored one
-  box_input(GST_HOLD_R);
-  box_input(GST_HOLD_R);                // BOXA_VIEW
-  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_CARD);
   box_input(GST_TAP_R);
+  box_input(GST_TAP_R);                // BOXA_VIEW
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_CARD);
+  box_input(GST_HOLD_R);
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
   CHECK_EQ(box_screen_cursor(), (uint8_t)BOXA_VIEW);
   CHECK_EQ(g_backs, 0);
 
   // The card's own single row means the same thing as B does.
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_CARD);
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
 
   // ACTIONS -> SWAP -> ACTIONS, cancelled by B and by picking the slot itself.
   box_input(GST_TAP_L); box_input(GST_TAP_L);   // BOXA_SWAP
-  box_input(GST_HOLD_R);
-  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_SWAP);
   box_input(GST_TAP_R);
+  CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_SWAP);
+  box_input(GST_HOLD_R);
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
   CHECK_EQ(box_screen_cursor(), (uint8_t)BOXA_SWAP);
 
   g_box_swap_a = 0xFF;
-  box_input(GST_HOLD_R);                // into SWAP again, cursor on its own slot
+  box_input(GST_TAP_R);                // into SWAP again, cursor on its own slot
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_SWAP);
-  box_input(GST_HOLD_R);                // choosing itself is a cancel
+  box_input(GST_TAP_R);                // choosing itself is a cancel
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
   CHECK_EQ(g_box_swap_a, (uint8_t)0xFF);
   CHECK_EQ(g_backs, 0);                 // none of that left the screen
@@ -2928,7 +3186,7 @@ TEST(box_screen_to_list_leaves_the_emptied_action_list) {
   seams2_reset();
   box_fixture(3);
   box_input(GST_TAP_L);
-  box_input(GST_HOLD_R);
+  box_input(GST_TAP_R);
   CHECK_EQ(box_screen_mode(), (uint8_t)BOXM_ACTIONS);
 
   box_screen_to_list();
@@ -2978,7 +3236,7 @@ TEST(an_alert_never_steals_a_press) {
     dialog_alert(kActing[i]);
     CHECK(dialog_service(g_now, true));
     g_now += UI_ALERT_MIN_MS;
-    CHECK(dialog_input(GST_TAP_R));
+    CHECK(dialog_input(GST_HOLD_R));
     CHECK_EQ(dialog_modal(), (uint8_t)MODAL_NONE);
   }
   CHECK_EQ(g_action, (uint8_t)ACT_NONE);
@@ -3259,12 +3517,12 @@ TEST(snapshot_sequence_answer) {
 //  field gone through render.h, none of it could have been snapshotted and the
 //  goldens would have been of the chrome around a hole.
 //
-//  DETERMINISM: one fixed seed, a Box built by box_new_pebble(), a clock the
+//  DETERMINISM: one fixed seed, a Box built by box_new_bug(), a clock the
 //  seams hold still, and every gesture below is one a player could make.
 // =============================================================================
 static void battle_choose(uint8_t n) {
   for (uint8_t i = 0; i < n; ++i) {
-    battle_input(GST_HOLD_R);            // choose the slot under the cursor
+    battle_input(GST_TAP_R);            // choose the slot under the cursor
     battle_input(GST_TAP_L);             // step to the next occupied one
   }
   while (battle_screen_cursor() < (uint8_t)BOX_SLOTS) battle_input(GST_TAP_L);
@@ -3272,7 +3530,7 @@ static void battle_choose(uint8_t n) {
 
 static void battle_pick_team(uint8_t n) {
   battle_choose(n);
-  battle_input(GST_HOLD_R);              // LISTO
+  battle_input(GST_TAP_R);              // LISTO
 }
 
 // Play until the transcript is showing a beat of `kind`, choosing whatever the
@@ -3286,14 +3544,14 @@ static bool battle_to_beat(uint8_t kind) {
       battle_input(GST_TAP_L);
       continue;
     }
-    battle_input(GST_HOLD_R);
+    battle_input(GST_TAP_R);
   }
   return false;
 }
 
 static void battle_to_result(void) {
   for (int guard = 0; guard < 4000 && battle_screen_mode() != BTM_RESULT; ++guard)
-    battle_input(GST_HOLD_R);
+    battle_input(GST_TAP_R);
 }
 
 // The team pick: the Box on the shared list widget, three slots chosen, the
@@ -3335,7 +3593,7 @@ TEST(snapshot_battle_menu) {
   battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E02u);
   battle_enter();
   battle_pick_team((uint8_t)BATTLE_TEAM_MAX);
-  battle_input(GST_HOLD_R);              // skip the stare-down
+  battle_input(GST_TAP_R);              // skip the stare-down
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_MENU);
   CHECK_EQ(battle_screen_cursor_reject(), (uint8_t)BR_OK);
   snapshot(SCR_BATTLE, "battle_menu");
@@ -3352,7 +3610,7 @@ TEST(snapshot_battle_hit) {
   battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E03u);
   battle_enter();
   battle_pick_team((uint8_t)BATTLE_TEAM_MAX);
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
   CHECK(battle_to_beat((uint8_t)RLE_HIT));
   CHECK_EQ(battle_screen_event(), (uint8_t)RLE_HIT);
   CHECK_EQ(g_shakes, 1);                 // one shake per landed blow, not per frame
@@ -3380,7 +3638,7 @@ static void protect_fixture(void) {
   gen.g0 = 0x1234u; gen.g1 = 0x5678u; gen.g2 = 0x9ABCu;
   gen.generation = 3;
   for (uint8_t i = 0; i < 3u; ++i) {
-    const uint8_t slot = box_new_pebble(2u, (uint8_t)(6u + i), ORIGIN_STARTER,
+    const uint8_t slot = box_new_bug(2u, (uint8_t)(6u + i), ORIGIN_STARTER,
                                         gen, 0xC0FFEEu + i, 1000u);
     CHECK(slot != BOX_SLOT_NONE);
   }
@@ -3402,7 +3660,7 @@ static bool battle_to_protect(void) {
     if (m == (uint8_t)BTM_MENU) {
       for (int t = 0; t < 2; ++t) battle_input(GST_TAP_L);
     }
-    battle_input(GST_HOLD_R);
+    battle_input(GST_TAP_R);
   }
   return false;
 }
@@ -3413,7 +3671,7 @@ TEST(snapshot_battle_protect) {
   battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E00u);
   battle_enter();
   battle_pick_team((uint8_t)BATTLE_TEAM_MAX);
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
   CHECK(battle_to_protect());
   CHECK_EQ(battle_screen_event(), (uint8_t)RLE_PROTECT);
 
@@ -3449,7 +3707,7 @@ TEST(the_ward_marks_one_combatant_on_protect_beats_and_nobody_on_the_others) {
   battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E00u);
   battle_enter();
   battle_pick_team((uint8_t)BATTLE_TEAM_MAX);
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
 
   int protects = 0, beats = 0, menus = 0;
   for (int g = 0; g < 4000; ++g) {
@@ -3477,7 +3735,7 @@ TEST(the_ward_marks_one_combatant_on_protect_beats_and_nobody_on_the_others) {
       ++menus;
       for (int t = 0; t < 2; ++t) battle_input(GST_TAP_L);
     }
-    battle_input(GST_HOLD_R);
+    battle_input(GST_TAP_R);
   }
   // "No beat was warded" must not be able to pass as "every beat was right".
   CHECK(protects > 0);
@@ -3494,7 +3752,7 @@ TEST(snapshot_battle_faint) {
   battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E03u);
   battle_enter();
   battle_pick_team((uint8_t)BATTLE_TEAM_MAX);
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
   CHECK(battle_to_beat((uint8_t)RLE_FAINT));
   CHECK_EQ(battle_screen_event(), (uint8_t)RLE_FAINT);
   CHECK_EQ(g_flashes, 1);
@@ -3510,7 +3768,7 @@ TEST(snapshot_battle_result) {
   battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E03u);
   battle_enter();
   battle_pick_team((uint8_t)BATTLE_TEAM_MAX);
-  battle_input(GST_HOLD_R);
+  battle_input(GST_TAP_R);
   battle_to_result();
   CHECK_EQ(battle_screen_mode(), (uint8_t)BTM_RESULT);
   CHECK(battle_screen_outcome() != (uint8_t)BO_UNDECIDED);
@@ -3530,7 +3788,7 @@ TEST(play_launches_the_battle_from_its_own_row) {
   play_enter();
   for (uint8_t i = 0; i < PLAY_BATTLE; ++i) play_input(GST_TAP_L);
   CHECK_EQ(play_cursor(), PLAY_BATTLE);
-  play_input(GST_HOLD_R);
+  play_input(GST_TAP_R);
   CHECK_EQ(g_battle_starts, 1);
   CHECK_EQ(g_battle_entry, (uint8_t)BT_ENTRY_PRACTICE);
   CHECK_EQ(g_minigame, 0xFF);            // and NOT a minigame
@@ -3540,14 +3798,14 @@ TEST(play_launches_the_battle_from_its_own_row) {
   // widened fold exists to prevent.
   play_enter();
   for (uint8_t i = 0; i + 1u < PLAY_BATTLE; ++i) play_input(GST_TAP_L);
-  play_input(GST_HOLD_R);
+  play_input(GST_TAP_R);
   CHECK_EQ(g_minigame, (uint8_t)(PLAY_BATTLE - 1u));
   CHECK_EQ(g_battle_starts, 1);
 
   // And the row after it still means "leave".
   play_enter();
   for (uint8_t i = 0; i < PLAY_BACK; ++i) play_input(GST_TAP_L);
-  play_input(GST_HOLD_R);
+  play_input(GST_TAP_R);
   CHECK_EQ(g_backs, 1);
 }
 
@@ -3603,7 +3861,7 @@ TEST(b_cancels_the_scan_releases_the_radio_and_goes_back) {
   CHECK_EQ(g_drv_stop, 0);
 
   const int backs = g_backs;
-  network_input((Gesture)GST_TAP_R);
+  network_input((Gesture)GST_HOLD_R);
   CHECK_EQ(network_screen_phase(), (uint8_t)NSP_CANCELLED);
   CHECK_EQ(g_drv_stop, 1);               // the radio went down with the press
   CHECK_EQ(g_backs, backs + 1);          // and the screen went away
@@ -3690,23 +3948,41 @@ TEST(the_encounter_transient_draws_all_four_outcomes_and_only_wild_can_be_steere
   EncounterResult r;
   memset(&r, 0, sizeof r);
 
-  // WILD: two options, and A on the first one opens CAPTURE.
+  // WILD: THREE options now - catch it, fight it, or walk away - and the ring
+  // walks all three and wraps.
   r.outcome = (uint8_t)ENC_OUT_WILD; r.species_id = 1; r.level = 7;
   encounter_arm(r, (uint8_t)NET_CAT_HOME);
   encounter_enter();
-  CHECK_EQ(encounter_screen_cursor(), 0);
+  CHECK_EQ(encounter_screen_cursor(), (int)ENC_OPT_CATCH);
   encounter_input((Gesture)GST_TAP_L);
-  CHECK_EQ(encounter_screen_cursor(), 1);          // moved to DEJAR
+  CHECK_EQ(encounter_screen_cursor(), (int)ENC_OPT_FIGHT);
   encounter_input((Gesture)GST_TAP_L);
-  CHECK_EQ(encounter_screen_cursor(), 0);          // and back
+  CHECK_EQ(encounter_screen_cursor(), (int)ENC_OPT_LEAVE);
+  encounter_input((Gesture)GST_TAP_L);
+  CHECK_EQ(encounter_screen_cursor(), (int)ENC_OPT_CATCH);   // and it wraps
   encounter_input((Gesture)GST_HOLD_L);
   CHECK_EQ(g_push, (uint8_t)SCR_CAPTURE);
-  // DEJAR is a real answer and leaves without capturing.
-  g_push = 0xFF;
+
+  // LUCHAR hands the ENCOUNTER'S OWN creature to the battle - the species and
+  // the level the player was just looking at, not a re-roll - and it does NOT
+  // push, because a beaten wild Bug must not be left underneath still
+  // offering to be caught.
+  g_push = 0xFF; g_wild_starts = 0;
+  encounter_input((Gesture)GST_TAP_L);
+  CHECK_EQ(encounter_screen_cursor(), (int)ENC_OPT_FIGHT);
+  encounter_input((Gesture)GST_HOLD_L);
+  CHECK_EQ(g_wild_starts, 1);
+  CHECK_EQ((int)g_wild_sp, 1);
+  CHECK_EQ((int)g_wild_lv, 7);
+  CHECK_EQ(g_push, 0xFF);
+
+  // DEJAR is a real answer and leaves without capturing or fighting.
   const int backs = g_backs;
   encounter_input((Gesture)GST_TAP_L);
+  CHECK_EQ(encounter_screen_cursor(), (int)ENC_OPT_LEAVE);
   encounter_input((Gesture)GST_HOLD_L);
   CHECK_EQ(g_push, 0xFF);
+  CHECK_EQ(g_wild_starts, 1);                      // still one: no second fight
   CHECK_EQ(g_backs, backs + 1);
 
   // ITEM: the drop is in the bag the moment the screen opens, so a stray BACK
@@ -3759,7 +4035,7 @@ TEST(the_encounter_transient_draws_all_four_outcomes_and_only_wild_can_be_steere
 //  these two can be snapshotted, bounded and interrupted under test.
 // =============================================================================
 
-// A caught wild Pebble. The roll and the device seed are the two numbers
+// A caught wild Bug. The roll and the device seed are the two numbers
 // game/capture.cpp mixes, and these two produce CAP_CAUGHT on the first throw;
 // the Box is empty, so nothing can refuse the file.
 static void caught_fixture(void) {
@@ -3797,7 +4073,7 @@ TEST(snapshot_encounter_item_film) {
   // spark at three quarters of its reach. A film golden taken early enough that
   // nothing has happened yet is a golden of the resting screen with an icon on
   // it, which is what the second snapshot below is for.
-  g_now += 450u;
+  g_now += (ENC_ITEM_RISE_MS * 7u) / 8u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_ITEM_RISE);
   snapshot(SCR_ENCOUNTER, "encounter_item_film");
   encounter_leave();
@@ -3834,14 +4110,17 @@ static void wild_fixture(uint8_t species) {
 
 TEST(the_wild_reveal_walks_its_three_beats_and_the_clock_ends_it) {
   wild_fixture(1u);
+  // DRIVEN BY THE TIMETABLE'S OWN NAMES (screen_encounter.h), not by literals:
+  // the beats were retimed once already and a case full of magic milliseconds
+  // is a second copy of the schedule.
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_TEAR);
-  g_now += 299u;
+  g_now += ENC_WILD_TEAR_MS - 1u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_TEAR);
-  g_now += 2u;                                        // 301
+  g_now += 2u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_FORM);
-  g_now += 460u;                                      // 761
+  g_now += ENC_WILD_FORM_MS - ENC_WILD_TEAR_MS;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_STARE);
-  g_now += 220u;                                      // 981, past the end
+  g_now += ENC_WILD_END_MS - ENC_WILD_FORM_MS;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
   encounter_leave();
 }
@@ -3869,7 +4148,7 @@ TEST(the_wild_reveal_does_not_replay_when_the_player_comes_back_from_capture) {
 TEST(the_wild_tear_is_the_same_picture_every_time_it_is_played) {
   wild_fixture(1u);
   const uint32_t t0 = g_now;
-  g_now = t0 + 150u;
+  g_now = t0 + ENC_WILD_TEAR_MS / 2u;
   fb_reset();
   encounter_render();
   uint8_t first[FB_H][FB_W];
@@ -3878,7 +4157,7 @@ TEST(the_wild_tear_is_the_same_picture_every_time_it_is_played) {
   encounter_leave();
 
   wild_fixture(1u);
-  g_now += 150u;
+  g_now += ENC_WILD_TEAR_MS / 2u;
   fb_reset();
   encounter_render();
   int diff = 0;
@@ -3899,14 +4178,14 @@ TEST(the_wild_tear_is_the_same_picture_every_time_it_is_played) {
 TEST(the_wild_reveal_ends_on_a_full_band_snap) {
   wild_fixture(1u);
   const uint32_t t0 = g_now;
-  g_now = t0 + 820u;                                  // STARE, before the snap
+  g_now = t0 + ENC_WILD_SNAP_MS - 60u;                // STARE, before the snap
   fb_reset();
   encounter_render();
   uint8_t before[FB_H][FB_W];
   for (int y = 0; y < FB_H; ++y)
     for (int x = 0; x < FB_W; ++x) before[y][x] = (uint8_t)fb_get(x, y);
 
-  g_now = t0 + 920u;                                  // inside the snap
+  g_now = t0 + ENC_WILD_SNAP_MS + 60u;                // inside the snap
   fb_reset();
   encounter_render();
   int flipped = 0;
@@ -3921,7 +4200,7 @@ TEST(the_wild_reveal_ends_on_a_full_band_snap) {
 // The tear, mid-corruption: no body yet, and the band torn into scanlines.
 TEST(snapshot_encounter_wild_tear) {
   wild_fixture(1u);
-  g_now += 150u;
+  g_now += ENC_WILD_TEAR_MS / 2u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_TEAR);
   snapshot(SCR_ENCOUNTER, "encounter_wild_tear");
   encounter_leave();
@@ -3931,7 +4210,7 @@ TEST(snapshot_encounter_wild_tear) {
 // on, the head is not, and two bars of the tear are still standing.
 TEST(snapshot_encounter_wild_form) {
   wild_fixture(1u);
-  g_now += 480u;
+  g_now += (ENC_WILD_TEAR_MS + ENC_WILD_FORM_MS) / 2u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_WILD_FORM);
   snapshot(SCR_ENCOUNTER, "encounter_wild_form");
   encounter_leave();
@@ -3956,13 +4235,13 @@ TEST(a_catch_tells_the_commit_which_slot_it_filled) {
   memset(&g_gs, 0, sizeof g_gs);
   box_bind(g_gs);
 
-  // A PEBBLE IN SLOT 0 FIRST, AND THAT IS THE WHOLE POINT OF THE FIXTURE.
+  // A BUG IN SLOT 0 FIRST, AND THAT IS THE WHOLE POINT OF THE FIXTURE.
   // caught_fixture() catches into an EMPTY Box, so the catch lands in slot 0,
   // which is also box_active() - the ONE case the broken commit handled. The
   // defect only appears from the SECOND creature onward.
   Genome gen; memset(&gen, 0, sizeof gen);
   gen = genome_genesis();
-  const uint8_t starter = box_new_pebble(1u, 5u, (uint8_t)ORIGIN_STARTER,
+  const uint8_t starter = box_new_bug(1u, 5u, (uint8_t)ORIGIN_STARTER,
                                          gen, 0xC0FFEEu, 1700300000u);
   CHECK_EQ((int)starter, 0);
   CHECK(box_set_active(starter));
@@ -4003,7 +4282,7 @@ TEST(snapshot_capture_caught_pull) {
   // leave every successful capture with no film at all and every golden below
   // would still be a valid picture of the screen.
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_CAP_CLAMP);
-  g_now += 600u;
+  g_now += (ENC_CAP_CLAMP_MS + ENC_CAP_PULL_MS) / 2u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_CAP_PULL);
   snapshot(SCR_CAPTURE, "capture_caught_pull");
   capture_leave();
@@ -4014,7 +4293,7 @@ TEST(snapshot_capture_caught_pull) {
 TEST(snapshot_capture_caught_seal) {
   caught_fixture();
   capture_input((Gesture)GST_HOLD_L);
-  g_now += 900u;
+  g_now += (ENC_CAP_PULL_MS + ENC_CAP_END_MS) / 2u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_CAP_SEAL);
   snapshot(SCR_CAPTURE, "capture_caught_seal");
   capture_leave();
@@ -4035,7 +4314,7 @@ TEST(snapshot_capture_caught_seal) {
 TEST(a_film_ends_by_the_clock_alone_even_though_nothing_cancels_it) {
   item_fixture(1u);
   CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
-  g_now += 979u;                                   // one millisecond short
+  g_now += ENC_ITEM_END_MS - 1u;                   // one millisecond short
   CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
   g_now += 1u;                                     // and exactly at the end
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
@@ -4045,7 +4324,7 @@ TEST(a_film_ends_by_the_clock_alone_even_though_nothing_cancels_it) {
   caught_fixture();
   capture_input((Gesture)GST_HOLD_L);
   CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
-  g_now += 1079u;
+  g_now += ENC_CAP_END_MS - 1u;
   CHECK(enc_film_phase() != (uint8_t)ENC_FILM_NONE);
   g_now += 1u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
@@ -4055,7 +4334,7 @@ TEST(a_film_ends_by_the_clock_alone_even_though_nothing_cancels_it) {
 // ANY GESTURE SKIPS IT, and the words arrive on the same frame. A player who
 // has pressed something has stopped watching.
 TEST(any_gesture_skips_a_film_and_the_screen_answers_at_once) {
-  static const Gesture kAll[] = { GST_TAP_L, GST_TAP_R, GST_HOLD_L, GST_HOLD_R,
+  static const Gesture kAll[] = { GST_TAP_L, GST_HOLD_R, GST_HOLD_L, GST_TAP_R,
                                   GST_BOTH, GST_LONG_BOTH };
   for (unsigned i = 0; i < sizeof(kAll) / sizeof(kAll[0]); ++i) {
     item_fixture(1u);
@@ -4126,9 +4405,9 @@ TEST(a_film_armed_before_the_millis_wrap_measures_forward_and_not_backward) {
   g_now += 64u;                           // the wrap itself
   CHECK_EQ(g_now, 0u);
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_ITEM_RISE);
-  g_now += 500u;                          // 564 ms in: past the climb
+  g_now += ENC_ITEM_RISE_MS;              // past the climb, across the wrap
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_ITEM_SETTLE);
-  g_now += 500u;                          // 1064 ms in: over
+  g_now += ENC_ITEM_END_MS;               // and over
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
   encounter_leave();
   g_now = 100000u;
@@ -4171,7 +4450,7 @@ TEST(every_frame_of_both_films_stays_inside_the_content_band) {
   g_now = t0_item + 5000u;                       // film over
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
   capture_base(encounter_render);
-  for (uint32_t t = 0; t < 980u; t += 10u) {
+  for (uint32_t t = 0; t < ENC_ITEM_END_MS; t += 10u) {
     g_now = t0_item + t;
     fb_reset();
     encounter_render();
@@ -4208,7 +4487,7 @@ TEST(every_frame_of_both_films_stays_inside_the_content_band) {
   g_now = t0_cap + 5000u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
   capture_base(capture_render);
-  for (uint32_t t = 0; t < 1080u; t += 10u) {
+  for (uint32_t t = 0; t < ENC_CAP_END_MS; t += 10u) {
     g_now = t0_cap + t;
     fb_reset();
     capture_render();
@@ -4237,7 +4516,7 @@ TEST(every_frame_of_both_films_stays_inside_the_content_band) {
   g_now = t0_wild + 5000u;
   CHECK_EQ(enc_film_phase(), (uint8_t)ENC_FILM_NONE);
   capture_base(encounter_render);
-  for (uint32_t t = 0; t < 980u; t += 10u) {
+  for (uint32_t t = 0; t < ENC_WILD_END_MS; t += 10u) {
     g_now = t0_wild + t;
     fb_reset();
     encounter_render();
@@ -4260,7 +4539,8 @@ TEST(every_frame_of_both_films_stays_inside_the_content_band) {
 
   // ANTI-VACUITY. "Nothing moved outside the band" must not be able to pass
   // because nothing moved at all.
-  CHECK_EQ(frames, 98 + 108 + 98);
+  CHECK_EQ(frames, (int)(((ENC_ITEM_END_MS + 9u) / 10u) + ((ENC_CAP_END_MS + 9u) / 10u) +
+                         ((ENC_WILD_END_MS + 9u) / 10u)));
   CHECK(moved > 1000);
   g_now = 100000u;
 }
@@ -4312,7 +4592,7 @@ TEST(the_exploration_screens_render_without_drawing_off_the_panel) {
 //  bag_use() declared an ItemEffect, handed it to inv_use(), and never read a
 //  field of it. Every successful use of every item in the game answered
 //  "Usado": filling five care bars from empty, curing SICK and CORRUPTED at
-//  once and jumping a Pebble eight levels were the same single word, on the
+//  once and jumping a Bug eight levels were the same single word, on the
 //  half of the care loop that carries the rewards from exploring - and there is
 //  no item description anywhere in the product, so the bag row ("NAME xN") is
 //  all a player ever learns about what they are holding.
@@ -4324,8 +4604,8 @@ TEST(the_exploration_screens_render_without_drawing_off_the_panel) {
 TEST(using_an_item_says_which_thing_it_did_and_not_just_that_it_was_used) {
   // TWO ACCEPTABLE ANSWERS PER KLASS, BECAUSE THE LADDER IS ORDERED AND THE
   // PACK DECIDES WHICH RUNG IT LANDS ON - and my first draft of this case got
-  // that wrong twice: "Parche" heals a Pebble whose status bits are set, so it
-  // reports the CURE rather than the bar, and "Bit Dulce" on a level-5 Pebble
+  // that wrong twice: "Parche" heals a Bug whose status bits are set, so it
+  // reports the CURE rather than the bar, and "Bit Dulce" on a level-5 Bug
   // crosses a level boundary, so it reports the LEVEL rather than the XP. Both
   // times the code was right and the expectation was a guess. What the case
   // states is the property that matters: the answer is a REACTION to what the
@@ -4344,20 +4624,20 @@ TEST(using_an_item_says_which_thing_it_did_and_not_just_that_it_was_used) {
     if (id == 0) continue;                       // no such klass in the pack
     seams2_reset();
     explore_reset();
-    PebbleInstance pet;
+    BugInstance pet;
     memset(&pet, 0, sizeof pet);
-    pet.magic = (uint16_t)PEBBLE_MAGIC;
-    pet.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+    pet.magic = (uint16_t)BUG_MAGIC;
+    pet.layout_ver = (uint8_t)BUG_LAYOUT_VER;
     pet.species_id = 1; pet.id = 0x5EED1000u + a; pet.level = 5;
-    for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) pet.care[i] = 0;
+    for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) pet.care[i] = 0;
     g_active_p = &pet;
     CHECK_EQ(inv_add(g_inv, id, 1), 1);
     care_enter();
     while (care_cursor() != (uint8_t)CARE_BAG) care_input(GST_TAP_L);
-    care_input(GST_HOLD_R);                      // into the bag
+    care_input(GST_TAP_R);                      // into the bag
     CHECK_EQ(care_mode(), (uint8_t)CAREM_BAG);
     g_toast = STR_EMPTY;
-    care_input(GST_HOLD_R);                      // use the only row
+    care_input(GST_TAP_R);                      // use the only row
     CHECK(g_toast == kArms[a].a || g_toast == kArms[a].b);
     CHECK(g_toast != (uint16_t)STR_ITEM_USED);   // ...and NOT the old one word
     ++seen;
@@ -4375,19 +4655,19 @@ TEST(using_an_item_says_which_thing_it_did_and_not_just_that_it_was_used) {
   if (candy != 0) {
     seams2_reset();
     explore_reset();
-    PebbleInstance pet;
+    BugInstance pet;
     memset(&pet, 0, sizeof pet);
-    pet.magic = (uint16_t)PEBBLE_MAGIC;
-    pet.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+    pet.magic = (uint16_t)BUG_MAGIC;
+    pet.layout_ver = (uint8_t)BUG_LAYOUT_VER;
     pet.species_id = 1; pet.id = 0x5EED2000u; pet.level = 1; pet.xp = 0;
     g_active_p = &pet;
     CHECK_EQ(inv_add(g_inv, candy, 1), 1);
     care_enter();
     while (care_cursor() != (uint8_t)CARE_BAG) care_input(GST_TAP_L);
-    care_input(GST_HOLD_R);
+    care_input(GST_TAP_R);
     g_toast = STR_EMPTY;
-    care_input(GST_HOLD_R);
-    // A level-1 Pebble handed a candy either levels or does not; whichever it
+    care_input(GST_TAP_R);
+    // A level-1 Bug handed a candy either levels or does not; whichever it
     // is, the toast must be the one that matches what the pack recorded.
     CHECK(g_toast == (uint16_t)STR_ITEM_LEVELED || g_toast == (uint16_t)STR_ITEM_XP);
     CHECK_EQ(g_toast == (uint16_t)STR_ITEM_LEVELED, pet.level > 1u);
@@ -4406,7 +4686,7 @@ TEST(the_bag_answers_both_buttons_like_every_other_list_in_the_product) {
   care_input(GST_BOTH);
   const uint16_t on_the_row = g_help;
   CHECK(on_the_row != (uint16_t)STR_EMPTY);      // the row that opens it: covered
-  care_input(GST_HOLD_R);
+  care_input(GST_TAP_R);
   CHECK_EQ(care_mode(), (uint8_t)CAREM_BAG);
   g_help = STR_EMPTY;
   care_input(GST_BOTH);
@@ -4423,13 +4703,13 @@ TEST(the_bag_lists_what_is_held_uses_one_and_walks_back_out) {
   // Empty is an ordinary state and draws a line saying so.
   CHECK_EQ(care_bag_rows(), 0);
   while (care_cursor() != (uint8_t)CARE_BAG) care_input(GST_TAP_L);
-  care_input(GST_HOLD_R);
+  care_input(GST_TAP_R);
   CHECK_EQ(care_mode(), (uint8_t)CAREM_BAG);
   snapshot(SCR_CARE, "care_bag_empty");
-  care_input(GST_TAP_R);
+  care_input(GST_HOLD_R);
   CHECK_EQ(care_mode(), (uint8_t)CAREM_LIST);
 
-  // Two kinds in the bag, one of them a care item the active Pebble needs.
+  // Two kinds in the bag, one of them a care item the active Bug needs.
   uint8_t care_id = 0, cap_id = 0;
   for (uint8_t i = 0; i < ITEM_COUNT; ++i) {
     if (ITEMS_TABLE[i].klass == (uint8_t)ITEM_KLASS_CARE && care_id == 0)
@@ -4442,15 +4722,15 @@ TEST(the_bag_lists_what_is_held_uses_one_and_walks_back_out) {
   CHECK_EQ(inv_add(g_inv, cap_id, 1), 1);
   CHECK_EQ(care_bag_rows(), 2);
 
-  PebbleInstance pet;
+  BugInstance pet;
   memset(&pet, 0, sizeof pet);
-  pet.magic = (uint16_t)PEBBLE_MAGIC;
-  pet.layout_ver = (uint8_t)PEBBLE_LAYOUT_VER;
+  pet.magic = (uint16_t)BUG_MAGIC;
+  pet.layout_ver = (uint8_t)BUG_LAYOUT_VER;
   pet.species_id = 1; pet.id = 0x5EED0009u; pet.level = 5;
-  for (uint8_t i = 0; i < (uint8_t)PB_CARE_COUNT; ++i) pet.care[i] = 0;
+  for (uint8_t i = 0; i < (uint8_t)ER_CARE_COUNT; ++i) pet.care[i] = 0;
   g_active_p = &pet;
 
-  care_input(GST_HOLD_R);                       // open the bag again
+  care_input(GST_TAP_R);                       // open the bag again
   CHECK_EQ(care_mode(), (uint8_t)CAREM_BAG);
   CHECK_EQ(care_bag_cursor(), 0);
   snapshot(SCR_CARE, "care_bag_two");
@@ -4464,8 +4744,8 @@ TEST(the_bag_lists_what_is_held_uses_one_and_walks_back_out) {
   const uint8_t cap_row  = (uint8_t)(1u - care_row);
 
   while (care_bag_cursor() != care_row) care_input(GST_TAP_L);
-  care_input(GST_HOLD_R);
-  // P10-C6: the toast now says WHAT HAPPENED. This is a CARE item on a Pebble
+  care_input(GST_TAP_R);
+  // P10-C6: the toast now says WHAT HAPPENED. This is a CARE item on a Bug
   // whose bars are all empty, so the reaction is the one for a bar that moved.
   CHECK_EQ(g_toast, (uint16_t)STR_ITEM_FED);
   CHECK_EQ(inv_count(g_inv, care_id), 1);
@@ -4475,20 +4755,20 @@ TEST(the_bag_lists_what_is_held_uses_one_and_walks_back_out) {
   // A CAPTURE item refuses BY NAME from a menu and is not consumed: it is the
   // one item a player could otherwise throw away by accident.
   while (care_bag_cursor() != cap_row) care_input(GST_TAP_L);
-  care_input(GST_HOLD_R);
+  care_input(GST_TAP_R);
   CHECK_EQ(g_toast, (uint16_t)STR_ITEM_NOT_HERE);
   CHECK_EQ(inv_count(g_inv, cap_id), 1);
 
   // The last row is the way out of the mode, not out of the screen.
   const int backs = g_backs;
   while (care_bag_cursor() != care_bag_rows()) care_input(GST_TAP_L);
-  care_input(GST_HOLD_R);
+  care_input(GST_TAP_R);
   CHECK_EQ(care_mode(), (uint8_t)CAREM_LIST);
   CHECK_EQ(g_backs, backs);
   g_active_p = nullptr;
 }
 
-TEST(an_item_used_with_no_active_pebble_is_refused_by_name_and_kept) {
+TEST(an_item_used_with_no_active_bug_is_refused_by_name_and_kept) {
   seams2_reset();
   explore_reset();
   g_active_p = nullptr;
@@ -4498,9 +4778,9 @@ TEST(an_item_used_with_no_active_pebble_is_refused_by_name_and_kept) {
 
   care_enter();
   while (care_cursor() != (uint8_t)CARE_BAG) care_input(GST_TAP_L);
-  care_input(GST_HOLD_R);
+  care_input(GST_TAP_R);
   CHECK_EQ(care_mode(), (uint8_t)CAREM_BAG);
-  care_input(GST_HOLD_R);
+  care_input(GST_TAP_R);
   CHECK_EQ(g_toast, (uint16_t)STR_ITEM_NO_PET);
   CHECK_EQ(inv_count(g_inv, candy), 1);
 }
@@ -4562,12 +4842,12 @@ static void audit_full_box(void) {
     // Different species per slot, so the list is not ten copies of one row and
     // the badge column varies with it.
     const uint8_t sp = (uint8_t)(1u + ((uint16_t)i * 6u) % (uint16_t)SPECIES_TABLE_COUNT);
-    const uint8_t slot = box_new_pebble(sp, 30u, ORIGIN_STARTER, gen,
+    const uint8_t slot = box_new_bug(sp, 30u, ORIGIN_STARTER, gen,
                                         0xC0FFEEu + i, 1000u);
     CHECK(slot != BOX_SLOT_NONE);
-    PebbleInstance* p = box_slot(slot);
+    BugInstance* p = box_slot(slot);
     if (!p) continue;
-    for (uint8_t c = 0; c < PB_CARE_COUNT; ++c) p->care[c] = (int32_t)PB_CARE_MILLI_MAX;
+    for (uint8_t c = 0; c < ER_CARE_COUNT; ++c) p->care[c] = (int32_t)ER_CARE_MILLI_MAX;
     p->hp_cur = 250u;
     // The STORED form: raw Latin-1, exactly as networking/creator_parse.cpp
     // writes one and as game/validate.cpp accepts one.
@@ -4630,7 +4910,7 @@ static void au_setup_name(void) {
   // Every cell driven to the WIDEST character the ring offers, which is one of
   // the accented ones - so the field is twelve two-byte characters.
   for (uint8_t cell = 0; cell < (uint8_t)NAME_MAX_LEN; ++cell) {
-    for (uint8_t k = 0; k < 28u; ++k) setup_name_input(GST_TAP_R);  // ... up to N-tilde
+    for (uint8_t k = 0; k < 28u; ++k) setup_name_input(GST_HOLD_R);  // ... up to N-tilde
     setup_name_input(GST_TAP_L);
   }
 }
@@ -4659,7 +4939,7 @@ static void au_battle(void) {
   battle_arm(BT_ENTRY_PRACTICE, 0xB0A71E02u);
   battle_enter();
   battle_pick_team((uint8_t)BATTLE_TEAM_MAX);
-  battle_input(GST_HOLD_R);                    // past the stare-down
+  battle_input(GST_TAP_R);                    // past the stare-down
 }
 
 static void au_evolution(void) {
@@ -4931,7 +5211,7 @@ TEST(a_full_box_draws_at_every_cursor_position) {
 TEST(snapshot_box_full) {
   audit_model();
   box_enter();
-  // Park the cursor on the last Pebble so the window has SCROLLED and the
+  // Park the cursor on the last Bug so the window has SCROLLED and the
   // scrollbar is at the bottom of its track - the state no golden had.
   for (uint8_t i = 0; i < (uint8_t)(BOX_SLOTS - 1u); ++i) box_input(GST_TAP_L);
   // LET THE HIGHLIGHT SETTLE ON THE ROW IT WAS SENT TO. cursor_y() retargets on
@@ -4966,14 +5246,14 @@ TEST(the_naming_screen_types_a_name_one_character_at_a_time) {
   CHECK_EQ((int)setup_name_text()[0], 0);          // an empty field, not spaces
 
   // R steps the ring; the first stop past the blank is 'A'.
-  setup_name_input(GST_TAP_R);
+  setup_name_input(GST_HOLD_R);
   CHECK_EQ((int)setup_name_text()[0], (int)'A');
   CHECK_EQ((int)setup_name_cursor(), 0);           // and R does not move on
 
   // A moves on, R types again.
   setup_name_input(GST_TAP_L);
   CHECK_EQ((int)setup_name_cursor(), 1);
-  for (int i = 0; i < 2; ++i) setup_name_input(GST_TAP_R);
+  for (int i = 0; i < 2; ++i) setup_name_input(GST_HOLD_R);
   CHECK_EQ(strcmp(setup_name_text(), "AB"), 0);
 
   // The ring wraps, and it wraps back to the blank rather than to 'A' - which
@@ -4981,7 +5261,7 @@ TEST(the_naming_screen_types_a_name_one_character_at_a_time) {
   // twice.
   setup_name_enter();
   const uint8_t n = setup_ring_len();
-  for (uint8_t i = 0; i < n; ++i) setup_name_input(GST_TAP_R);
+  for (uint8_t i = 0; i < n; ++i) setup_name_input(GST_HOLD_R);
   CHECK_EQ((int)setup_name_text()[0], 0);          // back to blank
   CHECK_EQ((int)setup_ring_at(0), (int)' ');
 
@@ -5002,7 +5282,7 @@ TEST(a_name_typed_on_the_device_is_latin1_and_is_drawn_as_utf8) {
     ++taps;
     CHECK(taps < setup_ring_len());
   }
-  for (uint8_t i = 0; i < taps; ++i) setup_name_input(GST_TAP_R);
+  for (uint8_t i = 0; i < taps; ++i) setup_name_input(GST_HOLD_R);
   CHECK_EQ((int)(uint8_t)setup_name_text()[0], 0xD1);
   CHECK_EQ((int)strlen(setup_name_text()), 1);     // ONE stored byte
 
@@ -5028,7 +5308,7 @@ TEST(a_typed_name_is_trimmed_at_both_ends) {
   flow_begin(OB_NAME);
   setup_name_enter();
   setup_name_input(GST_TAP_L);                     // leave cell 0 blank
-  setup_name_input(GST_TAP_R);                     // 'A' in cell 1
+  setup_name_input(GST_HOLD_R);                     // 'A' in cell 1
   setup_name_input(GST_TAP_L);
   setup_name_input(GST_TAP_L);                     // cell 3, left blank
   CHECK_EQ(strcmp(setup_name_text(), "A"), 0);
@@ -5044,7 +5324,7 @@ TEST(the_flow_walks_starter_name_time_and_re_roots_at_every_step) {
   flow_begin(OB_STARTER);
   setup_pick_enter();
   CHECK_EQ((int)setup_pick_cursor(), 0);
-  setup_pick_input(GST_TAP_R);
+  setup_pick_input(GST_HOLD_R);
   CHECK_EQ((int)setup_pick_cursor(), 1);
   setup_pick_input(GST_HOLD_L);
   CHECK_EQ((int)g_starter_calls, 1);
@@ -5059,7 +5339,7 @@ TEST(the_flow_walks_starter_name_time_and_re_roots_at_every_step) {
   // NAME -> TIME
   flow_begin(OB_NAME);
   setup_name_enter();
-  setup_name_input(GST_TAP_R);
+  setup_name_input(GST_HOLD_R);
   setup_name_input(GST_HOLD_L);
   CHECK_EQ((int)ob_step(g_cfg), (int)OB_TIME);
   CHECK_EQ((int)g_root, (int)SCR_TIME);
@@ -5096,7 +5376,7 @@ TEST(a_player_who_reads_nothing_still_reaches_a_playable_device) {
     CHECK_EQ((int)ob_step(g_cfg), (int)ob_next(kSteps[i]));
     CHECK_EQ((int)g_root, (int)ob_screen_for(ob_next(kSteps[i])));
     // Nothing was destroyed on the way past: no name written, no starter
-    // rerolled, and the Box is still ten Pebbles.
+    // rerolled, and the Box is still ten Bugs.
     CHECK_EQ((int)g_cfg.pet_name[0], 0);
     CHECK_EQ((int)g_starter_calls, 0);
     CHECK_EQ(box_count(), (uint8_t)BOX_SLOTS);
@@ -5184,7 +5464,7 @@ TEST(no_screen_that_holds_the_players_work_can_time_out_from_under_them) {
   // nothing on any of the three screens.
   flow_begin(OB_NAME);
   setup_name_enter();
-  setup_name_input(GST_TAP_R);
+  setup_name_input(GST_HOLD_R);
   const char first = setup_name_text()[0];
   for (uint32_t t = 0; t < 60000u; t += 250u) {
     g_now += 250u;
@@ -5212,7 +5492,7 @@ TEST(snapshot_setup_name) {
   for (uint8_t i = 0; kWanted[i] != '\0'; ++i) {
     uint8_t taps = 0;
     while (setup_ring_at(taps) != kWanted[i]) { ++taps; CHECK(taps < setup_ring_len()); }
-    for (uint8_t k = 0; k < taps; ++k) setup_name_input(GST_TAP_R);
+    for (uint8_t k = 0; k < taps; ++k) setup_name_input(GST_HOLD_R);
     setup_name_input(GST_TAP_L);
   }
   CHECK_EQ((int)strlen(setup_name_text()), 5);     // five stored bytes
@@ -5222,7 +5502,7 @@ TEST(snapshot_setup_name) {
 TEST(snapshot_setup_starter) {
   flow_begin(OB_STARTER);
   setup_pick_enter();
-  setup_pick_input(GST_TAP_R);                     // the middle of the three
+  setup_pick_input(GST_HOLD_R);                     // the middle of the three
   CHECK_EQ((int)setup_pick_cursor(), 1);
   snapshot(SCR_SETUP_STARTER, "setup_starter");
 }
@@ -5264,8 +5544,8 @@ TEST(the_intro_walks_its_five_beats_and_the_clock_ends_it) {
 // device must not be a permanent choice they did not know they were making, and
 // it must not spin the cursor either.
 TEST(a_press_during_the_intro_skips_it_and_chooses_nothing) {
-  static const Gesture kAll[5] = { GST_TAP_L, GST_TAP_R, GST_HOLD_L,
-                                   GST_HOLD_R, GST_BOTH };
+  static const Gesture kAll[5] = { GST_TAP_L, GST_HOLD_R, GST_HOLD_L,
+                                   GST_TAP_R, GST_BOTH };
   for (uint8_t i = 0; i < 5u; ++i) {
     intro_fixture();
     g_now += 2000u;
@@ -5277,7 +5557,7 @@ TEST(a_press_during_the_intro_skips_it_and_chooses_nothing) {
     CHECK_EQ((int)ob_step(g_cfg), (int)OB_STARTER);// the flow did not advance
   }
   // ...and the very next press, with the intro gone, does all three.
-  setup_pick_input(GST_TAP_R);
+  setup_pick_input(GST_HOLD_R);
   CHECK_EQ((int)setup_pick_cursor(), 1);
   setup_pick_input(GST_HOLD_L);
   CHECK_EQ((int)g_starter_calls, 1);
@@ -5401,7 +5681,7 @@ TEST(the_starter_bodies_never_erase_the_title_bar) {
   for (uint8_t i = 0; i < (uint8_t)OB_STARTER_COUNT; ++i) {
     flow_begin(OB_STARTER);
     setup_pick_enter();
-    for (uint8_t k = 0; k < i; ++k) setup_pick_input(GST_TAP_R);
+    for (uint8_t k = 0; k < i; ++k) setup_pick_input(GST_HOLD_R);
     fb_reset();
     setup_pick_render();
     // The inverted title bar is solid from edge to edge on its last row, which
@@ -5430,7 +5710,7 @@ TEST(the_three_starters_draw_three_different_creatures) {
   for (uint8_t i = 0; i < (uint8_t)OB_STARTER_COUNT; ++i) {
     flow_begin(OB_STARTER);
     setup_pick_enter();
-    for (uint8_t k = 0; k < i; ++k) setup_pick_input(GST_TAP_R);
+    for (uint8_t k = 0; k < i; ++k) setup_pick_input(GST_HOLD_R);
     CHECK_EQ((int)setup_pick_cursor(), (int)i);
     fb_reset();
     setup_pick_render();

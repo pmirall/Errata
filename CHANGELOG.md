@@ -1,10 +1,10 @@
 # Changelog
 
-All notable changes to Pebblebol are documented in this file.
+All notable changes to Errata are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-Versions are tagged at phase boundaries of `PEBBLEBOL_IMPLEMENTATION_PLAN.md`; the
+Versions are tagged at phase boundaries of `ERRATA_IMPLEMENTATION_PLAN.md`; the
 tag for a phase is cut only when its gate (`tools/check.sh`) and its variant matrix
 (`tools/build_matrix.sh`) are both green.
 
@@ -29,13 +29,381 @@ carries the developer console and ships to nobody. A number quoted without its
 variant is not a number — `docs/budget.md` §8 records a phase exit that compared
 one with the other.
 
+## [Unreleased] — Errata, and the creatures are bugs, 2026-09-09
+
+**The product is called Errata now and the creatures are bugs.** The old name
+was Pebblebol and a creature was a Pebble. 5,386 lines across 427 files, plus
+eleven files and two directories renamed.
+
+The pairing is better than the one it replaces: *errata* are the corrections a
+published thing ships with, the creature types were already SIGNAL / CORRUPT /
+SYSTEM, and the moves were already PING, OVERCLOCK and DEPURAR. The device was
+about debugging before it had a name that said so.
+
+### Changed — the name, everywhere it is a name
+
+- `Pebblebol` → `Errata`, `Pebble` → `Bug`, in prose, in identifiers and in the
+  Spanish UI. `PB_` → `ER_` (127 symbols, include guards included), `PBSPR_` →
+  `BUGSPR_`, `pb_spr_` → `bug_spr_`, `PBW_` → `BUGW_`, `PebbleInstance` →
+  `BugInstance`, `PebbleView` → `BugView`.
+- `Pebblebol/` → `Errata/` and `Pebblebol.ino` → `Errata.ino` (Arduino requires
+  the sketch to match its folder), `game/pebble.{cpp,h}` → `game/bug.{cpp,h}`,
+  `data/sprites_pebbles.h` → `data/sprites_bugs.h`, the two `PEBBLEBOL_*.md`
+  specs, the two hardware/product specs under `docs/`, and two goldens.
+- **`AP_SSID_PREFIX` is `"ERRATA-"`.** This one really does change what a phone
+  sees, which is the point of a rename.
+- **Spanish agreement, by hand.** *Errata* is feminine and *Pebblebol* was
+  masculine, so `"¡ERRATA ENCONTRADA!"` and `"Acerca otra Errata y pulsad A en
+  las dos."` No sed can do that, and both replacements are the same byte length
+  so no banner moved.
+
+### Unchanged — the bytes on somebody's flash and in the air
+
+A rename must not cost the owner his save. These four are the pre-rename values
+and every one of them now carries a comment saying why it stayed, because the
+next reader will otherwise "finish the rename" and brick every device in the
+field:
+
+| what | value | why |
+|---|---|---|
+| `BUG_MAGIC` | `0x4250` (`'P','B'`) | on every record already written |
+| `KEY_BUG_PREFIX` / `KEY_CK_BUG_PREFIX` | `"pb"` / `"ck_pb"` | the keys creatures are already filed under |
+| `ER_NVS_NAMESPACE` | `"pbbl"` | the namespace every device already opens |
+| `BUGW_MAGIC` | `0x5750` (`'P','W'`) | the wire tag an un-updated peer still sends |
+| `net_scan_salt` | `"pbl-scan"` | seeds every network hash: changing it re-rolls every cooldown the player has walked for |
+
+### Fixed — four things the blind sweep broke, caught by the suite
+
+A global replace does not know data from names. Every one of these was a test
+failing, not a review catching it:
+
+- **`crc16_ccitt("Pebblebol", 9)`** is a known-answer vector: nine bytes with a
+  precomputed result. The sweep left `"Errata"` — six bytes — being read as
+  nine. Undefined behaviour *and* a different input.
+- **`"Pebble"` in the v1 fixtures** is a nickname recorded on disk in the
+  Nottamagochi era. The bytes cannot move, so the expectation cannot either.
+- **The QR reference payloads.** `REF_V1` / `REF_V2` are module matrices a
+  Python reference generated *for those strings*. `pebblebol.local` was never a
+  real host — it lives only in that test.
+- **Fifteen `git show <sha>:Errata/…` citations.** At those commits the path was
+  `Pebblebol/`. All fifteen were restored and re-run; all three distinct blobs
+  resolve.
+
+### Verified — the game did not move
+
+- **`CONTENT_VERSION` `0xE426` → `0xA78B`**, and only because `PEBBLE_STATUS_BITS`
+  was renamed and three doc strings live under non-`_` keys. No weight, no stat
+  and no roster row changed. It is written into saves but **never compared** on
+  load, so no save is rejected; the one comparison is a linked battle between
+  two boards, which a rename reflashes anyway.
+- **The battle golden's `rng=4797CEC9` is identical**, as are the outcome and
+  the round count. Only the three state hashes moved, and those mix
+  `CONTENT_VERSION` by design.
+- **The sprite art hash is `0x19A2`, unchanged**; the regenerated header differed
+  only in comment-column padding.
+- **13 screen goldens changed pixels — exactly the 13 snapshot tests that
+  failed.** The other 68 changed only their header comment.
+
+### Sizes
+
+| variant | flash | globals |
+|---|---|---|
+| `release` | 1,355,580 / 1,600,000 | 60,924 / 65,000 |
+| `baseline` | 1,372,742 | 61,028 |
+| `no-web` | 1,258,982 | 56,644 |
+| `all-off` | 609,826 | 28,212 |
+
+**136 bytes of flash smaller and not one byte of globals moved.** `"ERRATA"` is
+three characters shorter than `"PEBBLEBOL"` and the app name is a string in the
+image; everything else about the rename is identifiers, which cost nothing.
+Six of six variants build at zero warnings.
+
+### Not renamed, on purpose
+
+- `docs/legacy/CHANGELOG.es.md` is an archive and says it is unedited.
+- The `nt_` prefix and `NT_HOST` are Nottamagochi's, not this product's.
+- The GitHub repository and the clone directory are still `Pebblebol` — that is
+  a rename to make on GitHub, not in a commit.
+
+---
+
+## [Unreleased] — the creature you drew, 2026-09-07
+
+**The owner made a Bug in the creator, and the device drew somebody else's
+body on it.** It appeared in the Box under its own name, so the record was
+there; it walked onto HOME wearing species 1.
+
+### Fixed — the 144 bytes the player drew were read by nothing
+
+- **`csp_install()` set `sprite_id = 0` under a comment promising the renderer
+  would learn to read `CustomSpeciesRec.sprite` "at P8-C4/P9-C3".** It never
+  did. A grep for a reader of that field across the whole tree found none: the
+  pixels were parsed, validated, CRC-covered, written to flash, migrated,
+  served back to the phone — and drawn by nothing. Two phases of pipeline
+  ending in a `0`.
+- **`csp_sprite(species_id, frame)`** is the reader. `game/species_custom.cpp`
+  keeps the frames beside the projected stats (1,440 B of globals: 10 slots ×
+  2 frames × 72 B), because a pointer into the caller's `CustomSpeciesRec` is a
+  pointer into a stack frame that is gone by the time anything draws. It is
+  keyed on the OCCUPIED MASK and not on the bytes — an all-blank drawing is a
+  legal drawing, and answering `nullptr` for one would hand that player species
+  1's body instead of the empty creature they actually made.
+- **`pet_body_ref()` in `ui/pet_art.h`** is the one lookup every body path now
+  goes through. The geometry needed no conversion: `CS_SPRITE_W/H` are 24×24
+  and `CS_SPRITE_FRAMES` is 2, byte for byte every body in
+  `data/sprites_bugs.h`.
+- **Three poses are deliberately NOT overridden.** An EGG is an egg — nobody's
+  drawing shows through a shell. A SICK body stays the shared one, because that
+  silhouette is HOW a player reads "sick" and a custom body there would hide a
+  state they need. SLEEP is derived rather than looked up, so it already wears
+  the drawing without a branch.
+- **Four draw sites, not one.** HOME's still body, `ui/petfx.cpp`'s animated
+  cache, HOME's derived sleeper, and the battle field. The BOX card draws no
+  body at all, which is why the creature was visible there the whole time and
+  is why the report read the way it did. The encounter screen is deliberately
+  untouched: a custom species has `spawn_weight = 0` and never appears wild.
+
+### Fixed — two drawn Bugs shared one cached face
+
+- **Both body caches were keyed on the ATLAS set id**, and every creator species
+  folds onto the same one — they have no row of their own. `ui/screen_home.cpp`'s
+  derived sleeper and `ui/petfx.cpp`'s mirrored-body cache would each have handed
+  the second custom Bug the first one's silhouette. Both now carry the source
+  frame's pointer as a fourth key. Found while writing the fix, not after it.
+- **`petfx_draw_body()` left `s_qry_custom` stale on an EGG.** The assignment was
+  inside the else-arm, so an egg kept whichever creator body the last Bug
+  drawn had brought — straight into the cache key and its first pass. It is
+  written before the branch now.
+- **`petfx_pose_ink_x()` scans the ATLAS**, which for a creator species holds a
+  row that creature never wore, so it answered where the food bowl goes from a
+  silhouette nobody has seen. A drawn body takes the live-ink-box fallback that
+  was already there for the egg case.
+
+### Coverage — the registry was linked by no screen binary
+
+- **`species_custom.o` was in no screen link line, and the link error is the
+  finding.** `test_screens`, `test_battle_screen`, `test_link_screen` and
+  `test_pet_view` all now link the real registry; before this they could not
+  have drawn a custom body if the code had existed. That is exactly how 144
+  bytes sat unread for two phases with the suite green.
+- **Eight cases, and each one was mutation-proven.** Disabling the lookup in
+  `pet_body_ref()` kills four by name; dropping the sleeper's fourth key kills
+  one; deriving the sleeper from the atlas kills one; ignoring the frame index
+  in `csp_sprite()` kills one; dropping `out.body` in `fill_art()` and ignoring
+  the brought body in `br_draw_body()` kill the two battle cases; and nulling
+  `PetView.custom_bits` kills the one in `tests/test_pet_view.cpp` — which is
+  the only host case that can reach the pointer `ui/petfx.cpp` draws the DEVICE's
+  animated body out of, since that file is compiled by no host binary at all.
+- **The field case asserts a DIFFERENCE, not a rectangle.** Its first draft
+  compared the player's body box against the record byte for byte and failed on
+  39 pixels — and on 12 of the ATLAS foe's, which is what proved the fault was
+  the field's composition (the foe's name plate is drawn over the top of the
+  player's body) and not the change under test. Carving that band out by hand
+  would have baked an observed failure into a constant, so the field is rendered
+  twice with two different drawings and the pixels that MOVE are the assertion.
+  Under the old renderer nothing moves and it fails on its first check.
+
+### Gated
+
+- **`tools/check.sh` gains seven greps** over the five links in the chain, and
+  they are mutation-proven too. Six of them duplicate something a test already
+  holds. The seventh does not and cannot: `ui/petfx.cpp` includes `render.h`, so
+  no host binary compiles it, and its two lines are the ones that decide what the
+  DEVICE draws on HOME.
+
+### Sizes
+
+| variant | flash | globals |
+|---|---|---|
+| `release` | 1,355,716 / 1,600,000 | 60,924 / 65,000 |
+| `baseline` | 1,372,878 | 61,028 |
+| `no-web` | 1,259,094 | 56,644 |
+| `all-off` | 609,922 | 28,212 |
+
+**+1,456 B of globals against the previous release** (59,468 → 60,924), and
+1,440 of them are the kept sprite bytes: `CREATOR_SPECIES_SLOTS` × two frames ×
+72 B, the price of a creature the device can actually draw. The rest is the
+fourth cache key on each of the two body caches. Flash moved 828 B. Six of six
+variants build with zero warnings.
+
+---
+
+## [Unreleased] — playable in three minutes, 2026-09-07
+
+Three changes the owner asked for after the first hardware session: two about
+usability, one a feature the exploration loop was missing.
+
+### Changed — a minigame has no cooldown any more
+- **The brief, verbatim:** *"I want to use this when I'm in the bathroom for
+  three minutes, and one minigame doesn't last three minutes."* `MG_COOLDOWN_S`
+  was 120 s, so a visit to the device bought you exactly ONE twenty-second game
+  and then a countdown. It is **deleted** — the constant, `sim_minigame_cooldown_s()`
+  and all three of its checks.
+- **`data/balance.h`'s decay curve is the whole anti-farm now**, and it takes
+  the REWARD down instead of the button away. Geometric at about 0.62 per run,
+  and it stops at a floor of 150‰ instead of falling to nothing, because a
+  payout of zero is a lockout wearing a different hat — which is exactly what
+  the old six-step curve did at its sixth step. At the floor a run still pays
+  15 % of the happiness and one whole XP; two `static_assert`s hold both, and
+  setting the last step back to 0 **does not compile**.
+- The window is **1 h**, down from 3, so it is the same hour as
+  `XP_WIN_MINIGAME_S`: the two independent brakes on the same activity now
+  refill on one clock instead of arguing.
+- **The XP is awarded on what the run was actually worth**, not on the raw
+  score. `sim_apply_play_result()` reports the decayed value through a new
+  out-param, because it is also the call that pushes the run into the rolling
+  window — a caller that re-read the curve itself would get a different answer
+  before and after, and the experience would drift one step out of step with the
+  happiness the same run paid.
+- **Nothing in the repository had ever driven any of this.** No test mentioned
+  the cooldown or the curve, which is how a 120 s lockout survived ten phases.
+  Three cases now do: a run is never refused for following another one; twelve
+  in a row pay monotonically less, fall fast, and never reach zero; and an hour
+  away puts the curve back at the top. All three confirmed failing by name
+  against a re-introduced cooldown.
+
+### Added — you can FIGHT a wild Bug
+- **The gap the owner named:** *"it lets you catch it or leave, you can't even
+  fight it for XP."* Catching and walking away were a wild encounter's only two
+  answers, so a creature you could not afford to keep was worth nothing at all —
+  in a loop whose entire purpose is finding creatures.
+- **`BT_ENTRY_WILD`**, a fourth battle entry. **One Bug a side: your ACTIVE
+  one against the one on the panel**, and no pick list — you did not choose a
+  team to bump into a stranger with, you were carrying what you were carrying,
+  and asking the player to assemble three creatures while one stands in front of
+  them would be a menu in the middle of a moment.
+- **The foe is not rolled.** `build_foe()`'s dice are skipped: the species and
+  level are the ones `game/encounters.cpp` already rolled and already showed the
+  player one screen ago. That is the entry's only promise, it is invisible in a
+  rendered frame (one 24×24 body looks like another), and it is asserted over
+  three different creatures on the setup itself — confirmed failing by name when
+  the wild branch is deleted.
+- **A win pays `XP_BATTLE_WIN` out of the same `XP_SRC_BATTLE` bucket as a
+  practice win**, so this is not a new farm: `XP_CAP_BATTLE` is two wins an hour
+  for the device, and a wild fight can only be reached through an encounter,
+  which arms the network's own two-hour cooldown on the way in.
+- **The fight REPLACES the encounter rather than stacking on it.** A wild Bug
+  you have just beaten is not still standing there waiting to be caught, so
+  leaving the battle walks back to the scan and not onto a card offering
+  CAPTURAR to something that fainted.
+- The card carries three answers now — CAPTURAR / LUCHAR / DEJAR — in a row of
+  three boxes at `GF_TINY`, because "CAPTURAR" is 40 px at `GF_BODY` and a third
+  of the panel is 42. Each label is centred by measurement rather than by a
+  hand-counted offset.
+
+### Changed — the wild Bug stays on screen while you decide
+- **The complaint:** *"it appears for a millisecond, it goes, and it lets you
+  catch it or leave."* Exactly right, and it was this session's own doing: the
+  reveal drew a 24×24 body, the film ended, and what was left was three lines of
+  prose asking the player to decide about something they could no longer see.
+- The resting frame is a **card** now: the body on the left where the film left
+  it standing, the species name and level beside it, the two options underneath.
+  The `¡BUG SALVAJE!` line is gone — the title bar says ENCOUNTER and the
+  picture says the rest, and the row it occupied is what makes room for the
+  body. Five `static_assert`s pin the layout against the header bar, the
+  countdown bar and each other.
+- **The films are about 70 % longer** (item 980→1660 ms, capture 1080→1840,
+  wild 980→1700). They were written against host goldens, where a film is a
+  still picture you study a frame at a time; on a 0.96" panel at arm's length a
+  300 ms tear is four frames, and four frames of anything is a glitch in the
+  literal sense rather than the intended one. A `static_assert` caps every film
+  at two seconds so none of them can quietly grow into a wait.
+- **The timetable moved into `ui/screen_encounter.h`** and the tests drive it by
+  name. They held it as literal milliseconds before, which is two copies of a
+  schedule — and the retiming is exactly the edit that makes those two copies
+  disagree.
+
+---
+
+## [Unreleased] — the first board, 2026-09-07
+
+**The firmware ran on hardware for the first time.** The intro played. The
+Wi-Fi scan found 22 networks, read 16, rolled an encounter — and the encounter
+never appeared.
+
+### Fixed — the auto-return measured two different readings of one clock
+- **`app/state_machine.cpp`: `sm_service()` compared `s_input_ms` against its
+  `now_ms` PARAMETER.** That parameter is the frame stamp `ui.cpp` samples at
+  the top of `ui_service()`, ninety lines earlier; `s_input_ms` is stamped by
+  `sm_goto()` with `sm_now()`. When a screen navigates **from its own `update()`
+  hook** — which `sm_service()` runs one line before the check — `s_input_ms`
+  ends up milliseconds AHEAD of `now_ms`, the unsigned subtraction underflows to
+  about four billion, that clears `UI_AUTORETURN_MS`, and **the screen that was
+  just pushed is sent to HOME on the same tick**, back stack cleared, no message.
+- `ui/screen_network.cpp` is the only screen in the tree that navigates from
+  `update()` (a scan answers on a frame, not on a press) and it writes the
+  cooldown to flash on the way, so the gap is milliseconds, not microseconds.
+  **Every wild encounter on a real board vanished into HOME**, while the console
+  reported `16 seen / 1 fresh, phase=4` — the roll had happened and
+  `ui_push(SCR_ENCOUNTER)` had been called.
+- **No test in `tests/test_statemachine.cpp` could have failed**: every one of
+  them passes `host_ms()` as the parameter, which is the same reading `sm_now()`
+  answers, so the two were equal by construction and the subtraction was always
+  0. The project's own recurring defect, one level down, inside the navigation
+  machine itself. Two new cases drive the readings apart; both were confirmed
+  failing by name against the old line.
+
+### Changed — B is BACK on the HOLD, and choosing moved to the TAP
+- **The owner played it on a board and the grammar was backwards in a hand.**
+  Until now B tapped cancelled and B held chose, which is what spec §7's wording
+  says on paper; with the device in your hands the two presses are not
+  symmetric. A tap is the cheap, frequent, low-consequence gesture and a hold is
+  the deliberate one — so the cheap one should be what you do constantly
+  (walking a list and picking a row) and the deliberate one should be what
+  throws work away. The old grammar cost a 600 ms hold for every confirmation
+  and left the screen on any accidental brush of B.
+- **35 call sites in 14 files**, plus the router. What did NOT move, each for a
+  reason written down in `app/input_router.h`: the R auto-repeat on `SCR_TIME`
+  and both setup screens (there B is "+1 on the field", and a 46-entry ring
+  needs the repeat); the minigame pause, which stays on `GST_HOLD_R` because
+  that is the P3-C4a collision fix and not a preference; `SCR_HOME`, the root,
+  where both presses have always been the caress; and the ERROR screen, whose
+  two taps are both primary actions. The dev console needed no change at all —
+  it has used tap-to-choose and hold-to-leave since it was written.
+- `STR_AF_BACK_SEL` reads **"SEL/ATRÁS"** now, tap first.
+
+### Fixed — the coverage that let a 35-site swap through on one failing test
+- Swapping the whole grammar broke exactly **one** case in the suite. Every
+  screen case in `tests/test_screens.cpp` drives its own `input()` hook and so
+  cannot see the router at all, and the only router case named one screen.
+- **`the_router_takes_b_held_and_never_b_tapped_on_any_screen`** sweeps the
+  whole enum and asserts both halves: B held is consumed exactly where the flags
+  say, and B tapped is consumed nowhere. A half-done swap leaves either two
+  backs or none, and both pass a test that names one gesture. Confirmed failing
+  across 12 screens against the pre-swap router.
+- `tools/check.sh` §5b: the router must test `GST_HOLD_R` exactly once and name
+  `GST_TAP_R` never.
+- The `kExits` table named `GST_TAP_R` on rows whose driver never presses it —
+  a column that was decorative and, after the swap, also wrong. Corrected.
+
+### Added — the instrument that was missing
+- **`DIAG,scr,<ms>,<n>=<NAME>`, one line per screen change**, in both
+  `god_service()` bodies. `DIAG,perf` already carried a screen ordinal, but once
+  a minute and only as a sample: a screen that lives for one frame never appears
+  in it, which is exactly the case that needed watching. The gap between two
+  rows is the diagnosis — a push followed 20 s later by HOME is the auto-return
+  doing its job on a screen nobody noticed; a push followed *immediately* by
+  HOME is a navigation defect. Those two need opposite fixes and look identical
+  from the sofa. An hour of this evening went on telling them apart by argument.
+
+### Measured on hardware, for the first time in eleven phases
+- Flash and boot: clean. The `serial exception` esptool prints after
+  `Hard resetting` is the native-USB port re-enumerating, not a failure.
+- The first-boot intro plays and hands over to the picker.
+- Wi-Fi scan: 22 access points seen, 16 read (the `WIFI_SCAN_MAX_RESULTS` cap),
+  radio released. Classification, hashing and the encounter roll all correct.
+- **Not yet exercised**: sound (no piezo fitted), battery (no cell fitted), and
+  everything that needs a second board.
+
+---
+
 ## [Unreleased] — first impressions, 2026-09-07
 
-*(Two `[Unreleased]` sections stand here on purpose: neither has been tagged, and
-they are two different pieces of work on the same day. This one is what the
-owner asked for after playing the build; the one below it is the pre-hardware
-review. Inventing a version number for either to keep the headings unique would
-be claiming a tag that was never cut.)*
+*(Four `[Unreleased]` sections stand here on purpose: none has been tagged, and
+they are four different pieces of work on the same day. This one is what the
+owner asked for after playing the build; above it is the first hardware session;
+below it is the pre-hardware review. Inventing version numbers to keep the
+headings unique would be claiming tags that were never cut.)*
 
 **The owner played the build.** Everything in this section comes from that:
 seven observations about how the game FEELS, a list of the moments that deserved
@@ -77,7 +445,7 @@ instead of on a text field.
   `SCR_CAPTURE`.
 - **A verdict cue** (`ui/screen_battle.cpp`). A win plays `SFX_FANFARE` on the
   `RLE_BATTLE_END` beat. A loss adds nothing on purpose: the beat before it is
-  the player's last Pebble going down, which already played `SFX_FALL`.
+  the player's last Bug going down, which already played `SFX_FALL`.
 - **The cursor clicks** — menu, care, settings, box, encounter. One rule: a
   cursor that moves clicks, a cursor that cannot move does not. The BOX card is
   silent because it has one row; the battle ring is silent because it is stepped
@@ -141,7 +509,7 @@ tree against one measured fact, and the fixes it produced.
 
 ### The fact
 `tests/fakes/*.cpp` defines 143 functions and **FIFTY of them are also defined
-under `Pebblebol/src`**, so every host binary that links a fake drives the
+under `Errata/src`**, so every host binary that links a fake drives the
 FAKE's body while the reader believes it drives the firmware's. Two of the
 defects this product has already shipped were exactly that — P10-C6's stale copy
 of `ui_pet_name_latin1()` and P7's fixture nulling `save_manager`'s wear filter —
@@ -213,7 +581,7 @@ the six-variant matrix is green, the release image fits its caps with 249 KB of
 flash to spare, and **no line of this firmware has ever run on hardware**.
 Seventeen §67 acceptance boxes are open — fifteen for want of a board, one for
 want of decision D1, and two for want of a networking module that was planned
-and never written. `PB_PINS_CONFIRMED` has never been defined. See `README.md`
+and never written. `ER_PINS_CONFIRMED` has never been defined. See `README.md`
 §2, which carries all 38 bench items in dependency order, and `docs/bench.md`,
 which has the keystrokes.
 
@@ -239,8 +607,8 @@ which has the keystrokes.
   now — `help`, `info`, `show_save`, `stall` — with `DCF_ALWAYS ⇒ NOT
   DCF_MUTATES` static_asserted and tested.
 - **The taint is a table column applied by `diag_exec()`, not a call remembered
-  per arm**, because `box_new_pebble()` memsets flags and `genome_genesis()`
-  clears the taint bit: a naive `spawn` would mint a CLEAN Pebble inside god
+  per arm**, because `box_new_bug()` memsets flags and `genome_genesis()`
+  clears the taint bit: a naive `spawn` would mint a CLEAN Bug inside god
   mode that `taint_gate_ok()` would let into an honest dynasty.
 
 ### Added — P10-C2, a performance instrument that measures no time
@@ -298,7 +666,7 @@ which has the keystrokes.
   bits, read the bits back — it would have passed, and the first power cut on a
   real board would have thrown away the name the player had just typed.
 - **`core/utf8.{h,cpp}`: one codepoint rule where there were three.**
-  `render.cpp`, `gfx_fb.cpp` and `pebble.cpp` each read a lead byte and trusted
+  `render.cpp`, `gfx_fb.cpp` and `bug.cpp` each read a lead byte and trusted
   it, none ever executed against a malformed sequence — and `p += 4` on a lone
   `0xF1` walks past the terminator, while `0xF1` is a **legal nickname byte**.
 - **Spec §63 as a completeness claim**: `kAudit[]` has one row per `ScreenId`
@@ -332,7 +700,7 @@ which has the keystrokes.
   the sprite editor and bench D2 were all unusable.
 - **The device called itself NOTTAMAGOCHI.** `STR_APP_NAME` was the boot splash,
   the load-save splash and the main menu's header bar, while SETTINGS →
-  *Acerca de* two taps away printed `Pebblebol` and the AP was `PEBBLEBOL-XXXX`.
+  *Acerca de* two taps away printed `Errata` and the AP was `ERRATA-XXXX`.
   The same power-on drew both names within seconds. Decision D3 is recorded
   CLOSED with "D3 has nothing open" — it closed every name the *machine* sees
   and never touched the one the human does.
@@ -418,7 +786,7 @@ chunk-by-chunk account and §15.3 attributes the exit symbol by symbol.
   - **The creator registry, which is outside `GameState` entirely.** `cs0..cs9`
     are not part of the state the chain transforms, so their upgrade lives in
     `custom_species_install_all()`. Without it `validate_custom_species()`
-    refuses the record by name and every Pebble pointing at it comes back
+    refuses the record by name and every Bug pointing at it comes back
     `VR_UNKNOWN_SPECIES`: the creature the owner designed, gone on the first
     boot after a firmware update.
 - **The v2 → v3 step, and how much of it is load-bearing.** It changes no field
@@ -444,7 +812,7 @@ chunk-by-chunk account and §15.3 attributes the exit symbol by symbol.
   toolchain, the build, the gate, the architecture, the partition table and the
   save. There was no README at the root before this commit.
 - **`tests/test_persistence.cpp` §8b** — nine cases driving a whole played save
-  (two Pebbles, one of them a creator species, a changed config, a bag, a
+  (two Bugs, one of them a creator species, a changed config, a bag, a
   cooldown, a trade journal, **both copies of every pair**) stamped back down to
   v2 and read by this firmware: carried forward field by field, re-sealed, and
   an ordinary `LOAD_OK` on the second boot. Plus a v2 checkpoint restored after
@@ -585,7 +953,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   whoever runs the bench list, because the tag is a claim about a device.
 - **`POSE_SICK` is one body for sixty species**, and `POSE_EAT` has no art at
   all. Decided rather than left unmentioned; the price is in P10-C3's record
-  above and in `PEBBLEBOL_IMPLEMENTATION_PLAN.md`.
+  above and in `ERRATA_IMPLEMENTATION_PLAN.md`.
 - **Sixteen translation units are compiled by no host binary**, about 3,200
   lines of device-only networking, rendering and boot code. Anything in them is
   untested by construction, and both of this exit's blocking defects lived
@@ -673,7 +1041,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   constexpr call, the loop variable discarded on the next line — under a comment promising a
   sweep over `minor_form`'s whole range. Deleted: P9-C3 made the property a build error.
 - **`the_name_cap_never_splits_a_utf8_sequence` had no instrument for the CAP half of its own
-  name.** A stray `out[cap] = 0` in `pebble_name_join()` passed the whole suite; the 0x7F fill
+  name.** A stray `out[cap] = 0` in `bug_name_join()` passed the whole suite; the 0x7F fill
   that was already there "so a write can be detected" is now inspected past the cap.
 - **`verify.py`'s five-key CORRUPTION mask** reported four different failures under one name and
   died with an unhandled `KeyError` on the fifth. Five named checks now.
@@ -687,7 +1055,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   .bss, phase 10 gets 352 not 400), the art budget quoted against the baseline cap rather than
   the release one (0.70 %, not 0.47 %), `tests/Makefile`'s claim that `sim_days` links `box.o`
   "for the Box recovery half of the care model" (it is linked dead and the simulated day is one
-  ACTIVE Pebble), and the generated atlas banner's claim that `SPRITE_REV` breaks the build
+  ACTIVE Bug), and the generated atlas banner's claim that `SPRITE_REV` breaks the build
   (P9-C3 deleted that `static_assert`; the hash is a DIAG readout and a cache key).
 
 ### Measured — the phase-9 exit (P9-C6)
@@ -731,7 +1099,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
 ### Added — the corruption effects (P9-C5)
 
 - **`cor_service()`, and the timer that had no reader.** `cor_expire()` was called by nothing in
-  `Pebblebol/src`: the encounter armed the 24 h deadline and the Antivirus cleared the bit, so
+  `Errata/src`: the encounter armed the 24 h deadline and the Antivirus cleared the bit, so
   `PBS_CORRUPTED` was permanent on every device while `verify.py`'s "corruption clears by timer"
   check passed over the JSON for four phases. `cor_service()` is a Box-wide walk in
   `game/corruption.cpp` (pure, host-tested) called once a second from `app/app.cpp`'s
@@ -742,14 +1110,14 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   test can check. `petfx_draw_body()` paints what it is handed with the existing
   `rd_dither_rect_phase()` at draw colour 2, inside the ink box it already publishes.
 - **The battle modifier's missing half was `battle_init()`.** `battle_stat_eff()`'s +1 ATK /
-  −1 DEF has read `corrupt_left` since P4-C2 and nothing ever set it from the stored Pebble, so
+  −1 DEF has read `corrupt_left` since P4-C2 and nothing ever set it from the stored Bug, so
   a creature corrupted out of battle walked into one cured. One ASSIGNMENT into the same field
   attack 12 Infectar writes, so the two sources are one fact and cannot stack.
   `BATTLE_ENGINE_VER` 2 → 3; `tests/golden/battle_v1.txt` re-recorded, and split with an
   intermediate build to prove the whole diff is the version stamp and the hashes.
 - **`tests/test_corruption.cpp`** — 19 cases, 231,174 checks, the 51st host binary. The glitch
   containment is measured on PIXELS painted into the host framebuffer over a control render,
-  not on the struct fields, with `fb_oob()` watching the panel; a corrupted Pebble survives a
+  not on the struct fields, with `fb_oob()` watching the panel; a corrupted Bug survives a
   REAL NVS round trip, a REAL wire round trip and a REAL breeding with its deadline intact.
 - **`tests/tools/corrupt_view.cpp`** — the glitch drawn over a real body from the compiled atlas
   at the real floor line, plus a `strip` mode for the 1-in-8 rate over a minute and a `temper`
@@ -780,9 +1148,9 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   measured and overshoot, so 3 is the measured answer rather than the largest available one.
 - **The dynasty name is host-testable for the first time (P9-C4, §54).** The hash and the two
   syllable indices moved from `ui/ui.cpp` — which includes `<Arduino.h>`, so no host binary could
-  ever link it — into `game/pebble.cpp` as `pebble_name_syllables()`. The syllable repertoire
+  ever link it — into `game/bug.cpp` as `bug_name_syllables()`. The syllable repertoire
   stays in `core/strings_es.h` and the caller does the lookup, so neither `snprintf` nor the
-  Spanish string block enters the pure layer. `pebble_name_join()` replaces the `snprintf` and
+  Spanish string block enters the pure layer. `bug_name_join()` replaces the `snprintf` and
   **fixes a real defect**: the old join truncated on a BYTE boundary and the repertoire is UTF-8,
   so `"Ña" + "rrón"` (6 glyphs, 8 bytes) could be cut mid-sequence; the new one truncates on a
   CHARACTER boundary and always yields a PREFIX of the whole name.
@@ -813,8 +1181,8 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   unchanged** — the balance pass moved no table, so nothing left `.rodata`. Split with an
   intermediate build: the balance constant, the regenerated `CONTENT_VERSION` and the
   JSON/documentation edits are **+4 B**; the nickname move is **+486**, of which **+358 is named
-  `.text`** (`pebble_name_join` 236 B, `pebble_name_syllables` 74, `utf8_fit` 64, and
-  `ui_name_for` shrinking 118 → 102) and the rest is alignment. `pebble_name_join` is the
+  `.text`** (`bug_name_join` 236 B, `bug_name_syllables` 74, `utf8_fit` 64, and
+  `ui_name_for` shrinking 118 → 102) and the rest is alignment. `bug_name_join` is the
   expensive half and it is the half that fixes the UTF-8 truncation.
 - `ALL PASS 50/50`, ASAN 4/4, PAGE TEST 51/51, GATE OK, MATRIX OK on six variants;
   release caps 1,328,580/1,600,000 flash and 59,044/65,000 globals, i.e. 271,420 B of flash and
@@ -824,16 +1192,16 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
 ### Still owed after P9-C4
 
 - **The v1 stage clock gives away the first twenty levels.** `game/sim.cpp` advances the retired
-  life stage by AGE alone and `stage_commit()` writes it back into `PebbleInstance.level`, so a
-  Pebble earning **no XP at all** reaches level 5 at 2 h, 10 at 10 h, 15 at 24 h and **20 at
+  life stage by AGE alone and `stage_commit()` writes it back into `BugInstance.level`, so a
+  Bug earning **no XP at all** reaches level 5 at 2 h, 10 at 10 h, 15 at 24 h and **20 at
   3.5 days**. `sim.cpp`'s own comment says "P3-C2 makes level XP-driven and this map becomes
   read-only", and that sentence is false while `stage_commit()` still writes. 2,660 of the
   curve's 8,845 points are never earned by anybody. Measured, named, not fixed: undoing it is a
   save-visible change to what `level` means.
-- **"3-4 touches a day is a well-kept Pebble" is optimistic and `balance.h` now says by how
+- **"3-4 touches a day is a well-kept Bug" is optimistic and `balance.h` now says by how
   much.** Satiety falls 100.8 points a day against a 30-point meal, so 3.36 MEALS is break-even
   and a touch also has to cover cleaning and play. The NORMAL player lands 3.3 care actions a day
-  and satiety reaches zero every night. §27 holds (the Pebble is never lost) and §57's own
+  and satiety reaches zero every night. §27 holds (the Bug is never lost) and §57's own
   criterion holds with margin, so no rate was tuned — moving `ACT_MEAL_HUNGER` or
   `CARE_DECAY_MPH` re-records `tests/golden/care_v1.txt` and is its own commit.
 - **Five species remain outside 35-65 % against their own stage** (ids 12, 23, 25, 26, 29, all
@@ -850,7 +1218,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   rendered from the COMPILED header and looked at — as text, as a 5x contact sheet per family
   and as a whole-roster sheet at 1x, 2x and 4x — because nothing automated can tell you whether
   a body looks like a creature and this repository says so in four separate files.
-- **`PB_SPRITE_EYES`, the eyelid table, generated.** `ui/petfx.cpp` carried 24 rows of blink
+- **`ER_SPRITE_EYES`, the eyelid table, generated.** `ui/petfx.cpp` carried 24 rows of blink
   bands read off the decoded art BY HAND, 1,100 lines from the pixels they indexed, held in
   step by `static_assert(SPRITE_REV == 1, "re-verify it")`. Sixty bodies would have made it
   sixty rows of the same. `tools/gen_sprites.py` derives the band from the same `.txt` file as
@@ -874,7 +1242,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
 - **The roster ships the whole pack: `ROSTER_FAMILIES` 12 → 20, 36 → 60 species.** The clamp
   was never the tables, it was the art: the old guard `SPR_BABY_BLOB + sprite_id < 38` capped
   the roster at 36 because the legacy atlas held 36 addressable bodies. The same three lines
-  now read `PB_SPRITE_BODY_FIRST + sprite_id < 64` and describe the resolution the firmware
+  now read `ER_SPRITE_BODY_FIRST + sprite_id < 64` and describe the resolution the firmware
   performs. **Every one of the 34 attacks is on a reachable learnset for the first time** (13
   Infección on species 46, 22 Firewall on 60), and the evolution key (item 9) has a lock:
   species 53 → 54, driven end to end in `test_inventory.cpp`.
@@ -882,7 +1250,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   for the window in which both rosters were in the tree at once. Both rosters are no longer in
   the tree, so it is the measured end state (**10,247 B** — 9,216 of atlas plus 1,031 of icons,
   mini-icons, badges and emotes) plus **1,017 B**, which is seven more 24x24x2 sets: one more
-  three-stage family and four effect sets. `tools/gen_sprites.py`'s own `PB_DATA_BYTES_MAX`
+  three-stage family and four effect sets. `tools/gen_sprites.py`'s own `ER_DATA_BYTES_MAX`
   came down from 12,288 to 10,240 and now actually refuses to emit over it — README section 5
   had claimed that refusal since P9-C1 and there was no such check.
 - **`br_body_set_id()` no longer folds.** Sixty species resolve onto sixty distinct 24x24
@@ -905,7 +1273,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   **deleted**, not refactored. `sprite_form_of()` lost its `minor_form` parameter so every call
   site had to be visited rather than silently keeping a no-op; `test_pet_view.cpp` pins both
   directions. A screen that wants care quality back should draw it with the renderer.
-  **What this bought:** a Pebble's body is its species at EVERY stage, so all forty evolution
+  **What this bought:** a Bug's body is its species at EVERY stage, so all forty evolution
   rules now move the drawn body at the level they actually fire at — including the twenty that
   fire at CHILD or TEEN, every family's first evolution, the starter's Paketo → Fragmar among
   them. That number was 12 of 24 seeing "only the name" and is now 0 of 40.
@@ -942,7 +1310,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   (nine 2px through-holes read as stripes, not holes); `KERNON`'s halo bar was floating clear of
   its spire and now has a stem, `ESTAFEX` lost 36 px of 1-3 pixel barb islands that read as dirt.
 - **Stale atlas arithmetic in three documents.** `docs/budget.md` §4.3 and §12 and
-  `Pebblebol/ESTUDIO_VISUAL.md` carried 10,893 B against a 14,336 B ceiling and a 9,959 B end
+  `Errata/ESTUDIO_VISUAL.md` carried 10,893 B against a 14,336 B ceiling and a 9,959 B end
   state that double-counted the eggs and predicted no pose sets. All three now carry the
   measured numbers and the measured cost.
 
@@ -999,7 +1367,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   the monotonic clock and reset **only by a request that passed the PIN gate** — otherwise
   anyone in radio range holds the access point up forever by fetching one URL every 299 s.
 - **All seven spec §38 routes (P8-C3).** `GET /`, `GET /api/schema`, `GET /api/state`,
-  `POST /api/validate`, `POST /api/pebble`, `POST /api/time` and `POST /api/ping`.
+  `POST /api/validate`, `POST /api/bug`, `POST /api/time` and `POST /api/ping`.
   `/api/schema` is served from the generated `data/creator_schema_json.h` with the 4-arg
   `send_P` — 744 B of `.rodata`, **zero globals** — so the page and the device cannot disagree
   about a budget; `/api/time` calls `gt_set_epoch(CAL_PHONE)`. `/api/schema` is the one ungated
@@ -1014,7 +1382,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   `CS_BODY_DRAIN_MAX` (8192), or NEGATIVE, the socket is closed from inside the hook, because a
   client declaring 100 MB would otherwise hold `loop()` — no render, no simulation — for as long
   as it kept trickling. A `Content-Length` of 0 is **411**, never an empty upload: chunked and
-  absent look identical to the core and would hand the validator an empty Pebble.
+  absent look identical to the core and would hand the validator an empty Bug.
 - **`networking/creator_parse.{h,cpp}` — a fixed-schema reader, and no JSON library.** It reads
   exactly the two documents the page may send and answers everything else with a named code. It
   is **length-bounded, never NUL-bounded** (an embedded NUL is `CP_NUL`, not a terminator),
@@ -1025,7 +1393,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   `VR_CS_*` codes over the §35/§36 rules — type, the stat band, the four move rules, the
   stage-1 power cap, the attack budget, the name and its character set, the reserve, and
   `budget_used`, which is **recomputed and refused on disagreement** because a page that prices
-  its own Pebble prices it at zero. The same function runs on every `cs*` record read off flash
+  its own Bug prices it at zero. The same function runs on every `cs*` record read off flash
   at boot: "it survived a CRC" is not evidence about a stat total.
 - **`game/species_custom.{h,cpp}` — creator species resolve through `species_get()`.**
   `data/species_table.h` has promised since P4-C1 that "P8 resolves cs* records here so no
@@ -1086,7 +1454,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   `build()`, the one function that decides what `qr_encode()` is handed, would have shipped with
   the gate green. Three host cases close it, the middle one exhaustively — **the payload is
   byte-identical at all 9,999 PINs `cg_mint_pin()` can produce, both symbols.** A substring search
-  would have been the wrong test: `PEBBLEBOL-1234` is an ordinary real SSID.
+  would have been the wrong test: `ERRATA-1234` is an ordinary real SSID.
 - **`tools/creator_smoke.sh` — the bench instrument for four §67 boxes.** All seven §38 routes over
   curl, a body over `CS_BODY_MAX` answered 413 and one over `CS_BODY_DRAIN_MAX` answered with a
   closed socket, five wrong PINs then a sixth refused as locked (and the lockout refusing the
@@ -1115,7 +1483,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   and give `CP_OK` — the round trip is what makes the refusal attributable to the missing key
   rather than to a mangled document. All six mutation-tested one at a time.
 - **The PIN gate on the routes that WRITE now has probes (P8-C6).** `tools/creator_smoke.sh`
-  phase 3 sends `POST /api/pebble` with a valid document and no `X-Pin` (403, and the Box count
+  phase 3 sends `POST /api/bug` with a valid document and no `X-Pin` (403, and the Box count
   must not move), `POST /api/time` with a wrong header, a wrong PIN carried in the **body**, and
   the correct PIN carried in the body **accepted** — the last because a one-sided assertion
   passes against a firmware that refuses every body PIN. Phase 2 gained the only probe that can
@@ -1151,12 +1519,12 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   time than joining a network takes. The row is `SF_STICKY` now, with two screen-owned exits in
   its place — `CREATOR_AP_WAIT_MS` (§47) and the D7 grace period — both leaving through the same
   teardown a B press runs.
-- **A CREATOR PEBBLE WOULD HAVE BEEN QUARANTINED ON THE FIRST POWER CYCLE, and the defect was
-  already waiting in the tree.** `species_get(200)` answered `nullptr`, so `box_new_pebble()`
-  refused a creator species outright and a Pebble filed any other way was flagged
+- **A CREATOR BUG WOULD HAVE BEEN QUARANTINED ON THE FIRST POWER CYCLE, and the defect was
+  already waiting in the tree.** `species_get(200)` answered `nullptr`, so `box_new_bug()`
+  refused a creator species outright and a Bug filed any other way was flagged
   `VR_UNKNOWN_SPECIES` by `save_manager.cpp`'s `quarantine_scan()` at the next boot. The load
   path now rebuilds the registry from the `cs*` records **before** the scan runs, and
-  `tests/test_validate.cpp::a_creator_pebble_is_an_ordinary_pebble_to_the_one_validator` drives
+  `tests/test_validate.cpp::a_creator_bug_is_an_ordinary_bug_to_the_one_validator` drives
   both halves.
 - **An over-long string left the reader's cursor inside it.** `cp_read_string()` returned
   `CP_STRING_LEN` the moment the buffer filled, without consuming to the closing quote — so the
@@ -1192,7 +1560,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   drove `{}` and `{"v":1}`, so whichever single key was dropped from `creator_parse.cpp`'s mask,
   `CPK_V` or `CPK_NAME` still fired. With `CPK_TYPE` and `CPK_SPRITE` both removed the suite
   printed **ALL PASS 49/49**, and a document with neither key parsed `CP_OK` and validated
-  `VR_OK` — **a type-defaulted, entirely blank creature accepted by `POST /api/pebble`**. Neither
+  `VR_OK` — **a type-defaulted, entirely blank creature accepted by `POST /api/bug`**. Neither
   key has a downstream guard: a zeroed `type` is `TYPE_SIGNAL`, and the validator never inspects
   the sprite bytes. The mask is the only thing standing there, and now it is tested key by key.
 - **`h_root`'s throttled exit was the one server exit without `cs_body_done()` (P8-C6)**, against
@@ -1213,7 +1581,7 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
 - **The PIN left the QR payload (spec §39).** `net_url()` emits `http://<ip>/` and lost the
   `pin` argument entirely; `tools/check.sh` gained a gate that fails the build if a formatted
   query parameter reappears under `src/networking`.
-- **`AP_SSID_PREFIX` is `PEBBLEBOL-`**, closing decision D3's last open piece. The soft AP stays
+- **`AP_SSID_PREFIX` is `ERRATA-`**, closing decision D3's last open piece. The soft AP stays
   **open**: no WPA passphrase of any length fits the join QR (32 B of fixed text against a 32 B
   version-2 budget), and `docs/decisions.md` carries the arithmetic and the owner's remaining
   choice.
@@ -1226,9 +1594,9 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
   set costs 84..86 depending on type, which prices at 73 % — so requiring equality would have
   made the product spec's own screenshot impossible to produce. `docs/decisions.md` carries the
   enumeration; `tests/test_validate.cpp` runs it rather than quoting it.
-- **A custom Pebble does not travel.** `networking/protocol.cpp` already refuses a wire record
+- **A custom Bug does not travel.** `networking/protocol.cpp` already refuses a wire record
   with `species > 199` as `VR_WIRE_CUSTOM_UNRESOLVED`; that now has a stated consequence —
-  custom Pebbles are local until a later phase sends the `cs*` record alongside them.
+  custom Bugs are local until a later phase sends the `cs*` record alongside them.
 - **`CS_SPRITE_W` / `CS_SPRITE_H`** name the 24x24 geometry that had lived only in a comment,
   with a `static_assert` tying them to `CS_SPRITE_BYTES`. §35's "sprite dimensions" now has a
   source the served schema can quote.
@@ -1304,12 +1672,12 @@ is not "can this fail?" but "what is it enumerating, and is that the whole set?"
 
 ## [0.7.0-social] — Unreleased
 
-Phase 7 is the phase where a Pebblebol stops being alone. Two devices find each other over
+Phase 7 is the phase where a Errata stops being alone. Two devices find each other over
 ESP-NOW, agree to talk only when **both** players press A, fight a lockstep battle whose reward
-neither device can award by itself, and swap a Pebble through a flash journal that survives the
+neither device can award by itself, and swap a Bug through a flash journal that survives the
 power being cut at any single write. `game/breeding.{h,cpp}` computes a balanced offspring from
 two parents and a shared seed. And the phase exit found that a successful trade **destroyed a
-Pebble on the shipping build**, fixed it, and then discharged the seven debts phase 6 carried
+Bug on the shipping build**, fixed it, and then discharged the seven debts phase 6 carried
 forward.
 
 **Two acceptance items are deliberately UNTICKED and neither was run.** §67's "Local
@@ -1325,7 +1693,7 @@ never in the shipping image at all. See that entry.)*
 
 ### P7-C1 — the device transport, per decision D2 (ESP-NOW)
 
-Two Pebblebols can now, in principle, find each other. `networking/transport_espnow.cpp`
+Two Erratas can now, in principle, find each other. `networking/transport_espnow.cpp`
 brings ESP-NOW up on a `WIFI_STA` residency that still never associates — nothing in
 `esp_now.h` mentions credentials, an access point, an IP or a netif, and the gate that counts
 association call sites under `src/` still reads zero — broadcasts a 24-byte beacon every
@@ -1393,11 +1761,11 @@ that never had a switch.
 
 ### P7-C2/C3 — the LINK screen, the consent that gates it, and the battle over the link
 
-Two Pebblebols can now fight each other, and neither can be made to by the other one.
+Two Erratas can now fight each other, and neither can be made to by the other one.
 
 **Consent is not implied by proximity, and it is enforced twice.** The LINK screen browses,
 lists the peers it has heard three times above the signal floor, and opens §42's card —
-"¡PEBBLEBOL ENCONTRADO!" over COMBATE / INTERCAMBIO / CRIAR / CANCELAR — on the one the player
+"¡ERRATA ENCONTRADO!" over COMBATE / INTERCAMBIO / CRIAR / CANCELAR — on the one the player
 picks. Pressing A there is the ONLY thing in the firmware that calls `session_init()`: until
 it happens this device has no session at all, drains no transport and has no unicast peer
 bound, so the far device's HELLO is neither answered nor, on real hardware, even delivered —
@@ -1440,7 +1808,7 @@ plan with its one-line remedy and its cost rather than papered over.
 `STR_SO_LINK_SOON` ("LINK - Fase 7") is deleted, and `STR_LINK_PHASE` ("Enlace - Fase 7"),
 which was the string the screen actually drew, went with it. The BOX's inspect menu's
 INTERCAMBIAR and CRIAR rows are entry points now instead of a toast: each pre-selects that
-Pebble and opens LINK with the intent, consenting to nothing. `act_note_peer()` has its first
+Bug and opens LINK with the intent, consenting to nothing. `act_note_peer()` has its first
 driver in the product. One new host binary — 43 -> **44**, 827 -> **854 tests**, 3,672,108 ->
 **3,672,806 checks**: `tests/test_link_screen.cpp` drives the real screen against a real
 caller-owned `Session` with a real AI over a real loopback, because a screen is a singleton and
@@ -1467,7 +1835,7 @@ until this commit nothing reachable from `setup()` called any of them.
 
 ### P7-C4 / P7-C5 — the atomic trade, breeding, and the god-taint gate
 
-**Two Pebblebols can trade, and a power cut in the middle cannot make a Pebble twice or
+**Two Erratas can trade, and a power cut in the middle cannot make a Bug twice or
 none.** `game/trade.{h,cpp}` owns the journal and the write order; `networking/trade_link.cpp`
 owns the five wire steps; `ui/screen_link.cpp` drives both, so the INTERCAMBIO row that
 answered "Aún no está listo" since P7-C2 opens a real session now and `LK_SELF_CAPS` claims
@@ -1537,7 +1905,7 @@ the full 0..15; clamped, 0 times**, and the case asserts the control arm escapes
 guarding something measurable.
 
 **The god-taint gate is back, in the game layer.** `game/taint.h` — two inline functions, no
-`.cpp` — shared verbatim by trade and breeding. Not in `validate_pebble()` (a tainted Pebble is
+`.cpp` — shared verbatim by trade and breeding. Not in `validate_bug()` (a tainted Bug is
 a legal object and the flag is inside the accepted mask on purpose), not in the transport (what
 P2-C7b correctly removed). It reads BOTH markers, because `migration.cpp` sets the instance flag
 from a v1 save without touching the genome bit, and it is honour-based, which the header says
@@ -1546,7 +1914,7 @@ rather than implies.
 Twenty-five mutations were planted and the table is in `docs/decisions.md`. **One was not
 caught**: deleting every "the write did not land" check left the sweep green, because once the
 fake store is dead a reboot cannot tell "stopped at the failure" from "carried on regardless" —
-the case that catches it asserts what a reboot hides, and a `TDR_LAST_PEBBLE` code was written,
+the case that catches it asserts what a reboot hides, and a `TDR_LAST_BUG` code was written,
 measured to be unreachable and deleted in the same spirit.
 
 Two new host binaries — 44 → **46**, 854 → **898 tests**, 3,672,806 → **3,802,557 checks**.
@@ -1567,22 +1935,22 @@ journal writers, the wire codec and `s_tl` are all in the image.
 Sizes, all seven matrix variants green with zero project warnings: baseline
 1,985,080 / 80,340 → **1,993,954 / 80,484**; release **1,269,108 / 56,812**, 79.3 % and 87.4 % of the caps.
 
-### P7-C6 — the exit: one destroyed Pebble, seven debts, and a grep that could not see a unit slip
+### P7-C6 — the exit: one destroyed Bug, seven debts, and a grep that could not see a unit slip
 
-**The exit opened on a blocking defect: a successful trade destroyed a Pebble on the shipping
+**The exit opened on a blocking defect: a successful trade destroyed a Bug on the shipping
 build, and the boot resolver carried the identical defect through the identical shim.**
-`game/trade.cpp` clears the outgoing slot (B1) and then files the incoming Pebble (B2), and
+`game/trade.cpp` clears the outgoing slot (B1) and then files the incoming Bug (B2), and
 `box_add()` fills the lowest free slot — which is the slot B1 just released. So the sequence
-writes **the same flash key microseconds apart**. `save_pebble()` DEFERS a second write of one
+writes **the same flash key microseconds apart**. `save_bug()` DEFERS a second write of one
 key inside `SAVE_MIN_GAP_MS` (1,000 ms) — `force` does not bypass that branch — **and returns
 true**. The two shims returned that `true` as `TradeStore.write_slot`, whose contract is
 literally "every function returns whether the bytes LANDED". B2 never reached flash, the Box
 header was written over it and the journal was cleared to IDLE, so nothing was left to repair
-it. The peer had already applied. The Pebble was gone.
+it. The peer had already applied. The Bug was gone.
 
 **Reproduced before it was fixed, and it is worse than a race.** Binding `app/app.cpp`'s own
 clock wiring in `tests/test_trade.cpp` — one line — makes the CLEAN trade case fail with **no
-fault injection at all**: the Box holds 2 Pebbles instead of 3 and the trade costs **9 flash
+fault injection at all**: the Box holds 2 Bugs instead of 3 and the trade costs **9 flash
 writes instead of 10**.
 
 **The fixture is why 27,819 checks could not see it, and that is this project's named pattern
@@ -1590,8 +1958,8 @@ with the polarity inverted.** `save_set_clock(nullptr, ...)` switches off `save_
 entire wear-filter branch. A 15-point kill sweep, a 9-point resolver sweep and an 800-trial
 lossy table all ran against a save manager **the release artefact does not execute**. Phase 6
 found a default living inside a dev-only path; here the DEFAULT was the safe one and the
-SHIPPING wiring was the dangerous one. The fix is `save_pebble_now()` — no filter, no deferral,
-no third answer — and two gates: `save_pebble()` may not be called from `app/` or `ui/`, and no
+SHIPPING wiring was the dangerous one. The fix is `save_bug_now()` — no filter, no deferral,
+no third answer — and two gates: `save_bug()` may not be called from `app/` or `ui/`, and no
 host test may bind a null millisecond clock.
 
 **The seven debts phase 6 carried forward are all discharged, three as defects and two as
@@ -1605,9 +1973,9 @@ documentation.**
   off-time no longer refills the budget, so a player back after an hour away may wait up to 29
   minutes for a full meal. An unkind hour is recoverable; a stat budget a power cycle refills is
   not.
-- **A Pebble at level 30 earned no activity happiness at all.** `xp_add()` returned at the top
+- **A Bug at level 30 earned no activity happiness at all.** `xp_add()` returned at the top
   of the curve *before* spending the meter, and the activity reward is scaled by what the meter
-  spent — so a maxed Pebble was paid 0 of the 5,500 milli it had earned. One line moved. It
+  spent — so a maxed Bug was paid 0 of the 5,500 milli it had earned. One line moved. It
   changes what the device-wide ledger means (XP handed out, not XP that found a home) and a
   named case now owns that behaviour source by source.
 - **A cooldown blob could freeze the activity score for the life of the device.**
@@ -1641,14 +2009,14 @@ makes it adopt the attacker's nonce, which is a `session_derive_seed()` input. T
 is bounded to denial, which `session.h` already states; the guard now has a case.
 
 **Fifteen mutations, each making a NAMED case or a NAMED gate fail**, and one of them failed
-nothing — `save_pebble_now()`'s cancellation of a pending deferred write buys one fewer flash
+nothing — `save_bug_now()`'s cancellation of a pending deferred write buys one fewer flash
 write and not correctness, because `save_service()` would have written the same RAM. The
 **comment was narrowed and the assertion changed to count puts**, rather than the test stretched
 around a claim wider than the tree.
 
 Sizes: baseline 1,993,954 / 80,484 → **1,994,460 / 80,492** (+506 / +8, and the 8 B are the two
 new counters plus alignment); release **1,269,468 / 56,820**, 79.3 % and 87.4 % of the caps.
-`riscv32-esp-elf-nm` confirms `save_pebble_now`, `act_adopt`, `pwr_tick_budget` and
+`riscv32-esp-elf-nm` confirms `save_bug_now`, `act_adopt`, `pwr_tick_budget` and
 `sim_gain_restore` are all **in the release image** — a fix that is not in the shipping artefact
 is not a fix, which is the rule phase 6 left behind.
 
@@ -1666,7 +2034,7 @@ or a comment; the ESP-NOW API may be called from exactly one file; `session.cpp`
 under `networking/` must be classified pure or impure; `session_init()`/`session_start()` may be
 called only from the LINK screen (the consent gate as a red line); `session_rewards_authorised()`
 has exactly one reader; `ui/screen_battle.cpp` may not include the LINK screen or a networking
-header; `save_pebble()` may not be called from `app/` or `ui/`; and no host test may bind
+header; `save_bug()` may not be called from `app/` or `ui/`; and no host test may bind
 `save_set_clock(nullptr, ...)`.
 
 Sizes, all seven matrix variants green with zero project warnings: baseline
@@ -1760,7 +2128,7 @@ forward:
   `GATE_RELEASE_GLOBALS_MAX`, and **38.9 %** of the 3,145,728 B `app0` slot.
 - **The phase is 174 % of the top of its own flash line and comfortably inside the scarce
   one.** `docs/budget.md` allows P6 8–12 KB of flash and 0.3–0.8 KB of globals; actual
-  **+20,866 flash** and **+400 globals**. Most of the overrun is not Pebblebol's code: two
+  **+20,866 flash** and **+400 globals**. Most of the overrun is not Errata's code: two
   ESP-IDF drivers arrive in the tree for the first time — LEDC with the first PWM output
   (~7.5 KB, P6-C1) and `esp_sleep` with the first `esp_light_sleep_start()` (~9.6 KB,
   P6-C3) — and both are paid once and reused. It is immaterial against the cap that matters:
@@ -1800,7 +2168,7 @@ forward:
   not read `millis()`.
 
 **Two decisions are still open and phase 6 did not close either.** **D1** (pin map) stays
-deferred: `PB_PINS_CONFIRMED` is not defined anywhere, the five `#define`s are byte-for-byte
+deferred: `ER_PINS_CONFIRMED` is not defined anywhere, the five `#define`s are byte-for-byte
 what the repository carried, and the consequence this phase paid for it is a light sleep
 instead of a deep one — worth ~2.7 days of ~26 on D11's own battery model, against D11's own
 unmeasured 100× spread, which swings the same answer from 26 days to 9. **D8** (piezo GPIO)
@@ -1829,7 +2197,7 @@ a network is deleted rather than disabled, so §44's promise is a property of th
 not of a setting. On top of that sensor sit an exploration loop — a NETWORK screen behind
 a twelve-second timeout with a cancel, a two-hour per-network cooldown that no single
 calibration can unlock wholesale (an uncalibrated device can still farm by rebooting, and
-the header says so), a seeded encounter, a capture that files a validator-clean Pebble
+the header says so), a seeded encounter, a capture that files a validator-clean Bug
 through the tree's one constructor, and a bag the CARE screen can spend. There is still no
 radio in the sense that matters: none of this has run on a board.
 
@@ -1928,11 +2296,11 @@ which was checked by diffing the file with the hash fields masked out.
 **Exploring is a loop now.** The MENU's RED row opens a real screen: it asks the radio for one
 passive scan, spins for at most twelve seconds, takes B as a cancel, and on an answer picks the
 first access point that is off cooldown, arms that cooldown and rolls an encounter against the
-generated tables. A wild Pebble can be caught into the Box, an item goes into a bag the CARE
+generated tables. A wild Bug can be caught into the Box, an item goes into a bag the CARE
 screen can spend, and a special event pays experience or corrupts the creature for a day.
 
 **The roll is a pure function of what §20 says it should be** — the salted network hash, the
-six-hour bucket, the per-device seed, the category, the signal and how many Pebbles are filed —
+six-hour bucket, the per-device seed, the category, the signal and how many Bugs are filed —
 and draws from no global stream. That is a **deviation from the plan's `RNG_ENCOUNTER`**, with a
 reason: a shared stream would make two scans of the same network in the same bucket answer
 differently, which is the opposite of §20's "deterministic from a seed", and would make the
@@ -1953,11 +2321,11 @@ Every stage now derives its own seed from the encounter seed and a one-byte tag.
 - **SPECIAL had no payload table.** `tools/content/specials.json` is one now — an event roster
   and per-category weights summing to 100, shaped exactly like `ITEM_DROPS` so both two-stage
   picks are the same walk, with three generated guards. Exactly the two kinds the plan promised:
-  an XP burst and a corruption event. **The 24-hour timer had nowhere to live**: `PebbleInstance`
+  an XP burst and a corruption event. **The 24-hour timer had nowhere to live**: `BugInstance`
   carried the status bit and no deadline, so corruption could be set and never expire. Four of
   the twelve reserved bytes are `corrupt_until_epoch` — no migration (nothing in the tree set the
   bit before this commit), no wire change (`reserved[12]` is not in the 48-byte record and
-  `PBW_STATUS_MASK` refuses the bit outright) and no new VReject. The tripwire that pinned
+  `BUGW_STATUS_MASK` refuses the bit outright) and no new VReject. The tripwire that pinned
   `CONTENT_VERSION` **fired as designed and is deleted rather than re-derived**: it guarded a hole
   that no longer exists, and what replaces it asks the same question of the thing that does.
 - **The ITEM outcome had no resolvability guard.** `encounter_item_rows_have_a_drop()` is emitted
@@ -1975,12 +2343,12 @@ Every stage now derives its own seed from the encounter seed and a one-byte tag.
   `ItemDef` spends its two `reserved` bytes on `target` and `param` **without growing**; and a
   third unit nobody had named — the CAPTURE bonus, which the pack stated three incompatible ways —
   is settled as a number (`ITEM_CAPTURE_SCALE`), so prose can no longer disagree with prose.
-- **A captured Pebble passes the validator**, and the shape of that answer was measured first:
+- **A captured Bug passes the validator**, and the shape of that answer was measured first:
   across 36 species × 30 levels, a sealed genome gives **0 of 1,080** rejects and an unsealed one
   gives `VR_BAD_GENOME` on **all 1,080**. The seal is the only input that can make a constructed
-  Pebble invalid, so capture refuses it by name before it builds anything and validates the filed
-  slot as a post-condition. The Pebble is **not destroyed** on that path, and that is a decision:
-  `box_new_pebble()` files as it constructs, the first Pebble in an empty Box becomes the active
+  Bug invalid, so capture refuses it by name before it builds anything and validates the filed
+  slot as a post-condition. The Bug is **not destroyed** on that path, and that is a decision:
+  `box_new_bug()` files as it constructs, the first Bug in an empty Box becomes the active
   one, and `box_release()` refuses the active slot — so "file, validate, undo" would have an
   unreachable branch in exactly the case a first-boot player hits.
 
@@ -2070,7 +2438,7 @@ offered to the rules and kept when none bites; the rule that would spend it is s
 past the 36-species prefix, and lands in P9.
 
 **One mutant survives and is reported rather than hidden.** Deleting `cap_attempt()`'s
-`validate_pebble()` post-condition leaves every host case green: with a sealed genome the
+`validate_bug()` post-condition leaves every host case green: with a sealed genome the
 validator answers `VR_OK` on all 1,080 roster × level rows, so the post-condition has no
 reachable falsifier at this roster. The *pre*-check is where the requirement bites and it is
 covered — dropping it turns all 1,080 rows red by name.
@@ -2164,19 +2532,19 @@ project warnings, size caps, and `make -C tests check`.
 
 ### Added (P4-C5a)
 
-- **`game/validate.{h,cpp}` — THE ONE PEBBLE VALIDATOR** (spec §15, P4-C5a). Spec §15's
-  second governing sentence is "the same validator used for custom Pebbles should be used
-  for exchanged Pebbles", and this is it: a `const PebbleInstance&` in, one of twenty-seven
+- **`game/validate.{h,cpp}` — THE ONE BUG VALIDATOR** (spec §15, P4-C5a). Spec §15's
+  second governing sentence is "the same validator used for custom Bugs should be used
+  for exchanged Bugs", and this is it: a `const BugInstance&` in, one of twenty-seven
   named `VReject` codes out, no policy flag and no scope parameter. A validator that
   cannot write cannot repair, and a repairing validator is the exact failure §15's first
   sentence is written against — `ui/screen_battle.cpp:205 copy_from_box()` repairs, and
-  that is defensible for a Pebble the device made and not for one a peer sent. Every §15
+  that is defensible for a Bug the device made and not for one a peer sent. Every §15
   reject reason has a live code: impossible stats (`VR_HP_OVER_MAX` against the DERIVED
-  maximum, through the same `pebble_derive_stats()` call `battle.cpp` makes), illegal moves
+  maximum, through the same `bug_derive_stats()` call `battle.cpp` makes), illegal moves
   (`VR_UNKNOWN_MOVE` and `VR_UNLEARNABLE_MOVESET`), impossible levels (`VR_BAD_LEVEL`),
   invalid species (`VR_UNKNOWN_SPECIES`), invalid evolution state (`VR_BAD_EVO_STAGE`,
   `VR_BAD_EVO_PENDING`) and the rest.
-- **`networking/protocol.{h,cpp}` — THE §15 FRAME AND THE 48 B WIRE PEBBLE.** A 14-byte
+- **`networking/protocol.{h,cpp}` — THE §15 FRAME AND THE 48 B WIRE BUG.** A 14-byte
   header carrying all six things §15 requires of every packet (version, type, session id,
   payload length, sequence number, and a trailing CRC-16/CCITT over the whole frame INCLUDING
   the header), the twelve §15 message types at twelve FIXED payload lengths, and a decode
@@ -2257,7 +2625,7 @@ project warnings, size caps, and `make -C tests check`.
 - **A message from an earlier PHASE was dropped as out-of-state**, so a `CAPABILITIES` that
   overtook its `HELLO` stranded an honest pair. The design gave the answer-from-state rule
   to battle rounds only; the handshake needs it too. All three are now zero.
-- **A peer that echoed one of our own Pebble ids reached `battle_init()`** and came back as
+- **A peer that echoed one of our own Bug ids reached `battle_init()`** and came back as
   `BR_DUPLICATE_ID` — which this device reports as an INTERNAL fault, because the engine's
   duplicate rule spans all six members and `validate_team()` is about one team by
   construction. It was this device blaming itself for a lie the peer told; there is now a
@@ -2275,14 +2643,14 @@ project warnings, size caps, and `make -C tests check`.
 ### Fixed (P4-C5 follow-up — six hostile verifiers, and what they found)
 
 - **`hp_cur == 0` WAS THE LAST THING THREE CHECKERS ACCEPTED AND THE ENGINE REFUSED, AND
-  THE HONEST DEVICE BLAMED ITSELF FOR IT.** A fainted Pebble is a legal thing to have
-  *stored* and an illegal thing to bring to a battle, so `validate_pebble()`,
+  THE HONEST DEVICE BLAMED ITSELF FOR IT.** A fainted Bug is a legal thing to have
+  *stored* and an illegal thing to bring to a battle, so `validate_bug()`,
   `validate_team()` and `pbw_decode()` all answered `VR_OK` for one and `battle_init()`
   answered `BR_MEMBER_FAINTED` — which `battle_link.cpp` turned into
   `SE_PROTOCOL(SD_INTERNAL)`, *"a bug in `game/validate.cpp`"*, with `bad_index == 0xFF`
   so neither the log nor the peer was told which member did it. Measured: a peer sending
   `member[1].hp_cur = 0` closed the honest endpoint that way, and so did an honest player
-  whose own team held a fainted Pebble, **with nobody lying at all** — both endpoints
+  whose own team held a fainted Bug, **with nobody lying at all** — both endpoints
   recorded an internal fault over a legal team. It is byte for byte the class P4-C5b had
   already fixed once for cross-team duplicate ids and left one instance of. There is now a
   `validate_battle_ready()` beside `validate_level_band()` — a set rule in a context, no
@@ -2394,7 +2762,7 @@ project warnings, size caps, and `make -C tests check`.
   validation, migration, runtime validation"; `grep -c valid` inside the old
   `save_load_all()` was **0** and `blob_ok()` — magic, CRC and a version byte — was the
   whole of it. Spec §15 names the load path as a consumer, so every occupied slot is now
-  run through `validate_pebble()`. The rule is **QUARANTINE**: the slot is flagged in an
+  run through `validate_bug()`. The rule is **QUARANTINE**: the slot is flagged in an
   in-RAM mask with its named `VReject` (`save_quarantine_mask()` /
   `save_quarantine_reason()`), the Box still loads and not one byte is repaired. Refusing
   the Box would brick a device on a content-pack change, because `VR_UNKNOWN_SPECIES` is
@@ -2442,7 +2810,7 @@ project warnings, size caps, and `make -C tests check`.
   moves by expected damage times effective accuracy — the type modifier included, and the
   per-combatant type-edge budget respected so it stops paying for an advantage it has
   already spent — and switches when HP is strictly below 25 % (`BATTLE_AI_SWITCH_HP_PCT`)
-  AND a benched Pebble is better typed against the foe. IT CANNOT PRODUCE AN INVALID
+  AND a benched Bug is better typed against the foe. IT CANNOT PRODUCE AN INVALID
   ACTION, and the reason is structural rather than careful: the AI does not decide legality
   at all. It enumerates the seven actions that exist, hands each to
   `battle_validate_action()`, and may return only one that came back `BR_OK` — so there is
@@ -2496,7 +2864,7 @@ project warnings, size caps, and `make -C tests check`.
   `src/game/battle*` may not touch a named RNG stream; and `battle_step_round()`'s nine step
   calls must read 1..9 in order.
 - **The content pipeline** (`tools/gen_content.py`, `tools/content/*.json`): the species,
-  attack, item, evolution and encounter tables under `Pebblebol/src/data/` are now
+  attack, item, evolution and encounter tables under `Errata/src/data/` are now
   GENERATED from JSON and committed. Running the generator twice on the same JSON produces
   byte-identical headers, and `tools/check.sh` runs both `tools/gen_content.py --check`
   (regenerate in memory, diff against the tree) and the content pack's own `verify.py`
@@ -2520,7 +2888,7 @@ project warnings, size caps, and `make -C tests check`.
   buff stages, the evasion rule, and three constants the content pack does not carry and
   which are named as decisions here — the round cap with an integer HP tiebreak and an
   explicit draw, the team size, and what a win pays.
-- **Derived stats** (`game/pebble.{h,cpp}`): `pebble_derive_stats()` — integer only, nothing
+- **Derived stats** (`game/bug.{h,cpp}`): `bug_derive_stats()` — integer only, nothing
   stored, variation from the genome with the `creation_seed` reading recorded as rejected.
 - **Content accessors** (`game/species.{h,cpp}`): family bases, the type modifier, the
   weighted encounter pick and the two-stage item drop. It is also the one translation unit
@@ -2549,15 +2917,15 @@ project warnings, size caps, and `make -C tests check`.
 
 ### Fixed
 
-- **`box_new_pebble()` never wrote `evo_state`, so every Pebble it minted at a stage-1 or
+- **`box_new_bug()` never wrote `evo_state`, so every Bug it minted at a stage-1 or
   stage-2 species carried stage bits 0** — a fact about the creature that disagreed with
   its own species row. `grep -c evo_state game/box.cpp` was 0, and
   `tests/test_battle_screen.cpp:107` creates species 1, 5 and 9, of which 5 is stage 1 and
   9 is stage 2. It was harmless only because nothing outside the evolve ceremony read the
-  bits; `game/validate.cpp` reads them now, so a legitimately captured mid-stage Pebble
+  bits; `game/validate.cpp` reads them now, so a legitimately captured mid-stage Bug
   would have been refused on the wire and quarantined on load. The fix is one line **at the
   writer**, never a repair inside the validator, and reverting it turns
-  `a_constructed_pebble_validates` red.
+  `a_constructed_bug_validates` red.
 
 #### P4-C4 follow-up — a won battle that paid nothing, and an evolution the tick was wider than
 
@@ -2584,14 +2952,14 @@ project warnings, size caps, and `make -C tests check`.
   move; the body follows when the pet reaches ADULT. The policy is unchanged and is right
   (the atlas authors two CHILD and two TEEN designs and both pairs already carry care
   quality), so what was fixed is the CLAIM: `every_rule_measured_at_the_level_it_actually_
-  fires_at` binds a Pebble at each rule's own level, asks the SIMULATION which stage that
+  fires_at` binds a Bug at each rule's own level, asks the SIMULATION which stage that
   is rather than restating the ladder, and asserts 12 / 12 with the name moving for all 24
   and the body moving for all 24 at ADULT. The plan, the §67 line and the obligation bullet
   all carry the number now.
 - **AND ON A MIGRATED DEVICE THE NAME DID NOT MOVE EITHER**, which made the twelve above a
   change of nothing at all. `migrate_v1_to_v2()` synthesized the v1 DYNASTY name into
-  `PebbleInstance.nickname` for a pet nobody had ever renamed; `game_state.cpp` copies
-  `pebbles[0].nickname` into `Config.pet_name`; `ui_pet_name()` answers `Config.pet_name`
+  `BugInstance.nickname` for a pet nobody had ever renamed; `game_state.cpp` copies
+  `bugs[0].nickname` into `Config.pet_name`; `ui_pet_name()` answers `Config.pet_name`
   before anything else; and no v2 path ever clears it. So a migrated player saw the dynasty
   syllables for the life of the device and the species name never appeared once — the exact
   P3-C3 complaint P4-C4a set out to close, on every device that had a v1 save. A fresh v2
@@ -2631,7 +2999,7 @@ project warnings, size caps, and `make -C tests check`.
   `pet_view_fill_sim()`'s `kStatOfCare[]`; the case drove `pet_view_fill()`, a straight copy
   of `inst.care[]`. It drives the live fill now, through five DISTINCT `sim_god_set_stat()`
   values with the distinctness asserted — with five equal stats any permutation passes.
-- **`pet_view_fill()` is deleted.** No caller in `Pebblebol/src` for three phases; a stage
+- **`pet_view_fill()` is deleted.** No caller in `Errata/src` for three phases; a stage
   ladder its own comment called "the same rule `sim_bind()` uses" that disagreed with
   `sim.cpp` on three of four thresholds and could never return `STAGE_SENIOR`; and an
   evolution case that "proved" a changed body by feeding `evo_state & 3` in as `minor_form`,
@@ -2663,9 +3031,9 @@ project warnings, size caps, and `make -C tests check`.
   Paketo that wins **0 of 200** scripted 1v1 seeds against species 17 wins **100** with
   attack 11 Plaga written into slot 0 — and **103** with the ON-TYPE attack 3 Rafaga, so a
   rule that only checked the move's type would have stopped nothing. The rule is the closure
-  of the only two writers of `PebbleInstance.moves[]` in the tree: it must be the verbatim
+  of the only two writers of `BugInstance.moves[]` in the tree: it must be the verbatim
   learnset of some species in the same family at a stage no higher than this one's, which
-  accepts an evolved Pebble still carrying the kit it grew up with and refuses everything
+  accepts an evolved Bug still carrying the kit it grew up with and refuses everything
   else. New reject code `BR_UNLEARNABLE_MOVE`, and `BATTLE_ENGINE_VER` is bumped to 2
   because `battle_init()` now refuses what it used to accept.
 - **Three more tests that could not fail** — the seventh, eighth and ninth instances of this
@@ -2698,7 +3066,7 @@ project warnings, size caps, and `make -C tests check`.
   233,280 plain-roster protected move pairs (0.32 %) rank the wrong way round, worst case
   5.9 % of the better move's expected damage — though the conservative half of the claim
   held, at no more than 2/6 of a point from the engine's exact expectation. The comment
-  defending step 8's second fainting pass said a DOT-killed Pebble "never yields a victory";
+  defending step 8's second fainting pass said a DOT-killed Bug "never yields a victory";
   `combatant_alive()` requires `hp_cur > 0`, so the victory is found either way and what
   actually goes missing is the `BCF_FAINTED` flag and the transcript's FAINT event.
   `battle_ai_move_score()`'s "widest reachable" 89,400 is an arithmetic ceiling; the widest
@@ -2773,8 +3141,8 @@ project warnings, size caps, and `make -C tests check`.
   sweep — every global present in a `.o` and absent from the linked ELF, cross-checked
   against a comment-stripped grep — found the next three and the chain behind them:
   `PetView.mood`, `PetView.asleep` and `PetView.sick` (each assigned once in
-  `pet_view_fill_sim()` and read by no line in `Pebblebol/src` or `tests`),
-  `PebbleView.mood_face` (written by `ui.cpp` every frame, drawn by no screen),
+  `pet_view_fill_sim()` and read by no line in `Errata/src` or `tests`),
+  `BugView.mood_face` (written by `ui.cpp` every frame, drawn by no screen),
   `sprite_mood_face()` (**zero references in the whole tree**, its last caller gone since
   P2-C11b) and `spr_mood12`, 144 B of authored 12×12 art that `--gc-sections` had been
   dropping from every build. `asleep` and `sick` were worse than unused: they were a second
@@ -2820,7 +3188,7 @@ project warnings, size caps, and `make -C tests check`.
   table and decides what a learnset change owes an existing creature". P4-C1 landed the
   table and did not decide; **P4-C2 did**, through `BR_UNLEARNABLE_MOVE`, which accepts the
   verbatim learnset of any same-family species at a stage ≤ this one's — so an evolved
-  Pebble keeping the moves it was raised with is legal by construction. The decision, and
+  Bug keeping the moves it was raised with is legal by construction. The decision, and
   the price it carries (a later stage's own learnset is unreachable in V1), are written
   where the reader is standing.
 - **Four sentences narrowed to what the tree does.** `migration.cpp` claimed "nothing is
@@ -2845,7 +3213,7 @@ tree before it was touched, and every one was **narrowed** rather than deleted.
 - **The phase-4 cost ledger in `docs/decisions.md` did not add up, and its first item was
   contradicted by the commit it cited.** "P4-C1 and P4-C2 moved the baseline not at all" is
   true of GLOBALS and **false of flash**: P4-C1 cost **+3,022 B**, which `993e3b0`'s own
-  message and `PEBBLEBOL_IMPLEMENTATION_PLAN.md:529` both state in bold, and which the
+  message and `ERRATA_IMPLEMENTATION_PLAN.md:529` both state in bold, and which the
   P4-C1 section of this same entry states three hundred lines above ("Flash does not bind:
   +3,022 B"). One axis's true number had been generalised
   onto both — the phase-3 shape exactly — and the consequence was arithmetic: the deltas the
@@ -2875,16 +3243,16 @@ tree before it was touched, and every one was **narrowed** rather than deleted.
   them with the case still green. It pins the pack hash (`CONTENT_VERSION 0x5B4A`) now, and
   the comment states both what that catches (any pack edit) and what it misses.
 - **Three more plan §5 module-contract rows described APIs that do not exist, and one was
-  made false by the exit commit itself**: `game/pebble.h` (`pebble_new()`,
-  `pebble_identity()`, `pebble_display_name()` — zero definitions tree-wide),
+  made false by the exit commit itself**: `game/bug.h` (`bug_new()`,
+  `bug_identity()`, `bug_display_name()` — zero definitions tree-wide),
   `game/box.h` (`bool box_add(Box&, …, uint8_t*)` against the tree's
-  `uint8_t box_add(const PebbleInstance&)`), and `ui/pet_view.h`, which still declared the
+  `uint8_t box_add(const BugInstance&)`), and `ui/pet_view.h`, which still declared the
   `mood`, `asleep` and `sick` fields the Removed section above deletes, plus a
   `pet_view_fill()` that P4-C4a deleted.
 - **Four claims were wider than their evidence and are narrowed**: "all 3,333 lines of
   `src/networking`" (3,333 is what phase 4 ADDED; the directory is 5,247 lines and
   `ble_social`/`net`/`webui` **are** linked); "none of P4-C5 is linked" (`game/validate.cpp`
-  is — `riscv32-esp-elf-nm -C` shows `T validate_pebble(PebbleInstance const&)`, reached
+  is — `riscv32-esp-elf-nm -C` shows `T validate_bug(BugInstance const&)`, reached
   from `save_manager.cpp:610`, and by elimination that is where P4-C5a's +782 B went, the
   codec half being dropped entirely by `--gc-sections`); "every arm prints
   its `SessionDetail` distribution" (only an arm with a non-completing pair prints anything
@@ -2918,7 +3286,7 @@ and no AI at all. P9-C4 owns the real matrix.
 
 ## [0.3.0-pet] — Unreleased
 
-Phase 3 turns the Pebblebol core engine into a virtual pet. Care moved onto the hours scale
+Phase 3 turns the Errata core engine into a virtual pet. Care moved onto the hours scale
 spec §27 asks for, XP and levels arrived with an anti-farm ledger, the light switch was
 deleted and sleep now follows the sun, evolution became a data table with a ceremony behind
 a confirmation, and the minigames left `ui.cpp` for a framework with six two-button games
@@ -2995,23 +3363,23 @@ project warnings, size caps, and `make -C tests check`.
 
 - **The light.** `PF_LIGHT_ON`, `ACT_LIGHT_TOGGLE`, `MULT_LIGHT_ON_SLEEP`, five
   `STR_*_LIGHT`, the CARE row and the SETTINGS row. Bit 0x0004 of the live flag word and bit
-  0x10 of `PebbleInstance.status` are reserved, never reused, never written; no other bit
+  0x10 of `BugInstance.status` are reserved, never reused, never written; no other bit
   moved, and the v1 migration drops the old bit rather than carrying it. It was the worst
-  mechanic in the game: a player who never found the toggle owned a Pebble that never slept.
+  mechanic in the game: a player who never found the toggle owned a Bug that never slept.
 - SALTO, which is in no §29 list, and `MinigameState` with it.
 - The menu's repeat-last-action (in no spec section; its empty path toasted "bad argument")
   and `s_last_action`, which after that was written in three places and read in none.
 
 ### Fixed
 
-- **A sleeping pebble could not poop overnight, ever, on real hardware.** `poop_step()`
+- **A sleeping bug could not poop overnight, ever, on real hardware.** `poop_step()`
   scaled its advance by `MULT_SLEEP` (×0.35) and truncated it every sub-step with no carry:
   `(1 * 350) / 1000` is 0, and 1 s is the step the device runs outside god mode. An offline
   catch-up over the same night (60 s sub-steps, an exact 21) produced two poops. It carries
   its remainder now, the way the stat integrator always has. Found by adding the 1 s case to
   the chunking test — the exercise the phase-3 exit asked for. Nothing at dt = 60 moved, so
-  the care golden did not need re-recording. **Bounded by `POOP_MAX`:** a pebble already
-  sitting on four uncleaned poops has nowhere to put a fifth, so a *neglected* pebble's
+  the care golden did not need re-recording. **Bounded by `POOP_MAX`:** a bug already
+  sitting on four uncleaned poops has nowhere to put a fifth, so a *neglected* bug's
   trajectory does not move at all — reintroducing the truncation leaves every neglect case,
   the fortnight case and the golden green. It is the played pet, the one that goes to bed
   clean, that the bug took the overnight poop away from.
@@ -3052,7 +3420,7 @@ baseline total. Both figures were right — 1,893,072/2,400,000 = 78.9 %,
 17 / 205 / 185,482).
 
 **The phase-3 exit soak, run rather than asserted from a comment.** Fourteen simulated days
-of total neglect — a hatched pebble, a trustworthy clock, not one action for a fortnight —
+of total neglect — a hatched bug, a trustworthy clock, not one action for a fortnight —
 recording the longest *continuous* run each stat spends at 0:
 
 | Stat | First reaches 0 | Longest run at 0 | Ends at |
@@ -3085,13 +3453,13 @@ from them. Four more that had no inline home:
 - **The three constants "6 h" was said to depend on were all wrong, and the dependence is not
   monotonic.** The criterion first breaks at `CARE_ENERGY_ASLEEP_MPH` ≈ 11,000 (not "much
   below 13,300" — 13,300 breaks nothing), `SLEEP_AFTER_DUSK_MIN` ≈ 240 min (not ~3 h) and
-  `CARE_DECAY_MPH[CARE_ENERGY]` ≈ −8,000. Below ≈ 5,000 the pebble stays asleep past sunrise
+  `CARE_DECAY_MPH[CARE_ENERGY]` ≈ −8,000. Below ≈ 5,000 the bug stays asleep past sunrise
   (`SIM_WAKE_DAY_ENERGY_PCT` = 60) and the run at 0 gets *shorter* again. Full sweep in
   `docs/decisions.md`.
 - **The poop carry cost 28 B of flash, not 32 B** (0 B of static RAM either way, which is
   exact). Measured against a rebuild of the pre-fix `poop_step()`.
 - **Three §67 boxes were due and had been left open** — "Two-button input is robust", "Box
-  supports 10 Pebbles", "Active Pebble can be selected". The rule the section applies (tick
+  supports 10 Bugs", "Active Bug can be selected". The rule the section applies (tick
   when every commit named on the line has landed) is now written down above the list, because
   it was being applied unevenly.
 
@@ -3116,7 +3484,7 @@ different `hp_max`. §18's visual transformation is carried to P4-C1, where the 
 ## [0.2.0-core] — Unreleased
 
 Phase 2 turns "Nottamagochi", a single 26,703-line Arduino sketch that had never run
-on hardware, into the Pebblebol core engine: a layered `src/` tree, a persistence
+on hardware, into the Errata core engine: a layered `src/` tree, a persistence
 schema that survives a corrupted blob and an erased NVS partition, a table-driven
 screen state machine, and a host test suite that runs the game logic with no board
 attached. Nothing in this release talks to a cloud service.
@@ -3126,7 +3494,7 @@ Every commit in this range passes the gate: firmware compile with `--warnings al
 
 ### Added
 
-- **Host test suite** (`tests/`, `SRC_ROOT=../Pebblebol/src`): 17 binaries, 205 tests,
+- **Host test suite** (`tests/`, `SRC_ROOT=../Errata/src`): 17 binaries, 205 tests,
   185,482 checks, built with `g++ -std=c++17 -Wall -Wextra` against the real sources —
   no board required. Covers care simulation (against a recorded golden trajectory),
   genome, CRC-16, RNG, clock and calibration, input gestures, persistence and
@@ -3138,15 +3506,15 @@ Every commit in this range passes the gate: firmware compile with `--warnings al
   a write torn by a power cut loses at most the newer copy. A v1 save is migrated
   in place on first boot; `tests/test_persistence.cpp` proves migration, corruption
   recovery, pair recovery and fault injection.
-- **`nvs2` checkpoint partition** (decision D6): `Pebblebol/partitions.csv` carves a
+- **`nvs2` checkpoint partition** (decision D6): `Errata/partitions.csv` carves a
   private 64 KB NVS partition, because Arduino's `initArduino()` erases the *whole*
   default `nvs` partition on `ESP_ERR_NVS_NO_FREE_PAGES` / `NEW_VERSION_FOUND` before
   `setup()` ever runs. `save_checkpoint_all()` writes there daily and on the events
-  that change what a Pebble *is*. `tools/build.sh` gates both halves of D6: the app
+  that change what a Bug *is*. `tools/build.sh` gates both halves of D6: the app
   ceiling must equal `app0`, and the table about to be flashed must contain `nvs2`.
 - **Box of ten** (`game/box.{h,cpp}`, `game/box_sim.{h,cpp}`): unique ids, exactly one
   active slot, swap, release behind a double confirm, and off-line recovery for stored
-  Pebbles that never touches XP or level.
+  Bugs that never touches XP or level.
 - **Screen table** (`ui/screen.h`, `app/state_machine.cpp`, `app/input_router.cpp`):
   the §6 set of 26 states as data — five hooks per row plus flags — with a back stack
   of 5, auto-return for non-sticky rows, and the §7 two-button grammar (A steps, B held
@@ -3165,20 +3533,20 @@ Every commit in this range passes the gate: firmware compile with `--warnings al
 - **Heap trend line** (this commit): `DIAG,heap,<uptime_s>,<free_b>,<min_free_b>` on
   Serial every 60 s, on every screen, in the release build too — the baseline for the
   bench soak.
-- **Documentation**: `PEBBLEBOL_IMPLEMENTATION_PLAN.md`, `PEBBLEBOL_IMPLEMENTATION_AUDIT.md`,
+- **Documentation**: `ERRATA_IMPLEMENTATION_PLAN.md`, `ERRATA_IMPLEMENTATION_AUDIT.md`,
   `docs/decisions.md`, `docs/save_schema.md`, `docs/hardware_reconciliation.md`.
 
 ### Changed
 
-- **The pivot.** The product is Pebblebol, not Nottamagochi: sketch folder renamed to
-  `Pebblebol/`, sources moved under `Pebblebol/src/{core,app,game,ui,networking,persistence,hardware,data,dev}`,
-  `Pebblebol.ino` reduced to a 3-line shim over `src/app/app.cpp`, and the persisted
+- **The pivot.** The product is Errata, not Nottamagochi: sketch folder renamed to
+  `Errata/`, sources moved under `Errata/src/{core,app,game,ui,networking,persistence,hardware,data,dev}`,
+  `Errata.ino` reduced to a 3-line shim over `src/app/app.cpp`, and the persisted
   NVS namespace changed from `"notta"` to `"pbbl"` with a one-shot, idempotent import
   of a legacy save (decision D3, closed).
 - **Radio OFF is the resting state** (decision T6). No always-on Wi-Fi policy; a stack
   is brought up only by a screen that needs one and torn down after.
-- **Care runs on `PebbleInstance`**, not on the old flat `PetSave`; `sim_switch()`
-  separates per-Pebble accumulators from the device-wide gain ledger so swapping the
+- **Care runs on `BugInstance`**, not on the old flat `PetSave`; `sim_switch()`
+  separates per-Bug accumulators from the device-wide gain ledger so swapping the
   active slot cannot be used to farm.
 - **`storage.cpp` split** into `hardware/kv_nvs.cpp` (the NVS key-value seam),
   `hardware/boot.cpp` (RTC nonce and reset-reason classification) and
@@ -3191,7 +3559,7 @@ Every commit in this range passes the gate: firmware compile with `--warnings al
 
 - The weather subsystem, the Telegram subsystem, the browser minigames, the phone
   page's `/api/cfg` and `/api/sprites`, mDNS, and SNTP — every remote service the
-  firmware used to reach for. Pebblebol has no cloud code.
+  firmware used to reach for. Errata has no cloud code.
 - Death, memorial, lineage, the absence ladder, discipline, weight and adult forms —
   the punishment mechanics the product spec rejects.
 - The BLE mating protocol content (the plumbing is kept until P7-C1 retires it).
@@ -3236,13 +3604,13 @@ from them. Four more that had no inline home:
 - **The three constants "6 h" was said to depend on were all wrong, and the dependence is not
   monotonic.** The criterion first breaks at `CARE_ENERGY_ASLEEP_MPH` ≈ 11,000 (not "much
   below 13,300" — 13,300 breaks nothing), `SLEEP_AFTER_DUSK_MIN` ≈ 240 min (not ~3 h) and
-  `CARE_DECAY_MPH[CARE_ENERGY]` ≈ −8,000. Below ≈ 5,000 the pebble stays asleep past sunrise
+  `CARE_DECAY_MPH[CARE_ENERGY]` ≈ −8,000. Below ≈ 5,000 the bug stays asleep past sunrise
   (`SIM_WAKE_DAY_ENERGY_PCT` = 60) and the run at 0 gets *shorter* again. Full sweep in
   `docs/decisions.md`.
 - **The poop carry cost 28 B of flash, not 32 B** (0 B of static RAM either way, which is
   exact). Measured against a rebuild of the pre-fix `poop_step()`.
 - **Three §67 boxes were due and had been left open** — "Two-button input is robust", "Box
-  supports 10 Pebbles", "Active Pebble can be selected". The rule the section applies (tick
+  supports 10 Bugs", "Active Bug can be selected". The rule the section applies (tick
   when every commit named on the line has landed) is now written down above the list, because
   it was being applied unevenly.
 
@@ -3271,7 +3639,7 @@ The plan cuts tags from Phase 2 onward, so Phase 1 has no `v0.1.0` tag; it is co
 - Repository archaeology: audit of the inherited sketch, the ten-phase implementation
   plan, the decisions log, and a CI skeleton.
 
-[0.7.0-social]: https://github.com/pmirall/Pebblebol/commit/f8f2e51
+[0.7.0-social]: https://github.com/pmirall/Errata/commit/f8f2e51
 <!-- 0.7.0-social names f8f2e51 (P7-C4/C5), the last commit before the exit,
      for the same reason 0.6.0-activity names e8701ea rather than b434491: an
      entry cannot contain the hash of the commit that adds it, since writing it
@@ -3280,11 +3648,11 @@ The plan cuts tags from Phase 2 onward, so Phase 1 has no `v0.1.0` tag; it is co
      commit that exists independently of it. Neither is on the remote — this
      session was instructed not to push — so both currently 404, exactly as the
      0.5.0 note below records for the same situation. -->
-[0.6.0-activity]: https://github.com/pmirall/Pebblebol/commit/e8701ea
-[0.5.0-explore]: https://github.com/pmirall/Pebblebol/commit/6ec3355
-[0.4.0-battle]: https://github.com/pmirall/Pebblebol/commit/250f73e
-[0.3.0-pet]: https://github.com/pmirall/Pebblebol/commit/e2004e7
-[0.2.0-core]: https://github.com/pmirall/Pebblebol/commit/db3feb3
+[0.6.0-activity]: https://github.com/pmirall/Errata/commit/e8701ea
+[0.5.0-explore]: https://github.com/pmirall/Errata/commit/6ec3355
+[0.4.0-battle]: https://github.com/pmirall/Errata/commit/250f73e
+[0.3.0-pet]: https://github.com/pmirall/Errata/commit/e2004e7
+[0.2.0-core]: https://github.com/pmirall/Errata/commit/db3feb3
 <!-- The annotated tags v0.2.0-core, v0.3.0-pet and v0.4.0-battle exist in the local
      repository but this environment's git remote refuses tag pushes
      (send-pack disconnects), so each link points at a commit, which does

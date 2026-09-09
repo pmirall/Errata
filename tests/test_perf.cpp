@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_perf.cpp
+//  Errata host tests - test_perf.cpp
 //  core/perf.cpp: THE PERFORMANCE INSTRUMENT'S ARITHMETIC (P10-C2, spec 46).
 //
 //  READ THIS BEFORE ADDING A CASE. NOTHING IN THIS FILE MEASURES TIME AND

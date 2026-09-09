@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - legacy/mkfixtures.cpp
+//  Errata host tests - legacy/mkfixtures.cpp
 //  Writes the v1 persistence fixtures the SaveSchema v2 migration (P2-C9) is
 //  tested against: byte images of the legacy PetSave / Config / GainSave
 //  structs exactly as the v1 firmware put them into NVS.
@@ -134,7 +134,7 @@ static Config config_v1(void) {
   c.saved_epoch = 1700200000u;
   copy_str(c.wifi_ssid, sizeof c.wifi_ssid, "legacy-ssid");
   copy_str(c.wifi_pass, sizeof c.wifi_pass, "legacy-pass");
-  copy_str(c.pet_name,  sizeof c.pet_name,  "Pebble");
+  copy_str(c.pet_name,  sizeof c.pet_name,  "Bug");
   // The v1 layout had tg_token[48]@119 and tg_chat[17]@167 where reserved_a[65]
   // now sits, and tg_mode@248 where reserved_c does. This fixture left all three
   // empty/zero, and memset() above already wrote those bytes, so the file stays

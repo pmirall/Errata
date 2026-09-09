@@ -1,11 +1,11 @@
 // =============================================================================
-//  Pebblebol host tests - test_utf8.cpp
+//  Errata host tests - test_utf8.cpp
 //  core/utf8.cpp: THE codepoint rule, driven for the first time.
 //
 //  WHY IT IS ITS OWN BINARY. Until P10-C4 this rule existed three times - in
 //  ui/render.cpp (device only, compiled by no host binary), in
 //  tests/fakes/gfx_fb.cpp (host only, so the firmware never ran it) and in
-//  game/pebble.cpp - and NOT ONE of the three was executed against a malformed
+//  game/bug.cpp - and NOT ONE of the three was executed against a malformed
 //  sequence by anything in this repository. The whole suite puts only ASCII in
 //  a name: tests/test_screens.cpp's fixture_maxed uses "ABCDEFGHIJKL", the Box
 //  fixture the same, and tests/test_discovery.cpp asserts a high byte survives
@@ -103,7 +103,7 @@ TEST(a_truncation_never_leaves_half_a_character_behind) {
     memcpy(buf, s, n);
     buf[n] = '\0';
     CHECK(u8_well_formed(buf));
-    // and it is a PREFIX: the same rule game/pebble.cpp's joiner depends on.
+    // and it is a PREFIX: the same rule game/bug.cpp's joiner depends on.
     CHECK_EQ(memcmp(buf, s, n), 0);
   }
 }
@@ -134,7 +134,7 @@ TEST(the_shared_rule_answers_exactly_what_the_three_private_copies_did) {
     CHECK(u8_well_formed(s));                  // the sweep is over VALID input
     const uint16_t len = (uint16_t)strlen(s);
     for (uint16_t room = 0; room <= len + 3u; ++room) {
-      // game/pebble.cpp's utf8_fit(), byte for byte as it stood before P10-C4.
+      // game/bug.cpp's utf8_fit(), byte for byte as it stood before P10-C4.
       uint16_t old_n = 0;
       while (old_n < room && s[old_n] != '\0') ++old_n;
       while (old_n > 0u && ((uint8_t)s[old_n] & 0xC0u) == 0x80u) --old_n;

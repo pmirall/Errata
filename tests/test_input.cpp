@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_input.cpp
+//  Errata host tests - test_input.cpp
 //  Scripted button waveforms through the input.cpp recogniser: tap,
 //  double tap, hold-repeat, chord, long chord, the boot-held swallow, and the
 //  "no phantom TAP before BOTH" guarantee. The fake clock advances 1 ms per

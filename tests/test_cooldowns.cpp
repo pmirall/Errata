@@ -1,5 +1,5 @@
 // =============================================================================
-//  Pebblebol host tests - test_cooldowns.cpp
+//  Errata host tests - test_cooldowns.cpp
 //  P5-C2: encounter cooldowns (spec section 21, plan T9).
 //
 //  The persisted table, expiry by epoch, LRU eviction over COOLDOWN_SLOTS, a

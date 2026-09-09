@@ -1,5 +1,5 @@
 // =============================================================================
-//  PEBBLEBOL - tests/fakes/arduino_clocks.cpp
+//  ERRATA - tests/fakes/arduino_clocks.cpp
 //  The two clocks tests/fakes/arduino/Arduino.h declares, as drivable
 //  variables. See that header for why this fake exists at all.
 //

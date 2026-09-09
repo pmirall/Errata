@@ -1,5 +1,5 @@
 {
-  "_doc": "Pebblebol FINAL content set. Every constant the battle, progression, breeding, corruption and encounter code reads. 1:1 with plan 1.5.2.",
+  "_doc": "Errata FINAL content set. Every constant the battle, progression, breeding, corruption and encounter code reads. 1:1 with plan 1.5.2.",
   "TYPE_ORDER": [
     "SIGNAL",
     "CORRUPT",
@@ -36,9 +36,9 @@
   ],
   "TYPE_MOD_SCALE": 0,
   "TYPE_MOD_MAX_HITS": 1,
-  "_TYPE_MOD_MAX_HITS_doc": "THE OTHER HALF OF THE FIX, and the part no draft had. A per-hit damage edge COMPOUNDS: over the ~5 exchanges a fight lasts, even a modifier small enough to be invisible on a 5-point hit decides the duel. Measured: with the modifier uncapped, every visible multiplier lands the cross-type cells at 69-78% (and the plan's additive +-2 at 86-92%). So the modifier is capped: an attacking Pebble gets TYPE_MOD_MAX_HITS type-modified hits per battle, and after that its mod is forced to 0. One u8 counter per battle side, never persisted. It is also the right fiction for this game - you exploit the weakness once and then it is patched - so the battle log reads '!Exploit!' on the modified hit and nothing after. With the cap at 1 the six off-diagonal 1v1 cells land at 40-63% and the 3v3 lead advantage at 57-65%.",
+  "_TYPE_MOD_MAX_HITS_doc": "THE OTHER HALF OF THE FIX, and the part no draft had. A per-hit damage edge COMPOUNDS: over the ~5 exchanges a fight lasts, even a modifier small enough to be invisible on a 5-point hit decides the duel. Measured: with the modifier uncapped, every visible multiplier lands the cross-type cells at 69-78% (and the plan's additive +-2 at 86-92%). So the modifier is capped: an attacking Bug gets TYPE_MOD_MAX_HITS type-modified hits per battle, and after that its mod is forced to 0. One u8 counter per battle side, never persisted. It is also the right fiction for this game - you exploit the weakness once and then it is patched - so the battle log reads '!Exploit!' on the modified hit and nothing after. With the cap at 1 the six off-diagonal 1v1 cells land at 40-63% and the 3v3 lead advantage at 57-65%.",
   "_TYPE_MOD_doc": "THE FIX FOR THE ONE THING ALL THREE DRAFTS GOT WRONG. plan 1.5.2 writes damage = max(1, power*atk/(def*K)) + 2*type_mod + rng(0..2). Hits land for 4-8 points, so a flat +-2 is a 50-100% swing and the triangle decides the fight (measured off-diagonal win rates of 88-98% in all three drafts). Here the modifier is MULTIPLICATIVE and applied to the raw term before the rng: dmg = max(1, raw * TYPE_MUL_NUM[mod+1] / TYPE_MUL_DEN[mod+1]) + rng(0..2), indices 0/1/2 = mod -1/0/+1. Integer arithmetic, two 3-entry int8 tables, no FPU. TYPE_MOD_SCALE is kept as a real key (graft: draft_B-balance): set TYPE_MOD_MODE=ADDITIVE and TYPE_MOD_SCALE=2 to restore the plan's original formula for an A/B run in P9-C4.",
-  "_XP_TABLE_deleted_doc": "THE PACK'S 31-ENTRY XP_TABLE (inc(L) = 25 + 12*(L-1) + 4*(L-1)^2, total 36,453) AND ITS XP_TOTAL_TO_MAX WERE DELETED HERE BY P9-C4, which is the chunk the plan sequenced the decision into after P4-C1, P4-C6 and P9-C3 each deferred it. The firmware compiles ONE curve, and it lives in Pebblebol/src/data/balance.h: 10 + L*L, total 8,845. Two curves in two files was the second source of truth this deletion ends, so DO NOT ADD ONE BACK - verify.py now reads the shipped curve out of balance.h and FAILS BY NAME if an XP_TABLE key reappears here. THE EVIDENCE, from tests/tools/sim_days.cpp over 30 simulated days of the real game/sim.cpp, game/xp.cpp and game/encounters.cpp: measured XP/day is 18.8 (light, 2 device-ON h), 109.4 (normal, 8 h and balance.h's own 3-4 touches), 352.8 (heavy, 14 h) and 1,031.9 at the physical ceiling. Against the plan's 3-4-week target the shipped curve reaches level 30 in 25 days of heavy play and 81 of normal; the pack's needs 103 days of heavy play and 333 of normal, and does not reach the band even at the unreachable ceiling (35 days). Note also that game/sim.cpp's v1 stage clock writes level 20 into PebbleInstance.level after 3.5 days on zero XP, so the first 2,660 points of the shipped curve (10,963 of the pack's) are free either way.",
+  "_XP_TABLE_deleted_doc": "THE PACK'S 31-ENTRY XP_TABLE (inc(L) = 25 + 12*(L-1) + 4*(L-1)^2, total 36,453) AND ITS XP_TOTAL_TO_MAX WERE DELETED HERE BY P9-C4, which is the chunk the plan sequenced the decision into after P4-C1, P4-C6 and P9-C3 each deferred it. The firmware compiles ONE curve, and it lives in Errata/src/data/balance.h: 10 + L*L, total 8,845. Two curves in two files was the second source of truth this deletion ends, so DO NOT ADD ONE BACK - verify.py now reads the shipped curve out of balance.h and FAILS BY NAME if an XP_TABLE key reappears here. THE EVIDENCE, from tests/tools/sim_days.cpp over 30 simulated days of the real game/sim.cpp, game/xp.cpp and game/encounters.cpp: measured XP/day is 18.8 (light, 2 device-ON h), 109.4 (normal, 8 h and balance.h's own 3-4 touches), 352.8 (heavy, 14 h) and 1,031.9 at the physical ceiling. Against the plan's 3-4-week target the shipped curve reaches level 30 in 25 days of heavy play and 81 of normal; the pack's needs 103 days of heavy play and 333 of normal, and does not reach the band even at the unreachable ceiling (35 days). Note also that game/sim.cpp's v1 stage clock writes level 20 into BugInstance.level after 3.5 days on zero XP, so the first 2,660 points of the shipped curve (10,963 of the pack's) are free either way.",
   "LEVEL_MAX": 30,
   "K": 7,
   "FORMULAS": {
@@ -58,9 +58,9 @@
     "recoil": "user takes max(1, damage_dealt*effect_value/100)",
     "drain": "user heals damage_dealt*effect_value/100",
     "heal": "user heals hp_max*effect_value/100",
-    "dot": "effect_value damage at end of each round for effect_duration rounds; ignores DEF and PROTECT, and NEVER STACKS - re-applying refreshes the duration. Stacking DOT on a high-DEF Pebble is the one degenerate kit the matrix found (a stage-2 TANK went to 100%).",
+    "dot": "effect_value damage at end of each round for effect_duration rounds; ignores DEF and PROTECT, and NEVER STACKS - re-applying refreshes the duration. Stacking DOT on a high-DEF Bug is the one degenerate kit the matrix found (a stage-2 TANK went to 100%).",
     "corrupt_status": "EFF_CORRUPT gives the TARGET the spec 55 modifier for effect_duration rounds: +1 ATK stage, -1 DEF stage. See CORRUPTION.",
-    "switch": "switching consumes the whole turn (spec 14) and resets the switched-in Pebble's stages to 0",
+    "switch": "switching consumes the whole turn (spec 14) and resets the switched-in Bug's stages to 0",
     "budget_cost": "budget_cost = power*accuracy/100 + 12*max(0,priority if power>0 else 0) + effect_weight(effect,value,duration) - min(12, 4*cooldown) - 2*recoil/3, clamped to >= 1",
     "creator_power_pct": "round(100 * (stat_used/CREATOR_TOTAL_STAT_POINTS + attack_used/CREATOR_ATTACK_BUDGET) / 2)",
     "capture_permille": "CAPTURE_BASE_PERMILLE[wild.rarity] - CAPTURE_LEVEL_GAP_PERMILLE*max(0, wild_level - active_level) + CAPTURE_VALUE_SCALE*item.value, clamped to [CAPTURE_MIN_PERMILLE, CAPTURE_MAX_PERMILLE]",
@@ -81,13 +81,13 @@
     "SELF_DEBUFF_DEF": "-18*value",
     "SELF_STUN": "-22*duration"
   },
-  "_EFFECT_WEIGHTS_doc": "budget_cost is COMPUTED from this table for every row in attacks.json and for every creator move, so the built-in roster and a custom Pebble are priced by one rule (spec 36). Never hand-typed. Priority is charged on offensive moves only - charging it on PROTECT prices defensive archetypes out of the game (finding grafted from draft_B-balance).",
+  "_EFFECT_WEIGHTS_doc": "budget_cost is COMPUTED from this table for every row in attacks.json and for every creator move, so the built-in roster and a custom Bug are priced by one rule (spec 36). Never hand-typed. Priority is charged on offensive moves only - charging it on PROTECT prices defensive archetypes out of the game (finding grafted from draft_B-balance).",
   "XP_CANDY_SCALE": 8,
   "_ITEM_VALUE_doc": "ItemDef.value is a uint8_t in the 8 B struct, so it carries a MAGNITUDE whose unit depends on klass: XP_CANDY value*XP_CANDY_SCALE = XP granted (5/24/100 -> 40/192/800); CAPTURE value = capture-chance bonus in PERCENT, scaled to permille by CAPTURE_VALUE_SCALE (15/45 -> +150/+450 permille, which is what the Spanish flavour line has always promised the player); CARE value = care points restored (0 = the item is a key, not a consumable effect); BATTLE_MOD value = stat stages granted at battle start. No shipped value exceeds 255, and verify.py asserts it - so the table generates without widening the struct. If a later item needs > 255 the schema fix is to spend one reserved byte on a u16 value; do NOT invent a second out-of-band scale constant.",
   "EVASION_PER_SPD": 3,
   "EVASION_MAX_SPD_GAP": 10,
   "ACCURACY_MIN": 40,
-  "_EVASION_doc": "Under the plan 1.5.1 formulas SPD does nothing but break turn order, so a FAST or EVASIVE Pebble pays 6-7 of its 16/22/28 stat points for a tiebreak. Measured cost: the FAST archetype won 24% of stage-0 duels and EVASIVE 31% before this rule existed. Evasion gives SPD a second job: an attack's effective accuracy is max(ACCURACY_MIN, accuracy - EVASION_PER_SPD * min(EVASION_MAX_SPD_GAP, max(0, spd_def_eff - spd_atk_eff))), i.e. at most -30 points. Utility moves are never dodged. One integer line in the battle resolver, and it is what makes a four-stat system have four stats. P9-C4 RAISED EVASION_PER_SPD FROM 2 TO 3 (cap -20 -> -30) against the SHIPPED engine rather than this model. tests/tools/balance_matrix.cpp fought all 3,600 ordered pairs of the 60-species roster 1,000 times each at level 15 through game/battle.cpp and game/battle_ai.cpp and found the rule still undersized: SIGNAL carries 11 of the 12 SPD archetypes and CORRUPT 13 of the 13 ATK ones, so a rule that underpays SPD reads as a TYPE imbalance. Measured same-stage cross-type win rates at 2: SIGNAL 42.9 %, CORRUPT 56.8 %, SYSTEM 50.3 %, with 9 of 60 species outside 35-65 % against their own stage. At 3: 46.6 / 55.0 / 48.5 and 5 of 60. At 4 the correction overshoots - SYSTEM sags to 46.8 % and two SYSTEM FAST bodies cross 65 % - so 3 is the measured answer and not the largest available one.",
+  "_EVASION_doc": "Under the plan 1.5.1 formulas SPD does nothing but break turn order, so a FAST or EVASIVE Bug pays 6-7 of its 16/22/28 stat points for a tiebreak. Measured cost: the FAST archetype won 24% of stage-0 duels and EVASIVE 31% before this rule existed. Evasion gives SPD a second job: an attack's effective accuracy is max(ACCURACY_MIN, accuracy - EVASION_PER_SPD * min(EVASION_MAX_SPD_GAP, max(0, spd_def_eff - spd_atk_eff))), i.e. at most -30 points. Utility moves are never dodged. One integer line in the battle resolver, and it is what makes a four-stat system have four stats. P9-C4 RAISED EVASION_PER_SPD FROM 2 TO 3 (cap -20 -> -30) against the SHIPPED engine rather than this model. tests/tools/balance_matrix.cpp fought all 3,600 ordered pairs of the 60-species roster 1,000 times each at level 15 through game/battle.cpp and game/battle_ai.cpp and found the rule still undersized: SIGNAL carries 11 of the 12 SPD archetypes and CORRUPT 13 of the 13 ATK ones, so a rule that underpays SPD reads as a TYPE imbalance. Measured same-stage cross-type win rates at 2: SIGNAL 42.9 %, CORRUPT 56.8 %, SYSTEM 50.3 %, with 9 of 60 species outside 35-65 % against their own stage. At 3: 46.6 / 55.0 / 48.5 and 5 of 60. At 4 the correction overshoots - SYSTEM sags to 46.8 % and two SYSTEM FAST bodies cross 65 % - so 3 is the measured answer and not the largest available one.",
   "RISK_SELF_HP_PCT": 0,
   "PROTECT_DIVISOR": 2,
   "BUFF_STAGE_MIN": -2,
@@ -131,14 +131,14 @@
     "exactly 4 distinct attack ids",
     "every move is the species' own type or NEUTRAL",
     "at least one TYPED damage move",
-    "at least one NEUTRAL damage move (Choque or Apuesta) - the release valve, so no Pebble is ever left with a kit in which every attack is at a type disadvantage",
+    "at least one NEUTRAL damage move (Choque or Apuesta) - the release valve, so no Bug is ever left with a kit in which every attack is at a type disadvantage",
     "at least one move whose category is not DAMAGE or RISK",
     "max power <= POWER_CAP_BY_STAGE[stage]",
     "sum(budget_cost) <= ATTACK_BUDGET_BY_STAGE[stage]"
   ],
   "CREATOR_TOTAL_STAT_POINTS": 22,
   "CREATOR_ATTACK_BUDGET": 185,
-  "_creator_doc": "A custom Pebble is capped at the stage-1 budget so it can never out-stat a final evolution (spec 68 r17). Appendix C's POWER bar uses FORMULAS.creator_power_pct.",
+  "_creator_doc": "A custom Bug is capped at the stage-1 budget so it can never out-stat a final evolution (spec 68 r17). Appendix C's POWER bar uses FORMULAS.creator_power_pct.",
   "TYPE_ENUM": {
     "TYPE_SIGNAL": 0,
     "TYPE_CORRUPT": 1,
@@ -359,7 +359,7 @@
       "mode": "XOR_NOISE_ROWS",
       "rows_per_frame": 3,
       "frame_period": 8,
-      "seed_from": "pebble.id ^ (epoch/3600)",
+      "seed_from": "bug.id ^ (epoch/3600)",
       "_doc": "P9-C5: petfx XOR-noise rows, 1 frame in 8. Three 24 px rows are XORed with a per-hour noise word, so the glitch is stable within an hour and moves between hours. Never touches the stored sprite."
     },
     "idle_anim_set": "IDLE_CORRUPT",
@@ -390,7 +390,7 @@
     "cleared_by_item": 7,
     "cleared_by_timer": true,
     "never_destroys": true,
-    "_doc": "spec 55: corruption never destroys a Pebble. It is a signature mechanic, not an annoyance: it is the ONLY route to two of the sixty species."
+    "_doc": "spec 55: corruption never destroys a Bug. It is a signature mechanic, not an annoyance: it is the ONLY route to two of the sixty species."
   },
   "BREEDING": {
     "compat_groups": {
@@ -468,13 +468,13 @@
     "DEF",
     "SPD"
   ],
-  "PEBBLE_STATUS_BITS": {
+  "BUG_STATUS_BITS": {
     "SICK": 1,
     "ASLEEP": 2,
     "CORRUPTED": 4,
     "FAINTED": 8
   },
-  "_ITEM_TARGET_doc": "ItemDef.target and ItemDef.param are the two columns P4-C1's completeness pass found MISSING (plan line 552): a CARE item did not say WHICH of the five care stats it restores and a BATTLE_MOD did not say which stat, for how long. target is klass-scoped - CARE reads it as CARE_TARGET_ENUM (ALL restores all five), BATTLE_MOD as BATTLE_STAT_ENUM (which is game/battle.h's BattleStat ordering, not a second one), and every other klass carries NONE == 0. param is one byte with one meaning per klass too: CARE puts the PEBBLE_STATUS_BITS mask it also clears there (items.json 'clears'), BATTLE_MOD puts the buff's length in ROUNDS there (items.json 'duration'), and no row may set both. A CARE item's value is PERCENT OF FULL: care[] is 0..PB_CARE_MILLI_MAX milli-points, so value 40 means +40 % of a full bar, which is the only reading a uint8_t can carry against a 100000-point scale.",
+  "_ITEM_TARGET_doc": "ItemDef.target and ItemDef.param are the two columns P4-C1's completeness pass found MISSING (plan line 552): a CARE item did not say WHICH of the five care stats it restores and a BATTLE_MOD did not say which stat, for how long. target is klass-scoped - CARE reads it as CARE_TARGET_ENUM (ALL restores all five), BATTLE_MOD as BATTLE_STAT_ENUM (which is game/battle.h's BattleStat ordering, not a second one), and every other klass carries NONE == 0. param is one byte with one meaning per klass too: CARE puts the BUG_STATUS_BITS mask it also clears there (items.json 'clears'), BATTLE_MOD puts the buff's length in ROUNDS there (items.json 'duration'), and no row may set both. A CARE item's value is PERCENT OF FULL: care[] is 0..ER_CARE_MILLI_MAX milli-points, so value 40 means +40 % of a full bar, which is the only reading a uint8_t can carry against a 100000-point scale.",
   "CAPTURE_BASE_PERMILLE": [
     700,
     500,
