@@ -10,14 +10,23 @@ any instant.
 The user interface is in Spanish. This document, the code and the comments are
 in English.
 
-> **Version `1.0.0-rc1`. Nothing in this repository has ever run on hardware.**
-> The firmware compiles at zero warnings in six configurations, 58 host test
-> binaries pass, and the release image fits its budget with 249 KB of flash to
-> spare — none of which is evidence that a board works. **Seventeen of the
-> spec's acceptance boxes are open**: fifteen because nobody has watched a
-> device do the thing, one because the pin map is undecided, and two because a
-> networking module that was planned was never written. The **pin map fails this
-> project's own guard**.
+> **Version `1.0.0-rc1`. The firmware HAS now run on hardware — once, on one
+> board, by its owner.** That first session is recorded in `CHANGELOG.md`
+> ("the first board"): the intro played, both buttons worked, the Wi-Fi scan
+> found 22 networks and read 16 of them, and it exposed a real defect — an
+> encounter that rolled and then never appeared, because `sm_service()` compared
+> two different readings of one clock. Boot, the panel over I²C, both buttons
+> and the scan are therefore no longer theoretical on **that unit with that
+> wiring**. Everything below still is.
+>
+> The firmware compiles at zero warnings in six configurations, 60 host test
+> binaries pass, and the release image fits its budget with 244 KB of flash to
+> spare — none of which is evidence that a board works. **Sixteen of the spec's
+> acceptance boxes are open**: fourteen because nobody has watched a device do
+> the thing, and two because a networking module that was planned was never
+> written. The **pin map still fails this project's own guard** and decision
+> **D1 is still open**: one successful flash is not a reliability claim, and the
+> specific risk it cannot rule out is named in section 1.
 > Both are the next two sections, before anything else, because they are what a
 > person holding the hardware needs first.
 

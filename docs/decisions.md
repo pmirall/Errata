@@ -3273,6 +3273,51 @@ Six are still open, and each one has a step the owner can act on — that is wha
 
 ## Open at ship — the owner's list
 
+### D1 — WHAT THE FIRST FLASH ACTUALLY SETTLED, AND WHAT IT DID NOT (2026-09-07)
+
+A board was wired to the committed map and flashed. **This is the first evidence
+this decision has ever had**, and it is recorded here rather than in a commit
+message because the table above still says "Nothing has ever run on hardware",
+which stopped being true that evening.
+
+**Observed working, on that unit, with that wiring:**
+
+- the board boots and runs the loop;
+- the SSD1306 answers over I²C on `PIN_SDA 8` / `PIN_SCL 9`;
+- **both buttons work** — the first-boot flow was walked end to end, which means
+  taps, holds and a name typed letter by letter on `PIN_BTN_L 10` and
+  `PIN_BTN_R 2`;
+- the Wi-Fi scan runs: 22 networks seen, 16 read.
+
+That is four of the things D1 was afraid of, and none of them happened.
+
+**What it does NOT settle, and why the decision stays OPEN.**
+
+A strapping pin is not read while the firmware runs — it is read **at reset**,
+once, before any of this code exists. Every observation above happened after
+that moment and therefore cannot speak to it. Three specific risks survive:
+
+1. **`PIN_BTN_R 2` is a strapping pin that must be HIGH at reset.** The button
+   is the only thing that can pull it low. So the failure mode is precise and
+   nobody has tried it: **hold the right button while the device powers on.**
+   If the board fails to start, D1 is answered in the negative by one press.
+   This is testable TODAY, with the one board that already exists, and it is
+   the single highest-value hardware test currently possible.
+2. **`PIN_SCL 9` low at reset selects the serial download mode.** An I²C bus
+   idles high, so this is unlikely to fire — but a panel that holds the line, a
+   long lead or a marginal pull-up would make it a device that sometimes boots
+   into the bootloader instead of the game, and "sometimes" is the hard kind.
+3. **`PIN_SDA 8` is the built-in LED on most SuperMini clones.** Not a boot
+   risk; it means the LED and the bus share a pin, which is what `PIN_LED 5`'s
+   own comment ("has to move: 8 is already SDA") is about.
+
+**The owner's step is unchanged, and the pins stay exactly as committed** until
+the components arrive. `ER_PINS_CONFIRMED` is still NOT defined, and it CANNOT
+be defined against this map: the guard asserts `PIN_BTN_R != 2` and would fail
+the build. Defining it is the act that closes D1, not a step towards closing it.
+
+---
+
 **D1 gates all six.** Nothing below D1 can be done until a board is wired.
 
 ### D1 — the GPIO map. *The first thing owed, and it blocks every bench item.*
