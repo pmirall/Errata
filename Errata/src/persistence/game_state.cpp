@@ -9,6 +9,8 @@
 // =============================================================================
 #include "game_state.h"
 
+#include "../game/dex.h"
+
 #include <string.h>
 
 #include "kv_store.h"
@@ -136,6 +138,9 @@ static void cfg_to_v2(const Config& c, ConfigV2& v2) {
     ++n;
   }
   v2.device_name[n] = '\0';
+  // ConfigV2.dex is NOT written from the runtime Config and must not be: it is
+  // the live array game/dex.cpp is bound to, so copying a v1-shaped struct over
+  // it would undo every discovery made since the last load. See nt_types.h.
 }
 
 void gs_cfg_defaults(Config& c) {
@@ -215,6 +220,13 @@ LoadResult gs_load(Config& cfg) {
       save_config(s_gs.cfg);
     }
   }
+
+  // THE WIKI IS BOUND TO THE LIVE BLOB, not copied out of it. game/dex.cpp owns
+  // the bit arithmetic and nothing else, so binding here means a discovery made
+  // by an encounter roll lands in the SAME fifteen bytes gs_save_cfg() writes -
+  // there is no second copy to fall out of step, and no "flush the dex" step
+  // anybody can forget.
+  dex_bind(s_gs.cfg.dex);
 
   cfg_from_v2(s_gs.cfg, cfg);
   if (r == LOAD_FRESH) {

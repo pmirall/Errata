@@ -39,6 +39,8 @@
 #include "ui/screen_care.h"
 #include "hardware/power.h"
 #include "ui/screen_creator.h"
+#include "game/dex.h"
+#include "ui/screen_dex.h"
 #include "ui/screen_manual.h"
 #include "ui/screen_diag.h"
 #include "ui/screen_evolution.h"
@@ -407,6 +409,12 @@ static void fixture_none(void) {
 
 static void fake_commit(uint8_t id);
 
+// THE WIKI'S FIFTEEN BYTES ARE THE FIXTURE'S, not the save's: this binary
+// never runs game_state.cpp's load path, which is where the firmware calls
+// dex_bind(). Without this every dex_mark_caught() below would be a silent
+// no-op and the screen tests would be exercising an unbound wiki.
+static uint8_t g_dex_bytes[DEX_BYTES];
+
 static void seams2_reset(void) {
   g_now = 100000u;
   g_idle = 0;
@@ -455,6 +463,8 @@ static void seams2_reset(void) {
   g_hold_calls = 0;
   g_flashes = 0;
   g_shakes = 0;
+  dex_bind(g_dex_bytes);
+  dex_reset();
   dialog_reset();
   dialog_bind_commit(&fake_commit);
   diag_bind(nullptr, nullptr, nullptr);
@@ -2125,6 +2135,7 @@ TEST(menu_goes_where_section_8_says) {
     { MENU_CARE,     1, SCR_CARE     },
     { MENU_PLAY,     1, SCR_PLAY     },
     { MENU_BOX,      1, SCR_BOX      },
+    { MENU_DEX,      1, SCR_DEX      },
     { MENU_NETWORK,  1, SCR_NETWORK  },
     { MENU_LINK,     1, SCR_LINK   },
     { MENU_SETTINGS, 1, SCR_SETTINGS },
@@ -2587,6 +2598,69 @@ TEST(the_manual_qr_encodes_the_documented_address) {
 TEST(the_manual_screen_leaves_on_the_ordinary_clock) {
   CHECK((SCREENS[SCR_MANUAL].flags & SF_STICKY) == 0);
   CHECK((SCREENS[SCR_CREATOR].flags & SF_STICKY) != 0);
+}
+
+// =============================================================================
+//  THE WIKI (P10-C8)
+// =============================================================================
+TEST(snapshot_dex_discovered) {
+  seams2_reset();
+  for (uint8_t id = 1u; id <= (uint8_t)SPECIES_TABLE_COUNT; ++id)
+    (void)dex_mark_caught(id);
+  dex_screen_enter();
+  snapshot(SCR_DEX, "dex_known");
+}
+
+TEST(snapshot_dex_undiscovered) {
+  seams2_reset();
+  dex_reset();
+  dex_screen_enter();
+  snapshot(SCR_DEX, "dex_unknown");
+}
+
+// AN UNDISCOVERED ROW WITHHOLDS THE NAME AND KEEPS THE NUMBER, which is the
+// whole shape of the screen: the gap is visible and the reward is not given
+// away. Asserted on the PIXELS because "it drew something" would pass either
+// way - the two frames must DIFFER, and the difference must be inside the
+// text column rather than in the number.
+TEST(an_unmet_species_shows_its_number_and_hides_its_name) {
+  seams2_reset();
+  dex_reset();
+  dex_screen_enter();
+  const uint8_t row = dex_screen_cursor();
+  static uint8_t unknown[FB_H][FB_W];
+  fb_reset();
+  dex_screen_render();
+  CHECK_EQ(fb_oob(), 0u);
+  for (int y = 0; y < FB_H; ++y)
+    for (int x = 0; x < FB_W; ++x) unknown[y][x] = (uint8_t)fb_get(x, y);
+
+  (void)dex_mark_caught(row);
+  fb_reset();
+  dex_screen_render();
+  int moved = 0;
+  for (int y = 0; y < FB_H; ++y)
+    for (int x = 0; x < FB_W; ++x)
+      if ((uint8_t)fb_get(x, y) != unknown[y][x]) ++moved;
+  CHECK(moved > 0);          // meeting it changed the screen
+  CHECK(dex_seen(row));
+  CHECK(dex_caught(row));
+}
+
+// AND THE CURSOR OPENS ON THE FRONTIER. A wiki that always opens at row 1 makes
+// the player walk the same forty rows every visit to find what is missing.
+TEST(the_wiki_opens_on_the_first_thing_you_have_not_got) {
+  seams2_reset();
+  dex_reset();
+  for (uint8_t id = 1u; id <= 5u; ++id) (void)dex_mark_caught(id);
+  dex_screen_enter();
+  CHECK_EQ((int)dex_screen_cursor(), 6);
+  // A complete wiki has no frontier and falls back to the first row rather
+  // than to a species id that does not exist.
+  for (uint8_t id = 1u; id <= (uint8_t)SPECIES_TABLE_COUNT; ++id)
+    (void)dex_mark_caught(id);
+  dex_screen_enter();
+  CHECK_EQ((int)dex_screen_cursor(), 1);
 }
 
 TEST(snapshot_creator_offline) {
@@ -4944,6 +5018,15 @@ static void au_creator(void)  { g_ap_up = 1; creator_enter(); }
 // wrapped and the longest Spanish string in them is what would push the hint
 // into the affordance strip.
 static void au_manual(void)   { manual_enter(); }
+// THE WORST CASE FOR A WIKI ROW IS THE LONGEST SPECIES NAME AT THE WIDEST
+// STATE LINE, and both are drawn beside a 24x24 body in a 96 px column. The
+// fixture marks EVERY species caught so the audit walks the discovered layout;
+// the undiscovered one is narrower by construction (its name is "???").
+static void au_dex(void) {
+  for (uint8_t id = 1u; id <= (uint8_t)SPECIES_TABLE_COUNT; ++id)
+    (void)dex_mark_caught(id);
+  dex_screen_enter();
+}
 static void au_settings(void) { settings_enter(); }
 static void au_time(void)     { time_enter(); }
 
@@ -5033,6 +5116,7 @@ static const AuditRow kAudit[] = {
   { SCR_LINK,          "LINK",          link_render,       au_link      },
   { SCR_CREATOR,       "CREATOR",       creator_render,    au_creator   },
   { SCR_MANUAL,        "MANUAL",        manual_render,     au_manual    },
+  { SCR_DEX,           "DEX",           dex_screen_render, au_dex       },
   { SCR_SETTINGS,      "SETTINGS",      settings_render,   au_settings  },
   { SCR_TIME,          "TIME",          time_render,       au_time      },
   { SCR_SETUP_NAME,    "SETUP_NAME",    setup_name_render, au_setup_name},

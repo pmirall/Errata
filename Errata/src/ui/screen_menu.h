@@ -21,6 +21,7 @@ enum MenuItem : uint8_t {
   MENU_CARE,
   MENU_PLAY,
   MENU_BOX,
+  MENU_DEX,
   MENU_NETWORK,
   MENU_LINK,
   MENU_SETTINGS

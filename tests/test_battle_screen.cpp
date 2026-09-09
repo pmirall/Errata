@@ -43,6 +43,7 @@
 #include "fakes/gfx_fb.h"
 #include "game/battle.h"
 #include "game/box.h"
+#include "game/dex.h"
 #include "data/attacks_table.h"    // ATTACK_COUNT: the move-set search walks it
 #include "game/genome.h"
 #include "game/species_custom.h"   // the registry a drawn body comes out of
@@ -98,7 +99,15 @@ void     ui_link_battle_done(void)         { }
 void ui_flash(uint16_t)               { ++g_flashes; }
 void ui_shake(uint8_t, uint16_t)      { ++g_shakes; }
 
+// The wiki's bytes are the fixture's here for the same reason they are in
+// test_screens.cpp: this binary never runs the save's load path, which is the
+// only place the firmware calls dex_bind(). Unbound, every mark below would be
+// a silent no-op and the foe-discovery case would pass by doing nothing.
+static uint8_t g_dex_bytes[DEX_BYTES];
+
 static void seams_reset(void) {
+  dex_bind(g_dex_bytes);
+  dex_reset();
   g_now = 100000u; g_toast = STR_EMPTY; g_help = STR_EMPTY;
   g_backs = 0; g_wiggles = 0; g_results = 0;
   g_res_entry = 0xFF; g_res_won = 0xFF;
@@ -441,6 +450,39 @@ TEST(a_wild_battle_fights_the_creature_the_encounter_showed_and_not_a_new_roll) 
     CHECK_EQ((int)battle_screen_foe_level(),   (int)kLv[i]);
     battle_leave();
   }
+}
+
+// MEETING A CREATURE IN A FIGHT IS MEETING IT (P10-C8). game/dex.h promises
+// that a foe on somebody else's team counts as SEEN, and this is the case that
+// makes the promise true rather than a comment: resolve_art() is the one pass
+// that walks both teams once per battle, so a wild roll, an AI roster and a
+// linked opponent all reach the wiki through it.
+//
+// The case also pins the NEGATIVE, which is the half that would rot silently:
+// a battle must not mark the foe CAUGHT (you fought it, you did not keep it),
+// and it must not invent a discovery on your own side beyond what your Box
+// already put there.
+TEST(a_battle_teaches_the_wiki_its_opponent_and_does_not_hand_it_over) {
+  seams_reset();
+  box_fixture(3);
+  const uint8_t mine = box_active();
+  CHECK(mine != BOX_ACTIVE_NONE);
+  const BugInstance* me = box_slot(mine);
+  CHECK(me != nullptr);
+
+  // The foe is chosen so it is NOT the species already in the Box: a case where
+  // both are species 9 would pass whether or not the foe side was read.
+  const uint8_t foe_sp = (me && me->species_id == 9u) ? 21u : 9u;
+  dex_reset();
+  CHECK(!dex_seen(foe_sp));
+
+  battle_arm_wild(0x0D3C0001u, foe_sp, 12u);
+  battle_enter();
+  CHECK_EQ((int)battle_screen_foe_species(), (int)foe_sp);
+
+  CHECK(dex_seen(foe_sp));         // met
+  CHECK(!dex_caught(foe_sp));      // and not kept
+  battle_leave();
 }
 
 // AND A WIN REPORTS ITSELF AS A WILD WIN, which is what lets ui.cpp pay it out

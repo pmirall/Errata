@@ -46,6 +46,7 @@ enum StrId : uint16_t {
   STR_MENU_CARE,
   STR_MENU_PLAY,
   STR_MENU_BOX,
+  STR_MENU_DEX,
   STR_MENU_NETWORK,
   STR_MENU_LINK,
   STR_MENU_SETTINGS,
@@ -862,6 +863,13 @@ enum StrId : uint16_t {
   // one line of onset text and no way to check it afterwards.
   STR_ST_CORRUPT,
   STR_LK_BR_STAGE,      // a stage-0 Bug cannot breed, whatever the peer brings
+  // The WIKI screen (P10-C8).
+  STR_DEX_TITLE,
+  STR_DEX_UNKNOWN,
+  STR_DEX_SEEN,
+  STR_DEX_HELD,
+  STR_DEX_MISSING,
+  STR_HLP_DEX_ROW,
   // The MANUAL screen (P10-C7). Two blocks beside one static QR.
   STR_MAN_TITLE,
   STR_MAN_HINT,
@@ -892,6 +900,7 @@ inline constexpr const char* const ES[] = {
   /* STR_MENU_CARE */             "CUIDAR",
   /* STR_MENU_PLAY */             "JUGAR",
   /* STR_MENU_BOX */              "CAJA",
+  /* STR_MENU_DEX */              "WIKI",
   /* STR_MENU_NETWORK */          "RED",
   /* STR_MENU_LINK */             "ENLACE",
   /* STR_MENU_SETTINGS */         "AJUSTES",
@@ -1596,7 +1605,13 @@ inline constexpr const char* const ES[] = {
   , /* STR_ITEM_BOOST */          "Listo para el combate"
   , /* STR_ITEM_EVOLVED */        "¡Algo está cambiando!"
   , /* STR_ST_CORRUPT */          "Corrupto"
-  , /* STR_LK_BR_STAGE */         "Ese bug es muy peque\xc3\xb1o a\xc3\xban"
+  , /* STR_LK_BR_STAGE */         "Ese bug es muy pequeño aún"
+  , /* STR_DEX_TITLE */            "WIKI"
+  , /* STR_DEX_UNKNOWN */          "???"
+  , /* STR_DEX_SEEN */             "VISTO"
+  , /* STR_DEX_HELD */             "EN LA CAJA"
+  , /* STR_DEX_MISSING */          "SIN VER"
+  , /* STR_HLP_DEX_ROW */          "Los bugs que has visto."
   , /* STR_MAN_TITLE */           "MANUAL"
   , /* STR_MAN_HINT */            "Escanea para leerlo en el móvil."
 };

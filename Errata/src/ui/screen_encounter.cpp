@@ -12,6 +12,7 @@
 #include "../game/box.h"
 #include "../game/capture.h"
 #include "../game/corruption.h"
+#include "../game/dex.h"
 #include "../game/inventory.h"
 #include "../game/species.h"
 #include "../game/xp.h"
@@ -471,6 +472,15 @@ void encounter_arm(const EncounterResult& r, uint8_t category)
   s_applied = 0;
   s_reward  = 0;
   cap_reset(s_cap);
+  // SEEN, AND SEEN IS THE WHOLE POINT OF THE WIKI. A capture writes CAUGHT in
+  // game/box.cpp and that half would have been easy; this is the half that
+  // makes the list a reason to walk - the one that got away is still a creature
+  // you met, and its silhouette stops being a silhouette.
+  //
+  // ARMED, NOT DRAWN. The film has not played yet, but the roll is decided and
+  // the screen is about to show it; hooking a frame instead would make the
+  // discovery depend on how long the player looked.
+  if (r.outcome != (uint8_t)ENC_OUT_NOTHING) (void)dex_mark_seen(r.species_id);
 }
 
 static uint8_t active_level(void)

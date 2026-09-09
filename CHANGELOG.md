@@ -29,6 +29,63 @@ carries the developer console and ships to nobody. A number quoted without its
 variant is not a number — `docs/budget.md` §8 records a phase exit that compared
 one with the other.
 
+## [Unreleased] — the wiki, 2026-09-09
+
+**P10-C8. A list of the sixty, and which of them you have met.** The roster was
+already sixty species and the player had no way to know it: the Box shows what
+you are holding, and everything you fought, glimpsed in a link or let get away
+left no trace. The main menu's **WIKI** row, next to CAJA, is that trace.
+
+### Added
+
+- **`game/dex.{h,cpp}`** — the wiki, and nothing but the bit arithmetic. Two
+  bits per species (SEEN, CAUGHT) over fifteen bytes the CALLER owns, bound the
+  same way the Box's storage is, so a host test drives the same code the
+  firmware does. `dex_mark_caught()` sets SEEN too: you cannot hold a thing you
+  have not met, and that invariant is not left to callers to remember.
+- **`ui/screen_dex.{h,cpp}`** and `SCR_DEX` — one species per card: the 24×24
+  body, `Nº 07`, the name, the state line, and two-row slivers of the
+  neighbours above and below so the list reads as a ring. Left taps forward,
+  a long left goes back, B is BACK — there is nothing to *choose* on a wiki row.
+- **The silhouette.** A species you have not met keeps its shape and loses its
+  name: the same sprite under a 50 % dither, `???` on the name line. Drawing a
+  solid block instead would lose the shape, and the shape is the clue.
+- **It opens on the frontier** — the first species you have not caught, not
+  row 1 — so finding the gap is not a walk through forty cards you have already
+  filled.
+- **`the_wiki_survives_a_reboot`** in `tests/test_game_state.cpp`. The case that
+  matters: every other dex test drives an array the TEST owns, and all of them
+  keep passing if the firmware binds the wrong fifteen bytes. Mutation-proved
+  against a bound copy and against a cleared blob.
+
+### Changed — three places now feed it
+
+- `box_new_bug()` marks CAUGHT: a hatch, a capture, a trade, a creator bug and a
+  breeding all reach the Box through it, so one line covers five paths.
+- `encounter_arm()` marks SEEN on anything but a nothing-roll — the one that got
+  away is still a sighting.
+- **`resolve_art()` marks the FOE side SEEN.** It is the one pass that walks
+  both teams once per battle, so a wild roll, an AI roster and a linked
+  opponent's team all land in the wiki through a single line. Only the other
+  side: your own creatures were marked CAUGHT when they entered your Box.
+
+### Storage — fifteen bytes, and the defect that chose where they live
+
+`ConfigV2.dex[15]`, carved out of the front of `reserved[152]`, **no schema
+bump** — an older blob reads zero in all fifteen and an all-zero wiki is
+*nothing discovered yet*, which is right for every save written before this.
+
+The first draft took `Config.reserved_b[24]` instead and `tests/test_fixtures.cpp`
+refused it: the v1 fixture — a real save from the device this firmware replaces
+— carries latitude and longitude as ASCII in those bytes. A migrated save would
+have opened with half the roster "discovered" out of decimal digits.
+
+### Cost
+
+**+2,356 B of flash and +128 B of globals** on the release variant: 1,363,996 /
+1,600,000 and 61,276 / 65,000, so the budget question the wiki was measured
+against is answered with 236 KB and 3.7 KB still free.
+
 ## [Unreleased] — Errata, and the creatures are bugs, 2026-09-09
 
 **The product is called Errata now and the creatures are bugs.** The old name

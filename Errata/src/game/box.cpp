@@ -7,6 +7,8 @@
 // =============================================================================
 #include "box.h"
 
+#include "dex.h"
+
 #include <string.h>
 
 #include "../core/config.h"                // SEC_PER_HOUR, ABSENCE_MAX_S
@@ -219,6 +221,16 @@ uint8_t box_new_bug(uint8_t species_id, uint8_t level, uint8_t origin,
   mint(s_gs->bugs[slot], *sp, species_id, level, origin, genome,
        creation_seed, now_epoch);
   mask_sync();
+  // THE WIKI, MARKED HERE BECAUSE THIS IS THE ONLY DOOR. Every Bug that has
+  // ever entered a Box came through box_new_bug() - the starter, a capture, a
+  // creator upload, a bred child - so one line covers four features and none of
+  // them can be added later and forget. dex_mark_caught() sets SEEN too, so
+  // holding a creature can never leave it listed as one you have not met.
+  //
+  // A DISCOVERY DOES NOT SAVE ITSELF and must not: this module performs no I/O,
+  // and the callers already commit the Box on the paths that reach here. The
+  // bits live in the same ConfigV2 the next gs_save_cfg() writes.
+  (void)dex_mark_caught(species_id);
   return slot;
 }
 

@@ -273,7 +273,10 @@ static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
 #define UI_EVOLVE_ASK_MS        300000UL     // 5 min
 #define UI_HEX_DUMP_MS          5000UL       // DBL_R on S5/S6
 #define UI_ALERT_MIN_MS         1200UL
-#define MENU_ITEM_COUNT         7
+// 7 -> 8: the WIKI joined the ring at P10-C8. S_MENU(i) indexes the contiguous
+// STR_MENU_BUG..STR_MENU_SETTINGS block and strings_es.h static_asserts the two
+// against each other, so this number and that block cannot drift apart.
+#define MENU_ITEM_COUNT         8
 
 // --- birth staging: 4.5 s in 7 phases ----------------------------------------
 #define HATCH_WOBBLE_MS      1200UL

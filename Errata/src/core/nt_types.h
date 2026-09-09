@@ -62,6 +62,7 @@ enum ScreenId : uint8_t {
   SCR_LINK,          // peer link, phase 7 (ex SCR_SOCIAL)
   SCR_CREATOR,       // the creator portal (ex SCR_QR)
   SCR_MANUAL,        // one static QR: the user manual's address
+  SCR_DEX,           // the wiki: sixty rows and how far you have got
   SCR_SETTINGS,
   SCR_TIME,          // on-device time entry (ex SCR_CLOCK)
   // THE TWO FIRST-BOOT SCREENS (P10-C4). They sit here, beside TIME, because
@@ -416,6 +417,12 @@ static_assert(sizeof(PendingEgg) == 24, "PendingEgg must be 24 bytes");
 #define CF_SETUP_MASK    0xC0u
 #define CF_SETUP_SH      6
 
+// THE WIKI'S BYTE COUNT, HERE AND NOT IN game/dex.h, because both config
+// structs carve it out of their reserved blocks and neither may include a game
+// header. game/dex.h static_asserts it against the roster, which is where the
+// number is actually justified.
+#define DEX_BYTES 15
+
 struct Config {
   uint16_t magic;                        //   0  NT_CFG_MAGIC
   uint8_t  version;                      //   2  NT_CFG_VERSION
@@ -431,7 +438,15 @@ struct Config {
   char     pet_name[NAME_MAX_LEN + 1];   // 106  13
   uint8_t  reserved_a[65];               // 119  65  was tg_token[48]+tg_chat[17]
   char     tz[TZ_MAX_LEN + 1];           // 184  40
-  uint8_t  reserved_b[24];               // 224  24  was lat[12]+lon[12], now 0
+  // THE WIKI IS NOT HERE, AND tests/test_fixtures.cpp IS WHY. These 24 bytes
+  // were lat[12]+lon[12] and the v1 FIXTURE STILL CARRIES COORDINATES IN THEM -
+  // "41.3874" and "2.1686", asserted by name in fixture_config_v1. Carving the
+  // dex out of the front of this block made a migrated Nottamagochi save open
+  // with half the roster already discovered, because ASCII digits are perfectly
+  // good bits. The wiki lives in ConfigV2.dex instead: that struct is BUILT by
+  // the migration rather than mapped from v1 bytes, so nothing an old save
+  // holds can be read as a discovery.
+  uint8_t  reserved_b[24];               // 224  24  was lat[12]+lon[12]
   uint8_t  reserved_c;                   // 248  was tg_mode, now 0
   uint8_t  brightness;                   // 249  OLED contrast
   uint8_t  statusbar_mode;               // 250  StatusBarMode

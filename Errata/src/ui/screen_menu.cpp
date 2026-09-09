@@ -102,6 +102,9 @@ static void menu_select(void) {
     case MENU_CARE:     ui_push(SCR_CARE);     break;
     case MENU_PLAY:     ui_push(SCR_PLAY);     break;
     case MENU_BOX:      ui_push(SCR_BOX);      break;
+    // The Box is what you HOLD and the wiki is what you have MET, so it sits
+    // next to it rather than down with the settings.
+    case MENU_DEX:      ui_push(SCR_DEX);      break;
     // NETWORK is Phase 5. The entry goes to a real screen that says so rather
     // than to a toast: every section 6 state has a row now (ui/screen_soon.h).
     case MENU_NETWORK:  ui_push(SCR_NETWORK);  break;

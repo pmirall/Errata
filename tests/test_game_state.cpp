@@ -23,6 +23,7 @@
 #include "persistence/save_manager.h"
 #include "persistence/legacy_v1.h"
 #include "core/crc16.h"
+#include "game/dex.h"
 
 static uint32_t s_ms    = 0;
 static uint32_t s_epoch = 1700300000u;
@@ -410,6 +411,46 @@ TEST(game_state_creator_pin_survives_a_reboot) {
   gs_creator_load(pin, fails, idle);
   CHECK_EQ((int)pin, 4242);
   CHECK_EQ((int)fails, 0);
+}
+
+// THE WIKI SURVIVES A REBOOT (P10-C8), and this is the case that says so.
+//
+// It matters more than it looks. Every other thing the dex module was tested
+// for in tests/test_dex.cpp is bit arithmetic over an array the TEST owns; the
+// only reason any of it is worth having is that the array the FIRMWARE binds is
+// the one gs_save_cfg() writes to flash. Bind the wrong fifteen bytes - a copy,
+// a stack temporary, the runtime Config instead of the blob - and every one of
+// those cases still passes while the player's discoveries evaporate at every
+// power cycle. So this case does not touch dex.cpp's internals at all: it marks
+// a species, reboots, and asks.
+TEST(the_wiki_survives_a_reboot) {
+  begin();
+  if (!seed_v1()) { CHECK(false); return; }
+  Config cfg;
+  CHECK_EQ((int)gs_load(cfg), (int)LOAD_MIGRATED);
+
+  // A migrated save has met nothing: ConfigV2 is built fresh by the migration,
+  // so the fifteen bytes are zero however much history the v1 blob carried.
+  CHECK_EQ((int)dex_count_seen(), 0);
+  CHECK_EQ((int)dex_count_caught(), 0);
+
+  CHECK(dex_mark_caught(7u));
+  CHECK(dex_mark_seen(19u));
+  CHECK(gs_save_cfg(cfg));
+
+  // THE REBOOT. Nothing in RAM survives; the store does. gs_load() re-binds,
+  // so the answers below come out of bytes that went to flash and came back.
+  dex_unbind();
+  Config back;
+  CHECK_EQ((int)gs_load(back), (int)LOAD_OK);
+
+  CHECK(dex_caught(7u));
+  CHECK(dex_seen(7u));
+  CHECK(dex_seen(19u));
+  CHECK(!dex_caught(19u));       // SEEN did not quietly promote itself
+  CHECK(!dex_seen(8u));          // and nothing else came back set
+  CHECK_EQ((int)dex_count_seen(), 2);
+  CHECK_EQ((int)dex_count_caught(), 1);
 }
 
 // The armed edge is the half that MUST survive: a power cycle that reset the

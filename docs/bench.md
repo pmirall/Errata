@@ -685,6 +685,7 @@ come back. If step 3 shows SAVE ERROR on a device whose data is intact, the faul
 | A v2 save is read, carried forward field by field and re-sealed at v3, and the second boot is ordinary | `tests/test_persistence.cpp` §8b, a whole played save stamped down to v2 | that real NVS returns the bytes it was given; a power cut inside the rewrite; the two-image flash of G3 |
 | A factory reset empties both partitions and the next load is `LOAD_FRESH` | `tests/test_persistence.cpp`, against `kv_mem`'s erase path | that `kv_wipe()` reaches a real partition, and that `nvs2` goes with `nvs` (G1) |
 | A checkpoint restores after `KV_MAIN` is wiped, at v2 or v3, through both entry points | `tests/test_persistence.cpp` | that the `nvs2` partition was actually flashed and that `initArduino()` leaves it alone (G2) |
+| The wiki's discoveries survive a power cycle | `tests/test_game_state.cpp` `the_wiki_survives_a_reboot`, which marks, saves, unbinds and reloads through the real `save_manager` | that the fifteen bytes reach a real NVS page and come back — the host proves the BINDING is the live blob, not that flash kept it |
 
 ---
 

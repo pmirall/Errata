@@ -210,13 +210,13 @@ $(BIN)/test_care_golden: $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/genome.o \
 # curve is the whole anti-farm, and half of its promise is that at the FLOOR a
 # run still pays one whole XP. That claim joins two modules, so the case that
 # holds it has to link both rather than repeat xp_minigame_amount()'s arithmetic.
-$(BIN)/test_care:       $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o \
+$(BIN)/test_care:       $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o $(OBJ)/dex.o \
                         $(OBJ)/xp.o $(OBJ)/bug.o $(OBJ)/species.o \
                         $(OBJ)/evolution.o \
                         $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 # daylight.cpp is pure arithmetic over the balance.h table: no clock, no state.
 $(BIN)/test_daylight:   $(OBJ)/daylight.o
-$(BIN)/test_box:        $(OBJ)/box.o
+$(BIN)/test_box:        $(OBJ)/box.o $(OBJ)/dex.o
 # xp.cpp is pure: the curve, the level carry and the anti-farm ledger, with
 # species_table.h (header-only) for the base_hp the hp rescale needs.
 # evolution.o comes with it because the two call each other: xp_add() asks
@@ -258,7 +258,7 @@ $(BIN)/test_sprite_pipeline: $(OBJ)/petfx_core.o
 $(BIN)/test_stats:      $(OBJ)/bug.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 # The Box <-> sim seam: the real box.cpp and the real sim.cpp together, which
 # is the only way to see a swap move sim's raw pointer off its creature.
-$(BIN)/test_box_sim:    $(OBJ)/box_sim.o $(OBJ)/box.o $(OBJ)/sim.o \
+$(BIN)/test_box_sim:    $(OBJ)/box_sim.o $(OBJ)/box.o $(OBJ)/dex.o $(OBJ)/sim.o \
                         $(OBJ)/daylight.o $(OBJ)/genome.o $(OBJ)/crc16.o \
                         $(OBJ)/rng.o
 # THE BATTLE ENGINE (P4-C2). battle.cpp is PURE, so it compiles here exactly as
@@ -292,7 +292,7 @@ $(BIN)/test_battle_ai:  $(OBJ)/battle_ai.o $(OBJ)/battle.o $(OBJ)/bug.o \
 # resolves.
 $(BIN)/test_validate:   $(OBJ)/validate.o $(OBJ)/bug.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o \
-                        $(OBJ)/rng.o $(OBJ)/battle.o $(OBJ)/box.o \
+                        $(OBJ)/rng.o $(OBJ)/battle.o $(OBJ)/box.o $(OBJ)/dex.o \
                         $(OBJ)/species_custom.o
 
 # THE SECTION 15 CODEC (P4-C5). protocol.o on top of the validator's objects,
@@ -310,7 +310,7 @@ $(BIN)/test_protocol:   $(OBJ)/protocol.o $(OBJ)/validate.o $(OBJ)/bug.o \
 # trial is a whole battle between two engines and not a script. box.o comes
 # along for nothing else than the shared fixture builder the validator test
 # already uses.
-$(BIN)/test_session:    $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/battle_link.o \
+$(BIN)/test_session:    $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/dex.o $(OBJ)/species.o $(OBJ)/battle_link.o \
                         $(OBJ)/trade_link.o \
                         $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
                         $(OBJ)/validate.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
@@ -378,7 +378,7 @@ $(BIN)/test_encounters: $(OBJ)/encounters.o $(OBJ)/species.o $(OBJ)/rng.o \
 # ever had outside a test; activity.o because set_activity has to answer for a
 # score it can only derive; encounters.o + species.o because test_encounter
 # rolls the real table.
-$(BIN)/test_diag:       $(OBJ)/diag_core.o $(OBJ)/box.o $(OBJ)/sim.o \
+$(BIN)/test_diag:       $(OBJ)/diag_core.o $(OBJ)/box.o $(OBJ)/dex.o $(OBJ)/sim.o \
                         $(OBJ)/daylight.o $(OBJ)/inventory.o \
                         $(OBJ)/activity.o $(OBJ)/encounters.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/species.o \
@@ -387,7 +387,7 @@ $(BIN)/test_diag:       $(OBJ)/diag_core.o $(OBJ)/box.o $(OBJ)/sim.o \
 
 $(BIN)/test_corruption: $(OBJ)/corruption.o $(OBJ)/corrupt_fx.o \
                         $(OBJ)/battle.o $(OBJ)/bug.o \
-                        $(OBJ)/breeding.o $(OBJ)/box.o \
+                        $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/dex.o \
                         $(OBJ)/inventory.o $(OBJ)/protocol.o \
                         $(OBJ)/validate.o $(OBJ)/species.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o \
@@ -401,7 +401,7 @@ $(BIN)/test_corruption: $(OBJ)/corruption.o $(OBJ)/corrupt_fx.o \
 # tree's one validator - a fake Box would prove neither. validate.o drags the
 # pair it always drags (evolution.o + xp.o call each other) and genome.o drags
 # crc16.o and rng.o, exactly as tests/test_validate.cpp does.
-$(BIN)/test_capture:    $(OBJ)/capture.o $(OBJ)/encounters.o $(OBJ)/box.o \
+$(BIN)/test_capture:    $(OBJ)/capture.o $(OBJ)/encounters.o $(OBJ)/box.o $(OBJ)/dex.o \
                         $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/bug.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
@@ -409,7 +409,7 @@ $(BIN)/test_capture:    $(OBJ)/capture.o $(OBJ)/encounters.o $(OBJ)/box.o \
 # The Box-full branches of the same path, kept in their own binary for the
 # reason tests/test_battle_screen.cpp is: it links what it drives and nothing
 # else, so it cannot start passing because another module happened to be there.
-$(BIN)/test_box_full_capture: $(OBJ)/capture.o $(OBJ)/encounters.o $(OBJ)/box.o \
+$(BIN)/test_box_full_capture: $(OBJ)/capture.o $(OBJ)/encounters.o $(OBJ)/box.o $(OBJ)/dex.o \
                         $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/bug.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o
@@ -469,7 +469,7 @@ $(BIN)/test_discovery:  $(OBJ)/discovery.o $(OBJ)/activity.o $(OBJ)/crc16.o
 # so the claim "the session runs over the radio's ring with NO change to
 # session.cpp" is a thing this binary demonstrates rather than a sentence in a
 # header. That is why the session's whole object set is here.
-$(BIN)/test_link_transport: $(OBJ)/rxring.o $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/battle_link.o \
+$(BIN)/test_link_transport: $(OBJ)/rxring.o $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/dex.o $(OBJ)/species.o $(OBJ)/battle_link.o \
                         $(OBJ)/trade_link.o \
                         $(OBJ)/protocol.o $(OBJ)/validate.o $(OBJ)/battle.o \
                         $(OBJ)/battle_ai.o $(OBJ)/bug.o $(OBJ)/evolution.o \
@@ -483,7 +483,7 @@ $(BIN)/test_link_transport: $(OBJ)/rxring.o $(OBJ)/session.o $(OBJ)/breed_link.o
 # NO networking object: game/breeding.cpp is pure and the shared seed arrives as
 # a uint32_t, which is the whole reason the determinism case can run two
 # "devices" in one process.
-$(BIN)/test_breeding:   $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/validate.o \
+$(BIN)/test_breeding:   $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/dex.o $(OBJ)/validate.o \
                         $(OBJ)/species.o $(OBJ)/bug.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
@@ -506,20 +506,22 @@ $(BIN)/test_breeding:   $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/validate.o \
 # see it. Endpoint 0 files into the real Box; endpoint 1 is a model, which is
 # enough because the claim is about the PLAN and breed_link_plan() exposes it
 # on both sides.
+$(BIN)/test_dex:        $(OBJ)/dex.o
+
 $(BIN)/test_breed_link: $(OBJ)/breed_link.o $(OBJ)/session.o $(OBJ)/battle_link.o \
                         $(OBJ)/trade_link.o $(OBJ)/trade.o \
                         $(OBJ)/breeding.o $(OBJ)/protocol.o $(OBJ)/rxring.o \
                         $(OBJ)/transport_loopback.o $(OBJ)/battle.o \
-                        $(OBJ)/battle_ai.o $(OBJ)/box.o $(OBJ)/validate.o \
+                        $(OBJ)/battle_ai.o $(OBJ)/box.o $(OBJ)/dex.o $(OBJ)/validate.o \
                         $(OBJ)/species.o $(OBJ)/bug.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
                         $(OBJ)/corruption.o $(OBJ)/inventory.o $(OBJ)/kv_mem.o \
                         $(OBJ)/species_custom.o $(OBJ)/save_manager.o \
                         $(OBJ)/migration.o
 
-$(BIN)/test_trade:      $(OBJ)/trade.o $(OBJ)/box.o $(OBJ)/save_manager.o \
+$(BIN)/test_trade:      $(OBJ)/trade.o $(OBJ)/box.o $(OBJ)/dex.o $(OBJ)/save_manager.o \
                         $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/species_custom.o \
-                        $(OBJ)/trade_link.o $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/species.o \
+                        $(OBJ)/trade_link.o $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/dex.o $(OBJ)/species.o \
                         $(OBJ)/battle_link.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
                         $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
                         $(OBJ)/validate.o $(OBJ)/species.o $(OBJ)/bug.o \
@@ -553,7 +555,7 @@ $(BIN)/test_creator_gate: $(OBJ)/creator_gate.o
 # creator_server.cpp's one-line mapping of the states this binary asserts.
 $(BIN)/test_creator_api: $(OBJ)/creator_body.o $(OBJ)/creator_parse.o \
                         $(OBJ)/creator_gate.o $(OBJ)/validate.o \
-                        $(OBJ)/species_custom.o $(OBJ)/box.o $(OBJ)/species.o \
+                        $(OBJ)/species_custom.o $(OBJ)/box.o $(OBJ)/dex.o $(OBJ)/species.o \
                         $(OBJ)/bug.o $(OBJ)/evolution.o $(OBJ)/xp.o \
                         $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o
 
@@ -591,7 +593,7 @@ $(BIN)/test_clock:      $(OBJ)/gametime_nevervalid.o $(OBJ)/host_shims.o
 # and gs_boot_tz() - stubbing them would be testing a gametime the board does
 # not have.
 $(BIN)/test_clock_device: $(OBJ)/gametime_arduino.o $(OBJ)/arduino_clocks.o \
-                        $(OBJ)/cooldowns.o $(OBJ)/game_state.o \
+                        $(OBJ)/cooldowns.o $(OBJ)/game_state.o $(OBJ)/dex.o \
                         $(OBJ)/save_manager.o $(OBJ)/migration.o $(OBJ)/kv_mem.o \
                         $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/genome.o $(OBJ)/rng.o \
                         $(OBJ)/species.o $(OBJ)/validate.o $(OBJ)/bug.o \
@@ -616,14 +618,14 @@ $(BIN)/test_persistence: $(OBJ)/save_manager.o $(OBJ)/migration.o \
 # game_state.o and save_manager.o for the reason the file's banner gives: the
 # step is two bits of Config, Config is not what reaches flash, and "does the
 # answer survive a power cut" is a question only the real mapping can answer.
-$(BIN)/test_onboarding: $(OBJ)/onboarding.o $(OBJ)/game_state.o \
+$(BIN)/test_onboarding: $(OBJ)/onboarding.o $(OBJ)/game_state.o $(OBJ)/dex.o \
                         $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o \
                         $(OBJ)/rng.o $(OBJ)/validate.o $(OBJ)/bug.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/genome.o \
                         $(OBJ)/species_custom.o
 
-$(BIN)/test_game_state: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
+$(BIN)/test_game_state: $(OBJ)/game_state.o $(OBJ)/dex.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o \
                         $(OBJ)/validate.o $(OBJ)/bug.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/species_custom.o
@@ -638,11 +640,11 @@ $(BIN)/test_game_state: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migrati
 # was committed with gs_save_active(), which writes the ACTIVE slot only.
 # capture.o and encounters.o come along so the case can drive the real
 # cap_attempt() rather than a hand-rolled stand-in.
-$(BIN)/test_box_persist: $(OBJ)/game_state.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
+$(BIN)/test_box_persist: $(OBJ)/game_state.o $(OBJ)/dex.o $(OBJ)/save_manager.o $(OBJ)/migration.o \
                         $(OBJ)/kv_mem.o $(OBJ)/boot_host.o $(OBJ)/crc16.o $(OBJ)/rng.o \
                         $(OBJ)/validate.o $(OBJ)/bug.o $(OBJ)/evolution.o \
                         $(OBJ)/xp.o $(OBJ)/genome.o $(OBJ)/species_custom.o \
-                        $(OBJ)/box.o $(OBJ)/capture.o $(OBJ)/encounters.o \
+                        $(OBJ)/box.o $(OBJ)/dex.o $(OBJ)/capture.o $(OBJ)/encounters.o \
                         $(OBJ)/species.o $(OBJ)/corruption.o $(OBJ)/activity.o
 # The screen table's migrated rows are pure translation units, so they compile
 # here exactly as they do in the firmware; gfx_fb.o is the host end of gfx.h
@@ -657,19 +659,20 @@ SCREEN_OBJS := $(OBJ)/screen_table.o $(OBJ)/screen_boot.o \
                $(OBJ)/screen_time.o $(OBJ)/screen_view.o \
                $(OBJ)/screen_setup.o $(OBJ)/onboarding.o \
                $(OBJ)/screen_link.o $(OBJ)/screen_diag.o \
-               $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/battle_link.o \
+               $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/dex.o $(OBJ)/species.o $(OBJ)/battle_link.o \
                $(OBJ)/trade_link.o $(OBJ)/trade.o \
                $(OBJ)/protocol.o $(OBJ)/link_fake.o $(OBJ)/breeding.o \
                $(OBJ)/screen_evolution.o $(OBJ)/screen_creator.o \
-               $(OBJ)/screen_network.o $(OBJ)/screen_encounter.o \
+               $(OBJ)/screen_network.o $(OBJ)/screen_encounter.o $(OBJ)/dex.o \
                $(OBJ)/screen_manual.o $(OBJ)/qr_paint.o $(OBJ)/qr.o \
+               $(OBJ)/screen_dex.o \
                $(OBJ)/wifi_scanner.o $(OBJ)/net_classify.o \
                $(OBJ)/cooldowns.o $(OBJ)/activity.o \
                $(OBJ)/encounters.o $(OBJ)/capture.o \
                $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/species.o \
                $(OBJ)/validate.o $(OBJ)/evolution.o $(OBJ)/xp.o \
                $(OBJ)/species_custom.o \
-               $(OBJ)/dialog.o $(OBJ)/qr.o $(OBJ)/box.o \
+               $(OBJ)/dialog.o $(OBJ)/qr.o $(OBJ)/box.o $(OBJ)/dex.o \
                $(OBJ)/anim_ease.o \
                $(OBJ)/anim_ease.o \
                $(OBJ)/gfx_widgets.o $(OBJ)/gfx_fb.o \
@@ -815,11 +818,11 @@ $(BIN)/screen_capture: $(OBJ)/test_screens_capture.o $(CAPTURE_OBJS) | $(BIN)
 # because the team the screen offers comes out of the tree's one Box.
 $(BIN)/test_link_screen: $(OBJ)/screen_link.o $(OBJ)/screen_battle.o \
                         $(OBJ)/battle_renderer.o $(OBJ)/xbm_mirror.o \
-                        $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/battle_link.o \
+                        $(OBJ)/discovery.o $(OBJ)/session.o $(OBJ)/breed_link.o $(OBJ)/breeding.o $(OBJ)/box.o $(OBJ)/dex.o $(OBJ)/species.o $(OBJ)/battle_link.o \
                         $(OBJ)/trade_link.o $(OBJ)/trade.o \
                         $(OBJ)/transport_loopback.o $(OBJ)/protocol.o \
                         $(OBJ)/validate.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
-                        $(OBJ)/box.o $(OBJ)/species.o $(OBJ)/bug.o \
+                        $(OBJ)/box.o $(OBJ)/dex.o $(OBJ)/species.o $(OBJ)/bug.o \
                         $(OBJ)/species_custom.o \
                         $(OBJ)/cooldowns.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o $(OBJ)/activity.o \
@@ -844,7 +847,7 @@ $(BIN)/test_link_screen: $(OBJ)/screen_link.o $(OBJ)/screen_battle.o \
 $(BIN)/test_battle_screen: $(OBJ)/screen_battle.o $(OBJ)/battle_renderer.o \
                         $(OBJ)/audio.o \
                         $(OBJ)/xbm_mirror.o $(OBJ)/battle.o $(OBJ)/battle_ai.o \
-                        $(OBJ)/bug.o $(OBJ)/box.o $(OBJ)/genome.o \
+                        $(OBJ)/bug.o $(OBJ)/box.o $(OBJ)/dex.o $(OBJ)/genome.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o \
                         $(OBJ)/inventory.o $(OBJ)/corruption.o $(OBJ)/xp.o \
                         $(OBJ)/evolution.o $(OBJ)/species.o \
@@ -875,7 +878,7 @@ $(BIN)/test_perf:       $(OBJ)/perf.o
 # links none of the four subsystems that allocate on the device (Wi-Fi,
 # WebServer, U8g2, ESP-NOW). test_soak.cpp's banner says so; docs/bench.md
 # step A5 is the real one.
-$(BIN)/test_soak:       $(OBJ)/alloc_count.o $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o \
+$(BIN)/test_soak:       $(OBJ)/alloc_count.o $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o $(OBJ)/dex.o \
                         $(OBJ)/corruption.o $(OBJ)/cooldowns.o \
                         $(OBJ)/save_manager.o \
                         $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/boot_host.o \
@@ -894,7 +897,7 @@ $(BIN)/test_soak:       $(OBJ)/alloc_count.o $(OBJ)/sim.o $(OBJ)/daylight.o $(OB
 # its own comment that a second object there means something device-shaped has
 # leaked below the AudioSink seam, and it is right. The persistence chain is a
 # different claim and gets its own binary.
-$(BIN)/test_sound:      $(OBJ)/audio.o $(OBJ)/game_state.o $(OBJ)/save_manager.o \
+$(BIN)/test_sound:      $(OBJ)/audio.o $(OBJ)/game_state.o $(OBJ)/dex.o $(OBJ)/save_manager.o \
                         $(OBJ)/migration.o $(OBJ)/kv_mem.o $(OBJ)/boot_host.o \
                         $(OBJ)/crc16.o $(OBJ)/rng.o $(OBJ)/validate.o \
                         $(OBJ)/bug.o $(OBJ)/evolution.o $(OBJ)/xp.o \
@@ -916,7 +919,7 @@ $(BIN)/test_statemachine: $(SCREEN_OBJS) $(OBJ)/state_machine.o \
 # creator's own 24x24 now (PetView.custom_bits), so the projection asks the
 # registry whether this species has one. A roster species answers nullptr.
 $(BIN)/test_pet_view:   $(OBJ)/pet_view.o $(OBJ)/sim.o $(OBJ)/daylight.o \
-                        $(OBJ)/box.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
+                        $(OBJ)/box.o $(OBJ)/dex.o $(OBJ)/genome.o $(OBJ)/crc16.o $(OBJ)/rng.o \
                         $(OBJ)/species_custom.o $(OBJ)/validate.o \
                         $(OBJ)/species.o $(OBJ)/bug.o \
                         $(OBJ)/evolution.o $(OBJ)/xp.o
@@ -977,7 +980,7 @@ $(BIN)/balance_matrix: tools/balance_matrix.cpp $(OBJ)/battle_ai.o $(OBJ)/battle
 # instrument did and did not cover has to be right where a reader looks for it.
 # The object stays on the link line only because game/sim.cpp declares against
 # it; removing it is a separate change to sim.cpp'''s dependencies.
-$(BIN)/sim_days: tools/sim_days.cpp $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o \
+$(BIN)/sim_days: tools/sim_days.cpp $(OBJ)/sim.o $(OBJ)/daylight.o $(OBJ)/box.o $(OBJ)/dex.o \
                         $(OBJ)/xp.o $(OBJ)/evolution.o $(OBJ)/encounters.o \
                         $(OBJ)/species.o $(OBJ)/genome.o $(OBJ)/crc16.o \
                         $(OBJ)/rng.o | $(BIN)

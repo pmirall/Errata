@@ -295,11 +295,24 @@ struct ConfigV2 {
                                          //      the payload that would have to
                                          //      hold it.
   char     tz[CFGV2_TZ_CAP];             //  62  POSIX TZ, no network needed
-  uint8_t  reserved[152];                // 102  must be 0
+  // THE WIKI (P10-C8). 60 species x 2 bits - SEEN and CAUGHT - is 15 bytes, and
+  // they come out of the 152 that were reserved rather than out of a new blob:
+  // a new NVS key costs three entries of the 262 budget, a second CRC and a
+  // second thing that can be half-written, to persist fifteen bytes that are
+  // meaningless without the config beside them. An older save reads zeros here,
+  // which is exactly "nothing discovered yet" - the one starting state that
+  // needs no migration.
+  uint8_t  dex[DEX_BYTES];               // 102  15, game/dex.h
+  uint8_t  reserved[152 - DEX_BYTES];    // 117  must be 0
   uint16_t crc16;                        // 254  over bytes 0..253
 };
 
 static_assert(sizeof(ConfigV2) == 256, "ConfigV2 layout drifted");
+static_assert(offsetof(ConfigV2, dex) == 102,
+              "ConfigV2.dex moved: it was carved out of the front of reserved[] "
+              "so that every field before it keeps its offset and no stored save "
+              "shifts. Moving it re-reads somebody's discoveries as somebody "
+              "else's bytes.");
 static_assert(offsetof(ConfigV2, device_id)   ==   4, "ConfigV2.device_id moved");
 static_assert(offsetof(ConfigV2, seq)         ==  20, "ConfigV2.seq moved");
 static_assert(offsetof(ConfigV2, device_name) ==  32, "ConfigV2.device_name moved");

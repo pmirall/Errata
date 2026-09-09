@@ -12,6 +12,7 @@
 #include "../game/battle.h"
 #include "../game/battle_ai.h"
 #include "../game/box.h"
+#include "../game/dex.h"
 #include "../game/genome.h"
 #include "../game/bug.h"
 #include "battle_renderer.h"
@@ -321,6 +322,13 @@ static void resolve_art(void) {
       // field HAS a roster row and pet_art_key() answers from it. The art is
       // resolved ONCE, outside every frame loop.
       s_art[side][i] = pet_art_key(c->species_id, 0u);
+
+      // AND THE WIKI LEARNS THE FOE HERE. This is the one pass that walks both
+      // teams once per battle, so it covers a wild roll, an AI roster and a
+      // linked opponent's team with a single line rather than three. Only the
+      // OTHER side is a discovery: your own creatures are in your Box and were
+      // marked CAUGHT when they got there, so marking them again is noise.
+      if (side != s_me) (void)dex_mark_seen(c->species_id);
     }
   }
 }

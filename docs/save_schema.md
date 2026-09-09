@@ -102,7 +102,28 @@ occupied slot when it points at an empty one.
 `magic 0x5643` · `version` · `time_cal_state` (`TimeCal`) · `device_id` (§43,
 drawn once) · `time_cal_epoch` · `last_known_epoch` · `pin_lock_until` · `seq` ·
 `creator_pin` · `creator_idle_s` · `flags` · `brightness` · `pin_fail_count` ·
-`device_name[13]` · `ap_pass[17]` · `tz[40]` · `reserved[152]` · `crc16`.
+`device_name[13]` · `ap_pass[17]` · `tz[40]` · `dex[15]` · `reserved[137]` ·
+`crc16`.
+
+**`dex[15]` was the front of `reserved[152]` until P10-C8**, and it is the whole
+persisted wiki: sixty species at two bits each (SEEN, CAUGHT), which
+`game/dex.h` asserts against the roster so a content pack that grows the roster
+fails to compile rather than dropping the species past the end. **No schema
+bump**, on exactly the argument `act_day`/`act_score` used below: an older blob
+reads 0 in all fifteen bytes, and an all-zero wiki is *nothing discovered yet* —
+which is the correct state for every save written before the commit. The bytes
+also round-trip untouched through an older firmware, which writes them back
+verbatim from its own struct.
+
+**It is NOT carved out of the runtime `Config`, and the reason is a defect the
+suite caught before it shipped.** The first draft took `Config.reserved_b[24]`
+instead, and `tests/test_fixtures.cpp` failed: the *v1* fixture — a real
+Nottamagochi save — carries latitude and longitude as ASCII in those bytes
+(`"41.3874"`, `"2.1686"`). A migrated save would have opened with half the
+roster "discovered" out of decimal digits. `ConfigV2` is built fresh by the
+migration and has no such history, which is why the wiki lives only there;
+`persistence/game_state.cpp` binds it on load and `cfg_to_v2()` carries a
+comment saying the runtime `Config` must never write it back.
 
 No Wi-Fi credentials, no cloud token, no coordinates: the device never
 associates to a station (spec §68 r5) and talks to nobody's cloud. `flags`:

@@ -26,6 +26,7 @@
 #include "screen_box.h"
 #include "screen_care.h"
 #include "screen_creator.h"
+#include "screen_dex.h"
 #include "screen_manual.h"
 #include "screen_diag.h"
 #include "screen_encounter.h"
@@ -131,6 +132,12 @@ const ScreenDef SCREENS[SCR_COUNT] = {
   // it does: no radio, no server, no hold on the power ladder.
   { manual_enter, nop_update, manual_render, manual_input, nop_leave,
     0, 0 },                                                       // SCR_MANUAL
+  // The wiki is an ordinary list screen: it times out, it owns no radio and it
+  // holds no state a player would lose. dex_screen_enter() re-derives its
+  // cursor from the dex every visit, so leaving and coming back opens it at the
+  // frontier again rather than where the last visit happened to stop.
+  { dex_screen_enter, nop_update, dex_screen_render, dex_screen_input, nop_leave,
+    0, 0 },                                                       // SCR_DEX
   // SETTINGS owns B because its "Acerca de" page is one level below the
   // navigation stack: B closes the page, and only then the screen.
   { settings_enter, nop_update, settings_render, settings_input, nop_leave, 0,
@@ -233,6 +240,6 @@ const ScreenDef SCREENS[SCR_COUNT] = {
 // kScreenName[] are what made it a build failure instead of a silent
 // off-by-one - the perf receipt would otherwise have printed "SETTINGS" for
 // every frame the MANUAL screen owned.
-static_assert((int)SCR_COUNT == 30, "screen table: rows and ScreenId drifted apart");
+static_assert((int)SCR_COUNT == 31, "screen table: rows and ScreenId drifted apart");
 static_assert((int)SCR_BOOT  ==  0, "screen table: BOOT is the first state");
-static_assert((int)SCR_DIAG  == 29, "screen table: DIAG is the last state");
+static_assert((int)SCR_DIAG  == 30, "screen table: DIAG is the last state");
