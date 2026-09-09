@@ -26,7 +26,7 @@
 //  Page and type
 // ---------------------------------------------------------------------------
 
-#set document(title: "Pebblebol - Manual de usuario / User manual")
+#set document(title: "Errata - Manual de usuario / User manual")
 #set page(
   width: 105mm, height: 148mm,
   bleed: 3mm,                 // writes a TrimBox; the printer needs both
@@ -97,8 +97,8 @@
   // reproduced unchanged.
   #set smartquote(enabled: false)
 
-  Pebblebol usa software de terceros. Sus avisos de copyright se reproducen
-  aqui como exigen sus licencias. / Pebblebol uses third-party software. Their
+  Errata usa software de terceros. Sus avisos de copyright se reproducen
+  aqui como exigen sus licencias. / Errata uses third-party software. Their
   copyright notices are reproduced here as their licences require.
 
   #v(1.5mm)

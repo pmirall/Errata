@@ -2541,12 +2541,19 @@ if [ -f "$ROOT/tools/pbm2svg.py" ] && [ -d "$ROOT/docs/manual" ]; then
   # tests/capture/ is build output and is not committed - the SVGs are. So the
   # staleness check only runs where a capture exists; on a fresh clone it says
   # so rather than failing a gate nobody can satisfy without building first.
-  if [ -d "$ROOT/tests/capture/golden/screens" ]; then
+  # THE CAPTURE ITSELF HAS TO BE FRESH, and until the Errata rename this gate
+  # could not see that it was not. It compared the SVGs against whatever
+  # tests/capture/ happened to hold, and tests/capture/ is build output that
+  # survives a merge - so after 427 files were renamed the booklet's boot
+  # splash still read the old wordmark and this said GATE OK. Comparing a
+  # generated file against another generated file proves only that they agree
+  # with each other. So the capture is REBUILT here; make is incremental, so
+  # the cost is a no-op once it is warm.
+  if make -C "$ROOT/tests" capture >/dev/null 2>&1 || [ -d "$ROOT/tests/capture/golden/screens" ]; then
     python3 "$ROOT/tools/pbm2svg.py" --check >/dev/null \
       || fail "manual screens are stale (make -C tests capture && tools/pbm2svg.py --all)"
   else
-    echo "check: no screen capture present, manual SVGs not verified" \
-         "(make -C tests capture)"
+    echo "check: screen capture could not be built, manual SVGs not verified"
   fi
 
   # No page number may be typed into the manual. The legal section grew by

@@ -7,7 +7,7 @@
 //  Layout is `seq`, not `bi`: continuous legal prose reads badly in a 40 mm
 //  column and is read rarely, so Spanish runs full width and English follows.
 //
-//  POSITIONING. Pebblebol is placed on the market as a 14+ electronic device,
+//  POSITIONING. Errata is placed on the market as a 14+ electronic device,
 //  NOT as a toy, so Directive 2009/48/EC, EN 71 and EN IEC 62115 are out of
 //  scope. That position is only defensible if the product says so plainly and
 //  consistently - a regulator may reclassify a product that is "obviously
@@ -31,7 +31,7 @@
 ]
 
 #seq[
-  Pebblebol es un aparato electrónico de ocio para personas de 14 años o más.
+  Errata es un aparato electrónico de ocio para personas de 14 años o más.
   No está diseñado ni ensayado como juguete y no cumple los requisitos
   aplicables a los juguetes. Manténgalo fuera del alcance de los niños
   pequeños: contiene piezas pequeñas y pilas.
@@ -54,7 +54,7 @@
   - No acerque el zumbador al oído.
   - Utilícelo solo para lo que se describe en este manual.
 ][
-  Pebblebol is a leisure electronic device for people aged 14 and over. It is
+  Errata is a leisure electronic device for people aged 14 and over. It is
   not designed or tested as a toy and does not meet the requirements that apply
   to toys. Keep it out of reach of small children: it contains small parts and
   batteries.
@@ -145,7 +145,7 @@
 
   - *Escucha* qué redes hay alrededor. El escaneo es pasivo: ni se asocia ni
     pide nada, solo oye lo que las redes ya emiten.
-  - *Habla* directamente con otro Pebblebol cercano, sin router.
+  - *Habla* directamente con otra Errata cercana, sin router.
   - *Crea su propia red* mientras el creador está abierto, para que su página
     se vea desde el móvil. Es la única situación en la que el aparato emite de
     forma continuada, y termina en cuanto cierras el creador.
@@ -171,7 +171,7 @@
   - It *listens* for the networks around it. The scan is passive: it neither
     associates nor asks for anything, it only hears what networks already
     broadcast.
-  - It *talks* directly to another nearby Pebblebol, with no router.
+  - It *talks* directly to another nearby Errata, with no router.
   - It *makes a network of its own* while the creator is open, so its page can
     be reached from a phone. That is the only situation in which the device
     transmits continuously, and it ends when you close the creator.
@@ -272,7 +272,7 @@
 
 #v(1.5mm)
 #seq[
-  *Aparato (RAEE).* Al final de su vida útil, deposite el Pebblebol en un punto
+  *Aparato (RAEE).* Al final de su vida útil, deposite la Errata en un punto
   limpio, en la tienda donde lo compró o en cualquier punto de recogida de
   RAEE. Directiva 2012/19/UE y RD 110/2015.
 
@@ -286,7 +286,7 @@
 
   Número RII-PYA: #fact("registers.rii_pya")
 ][
-  *Device (WEEE).* At the end of its life, take the Pebblebol to a civic
+  *Device (WEEE).* At the end of its life, take the Errata to a civic
   amenity site, to the shop where you bought it, or to any WEEE collection
   point. Directive 2012/19/EU and Spanish RD 110/2015.
 
@@ -317,7 +317,7 @@
   justificación, conforme a la Directiva 2011/83/UE. Condiciones en
   #fact("contact.website").
 
-  *Privacidad.* El Pebblebol funciona sin cuenta, sin registro y sin conexión a
+  *Privacidad.* Errata funciona sin cuenta, sin registro y sin conexión a
   internet. No recoge ni transmite datos personales.
 
   Del escaneo de redes conviene ser preciso, porque es lo único que el aparato
@@ -325,7 +325,7 @@
   existen únicamente dentro de la función que lee el resultado del escaneo, y
   se destruyen ahí mismo: lo que sale de esa función es un número resumen y una
   etiqueta de tipo de red. Ese número se calcula con una sal propia de cada
-  aparato, así que el mismo router da un número distinto en dos Pebblebol y no
+  aparato, así que el mismo router da un número distinto en dos Erratas y no
   puede usarse para cruzar datos entre unidades. Ningún nombre de red se guarda,
   se enseña en pantalla ni se manda a otro aparato.
 
@@ -345,7 +345,7 @@
   USB en #fact("contact.support_url").
 
   Para retirar el aparato de forma segura, borre la partida desde
-  #scr[AJUSTES] antes de cederlo o desecharlo: eso elimina sus Pebbles y el
+  #scr[AJUSTES] antes de cederlo o desecharlo: eso elimina sus Bugs y el
   identificador aleatorio del aparato.
 ][
   *Legal guarantee.* This product carries the
@@ -358,7 +358,7 @@
   #fact("commercial.withdrawal_days") calendar days to withdraw without giving
   a reason, under Directive 2011/83/EU. Terms at #fact("contact.website").
 
-  *Privacy.* The Pebblebol works with no account, no sign-up and no internet
+  *Privacy.* The Errata works with no account, no sign-up and no internet
   connection. It neither collects nor transmits personal data.
 
   The network scan is worth being precise about, because it is the only thing
@@ -366,7 +366,7 @@
   hardware address exist only inside the function that reads the scan result,
   and they are destroyed there: what leaves that function is a summary number
   and a network-type label. The number is computed with a salt unique to each
-  device, so the same router yields a different number on two Pebblebols and
+  device, so the same router yields a different number on two Erratas and
   cannot be used to correlate them. No network name is stored, shown on screen
   or sent to another device.
 
@@ -386,6 +386,6 @@
   at #fact("contact.support_url").
 
   To decommission the device safely, wipe the save from #scr[AJUSTES] before
-  passing it on or discarding it: that removes your Pebbles and the device's
+  passing it on or discarding it: that removes your Bugs and the device's
   random identifier.
 ]

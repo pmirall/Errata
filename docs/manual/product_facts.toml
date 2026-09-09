@@ -55,7 +55,7 @@ sbom_url = "TODO"                # where the software bill of materials lives
 # --- What the product is -----------------------------------------------------
 # GPSR art. 19 also requires a product identifier: type, batch or serial.
 [product]
-name = "Pebblebol"
+name = "Errata"
 model = "TODO"                   # e.g. PBBL-1
 hw_revision = "TODO"
 fw_version = "1.0.0-rc1"         # keep in step with src/core/version.h

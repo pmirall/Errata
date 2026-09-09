@@ -6,7 +6,7 @@ printed without.
 
 **Scope this assumes** (decided by the owner, 2026-09):
 
-- Pebblebol is placed on the market as a **14+ electronic device, not a toy**.
+- Errata is placed on the market as a **14+ electronic device, not a toy**.
   Directive 2009/48/EC, EN 71 and EN IEC 62115 are therefore out of scope.
 - **Short maker run / crowdfunding**, sold in Spain and possibly elsewhere in
   the EU. Selling ten units is placing product on the market exactly as much as
@@ -63,7 +63,7 @@ manual's exploded view until the enclosure is closed.
 ## The three that need a judgement call
 
 **#9 — RED cybersecurity (Delegated Regulation (EU) 2022/30).** Mandatory since
-1 August 2025 for internet-connected radio equipment. Pebblebol's position is
+1 August 2025 for internet-connected radio equipment. Errata's position is
 genuinely ambiguous and the file must record a reasoned answer rather than
 assume one: the release firmware **never connects to the internet** — Wi-Fi is
 scan-only and device-to-device traffic is ESP-NOW — but the device **does serve

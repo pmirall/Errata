@@ -8,7 +8,7 @@
 //  enclosure before they can be accurate.
 //
 //  On-screen wording quoted with `scr()` is copied from
-//  Pebblebol/src/core/strings_es.h. If a label changes there, change it here.
+//  Errata/src/core/strings_es.h. If a label changes there, change it here.
 // =============================================================================
 
 #import "../lib.typ": *
@@ -20,7 +20,7 @@
 #drawing("exploded", "Exploded view: device, 2x AAA, manual", height: 38mm)
 
 #bi[
-  #mark(1, [El Pebblebol.], [The Pebblebol.])
+  #mark(1, [La Errata.], [The Errata.])
   #mark(2, [Dos pilas AAA.], [Two AAA cells.])
   #mark(3, [Este manual.], [This manual.])
 ][]
@@ -80,7 +80,7 @@
 
 #v(1.5mm)
 #bi[
-  La primera vez que le pones las pilas, el Pebblebol no arranca en un menú:
+  La primera vez que le pones las pilas, la Errata no arranca en un menú:
   arranca escribiendo código. Tarda unos dieciséis segundos.
 
   Se compila, la barra llega al 92 % y se para. #scr[ERROR: 3 BUGS]. La banda
@@ -89,7 +89,7 @@
   Esos tres son tus candidatos, y el último fotograma de la película ya es la
   pantalla donde eliges.
 ][
-  The first time you fit the cells, the Pebblebol does not open on a menu: it
+  The first time you fit the cells, the Errata does not open on a menu: it
   opens writing code. It takes about sixteen seconds.
 
   It compiles, the bar reaches 92% and stops. #scr[ERROR: 3 BUGS]. The band
@@ -102,11 +102,11 @@
 #v(1.5mm)
 #warnbox[
   #set text(size: 7pt)
-  *Cualquier botón se la salta, y solo hace eso:* no elige Pebble por ti ni
+  *Cualquier botón se la salta, y solo hace eso:* no elige Bug por ti ni
   mueve el cursor. Puedes saltártela sin miedo a quedarte con un bicho que no
   has mirado. Solo se ve en el primer arranque de verdad. \
   #text(fill: luma(25%))[*Any button skips it, and only that:* it does not pick
-  a Pebble for you and does not move the cursor. You can skip it without ending
+  a Bug for you and does not move the cursor. You can skip it without ending
   up with a creature you never looked at. It plays on a true first run only.]
 ]
 
@@ -133,7 +133,7 @@
   Para el nombre, *A* recorre las letras y *B mantenido* pasa a la siguiente.
   *Mantén A* para aceptar.
 
-  Al final te pedirá la *hora*. Ajústala: tu Pebble duerme de noche y come de
+  Al final te pedirá la *hora*. Ajústala: tu Bug duerme de noche y come de
   día, y sin fecha no puedes explorar.
 
   Si prefieres saltarte las preguntas, pulsa *A + B*.
@@ -149,7 +149,7 @@
   For the name, *A* walks the letters and *hold B* moves to the next. *Hold A*
   to accept.
 
-  Last it asks for the *time*. Set it: your Pebble sleeps at night and eats by
+  Last it asks for the *time*. Set it: your Bug sleeps at night and eats by
   day, and without a date you cannot explore.
 
   If you would rather skip the questions, press *A + B*.
@@ -181,10 +181,10 @@
       [#text(fill: luma(25%))[Moves the cursor, or the main action]],
     [*A* mantenido], [Repite lo anterior],
       [#text(fill: luma(25%))[Repeats the above]],
-    [*B* toque], [*Atrás.* En todas las pantallas],
-      [#text(fill: luma(25%))[*Back.* On every screen]],
-    [*B* mantenido], [*Elige* la línea marcada],
+    [*B* toque], [*Elige* la línea marcada],
       [#text(fill: luma(25%))[*Chooses* the highlighted line]],
+    [*B* mantenido], [*Atrás.* En todas las pantallas],
+      [#text(fill: luma(25%))[*Back.* On every screen]],
     [*A + B*], [Ayuda de la pantalla actual],
       [#text(fill: luma(25%))[Help for the current screen]],
     [*A + B* largo], [Vuelve a INICIO desde donde sea],
@@ -195,10 +195,12 @@
 #v(1.5mm)
 #warnbox[
   #set text(size: 7pt)
-  *Lo único que sorprende:* para elegir hay que *mantener B*, no tocarlo. Un
-  toque de *B* siempre va hacia atrás. \
-  #text(fill: luma(25%))[*The one surprise:* to choose something you *hold B*,
-  you do not tap it. A tap on *B* always goes back.]
+  *Lo único que sorprende:* salir cuesta *mantener B*, no tocarlo. Un toque de
+  *B* elige, que es lo que uno hace a todas horas; irse hacia atrás es un gesto
+  deliberado y no un roce. \
+  #text(fill: luma(25%))[*The one surprise:* leaving costs a *held B*, not a
+  tap. A tap on B chooses, which is what you do constantly; going back is a
+  deliberate gesture rather than a brush.]
 ]
 
 #v(1mm)
@@ -207,7 +209,7 @@
   una caricia y *A + B* largo abre los ajustes.
 ][
   On the home screen there is nothing to go back to, so there *B* strokes the
-  Pebble and a long *A + B* opens the settings.
+  Bug and a long *A + B* opens the settings.
 ]
 
 // --- 6. The home screen ------------------------------------------------------
@@ -220,11 +222,11 @@
 )))
 
 #v(2mm)
-#mark(1, [El nombre de tu Pebble.], [Your Pebble's name.])
+#mark(1, [El nombre de tu Bug.], [Your Bug's name.])
 #mark(2, [Su nivel.], [Its level.])
 #mark(3, [Salud, comida y ánimo.], [Health, food and mood.])
-#mark(4, [Tu Pebble. Su postura te dice cómo está.],
-         [Your Pebble. Its posture tells you how it is doing.])
+#mark(4, [Tu Bug. Su postura te dice cómo está.],
+         [Your Bug. Its posture tells you how it is doing.])
 #mark(5, [Lo que hacen *A* y *B* en esta pantalla.],
          [What *A* and *B* do on this screen.])
 
@@ -241,9 +243,9 @@
   Menus are rings: past the last item you are back at the first.
 ]
 
-// --- Pebble states -----------------------------------------------------------
+// --- Bug states -----------------------------------------------------------
 #pagebreak()
-= Cómo está tu Pebble / How your Pebble is
+= Cómo está tu Bug / How your Bug is
 
 #bi[
   No hace falta abrir ningún menú: la pantalla de inicio ya te lo dice.
@@ -303,19 +305,19 @@
   En #scr[CUIDAR] tienes #scr[COMER], #scr[LIMPIAR], #scr[SALUD],
   #scr[ESTADO] y #scr[LUZ].
 
-  Tu Pebble avisa cuando necesita algo. No hace falta estar pendiente todo el
-  día: esto no es un Tamagotchi de los duros. *Tu Pebble no puede morir.*
+  Tu Bug avisa cuando necesita algo. No hace falta estar pendiente todo el
+  día: esto no es un Tamagotchi de los duros. *Tu Bug no puede morir.*
 
-  Solo el Pebble que llevas seleccionado necesita cuidados. Los que están en la
+  Solo el Bug que llevas seleccionado necesita cuidados. Los que están en la
   Caja se recuperan solos, poco a poco, a lo largo de unas 24 horas.
 ][
   Under #scr[CUIDAR] you get #scr[COMER] (feed), #scr[LIMPIAR] (clean),
   #scr[SALUD] (health), #scr[ESTADO] (status) and #scr[LUZ] (light).
 
-  Your Pebble tells you when it needs something. You do not have to watch it
-  all day: this is not one of the harsh Tamagotchis. *Your Pebble cannot die.*
+  Your Bug tells you when it needs something. You do not have to watch it
+  all day: this is not one of the harsh Tamagotchis. *Your Bug cannot die.*
 
-  Only the Pebble you have selected needs care. The ones in the Box recover on
+  Only the Bug you have selected needs care. The ones in the Box recover on
   their own, slowly, over about 24 hours.
 ]
 
@@ -384,7 +386,7 @@
   páginas*: *A* pasa de una a otra.
 
   La primera trae nivel, experiencia, tipo y estadísticas. La segunda trae el
-  *genoma* y los *rasgos*: los datos internos que hacen que dos Pebbles de la
+  *genoma* y los *rasgos*: los datos internos que hacen que dos Bugs de la
   misma especie no sean iguales.
 
   El *tipo* decide el triángulo del combate.
@@ -393,7 +395,7 @@
   pages*: *A* moves between them.
 
   The first has level, experience, type and stats. The second has the *genome*
-  and the *traits*: the internal data that makes two Pebbles of the same
+  and the *traits*: the internal data that makes two Bugs of the same
   species different from each other.
 
   *Type* decides the battle triangle.
@@ -594,10 +596,10 @@
 = Explorar / Explore
 
 #bi[
-  Esta es la idea central del producto. *Los Pebbles viven en las redes Wi-Fi
+  Esta es la idea central del producto. *Los Bugs viven en las redes Wi-Fi
   que te rodean.* Llévate el aparato encima y usa #scr[RED] para mirar.
 ][
-  This is the core idea of the product. *Pebbles live in the Wi-Fi networks
+  This is the core idea of the product. *Bugs live in the Wi-Fi networks
   around you.* Carry the device with you and use #scr[RED] to look.
 ]
 
@@ -606,11 +608,11 @@
 
 #v(2mm)
 #bi[
-  Una red puede darte un Pebble salvaje, uno raro, un objeto, un suceso
+  Una red puede darte un Bug salvaje, uno raro, un objeto, un suceso
   especial, o nada. Cada red se agota durante *un par de horas* como minimo:
   quedarte quieto en casa no sirve de mucho. Hay que moverse.
 ][
-  A network can give you a wild Pebble, a rare one, an item, a special event,
+  A network can give you a wild Bug, a rare one, an item, a special event,
   or nothing. Each network then goes quiet for *at least a couple of hours*:
   standing still at home gets you little. You have to move.
 ]
@@ -625,15 +627,15 @@
 
 #v(1.5mm)
 #bi[
-  De mirar una red sale una de cinco cosas: un Pebble salvaje, uno raro, un
+  De mirar una red sale una de cinco cosas: un Bug salvaje, uno raro, un
   objeto, un suceso especial, o nada. Que salga nada es normal y no es un
   fallo.
 
-  Cuando aparece un Pebble, la pantalla se rompe y el bicho se monta desde los
+  Cuando aparece un Bug, la pantalla se rompe y el bicho se monta desde los
   pies. Dura un segundo y *solo se ve una vez por encuentro*: si fallas un
   intento de captura y vuelves, no te la repite.
 
-  Un *suceso especial* puede dejar a tu Pebble *corrupto durante 24 h*. No es
+  Un *suceso especial* puede dejar a tu Bug *corrupto durante 24 h*. No es
   una avería: cambia su aspecto, cambia cómo combate, y abre dos evoluciones
   que no puedes conseguir de otra forma.
 
@@ -641,14 +643,14 @@
   Otras redes siguen valiendo, así que lo que hay que hacer es moverse, no
   esperar.
 ][
-  Checking a network gives one of five things: a wild Pebble, a rare one, an
+  Checking a network gives one of five things: a wild Bug, a rare one, an
   item, a special event, or nothing. Nothing is a normal outcome, not a fault.
 
-  When a Pebble turns up the screen tears and the creature assembles from the
+  When a Bug turns up the screen tears and the creature assembles from the
   feet up. It lasts a second and *plays once per encounter*: miss a throw and
   come back, and it does not replay.
 
-  A *special event* can leave your Pebble *corrupted for 24 h*. It is not a
+  A *special event* can leave your Bug *corrupted for 24 h*. It is not a
   fault: it changes how it looks, changes how it fights, and opens two
   evolutions you cannot get any other way.
 
@@ -669,7 +671,7 @@
 
 #v(1.5mm)
 #bi[
-  Ante un Pebble salvaje puedes capturarlo o dejarlo marchar. Dejarlo marchar
+  Ante un Bug salvaje puedes capturarlo o dejarlo marchar. Dejarlo marchar
   es una opción legítima, no una derrota.
 
   *Tienes dos intentos.* Si los dos fallan, se va. No hay un tercero.
@@ -681,7 +683,7 @@
   Una *Jaula Hash* sube esa probabilidad. Úsala antes de tirar, no después de
   fallar.
 ][
-  Facing a wild Pebble you can catch it or let it go. Letting it go is a
+  Facing a wild Bug you can catch it or let it go. Letting it go is a
   legitimate choice, not a loss.
 
   *You get two attempts.* If both fail, it leaves. There is no third.
@@ -698,9 +700,9 @@
 
 #warnbox[
   #set text(size: 7pt)
-  *El Pebblebol nunca se conecta a esas redes.* Solo mira qué nombres hay en el
+  *Errata nunca se conecta a esas redes.* Solo mira qué nombres hay en el
   aire, igual que hace tu móvil cuando abres la lista de Wi-Fi. \\
-  #text(fill: luma(25%))[*The Pebblebol never connects to those networks.* It
+  #text(fill: luma(25%))[*The Errata never connects to those networks.* It
   only looks at what names are in the air, the same way your phone does when
   you open its Wi-Fi list.]
 ]
@@ -741,7 +743,7 @@
 
 #v(1.5mm)
 #bi[
-  La Caja guarda hasta *diez* Pebbles. Desde #scr[CAJA] puedes leer la ficha de
+  La Caja guarda hasta *diez* Bugs. Desde #scr[CAJA] puedes leer la ficha de
   cada uno, cambiar cuál llevas seleccionado, o soltarlo.
 
   El seleccionado es el que llevas encima, el que cuidas y el que crece. Los
@@ -749,7 +751,7 @@
 
   Con la Caja llena no puedes capturar nada. Suelta algo antes de salir.
 ][
-  The Box holds up to *ten* Pebbles. From #scr[CAJA] you can read each one's
+  The Box holds up to *ten* Bugs. From #scr[CAJA] you can read each one's
   card, change which one you carry, or release it.
 
   The selected one is the one you carry, care for and grow. The rest recover on
@@ -770,12 +772,12 @@
 
 #v(1.5mm)
 #bi[
-  Al subir de nivel, un Pebble puede quedar *listo para evolucionar*. El
+  Al subir de nivel, un Bug puede quedar *listo para evolucionar*. El
   aparato te avisa y te pregunta: la evolución no ocurre a tus espaldas.
 
   Que esté listo *no significa que vaya a evolucionar*. El nivel es solo una de
   las condiciones. Otras evoluciones piden además felicidad, un objeto como la
-  *Llave Raíz*, o haber jugado lo suficiente. Y dos solo se abren si tu Pebble
+  *Llave Raíz*, o haber jugado lo suficiente. Y dos solo se abren si tu Bug
   está *corrupto*.
 
   Si falta alguna condición, sigue esperando hasta que se cumpla. No se pierde
@@ -784,12 +786,12 @@
   Evolucionar cambia aspecto, estadísticas y a veces ataques. Un huevo, además,
   necesita que lo lleves encima: frío quiere decir abandonado.
 ][
-  On levelling up, a Pebble may become *ready to evolve*. The device tells you
+  On levelling up, a Bug may become *ready to evolve*. The device tells you
   and asks: evolution never happens behind your back.
 
   Ready *does not mean it will evolve*. Level is only one of the conditions.
   Other evolutions also want happiness, an item such as the *Llave Raíz*, or
-  enough time played. And two open only while your Pebble is *corrupted*.
+  enough time played. And two open only while your Bug is *corrupted*.
 
   If a condition is missing it simply keeps waiting until it is met. Nothing is
   lost.
@@ -809,17 +811,17 @@
 
 #v(1.5mm)
 #bi[
-  Dos Pebblebol cerca pueden combatir. No hace falta internet ni router.
+  Dos Erratas cerca pueden combatir. No hace falta internet ni router.
 
-  Cada jugador lleva *hasta tres* Pebbles, pero pelea *uno a uno*. Eliges el
+  Cada jugador lleva *hasta tres* Bugs, pero pelea *uno a uno*. Eliges el
   equipo antes de empezar; con uno basta.
 
   El combate va por *rondas*: los dos elegís acción y luego se resuelven las
   dos, primero la del más rápido. No es por turnos alternos.
 ][
-  Two Pebblebols nearby can fight. No internet and no router needed.
+  Two Erratas nearby can fight. No internet and no router needed.
 
-  Each player brings *up to three* Pebbles but fights *one at a time*. You pick
+  Each player brings *up to three* Bugs but fights *one at a time*. You pick
   the team before you start; one is enough.
 
   A battle runs in *rounds*: you both choose an action and then both resolve,
@@ -828,9 +830,9 @@
 
 #v(2mm)
 #bi[
-  *El triángulo de tipos.* Cada Pebble y cada ataque tienen un tipo:
+  *El triángulo de tipos.* Cada Bug y cada ataque tienen un tipo:
 ][
-  *The type triangle.* Every Pebble and every attack has a type:
+  *The type triangle.* Every Bug and every attack has a type:
 ]
 
 #v(1mm)
@@ -843,9 +845,9 @@
 #warnbox[
   #set text(size: 7pt)
   *La regla que nadie adivina:* la ventaja de tipo se aplica *una sola vez por
-  Pebble y combate*. Gastarla en un golpe flojo la desperdicia. \
+  Bug y combate*. Gastarla en un golpe flojo la desperdicia. \
   #text(fill: luma(25%))[*The rule nobody guesses:* a type advantage applies
-  *once per Pebble per battle*. The device says so when it fires --
+  *once per Bug per battle*. The device says so when it fires --
   #scr[explota la debilidad] -- and once spent it is gone.]
 ]
 
@@ -860,7 +862,7 @@
 #v(1.5mm)
 #bi[
   En tu turno eliges entre *cuatro ataques*, *protegerte*, usar un objeto o
-  *cambiar* de Pebble.
+  *cambiar* de Bug.
 
   *Cambiar cuesta la ronda entera*: entras y encajas el golpe del rival sin
   devolverlo. A veces compensa; casi nunca por costumbre.
@@ -868,10 +870,10 @@
   *Protegerse* anula el golpe de esa ronda. No abuses: es una ronda que no
   haces daño.
 
-  Cuando un Pebble *cae*, sacas otro. Cuando caen los tres, se acaba.
+  Cuando un Bug *cae*, sacas otro. Cuando caen los tres, se acaba.
 ][
   On your turn you choose between *four attacks*, *protect*, an item, or
-  *switching* Pebble.
+  *switching* Bug.
 
   *Switching costs the whole round*: you come in and take the opponent's hit
   without answering. Sometimes worth it; almost never as a habit.
@@ -879,7 +881,7 @@
   *Protect* cancels that round's hit. Do not lean on it: it is a round in which
   you deal no damage.
 
-  When a Pebble *faints* you send out another. When all three are down, it is
+  When a Bug *faints* you send out another. When all three are down, it is
   over.
 ]
 
@@ -904,22 +906,22 @@
 
 #v(1.5mm)
 #bi[
-  #scr[ENLACE] busca otros Pebblebol cerca y te enseña quién hay. Los dos
+  #scr[ENLACE] busca otras Erratas cerca y te enseña quién hay. Los dos
   tenéis que aceptar: nadie puede conectarse contigo sin que lo veas.
 
   Al elegir a alguien salen tres opciones: #scr[COMBATE], #scr[INTERCAMBIO] y
   #scr[CRIAR].
 
-  *Intercambiar* manda un Pebble y recibe otro. Si el enlace se corta a medias,
+  *Intercambiar* manda un Bug y recibe otro. Si el enlace se corta a medias,
   el aparato lo repara solo: no se pierde ni se duplica ninguno.
 ][
-  #scr[ENLACE] looks for other Pebblebols nearby and shows you who is there.
+  #scr[ENLACE] looks for other Erratas nearby and shows you who is there.
   Both of you must accept: nobody can connect to you without you seeing it.
 
   Choosing someone offers three options: #scr[COMBATE], #scr[INTERCAMBIO] and
   #scr[CRIAR].
 
-  *Trading* sends one Pebble and receives another. If the link drops halfway
+  *Trading* sends one Bug and receives another. If the link drops halfway
   through, the device repairs it on its own: none is lost and none is
   duplicated.
 ]
@@ -947,14 +949,14 @@
 
 #v(1.5mm)
 #bi[
-  El Pebblebol puede abrir su propia página para que diseñes un Pebble desde el
+  La Errata puede abrir su propia página para que diseñes un Bug desde el
   móvil. El aparato crea una red propia, te enseña un código QR y un PIN, y tu
   te conectas a el. No hay servidor de por medio.
 
   Cierra el creador cuando termines. La página solo debería estar abierta
   mientras la usas.
 ][
-  The Pebblebol can serve its own page so you can design a Pebble from your
+  The Errata can serve its own page so you can design a Bug from your
   phone. The device makes its own network, shows a QR code and a PIN, and you
   connect to it. There is no server involved.
 
@@ -1100,35 +1102,35 @@
 
 #set text(size: 7pt)
 #bi[
-  *Pebble* -- la criatura. Un bicho digital atrapado en las redes.
+  *Bug* -- la criatura. Un bicho digital atrapado en las redes.
 
-  *Caja* -- donde guardas tus Pebbles. Diez plazas.
+  *Caja* -- donde guardas tus Bugs. Diez plazas.
 
-  *Seleccionado* -- el Pebble que llevas encima y que cuidas.
+  *Seleccionado* -- el Bug que llevas encima y que cuidas.
 
-  *Genoma* -- los datos internos que hacen a cada Pebble distinto.
+  *Genoma* -- los datos internos que hacen a cada Bug distinto.
 
   *Rasgo* -- una peculiaridad interna que cambia cómo se comporta.
 
-  *Corrupción* -- el desgaste que un Pebble acumula. Cambia su aspecto.
+  *Corrupción* -- el desgaste que un Bug acumula. Cambia su aspecto.
 
-  *Enlace* -- la conexión directa entre dos Pebblebol cercanos.
+  *Enlace* -- la conexión directa entre dos Erratas cercanas.
 
   *Encuentro* -- lo que sale de mirar una red con #scr[RED].
 ][
-  *Pebble* -- the creature. A digital bug trapped in the networks.
+  *Bug* -- the creature. A digital bug trapped in the networks.
 
-  *Box* -- where you keep your Pebbles. Ten slots.
+  *Box* -- where you keep your Bugs. Ten slots.
 
-  *Selected* -- the Pebble you carry and care for.
+  *Selected* -- the Bug you carry and care for.
 
-  *Genome* -- the internal data that makes each Pebble different.
+  *Genome* -- the internal data that makes each Bug different.
 
   *Trait* -- an internal quirk that changes how it behaves.
 
-  *Corruption* -- the wear a Pebble builds up. It changes how it looks.
+  *Corruption* -- the wear a Bug builds up. It changes how it looks.
 
-  *Link* -- the direct connection between two nearby Pebblebols.
+  *Link* -- the direct connection between two nearby Erratas.
 
   *Encounter* -- what comes out of checking a network with #scr[RED].
 ]
