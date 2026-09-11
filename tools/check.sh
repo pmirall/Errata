@@ -1503,6 +1503,37 @@ if [ -f "$ROOT/tests/test_statemachine.cpp" ]; then
   done
 fi
 
+# --- P10-C9: THE BOOKLET QUOTES STRINGS THAT EXIST --------------------------
+# docs/manual/ writes on-screen wording through scr(), and pbm2svg.py already
+# fails when a SCREENSHOT goes stale. Nothing checked the PROSE: a string the
+# firmware renamed or deleted stayed printed in the booklet, because a
+# screenshot shows one state of one screen and says nothing about a sentence
+# three pages away. That is the gap the guide-agent rule in CLAUDE.md covers by
+# judgement; this is the mechanical half of it.
+#
+# It found one the first time it ran: the care page told the player CUIDAR has
+# a LUZ row. The light mechanic was deleted in P3-C2b.
+#
+# WHAT IT CANNOT SEE, and the reason the agent still has to read the thing: a
+# literal that IS in the table but in the wrong place. COMER and ESTADO are
+# real strings and were both wrong on that same line, and this gate passed them.
+if [ -f "$ROOT/docs/manual/content/guide.typ" ]; then
+  python3 - "$ROOT/docs/manual/content/guide.typ" "$SKETCH/src/core/strings_es.h" <<'PYEOF' || fail "the printed manual quotes on-screen wording that is not in core/strings_es.h - a renamed or deleted string stays printed in a booklet that goes in a box (docs/manual/README.md, CLAUDE.md)"
+import re, sys
+typ = open(sys.argv[1], encoding="utf-8").read()
+hdr = open(sys.argv[2], encoding="utf-8").read()
+def dec(x):
+    try: return x.encode().decode("unicode_escape").encode("latin-1").decode("utf-8")
+    except Exception: return x
+table = {dec(t) for t in re.findall(r'"((?:[^"\\]|\\.)*)"', hdr)}
+missing = sorted({l for l in re.findall(r'#scr\[([^\]]*)\]', typ) if l not in table})
+if missing:
+    for m in missing:
+        print("  manual quotes a string the firmware does not have: %r" % m, file=sys.stderr)
+    sys.exit(1)
+PYEOF
+fi
+
 # --- P10-C9: EVERY SOURCE FILE IS VALID UTF-8 -------------------------------
 # core/strings_es.h being UTF-8 is gated elsewhere and by a recorder that
 # catches a bad byte the moment it is DRAWN. Nothing gated the rest of the tree,

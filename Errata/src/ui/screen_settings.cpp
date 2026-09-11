@@ -113,7 +113,9 @@ static void settings_select(void) {
   if (!c) { ui_toast(STR_ERR_BUSY); return; }
   switch (s_cur) {
     case SET_SOUND:
-      // ALTO -> MEDIO -> BAJO -> APAGADO -> ALTO. Down the ladder and then out,
+      // ALTO -> MEDIO -> BAJO -> OFF -> ALTO, in the words the panel actually
+      // prints: the fourth state is S(STR_OFF) and not a word of its own. Down
+      // the ladder and then out,
       // rather than off-first: the row starts where every existing save already
       // is, so pressing it once makes the device QUIETER, which is what a
       // player reaching for a sound setting in a quiet room wants.

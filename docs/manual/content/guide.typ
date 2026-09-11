@@ -304,8 +304,8 @@
 
 #v(1.5mm)
 #bi[
-  En #scr[CUIDAR] tienes #scr[COMER], #scr[LIMPIAR], #scr[SALUD],
-  #scr[ESTADO] y #scr[LUZ].
+  En #scr[CUIDAR] tienes #scr[Comida], #scr[Chuche], #scr[LIMPIAR],
+  #scr[SALUD] y #scr[MOCHILA].
 
   Tu Bug avisa cuando necesita algo. No hace falta estar pendiente todo el
   día: esto no es un Tamagotchi de los duros. *Tu Bug no puede morir.*
@@ -313,8 +313,8 @@
   Solo el Bug que llevas seleccionado necesita cuidados. Los que están en la
   Caja se recuperan solos, poco a poco, a lo largo de unas 24 horas.
 ][
-  Under #scr[CUIDAR] you get #scr[COMER] (feed), #scr[LIMPIAR] (clean),
-  #scr[SALUD] (health), #scr[ESTADO] (status) and #scr[LUZ] (light).
+  Under #scr[CUIDAR] you get #scr[Comida] (a meal), #scr[Chuche] (a treat),
+  #scr[LIMPIAR] (clean), #scr[SALUD] (health) and #scr[MOCHILA] (the bag).
 
   Your Bug tells you when it needs something. You do not have to watch it
   all day: this is not one of the harsh Tamagotchis. *Your Bug cannot die.*

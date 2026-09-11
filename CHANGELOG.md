@@ -43,7 +43,11 @@ device can be carried somewhere quiet without being silenced.
   less energy into a capacitive sounder. `kVolDuty` is **50 / 16 / 5 %**,
   bunched at the quiet end because perceived loudness follows duty far more
   slowly than power does.
-- **`AJUSTES → SONIDO` is one ring of four**: `ALTO → MEDIO → BAJO → APAGADO`.
+- **`AJUSTES → Sonido` is one ring of four**: `ALTO → MEDIO → BAJO → OFF`.
+  (The fourth state prints `OFF`, not `APAGADO` — `STR_OFF` already existed and
+  a fourth word would have been a second thing to translate. The row label is
+  `Sonido`, mixed case. Both were written wrong here first, and the guide agent
+  caught them by reading the string table instead of this file.)
   Down the ladder and then out, not off-first: one press makes the device
   *quieter*, which is what somebody reaching for a sound setting in a quiet room
   actually wants. Pressing it plays a click **at the level just chosen**, so the
@@ -60,7 +64,7 @@ device can be carried somewhere quiet without being silenced.
   `CF_MUTE` and leaves the level alone, so pressing it twice gives back the
   level you had rather than full blast. A single four-state field could not do
   that. Pinned by `muting_does_not_forget_the_level_you_had`.
-- Walking the settings ring out of `APAGADO` lands on `ALTO`, and that is not
+- Walking the settings ring out of `OFF` lands on `ALTO`, and that is not
   the same thing forgetting: you went all the way round. Two ways to reach
   silence, two different ways back, each meaning what its own gesture means.
 - **The home screen's A + B was undocumented.** The booklet said that gesture
@@ -84,6 +88,24 @@ reaches silence or exceeds a square wave, that the pitch does not move with the
 volume, and that the persisted byte reaches the pin. Whether 16 % and 5 % are
 two distinguishable levels is a bench item, and the middle one should be
 expected to need retuning.
+
+### And a gate on what the booklet quotes
+
+`docs/manual/` writes on-screen wording through `scr()`, and `pbm2svg.py`
+already fails when a *screenshot* goes stale. Nothing checked the *prose*: a
+screenshot shows one state of one screen and says nothing about a sentence
+three pages away. `tools/check.sh` now cross-references every `#scr[...]`
+literal in the booklet against `strings_es.h`.
+
+**It found one on its first run.** The care page told the player that `CUIDAR`
+has a `LUZ` row. The light mechanic was deleted in **P3-C2b** and the printed
+manual has been describing it ever since. The same line named `COMER` and
+`ESTADO`, which are not rows on that screen either, and omitted `Chuche` and
+`MOCHILA`; it now names the five the firmware actually draws.
+
+The gate cannot see that second kind — `COMER` and `ESTADO` *are* real strings,
+just not there — which is precisely why the guide agent still has to read the
+booklet rather than grep it.
 
 ### A defect the host suite could not see
 

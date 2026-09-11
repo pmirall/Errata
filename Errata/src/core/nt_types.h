@@ -507,7 +507,7 @@ static inline bool cfg_sound_muted(const Config& c) {
 //  a second field to remember with, which is the field this is.
 //
 //  WALKING THE SETTINGS RING IS DIFFERENT AND DELIBERATELY SO. That row is
-//  ALTO -> MEDIO -> BAJO -> APAGADO -> ALTO, so coming out of APAGADO lands on
+//  ALTO -> MEDIO -> BAJO -> OFF -> ALTO, so coming out of OFF lands on
 //  ALTO because you went all the way round - not because anything was
 //  forgotten. Two ways to reach silence, two different ways back, and each is
 //  what its own gesture means.
