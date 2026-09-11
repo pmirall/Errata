@@ -477,10 +477,16 @@ static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
 //  another 8 and would leave nothing at all; phone cameras resolve a bare host
 //  plus path as a URL, so the scheme buys nothing a scanner needs.
 //
-//  THIS URL IS 32 BYTES. THE BUDGET IS 32. There is no headroom left, which is
-//  the static_assert's whole job: the next rename that lengthens any part of it
-//  fails the build instead of shipping a symbol the panel cannot resolve.
-#define MANUAL_URL              "pmirall.github.io/Errata/uso.pdf"
+//  IT POINTS AT THE SITE, NOT AT THE PDF, AND THAT BOUGHT BACK EIGHT BYTES.
+//  It used to be ".../uso.pdf", 32 bytes against a 32-byte budget with no
+//  headroom at all. The site's front page carries the manual as its first link
+//  plus the bestiary and every screen, so the shorter URL is also the richer
+//  destination - a player who scans this gets the booklet AND the sixty, and
+//  the firmware gets eight bytes of room for the next rename.
+//
+//  The budget is still 32 and the static_assert is still the thing that stops a
+//  longer URL shipping as a symbol the panel cannot resolve.
+#define MANUAL_URL              "pmirall.github.io/Errata"
 static_assert(sizeof(MANUAL_URL) - 1 <= 32,
               "MANUAL_URL is past QR version 2's 32-byte budget: the symbol would\n               fall to one pixel per module in the 62 px box and stop being\n               scannable on a 0.96\" panel. See ui/qr.cpp's QR_VER table.");
 

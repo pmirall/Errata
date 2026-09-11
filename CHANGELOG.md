@@ -29,6 +29,62 @@ carries the developer console and ships to nobody. A number quoted without its
 variant is not a number — `docs/budget.md` §8 records a phase exit that compared
 one with the other.
 
+## [Unreleased] — a wiki you can scan off the panel, 2026-09-11
+
+**P10-C10.** There is a public website now, at `pmirall.github.io/Errata`, and
+the QR on the device points at it. It is **generated**, so it cannot go stale
+without failing the build.
+
+### Added
+
+- **`tools/build_wiki.py` → `docs/index.html`.** Bilingual ES/EN. A bestiary of
+  all sixty Bugs with the sprites the firmware actually ships — the same 24×24
+  bitmaps, animated on the device's own two frames — filterable, each opening a
+  card with stats, moves, the family's evolution chain with levels, and the art
+  notes quoted from the sprite file's own header. Plus the gallery of all 84
+  generated screenshots, the move and item tables, and the manual.
+- **Two gates**, both stress-tested by breaking them:
+  - `build_wiki.py --check` — the page against the roster, the sprites and the
+    captures. Same contract `gen_content.py` and `pbm2svg.py` already have.
+  - The device's QR destination must exist under `docs/`, **and** when it is the
+    site root the site must link `uso.pdf` — which is the whole argument for
+    shortening the URL, written down in `config.h` and previously checked by
+    nothing.
+
+### Changed
+
+- **`MANUAL_URL`: 32 bytes → 24.** It was `.../uso.pdf`, the entire QR budget
+  with no headroom. The site root is shorter *and* the richer destination, since
+  the front page carries the booklet as its first link. Eight bytes back.
+
+### A claim on the page that was false, found by the guide agent
+
+The site said the device "no habla con ningún servidor" / "talks to no server".
+Verified against the source: the first half is true and **stronger** than the
+page claimed — `net.cpp` scans with `WiFi.scanNetworks(true, true, true, …)`,
+passive, so it does not even emit a probe request, and no translation unit in
+the tree so much as declares `esp_wifi_connect`. But the device **is** a server:
+`softAP()`, a captive DNS, and five HTTP routes in `creator_server.cpp`. The
+page had not mentioned the creator at all.
+
+It now names it: *"El único servidor que hay en todo esto es el suyo."* A
+blanket denial the product's own feature contradicts is worse than the longer
+sentence.
+
+### And the booklet
+
+The settings page said the `Manual` QR goes to "este mismo manual, al día". It
+goes to a site that *contains* the manual. Corrected, plus a paragraph on the
+wiki page tying the on-device hint to the web copy — quoted through `scr()`, so
+the P10-C9 string gate now fails by name if `STR_MAN_HINT` is reverted.
+
+Also corrected, and older than any of this: the glossary defined *Corrupción*
+as "el desgaste que un Bug acumula". `game/corruption.h` is unambiguous that it
+is a 24-hour status set by an encounter and cleared by an item, and pages 8 and
+18 of the same booklet already said so. The booklet contradicted itself.
+
+40 pages before, 40 after.
+
 ## [Unreleased] — a volume knob on a thing with no knobs, 2026-09-11
 
 **P10-C9.** The sound was ON or OFF. It now has three audible levels, so the

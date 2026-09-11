@@ -1171,7 +1171,7 @@ inline constexpr const char* const ES[] = {
   /* STR_HLP_WEB */               "Página y QR en el móvil.",
   /* STR_HLP_BRIGHT */            "Brillo de la pantalla.",
   /* STR_HLP_INFO */              "Versión, red y memoria.",
-  /* STR_HLP_MANUAL */            "QR al manual de uso.",
+  /* STR_HLP_MANUAL */            "QR al manual y la wiki.",
   /* STR_HLP_RESET */             "Borra todo. Todo.",
   /* STR_HLP_PEER */              "Acércalo y espera.",
   /* STR_HLP_BACK */              "Volver sin tocar nada.",
@@ -1621,7 +1621,7 @@ inline constexpr const char* const ES[] = {
   , /* STR_VOL_LOW */              "BAJO"
   , /* STR_HLP_DEX_ROW */          "Los bugs que has visto."
   , /* STR_MAN_TITLE */           "MANUAL"
-  , /* STR_MAN_HINT */            "Escanea para leerlo en el móvil."
+  , /* STR_MAN_HINT */            "Manual y wiki en el móvil."
 };
 
 // -----------------------------------------------------------------------------

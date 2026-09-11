@@ -813,6 +813,17 @@
   The count in the top right is how many you hold, out of sixty.
 ]
 
+#v(1.5mm)
+#bi[
+  En #scr[AJUSTES], bajo #scr[Manual]: #scr[Manual y wiki en el móvil.] Ese QR
+  (página #pg(<sec-settings>)) abre la misma lista en la web, y allí salen las
+  sesenta desde el principio.
+][
+  In #scr[AJUSTES], under #scr[Manual]: #scr[Manual y wiki en el móvil.] That
+  QR (page #pg(<sec-settings>)) opens the same list on the web, where all sixty
+  show from the start.
+]
+
 // --- 12. Evolution ------------------------------------------------------------
 #pagebreak()
 = Evolución / Evolution
@@ -1043,7 +1054,7 @@
 
 // --- 15. Settings and battery ------------------------------------------------
 #pagebreak()
-= Ajustes y pilas / Settings and battery
+= Ajustes y pilas / Settings and battery <sec-settings>
 
 // THE MANUAL SCREEN MOVED UP INTO THE STRIP AND "Acerca de" LEFT IT, and the
 // second half of that is the page's rent. P10-C9 turned the sound row from two
@@ -1068,8 +1079,8 @@
   #scr[ALTO], la primera pulsación no apaga: baja el volumen. El silencio
   está al final.
 
-  #scr[Manual] enseña un código QR que lleva el móvil a este mismo manual, al
-  día: escanéalo si pierdes este cuadernillo.
+  #scr[Manual] enseña un código QR que lleva el móvil a la página de Errata:
+  este mismo manual, al día, y la wiki de las sesenta.
 ][
   #scr[AJUSTES] holds the clock, sound, brightness, device information and
   #scr[Manual].
@@ -1079,8 +1090,8 @@
   From #scr[ALTO] the first press does not switch it off: it turns the volume
   down. Silence is at the end.
 
-  #scr[Manual] shows a QR code that takes your phone to this same manual, kept
-  up to date: scan it if you lose this booklet.
+  #scr[Manual] shows a QR code that takes your phone to the Errata page: this
+  same manual, kept up to date, and the wiki of the sixty.
 ]
 
 #v(1.5mm)
@@ -1220,7 +1231,8 @@
 
   *Caja* -- donde guardas tus Bugs. Diez plazas.
 
-  *Wiki* -- la lista de las sesenta especies y de cuáles has conocido.
+  *Wiki* -- la lista de las sesenta especies y de cuáles has conocido. La
+  misma lista, entera, está en la página que abre el QR de #scr[Manual].
 
   *Seleccionado* -- el Bug que llevas encima y que cuidas.
 
@@ -1228,7 +1240,7 @@
 
   *Rasgo* -- una peculiaridad interna que cambia cómo se comporta.
 
-  *Corrupción* -- el desgaste que un Bug acumula. Cambia su aspecto.
+  *Corrupción* -- un estado que dura 24~h. Cambia su aspecto y cómo combate.
 
   *Enlace* -- la conexión directa entre dos Erratas cercanas.
 
@@ -1238,7 +1250,8 @@
 
   *Box* -- where you keep your Bugs. Ten slots.
 
-  *Wiki* -- the list of the sixty species, and which ones you have met.
+  *Wiki* -- the list of the sixty species, and which ones you have met. The
+  same list, complete, is on the page the #scr[Manual] QR opens.
 
   *Selected* -- the Bug you carry and care for.
 
@@ -1246,7 +1259,8 @@
 
   *Trait* -- an internal quirk that changes how it behaves.
 
-  *Corruption* -- the wear a Bug builds up. It changes how it looks.
+  *Corruption* -- a state that lasts 24~h. It changes how a Bug looks and how
+  it fights.
 
   *Link* -- the direct connection between two nearby Erratas.
 

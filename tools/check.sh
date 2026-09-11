@@ -40,6 +40,47 @@ if [ $DO_BUILD -eq 1 ]; then
 fi
 
 if [ $DO_TESTS -eq 1 ]; then
+# --- P10-C10: THE DEVICE'S QR POINTS SOMEWHERE THAT EXISTS ------------------
+# MANUAL_URL is what the QR on the MANUAL screen encodes, and GitHub Pages
+# serves docs/ at the site root, so the URL's path after the repo name must
+# resolve to something under docs/. A QR aimed at a 404 is worse than no QR:
+# the player scans it, gets nothing, and has no way to tell whether the fault is
+# the symbol, the phone or the product.
+#
+# IT RUNS HERE, BEFORE THE HOST TESTS, AND THAT IS THE POINT. The first draft of
+# this gate sat next to the wiki check at the bottom and could never fire -
+# changing MANUAL_URL moves a golden, so the host tests failed first every time
+# and the check was decoration. A gate that cannot fail is worse than no gate,
+# because it reads as coverage.
+if [ -f "$SKETCH/src/core/config.h" ]; then
+  qr_url=$( sed -n 's/^#define[[:space:]]*MANUAL_URL[[:space:]]*"\([^"]*\)".*/\1/p' "$SKETCH/src/core/config.h" )
+  [ -n "$qr_url" ] || fail "MANUAL_URL not found in core/config.h - the MANUAL screen would encode nothing"
+  case "$qr_url" in
+    *.github.io/*)
+      qr_rest=${qr_url#*.github.io/}          # "Errata" or "Errata/uso.pdf"
+      case "$qr_rest" in
+        */*) qr_path=${qr_rest#*/} ;;         # everything after the repo name
+        *)   qr_path="" ;;                    # repo name alone: the site root
+      esac
+      if [ -z "$qr_path" ]; then
+        [ -f "$ROOT/docs/index.html" ] \
+          || fail "MANUAL_URL is the site root ($qr_url) and docs/index.html does not exist - Pages would serve a 404 to every player who scans the QR"
+        # AND THE SITE HAS TO CARRY THE BOOKLET, because that is the entire
+        # argument for pointing the QR at the site instead of at the PDF.
+        # core/config.h writes it down as justification and docs/manual/README.md
+        # repeats it; without this, a redesign that drops the link turns both
+        # into claims nothing checks, and the player who scanned the QR looking
+        # for the manual has no way back to it.
+        grep -q 'href="uso\.pdf"' "$ROOT/docs/index.html" \
+          || fail "MANUAL_URL points at the site root but docs/index.html does not link uso.pdf - the QR was shortened on the promise that the site carries the manual (core/config.h, docs/manual/README.md)"
+      else
+        [ -e "$ROOT/docs/$qr_path" ] || [ -f "$ROOT/docs/$qr_path/index.html" ] \
+          || fail "MANUAL_URL points at $qr_url and docs/$qr_path does not exist - Pages would serve a 404 to every player who scans the QR"
+      fi ;;
+    *) fail "MANUAL_URL ($qr_url) is not a github.io address and this gate cannot check it - either host it somewhere this can verify, or widen the gate deliberately" ;;
+  esac
+fi
+
   make -C "$ROOT/tests" check || fail "host tests"
 
   # --- THE INSTRUMENTS MUST STILL COMPILE (P9-C6) ---------------------------
@@ -1503,6 +1544,25 @@ if [ -f "$ROOT/tests/test_statemachine.cpp" ]; then
   done
 fi
 
+# --- P10-C10: THE PUBLIC WIKI IS A BUILD ARTEFACT ---------------------------
+# docs/index.html is generated from tools/content/*.json, tools/sprites/*.txt and
+# the generated screen SVGs. A hand-written bestiary is a second copy of the
+# roster, and a second copy agrees with the first one on the day it is written
+# and never again - sixty creatures, thirty-four moves and sixty pairs of 24x24
+# frames are far past what anybody re-checks by eye after a balance pass.
+#
+# Same contract gen_content.py and gen_index_html.py already have with their
+# generated headers. Rename a species, retune a stat, redraw a sprite: the page
+# changes with it or this fails.
+#
+# WHAT IT CANNOT SEE is the prose - the paragraphs that explain what a Bug IS
+# are not generated from anything and nothing here notices when they stop being
+# true. That half is the guide rule in CLAUDE.md.
+if [ -f "$ROOT/tools/build_wiki.py" ]; then
+  python3 "$ROOT/tools/build_wiki.py" --check >/dev/null 2>&1 \
+    || fail "docs/index.html is stale or unbuildable - regenerate it with tools/build_wiki.py (the wiki is generated from the roster, the sprites and the screen captures)"
+fi
+
 # --- P10-C9: THE BOOKLET QUOTES STRINGS THAT EXIST --------------------------
 # docs/manual/ writes on-screen wording through scr(), and pbm2svg.py already
 # fails when a SCREENSHOT goes stale. Nothing checked the PROSE: a string the
@@ -2641,9 +2701,10 @@ PY
   [ -z "$n" ] || fail "a manual section has no content: $n"
 
   # THE COMMITTED PDF MAY NOT DRIFT FROM ITS SOURCES. docs/uso.pdf is in git so
-  # the booklet can be read without a toolchain - and since Pages went up it is
-  # also what the device's MANUAL screen points a phone at, so a stale copy is
-  # now a wrong answer to a QR and not just an out-of-date file. An artefact
+  # the booklet can be read without a toolchain - and since P10-C10 it is the
+  # first link on docs/index.html, which is where the device's MANUAL QR now
+  # lands, so a stale copy is one hop from a QR and not just an out-of-date
+  # file. An artefact
   # that cannot be compared to its input is a file that goes quietly stale -
   # the same failure mode as the firmware version below and the screen SVGs
   # above. The build is byte-reproducible (SOURCE_DATE_EPOCH), so the check is

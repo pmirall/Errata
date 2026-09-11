@@ -12,14 +12,17 @@ tools/build_manual.sh --print         # refuses to build with any hole left
 Output lands in `docs/manual/out/`, which is not tracked.
 
 **The built booklet is committed**, at `docs/uso.pdf`, so it can be read without
-installing anything - and, since GitHub Pages went up, that path is also what the
-device's MANUAL screen points a phone at.
+installing anything - and GitHub Pages serves it from there.
 
-The name is not a taste. `ui/qr.cpp` encodes 32 bytes at a scale the 0.96" panel
-can resolve; `pmirall.github.io/Errata` is 24 of them, so the path has eight to
-live in and `/uso.pdf` is exactly eight. `core/config.h` static_asserts the URL
-against that budget, so a longer name fails the build rather than shipping a
-symbol nobody can scan. The build output under `out/` is still named
+**The device's QR no longer points at it directly.** P10-C10 moved `MANUAL_URL`
+to the site root, `pmirall.github.io/Errata`, because `docs/index.html` carries
+the booklet as its first link *and* the bestiary of the sixty: same scan, more
+at the end of it, and eight bytes back inside `ui/qr.cpp`'s 32-byte version-2
+budget, which `core/config.h` still static_asserts. The path `/uso.pdf` is
+therefore no longer load-bearing for the symbol - but it is load-bearing for the
+site, which links it by name, and for `tools/check.sh`, which refuses a
+`MANUAL_URL` whose path does not exist under `docs/`. The build output under
+`out/` is still named
 `manual-draft.pdf` / `manual-print.pdf`; only the published copy is short. It is a DRAFT: every legal fact that is
 still missing prints as a black `TODO:` block, and `--print` refuses to build
 until they are filled in. Do not send it to a printer.
