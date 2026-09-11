@@ -42,24 +42,34 @@ static_assert(MAN_ROW_HINT + 2 * GFX_LINE_BODY < UI_AFFORD_Y,
 // an encode that walks a Reed-Solomon generator; MANUAL_URL cannot change while
 // the screen is open, so re-encoding every frame would be the same answer at
 // FPS_LOW forever.
-static uint8_t s_mod[QR_BUF_BYTES];
-static uint8_t s_size = 0;
-static char    s_payload[QR_TEXT_MAX];
+static uint8_t  s_mod[QR_BUF_BYTES];
+static uint8_t  s_size = 0;
+static char     s_payload[QR_TEXT_MAX];
+static uint16_t s_title = STR_MAN_TITLE;
+static uint16_t s_hint  = STR_MAN_HINT;
 
-const char* manual_payload(void) { return s_payload; }
+const char* qr_link_payload(void) { return s_payload; }
 
-void manual_enter(void) {
+// ONE ENTRY POINT, TWO CALLERS. The URL and the two strings are everything that
+// differs between the manual row and the website row; sharing the rest is what
+// keeps the 165-byte module buffer at one copy instead of two.
+static void link_enter(const char* url, uint16_t title, uint16_t hint) {
   s_size = 0;
   s_payload[0] = '\0';
+  s_title = title;
+  s_hint  = hint;
   uint8_t size = 0;
-  if (qr_encode(MANUAL_URL, s_mod, size)) {
+  if (qr_encode(url, s_mod, size)) {
     s_size = size;
     // The payload is copied back from the constant rather than assumed: what
     // this reports is what was HANDED to the encoder, which is the only thing
     // a test asserting "the QR points at the manual" can honestly read.
-    snprintf(s_payload, sizeof s_payload, "%s", MANUAL_URL);
+    snprintf(s_payload, sizeof s_payload, "%s", url);
   }
 }
+
+void manual_enter(void) { link_enter(MANUAL_URL, STR_MAN_TITLE,  STR_MAN_HINT);  }
+void wiki_enter(void)   { link_enter(WIKI_URL,   STR_WIKI_TITLE, STR_WIKI_HINT); }
 
 // Nothing to press. B is BACK and the router owns it; A has nothing to mean on
 // a screen with one static picture, so it does nothing rather than something
@@ -75,9 +85,9 @@ void manual_render(void) {
   const int16_t rw = (int16_t)(OLED_W - rx - 1);
 
   gfx_text_wrap(GF_BODY, rx, MAN_ROW_TITLE, rw, GFX_LINE_BODY, 2,
-                S(STR_MAN_TITLE));
+                S(s_title));
   gfx_text_wrap(GF_BODY, rx, MAN_ROW_HINT, rw, GFX_LINE_BODY, 3,
-                S(STR_MAN_HINT));
+                S(s_hint));
 
   {
     const SpriteRef l = sprite_mini(MIC_ARROW_L);

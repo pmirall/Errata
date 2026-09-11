@@ -1,7 +1,7 @@
 // =============================================================================
 //  ERRATA - ui/screen_manual.h
 //
-//  THE USER MANUAL, AS A PICTURE OF A LINK. PURE translation unit.
+//  A LINK, AS A PICTURE. TWO OF THEM. PURE translation unit.
 //
 //  A handheld with two buttons and a 128x64 panel cannot hold a manual, and a
 //  printed card gets lost. What the device CAN do is hand the player the
@@ -14,6 +14,16 @@
 //  a PIN, an idle deadline and a power-ladder hold to show the same picture -
 //  none of which this screen has any business inheriting just because the two
 //  both draw a QR.
+//
+//  TWO SCREENS, ONE IMPLEMENTATION, ONE BUFFER. AJUSTES has a row for the
+//  printed manual and a row for the website, and they are two destinations
+//  rather than one because a player who wants the booklet should not have to
+//  land on a site and hunt for a link. What they share is everything below the
+//  URL: the same 62 px box, the same encoder and - deliberately - the same
+//  165-byte module buffer, because only one of them can be open at a time.
+//  That is also why the payload accessor is qr_link_payload() and not one per
+//  screen: there is ONE buffer, it holds whatever screen is open, and an
+//  accessor per screen would promise two answers the module cannot give.
 //
 //  THE ENCODE CAN FAIL AND THE SCREEN SAYS SO. qr_encode() refuses a payload
 //  that will not fit the versions ui/qr.cpp implements; core/config.h
@@ -29,14 +39,15 @@
 
 #include "../core/nt_types.h"
 
-void manual_enter(void);
-void manual_render(void);
+void manual_enter(void);      // encodes MANUAL_URL - the printed booklet
+void wiki_enter(void);        // encodes WIKI_URL   - the website
+void manual_render(void);     // both rows render through this
 void manual_input(Gesture g);
 
-// The NUL-terminated payload the symbol encodes, or "" if the encode failed.
-// Exported for the same reason ui/screen_creator.h exports creator_payload():
-// a host test has no scanner, and "the QR points at the manual" is a claim only
-// a reader of the bytes can check.
-const char* manual_payload(void);
+// The NUL-terminated payload the OPEN screen encoded, or "" if the encode
+// failed. Exported for the same reason ui/screen_creator.h exports
+// creator_payload(): a host test has no scanner, and "the QR points at the
+// manual" is a claim only a reader of the bytes can check.
+const char* qr_link_payload(void);
 
 #endif  // ER_SCREEN_MANUAL_H

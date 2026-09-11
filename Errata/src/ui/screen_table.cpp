@@ -132,6 +132,12 @@ const ScreenDef SCREENS[SCR_COUNT] = {
   // it does: no radio, no server, no hold on the power ladder.
   { manual_enter, nop_update, manual_render, manual_input, nop_leave,
     0, 0 },                                                       // SCR_MANUAL
+  // THE SAME ROW TWICE, WITH A DIFFERENT ENTER. ui/screen_manual.h argues it:
+  // the website and the booklet are two destinations, so they are two rows a
+  // player can tell apart, but everything below the URL is shared - including
+  // the 165-byte module buffer, because only one can be open at a time.
+  { wiki_enter,   nop_update, manual_render, manual_input, nop_leave,
+    0, 0 },                                                       // SCR_WIKI
   // The wiki is an ordinary list screen: it times out, it owns no radio and it
   // holds no state a player would lose. dex_screen_enter() re-derives its
   // cursor from the dex every visit, so leaving and coming back opens it at the
@@ -240,6 +246,6 @@ const ScreenDef SCREENS[SCR_COUNT] = {
 // kScreenName[] are what made it a build failure instead of a silent
 // off-by-one - the perf receipt would otherwise have printed "SETTINGS" for
 // every frame the MANUAL screen owned.
-static_assert((int)SCR_COUNT == 31, "screen table: rows and ScreenId drifted apart");
+static_assert((int)SCR_COUNT == 32, "screen table: rows and ScreenId drifted apart");
 static_assert((int)SCR_BOOT  ==  0, "screen table: BOOT is the first state");
-static_assert((int)SCR_DIAG  == 30, "screen table: DIAG is the last state");
+static_assert((int)SCR_DIAG  == 31, "screen table: DIAG is the last state");

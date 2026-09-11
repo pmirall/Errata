@@ -1,0 +1,852 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Errata</title>
+<meta name="description" content="Errata: un bicho virtual de bolsillo. Las sesenta especies, las pantallas del aparato y el manual.">
+<meta name="theme-color" content="#0B0E11">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* ===========================================================================
+   THE DEVICE IS 1-BIT. THIS PAGE IS WHERE WHAT DOES NOT FIT IN 1 BIT LIVES.
+   That is the whole design brief, and the one rule that follows from it is
+   that COLOUR IS RESERVED FOR TYPE. SIGNAL, CORRUPT and SYSTEM get a hue each
+   because the panel can never tell them apart; nothing else on this page is
+   coloured. The neutrals are biased cool toward those three phosphors rather
+   than being a pure grey ramp, so the ground reads as an instrument.
+   =========================================================================== */
+:root{
+  --panel:#0B0E11; --surface:#141A20; --raise:#1B232B;
+  --lit:#E8EDF0; --dim:#7E8A93; --rule:#252F38;
+  --signal:#5FD0E4; --corrupt:#E4675A; --system:#E0B341;
+  /* The little screens NEVER change with the theme: a sprite tile is a picture
+     of the panel, and the panel is lit pixels on black wherever you read it. */
+  --screen:#0A0D10; --screen-lit:#E8EDF0; --screen-grid:#161C22;
+  --shadow:rgba(0,0,0,.5);
+}
+:root:not([data-theme="dark"]){ color-scheme:light dark }
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]){
+    --panel:#EDEEEA; --surface:#FFFFFF; --raise:#F5F6F3;
+    --lit:#12161A; --dim:#5E6A73; --rule:#D8DBD5;
+    --signal:#0D7186; --corrupt:#B23A2D; --system:#7E5A0C;
+    --shadow:rgba(18,22,26,.12);
+  }
+}
+:root[data-theme="light"]{
+  --panel:#EDEEEA; --surface:#FFFFFF; --raise:#F5F6F3;
+  --lit:#12161A; --dim:#5E6A73; --rule:#D8DBD5;
+  --signal:#0D7186; --corrupt:#B23A2D; --system:#7E5A0C;
+  --shadow:rgba(18,22,26,.12);
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;background:var(--panel);color:var(--lit);
+  font:400 15px/1.6 "IBM Plex Sans","Segoe UI",system-ui,-apple-system,sans-serif;
+}
+.mono,.k,.num,th,.chip,.tag,.eyebrow,.mark,.viewbtn,.count{
+  font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-variant-numeric:tabular-nums;
+}
+h1,h2,h3,h4{margin:0;line-height:1.15;text-wrap:balance;font-weight:600}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-radius:3px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+.wrap{width:100%;max-width:1020px;margin:0 auto;padding-inline:20px}
+
+/* ---- header --------------------------------------------------------- */
+header{position:sticky;top:0;z-index:40;background:var(--panel);border-bottom:1px solid var(--rule)}
+.bar{display:flex;align-items:center;gap:12px;height:52px}
+.mark{font-weight:600;letter-spacing:.26em;font-size:15px}
+.bar nav{margin-left:auto;display:flex;gap:2px;align-items:center}
+.bar nav a{text-decoration:none;font-size:13px;padding:6px 9px;border-radius:5px;color:var(--dim)}
+.bar nav a:hover{color:var(--lit);background:var(--surface)}
+.langs{display:flex;border:1px solid var(--rule);border-radius:5px;overflow:hidden;flex:none;margin-left:8px}
+.langs button{
+  border:0;background:transparent;color:var(--dim);padding:7px 9px;cursor:pointer;
+  font:500 11px/1 "IBM Plex Mono",monospace;letter-spacing:.08em;
+}
+.langs button[aria-pressed="true"]{background:var(--lit);color:var(--panel)}
+@media (max-width:600px){ .bar nav a{display:none} }
+
+/* ---- the sprite tile: a little picture of the panel ------------------ */
+.tile{
+  background:var(--screen);border-radius:4px;display:grid;place-items:center;
+  flex:none;position:relative;overflow:hidden;
+}
+.tile canvas{image-rendering:pixelated;display:block;position:relative;z-index:1}
+/* the pixel grid, faint, so the tile reads as a screen and not as a swatch */
+.tile::after{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background-image:linear-gradient(var(--screen-grid) 1px,transparent 1px),
+                   linear-gradient(90deg,var(--screen-grid) 1px,transparent 1px);
+  background-size:var(--px,4px) var(--px,4px);opacity:.55;
+}
+.t-72{width:88px;height:88px;--px:3px} .t-72 canvas{width:72px;height:72px}
+.t-96{width:116px;height:116px;--px:4px} .t-96 canvas{width:96px;height:96px}
+.t-48{width:62px;height:62px;--px:2px} .t-48 canvas{width:48px;height:48px}
+.t-120{width:144px;height:144px;--px:5px} .t-120 canvas{width:120px;height:120px}
+
+/* ---- hero ----------------------------------------------------------- */
+.hero{padding-block:40px 34px;border-bottom:1px solid var(--rule)}
+.hero .eyebrow{margin-bottom:14px}
+.hero h1{font-size:clamp(26px,5.4vw,40px);max-width:19ch}
+.hero p{margin:16px 0 0;color:var(--dim);max-width:58ch;font-size:16px}
+/* THE EVOLUTION LINE NEVER WRAPS. It is an argument about a sequence - the same
+   shape three times, breaking further - and a sequence that folds to 2 + 1 on a
+   phone stops making it. It scrolls sideways in its own box instead, which is
+   also why the caption is a sibling and not a flex item inside it. */
+.line{display:flex;align-items:center;gap:10px;margin-top:26px;flex-wrap:nowrap;
+      overflow-x:auto;padding-bottom:4px}
+.linecap{margin:10px 0 0;font-size:12px;color:var(--dim);
+         font-family:"IBM Plex Mono",monospace}
+@media (max-width:480px){
+  .line .t-96{width:96px;height:96px;--px:3px}
+  .line .t-96 canvas{width:80px;height:80px}
+}
+.line .arrow{color:var(--dim);font-size:12px;white-space:nowrap}
+.line figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:7px}
+.line figcaption{font-size:12px;color:var(--dim)}
+.line figcaption b{display:block;color:var(--lit);font-weight:500;font-size:13px}
+.cta{display:flex;flex-wrap:wrap;gap:10px;margin-top:28px}
+.btn{
+  display:inline-block;text-decoration:none;font:500 14px/1 "IBM Plex Sans",sans-serif;
+  padding:11px 15px;border:1px solid var(--rule);border-radius:6px;color:var(--lit);
+}
+.btn:hover{border-color:var(--lit)}
+.btn.solid{background:var(--lit);color:var(--panel);border-color:var(--lit)}
+
+section{padding-block:42px;border-bottom:1px solid var(--rule);scroll-margin-top:60px}
+.eyebrow{font-size:11px;letter-spacing:.2em;color:var(--dim);text-transform:uppercase;font-weight:500}
+section h2{font-size:clamp(21px,4.6vw,27px);margin-top:9px}
+.lede{margin:12px 0 0;max-width:64ch;color:var(--dim)}
+
+/* ---- controls ------------------------------------------------------- */
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:22px}
+.views{display:flex;border:1px solid var(--rule);border-radius:6px;overflow:hidden}
+.viewbtn{
+  border:0;border-right:1px solid var(--rule);background:transparent;color:var(--dim);
+  padding:9px 13px;cursor:pointer;font-size:12px;letter-spacing:.06em;
+}
+.viewbtn:last-child{border-right:0}
+.viewbtn[aria-pressed="true"]{background:var(--lit);color:var(--panel)}
+.controls input{
+  flex:1 1 170px;min-width:140px;background:var(--surface);color:var(--lit);
+  border:1px solid var(--rule);border-radius:6px;padding:9px 12px;
+  font:400 14px/1 "IBM Plex Sans",sans-serif;
+}
+.chip{
+  border:1px solid var(--rule);background:transparent;color:var(--dim);
+  border-radius:5px;padding:8px 11px;font-size:11px;letter-spacing:.1em;cursor:pointer;font-weight:500;
+}
+.chip[data-type="SIGNAL"]{color:var(--signal)}
+.chip[data-type="CORRUPT"]{color:var(--corrupt)}
+.chip[data-type="SYSTEM"]{color:var(--system)}
+.chip[aria-pressed="true"]{background:currentColor;border-color:currentColor}
+.chip[aria-pressed="true"] span{color:var(--panel);mix-blend-mode:normal}
+.count{margin-left:auto;font-size:12px;color:var(--dim)}
+
+/* ---- type tag ------------------------------------------------------- */
+.tag{font-size:10px;letter-spacing:.12em;font-weight:500}
+.tag.SIGNAL{color:var(--signal)} .tag.CORRUPT{color:var(--corrupt)} .tag.SYSTEM{color:var(--system)}
+.tag.NEUTRAL{color:var(--dim)}
+
+/* ---- view: families -------------------------------------------------- */
+.fams{display:grid;gap:10px;margin-top:20px}
+/* Three tiles and two arrows are about 380 px wide, so one family per row leaves
+   half a desk screen empty and makes twenty of them a very long scroll. */
+@media (min-width:880px){ .fams{grid-template-columns:1fr 1fr} }
+.fam{
+  border:1px solid var(--rule);border-radius:8px;background:var(--surface);
+  padding:13px 14px;display:grid;gap:11px;
+}
+.fam header{
+  position:static;background:none;border:0;height:auto;
+  display:flex;align-items:baseline;gap:9px;
+}
+.fam h3{font-size:13px;font-weight:600;letter-spacing:.1em;font-family:"IBM Plex Mono",monospace}
+.fam .stages{display:flex;align-items:center;gap:9px;overflow-x:auto;padding-bottom:2px}
+.fam .step{
+  display:flex;flex-direction:column;align-items:center;gap:6px;
+  background:none;border:0;padding:0;cursor:pointer;color:inherit;flex:none;
+}
+.fam .step .nm{font:500 13px/1.2 "IBM Plex Sans",sans-serif}
+.fam .step .num{font-size:10px;color:var(--dim)}
+.fam .step:hover .nm{text-decoration:underline}
+
+/* ---- view: grid ------------------------------------------------------ */
+.grid{display:grid;gap:9px;margin-top:20px;grid-template-columns:repeat(auto-fill,minmax(100px,1fr))}
+.card{
+  background:var(--surface);border:1px solid var(--rule);border-radius:8px;
+  padding:10px 6px 9px;cursor:pointer;color:inherit;font:inherit;
+  display:flex;flex-direction:column;align-items:center;gap:5px;
+}
+.card:hover{border-color:var(--lit)}
+.card .num{font-size:10px;color:var(--dim)}
+.card .nm{font:500 13px/1.2 "IBM Plex Sans",sans-serif;text-align:center}
+
+/* ---- view: table ----------------------------------------------------- */
+.tw{overflow-x:auto;margin-top:20px;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13px;min-width:520px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--rule);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+th{font-size:10px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase;font-weight:500;cursor:pointer;user-select:none}
+th[aria-sort]{color:var(--lit)}
+td.n{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--raise)}
+
+/* ---- detail sheet ---------------------------------------------------- */
+.sheet{position:fixed;inset:0;z-index:60;display:none;background:rgba(0,0,0,.55)}
+.sheet.on{display:block}
+.inner{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:min(600px,calc(100vw - 24px));max-height:min(88vh,820px);overflow:auto;
+  background:var(--surface);border:1px solid var(--rule);border-radius:12px;
+  box-shadow:0 20px 70px var(--shadow);padding:22px;
+}
+@media (max-width:620px){
+  .inner{left:0;top:auto;bottom:0;transform:none;width:100vw;max-height:92vh;
+         border-radius:12px 12px 0 0;padding:18px 16px calc(20px + env(safe-area-inset-bottom))}
+}
+.x{position:absolute;right:14px;top:12px;border:0;background:transparent;color:var(--dim);
+   font-size:26px;line-height:1;cursor:pointer;padding:2px 6px}
+.dhead{display:flex;gap:16px;align-items:flex-start}
+.dhead h3{font-size:25px;margin-top:2px}
+.dmeta{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px;align-items:center}
+.quote{margin:18px 0 0;padding-left:12px;border-left:2px solid var(--rule);color:var(--dim);font-style:italic}
+.dsec{margin-top:22px}
+.dsec h4{font-size:10px;letter-spacing:.18em;color:var(--dim);text-transform:uppercase;margin:0 0 10px;font-weight:500}
+.stats{display:grid;grid-template-columns:auto 1fr 2.4em;gap:6px 11px;align-items:center}
+.k{font-size:11px;color:var(--dim);letter-spacing:.08em}
+.meter{height:6px;background:var(--rule);border-radius:99px;overflow:hidden}
+.meter i{display:block;height:100%;border-radius:99px;background:var(--bar,var(--lit))}
+.stats .v{font-size:12px;text-align:right}
+.moves{display:grid;gap:6px}
+.mv{display:flex;gap:10px;align-items:center;font-size:13px;border:1px solid var(--rule);border-radius:6px;padding:8px 11px}
+.mv .pw{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--dim)}
+.chain{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.chain .here .nm{font-weight:600}
+.chain .step{display:flex;flex-direction:column;align-items:center;gap:5px;background:none;border:0;padding:0;cursor:pointer;color:inherit}
+.chain .nm{font:400 12px/1.2 "IBM Plex Sans",sans-serif}
+.arrow{color:var(--dim);font-size:11px;font-family:"IBM Plex Mono",monospace}
+.note{font-size:13px;color:var(--dim);margin:0}
+.note + .note{margin-top:8px}
+
+/* ---- screens gallery -------------------------------------------------- */
+.area{margin-top:26px}
+.area h3{font-size:13px;font-weight:600;letter-spacing:.1em;font-family:"IBM Plex Mono",monospace;color:var(--dim)}
+.shots{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));margin-top:11px}
+.shot{margin:0}
+.shot img{
+  width:100%;display:block;image-rendering:pixelated;background:var(--screen);
+  border:1px solid var(--rule);border-radius:5px;
+}
+.shot figcaption{font-size:11px;color:var(--dim);margin-top:6px;font-family:"IBM Plex Mono",monospace;word-break:break-word}
+
+/* ---- facts ------------------------------------------------------------ */
+.facts{margin-top:20px;border:1px solid var(--rule);border-radius:8px;overflow:hidden;background:var(--surface)}
+.facts div{display:flex;gap:14px;padding:11px 14px;border-bottom:1px solid var(--rule);font-size:14px}
+.facts div:last-child{border-bottom:0}
+.facts b{flex:0 0 42%;font-weight:500}
+.facts span{color:var(--dim)}
+
+footer{padding-block:32px 46px;font-size:13px;color:var(--dim)}
+footer a{text-decoration:underline}
+footer p{margin:0 0 10px;max-width:64ch}
+
+[data-en]{display:none}
+html[lang="en"] [data-es]{display:none}
+html[lang="en"] [data-en]{display:revert}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap bar">
+    <span class="mark">ERRATA</span>
+    <nav>
+      <a href="#bichos"><span data-es>Bichos</span><span data-en>Bugs</span></a>
+      <a href="#pantallas"><span data-es>Pantallas</span><span data-en>Screens</span></a>
+      <a href="#combate"><span data-es>Combate</span><span data-en>Battle</span></a>
+      <a href="#aparato"><span data-es>El aparato</span><span data-en>The device</span></a>
+      <div class="langs">
+        <button id="es" aria-pressed="true">ES</button>
+        <button id="en" aria-pressed="false">EN</button>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<!-- THE HERO IS A THESIS, and the thesis of this product is that growth is
+     damage. So the first thing on the page is one family's three stages with
+     the same silhouette breaking apart, not a wordmark the size of a door. -->
+<div class="wrap hero">
+  <div class="eyebrow" data-es>Un bicho virtual de bolsillo</div>
+  <div class="eyebrow" data-en>A pocket virtual pet</div>
+  <h1>
+    <span data-es>Tu bicho no crece. Se rompe.</span>
+    <span data-en>Your bug does not grow up. It breaks down.</span>
+  </h1>
+  <p>
+    <span data-es>Errata cabe en un bolsillo y tiene dos botones. Dentro hay sesenta bichos, que
+    son errores de software: no se hacen más grandes al evolucionar, se hacen más rotos, dentro de
+    la misma silueta.</span>
+    <span data-en>Errata fits in a pocket and has two buttons. Inside are sixty bugs — software
+    defects — and they do not get bigger as they evolve. They get more broken, inside the same
+    silhouette.</span>
+  </p>
+  <div class="line" id="heroLine"></div>
+  <p class="linecap" id="heroCap"></p>
+  <div class="cta">
+    <a class="btn solid" href="#bichos"><span data-es>Ver los sesenta</span><span data-en>See all sixty</span></a>
+    <a class="btn" href="__MANUAL_HREF__"><span data-es>Manual (PDF)</span><span data-en>Manual (PDF)</span></a>
+  </div>
+</div>
+
+<section id="bichos" class="wrap">
+  <div class="eyebrow"><span data-es>El bestiario</span><span data-en>The bestiary</span></div>
+  <h2><span data-es>Veinte familias, sesenta bichos</span><span data-en>Twenty families, sixty bugs</span></h2>
+  <p class="lede">
+    <span data-es>Cada familia son tres etapas de la misma forma. El color es de esta página, no
+    del aparato: su pantalla es de un bit y no puede distinguir un tipo de otro.</span>
+    <span data-en>Each family is three stages of one shape. The colour belongs to this page, not to
+    the device: its screen is one bit and cannot tell one type from another.</span>
+  </p>
+
+  <div class="controls">
+    <div class="views" role="group">
+      <button class="viewbtn" id="vFam" aria-pressed="true"><span data-es>Familias</span><span data-en>Families</span></button>
+      <button class="viewbtn" id="vGrid" aria-pressed="false"><span data-es>Rejilla</span><span data-en>Grid</span></button>
+      <button class="viewbtn" id="vTab" aria-pressed="false"><span data-es>Tabla</span><span data-en>Table</span></button>
+    </div>
+    <input id="q" type="search" aria-label="Buscar">
+    <button class="chip" data-type="SIGNAL" aria-pressed="false"><span>SIGNAL</span></button>
+    <button class="chip" data-type="CORRUPT" aria-pressed="false"><span>CORRUPT</span></button>
+    <button class="chip" data-type="SYSTEM" aria-pressed="false"><span>SYSTEM</span></button>
+    <span class="count" id="count"></span>
+  </div>
+
+  <div class="fams" id="fams"></div>
+  <div class="grid hidden" id="grid"></div>
+  <div class="tw hidden" id="tabWrap"><table id="tab"></table></div>
+</section>
+
+<section id="pantallas" class="wrap">
+  <div class="eyebrow"><span data-es>El aparato, por dentro</span><span data-en>Inside the device</span></div>
+  <h2><span data-es>Todas las pantallas</span><span data-en>Every screen</span></h2>
+  <p class="lede">
+    <!-- THE COUNT IS WRITTEN BY THE PAGE, NOT BY A PERSON. It said "eighty-four"
+         for exactly as long as there were eighty-four; the commit that added a
+         screen did not know this sentence existed. It now comes from the same
+         list the gallery below is built from. -->
+    <span data-es><b class="nscr num"></b> pantallas, generadas del firmware y no dibujadas a mano: son
+    128 × 64 píxeles de un bit, exactamente lo que dibuja el aparato.</span>
+    <span data-en><b class="nscr num"></b> of them, generated from the firmware rather than drawn by
+    hand: 128 × 64 pixels at one bit, exactly what the device draws.</span>
+  </p>
+  <div id="shots"></div>
+</section>
+
+<section id="combate" class="wrap">
+  <div class="eyebrow"><span data-es>Combate</span><span data-en>Battle</span></div>
+  <h2><span data-es>Ataques</span><span data-en>Moves</span></h2>
+  <p class="lede">
+    <span data-es>SIGNAL gana a CORRUPT, CORRUPT gana a SYSTEM, SYSTEM gana a SIGNAL. Los ataques
+    NEUTRAL no tienen ventaja contra nadie ni nadie la tiene contra ellos.</span>
+    <span data-en>SIGNAL beats CORRUPT, CORRUPT beats SYSTEM, SYSTEM beats SIGNAL. NEUTRAL moves
+    have no advantage against anything, and nothing has one against them.</span>
+  </p>
+  <div class="tw"><table id="atk"></table></div>
+
+  <h2 style="margin-top:36px"><span data-es>Objetos</span><span data-en>Items</span></h2>
+  <div class="tw"><table id="itm"></table></div>
+</section>
+
+<section id="aparato" class="wrap">
+  <div class="eyebrow"><span data-es>El aparato</span><span data-en>The device</span></div>
+  <h2><span data-es>Qué es y qué no hace</span><span data-en>What it is, and what it does not do</span></h2>
+  <!-- THE STRONGEST CLAIM ON THE PAGE, and it names the creator rather than
+       denying it. An earlier draft said the device "talks to no server": the
+       first half is true and stronger than that draft claimed - net.cpp scans
+       passively and no translation unit even declares esp_wifi_connect - but
+       the device IS a server when the creator is open. A blanket denial the
+       product's own feature contradicts is worse than the longer sentence.
+
+       RE-READ AT P10-C11 AGAINST THE SOURCE, not against the last draft:
+       networking/net.cpp scan_begin() passes passive=true to scanNetworks()
+       and says why; the peer link is ESP-NOW, whose whole residency is
+       WiFi.mode(WIFI_STA) with no association call on the path; the only
+       softAP in the tree is the creator's. "Only listens" was true and vague,
+       so it now says the thing that makes it true - the scan sends nothing,
+       not even a probe request - which is a sentence a reader can go and
+       check and a future commit can make false. -->
+  <p class="lede">
+    <span data-es>Explorar es mirar los nombres de las redes Wi-Fi que hay en el aire. El aparato
+    solo escucha, y en sentido literal: el escaneo es pasivo, espera las balizas que cada red emite
+    sola y no pregunta nada, así que ni siquiera anuncia que está ahí. No se conecta a ninguna, no
+    pide cuenta y no manda nada a internet.</span>
+    <span data-en>Exploring means looking at the names of the Wi-Fi networks in the air. The device
+    only listens, in the literal sense: the scan is passive, it waits for the beacons every network
+    sends anyway and asks nothing, so it does not even announce itself. It joins none of them, asks
+    for no account and sends nothing to the internet.</span>
+  </p>
+  <p class="lede" style="margin-top:14px">
+    <span data-es>Dos Erratas cercanas hablan directamente entre ellas para pelear, intercambiar y
+    criar. El único servidor que hay en todo esto es el suyo: para diseñar un bicho desde el móvil,
+    el aparato levanta su propia red Wi-Fi y sirve su propia página.</span>
+    <span data-en>Two nearby Erratas talk straight to each other to battle, trade and breed. The
+    only server anywhere in this is its own: to design a Bug from your phone, the device brings up
+    its own Wi-Fi network and serves its own page.</span>
+  </p>
+  <div class="facts">
+    <div><b data-es>Pantalla</b><b data-en>Display</b><span>OLED 0,96", 128 × 64, 1 bit</span></div>
+    <div><b data-es>Controles</b><b data-en>Controls</b><span data-es>Dos botones, A y B</span><span data-en>Two buttons, A and B</span></div>
+    <div><b data-es>Cerebro</b><b data-en>Brain</b><span>ESP32-C3</span></div>
+    <div><b data-es>Pilas</b><b data-en>Batteries</b><span>2 × AAA</span></div>
+    <div><b data-es>Sonido</b><b data-en>Sound</b><span data-es>Piezo, una voz de onda cuadrada</span><span data-en>Piezo, one square-wave voice</span></div>
+    <div><b data-es>Especies</b><b data-en>Species</b><span id="nsp"></span></div>
+    <div><b data-es>Ataques</b><b data-en>Moves</b><span id="natk"></span></div>
+  </div>
+
+  <h2 style="margin-top:36px"><span data-es>El manual</span><span data-en>The manual</span></h2>
+  <p class="lede">
+    <span data-es>El cuadernillo que va en la caja: A6, grapado, una tinta, español e inglés en las
+    mismas páginas. El aparato lleva su propio QR para abrirlo, en <b>AJUSTES → Manual</b>, y otro
+    para esta página en <b>AJUSTES → Wiki web</b>.</span>
+    <span data-en>The booklet that goes in the box: A6, saddle-stitched, one ink, Spanish and
+    English on the same pages. The device has its own QR for it under <b>AJUSTES → Manual</b>, and
+    another for this page under <b>AJUSTES → Wiki web</b>.</span>
+  </p>
+  <div class="cta"><a class="btn solid" href="__MANUAL_HREF__">uso.pdf</a></div>
+</section>
+
+<div class="wrap"><footer>
+  <p>
+    <span data-es>Esta página se genera del código: los sprites, las fichas y las capturas salen de
+    la misma fuente que lleva el aparato, así que no puede quedarse vieja sin que falle la
+    compilación.</span>
+    <span data-en>This page is generated from the source: the sprites, the stats and the
+    screenshots come from the same place the device does, so it cannot go stale without failing
+    the build.</span>
+  </p>
+  <p><a href="https://github.com/pmirall/Pebblebol">github.com/pmirall/Pebblebol</a></p>
+</footer></div>
+
+<div class="sheet" id="sheet" role="dialog" aria-modal="true"><div class="inner" id="inner"></div></div>
+
+<script>
+const DATA = __DATA__;
+const T = {
+  hp:["VIDA","HP"], atk:["ATAQUE","ATTACK"], dfn:["DEFENSA","DEFENCE"], spd:["VELOCIDAD","SPEED"],
+  moves:["Ataques que aprende","Moves it learns"], chain:["Su familia","Its family"],
+  look:["Notas de dibujo","How it is drawn"],
+  looknote:["citadas del fichero del sprite, en inglés","quoted from the sprite's own file"],
+  none:["Nada coincide con eso.","Nothing matches that."],
+  showing:["%a de %b","%a of %b"], lvl:["Nv %d","Lv %d"],
+  name:["Nombre","Name"], type:["Tipo","Type"], power:["Potencia","Power"], acc:["Precisión","Accuracy"],
+  kind:["Clase","Kind"], value:["Valor","Value"], rarity:["Rareza","Rarity"], effect:["Efecto","Effect"],
+  stage:["Etapa","Stage"], fam:["Familia","Family"], search:["Buscar…","Search…"],
+  close:["Cerrar","Close"], total:["Total","Total"],
+  heroCap:["Lo mismo, tres veces, cada vez más roto","One shape, three times, breaking a little further"]
+};
+let L = 0;
+const t = k => T[k][L];
+const STAGES = [["Cría","Joven","Adulto"],["Hatchling","Young","Adult"]];
+const HUE = {SIGNAL:"--signal", CORRUPT:"--corrupt", SYSTEM:"--system"};
+
+/* ---- sprites: 24 packed hex rows, MSB is the leftmost pixel ------------- */
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const live = [];
+function paint(cv, hex){
+  const g = cv.getContext("2d");
+  g.clearRect(0,0,24,24);
+  g.fillStyle = getComputedStyle(document.body).getPropertyValue("--screen-lit").trim() || "#E8EDF0";
+  for(let y=0;y<24;y++){
+    const row = parseInt(hex.substr(y*6,6),16);
+    for(let x=0;x<24;x++) if(row & (1<<(23-x))) g.fillRect(x,y,1,1);
+  }
+}
+function tile(sp, size){
+  const d = document.createElement("div");
+  d.className = "tile t-" + size;
+  const cv = document.createElement("canvas");
+  cv.width = 24; cv.height = 24;
+  cv.setAttribute("role","img");
+  cv.setAttribute("aria-label", sp.name);
+  d.appendChild(cv);
+  live.push({cv, f: sp.f});
+  paint(cv, sp.f[0]);
+  return d;
+}
+let phase = 0;
+if(!REDUCED) setInterval(() => {
+  phase ^= 1;
+  for(const s of live) paint(s.cv, s.f[phase]);
+}, 430);
+
+/* ---- data helpers ------------------------------------------------------- */
+const byId = Object.fromEntries(DATA.species.map(s => [s.id, s]));
+const families = [];
+{
+  const m = new Map();
+  for(const s of DATA.species){
+    if(!m.has(s.family)) { m.set(s.family, {id:s.family, name:s.familyName, type:s.type, members:[]}); families.push(m.get(s.family)); }
+    m.get(s.family).members.push(s);
+  }
+  for(const f of families) f.members.sort((a,b) => a.stage - b.stage);
+}
+const el = (tag, cls, txt) => {
+  const e = document.createElement(tag);
+  if(cls) e.className = cls;
+  if(txt !== undefined) e.textContent = txt;
+  return e;
+};
+const pad2 = n => String(n).padStart(2,"0");
+const tag = s => el("span", "tag " + s.type, s.type);
+
+let view = "fam", fType = null, fQ = "";
+const matches = s => (!fType || s.type === fType) &&
+  (!fQ || s.name.toLowerCase().includes(fQ) || s.familyName.toLowerCase().includes(fQ));
+
+/* ---- view: families ----------------------------------------------------- */
+function step(s, size){
+  const b = el("button", "step");
+  b.appendChild(tile(s, size));
+  b.appendChild(el("span", "nm", s.name));
+  b.appendChild(el("span", "num", "Nº " + pad2(s.id)));
+  b.addEventListener("click", () => open(s.id));
+  return b;
+}
+function renderFams(){
+  const host = document.getElementById("fams");
+  host.textContent = "";
+  let n = 0;
+  for(const f of families){
+    const hits = f.members.filter(matches);
+    if(!hits.length) continue;
+    n += hits.length;
+    const box = el("div","fam");
+    const hd = document.createElement("header");
+    hd.appendChild(el("h3", null, f.name));
+    hd.appendChild(tag(f.members[0]));
+    box.appendChild(hd);
+    const row = el("div","stages");
+    f.members.forEach((m, i) => {
+      if(i){
+        const ev = f.members[i-1].evo[0];
+        row.appendChild(el("span","arrow", ev ? t("lvl").replace("%d", ev.level) : "→"));
+      }
+      row.appendChild(step(m, 72));
+    });
+    box.appendChild(row);
+    host.appendChild(box);
+  }
+  if(!n) host.appendChild(el("p","lede", t("none")));
+  return n;
+}
+
+/* ---- view: grid --------------------------------------------------------- */
+function renderGrid(){
+  const host = document.getElementById("grid");
+  host.textContent = "";
+  const rows = DATA.species.filter(matches);
+  for(const s of rows){
+    const b = el("button","card");
+    b.appendChild(tile(s, 72));
+    b.appendChild(el("span","num","Nº " + pad2(s.id)));
+    b.appendChild(el("span","nm", s.name));
+    b.appendChild(tag(s));
+    b.addEventListener("click", () => open(s.id));
+    host.appendChild(b);
+  }
+  if(!rows.length) host.appendChild(el("p","lede", t("none")));
+  return rows.length;
+}
+
+/* ---- view: table -------------------------------------------------------- */
+let sortKey = "id", sortDir = 1;
+function renderTable(){
+  const tb = document.getElementById("tab");
+  tb.textContent = "";
+  const cols = [
+    ["id","Nº"], ["name",t("name")], ["type",t("type")], ["familyName",t("fam")],
+    ["stage",t("stage")], ["hp",t("hp")], ["atk",t("atk")], ["dfn",t("dfn")], ["spd",t("spd")], ["total",t("total")]
+  ];
+  const head = document.createElement("thead");
+  const hr = document.createElement("tr");
+  for(const [k,label] of cols){
+    const th = el("th", null, label);
+    if(k === sortKey) th.setAttribute("aria-sort", sortDir > 0 ? "ascending" : "descending");
+    th.addEventListener("click", () => {
+      if(sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
+      renderTable();
+    });
+    hr.appendChild(th);
+  }
+  head.appendChild(hr); tb.appendChild(head);
+  const body = document.createElement("tbody");
+  const rows = DATA.species.filter(matches).map(s => ({...s, total: s.hp + s.atk + s.dfn + s.spd}));
+  rows.sort((a,b) => {
+    const x = a[sortKey], y = b[sortKey];
+    return (typeof x === "string" ? x.localeCompare(y) : x - y) * sortDir;
+  });
+  for(const s of rows){
+    const tr = document.createElement("tr");
+    tr.appendChild(el("td","n", pad2(s.id)));
+    tr.appendChild(el("td", null, s.name));
+    const tt = document.createElement("td"); tt.appendChild(tag(s)); tr.appendChild(tt);
+    tr.appendChild(el("td", null, s.familyName));
+    tr.appendChild(el("td", null, STAGES[L][s.stage] || ""));
+    for(const k of ["hp","atk","dfn","spd","total"]) tr.appendChild(el("td","n", String(s[k])));
+    tr.addEventListener("click", () => open(s.id));
+    body.appendChild(tr);
+  }
+  tb.appendChild(body);
+  return rows.length;
+}
+
+/* ---- render dispatch ---------------------------------------------------- */
+function render(){
+  live.length = 0;
+  const fams = document.getElementById("fams"), grid = document.getElementById("grid"),
+        tab = document.getElementById("tabWrap");
+  fams.classList.toggle("hidden", view !== "fam");
+  grid.classList.toggle("hidden", view !== "grid");
+  tab.classList.toggle("hidden", view !== "tab");
+  let n = 0;
+  if(view === "fam") n = renderFams();
+  else if(view === "grid") n = renderGrid();
+  else n = renderTable();
+  document.getElementById("count").textContent =
+    t("showing").replace("%a", n).replace("%b", DATA.species.length);
+}
+
+/* ---- detail ------------------------------------------------------------- */
+const sheet = document.getElementById("sheet"), inner = document.getElementById("inner");
+function open(id){
+  const s = byId[id];
+  live.length = 0;
+  inner.textContent = "";
+
+  const x = el("button","x","×");
+  x.setAttribute("aria-label", t("close"));
+  x.addEventListener("click", close);
+  inner.appendChild(x);
+
+  const head = el("div","dhead");
+  head.appendChild(tile(s, 96));
+  const ht = el("div");
+  ht.appendChild(el("div","num k","Nº " + pad2(s.id) + " / " + DATA.species.length));
+  ht.appendChild(el("h3", null, s.name));
+  const meta = el("div","dmeta");
+  meta.appendChild(tag(s));
+  meta.appendChild(el("span","tag", s.familyName));
+  meta.appendChild(el("span","tag", (STAGES[L][s.stage] || "").toUpperCase()));
+  if(s.rarityName) meta.appendChild(el("span","tag", s.rarityName));
+  ht.appendChild(meta);
+  head.appendChild(ht);
+  inner.appendChild(head);
+
+  if(s.flavor) inner.appendChild(el("p","quote", s.flavor));
+
+  const st = el("div","stats dsec");
+  for(const [k, v] of [["hp",s.hp],["atk",s.atk],["dfn",s.dfn],["spd",s.spd]]){
+    st.appendChild(el("span","k", t(k)));
+    const m = el("div","meter"), i = el("i");
+    i.style.width = Math.max(4, Math.min(100, v*100/DATA.statMax)) + "%";
+    i.style.setProperty("--bar", "var(" + (HUE[s.type] || "--lit") + ")");
+    m.appendChild(i); st.appendChild(m);
+    st.appendChild(el("span","v", String(v)));
+  }
+  inner.appendChild(st);
+
+  const ms = el("div","dsec"); ms.appendChild(el("h4",null,t("moves")));
+  const mw = el("div","moves");
+  for(const m of s.moves){
+    const r = el("div","mv");
+    r.appendChild(el("span","tag " + m.type, m.type));
+    r.appendChild(el("span",null,m.name));
+    r.appendChild(el("span","pw", m.power ? (m.power + " / " + m.acc + "%") : m.cat.toLowerCase().replace(/_/g," ")));
+    mw.appendChild(r);
+  }
+  ms.appendChild(mw); inner.appendChild(ms);
+
+  const fam = families.find(f => f.id === s.family);
+  if(fam && fam.members.length > 1){
+    const cs = el("div","dsec"); cs.appendChild(el("h4",null,t("chain")));
+    const ch = el("div","chain");
+    fam.members.forEach((o, i) => {
+      if(i){
+        const ev = fam.members[i-1].evo[0];
+        ch.appendChild(el("span","arrow", ev ? t("lvl").replace("%d", ev.level) : "→"));
+      }
+      const b = el("button","step" + (o.id === s.id ? " here" : ""));
+      b.appendChild(tile(o, 48));
+      b.appendChild(el("span","nm", o.name));
+      if(o.id !== s.id) b.addEventListener("click", () => open(o.id));
+      ch.appendChild(b);
+    });
+    cs.appendChild(ch); inner.appendChild(cs);
+  }
+
+  if(s.silhouette){
+    const ls = el("div","dsec");
+    const h = el("h4", null, t("look") + "  ·  ");
+    const n = el("span", null, t("looknote"));
+    n.style.textTransform = "none"; n.style.opacity = ".8";
+    h.appendChild(n); ls.appendChild(h);
+    ls.appendChild(el("p","note", s.silhouette));
+    if(s.frame2) ls.appendChild(el("p","note", s.frame2));
+    inner.appendChild(ls);
+  }
+
+  sheet.classList.add("on");
+  document.body.style.overflow = "hidden";
+  inner.scrollTop = 0;
+  x.focus();
+  history.replaceState(null, "", "#b" + s.id);
+}
+function close(){
+  sheet.classList.remove("on");
+  document.body.style.overflow = "";
+  if(location.hash.startsWith("#b")) history.replaceState(null, "", "#bichos");
+  render();
+}
+sheet.addEventListener("click", e => { if(e.target === sheet) close(); });
+document.addEventListener("keydown", e => { if(e.key === "Escape" && sheet.classList.contains("on")) close(); });
+
+/* ---- tables, screens ---------------------------------------------------- */
+function simpleTable(id, cols, rows){
+  const tb = document.getElementById(id);
+  tb.textContent = "";
+  const head = document.createElement("thead"), hr = document.createElement("tr");
+  for(const c of cols){ const th = el("th", null, c); th.style.cursor = "default"; hr.appendChild(th); }
+  head.appendChild(hr); tb.appendChild(head);
+  const body = document.createElement("tbody");
+  for(const r of rows){
+    const tr = document.createElement("tr");
+    tr.style.cursor = "default";
+    r.forEach((v, i) => {
+      const td = document.createElement("td");
+      if(v && v.type){ td.appendChild(el("span","tag " + v.type, v.type)); }
+      else { td.textContent = String(v); if(i) td.className = "n"; }
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  }
+  tb.appendChild(body);
+}
+function sideTables(){
+  simpleTable("atk", [t("name"), t("type"), t("power"), t("acc"), t("effect")],
+    DATA.attacks.map(a => [a.name, {type:a.type}, a.power || "—", a.acc + "%",
+                           a.effect === "NONE" ? "—" : a.effect.toLowerCase().replace(/_/g," ")]));
+  simpleTable("itm", [t("name"), t("kind"), t("value"), t("rarity")],
+    DATA.items.map(i => [i.name, i.klass.toLowerCase().replace(/_/g," "), i.value || "—",
+                         i.rarity.toLowerCase()]));
+}
+function renderShots(){
+  const host = document.getElementById("shots");
+  host.textContent = "";
+  let n = 0;
+  for(const area of DATA.screenAreas) n += area.screens.length;
+  for(const e of document.querySelectorAll(".nscr")) e.textContent = n;
+  for(const area of DATA.screenAreas){
+    const sec = el("div","area");
+    sec.appendChild(el("h3", null, area.label[L]));
+    const g = el("div","shots");
+    for(const s of area.screens){
+      const f = document.createElement("figure"); f.className = "shot";
+      const im = document.createElement("img");
+      im.src = "manual/assets/screens/" + s + ".svg";
+      im.alt = s.replace(/_/g," "); im.loading = "lazy"; im.width = 128; im.height = 64;
+      f.appendChild(im);
+      f.appendChild(el("figcaption", null, s.replace(/_/g," ")));
+      g.appendChild(f);
+    }
+    sec.appendChild(g);
+    host.appendChild(sec);
+  }
+}
+
+/* ---- hero line ---------------------------------------------------------- */
+function renderHero(){
+  const host = document.getElementById("heroLine");
+  host.textContent = "";
+  const fam = families.find(f => f.id === DATA.heroFamily) || families[0];
+  fam.members.forEach((m, i) => {
+    if(i){
+      const ev = fam.members[i-1].evo[0];
+      host.appendChild(el("span","arrow", ev ? t("lvl").replace("%d", ev.level) : "→"));
+    }
+    const fig = document.createElement("figure");
+    fig.appendChild(tile(m, 96));
+    const cap = document.createElement("figcaption");
+    cap.appendChild(el("b", null, m.name));
+    cap.appendChild(document.createTextNode(STAGES[L][m.stage] || ""));
+    fig.appendChild(cap);
+    fig.addEventListener("click", () => open(m.id));
+    fig.style.cursor = "pointer";
+    host.appendChild(fig);
+  });
+  document.getElementById("heroCap").textContent = t("heroCap");
+}
+
+/* ---- language and wiring ------------------------------------------------- */
+function setLang(n){
+  L = n;
+  document.documentElement.lang = n ? "en" : "es";
+  document.getElementById("es").setAttribute("aria-pressed", String(!n));
+  document.getElementById("en").setAttribute("aria-pressed", String(!!n));
+  // The label travels with the language too: an English reader on a screen
+  // reader was being told "Buscar" by a page that had switched to English.
+  document.getElementById("q").placeholder = t("search");
+  document.getElementById("q").setAttribute("aria-label", t("search"));
+  try { localStorage.setItem("errata.lang", n ? "en" : "es"); } catch(e){}
+  sideTables(); renderShots(); renderHero();
+  const openId = sheet.classList.contains("on") ? parseInt(location.hash.slice(2),10) : 0;
+  render();
+  if(openId && byId[openId]) open(openId);
+}
+document.getElementById("es").addEventListener("click", () => setLang(0));
+document.getElementById("en").addEventListener("click", () => setLang(1));
+
+document.getElementById("q").addEventListener("input", e => { fQ = e.target.value.trim().toLowerCase(); render(); });
+for(const c of document.querySelectorAll(".chip[data-type]")){
+  c.addEventListener("click", () => {
+    const was = c.getAttribute("aria-pressed") === "true";
+    for(const o of document.querySelectorAll(".chip[data-type]")) o.setAttribute("aria-pressed","false");
+    c.setAttribute("aria-pressed", String(!was));
+    fType = was ? null : c.dataset.type;
+    render();
+  });
+}
+for(const [id, v] of [["vFam","fam"],["vGrid","grid"],["vTab","tab"]]){
+  document.getElementById(id).addEventListener("click", () => {
+    view = v;
+    for(const [i2] of [["vFam"],["vGrid"],["vTab"]]) document.getElementById(i2).setAttribute("aria-pressed","false");
+    document.getElementById(id).setAttribute("aria-pressed","true");
+    render();
+  });
+}
+document.getElementById("nsp").textContent = DATA.species.length;
+document.getElementById("natk").textContent = DATA.attacks.length;
+
+let saved = null;
+try { saved = localStorage.getItem("errata.lang"); } catch(e){}
+setLang(saved === "en" ? 1 : saved === "es" ? 0 : (navigator.language || "").startsWith("en") ? 1 : 0);
+
+if(location.hash.startsWith("#b")){
+  const id = parseInt(location.hash.slice(2), 10);
+  if(byId[id]) open(id);
+}
+</script>
+</body>
+</html>

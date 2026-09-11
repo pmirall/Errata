@@ -4,200 +4,267 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Errata</title>
-<meta name="description" content="Errata - un bicho virtual portátil. El manual, los sesenta bichos y todas las pantallas.">
-<meta name="theme-color" content="#141414">
+<meta name="description" content="Errata: un bicho virtual de bolsillo. Las sesenta especies, las pantallas del aparato y el manual.">
+<meta name="theme-color" content="#0B0E11">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
+/* ===========================================================================
+   THE DEVICE IS 1-BIT. THIS PAGE IS WHERE WHAT DOES NOT FIT IN 1 BIT LIVES.
+   That is the whole design brief, and the one rule that follows from it is
+   that COLOUR IS RESERVED FOR TYPE. SIGNAL, CORRUPT and SYSTEM get a hue each
+   because the panel can never tell them apart; nothing else on this page is
+   coloured. The neutrals are biased cool toward those three phosphors rather
+   than being a pure grey ramp, so the ground reads as an instrument.
+   =========================================================================== */
 :root{
-  --paper:#f4f2ec; --ink:#141414; --ink-soft:#5d5a52; --rule:#d6d2c6;
-  --panel:#fffefa; --accent:#141414; --shadow:rgba(20,20,20,.10);
+  --panel:#0B0E11; --surface:#141A20; --raise:#1B232B;
+  --lit:#E8EDF0; --dim:#7E8A93; --rule:#252F38;
+  --signal:#5FD0E4; --corrupt:#E4675A; --system:#E0B341;
+  /* The little screens NEVER change with the theme: a sprite tile is a picture
+     of the panel, and the panel is lit pixels on black wherever you read it. */
+  --screen:#0A0D10; --screen-lit:#E8EDF0; --screen-grid:#161C22;
+  --shadow:rgba(0,0,0,.5);
 }
-@media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){
-    --paper:#121210; --ink:#ece9e1; --ink-soft:#928d81; --rule:#2e2c28;
-    --panel:#1a1917; --accent:#ece9e1; --shadow:rgba(0,0,0,.5);
+:root:not([data-theme="dark"]){ color-scheme:light dark }
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]){
+    --panel:#EDEEEA; --surface:#FFFFFF; --raise:#F5F6F3;
+    --lit:#12161A; --dim:#5E6A73; --rule:#D8DBD5;
+    --signal:#0D7186; --corrupt:#B23A2D; --system:#7E5A0C;
+    --shadow:rgba(18,22,26,.12);
   }
 }
-:root[data-theme="dark"]{
-  --paper:#121210; --ink:#ece9e1; --ink-soft:#928d81; --rule:#2e2c28;
-  --panel:#1a1917; --accent:#ece9e1; --shadow:rgba(0,0,0,.5);
+:root[data-theme="light"]{
+  --panel:#EDEEEA; --surface:#FFFFFF; --raise:#F5F6F3;
+  --lit:#12161A; --dim:#5E6A73; --rule:#D8DBD5;
+  --signal:#0D7186; --corrupt:#B23A2D; --system:#7E5A0C;
+  --shadow:rgba(18,22,26,.12);
 }
+
 *{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
 body{
-  margin:0;background:var(--paper);color:var(--ink);
-  font:16px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-  -webkit-text-size-adjust:100%;
+  margin:0;background:var(--panel);color:var(--lit);
+  font:400 15px/1.6 "IBM Plex Sans","Segoe UI",system-ui,-apple-system,sans-serif;
 }
-.wrap{max-width:960px;margin:0 auto;padding:0 18px}
+.mono,.k,.num,th,.chip,.tag,.eyebrow,.mark,.viewbtn,.count{
+  font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-variant-numeric:tabular-nums;
+}
+h1,h2,h3,h4{margin:0;line-height:1.15;text-wrap:balance;font-weight:600}
 a{color:inherit}
-h1,h2,h3{line-height:1.15;margin:0}
-.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-radius:3px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
-/* ---- header ---- */
-header{
-  position:sticky;top:0;z-index:30;background:var(--paper);
-  border-bottom:1px solid var(--rule);
-}
-.bar{display:flex;align-items:center;gap:14px;height:54px}
-.mark{
-  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  font-weight:700;letter-spacing:.22em;font-size:17px;
-}
-.bar nav{margin-left:auto;display:flex;gap:4px;align-items:center}
-.bar nav a{
-  text-decoration:none;font-size:13px;padding:6px 9px;border-radius:6px;
-  color:var(--ink-soft);
-}
-.bar nav a:hover{color:var(--ink);background:var(--rule)}
-.langs{display:flex;border:1px solid var(--rule);border-radius:6px;overflow:hidden;margin-left:6px;flex:none}
-/* A 390 px phone is the DESIGN TARGET, not an edge case: this page is reached by
-   scanning a QR off the device. The section links do not fit next to the
-   wordmark and the language toggle there, and the toggle is the one a reader
-   cannot get to any other way - the sections are one scroll away. */
-@media (max-width:520px){ .bar nav a{display:none} }
+.wrap{width:100%;max-width:1020px;margin:0 auto;padding-inline:20px}
+
+/* ---- header --------------------------------------------------------- */
+header{position:sticky;top:0;z-index:40;background:var(--panel);border-bottom:1px solid var(--rule)}
+.bar{display:flex;align-items:center;gap:12px;height:52px}
+.mark{font-weight:600;letter-spacing:.26em;font-size:15px}
+.bar nav{margin-left:auto;display:flex;gap:2px;align-items:center}
+.bar nav a{text-decoration:none;font-size:13px;padding:6px 9px;border-radius:5px;color:var(--dim)}
+.bar nav a:hover{color:var(--lit);background:var(--surface)}
+.langs{display:flex;border:1px solid var(--rule);border-radius:5px;overflow:hidden;flex:none;margin-left:8px}
 .langs button{
-  border:0;background:transparent;color:var(--ink-soft);font:600 11px/1 inherit;
-  padding:7px 9px;cursor:pointer;letter-spacing:.06em;
+  border:0;background:transparent;color:var(--dim);padding:7px 9px;cursor:pointer;
+  font:500 11px/1 "IBM Plex Mono",monospace;letter-spacing:.08em;
 }
-.langs button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.langs button[aria-pressed="true"]{background:var(--lit);color:var(--panel)}
+@media (max-width:600px){ .bar nav a{display:none} }
 
-/* ---- hero ---- */
-/* LONGHAND, and it is not a style preference: this element carries BOTH .wrap
-   and .hero, so a `padding:46px 0 34px` shorthand here zeroes the 18px
-   horizontal padding .wrap sets and the headline bleeds off the left edge of
-   a phone. Measured, not eyeballed. */
-.hero{padding-top:46px;padding-bottom:34px;border-bottom:1px solid var(--rule)}
-.hero h1{
-  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  font-size:clamp(38px,11vw,72px);letter-spacing:.06em;font-weight:700;
+/* ---- the sprite tile: a little picture of the panel ------------------ */
+.tile{
+  background:var(--screen);border-radius:4px;display:grid;place-items:center;
+  flex:none;position:relative;overflow:hidden;
 }
-.hero .sub{margin-top:14px;font-size:clamp(16px,4vw,20px);max-width:44ch;color:var(--ink-soft)}
-.hero .cta{display:flex;flex-wrap:wrap;gap:10px;margin-top:24px}
+.tile canvas{image-rendering:pixelated;display:block;position:relative;z-index:1}
+/* the pixel grid, faint, so the tile reads as a screen and not as a swatch */
+.tile::after{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background-image:linear-gradient(var(--screen-grid) 1px,transparent 1px),
+                   linear-gradient(90deg,var(--screen-grid) 1px,transparent 1px);
+  background-size:var(--px,4px) var(--px,4px);opacity:.55;
+}
+.t-72{width:88px;height:88px;--px:3px} .t-72 canvas{width:72px;height:72px}
+.t-96{width:116px;height:116px;--px:4px} .t-96 canvas{width:96px;height:96px}
+.t-48{width:62px;height:62px;--px:2px} .t-48 canvas{width:48px;height:48px}
+.t-120{width:144px;height:144px;--px:5px} .t-120 canvas{width:120px;height:120px}
+
+/* ---- hero ----------------------------------------------------------- */
+.hero{padding-block:40px 34px;border-bottom:1px solid var(--rule)}
+.hero .eyebrow{margin-bottom:14px}
+.hero h1{font-size:clamp(26px,5.4vw,40px);max-width:19ch}
+.hero p{margin:16px 0 0;color:var(--dim);max-width:58ch;font-size:16px}
+/* THE EVOLUTION LINE NEVER WRAPS. It is an argument about a sequence - the same
+   shape three times, breaking further - and a sequence that folds to 2 + 1 on a
+   phone stops making it. It scrolls sideways in its own box instead, which is
+   also why the caption is a sibling and not a flex item inside it. */
+.line{display:flex;align-items:center;gap:10px;margin-top:26px;flex-wrap:nowrap;
+      overflow-x:auto;padding-bottom:4px}
+.linecap{margin:10px 0 0;font-size:12px;color:var(--dim);
+         font-family:"IBM Plex Mono",monospace}
+@media (max-width:480px){
+  .line .t-96{width:96px;height:96px;--px:3px}
+  .line .t-96 canvas{width:80px;height:80px}
+}
+.line .arrow{color:var(--dim);font-size:12px;white-space:nowrap}
+.line figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:7px}
+.line figcaption{font-size:12px;color:var(--dim)}
+.line figcaption b{display:block;color:var(--lit);font-weight:500;font-size:13px}
+.cta{display:flex;flex-wrap:wrap;gap:10px;margin-top:28px}
 .btn{
-  display:inline-block;text-decoration:none;font-size:14px;font-weight:600;
-  padding:10px 16px;border:1px solid var(--ink);border-radius:8px;
+  display:inline-block;text-decoration:none;font:500 14px/1 "IBM Plex Sans",sans-serif;
+  padding:11px 15px;border:1px solid var(--rule);border-radius:6px;color:var(--lit);
 }
-.btn.solid{background:var(--ink);color:var(--paper)}
+.btn:hover{border-color:var(--lit)}
+.btn.solid{background:var(--lit);color:var(--panel);border-color:var(--lit)}
 
-section{padding:44px 0;border-bottom:1px solid var(--rule);scroll-margin-top:62px}
-.eyebrow{
-  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  font-size:11px;letter-spacing:.2em;color:var(--ink-soft);text-transform:uppercase;
+section{padding-block:42px;border-bottom:1px solid var(--rule);scroll-margin-top:60px}
+.eyebrow{font-size:11px;letter-spacing:.2em;color:var(--dim);text-transform:uppercase;font-weight:500}
+section h2{font-size:clamp(21px,4.6vw,27px);margin-top:9px}
+.lede{margin:12px 0 0;max-width:64ch;color:var(--dim)}
+
+/* ---- controls ------------------------------------------------------- */
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:22px}
+.views{display:flex;border:1px solid var(--rule);border-radius:6px;overflow:hidden}
+.viewbtn{
+  border:0;border-right:1px solid var(--rule);background:transparent;color:var(--dim);
+  padding:9px 13px;cursor:pointer;font-size:12px;letter-spacing:.06em;
 }
-section h2{font-size:clamp(23px,6vw,30px);margin-top:8px}
-section .lede{margin-top:12px;max-width:62ch;color:var(--ink-soft)}
-
-/* ---- filters ---- */
-.filters{display:flex;flex-wrap:wrap;gap:8px;margin:22px 0 6px;align-items:center}
-.filters input{
-  flex:1 1 190px;min-width:150px;background:var(--panel);color:var(--ink);
-  border:1px solid var(--rule);border-radius:8px;padding:9px 12px;font:inherit;font-size:14px;
+.viewbtn:last-child{border-right:0}
+.viewbtn[aria-pressed="true"]{background:var(--lit);color:var(--panel)}
+.controls input{
+  flex:1 1 170px;min-width:140px;background:var(--surface);color:var(--lit);
+  border:1px solid var(--rule);border-radius:6px;padding:9px 12px;
+  font:400 14px/1 "IBM Plex Sans",sans-serif;
 }
 .chip{
-  border:1px solid var(--rule);background:var(--panel);color:var(--ink-soft);
-  border-radius:999px;padding:7px 13px;font:600 12px/1 inherit;cursor:pointer;
-  letter-spacing:.04em;
+  border:1px solid var(--rule);background:transparent;color:var(--dim);
+  border-radius:5px;padding:8px 11px;font-size:11px;letter-spacing:.1em;cursor:pointer;font-weight:500;
 }
-.chip[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
-.count{font-size:12px;color:var(--ink-soft);margin-left:auto}
+.chip[data-type="SIGNAL"]{color:var(--signal)}
+.chip[data-type="CORRUPT"]{color:var(--corrupt)}
+.chip[data-type="SYSTEM"]{color:var(--system)}
+.chip[aria-pressed="true"]{background:currentColor;border-color:currentColor}
+.chip[aria-pressed="true"] span{color:var(--panel);mix-blend-mode:normal}
+.count{margin-left:auto;font-size:12px;color:var(--dim)}
 
-/* ---- grid ---- */
-.grid{
-  display:grid;gap:10px;margin-top:18px;
-  grid-template-columns:repeat(auto-fill,minmax(104px,1fr));
+/* ---- type tag ------------------------------------------------------- */
+.tag{font-size:10px;letter-spacing:.12em;font-weight:500}
+.tag.SIGNAL{color:var(--signal)} .tag.CORRUPT{color:var(--corrupt)} .tag.SYSTEM{color:var(--system)}
+.tag.NEUTRAL{color:var(--dim)}
+
+/* ---- view: families -------------------------------------------------- */
+.fams{display:grid;gap:10px;margin-top:20px}
+/* Three tiles and two arrows are about 380 px wide, so one family per row leaves
+   half a desk screen empty and makes twenty of them a very long scroll. */
+@media (min-width:880px){ .fams{grid-template-columns:1fr 1fr} }
+.fam{
+  border:1px solid var(--rule);border-radius:8px;background:var(--surface);
+  padding:13px 14px;display:grid;gap:11px;
 }
+.fam header{
+  position:static;background:none;border:0;height:auto;
+  display:flex;align-items:baseline;gap:9px;
+}
+.fam h3{font-size:13px;font-weight:600;letter-spacing:.1em;font-family:"IBM Plex Mono",monospace}
+.fam .stages{display:flex;align-items:center;gap:9px;overflow-x:auto;padding-bottom:2px}
+.fam .step{
+  display:flex;flex-direction:column;align-items:center;gap:6px;
+  background:none;border:0;padding:0;cursor:pointer;color:inherit;flex:none;
+}
+.fam .step .nm{font:500 13px/1.2 "IBM Plex Sans",sans-serif}
+.fam .step .num{font-size:10px;color:var(--dim)}
+.fam .step:hover .nm{text-decoration:underline}
+
+/* ---- view: grid ------------------------------------------------------ */
+.grid{display:grid;gap:9px;margin-top:20px;grid-template-columns:repeat(auto-fill,minmax(100px,1fr))}
 .card{
-  background:var(--panel);border:1px solid var(--rule);border-radius:10px;
-  padding:11px 8px 10px;text-align:center;cursor:pointer;
+  background:var(--surface);border:1px solid var(--rule);border-radius:8px;
+  padding:10px 6px 9px;cursor:pointer;color:inherit;font:inherit;
   display:flex;flex-direction:column;align-items:center;gap:5px;
-  font:inherit;color:inherit;
 }
-.card:hover{border-color:var(--ink)}
-.card canvas{
-  width:72px;height:72px;image-rendering:pixelated;display:block;
-}
-.card .num{font-family:ui-monospace,monospace;font-size:10px;color:var(--ink-soft)}
-.card .nm{font-size:13px;font-weight:600;line-height:1.2}
-.t{
-  font-family:ui-monospace,monospace;font-size:9px;letter-spacing:.1em;
-  padding:2px 6px;border-radius:999px;border:1px solid var(--rule);color:var(--ink-soft);
-}
-.t.SIGNAL{border-style:solid}
-.t.CORRUPT{border-style:dashed}
-.t.SYSTEM{border-style:dotted}
-.unseen .nm,.unseen .num{opacity:.5}
+.card:hover{border-color:var(--lit)}
+.card .num{font-size:10px;color:var(--dim)}
+.card .nm{font:500 13px/1.2 "IBM Plex Sans",sans-serif;text-align:center}
 
-/* ---- detail sheet ---- */
-.sheet{
-  position:fixed;inset:0;z-index:50;display:none;
-  background:rgba(0,0,0,.45);backdrop-filter:blur(2px);
-}
-.sheet[open],.sheet.on{display:block}
-.sheet .inner{
+/* ---- view: table ----------------------------------------------------- */
+.tw{overflow-x:auto;margin-top:20px;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13px;min-width:520px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--rule);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+th{font-size:10px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase;font-weight:500;cursor:pointer;user-select:none}
+th[aria-sort]{color:var(--lit)}
+td.n{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--raise)}
+
+/* ---- detail sheet ---------------------------------------------------- */
+.sheet{position:fixed;inset:0;z-index:60;display:none;background:rgba(0,0,0,.55)}
+.sheet.on{display:block}
+.inner{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  width:min(560px,calc(100vw - 28px));max-height:min(86vh,760px);overflow:auto;
-  background:var(--panel);border:1px solid var(--rule);border-radius:14px;
-  box-shadow:0 18px 60px var(--shadow);padding:22px;
+  width:min(600px,calc(100vw - 24px));max-height:min(88vh,820px);overflow:auto;
+  background:var(--surface);border:1px solid var(--rule);border-radius:12px;
+  box-shadow:0 20px 70px var(--shadow);padding:22px;
 }
-@media (max-width:560px){
-  .sheet .inner{
-    left:0;top:auto;bottom:0;transform:none;width:100vw;max-height:90vh;
-    border-radius:14px 14px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));
-  }
+@media (max-width:620px){
+  .inner{left:0;top:auto;bottom:0;transform:none;width:100vw;max-height:92vh;
+         border-radius:12px 12px 0 0;padding:18px 16px calc(20px + env(safe-area-inset-bottom))}
 }
-.sheet .x{
-  position:sticky;top:0;float:right;border:0;background:transparent;color:var(--ink-soft);
-  font-size:24px;line-height:1;cursor:pointer;padding:0 2px;
-}
-.dhead{display:flex;gap:16px;align-items:center}
-.dhead canvas{width:96px;height:96px;image-rendering:pixelated;flex:none}
-.dhead h3{font-size:26px}
-.stats{display:grid;grid-template-columns:auto 1fr auto;gap:5px 10px;align-items:center;margin-top:18px}
-.stats .k{font-family:ui-monospace,monospace;font-size:11px;color:var(--ink-soft);letter-spacing:.08em}
-.stats .v{font-family:ui-monospace,monospace;font-size:12px}
-.meter{height:7px;background:var(--rule);border-radius:99px;overflow:hidden}
-.meter i{display:block;height:100%;background:var(--ink)}
-.dsec{margin-top:20px}
-.dsec h4{
-  font-family:ui-monospace,monospace;font-size:10px;letter-spacing:.18em;
-  color:var(--ink-soft);text-transform:uppercase;margin:0 0 8px;font-weight:600;
-}
+.x{position:absolute;right:14px;top:12px;border:0;background:transparent;color:var(--dim);
+   font-size:26px;line-height:1;cursor:pointer;padding:2px 6px}
+.dhead{display:flex;gap:16px;align-items:flex-start}
+.dhead h3{font-size:25px;margin-top:2px}
+.dmeta{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px;align-items:center}
+.quote{margin:18px 0 0;padding-left:12px;border-left:2px solid var(--rule);color:var(--dim);font-style:italic}
+.dsec{margin-top:22px}
+.dsec h4{font-size:10px;letter-spacing:.18em;color:var(--dim);text-transform:uppercase;margin:0 0 10px;font-weight:500}
+.stats{display:grid;grid-template-columns:auto 1fr 2.4em;gap:6px 11px;align-items:center}
+.k{font-size:11px;color:var(--dim);letter-spacing:.08em}
+.meter{height:6px;background:var(--rule);border-radius:99px;overflow:hidden}
+.meter i{display:block;height:100%;border-radius:99px;background:var(--bar,var(--lit))}
+.stats .v{font-size:12px;text-align:right}
 .moves{display:grid;gap:6px}
-.mv{display:flex;gap:8px;align-items:center;font-size:13px;border:1px solid var(--rule);border-radius:8px;padding:7px 10px}
-.mv .pw{margin-left:auto;font-family:ui-monospace,monospace;font-size:11px;color:var(--ink-soft)}
-.chain{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.chain .step{display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer}
-.chain canvas{width:48px;height:48px;image-rendering:pixelated}
-.chain .arrow{font-family:ui-monospace,monospace;font-size:11px;color:var(--ink-soft)}
-.chain .here{font-weight:700}
-.quote{
-  border-left:2px solid var(--ink);padding:2px 0 2px 12px;font-size:14px;
-  font-style:italic;color:var(--ink-soft);
+.mv{display:flex;gap:10px;align-items:center;font-size:13px;border:1px solid var(--rule);border-radius:6px;padding:8px 11px}
+.mv .pw{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--dim)}
+.chain{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.chain .here .nm{font-weight:600}
+.chain .step{display:flex;flex-direction:column;align-items:center;gap:5px;background:none;border:0;padding:0;cursor:pointer;color:inherit}
+.chain .nm{font:400 12px/1.2 "IBM Plex Sans",sans-serif}
+.arrow{color:var(--dim);font-size:11px;font-family:"IBM Plex Mono",monospace}
+.note{font-size:13px;color:var(--dim);margin:0}
+.note + .note{margin-top:8px}
+
+/* ---- screens gallery -------------------------------------------------- */
+.area{margin-top:26px}
+.area h3{font-size:13px;font-weight:600;letter-spacing:.1em;font-family:"IBM Plex Mono",monospace;color:var(--dim)}
+.shots{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));margin-top:11px}
+.shot{margin:0}
+.shot img{
+  width:100%;display:block;image-rendering:pixelated;background:var(--screen);
+  border:1px solid var(--rule);border-radius:5px;
 }
+.shot figcaption{font-size:11px;color:var(--dim);margin-top:6px;font-family:"IBM Plex Mono",monospace;word-break:break-word}
 
-/* ---- screens gallery ---- */
-.shots{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));margin-top:20px}
-.shot{border:1px solid var(--rule);border-radius:8px;background:var(--panel);padding:8px}
-.shot img{width:100%;display:block;image-rendering:pixelated;background:#000;border-radius:3px}
-.shot figcaption{font-family:ui-monospace,monospace;font-size:10px;color:var(--ink-soft);margin-top:6px;word-break:break-all}
-
-/* ---- tables ---- */
-.tw{overflow-x:auto;margin-top:18px;-webkit-overflow-scrolling:touch}
-table{border-collapse:collapse;width:100%;font-size:13px;min-width:430px}
-th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--rule);white-space:nowrap}
-th{font-family:ui-monospace,monospace;font-size:10px;letter-spacing:.12em;color:var(--ink-soft);text-transform:uppercase}
-td.n{font-family:ui-monospace,monospace}
-
-.facts{display:grid;gap:0;margin-top:20px;border:1px solid var(--rule);border-radius:10px;overflow:hidden}
-.facts div{display:flex;gap:12px;padding:10px 14px;border-bottom:1px solid var(--rule);font-size:14px}
+/* ---- facts ------------------------------------------------------------ */
+.facts{margin-top:20px;border:1px solid var(--rule);border-radius:8px;overflow:hidden;background:var(--surface)}
+.facts div{display:flex;gap:14px;padding:11px 14px;border-bottom:1px solid var(--rule);font-size:14px}
 .facts div:last-child{border-bottom:0}
-.facts b{flex:0 0 40%;font-weight:600}
-.facts span{color:var(--ink-soft)}
+.facts b{flex:0 0 42%;font-weight:500}
+.facts span{color:var(--dim)}
 
-footer{padding:34px 0 48px;font-size:13px;color:var(--ink-soft)}
+footer{padding-block:32px 46px;font-size:13px;color:var(--dim)}
 footer a{text-decoration:underline}
+footer p{margin:0 0 10px;max-width:64ch}
+
 [data-en]{display:none}
 html[lang="en"] [data-es]{display:none}
 html[lang="en"] [data-en]{display:revert}
+.hidden{display:none!important}
 </style>
 </head>
 <body>
@@ -208,7 +275,8 @@ html[lang="en"] [data-en]{display:revert}
     <nav>
       <a href="#bichos"><span data-es>Bichos</span><span data-en>Bugs</span></a>
       <a href="#pantallas"><span data-es>Pantallas</span><span data-en>Screens</span></a>
-      <a href="#manual"><span data-es>Manual</span><span data-en>Manual</span></a>
+      <a href="#combate"><span data-es>Combate</span><span data-en>Battle</span></a>
+      <a href="#aparato"><span data-es>El aparato</span><span data-en>The device</span></a>
       <div class="langs">
         <button id="es" aria-pressed="true">ES</button>
         <button id="en" aria-pressed="false">EN</button>
@@ -217,117 +285,145 @@ html[lang="en"] [data-en]{display:revert}
   </div>
 </header>
 
+<!-- THE HERO IS A THESIS, and the thesis of this product is that growth is
+     damage. So the first thing on the page is one family's three stages with
+     the same silhouette breaking apart, not a wordmark the size of a door. -->
 <div class="wrap hero">
-  <h1>ERRATA</h1>
-  <p class="sub">
-    <span data-es>Un bicho virtual de bolsillo. El bicho es un bug informático, y crecer es estropearse.</span>
-    <span data-en>A pocket virtual pet. The creature is a software bug, and growing up means falling apart.</span>
+  <div class="eyebrow" data-es>Un bicho virtual de bolsillo</div>
+  <div class="eyebrow" data-en>A pocket virtual pet</div>
+  <h1>
+    <span data-es>Tu bicho no crece. Se rompe.</span>
+    <span data-en>Your bug does not grow up. It breaks down.</span>
+  </h1>
+  <p>
+    <span data-es>Errata cabe en un bolsillo y tiene dos botones. Dentro hay sesenta bichos, que
+    son errores de software: no se hacen más grandes al evolucionar, se hacen más rotos, dentro de
+    la misma silueta.</span>
+    <span data-en>Errata fits in a pocket and has two buttons. Inside are sixty bugs — software
+    defects — and they do not get bigger as they evolve. They get more broken, inside the same
+    silhouette.</span>
   </p>
-  <!-- THE MANUAL GOES FIRST, and it is not a taste. This page is what the QR on
-       the aparato's MANUAL screen opens, under a hint that reads "Manual y wiki
-       en el movil." Somebody who has just scanned it came for the booklet, and
-       core/config.h justifies the shorter URL by saying the site carries the
-       manual as its first link. Reorder these two and that comment is a lie. -->
+  <div class="line" id="heroLine"></div>
+  <p class="linecap" id="heroCap"></p>
   <div class="cta">
-    <a class="btn solid" href="uso.pdf"><span data-es>Leer el manual (PDF)</span><span data-en>Read the manual (PDF)</span></a>
-    <a class="btn" href="#bichos"><span data-es>Ver los 60 bichos</span><span data-en>See all 60 bugs</span></a>
+    <a class="btn solid" href="#bichos"><span data-es>Ver los sesenta</span><span data-en>See all sixty</span></a>
+    <a class="btn" href="uso.pdf"><span data-es>Manual (PDF)</span><span data-en>Manual (PDF)</span></a>
   </div>
 </div>
 
 <section id="bichos" class="wrap">
-  <div class="eyebrow" data-es>El bestiario</div><div class="eyebrow" data-en>The bestiary</div>
-  <h2><span data-es>Los sesenta</span><span data-en>The sixty</span></h2>
+  <div class="eyebrow"><span data-es>El bestiario</span><span data-en>The bestiary</span></div>
+  <h2><span data-es>Veinte familias, sesenta bichos</span><span data-en>Twenty families, sixty bugs</span></h2>
   <p class="lede">
-    <span data-es>Veinte familias de tres etapas. Un bicho no se hace más grande al crecer: se hace
-    más roto, dentro de la misma silueta. Los sprites de abajo son los que lleva el aparato,
-    animados con sus dos fotogramas.</span>
-    <span data-en>Twenty families of three stages each. A Bug does not get bigger as it grows: it gets
-    more broken, inside the same silhouette. The sprites below are the ones the device ships,
-    animated on its own two frames.</span>
+    <span data-es>Cada familia son tres etapas de la misma forma. El color es de esta página, no
+    del aparato: su pantalla es de un bit y no puede distinguir un tipo de otro.</span>
+    <span data-en>Each family is three stages of one shape. The colour belongs to this page, not to
+    the device: its screen is one bit and cannot tell one type from another.</span>
   </p>
 
-  <div class="filters">
-    <input id="q" type="search" placeholder="Buscar..." aria-label="Buscar">
-    <button class="chip" data-type="SIGNAL" aria-pressed="false">SIGNAL</button>
-    <button class="chip" data-type="CORRUPT" aria-pressed="false">CORRUPT</button>
-    <button class="chip" data-type="SYSTEM" aria-pressed="false">SYSTEM</button>
+  <div class="controls">
+    <div class="views" role="group">
+      <button class="viewbtn" id="vFam" aria-pressed="true"><span data-es>Familias</span><span data-en>Families</span></button>
+      <button class="viewbtn" id="vGrid" aria-pressed="false"><span data-es>Rejilla</span><span data-en>Grid</span></button>
+      <button class="viewbtn" id="vTab" aria-pressed="false"><span data-es>Tabla</span><span data-en>Table</span></button>
+    </div>
+    <input id="q" type="search" aria-label="Buscar">
+    <button class="chip" data-type="SIGNAL" aria-pressed="false"><span>SIGNAL</span></button>
+    <button class="chip" data-type="CORRUPT" aria-pressed="false"><span>CORRUPT</span></button>
+    <button class="chip" data-type="SYSTEM" aria-pressed="false"><span>SYSTEM</span></button>
     <span class="count" id="count"></span>
   </div>
-  <div class="grid" id="grid"></div>
+
+  <div class="fams" id="fams"></div>
+  <div class="grid hidden" id="grid"></div>
+  <div class="tw hidden" id="tabWrap"><table id="tab"></table></div>
 </section>
 
 <section id="pantallas" class="wrap">
-  <div class="eyebrow" data-es>El aparato, por dentro</div><div class="eyebrow" data-en>Inside the device</div>
+  <div class="eyebrow"><span data-es>El aparato, por dentro</span><span data-en>Inside the device</span></div>
   <h2><span data-es>Todas las pantallas</span><span data-en>Every screen</span></h2>
   <p class="lede">
-    <span data-es>Generadas del firmware, no dibujadas a mano: son 128x64 píxeles de un solo bit,
-    exactamente lo que dibuja el aparato.</span>
-    <span data-en>Generated from the firmware, not drawn by hand: 128x64 pixels at one bit, exactly
-    what the device draws.</span>
+    <!-- THE COUNT IS WRITTEN BY THE PAGE, NOT BY A PERSON. It said "eighty-four"
+         for exactly as long as there were eighty-four; the commit that added a
+         screen did not know this sentence existed. It now comes from the same
+         list the gallery below is built from. -->
+    <span data-es><b class="nscr num"></b> pantallas, generadas del firmware y no dibujadas a mano: son
+    128 × 64 píxeles de un bit, exactamente lo que dibuja el aparato.</span>
+    <span data-en><b class="nscr num"></b> of them, generated from the firmware rather than drawn by
+    hand: 128 × 64 pixels at one bit, exactly what the device draws.</span>
   </p>
-  <div class="shots" id="shots"></div>
+  <div id="shots"></div>
 </section>
 
-<section id="ataques" class="wrap">
-  <div class="eyebrow" data-es>Combate</div><div class="eyebrow" data-en>Battle</div>
+<section id="combate" class="wrap">
+  <div class="eyebrow"><span data-es>Combate</span><span data-en>Battle</span></div>
   <h2><span data-es>Ataques</span><span data-en>Moves</span></h2>
   <p class="lede">
-    <span data-es>SIGNAL gana a CORRUPT, CORRUPT gana a SYSTEM, SYSTEM gana a SIGNAL.</span>
-    <span data-en>SIGNAL beats CORRUPT, CORRUPT beats SYSTEM, SYSTEM beats SIGNAL.</span>
+    <span data-es>SIGNAL gana a CORRUPT, CORRUPT gana a SYSTEM, SYSTEM gana a SIGNAL. Los ataques
+    NEUTRAL no tienen ventaja contra nadie ni nadie la tiene contra ellos.</span>
+    <span data-en>SIGNAL beats CORRUPT, CORRUPT beats SYSTEM, SYSTEM beats SIGNAL. NEUTRAL moves
+    have no advantage against anything, and nothing has one against them.</span>
   </p>
   <div class="tw"><table id="atk"></table></div>
-</section>
 
-<section id="objetos" class="wrap">
-  <div class="eyebrow" data-es>La mochila</div><div class="eyebrow" data-en>The bag</div>
-  <h2><span data-es>Objetos</span><span data-en>Items</span></h2>
+  <h2 style="margin-top:36px"><span data-es>Objetos</span><span data-en>Items</span></h2>
   <div class="tw"><table id="itm"></table></div>
 </section>
 
 <section id="aparato" class="wrap">
-  <div class="eyebrow" data-es>Hardware</div><div class="eyebrow" data-en>Hardware</div>
-  <h2><span data-es>Qué es</span><span data-en>What it is</span></h2>
-  <!-- THE STRONGEST CLAIM ON THIS PAGE, so it says exactly what the source does
-       and not a word more. Checked against networking/net.cpp: the scan is
-       PASSIVE (it listens for beacons and sends no probe request) and no
-       association call exists anywhere in the tree, so "no se conecta" is
-       literal. But the device DOES run a server - its own, an open AP plus an
-       HTTP server, for the creator - and the first version of this paragraph
-       said "no habla con ningun servidor" while that code shipped. A blanket
-       denial that the product's own feature contradicts is worse than the
-       longer sentence, so the creator is named here. -->
+  <div class="eyebrow"><span data-es>El aparato</span><span data-en>The device</span></div>
+  <h2><span data-es>Qué es y qué no hace</span><span data-en>What it is, and what it does not do</span></h2>
+  <!-- THE STRONGEST CLAIM ON THE PAGE, and it names the creator rather than
+       denying it. An earlier draft said the device "talks to no server": the
+       first half is true and stronger than that draft claimed - net.cpp scans
+       passively and no translation unit even declares esp_wifi_connect - but
+       the device IS a server when the creator is open. A blanket denial the
+       product's own feature contradicts is worse than the longer sentence.
+
+       RE-READ AT P10-C11 AGAINST THE SOURCE, not against the last draft:
+       networking/net.cpp scan_begin() passes passive=true to scanNetworks()
+       and says why; the peer link is ESP-NOW, whose whole residency is
+       WiFi.mode(WIFI_STA) with no association call on the path; the only
+       softAP in the tree is the creator's. "Only listens" was true and vague,
+       so it now says the thing that makes it true - the scan sends nothing,
+       not even a probe request - which is a sentence a reader can go and
+       check and a future commit can make false. -->
   <p class="lede">
     <span data-es>Explorar es mirar los nombres de las redes Wi-Fi que hay en el aire. El aparato
-    solo escucha: no se conecta a ninguna, no pide cuenta y no manda nada a internet. Dos Erratas
-    cercanas hablan directamente entre ellas para pelear, intercambiar y criar. El único servidor
-    que hay en todo esto es el suyo: para diseñar un bicho desde el móvil, el aparato levanta su
-    propia red Wi-Fi y sirve su propia página.</span>
+    solo escucha, y en sentido literal: el escaneo es pasivo, espera las balizas que cada red emite
+    sola y no pregunta nada, así que ni siquiera anuncia que está ahí. No se conecta a ninguna, no
+    pide cuenta y no manda nada a internet.</span>
     <span data-en>Exploring means looking at the names of the Wi-Fi networks in the air. The device
-    only listens: it joins none of them, asks for no account and sends nothing to the internet. Two
-    nearby Erratas talk straight to each other to battle, trade and breed. The only server anywhere
-    in this is its own: to design a Bug from your phone, the device brings up its own Wi-Fi network
-    and serves its own page.</span>
+    only listens, in the literal sense: the scan is passive, it waits for the beacons every network
+    sends anyway and asks nothing, so it does not even announce itself. It joins none of them, asks
+    for no account and sends nothing to the internet.</span>
+  </p>
+  <p class="lede" style="margin-top:14px">
+    <span data-es>Dos Erratas cercanas hablan directamente entre ellas para pelear, intercambiar y
+    criar. El único servidor que hay en todo esto es el suyo: para diseñar un bicho desde el móvil,
+    el aparato levanta su propia red Wi-Fi y sirve su propia página.</span>
+    <span data-en>Two nearby Erratas talk straight to each other to battle, trade and breed. The
+    only server anywhere in this is its own: to design a Bug from your phone, the device brings up
+    its own Wi-Fi network and serves its own page.</span>
   </p>
   <div class="facts">
-    <div><b data-es>Pantalla</b><b data-en>Display</b><span>OLED 0.96", 128 x 64, 1 bit</span></div>
+    <div><b data-es>Pantalla</b><b data-en>Display</b><span>OLED 0,96", 128 × 64, 1 bit</span></div>
     <div><b data-es>Controles</b><b data-en>Controls</b><span data-es>Dos botones, A y B</span><span data-en>Two buttons, A and B</span></div>
     <div><b data-es>Cerebro</b><b data-en>Brain</b><span>ESP32-C3</span></div>
-    <div><b data-es>Pilas</b><b data-en>Batteries</b><span data-es>2 x AAA</span><span data-en>2 x AAA</span></div>
-    <div><b data-es>Sonido</b><b data-en>Sound</b><span data-es>Piezo, una voz</span><span data-en>Piezo, one voice</span></div>
+    <div><b data-es>Pilas</b><b data-en>Batteries</b><span>2 × AAA</span></div>
+    <div><b data-es>Sonido</b><b data-en>Sound</b><span data-es>Piezo, una voz de onda cuadrada</span><span data-en>Piezo, one square-wave voice</span></div>
     <div><b data-es>Especies</b><b data-en>Species</b><span id="nsp"></span></div>
+    <div><b data-es>Ataques</b><b data-en>Moves</b><span id="natk"></span></div>
   </div>
-</section>
 
-<section id="manual" class="wrap">
-  <div class="eyebrow" data-es>El cuadernillo</div><div class="eyebrow" data-en>The booklet</div>
-  <h2><span data-es>Manual de usuario</span><span data-en>User manual</span></h2>
+  <h2 style="margin-top:36px"><span data-es>El manual</span><span data-en>The manual</span></h2>
   <p class="lede">
-    <span data-es>El que va en la caja: A6, grapado, una tinta, español e inglés en el mismo
-    cuadernillo. Esta es la misma copia, al día. El QR de <span class="mono">Manual</span>, en los
-    ajustes del aparato, trae a esta página.</span>
-    <span data-en>The one that goes in the box: A6, saddle-stitched, one ink, Spanish and English in
-    the same booklet. This is that copy, kept up to date. The
-    <span class="mono">Manual</span> QR, in the device's settings, lands on this page.</span>
+    <span data-es>El cuadernillo que va en la caja: A6, grapado, una tinta, español e inglés en las
+    mismas páginas. El aparato lleva su propio QR para abrirlo, en <b>AJUSTES → Manual</b>, y otro
+    para esta página en <b>AJUSTES → Wiki web</b>.</span>
+    <span data-en>The booklet that goes in the box: A6, saddle-stitched, one ink, Spanish and
+    English on the same pages. The device has its own QR for it under <b>AJUSTES → Manual</b>, and
+    another for this page under <b>AJUSTES → Wiki web</b>.</span>
   </p>
   <div class="cta"><a class="btn solid" href="uso.pdf">uso.pdf</a></div>
 </section>
@@ -337,259 +433,417 @@ html[lang="en"] [data-en]{display:revert}
     <span data-es>Esta página se genera del código: los sprites, las fichas y las capturas salen de
     la misma fuente que lleva el aparato, así que no puede quedarse vieja sin que falle la
     compilación.</span>
-    <span data-en>This page is generated from the source: the sprites, the stats and the screenshots
-    come from the same place the device does, so it cannot go stale without failing the build.</span>
+    <span data-en>This page is generated from the source: the sprites, the stats and the
+    screenshots come from the same place the device does, so it cannot go stale without failing
+    the build.</span>
   </p>
   <p><a href="https://github.com/pmirall/Pebblebol">github.com/pmirall/Pebblebol</a></p>
 </footer></div>
 
-<div class="sheet" id="sheet"><div class="inner" id="sheetInner"></div></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true"><div class="inner" id="inner"></div></div>
 
 <script>
-const DATA = {"statMax":10,"species":[{"id":1,"name":"Paketo","type":"SIGNAL","family":1,"familyName":"PACKET","stage":0,"rarity":0,"rarityName":"COMMON","hp":4,"atk":4,"dfn":4,"spd":4,"flavor":"Reparte cartas sin parar.","silhouette":"14x8 capsule, one solid 2px header stripe, two dot eyes on the left cap, four 2px stub feet.","frame2":"the capsule tilts 1px nose-up and the stub feet alternate.","root":"capsule - rounded rect with a solid header stripe","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":2,"level":8,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000000000000000003f7c007f7e00ff7b00c97b00c9fb00fffb00fffb007f7e007f7e0066360066360060300","00000000000000000000000000000000000000000000000000000000000000000003f00007f7c00ff7e00c97b00c97b00fffb00fffb007ffb003f7e00667e0066360066360006060"]},{"id":2,"name":"Fragmar","type":"SIGNAL","family":1,"familyName":"PACKET","stage":1,"rarity":0,"rarityName":"COMMON","hp":6,"atk":6,"dfn":5,"spd":5,"flavor":"Se parte para colarse.","silhouette":"the capsule torn into three shards along an 18px line, 2px gaps, zigzag tear edges, one eye on the lead shard.","frame2":"the three shards scissor 1px apart and snap back.","root":"capsule - rounded rect with a solid header stripe","moves":[{"name":"Interferir","type":"SIGNAL","power":35,"acc":90,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"}],"evo":[{"to":3,"level":18,"cond":"NONE"}],"f":["0000000000000000000000000000000000000000000000000000000fc0003fc0003fc0006366006367de7f47de7f479e7f479e3fc79c3fc0000fc000330000330000330000330000","0000000000000000000000000000000000000000000000000000000fc0003fc0003fc6006367de6367de7f479e7f479e7f479c3fc0003fc0000fc000330000330000330000330000"]},{"id":3,"name":"Rafagón","type":"SIGNAL","family":1,"familyName":"PACKET","stage":2,"rarity":2,"rarityName":"RARE","hp":7,"atk":7,"dfn":7,"spd":7,"flavor":"Mil trozos, una tormenta","silhouette":"eleven 4x3 shards spiralling out of a filled 6px lozenge core, 22px across.","frame2":"the spiral advances one slot: the outermost shard leaves the frame and a new one appears at the core.","root":"capsule - rounded rect with a solid header stripe","moves":[{"name":"Ráfaga","type":"SIGNAL","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"}],"evo":[],"f":["00301800783c00301820000270000723c7e207e7f80fe7f81fe7fc18e7fc1867f8187ff0187ff818fffc1fe7fc0fe7f807e7f80fe7fc0f003c0f003c1f003c1f003c3f007c3f007c","00600c00f01e00600e00000720000273c7e027e7f80fe7f81fe7fc18e7fc1867f8187ff01ffff818fffc1fe7fc0fe7f807e7f80fe7fc0f003c0f003c1f003c1f003c3f007c3f007c"]},{"id":4,"name":"Bippo","type":"SIGNAL","family":2,"familyName":"RADIO","stage":0,"rarity":0,"rarityName":"COMMON","hp":4,"atk":3,"dfn":3,"spd":6,"flavor":"Pita bajito para saludar.","silhouette":"3px pole 12px tall on a 6px foot, one crossbar, a 2px bud on top, one eye on the foot.","frame2":"the bud blinks and one ring pings 2px outward.","root":"mast - thin vertical pole, background visible on both sides at every height","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":5,"level":10,"cond":"NONE"}],"f":["000000000000000000000000031cc0063e60063e60033ec0001c00001c00001c00001c0001ffc001ffc0001c00001c00001c00001c00001c00001c00007e00006600006600007e00","0000000000000000000000000c1c30183e18183e180c3e30001c00001c00001c00001c0001ffc001ffc0001c00001c00001c00001c00001c00001c00007e00006600007e00007e00"]},{"id":5,"name":"Estátic","type":"SIGNAL","family":2,"familyName":"RADIO","stage":1,"rarity":0,"rarityName":"COMMON","hp":5,"atk":5,"dfn":4,"spd":8,"flavor":"Zumba y no deja pensar.","silhouette":"3px pole 16px tall, three crossbars of increasing width, a 5px dish tilted left.","frame2":"the dish flips to tilt right; the crossbars hold still.","root":"mast - thin vertical pole, background visible on both sides at every height","moves":[{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Overclock","type":"NEUTRAL","power":0,"acc":100,"cat":"SPEED"}],"evo":[{"to":6,"level":20,"cond":"NONE"}],"f":["0000000001800000c00000600007e0001c60001cc0001d80001c00001c00007f00007f00001c00001c0001ffc001ffc0001c00001c0007fff007fff0001c00006700006700007f00","0000000000300000600000c00007c0001cc0001c60001c30001c00001c00007f00007f00001c00001c0001ffc001ffc0001c00001c0007fff007fff0001c00006700007f00007f00"]},{"id":6,"name":"Jamrón","type":"SIGNAL","family":2,"familyName":"RADIO","stage":2,"rarity":2,"rarityName":"RARE","hp":7,"atk":6,"dfn":6,"spd":9,"flavor":"Apaga todas las voces.","silhouette":"three fused poles 20px tall, six crossbars, every dish bent downward, a solid 4px block at the base.","frame2":"each dish swings 1px out of phase, so the whole mast visibly shivers.","root":"mast - thin vertical pole, background visible on both sides at every height","moves":[{"name":"Eco Doble","type":"SIGNAL","power":90,"acc":75,"cat":"RISK"},{"name":"Pulso","type":"SIGNAL","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["003e00001c000008003e18001c18000818f80c18700c18200c7f300c7f303f98303f98300c18fe0c18fe0c3e301f3e301f18300c187c0c187c0c18301ffffc1fc3fc1fc3fc1ffffc","007c000038000010001f18000e180004187c0c18380c18100c7f300c7f303f98303f98300c18fe0c18fe0c3e301f3e301f18300c187c0c187c0c18301ffffc1fc3fc1ffffc1ffffc"]},{"id":7,"name":"Lagui","type":"SIGNAL","family":3,"familyName":"LATENCY","stage":0,"rarity":0,"rarityName":"COMMON","hp":5,"atk":3,"dfn":3,"spd":5,"flavor":"Siempre llega tarde.","silhouette":"8px round body with three 1px echo dots trailing at 3px spacing.","frame2":"the echo dots shift one slot back and a new dot appears at the body.","root":"solid body trailed by DETACHED echo dots (the only body drawn with a gap)","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":8,"level":10,"cond":"NONE"}],"f":["0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001f00003f800064c00064c0007fc2667fc2667fc0003f80001f0","0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001f00003f800064c0007fc0007fc0cd7fc0cc7fc0003f80001f0"]},{"id":8,"name":"Jitera","type":"SIGNAL","family":3,"familyName":"LATENCY","stage":1,"rarity":0,"rarityName":"COMMON","hp":6,"atk":5,"dfn":4,"spd":7,"flavor":"Tiembla y te descoloca.","silhouette":"9px body split by a 2px horizontal jitter offset, five echo dots of alternating size.","frame2":"the two body halves swap which way the jitter offset points.","root":"solid body trailed by DETACHED echo dots (the only body drawn with a gap)","moves":[{"name":"Adelanto","type":"SIGNAL","power":40,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"}],"evo":[{"to":9,"level":20,"cond":"NONE"}],"f":["0000000000000000000000000000000000000000000000000000000000000000000000000000000001fe0003ff000333ad63330c63ff0003ff001ff8001ff8001ff8001ff8000ff0","0000000000000000000000000000000000000000000000000000000000000000000000000000000003fc0007fe000666ad66660c67fe0007fe000ffc000ffc000ffc000ffc0007f8"]},{"id":9,"name":"Timaut","type":"SIGNAL","family":3,"familyName":"LATENCY","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":7,"atk":7,"dfn":5,"spd":9,"flavor":"Nadie responde. Nunca.","silhouette":"10px body with a hollow centre, seven echoes growing into 3px blocks, the last touching the frame edge.","frame2":"the whole trail slides one slot forward and the body's hollow closes for one frame.","root":"solid body trailed by DETACHED echo dots (the only body drawn with a gap)","moves":[{"name":"Eco Doble","type":"SIGNAL","power":90,"acc":75,"cat":"RISK"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["00000030000030000000000007000007000007000000000000780000780000780000780000000001ffe003fff007fff807c0f807807807807807c0f807fff803fff001ffe0007f80","0000006000006000000e00000e00000e000000000000f00000f00000f00000f00000000000000001ffe003fff007fff807c0f807807807807807fff807fff803fff001ffe0007f80"]},{"id":10,"name":"Pixio","type":"SIGNAL","family":4,"familyName":"PIXEL","stage":0,"rarity":0,"rarityName":"COMMON","hp":3,"atk":7,"dfn":2,"spd":4,"flavor":"Solo quiere brillar.","silhouette":"10x10 square built from four 5px blocks, one corner block missing.","frame2":"the missing corner rotates to the next corner.","root":"chunky discrete blocks dissolving along a diagonal","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":11,"level":10,"cond":"NONE"}],"f":["0000000000000000000000000000000000000000000fefe00fefe00cece00cece00fefe00fefe00fefe0000380000fe0000fe0004fe0000c60000fe0000fe0000fe00306c00306c0","0000000000000000000000000000000000000000000fefe00fefe00cece00fefe00fefe00fefe00fefe0000380004fe0000fe0000fe0000820000fe0000fe0000fe00186c00186c0"]},{"id":11,"name":"Artefax","type":"SIGNAL","family":4,"familyName":"PIXEL","stage":1,"rarity":0,"rarityName":"COMMON","hp":4,"atk":9,"dfn":3,"spd":6,"flavor":"Mancha todo lo que miras.","silhouette":"14x14 of nine blocks, three of them displaced 3px along the diagonal.","frame2":"the three displaced blocks jump to the opposite diagonal.","root":"chunky discrete blocks dissolving along a diagonal","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":12,"level":20,"cond":"CORRUPTED"}],"f":["0000000000000000000000000000000000780000780000780000780003c00003c03fff003fff0033cf0033cf003fff003fff003ffc003ffc003f3c003f3c003f3c003f3c003e3c00","00000000000000000000000000000000003c00003c00003c00003c0001e00001e03fff003fff0033cf0033cf003fff003fff003ffc003ffc003f1e003f1e003f1e003f1e003e1e00"]},{"id":12,"name":"Burnix","type":"SIGNAL","family":4,"familyName":"PIXEL","stage":2,"rarity":2,"rarityName":"RARE","hp":6,"atk":10,"dfn":4,"spd":8,"flavor":"Se queda grabado. Siempre","silhouette":"20x20 with the diagonal band burnt through to nothing, remaining blocks tapering to single pixels top-right.","frame2":"the burn band steps one block down-left: it eats a new block and gives the old one back.","root":"chunky discrete blocks dissolving along a diagonal","moves":[{"name":"Ráfaga","type":"SIGNAL","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Caché","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["00000000000000000000000000000003800003b00003b3203c00003c38003c3b003c3b303fc0003fc3803fc3b03fc3b03ffc00223c38223c383ffc383fffc03fffc03fffc03fffc0","00000000000000000000000000000003800003e00003e6403c00003c38003c3e003c3e603fc0003fc3803fc3e03fc3e03ffc00223c383ffc383ffc383fffc03fffc03fffc03fffc0"]},{"id":13,"name":"Spamito","type":"SIGNAL","family":5,"familyName":"SPAM","stage":0,"rarity":0,"rarityName":"COMMON","hp":5,"atk":3,"dfn":6,"spd":2,"flavor":"Ofertas que no pediste.","silhouette":"three 6x4 flats linked by 2px joins in a short arc, one flat carrying two dot eyes.","frame2":"the chain compresses 1px like a spring and releases.","root":"chain of linked flats (never one body)","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":14,"level":8,"cond":"NONE"}],"f":["000000000000000000000ffe000ffe000ce6000ce6000ffe000f1e000ffe00180000180007fc00061c0007fc00063c0007fc00060000060000fe00008e0000fe00009e0000fe0000","000000000000000000000000000ffe000ffe000ce6000ce6000ffe000f1e000ffe00180007fc00061c0007fc00063c0007fc00060000060000fe00008e0000fe00009e0000fe0000"]},{"id":14,"name":"Kadenax","type":"SIGNAL","family":5,"familyName":"SPAM","stage":1,"rarity":0,"rarityName":"COMMON","hp":7,"atk":4,"dfn":8,"spd":3,"flavor":"Reenvía o algo pasará.","silhouette":"seven flats in an S-shaped chain, two of them doubled, a 3px clasp at the head.","frame2":"the clasp opens and the tail of the chain whips 1px.","root":"chain of linked flats (never one body)","moves":[{"name":"Eco Doble","type":"SIGNAL","power":90,"acc":75,"cat":"RISK"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Depurar","type":"NEUTRAL","power":0,"acc":100,"cat":"SPEED"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":15,"level":18,"cond":"NONE"}],"f":["000ffe000ffe000cce000cce000ffe000e0e000ffe0000c000ffe000c3e000ffe00030003ff80030f8003ff80003000003ff80030f8003ff800060007ffc0061fc00787c007ffc00","001ffc001ffc00199c00199c001ffc001c1c001ffc0000c000ffe000e1e000ffe00030003ff80030f8003ff80003000003ff80030f8003ff800060007ffc0070fc007c3c007ffc00"]},{"id":15,"name":"Blaklix","type":"SIGNAL","family":5,"familyName":"SPAM","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":9,"atk":5,"dfn":10,"spd":4,"flavor":"Te borra de la lista.","silhouette":"fourteen flats closed into a ring around a solid 8px core, four of them fused into a bar.","frame2":"the ring rotates one link and the core's edge pixels invert.","root":"chain of linked flats (never one body)","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Eco Doble","type":"SIGNAL","power":90,"acc":75,"cat":"RISK"}],"evo":[],"f":["000000003c000399c003ffc003c3c01f00f83c003c0dffb059ff9a71ff8e71998e71998e31ff8c71ff8271c38671ff8e59ffbe0c007c3c01fc1f03f8038ff003bfe003ffc0007e00","00000000660000e70006ff600fc3f00700e02c00343c003c79ff9e11ff8831998c71998ef1ff8f71ff8231c38611ff8e78003e3c007c2c01fc0703f80f8ff006bfe000ffc0007e00"]},{"id":16,"name":"Buggo","type":"CORRUPT","family":6,"familyName":"BUG","stage":0,"rarity":0,"rarityName":"COMMON","hp":4,"atk":7,"dfn":2,"spd":3,"flavor":"Un fallito muy cariñoso.","silhouette":"10x7 oval, four 3px legs, two antenna pixels.","frame2":"alternate leg pairs lift: a step.","root":"legged low oval (the only many-legged body)","moves":[{"name":"Bytazo","type":"CORRUPT","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Defrag","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":17,"level":10,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000001008000810001ff8003ffc007ffe0063c6006bd60063c6007ffe003ffc001ff80024240044220004020","00000000000000000000000000000000000000000000000000000000000002004000810001ff8003ffc007ffe0063c6006bd60063c6007ffe003ffc001ff80024240044220040200"]},{"id":17,"name":"Exploid","type":"CORRUPT","family":6,"familyName":"BUG","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":5,"atk":9,"dfn":3,"spd":5,"flavor":"Encuentra tu punto débil.","silhouette":"13x8 body, six legs, one raised pincer arm, a wedge crack across the shell.","frame2":"the pincer opens and closes.","root":"legged low oval (the only many-legged body)","moves":[{"name":"Bytazo","type":"CORRUPT","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Defrag","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":18,"level":20,"cond":"NONE"}],"f":["00000000000000000000003300003300001e00001e00000c00000c000018000030007fe00e7fc01fffe01c78e01d7ae01c78e01fffe01fffe00fffc00f7bc01ecde06cccd8cccccc","00000000000000000000001e00001e00001e00001e00000c00000c000018000030007fe00e7fc01fffe01c78e01d7ae01c78e01fffe01fffe00fffc00f7bc01ecde06cccd8cccccc"]},{"id":18,"name":"Rootkar","type":"CORRUPT","family":6,"familyName":"BUG","stage":2,"rarity":2,"rarityName":"RARE","hp":7,"atk":10,"dfn":5,"spd":6,"flavor":"Ya vive dentro de ti.","silhouette":"16x10 body, eight long legs reaching the frame edge, a four-spike crown.","frame2":"the body drops 1px while the legs splay: a lunge.","root":"legged low oval (the only many-legged body)","moves":[{"name":"Devorar","type":"CORRUPT","power":50,"acc":90,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Plaga","type":"CORRUPT","power":75,"acc":85,"cat":"DAMAGE"}],"evo":[],"f":["000000000000000000000040006020006060066060066660c6666367ffe63ffffc1ffff81c3c381dbdb81dbdb81c3c381ffff83ffffc63ffc6c63c630c66300c663018c31830c30c","000000000000000000000000000040006020006060c6606366666636666c37ffec1ffff81ffff81c3c381dbdb81dbdb81c3c381ffff83ffffc63ffc6c666631c663830c30c618186"]},{"id":19,"name":"Wormi","type":"CORRUPT","family":7,"familyName":"WORM","stage":0,"rarity":0,"rarityName":"COMMON","hp":6,"atk":3,"dfn":5,"spd":2,"flavor":"Se cuela por un hueco.","silhouette":"three-segment S, 4px thick, blunt head, one eye.","frame2":"the S phase-shifts one segment: a crawl.","root":"serpentine S-curve (never legs)","moves":[{"name":"Infectar","type":"CORRUPT","power":30,"acc":90,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Defrag","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":20,"level":10,"cond":"NONE"}],"f":["0000000000000000000000000000000000000000000000000000001e00003f000067800067ff807fffc07fffe03f83e01e01e00000e00000e00001e00007e03fffe07fffc03fff00","0000000000000000000000000000000000000000000000000000001e00003f000067800067ff007fff807fffc03f83c01e01c00001c00001c00003c00007c03fffc07fff803fff00"]},{"id":20,"name":"Parasix","type":"CORRUPT","family":7,"familyName":"WORM","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":8,"atk":4,"dfn":7,"spd":3,"flavor":"Vive de lo que tú tienes.","silhouette":"five-segment S, six hook barbs on the outer curves, wider head.","frame2":"the barbs retract flush and pop back out.","root":"serpentine S-curve (never legs)","moves":[{"name":"Mordisco","type":"CORRUPT","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":21,"level":20,"cond":"NONE"}],"f":["0000000000000000000211fc073bfe073fff07fe730ffe731fffff3fff8f3ffffe3801fc3c00003e00003fff801fffce0fffef1c71ee1c71e01c73e0082ff01fffe03fff801ffe00","0000000000000000000001fc0003fe0217ff07fe730ffe731fffff3fff8f3ffffe3801fc3c00003e00003fff801fffc80fffec1c71e80821e00003e0000fc01fffc03fff801ffe00"]},{"id":21,"name":"Plagón","type":"CORRUPT","family":7,"familyName":"WORM","stage":2,"rarity":2,"rarityName":"RARE","hp":9,"atk":6,"dfn":9,"spd":4,"flavor":"Ya no queda nada limpio.","silhouette":"eight-segment coil filling the frame, split tail, round maw of five teeth.","frame2":"the coil tightens 1px and the maw opens.","root":"serpentine S-curve (never legs)","moves":[{"name":"Plaga","type":"CORRUPT","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Corromper","type":"CORRUPT","power":0,"acc":90,"cat":"SPEED"},{"name":"Devorar","type":"CORRUPT","power":50,"acc":90,"cat":"DAMAGE"}],"evo":[],"f":["000ff8001ffc003e4e007e0f007f1f007c07007c07007eaf007f1f1fffbe3ffffc7ffff87c00007800007c00007ffffc3ffffe1fffffc0001ff0000ffc001f7fffff7ffffefffffc","000000000ff8001eec003c46007c07007e0f007c07007803007803007f1f1fff1e7ffffc7ffff87800007c00007ffffc3ffffe1fffffc0001ff0000ffc001f7fffff7ffffefffffc"]},{"id":22,"name":"Karnada","type":"CORRUPT","family":8,"familyName":"PHISH","stage":0,"rarity":0,"rarityName":"COMMON","hp":5,"atk":5,"dfn":4,"spd":2,"flavor":"Brilla para que piques.","silhouette":"12px shank with a single bend and a 2px barb, a 4px bait blob hanging off the barb, one eye on the blob.","frame2":"the bait blob swings 1px on the barb.","root":"open hook - straight shank, one bend, one barb","moves":[{"name":"Infectar","type":"CORRUPT","power":30,"acc":90,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Defrag","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":23,"level":10,"cond":"NONE"}],"f":["000700000d80000880000f8000070000070000070000070000070000070000070001c70003c70007c70003ef0001ff0000fe0003fc0006700006700007f00007f00007f00003e000","000700000d80000880000f8000070000070000070000070000070000070000070001c70003c70007c70003ef0001ff0000fe0001fc0003380003380003f80003f80003f80001f000"]},{"id":23,"name":"Klonix","type":"CORRUPT","family":8,"familyName":"PHISH","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":7,"atk":7,"dfn":5,"spd":3,"flavor":"Igualito, pero no es.","silhouette":"two parallel hooks sharing one shank, four barbs, the bait grown into a 6px mask with two eye slots.","frame2":"the mask's eye slots blink shut one frame apart.","root":"open hook - straight shank, one bend, one barb","moves":[{"name":"Gusano","type":"CORRUPT","power":85,"acc":80,"cat":"RISK"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":24,"level":20,"cond":"NONE"}],"f":["006c00004400007c000038000038000038000038000038000038000038003838387c387c3c38781c38701c7c700fffe00fefe01fc7f00dffe0031fc00318c003ffc003c3c001ff80","003600002200003e000038000038000038000038000038000038000038003838387c387c3c38781c38701c7c700fffe00fefe01fc7f00dffe003f8c00318c003ffc003c3c001ff80"]},{"id":24,"name":"Estafex","type":"CORRUPT","family":8,"familyName":"PHISH","stage":2,"rarity":2,"rarityName":"RARE","hp":8,"atk":9,"dfn":7,"spd":4,"flavor":"Te vacía con una sonrisa.","silhouette":"five hooks fanned from one 18px shank, every barb doubled, a 10px face wearing a second face behind it.","frame2":"the front face slides 2px aside to show the blank face behind, then back.","root":"open hook - straight shank, one bend, one barb","moves":[{"name":"Bytazo","type":"CORRUPT","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["003600003e00003e00001c00001c00001c00001c00001c00001c004c1ff2e61ffee003fc43fdfe67fefe2fff7e2cf37e0cf37e0fff7e0fff7cce0778efff73dfff6e07fe3803fc00","003600003e00003e00001c00001c00001c00001c00001c00001c004c1ff2e61ffee00ffc4ff7fe5ffbfe3ffdfe33cdfe33cdfe3ffdfe3ffdfcb81df8bffdf3fffc6e1ff8380ff000"]},{"id":25,"name":"Nulix","type":"CORRUPT","family":9,"familyName":"NULL","stage":0,"rarity":0,"rarityName":"COMMON","hp":3,"atk":8,"dfn":2,"spd":3,"flavor":"No es nada, y ahí está.","silhouette":"10px circle, one 2px diagonal slash, two dot eyes either side of the slash.","frame2":"the slash rotates 45 degrees.","root":"closed circle with a diagonal slash","moves":[{"name":"Infectar","type":"CORRUPT","power":30,"acc":90,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Defrag","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":26,"level":10,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000000000000000000000000000003c0000ff0001ff800199800399c003ffc003e7c003cfc0019f8001ff8000ff00003c00","000000000000000000000000000000000000000000000000000000000000000000000000003c0000ff0001ff8001998003ffc003ffc003e7c003cfc001ff8001ff8000ff00003c00"]},{"id":26,"name":"Voidina","type":"CORRUPT","family":9,"familyName":"NULL","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":4,"atk":10,"dfn":3,"spd":5,"flavor":"Se traga lo que toca.","silhouette":"14px circle, the slash widened into a wedge that removes a third of the disc.","frame2":"the wedge closes to a slit and reopens.","root":"closed circle with a diagonal slash","moves":[{"name":"Plaga","type":"CORRUPT","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Caché","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":27,"level":20,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000007e0001ff8003ff800667000666000ffc000ff8300ff3f00ffff00ffff00ffff007ffe007ffe003ffc001ff80007e00","000000000000000000000000000000000000000000000000007e0001ff8003ffc00667c007ff800ffe000ffc300ffff00ffff00ffff00ffff007ffe007ffe003ffc001ff80007e00"]},{"id":27,"name":"Segfalt","type":"CORRUPT","family":9,"familyName":"NULL","stage":2,"rarity":2,"rarityName":"RARE","hp":6,"atk":10,"dfn":4,"spd":8,"flavor":"Aquí termina el programa.","silhouette":"20px circle with two crossed slashes leaving four loose quadrants drifting 1px apart.","frame2":"the four quadrants rotate a quarter turn about the empty centre.","root":"closed circle with a diagonal slash","moves":[{"name":"Bytazo","type":"CORRUPT","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Gusano","type":"CORRUPT","power":85,"acc":80,"cat":"RISK"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"}],"evo":[],"f":["00000000000000000000000000fc0003ff000fffc01c71e01c71e03c71f03ffff07ffe007f000000007e003ffe1ffffe1ffffe0ffffc0ffffc07fff807fff803fff000ffc0003f00","00000000000000000000000000fc0003ff000fffc01c71e01c71e03ffff03ffff07ffe007f000000003f001fff0fffff0fffff07fffe07fffe03fffc03fffc01fff8007fe0001f80"]},{"id":28,"name":"Bitto","type":"CORRUPT","family":10,"familyName":"BITROT","stage":0,"rarity":0,"rarityName":"COMMON","hp":5,"atk":6,"dfn":3,"spd":2,"flavor":"Un bit feliz: cero o uno.","silhouette":"9x9 square with three corner pixels bitten out, one eye.","frame2":"the bitten corners move to three different corners.","root":"rectangle eroding at the CORNERS (crumble, not slice)","moves":[{"name":"Infectar","type":"CORRUPT","power":30,"acc":90,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Defrag","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":29,"level":8,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000000000000000000000000000000000000000007f0000ff8003ffc00381c003b1c003b1c00381c003ffc000ffc0007fc0","000000000000000000000000000000000000000000000000000000000000000000000000000000000000007f0001ff0003ffc00381c0038dc0038dc00381c003ffc003ff8001ff00"]},{"id":29,"name":"Flipix","type":"CORRUPT","family":10,"familyName":"BITROT","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":6,"atk":8,"dfn":5,"spd":3,"flavor":"Le gusta cambiar de idea.","silhouette":"13x11 rectangle, all four corners eroded 3px deep, a two-pixel hole punched mid-face.","frame2":"the mid-face hole widens to 3px and closes.","root":"rectangle eroding at the CORNERS (crumble, not slice)","moves":[{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Mordisco","type":"CORRUPT","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":30,"level":18,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000000000000000000000000000003c0000ff0007ffe00700e00770e00770e00770e00700e007ffe007ff80019f80001e00","000000000000000000000000000000000000000000000000000000000000000000000000003c0000ff0007ffe00700e0070ee0070ee0070ee00700e007ffe007ff80018780000600"]},{"id":30,"name":"Podrix","type":"CORRUPT","family":10,"familyName":"BITROT","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":8,"atk":10,"dfn":6,"spd":4,"flavor":"Pudre datos sin prisa.","silhouette":"18x14 rectangle reduced to a lace of eroded pits, bottom edge gone, three rot drips beneath.","frame2":"one pit opens clean through to the background and the lowest drip falls 2px.","root":"rectangle eroding at the CORNERS (crumble, not slice)","moves":[{"name":"Mordisco","type":"CORRUPT","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["00000000000000000000000000000000000007e7e01ffff83ffff83ffffc3ffffc3e01e006e1e006e1fc3ee1fc3e01fc3ffe7c3ffe7c3f3ffc1f3ff807f0e007f0e00c30600c0060","00000000000000000000000000000000000007e7e01ffff83ffff83ffffc3ffffc3e01e0061de0061dfc3e1dfc3e01fc3ffe7c3ffe7c3f3e7c1f3e7807f0e007c0e00c30600c3060"]},{"id":31,"name":"Daemi","type":"SYSTEM","family":11,"familyName":"DAEMON","stage":0,"rarity":0,"rarityName":"COMMON","hp":5,"atk":4,"dfn":4,"spd":3,"flavor":"Trabaja mientras duermes","silhouette":"two-step tower, 10px base, one eye slot on the top step.","frame2":"the eye slot widens 1px.","root":"stepped tower - solid ziggurat mass","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Reinicio","type":"SYSTEM","power":0,"acc":100,"cat":"SPEED"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":32,"level":12,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000000000000000000000003c00003c00003c0001ff8001ff8001c38001c38001ff8001ff80067fe0067fe007ffe00781e0","000000000000000000000000000000000000000000000000000000000000000000003c00003c00003c0001ff8001ff8001818001818001ff8001ff8007fe6007fe6007ffe00781e0"]},{"id":32,"name":"Servik","type":"SYSTEM","family":11,"familyName":"DAEMON","stage":1,"rarity":0,"rarityName":"COMMON","hp":6,"atk":6,"dfn":6,"spd":4,"flavor":"Siempre en segundo plano.","silhouette":"three-step tower with two side arms carrying a horizontal bar.","frame2":"the bar rocks like a balance.","root":"stepped tower - solid ziggurat mass","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Bloqueo","type":"SYSTEM","power":30,"acc":90,"cat":"DAMAGE"}],"evo":[{"to":33,"level":24,"cond":"HAPPINESS_GE"}],"f":["00000000000000000000000000000000000000000000000000000000000000ff0000ff0000c30000c30000ff0000ff0003ffc07ffffe7ffffe03ffc00e7ff00e7ff00ffff00ffff0","00000000000000000000000000000000000000000000000000000000000000ff0000ff0000c30000c30000ff0000ff007fffc07fffc003fffe03fffe0fff300fff300ffff00ffff0"]},{"id":33,"name":"Kernon","type":"SYSTEM","family":11,"familyName":"DAEMON","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":8,"atk":7,"dfn":7,"spd":6,"flavor":"Manda en toda la máquina.","silhouette":"five-step obelisk 20px tall, a detached halo bar floating 2px above, four corner pins.","frame2":"the halo bar rotates to a 1px diagonal.","root":"stepped tower - solid ziggurat mass","moves":[{"name":"Núcleo","type":"SYSTEM","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[],"f":["00000003ffc003ffc0001800001800001800003c00003c00003c0003ffc003ffc000c30000c30000ff0000ff0003ffc003ffc003ffc00ffff00ffff0fe7ffffe7fff3ffffc3ffffc","000000000fc003ffc003f800001800001800003c00003c00003c0003ffc003ffc000c30000c30000ff0000ff0003ffc003ffc003ffc00ffff00ffff0ffff3fffff3f3ffffc3ffffc"]},{"id":34,"name":"Proxi","type":"SYSTEM","family":12,"familyName":"FIREWALL","stage":0,"rarity":0,"rarityName":"COMMON","hp":5,"atk":4,"dfn":6,"spd":1,"flavor":"Lleva recados de ida.","silhouette":"12x12 shield with a 3px vertical slit.","frame2":"the slit blinks shut.","root":"broad pentagon shield","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":35,"level":10,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000000000000000003ffc003ffc00387c00387c00387c00387c00387c001878000ff00007e00003c00001800","00000000000000000000000000000000000000000000000000000000000000000000000003ffc003ffc003cfc003cfc003cfc003cfc003cfc001cf8000ff00007e00003c00001800"]},{"id":35,"name":"Gateón","type":"SYSTEM","family":12,"familyName":"FIREWALL","stage":1,"rarity":0,"rarityName":"COMMON","hp":7,"atk":5,"dfn":8,"spd":2,"flavor":"Decide quién pasa hoy.","silhouette":"16x14 shield, horizontal visor slit, two side flanges.","frame2":"the visor slides open to show three dots.","root":"broad pentagon shield","moves":[{"name":"Bloqueo","type":"SYSTEM","power":30,"acc":90,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":36,"level":20,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000003ffc007ffe03ffffc3e00fc3e00fc3e00fc3e00fc0ffff007ffe003ffc000ff00007e00003c00001800","00000000000000000000000000000000000000000000000000000000000003ffc007ffe03ffffc3e00fc3eccfc3eccfc3e00fc0ffff007ffe003ffc000ff00007e00003c00001800"]},{"id":36,"name":"Murax","type":"SYSTEM","family":12,"familyName":"FIREWALL","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":9,"atk":6,"dfn":10,"spd":3,"flavor":"Nada entra sin permiso.","silhouette":"22x18 shield, crenellated top of four merlons, double border, three-tongue flame crest.","frame2":"the crest tongues flicker: odd and even pixels swap.","root":"broad pentagon shield","moves":[{"name":"Sobrecarga","type":"SYSTEM","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Pánico","type":"SYSTEM","power":95,"acc":70,"cat":"RISK"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"}],"evo":[],"f":["000000000300001b0000db0000ff0000ff0079e79e79e79e7ffffe7ffffe6000066c00366d99b66d99b66c003667ffe63bffdc1dffb8067e6003bdc001db80006600003c00001800","00000000180000d80000db0000ff0000ff0079e79e79e79e7ffffe7ffffe6000066c00366d99b66d99b66c003667ffe63bffdc1dffb8067e6003bdc003b70000cc00003c00001800"]},{"id":37,"name":"Kachi","type":"SYSTEM","family":13,"familyName":"MEMORY","stage":0,"rarity":0,"rarityName":"COMMON","hp":6,"atk":5,"dfn":3,"spd":2,"flavor":"Guarda tus cosas cerca.","silhouette":"6x16 upright stick, four notch teeth on the bottom edge, one dot eye.","frame2":"one notch blinks filled and empty.","root":"vertical notched stick melting DOWNWARD","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":38,"level":10,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000000000000000007f0000ff8000ff8000e78000e78000ff80007f00007f0000ff8000ff8000aa8000aa8000aa8000aa80","000000000000000000000000000000000000000000000000000000007f0000ff8000ff8000ff8000ff8000e78000ff80007f00007f0000ff8000ff8000ae8000ae8000ae8000ae80"]},{"id":38,"name":"Memoro","type":"SYSTEM","family":13,"familyName":"MEMORY","stage":1,"rarity":0,"rarityName":"COMMON","hp":7,"atk":8,"dfn":4,"spd":3,"flavor":"Se acuerda de todo.","silhouette":"two sticks side by side bridged at the top, eight notches, small feet.","frame2":"the bridge bar slides 1px left and right.","root":"vertical notched stick melting DOWNWARD","moves":[{"name":"Núcleo","type":"SYSTEM","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":39,"level":20,"cond":"NONE"}],"f":["0000000000000000000000000000000000001ffff83ffffc3ffffc3fe7fc3fe7fc33e79c33e79c3fe7fc3fe7fc3fe7fc1fc3f81fc3f83fe7fc3fe7fc2aa5542aa5542aa5542aa554","0000000000000000000000000000000000000ffffc1ffffe1ffffe3fe7fc3fe7fc33e7fc33e79c3fe7fc3fe7fc3fe7fc0fe1fc0fe1fc3fe7fc3fe7fc2aa5542aa5542aa5542aa554"]},{"id":39,"name":"Lekron","type":"SYSTEM","family":13,"familyName":"MEMORY","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":9,"atk":9,"dfn":6,"spd":4,"flavor":"Pide más y nunca suelta.","silhouette":"three fused sticks, the bottom third melted into five drips of unequal length.","frame2":"the longest drip detaches into a falling 2px bead.","root":"vertical notched stick melting DOWNWARD","moves":[{"name":"Núcleo","type":"SYSTEM","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["001800003c00007e003c7e007e7e3c7e7e7e667e66667e667e7e7e7e667e7e667e7e7e7e7ffffe7ffffe7ffffe7bbf9c733718733718333718333718330718300700000700000700","001800003c00007e003c7e007e7e3c7e7e7e667e66667e667e7e7e7e7e7e7e667e7e7e7e7ffffe7ffffe7ffffe7bbf9c733718733718303718303718300718300718030700030700"]},{"id":40,"name":"Filito","type":"SYSTEM","family":14,"familyName":"FILE","stage":0,"rarity":0,"rarityName":"COMMON","hp":4,"atk":5,"dfn":3,"spd":4,"flavor":"Un archivo con nombre.","silhouette":"10x13 sheet with the top-right corner folded 4px, two dot eyes.","frame2":"the fold flaps 1px, like a page corner lifting.","root":"folded-corner sheet (the only folded plane)","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":41,"level":12,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000003f80003ec0003f60003fb0003fd8003fec00333c00333c003ffc003ffc00387c003ffc003ffc003ffc0","00000000000000000000000000000000000000000000000000000000000003fc0003f60003fb0003fd8003fec003ffc0033fc00333c003ffc003ffc00387c003ffc003ffc003ffc0"]},{"id":41,"name":"Arkivo","type":"SYSTEM","family":14,"familyName":"FILE","stage":1,"rarity":0,"rarityName":"COMMON","hp":5,"atk":7,"dfn":5,"spd":5,"flavor":"Guarda mil cosas dentro.","silhouette":"three sheets fanned behind one another, each corner folded the other way, bound at the left edge.","frame2":"the fan opens one step wider and closes.","root":"folded-corner sheet (the only folded plane)","moves":[{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Bloqueo","type":"SYSTEM","power":30,"acc":90,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"}],"evo":[{"to":42,"level":24,"cond":"NONE"}],"f":["00000000000000000000000000000001ff8001ffc00000e00ffc300ffe300007307f81b07ec1b07f61b01fb1b07fd9b0732db0733db01ffdb07ffdb0787db07ffdb07ffdb07ffdb0","00000000000000000000000000000000ffc000ffe00000700ffe180fff180007987f81d87ec1d87f61d81fb1d87fd9d873edd8733dd81ffdd87ffdd8787dd87ffdd87ffdd87ffdd8"]},{"id":42,"name":"Zipbom","type":"SYSTEM","family":14,"familyName":"FILE","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":7,"atk":8,"dfn":6,"spd":7,"flavor":"Se abre y ya no cabe.","silhouette":"one sheet whose fold has unrolled into a spiral of eleven nested sheets bursting from the corner, outer ones clipped by the frame.","frame2":"the spiral unwinds one turn: a new sheet appears at the corner, the outermost leaves the frame.","root":"folded-corner sheet (the only folded plane)","moves":[{"name":"Núcleo","type":"SYSTEM","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"}],"evo":[],"f":["00ffff0000010000023fffe43ffff80000180000380ffe580fff9800019800039803fd98ff9998ffd998fff998fff998fff998ccf998ccf998fff998fff818e1f818fff818fff800","0000ff0000010000023fffe43ffff80000180000380ffe580fff9800019800039803fd98ff9998ffdf98ffff98ffff98fff998cff998ccf998fff998fff998e1f818fff818fff818"]},{"id":43,"name":"Pingo","type":"SIGNAL","family":15,"familyName":"PING","stage":0,"rarity":0,"rarityName":"COMMON","hp":3,"atk":4,"dfn":2,"spd":7,"flavor":"Solo quiere respuesta.","silhouette":"two nested 7px arcs opening right, a 2px dot at the focus.","frame2":"the dot slides 1px toward the arcs and back.","root":"open arcs, never closing into a ring","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":44,"level":10,"cond":"NONE"}],"f":["0000000000000000000000000000000000000000000000000043e00067e000cf80009f0001bf0001be7001be5001be7001bf00009f0000cf800067e0005be0001980001980001980","0000000000000000000000000000000000000000000000000043e00067e000cf80009f0001bf0001bee001bea001bee001bf00009f0000cf800067e0005be0001980001980001980"]},{"id":44,"name":"Floodra","type":"SIGNAL","family":15,"familyName":"PING","stage":1,"rarity":0,"rarityName":"COMMON","hp":4,"atk":6,"dfn":3,"spd":9,"flavor":"Pregunta mil veces.","silhouette":"four arcs, the outer one broken into three dashes, the dot grown to a 4px eye.","frame2":"the arcs step outward one rank and the innermost is dropped.","root":"open arcs, never closing into a ring","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Adelanto","type":"SIGNAL","power":40,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":45,"level":20,"cond":"NONE"}],"f":["0000000000000000000000000000000000000001f00267f006cfe006dfc00c9d8001bff801bbc801bbc801bbf801bff80c9d8006dfc006cfe0027ff00019f00018c00018c00018c0","0000000000000000000000000000000000000041f00cc7f00d8fe0099fc0191d80033ff8033bc8033bc8033bc8033ff8191d80099fc00d8fe00cdff00059f00018c00018c00018c0"]},{"id":45,"name":"Denyra","type":"CORRUPT","family":15,"familyName":"PING","stage":2,"rarity":3,"rarityName":"SPECIAL","hp":7,"atk":7,"dfn":5,"spd":9,"flavor":"Nadie más podrá entrar.","silhouette":"seven arcs spanning 22px, the outer two barbed with 2px spikes, a filled 6px lozenge core.","frame2":"spike parity flips so the whole fan ripples.","root":"open arcs, never closing into a ring","moves":[{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Caché","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Plaga","type":"CORRUPT","power":75,"acc":85,"cat":"DAMAGE"}],"evo":[],"f":["0000001000003c00006c00f818c3fe198ff8f19ff0f31bfca33fdc6636de667d9e666d91e66d9fe66d9fe67d9e6636de233fdcf31bfcf19ff0d98ff818cffe0c0cf80c0c60000c60","0000000000000c00004c00f878c3fed98ff8719ff0331bfc233fdce636dee67d9ee66d9f666d91666d9fe67d9ee636dea33fdc331bfc319ff0598ff878cffe6c0cf80c0c60000c60"]},{"id":46,"name":"Glitchi","type":"CORRUPT","family":16,"familyName":"GLITCH","stage":0,"rarity":0,"rarityName":"COMMON","hp":4,"atk":4,"dfn":3,"spd":5,"flavor":"Baila donde no debería.","silhouette":"10x10 square in three slices, the middle offset 2px right, one eye split across the seam.","frame2":"the offset flips to the left.","root":"horizontal scanline slices offset sideways","moves":[{"name":"Infección","type":"CORRUPT","power":20,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Defrag","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":47,"level":10,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000000000000000000000001ffc001ffc001ffc001e7c00079f0007ff0007ff001ffc001c3c001ffc001ffc0","00000000000000000000000000000000000000000000000000000000000000000000000000000001ffc001ffc001ffc001e7c0079f0007ff0007ff0001ffc001c3c001ffc001ffc0"]},{"id":47,"name":"Errox","type":"CORRUPT","family":16,"familyName":"GLITCH","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":5,"atk":6,"dfn":4,"spd":7,"flavor":"Rompe cosas sin querer.","silhouette":"14x14 in six slices with alternating offsets, one slice replaced by empty background.","frame2":"the empty slice moves one rank down.","root":"horizontal scanline slices offset sideways","moves":[{"name":"Corromper","type":"CORRUPT","power":0,"acc":90,"cat":"SPEED"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Mordisco","type":"CORRUPT","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Infectar","type":"CORRUPT","power":30,"acc":90,"cat":"DAMAGE"}],"evo":[{"to":48,"level":20,"cond":"CORRUPTED"}],"f":["00000000000000000000000000000000000000000000000000000000000001fff801cff80e73c00ff3c001fff801fff801fff800000000000003fff003fff007ffe00783e007ffe0","00000000000000000000000000000000000000000000000000000000000001fff801cff80e73c00ff3c001fff801fff801fff81fff801fff8000000000000007ffe00783e007ffe0"]},{"id":48,"name":"Panika","type":"SYSTEM","family":16,"familyName":"GLITCH","stage":2,"rarity":2,"rarityName":"RARE","hp":7,"atk":7,"dfn":6,"spd":8,"flavor":"El sistema se rinde.","silhouette":"20x20 in eleven slices, offsets up to 5px, three slices dithered instead of solid, outline no longer readable as a square.","frame2":"the dither field inverts and the three widest slices swap offsets.","root":"horizontal scanline slices offset sideways","moves":[{"name":"Sobrecarga","type":"SYSTEM","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[],"f":["00000000000000000003fffc03fffc039f3c039f3c0f9f300ffff00f00f00ffff03fffc03fffc03fffc001f7de01f7de01f7de1fffe01fffe01fffe007fffc07fffc07fffc07f7fc","00000000000000000003fffc03fffc039f3c039f3c0ffff00ffff00f00f00ffff00ffff00ffff00ffff003e7cf03e7cf03e7cf1fffe01fffe01fffe007fffc07fffc07fffc07f7fc"]},{"id":49,"name":"Portu","type":"SYSTEM","family":17,"familyName":"PORT","stage":0,"rarity":0,"rarityName":"COMMON","hp":6,"atk":4,"dfn":5,"spd":1,"flavor":"Una puertecita educada.","silhouette":"12x9 slab, one 4x3 through-hole, two dot eyes above it.","frame2":"a shutter closes the hole to 1px and opens it.","root":"slab with a rectangular THROUGH-hole (background visible through the body)","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":50,"level":10,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001ff8003ffc0031cc0031cc003ffc003c3c003c3c003c3c003c3c0","00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001ff8003ffc0031cc0031cc003ffc003ffc003ffc003ffc003c3c0"]},{"id":50,"name":"Skanor","type":"SYSTEM","family":17,"familyName":"PORT","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":8,"atk":5,"dfn":7,"spd":2,"flavor":"Prueba todas las puertas.","silhouette":"16x11 slab, three through-holes in a row, a 2px probe bar sliding across them.","frame2":"the probe bar moves one hole to the right.","root":"slab with a rectangular THROUGH-hole (background visible through the body)","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":51,"level":20,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000003000003000003000007800000000007fff00ffff80cff980cff980ffff80ffff80c63180c63180c63180c63180c6318","000000000000000000000000000000000000000000000000001800001800001800003c0000000007fff00ffff80cff980cff980ffff80ffff80c63180c63180c63180c63180c6318"]},{"id":51,"name":"Bakdora","type":"CORRUPT","family":17,"familyName":"PORT","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":9,"atk":6,"dfn":10,"spd":3,"flavor":"Deja una puerta abierta.","silhouette":"20x14 slab, nine through-holes, one of them ragged and much larger, a hinged flap hanging off it.","frame2":"the flap swings open 2px and a second, smaller shape shows inside the ragged hole.","root":"slab with a rectangular THROUGH-hole (background visible through the body)","moves":[{"name":"Mordisco","type":"CORRUPT","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["0000000000000000000000000000000000003fff807fffc07fffc0679c00679c007ffc007ffc007ffc007fffc07ffffe7fffde7fffcf6318c96318c96318cf6318c06318c06318c0","0000000000000000000000000000000000003fff807fffc07fffc0679c007fce007ffc007ffc007ffc007fffc07fffc07ffffe7fffde6318de6318c96318c96318cf6318c06318c0"]},{"id":52,"name":"Klavik","type":"SYSTEM","family":18,"familyName":"CRYPTO","stage":0,"rarity":0,"rarityName":"COMMON","hp":4,"atk":8,"dfn":1,"spd":3,"flavor":"Guarda tu secreto bien.","silhouette":"9x11 lozenge, a 4px semicircular shackle on top, one keyhole pixel.","frame2":"the shackle lifts 1px and drops.","root":"angular lozenge with a shackle","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":53,"level":12,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000000000003e00007f00006300006300003e00007f0000ff8000c98000c98000ff8000e38000f78000f780007f00003e00","000000000000000000000000000000000000000000000000003e00007f00006300006300000000003e00007f0000ff8000c98000c98000ff8000e38000f78000f780007f00003e00"]},{"id":53,"name":"Cifrax","type":"SYSTEM","family":18,"familyName":"CRYPTO","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":5,"atk":10,"dfn":2,"spd":5,"flavor":"Nadie lee lo que escribe.","silhouette":"13x15 lozenge cut into four facets, a doubled shackle, the keyhole grown into a 3px slot.","frame2":"the facets shift one step around the lozenge, like a dial turning.","root":"angular lozenge with a shackle","moves":[{"name":"Núcleo","type":"SYSTEM","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":54,"level":24,"cond":"ITEM"}],"f":["000000000000000000007f0001ffc001bec001b6c001b6c001b6c001bec001ffc000f78001f7c0039ce0039ce003ffe001ffc001e3c003e3e003e3e001ffc000ff80007700003600","000000000000000000007f0001ffc001bec001b6c001b6c001b6c001bec001ffc0007f0000ff80039ce0039ce003ffe003ffe003e3e003e3e003e3e000ff80007f00007f00003e00"]},{"id":54,"name":"Ransora","type":"CORRUPT","family":18,"familyName":"CRYPTO","stage":2,"rarity":3,"rarityName":"SPECIAL","hp":6,"atk":9,"dfn":5,"spd":8,"flavor":"Te lo devuelve si pagas.","silhouette":"19x19 lozenge, the shackle snapped and hanging, the keyhole opened into a black hole with three chains dragging out.","frame2":"the chains reel in 2px and one of them snaps taut.","root":"angular lozenge with a shackle","moves":[{"name":"Bytazo","type":"CORRUPT","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Devorar","type":"CORRUPT","power":50,"acc":90,"cat":"DAMAGE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["01f80001803001803001806000fec003ffc00fffe03ffff83ffc38387c783c7ff83fc3f83f81f83f00f83f00f81f80f00f99e00719c003018001998001998000018000d80000db00","01f80001803001803001806000fec003ffc00fffe03ffff83ffc38387c783c7ff83fc3f83f81f83f00f83f00f81f80f00f99e00719c0031980019980019980001800001800001800"]},{"id":55,"name":"Probix","type":"SYSTEM","family":19,"familyName":"PROBE","stage":0,"rarity":0,"rarityName":"COMMON","hp":4,"atk":4,"dfn":2,"spd":6,"flavor":"¿Hay alguien ahí?","silhouette":"two 8x6 ovals overlapping 3px, one dot eye in each.","frame2":"the two eyes blink alternately.","root":"two interlocking ovals","moves":[{"name":"Núcleo","type":"SYSTEM","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":56,"level":10,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001f7c003ffe0071ff0071c70071ff003ffe001f7c0","00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001f7c003ffe007fc70071c7007fc7003ffe001f7c0"]},{"id":56,"name":"Beakon","type":"SYSTEM","family":19,"familyName":"PROBE","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":5,"atk":6,"dfn":3,"spd":8,"flavor":"Grita su nombre sin parar","silhouette":"two 11x8 ovals interlocked, one drawn solid and one hollow, a 4px stem between them.","frame2":"solid and hollow swap.","root":"two interlocking ovals","moves":[{"name":"Sobrecarga","type":"SYSTEM","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Caché","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":57,"level":20,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000000000000000000000003c0000180000180000180000180003ffc00ffff01c18381dd8381dd8381c18380ffff003e7c0","000000000000000000000000000000000000000000000000000000000000000000003c0000180000180000180000180003ffc00ffff01c18381c1bb81c1bb81c18380ffff003e7c0"]},{"id":57,"name":"Twinix","type":"SIGNAL","family":19,"familyName":"PROBE","stage":2,"rarity":2,"rarityName":"RARE","hp":7,"atk":8,"dfn":5,"spd":8,"flavor":"Se hace pasar por tu red.","silhouette":"two 15x11 ovals overlapped into a figure-eight, the shared region left empty, four eyes in all.","frame2":"the empty shared region slides along the eight, so which twin is real keeps changing.","root":"two interlocking ovals","moves":[{"name":"Ráfaga","type":"SIGNAL","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["0000000000000000000000000000000000000000000200000300000300000300400300c00300c00fe7f03ffffc7f07fee707e7e707e7ff07ffe707e7e707e77f07fe3ffffc0fe7f0","0000000000000000000000000000000000000000000200000300000300000300400300c00300c00fe7f03ffffc7fc1fee7c1e7e7c1e7ffc1ffe7c1e7e7c1e77fc1fe3ffffc0fe7f0"]},{"id":58,"name":"Cookit","type":"SIGNAL","family":20,"familyName":"COOKIE","stage":0,"rarity":0,"rarityName":"COMMON","hp":3,"atk":5,"dfn":2,"spd":6,"flavor":"Una miga que te sigue.","silhouette":"3px stalk 9px tall, a 7px round eye on top, a small 4px base.","frame2":"the pupil tracks 1px left and right.","root":"eye on a stalk - tall and thin, never legs","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":59,"level":10,"cond":"NONE"}],"f":["00000000000000000000000000000000fe0001ff0001830001b30001b30001830001830001ff0000fe00003800003800003800003800003800003800003800003800007c0000fe00","00000000000000000000000000000000fe0001ff00018300018300019b00019b0001830001ff0000fe00003800003800003800003800003800003800003800003800007c0000fe00"]},{"id":59,"name":"Trakkar","type":"SIGNAL","family":20,"familyName":"COOKIE","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":4,"atk":7,"dfn":3,"spd":8,"flavor":"Sabe por dónde has ido.","silhouette":"3px stalk 14px tall with two side stalks, three eyes of different sizes.","frame2":"the three pupils converge on one point and separate.","root":"eye on a stalk - tall and thin, never legs","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Adelanto","type":"SIGNAL","power":40,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":60,"level":20,"cond":"ACTIVITY_GE"}],"f":["000000003800007c0000e60000e60000e600007c000038000038000038001c38003e380033f8003ff8001c38000038f800399c003f9c003f9c0038f8003800003800007c0000fe00","000000003800007c0000ce0000ce0000ce00007c000038000038000038001c38003e380027f8003ff8001c38000038f80039cc003fcc003fcc0038f8003800003800007c0000fe00"]},{"id":60,"name":"Panoptix","type":"SYSTEM","family":20,"familyName":"COOKIE","stage":2,"rarity":3,"rarityName":"SPECIAL","hp":6,"atk":8,"dfn":5,"spd":9,"flavor":"Lo ve todo, siempre.","silhouette":"one 18px stalk with nine eyes on short branches filling the frame, the base dissolved into dots.","frame2":"the pupils sweep in a wave from base to tip.","root":"eye on a stalk - tall and thin, never legs","moves":[{"name":"Sobrecarga","type":"SYSTEM","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Firewall","type":"SYSTEM","power":0,"acc":100,"cat":"PROTECT"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"}],"evo":[],"f":["007c0000ce0000ce0000ce00007c001ff8001b18001f1ff80018b81ff8f81d18001f1ff80018d81ff8f81718001f1ff80018e81ff8f81b18001f1ff80018b80038f8006600019980","007c0000e60000e60000e600007c001ff8001d18001f1ff80018d81ff8f81718001f1ff80018e81ff8f81b18001f1ff80018b81ff8f81d18001f1ff80018d80038f8006600019980"]}],"attacks":[{"name":"Ping","type":"SIGNAL","cat":"DAMAGE","power":35,"acc":100,"effect":"NONE"},{"name":"Pulso","type":"SIGNAL","cat":"DAMAGE","power":55,"acc":95,"effect":"NONE"},{"name":"Ráfaga","type":"SIGNAL","cat":"DAMAGE","power":75,"acc":85,"effect":"NONE"},{"name":"Adelanto","type":"SIGNAL","cat":"DAMAGE","power":40,"acc":100,"effect":"NONE"},{"name":"Interferir","type":"SIGNAL","cat":"DAMAGE","power":35,"acc":90,"effect":"DEBUFF_SPD"},{"name":"Amplificar","type":"SIGNAL","cat":"OFF_BUFF","power":0,"acc":100,"effect":"BUFF_ATK"},{"name":"Antena","type":"SIGNAL","cat":"DEFENSIVE","power":0,"acc":100,"effect":"BUFF_DEF"},{"name":"Eco Doble","type":"SIGNAL","cat":"RISK","power":90,"acc":75,"effect":"RECOIL_PCT"},{"name":"Bytazo","type":"CORRUPT","cat":"DAMAGE","power":35,"acc":100,"effect":"NONE"},{"name":"Mordisco","type":"CORRUPT","cat":"DAMAGE","power":55,"acc":95,"effect":"NONE"},{"name":"Plaga","type":"CORRUPT","cat":"DAMAGE","power":75,"acc":85,"effect":"NONE"},{"name":"Infectar","type":"CORRUPT","cat":"DAMAGE","power":30,"acc":90,"effect":"EFF_CORRUPT"},{"name":"Infección","type":"CORRUPT","cat":"DAMAGE","power":20,"acc":100,"effect":"DOT"},{"name":"Devorar","type":"CORRUPT","cat":"DAMAGE","power":50,"acc":90,"effect":"DRAIN_PCT"},{"name":"Corromper","type":"CORRUPT","cat":"SPEED","power":0,"acc":90,"effect":"DEBUFF_DEF"},{"name":"Frenesí","type":"CORRUPT","cat":"OFF_BUFF","power":0,"acc":100,"effect":"BUFF_ATK"},{"name":"Gusano","type":"CORRUPT","cat":"RISK","power":85,"acc":80,"effect":"SELF_DEBUFF_DEF"},{"name":"Escaneo","type":"SYSTEM","cat":"DAMAGE","power":35,"acc":100,"effect":"NONE"},{"name":"Núcleo","type":"SYSTEM","cat":"DAMAGE","power":55,"acc":95,"effect":"NONE"},{"name":"Sobrecarga","type":"SYSTEM","cat":"DAMAGE","power":75,"acc":85,"effect":"NONE"},{"name":"Bloqueo","type":"SYSTEM","cat":"DAMAGE","power":30,"acc":90,"effect":"DEBUFF_ATK"},{"name":"Firewall","type":"SYSTEM","cat":"PROTECT","power":0,"acc":100,"effect":"PROTECT_HALF"},{"name":"Cifrado","type":"SYSTEM","cat":"DEFENSIVE","power":0,"acc":100,"effect":"BUFF_DEF"},{"name":"Permisos","type":"SYSTEM","cat":"OFF_BUFF","power":0,"acc":100,"effect":"BUFF_ATK"},{"name":"Reinicio","type":"SYSTEM","cat":"SPEED","power":0,"acc":100,"effect":"BUFF_SPD"},{"name":"Pánico","type":"SYSTEM","cat":"RISK","power":95,"acc":70,"effect":"SELF_STUN"},{"name":"Choque","type":"NEUTRAL","cat":"DAMAGE","power":50,"acc":100,"effect":"NONE"},{"name":"Apuesta","type":"NEUTRAL","cat":"RISK","power":100,"acc":55,"effect":"NONE"},{"name":"Defrag","type":"NEUTRAL","cat":"DEFENSIVE","power":0,"acc":100,"effect":"BUFF_DEF"},{"name":"Caché","type":"NEUTRAL","cat":"PROTECT","power":0,"acc":100,"effect":"PROTECT_HALF"},{"name":"Sandbox","type":"NEUTRAL","cat":"PROTECT","power":0,"acc":100,"effect":"PROTECT_HALF"},{"name":"Overclock","type":"NEUTRAL","cat":"SPEED","power":0,"acc":100,"effect":"BUFF_SPD"},{"name":"Backup","type":"NEUTRAL","cat":"DEFENSIVE","power":0,"acc":100,"effect":"HEAL_PCT"},{"name":"Depurar","type":"NEUTRAL","cat":"SPEED","power":0,"acc":100,"effect":"CLEANSE"}],"items":[{"name":"Bit Dulce","klass":"XP_CANDY","value":5,"rarity":"COMMON"},{"name":"Byte Dulce","klass":"XP_CANDY","value":24,"rarity":"UNCOMMON"},{"name":"Megadulce","klass":"XP_CANDY","value":100,"rarity":"RARE"},{"name":"Cebo","klass":"CAPTURE","value":15,"rarity":"COMMON"},{"name":"Jaula Hash","klass":"CAPTURE","value":45,"rarity":"RARE"},{"name":"Parche","klass":"CARE","value":40,"rarity":"COMMON"},{"name":"Antivirus","klass":"CARE","value":100,"rarity":"UNCOMMON"},{"name":"Turbo Chip","klass":"BATTLE_MOD","value":1,"rarity":"UNCOMMON"},{"name":"Llave Raíz","klass":"EVOLUTION","value":0,"rarity":"RARE"},{"name":"Escudo RAM","klass":"BATTLE_MOD","value":1,"rarity":"UNCOMMON"}],"screens":["alert_hungry","battle_faint","battle_hit","battle_intro","battle_menu","battle_pick","battle_protect","battle_result","boot_splash","box_actions","box_card","box_empty","box_list","box_list_full","capture_caught_pull","capture_caught_seal","capture_ready","care_bag_empty","care_bag_two","care_list","care_list_back","confirm_evolve","confirm_wipe","confirm_wipe_yes","creator_offline","creator_portal","dex_known","dex_unknown","diag_console_off","encounter_item","encounter_item_film","encounter_special","encounter_wild","encounter_wild_form","encounter_wild_tear","error_display","error_save_corrupt","error_save_newer","evolution_egg","evolution_egg_cold","help_line","home_corrupted","home_maxed","home_no_bug","home_sick","home_sleeping","home_species","home_starter","intro_bugs","intro_build","intro_fail","intro_type","link_card","link_lost","link_peers","link_searching","load_save_reading","manual","menu_bug","menu_settings_countdown","mg_buffer_run","mg_delete_purged","mg_delete_run","mg_firewall_leaked","mg_firewall_run","mg_packet_flood_reroute","mg_packet_flood_run","mg_ping_lit","mg_ping_wait","mg_sequence_answer","mg_sequence_show","network_scanning","play_list","settings_info","settings_list","setup_name","setup_starter","soon_trade","status_a_corrupted","status_a_maxed","status_a_starter","status_b_genome","status_b_god_hold","time_entry"],"manualUrl":"pmirall.github.io/Errata"};
+const DATA = {"statMax":10,"species":[{"id":1,"name":"Paketo","type":"SIGNAL","family":1,"familyName":"PACKET","stage":0,"rarity":0,"rarityName":"COMMON","hp":4,"atk":4,"dfn":4,"spd":4,"flavor":"Reparte cartas sin parar.","silhouette":"14x8 capsule, one solid 2px header stripe, two dot eyes on the left cap, four 2px stub feet.","frame2":"the capsule tilts 1px nose-up and the stub feet alternate.","root":"capsule - rounded rect with a solid header stripe","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":2,"level":8,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000000000000000003f7c007f7e00ff7b00c97b00c9fb00fffb00fffb007f7e007f7e0066360066360060300","00000000000000000000000000000000000000000000000000000000000000000003f00007f7c00ff7e00c97b00c97b00fffb00fffb007ffb003f7e00667e0066360066360006060"]},{"id":2,"name":"Fragmar","type":"SIGNAL","family":1,"familyName":"PACKET","stage":1,"rarity":0,"rarityName":"COMMON","hp":6,"atk":6,"dfn":5,"spd":5,"flavor":"Se parte para colarse.","silhouette":"the capsule torn into three shards along an 18px line, 2px gaps, zigzag tear edges, one eye on the lead shard.","frame2":"the three shards scissor 1px apart and snap back.","root":"capsule - rounded rect with a solid header stripe","moves":[{"name":"Interferir","type":"SIGNAL","power":35,"acc":90,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"}],"evo":[{"to":3,"level":18,"cond":"NONE"}],"f":["0000000000000000000000000000000000000000000000000000000fc0003fc0003fc0006366006367de7f47de7f479e7f479e3fc79c3fc0000fc000330000330000330000330000","0000000000000000000000000000000000000000000000000000000fc0003fc0003fc6006367de6367de7f479e7f479e7f479c3fc0003fc0000fc000330000330000330000330000"]},{"id":3,"name":"Rafagón","type":"SIGNAL","family":1,"familyName":"PACKET","stage":2,"rarity":2,"rarityName":"RARE","hp":7,"atk":7,"dfn":7,"spd":7,"flavor":"Mil trozos, una tormenta","silhouette":"eleven 4x3 shards spiralling out of a filled 6px lozenge core, 22px across.","frame2":"the spiral advances one slot: the outermost shard leaves the frame and a new one appears at the core.","root":"capsule - rounded rect with a solid header stripe","moves":[{"name":"Ráfaga","type":"SIGNAL","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"}],"evo":[],"f":["00301800783c00301820000270000723c7e207e7f80fe7f81fe7fc18e7fc1867f8187ff0187ff818fffc1fe7fc0fe7f807e7f80fe7fc0f003c0f003c1f003c1f003c3f007c3f007c","00600c00f01e00600e00000720000273c7e027e7f80fe7f81fe7fc18e7fc1867f8187ff01ffff818fffc1fe7fc0fe7f807e7f80fe7fc0f003c0f003c1f003c1f003c3f007c3f007c"]},{"id":4,"name":"Bippo","type":"SIGNAL","family":2,"familyName":"RADIO","stage":0,"rarity":0,"rarityName":"COMMON","hp":4,"atk":3,"dfn":3,"spd":6,"flavor":"Pita bajito para saludar.","silhouette":"3px pole 12px tall on a 6px foot, one crossbar, a 2px bud on top, one eye on the foot.","frame2":"the bud blinks and one ring pings 2px outward.","root":"mast - thin vertical pole, background visible on both sides at every height","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":5,"level":10,"cond":"NONE"}],"f":["000000000000000000000000031cc0063e60063e60033ec0001c00001c00001c00001c0001ffc001ffc0001c00001c00001c00001c00001c00001c00007e00006600006600007e00","0000000000000000000000000c1c30183e18183e180c3e30001c00001c00001c00001c0001ffc001ffc0001c00001c00001c00001c00001c00001c00007e00006600007e00007e00"]},{"id":5,"name":"Estátic","type":"SIGNAL","family":2,"familyName":"RADIO","stage":1,"rarity":0,"rarityName":"COMMON","hp":5,"atk":5,"dfn":4,"spd":8,"flavor":"Zumba y no deja pensar.","silhouette":"3px pole 16px tall, three crossbars of increasing width, a 5px dish tilted left.","frame2":"the dish flips to tilt right; the crossbars hold still.","root":"mast - thin vertical pole, background visible on both sides at every height","moves":[{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Overclock","type":"NEUTRAL","power":0,"acc":100,"cat":"SPEED"}],"evo":[{"to":6,"level":20,"cond":"NONE"}],"f":["0000000001800000c00000600007e0001c60001cc0001d80001c00001c00007f00007f00001c00001c0001ffc001ffc0001c00001c0007fff007fff0001c00006700006700007f00","0000000000300000600000c00007c0001cc0001c60001c30001c00001c00007f00007f00001c00001c0001ffc001ffc0001c00001c0007fff007fff0001c00006700007f00007f00"]},{"id":6,"name":"Jamrón","type":"SIGNAL","family":2,"familyName":"RADIO","stage":2,"rarity":2,"rarityName":"RARE","hp":7,"atk":6,"dfn":6,"spd":9,"flavor":"Apaga todas las voces.","silhouette":"three fused poles 20px tall, six crossbars, every dish bent downward, a solid 4px block at the base.","frame2":"each dish swings 1px out of phase, so the whole mast visibly shivers.","root":"mast - thin vertical pole, background visible on both sides at every height","moves":[{"name":"Eco Doble","type":"SIGNAL","power":90,"acc":75,"cat":"RISK"},{"name":"Pulso","type":"SIGNAL","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["003e00001c000008003e18001c18000818f80c18700c18200c7f300c7f303f98303f98300c18fe0c18fe0c3e301f3e301f18300c187c0c187c0c18301ffffc1fc3fc1fc3fc1ffffc","007c000038000010001f18000e180004187c0c18380c18100c7f300c7f303f98303f98300c18fe0c18fe0c3e301f3e301f18300c187c0c187c0c18301ffffc1fc3fc1ffffc1ffffc"]},{"id":7,"name":"Lagui","type":"SIGNAL","family":3,"familyName":"LATENCY","stage":0,"rarity":0,"rarityName":"COMMON","hp":5,"atk":3,"dfn":3,"spd":5,"flavor":"Siempre llega tarde.","silhouette":"8px round body with three 1px echo dots trailing at 3px spacing.","frame2":"the echo dots shift one slot back and a new dot appears at the body.","root":"solid body trailed by DETACHED echo dots (the only body drawn with a gap)","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":8,"level":10,"cond":"NONE"}],"f":["0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001f00003f800064c00064c0007fc2667fc2667fc0003f80001f0","0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001f00003f800064c0007fc0007fc0cd7fc0cc7fc0003f80001f0"]},{"id":8,"name":"Jitera","type":"SIGNAL","family":3,"familyName":"LATENCY","stage":1,"rarity":0,"rarityName":"COMMON","hp":6,"atk":5,"dfn":4,"spd":7,"flavor":"Tiembla y te descoloca.","silhouette":"9px body split by a 2px horizontal jitter offset, five echo dots of alternating size.","frame2":"the two body halves swap which way the jitter offset points.","root":"solid body trailed by DETACHED echo dots (the only body drawn with a gap)","moves":[{"name":"Adelanto","type":"SIGNAL","power":40,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"}],"evo":[{"to":9,"level":20,"cond":"NONE"}],"f":["0000000000000000000000000000000000000000000000000000000000000000000000000000000001fe0003ff000333ad63330c63ff0003ff001ff8001ff8001ff8001ff8000ff0","0000000000000000000000000000000000000000000000000000000000000000000000000000000003fc0007fe000666ad66660c67fe0007fe000ffc000ffc000ffc000ffc0007f8"]},{"id":9,"name":"Timaut","type":"SIGNAL","family":3,"familyName":"LATENCY","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":7,"atk":7,"dfn":5,"spd":9,"flavor":"Nadie responde. Nunca.","silhouette":"10px body with a hollow centre, seven echoes growing into 3px blocks, the last touching the frame edge.","frame2":"the whole trail slides one slot forward and the body's hollow closes for one frame.","root":"solid body trailed by DETACHED echo dots (the only body drawn with a gap)","moves":[{"name":"Eco Doble","type":"SIGNAL","power":90,"acc":75,"cat":"RISK"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["00000030000030000000000007000007000007000000000000780000780000780000780000000001ffe003fff007fff807c0f807807807807807c0f807fff803fff001ffe0007f80","0000006000006000000e00000e00000e000000000000f00000f00000f00000f00000000000000001ffe003fff007fff807c0f807807807807807fff807fff803fff001ffe0007f80"]},{"id":10,"name":"Pixio","type":"SIGNAL","family":4,"familyName":"PIXEL","stage":0,"rarity":0,"rarityName":"COMMON","hp":3,"atk":7,"dfn":2,"spd":4,"flavor":"Solo quiere brillar.","silhouette":"10x10 square built from four 5px blocks, one corner block missing.","frame2":"the missing corner rotates to the next corner.","root":"chunky discrete blocks dissolving along a diagonal","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":11,"level":10,"cond":"NONE"}],"f":["0000000000000000000000000000000000000000000fefe00fefe00cece00cece00fefe00fefe00fefe0000380000fe0000fe0004fe0000c60000fe0000fe0000fe00306c00306c0","0000000000000000000000000000000000000000000fefe00fefe00cece00fefe00fefe00fefe00fefe0000380004fe0000fe0000fe0000820000fe0000fe0000fe00186c00186c0"]},{"id":11,"name":"Artefax","type":"SIGNAL","family":4,"familyName":"PIXEL","stage":1,"rarity":0,"rarityName":"COMMON","hp":4,"atk":9,"dfn":3,"spd":6,"flavor":"Mancha todo lo que miras.","silhouette":"14x14 of nine blocks, three of them displaced 3px along the diagonal.","frame2":"the three displaced blocks jump to the opposite diagonal.","root":"chunky discrete blocks dissolving along a diagonal","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":12,"level":20,"cond":"CORRUPTED"}],"f":["0000000000000000000000000000000000780000780000780000780003c00003c03fff003fff0033cf0033cf003fff003fff003ffc003ffc003f3c003f3c003f3c003f3c003e3c00","00000000000000000000000000000000003c00003c00003c00003c0001e00001e03fff003fff0033cf0033cf003fff003fff003ffc003ffc003f1e003f1e003f1e003f1e003e1e00"]},{"id":12,"name":"Burnix","type":"SIGNAL","family":4,"familyName":"PIXEL","stage":2,"rarity":2,"rarityName":"RARE","hp":6,"atk":10,"dfn":4,"spd":8,"flavor":"Se queda grabado. Siempre","silhouette":"20x20 with the diagonal band burnt through to nothing, remaining blocks tapering to single pixels top-right.","frame2":"the burn band steps one block down-left: it eats a new block and gives the old one back.","root":"chunky discrete blocks dissolving along a diagonal","moves":[{"name":"Ráfaga","type":"SIGNAL","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Caché","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["00000000000000000000000000000003800003b00003b3203c00003c38003c3b003c3b303fc0003fc3803fc3b03fc3b03ffc00223c38223c383ffc383fffc03fffc03fffc03fffc0","00000000000000000000000000000003800003e00003e6403c00003c38003c3e003c3e603fc0003fc3803fc3e03fc3e03ffc00223c383ffc383ffc383fffc03fffc03fffc03fffc0"]},{"id":13,"name":"Spamito","type":"SIGNAL","family":5,"familyName":"SPAM","stage":0,"rarity":0,"rarityName":"COMMON","hp":5,"atk":3,"dfn":6,"spd":2,"flavor":"Ofertas que no pediste.","silhouette":"three 6x4 flats linked by 2px joins in a short arc, one flat carrying two dot eyes.","frame2":"the chain compresses 1px like a spring and releases.","root":"chain of linked flats (never one body)","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":14,"level":8,"cond":"NONE"}],"f":["000000000000000000000ffe000ffe000ce6000ce6000ffe000f1e000ffe00180000180007fc00061c0007fc00063c0007fc00060000060000fe00008e0000fe00009e0000fe0000","000000000000000000000000000ffe000ffe000ce6000ce6000ffe000f1e000ffe00180007fc00061c0007fc00063c0007fc00060000060000fe00008e0000fe00009e0000fe0000"]},{"id":14,"name":"Kadenax","type":"SIGNAL","family":5,"familyName":"SPAM","stage":1,"rarity":0,"rarityName":"COMMON","hp":7,"atk":4,"dfn":8,"spd":3,"flavor":"Reenvía o algo pasará.","silhouette":"seven flats in an S-shaped chain, two of them doubled, a 3px clasp at the head.","frame2":"the clasp opens and the tail of the chain whips 1px.","root":"chain of linked flats (never one body)","moves":[{"name":"Eco Doble","type":"SIGNAL","power":90,"acc":75,"cat":"RISK"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Depurar","type":"NEUTRAL","power":0,"acc":100,"cat":"SPEED"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":15,"level":18,"cond":"NONE"}],"f":["000ffe000ffe000cce000cce000ffe000e0e000ffe0000c000ffe000c3e000ffe00030003ff80030f8003ff80003000003ff80030f8003ff800060007ffc0061fc00787c007ffc00","001ffc001ffc00199c00199c001ffc001c1c001ffc0000c000ffe000e1e000ffe00030003ff80030f8003ff80003000003ff80030f8003ff800060007ffc0070fc007c3c007ffc00"]},{"id":15,"name":"Blaklix","type":"SIGNAL","family":5,"familyName":"SPAM","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":9,"atk":5,"dfn":10,"spd":4,"flavor":"Te borra de la lista.","silhouette":"fourteen flats closed into a ring around a solid 8px core, four of them fused into a bar.","frame2":"the ring rotates one link and the core's edge pixels invert.","root":"chain of linked flats (never one body)","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Eco Doble","type":"SIGNAL","power":90,"acc":75,"cat":"RISK"}],"evo":[],"f":["000000003c000399c003ffc003c3c01f00f83c003c0dffb059ff9a71ff8e71998e71998e31ff8c71ff8271c38671ff8e59ffbe0c007c3c01fc1f03f8038ff003bfe003ffc0007e00","00000000660000e70006ff600fc3f00700e02c00343c003c79ff9e11ff8831998c71998ef1ff8f71ff8231c38611ff8e78003e3c007c2c01fc0703f80f8ff006bfe000ffc0007e00"]},{"id":16,"name":"Buggo","type":"CORRUPT","family":6,"familyName":"BUG","stage":0,"rarity":0,"rarityName":"COMMON","hp":4,"atk":7,"dfn":2,"spd":3,"flavor":"Un fallito muy cariñoso.","silhouette":"10x7 oval, four 3px legs, two antenna pixels.","frame2":"alternate leg pairs lift: a step.","root":"legged low oval (the only many-legged body)","moves":[{"name":"Bytazo","type":"CORRUPT","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Defrag","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":17,"level":10,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000001008000810001ff8003ffc007ffe0063c6006bd60063c6007ffe003ffc001ff80024240044220004020","00000000000000000000000000000000000000000000000000000000000002004000810001ff8003ffc007ffe0063c6006bd60063c6007ffe003ffc001ff80024240044220040200"]},{"id":17,"name":"Exploid","type":"CORRUPT","family":6,"familyName":"BUG","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":5,"atk":9,"dfn":3,"spd":5,"flavor":"Encuentra tu punto débil.","silhouette":"13x8 body, six legs, one raised pincer arm, a wedge crack across the shell.","frame2":"the pincer opens and closes.","root":"legged low oval (the only many-legged body)","moves":[{"name":"Bytazo","type":"CORRUPT","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Defrag","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":18,"level":20,"cond":"NONE"}],"f":["00000000000000000000003300003300001e00001e00000c00000c000018000030007fe00e7fc01fffe01c78e01d7ae01c78e01fffe01fffe00fffc00f7bc01ecde06cccd8cccccc","00000000000000000000001e00001e00001e00001e00000c00000c000018000030007fe00e7fc01fffe01c78e01d7ae01c78e01fffe01fffe00fffc00f7bc01ecde06cccd8cccccc"]},{"id":18,"name":"Rootkar","type":"CORRUPT","family":6,"familyName":"BUG","stage":2,"rarity":2,"rarityName":"RARE","hp":7,"atk":10,"dfn":5,"spd":6,"flavor":"Ya vive dentro de ti.","silhouette":"16x10 body, eight long legs reaching the frame edge, a four-spike crown.","frame2":"the body drops 1px while the legs splay: a lunge.","root":"legged low oval (the only many-legged body)","moves":[{"name":"Devorar","type":"CORRUPT","power":50,"acc":90,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Plaga","type":"CORRUPT","power":75,"acc":85,"cat":"DAMAGE"}],"evo":[],"f":["000000000000000000000040006020006060066060066660c6666367ffe63ffffc1ffff81c3c381dbdb81dbdb81c3c381ffff83ffffc63ffc6c63c630c66300c663018c31830c30c","000000000000000000000000000040006020006060c6606366666636666c37ffec1ffff81ffff81c3c381dbdb81dbdb81c3c381ffff83ffffc63ffc6c666631c663830c30c618186"]},{"id":19,"name":"Wormi","type":"CORRUPT","family":7,"familyName":"WORM","stage":0,"rarity":0,"rarityName":"COMMON","hp":6,"atk":3,"dfn":5,"spd":2,"flavor":"Se cuela por un hueco.","silhouette":"three-segment S, 4px thick, blunt head, one eye.","frame2":"the S phase-shifts one segment: a crawl.","root":"serpentine S-curve (never legs)","moves":[{"name":"Infectar","type":"CORRUPT","power":30,"acc":90,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Defrag","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":20,"level":10,"cond":"NONE"}],"f":["0000000000000000000000000000000000000000000000000000001e00003f000067800067ff807fffc07fffe03f83e01e01e00000e00000e00001e00007e03fffe07fffc03fff00","0000000000000000000000000000000000000000000000000000001e00003f000067800067ff007fff807fffc03f83c01e01c00001c00001c00003c00007c03fffc07fff803fff00"]},{"id":20,"name":"Parasix","type":"CORRUPT","family":7,"familyName":"WORM","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":8,"atk":4,"dfn":7,"spd":3,"flavor":"Vive de lo que tú tienes.","silhouette":"five-segment S, six hook barbs on the outer curves, wider head.","frame2":"the barbs retract flush and pop back out.","root":"serpentine S-curve (never legs)","moves":[{"name":"Mordisco","type":"CORRUPT","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":21,"level":20,"cond":"NONE"}],"f":["0000000000000000000211fc073bfe073fff07fe730ffe731fffff3fff8f3ffffe3801fc3c00003e00003fff801fffce0fffef1c71ee1c71e01c73e0082ff01fffe03fff801ffe00","0000000000000000000001fc0003fe0217ff07fe730ffe731fffff3fff8f3ffffe3801fc3c00003e00003fff801fffc80fffec1c71e80821e00003e0000fc01fffc03fff801ffe00"]},{"id":21,"name":"Plagón","type":"CORRUPT","family":7,"familyName":"WORM","stage":2,"rarity":2,"rarityName":"RARE","hp":9,"atk":6,"dfn":9,"spd":4,"flavor":"Ya no queda nada limpio.","silhouette":"eight-segment coil filling the frame, split tail, round maw of five teeth.","frame2":"the coil tightens 1px and the maw opens.","root":"serpentine S-curve (never legs)","moves":[{"name":"Plaga","type":"CORRUPT","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Corromper","type":"CORRUPT","power":0,"acc":90,"cat":"SPEED"},{"name":"Devorar","type":"CORRUPT","power":50,"acc":90,"cat":"DAMAGE"}],"evo":[],"f":["000ff8001ffc003e4e007e0f007f1f007c07007c07007eaf007f1f1fffbe3ffffc7ffff87c00007800007c00007ffffc3ffffe1fffffc0001ff0000ffc001f7fffff7ffffefffffc","000000000ff8001eec003c46007c07007e0f007c07007803007803007f1f1fff1e7ffffc7ffff87800007c00007ffffc3ffffe1fffffc0001ff0000ffc001f7fffff7ffffefffffc"]},{"id":22,"name":"Karnada","type":"CORRUPT","family":8,"familyName":"PHISH","stage":0,"rarity":0,"rarityName":"COMMON","hp":5,"atk":5,"dfn":4,"spd":2,"flavor":"Brilla para que piques.","silhouette":"12px shank with a single bend and a 2px barb, a 4px bait blob hanging off the barb, one eye on the blob.","frame2":"the bait blob swings 1px on the barb.","root":"open hook - straight shank, one bend, one barb","moves":[{"name":"Infectar","type":"CORRUPT","power":30,"acc":90,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Defrag","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":23,"level":10,"cond":"NONE"}],"f":["000700000d80000880000f8000070000070000070000070000070000070000070001c70003c70007c70003ef0001ff0000fe0003fc0006700006700007f00007f00007f00003e000","000700000d80000880000f8000070000070000070000070000070000070000070001c70003c70007c70003ef0001ff0000fe0001fc0003380003380003f80003f80003f80001f000"]},{"id":23,"name":"Klonix","type":"CORRUPT","family":8,"familyName":"PHISH","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":7,"atk":7,"dfn":5,"spd":3,"flavor":"Igualito, pero no es.","silhouette":"two parallel hooks sharing one shank, four barbs, the bait grown into a 6px mask with two eye slots.","frame2":"the mask's eye slots blink shut one frame apart.","root":"open hook - straight shank, one bend, one barb","moves":[{"name":"Gusano","type":"CORRUPT","power":85,"acc":80,"cat":"RISK"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":24,"level":20,"cond":"NONE"}],"f":["006c00004400007c000038000038000038000038000038000038000038003838387c387c3c38781c38701c7c700fffe00fefe01fc7f00dffe0031fc00318c003ffc003c3c001ff80","003600002200003e000038000038000038000038000038000038000038003838387c387c3c38781c38701c7c700fffe00fefe01fc7f00dffe003f8c00318c003ffc003c3c001ff80"]},{"id":24,"name":"Estafex","type":"CORRUPT","family":8,"familyName":"PHISH","stage":2,"rarity":2,"rarityName":"RARE","hp":8,"atk":9,"dfn":7,"spd":4,"flavor":"Te vacía con una sonrisa.","silhouette":"five hooks fanned from one 18px shank, every barb doubled, a 10px face wearing a second face behind it.","frame2":"the front face slides 2px aside to show the blank face behind, then back.","root":"open hook - straight shank, one bend, one barb","moves":[{"name":"Bytazo","type":"CORRUPT","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["003600003e00003e00001c00001c00001c00001c00001c00001c004c1ff2e61ffee003fc43fdfe67fefe2fff7e2cf37e0cf37e0fff7e0fff7cce0778efff73dfff6e07fe3803fc00","003600003e00003e00001c00001c00001c00001c00001c00001c004c1ff2e61ffee00ffc4ff7fe5ffbfe3ffdfe33cdfe33cdfe3ffdfe3ffdfcb81df8bffdf3fffc6e1ff8380ff000"]},{"id":25,"name":"Nulix","type":"CORRUPT","family":9,"familyName":"NULL","stage":0,"rarity":0,"rarityName":"COMMON","hp":3,"atk":8,"dfn":2,"spd":3,"flavor":"No es nada, y ahí está.","silhouette":"10px circle, one 2px diagonal slash, two dot eyes either side of the slash.","frame2":"the slash rotates 45 degrees.","root":"closed circle with a diagonal slash","moves":[{"name":"Infectar","type":"CORRUPT","power":30,"acc":90,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Defrag","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":26,"level":10,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000000000000000000000000000003c0000ff0001ff800199800399c003ffc003e7c003cfc0019f8001ff8000ff00003c00","000000000000000000000000000000000000000000000000000000000000000000000000003c0000ff0001ff8001998003ffc003ffc003e7c003cfc001ff8001ff8000ff00003c00"]},{"id":26,"name":"Voidina","type":"CORRUPT","family":9,"familyName":"NULL","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":4,"atk":10,"dfn":3,"spd":5,"flavor":"Se traga lo que toca.","silhouette":"14px circle, the slash widened into a wedge that removes a third of the disc.","frame2":"the wedge closes to a slit and reopens.","root":"closed circle with a diagonal slash","moves":[{"name":"Plaga","type":"CORRUPT","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Caché","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":27,"level":20,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000007e0001ff8003ff800667000666000ffc000ff8300ff3f00ffff00ffff00ffff007ffe007ffe003ffc001ff80007e00","000000000000000000000000000000000000000000000000007e0001ff8003ffc00667c007ff800ffe000ffc300ffff00ffff00ffff00ffff007ffe007ffe003ffc001ff80007e00"]},{"id":27,"name":"Segfalt","type":"CORRUPT","family":9,"familyName":"NULL","stage":2,"rarity":2,"rarityName":"RARE","hp":6,"atk":10,"dfn":4,"spd":8,"flavor":"Aquí termina el programa.","silhouette":"20px circle with two crossed slashes leaving four loose quadrants drifting 1px apart.","frame2":"the four quadrants rotate a quarter turn about the empty centre.","root":"closed circle with a diagonal slash","moves":[{"name":"Bytazo","type":"CORRUPT","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Gusano","type":"CORRUPT","power":85,"acc":80,"cat":"RISK"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"}],"evo":[],"f":["00000000000000000000000000fc0003ff000fffc01c71e01c71e03c71f03ffff07ffe007f000000007e003ffe1ffffe1ffffe0ffffc0ffffc07fff807fff803fff000ffc0003f00","00000000000000000000000000fc0003ff000fffc01c71e01c71e03ffff03ffff07ffe007f000000003f001fff0fffff0fffff07fffe07fffe03fffc03fffc01fff8007fe0001f80"]},{"id":28,"name":"Bitto","type":"CORRUPT","family":10,"familyName":"BITROT","stage":0,"rarity":0,"rarityName":"COMMON","hp":5,"atk":6,"dfn":3,"spd":2,"flavor":"Un bit feliz: cero o uno.","silhouette":"9x9 square with three corner pixels bitten out, one eye.","frame2":"the bitten corners move to three different corners.","root":"rectangle eroding at the CORNERS (crumble, not slice)","moves":[{"name":"Infectar","type":"CORRUPT","power":30,"acc":90,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Defrag","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":29,"level":8,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000000000000000000000000000000000000000007f0000ff8003ffc00381c003b1c003b1c00381c003ffc000ffc0007fc0","000000000000000000000000000000000000000000000000000000000000000000000000000000000000007f0001ff0003ffc00381c0038dc0038dc00381c003ffc003ff8001ff00"]},{"id":29,"name":"Flipix","type":"CORRUPT","family":10,"familyName":"BITROT","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":6,"atk":8,"dfn":5,"spd":3,"flavor":"Le gusta cambiar de idea.","silhouette":"13x11 rectangle, all four corners eroded 3px deep, a two-pixel hole punched mid-face.","frame2":"the mid-face hole widens to 3px and closes.","root":"rectangle eroding at the CORNERS (crumble, not slice)","moves":[{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Mordisco","type":"CORRUPT","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":30,"level":18,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000000000000000000000000000003c0000ff0007ffe00700e00770e00770e00770e00700e007ffe007ff80019f80001e00","000000000000000000000000000000000000000000000000000000000000000000000000003c0000ff0007ffe00700e0070ee0070ee0070ee00700e007ffe007ff80018780000600"]},{"id":30,"name":"Podrix","type":"CORRUPT","family":10,"familyName":"BITROT","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":8,"atk":10,"dfn":6,"spd":4,"flavor":"Pudre datos sin prisa.","silhouette":"18x14 rectangle reduced to a lace of eroded pits, bottom edge gone, three rot drips beneath.","frame2":"one pit opens clean through to the background and the lowest drip falls 2px.","root":"rectangle eroding at the CORNERS (crumble, not slice)","moves":[{"name":"Mordisco","type":"CORRUPT","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["00000000000000000000000000000000000007e7e01ffff83ffff83ffffc3ffffc3e01e006e1e006e1fc3ee1fc3e01fc3ffe7c3ffe7c3f3ffc1f3ff807f0e007f0e00c30600c0060","00000000000000000000000000000000000007e7e01ffff83ffff83ffffc3ffffc3e01e0061de0061dfc3e1dfc3e01fc3ffe7c3ffe7c3f3e7c1f3e7807f0e007c0e00c30600c3060"]},{"id":31,"name":"Daemi","type":"SYSTEM","family":11,"familyName":"DAEMON","stage":0,"rarity":0,"rarityName":"COMMON","hp":5,"atk":4,"dfn":4,"spd":3,"flavor":"Trabaja mientras duermes","silhouette":"two-step tower, 10px base, one eye slot on the top step.","frame2":"the eye slot widens 1px.","root":"stepped tower - solid ziggurat mass","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Reinicio","type":"SYSTEM","power":0,"acc":100,"cat":"SPEED"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":32,"level":12,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000000000000000000000003c00003c00003c0001ff8001ff8001c38001c38001ff8001ff80067fe0067fe007ffe00781e0","000000000000000000000000000000000000000000000000000000000000000000003c00003c00003c0001ff8001ff8001818001818001ff8001ff8007fe6007fe6007ffe00781e0"]},{"id":32,"name":"Servik","type":"SYSTEM","family":11,"familyName":"DAEMON","stage":1,"rarity":0,"rarityName":"COMMON","hp":6,"atk":6,"dfn":6,"spd":4,"flavor":"Siempre en segundo plano.","silhouette":"three-step tower with two side arms carrying a horizontal bar.","frame2":"the bar rocks like a balance.","root":"stepped tower - solid ziggurat mass","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Bloqueo","type":"SYSTEM","power":30,"acc":90,"cat":"DAMAGE"}],"evo":[{"to":33,"level":24,"cond":"HAPPINESS_GE"}],"f":["00000000000000000000000000000000000000000000000000000000000000ff0000ff0000c30000c30000ff0000ff0003ffc07ffffe7ffffe03ffc00e7ff00e7ff00ffff00ffff0","00000000000000000000000000000000000000000000000000000000000000ff0000ff0000c30000c30000ff0000ff007fffc07fffc003fffe03fffe0fff300fff300ffff00ffff0"]},{"id":33,"name":"Kernon","type":"SYSTEM","family":11,"familyName":"DAEMON","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":8,"atk":7,"dfn":7,"spd":6,"flavor":"Manda en toda la máquina.","silhouette":"five-step obelisk 20px tall, a detached halo bar floating 2px above, four corner pins.","frame2":"the halo bar rotates to a 1px diagonal.","root":"stepped tower - solid ziggurat mass","moves":[{"name":"Núcleo","type":"SYSTEM","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[],"f":["00000003ffc003ffc0001800001800001800003c00003c00003c0003ffc003ffc000c30000c30000ff0000ff0003ffc003ffc003ffc00ffff00ffff0fe7ffffe7fff3ffffc3ffffc","000000000fc003ffc003f800001800001800003c00003c00003c0003ffc003ffc000c30000c30000ff0000ff0003ffc003ffc003ffc00ffff00ffff0ffff3fffff3f3ffffc3ffffc"]},{"id":34,"name":"Proxi","type":"SYSTEM","family":12,"familyName":"FIREWALL","stage":0,"rarity":0,"rarityName":"COMMON","hp":5,"atk":4,"dfn":6,"spd":1,"flavor":"Lleva recados de ida.","silhouette":"12x12 shield with a 3px vertical slit.","frame2":"the slit blinks shut.","root":"broad pentagon shield","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":35,"level":10,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000000000000000003ffc003ffc00387c00387c00387c00387c00387c001878000ff00007e00003c00001800","00000000000000000000000000000000000000000000000000000000000000000000000003ffc003ffc003cfc003cfc003cfc003cfc003cfc001cf8000ff00007e00003c00001800"]},{"id":35,"name":"Gateón","type":"SYSTEM","family":12,"familyName":"FIREWALL","stage":1,"rarity":0,"rarityName":"COMMON","hp":7,"atk":5,"dfn":8,"spd":2,"flavor":"Decide quién pasa hoy.","silhouette":"16x14 shield, horizontal visor slit, two side flanges.","frame2":"the visor slides open to show three dots.","root":"broad pentagon shield","moves":[{"name":"Bloqueo","type":"SYSTEM","power":30,"acc":90,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":36,"level":20,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000003ffc007ffe03ffffc3e00fc3e00fc3e00fc3e00fc0ffff007ffe003ffc000ff00007e00003c00001800","00000000000000000000000000000000000000000000000000000000000003ffc007ffe03ffffc3e00fc3eccfc3eccfc3e00fc0ffff007ffe003ffc000ff00007e00003c00001800"]},{"id":36,"name":"Murax","type":"SYSTEM","family":12,"familyName":"FIREWALL","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":9,"atk":6,"dfn":10,"spd":3,"flavor":"Nada entra sin permiso.","silhouette":"22x18 shield, crenellated top of four merlons, double border, three-tongue flame crest.","frame2":"the crest tongues flicker: odd and even pixels swap.","root":"broad pentagon shield","moves":[{"name":"Sobrecarga","type":"SYSTEM","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Pánico","type":"SYSTEM","power":95,"acc":70,"cat":"RISK"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"}],"evo":[],"f":["000000000300001b0000db0000ff0000ff0079e79e79e79e7ffffe7ffffe6000066c00366d99b66d99b66c003667ffe63bffdc1dffb8067e6003bdc001db80006600003c00001800","00000000180000d80000db0000ff0000ff0079e79e79e79e7ffffe7ffffe6000066c00366d99b66d99b66c003667ffe63bffdc1dffb8067e6003bdc003b70000cc00003c00001800"]},{"id":37,"name":"Kachi","type":"SYSTEM","family":13,"familyName":"MEMORY","stage":0,"rarity":0,"rarityName":"COMMON","hp":6,"atk":5,"dfn":3,"spd":2,"flavor":"Guarda tus cosas cerca.","silhouette":"6x16 upright stick, four notch teeth on the bottom edge, one dot eye.","frame2":"one notch blinks filled and empty.","root":"vertical notched stick melting DOWNWARD","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":38,"level":10,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000000000000000007f0000ff8000ff8000e78000e78000ff80007f00007f0000ff8000ff8000aa8000aa8000aa8000aa80","000000000000000000000000000000000000000000000000000000007f0000ff8000ff8000ff8000ff8000e78000ff80007f00007f0000ff8000ff8000ae8000ae8000ae8000ae80"]},{"id":38,"name":"Memoro","type":"SYSTEM","family":13,"familyName":"MEMORY","stage":1,"rarity":0,"rarityName":"COMMON","hp":7,"atk":8,"dfn":4,"spd":3,"flavor":"Se acuerda de todo.","silhouette":"two sticks side by side bridged at the top, eight notches, small feet.","frame2":"the bridge bar slides 1px left and right.","root":"vertical notched stick melting DOWNWARD","moves":[{"name":"Núcleo","type":"SYSTEM","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":39,"level":20,"cond":"NONE"}],"f":["0000000000000000000000000000000000001ffff83ffffc3ffffc3fe7fc3fe7fc33e79c33e79c3fe7fc3fe7fc3fe7fc1fc3f81fc3f83fe7fc3fe7fc2aa5542aa5542aa5542aa554","0000000000000000000000000000000000000ffffc1ffffe1ffffe3fe7fc3fe7fc33e7fc33e79c3fe7fc3fe7fc3fe7fc0fe1fc0fe1fc3fe7fc3fe7fc2aa5542aa5542aa5542aa554"]},{"id":39,"name":"Lekron","type":"SYSTEM","family":13,"familyName":"MEMORY","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":9,"atk":9,"dfn":6,"spd":4,"flavor":"Pide más y nunca suelta.","silhouette":"three fused sticks, the bottom third melted into five drips of unequal length.","frame2":"the longest drip detaches into a falling 2px bead.","root":"vertical notched stick melting DOWNWARD","moves":[{"name":"Núcleo","type":"SYSTEM","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["001800003c00007e003c7e007e7e3c7e7e7e667e66667e667e7e7e7e667e7e667e7e7e7e7ffffe7ffffe7ffffe7bbf9c733718733718333718333718330718300700000700000700","001800003c00007e003c7e007e7e3c7e7e7e667e66667e667e7e7e7e7e7e7e667e7e7e7e7ffffe7ffffe7ffffe7bbf9c733718733718303718303718300718300718030700030700"]},{"id":40,"name":"Filito","type":"SYSTEM","family":14,"familyName":"FILE","stage":0,"rarity":0,"rarityName":"COMMON","hp":4,"atk":5,"dfn":3,"spd":4,"flavor":"Un archivo con nombre.","silhouette":"10x13 sheet with the top-right corner folded 4px, two dot eyes.","frame2":"the fold flaps 1px, like a page corner lifting.","root":"folded-corner sheet (the only folded plane)","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":41,"level":12,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000003f80003ec0003f60003fb0003fd8003fec00333c00333c003ffc003ffc00387c003ffc003ffc003ffc0","00000000000000000000000000000000000000000000000000000000000003fc0003f60003fb0003fd8003fec003ffc0033fc00333c003ffc003ffc00387c003ffc003ffc003ffc0"]},{"id":41,"name":"Arkivo","type":"SYSTEM","family":14,"familyName":"FILE","stage":1,"rarity":0,"rarityName":"COMMON","hp":5,"atk":7,"dfn":5,"spd":5,"flavor":"Guarda mil cosas dentro.","silhouette":"three sheets fanned behind one another, each corner folded the other way, bound at the left edge.","frame2":"the fan opens one step wider and closes.","root":"folded-corner sheet (the only folded plane)","moves":[{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Bloqueo","type":"SYSTEM","power":30,"acc":90,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"}],"evo":[{"to":42,"level":24,"cond":"NONE"}],"f":["00000000000000000000000000000001ff8001ffc00000e00ffc300ffe300007307f81b07ec1b07f61b01fb1b07fd9b0732db0733db01ffdb07ffdb0787db07ffdb07ffdb07ffdb0","00000000000000000000000000000000ffc000ffe00000700ffe180fff180007987f81d87ec1d87f61d81fb1d87fd9d873edd8733dd81ffdd87ffdd8787dd87ffdd87ffdd87ffdd8"]},{"id":42,"name":"Zipbom","type":"SYSTEM","family":14,"familyName":"FILE","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":7,"atk":8,"dfn":6,"spd":7,"flavor":"Se abre y ya no cabe.","silhouette":"one sheet whose fold has unrolled into a spiral of eleven nested sheets bursting from the corner, outer ones clipped by the frame.","frame2":"the spiral unwinds one turn: a new sheet appears at the corner, the outermost leaves the frame.","root":"folded-corner sheet (the only folded plane)","moves":[{"name":"Núcleo","type":"SYSTEM","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"}],"evo":[],"f":["00ffff0000010000023fffe43ffff80000180000380ffe580fff9800019800039803fd98ff9998ffd998fff998fff998fff998ccf998ccf998fff998fff818e1f818fff818fff800","0000ff0000010000023fffe43ffff80000180000380ffe580fff9800019800039803fd98ff9998ffdf98ffff98ffff98fff998cff998ccf998fff998fff998e1f818fff818fff818"]},{"id":43,"name":"Pingo","type":"SIGNAL","family":15,"familyName":"PING","stage":0,"rarity":0,"rarityName":"COMMON","hp":3,"atk":4,"dfn":2,"spd":7,"flavor":"Solo quiere respuesta.","silhouette":"two nested 7px arcs opening right, a 2px dot at the focus.","frame2":"the dot slides 1px toward the arcs and back.","root":"open arcs, never closing into a ring","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":44,"level":10,"cond":"NONE"}],"f":["0000000000000000000000000000000000000000000000000043e00067e000cf80009f0001bf0001be7001be5001be7001bf00009f0000cf800067e0005be0001980001980001980","0000000000000000000000000000000000000000000000000043e00067e000cf80009f0001bf0001bee001bea001bee001bf00009f0000cf800067e0005be0001980001980001980"]},{"id":44,"name":"Floodra","type":"SIGNAL","family":15,"familyName":"PING","stage":1,"rarity":0,"rarityName":"COMMON","hp":4,"atk":6,"dfn":3,"spd":9,"flavor":"Pregunta mil veces.","silhouette":"four arcs, the outer one broken into three dashes, the dot grown to a 4px eye.","frame2":"the arcs step outward one rank and the innermost is dropped.","root":"open arcs, never closing into a ring","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Adelanto","type":"SIGNAL","power":40,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":45,"level":20,"cond":"NONE"}],"f":["0000000000000000000000000000000000000001f00267f006cfe006dfc00c9d8001bff801bbc801bbc801bbf801bff80c9d8006dfc006cfe0027ff00019f00018c00018c00018c0","0000000000000000000000000000000000000041f00cc7f00d8fe0099fc0191d80033ff8033bc8033bc8033bc8033ff8191d80099fc00d8fe00cdff00059f00018c00018c00018c0"]},{"id":45,"name":"Denyra","type":"CORRUPT","family":15,"familyName":"PING","stage":2,"rarity":3,"rarityName":"SPECIAL","hp":7,"atk":7,"dfn":5,"spd":9,"flavor":"Nadie más podrá entrar.","silhouette":"seven arcs spanning 22px, the outer two barbed with 2px spikes, a filled 6px lozenge core.","frame2":"spike parity flips so the whole fan ripples.","root":"open arcs, never closing into a ring","moves":[{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Caché","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Plaga","type":"CORRUPT","power":75,"acc":85,"cat":"DAMAGE"}],"evo":[],"f":["0000001000003c00006c00f818c3fe198ff8f19ff0f31bfca33fdc6636de667d9e666d91e66d9fe66d9fe67d9e6636de233fdcf31bfcf19ff0d98ff818cffe0c0cf80c0c60000c60","0000000000000c00004c00f878c3fed98ff8719ff0331bfc233fdce636dee67d9ee66d9f666d91666d9fe67d9ee636dea33fdc331bfc319ff0598ff878cffe6c0cf80c0c60000c60"]},{"id":46,"name":"Glitchi","type":"CORRUPT","family":16,"familyName":"GLITCH","stage":0,"rarity":0,"rarityName":"COMMON","hp":4,"atk":4,"dfn":3,"spd":5,"flavor":"Baila donde no debería.","silhouette":"10x10 square in three slices, the middle offset 2px right, one eye split across the seam.","frame2":"the offset flips to the left.","root":"horizontal scanline slices offset sideways","moves":[{"name":"Infección","type":"CORRUPT","power":20,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Defrag","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":47,"level":10,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000000000000000000000001ffc001ffc001ffc001e7c00079f0007ff0007ff001ffc001c3c001ffc001ffc0","00000000000000000000000000000000000000000000000000000000000000000000000000000001ffc001ffc001ffc001e7c0079f0007ff0007ff0001ffc001c3c001ffc001ffc0"]},{"id":47,"name":"Errox","type":"CORRUPT","family":16,"familyName":"GLITCH","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":5,"atk":6,"dfn":4,"spd":7,"flavor":"Rompe cosas sin querer.","silhouette":"14x14 in six slices with alternating offsets, one slice replaced by empty background.","frame2":"the empty slice moves one rank down.","root":"horizontal scanline slices offset sideways","moves":[{"name":"Corromper","type":"CORRUPT","power":0,"acc":90,"cat":"SPEED"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Mordisco","type":"CORRUPT","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Infectar","type":"CORRUPT","power":30,"acc":90,"cat":"DAMAGE"}],"evo":[{"to":48,"level":20,"cond":"CORRUPTED"}],"f":["00000000000000000000000000000000000000000000000000000000000001fff801cff80e73c00ff3c001fff801fff801fff800000000000003fff003fff007ffe00783e007ffe0","00000000000000000000000000000000000000000000000000000000000001fff801cff80e73c00ff3c001fff801fff801fff81fff801fff8000000000000007ffe00783e007ffe0"]},{"id":48,"name":"Panika","type":"SYSTEM","family":16,"familyName":"GLITCH","stage":2,"rarity":2,"rarityName":"RARE","hp":7,"atk":7,"dfn":6,"spd":8,"flavor":"El sistema se rinde.","silhouette":"20x20 in eleven slices, offsets up to 5px, three slices dithered instead of solid, outline no longer readable as a square.","frame2":"the dither field inverts and the three widest slices swap offsets.","root":"horizontal scanline slices offset sideways","moves":[{"name":"Sobrecarga","type":"SYSTEM","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[],"f":["00000000000000000003fffc03fffc039f3c039f3c0f9f300ffff00f00f00ffff03fffc03fffc03fffc001f7de01f7de01f7de1fffe01fffe01fffe007fffc07fffc07fffc07f7fc","00000000000000000003fffc03fffc039f3c039f3c0ffff00ffff00f00f00ffff00ffff00ffff00ffff003e7cf03e7cf03e7cf1fffe01fffe01fffe007fffc07fffc07fffc07f7fc"]},{"id":49,"name":"Portu","type":"SYSTEM","family":17,"familyName":"PORT","stage":0,"rarity":0,"rarityName":"COMMON","hp":6,"atk":4,"dfn":5,"spd":1,"flavor":"Una puertecita educada.","silhouette":"12x9 slab, one 4x3 through-hole, two dot eyes above it.","frame2":"a shutter closes the hole to 1px and opens it.","root":"slab with a rectangular THROUGH-hole (background visible through the body)","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":50,"level":10,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001ff8003ffc0031cc0031cc003ffc003c3c003c3c003c3c003c3c0","00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001ff8003ffc0031cc0031cc003ffc003ffc003ffc003ffc003c3c0"]},{"id":50,"name":"Skanor","type":"SYSTEM","family":17,"familyName":"PORT","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":8,"atk":5,"dfn":7,"spd":2,"flavor":"Prueba todas las puertas.","silhouette":"16x11 slab, three through-holes in a row, a 2px probe bar sliding across them.","frame2":"the probe bar moves one hole to the right.","root":"slab with a rectangular THROUGH-hole (background visible through the body)","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":51,"level":20,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000003000003000003000007800000000007fff00ffff80cff980cff980ffff80ffff80c63180c63180c63180c63180c6318","000000000000000000000000000000000000000000000000001800001800001800003c0000000007fff00ffff80cff980cff980ffff80ffff80c63180c63180c63180c63180c6318"]},{"id":51,"name":"Bakdora","type":"CORRUPT","family":17,"familyName":"PORT","stage":2,"rarity":1,"rarityName":"UNCOMMON","hp":9,"atk":6,"dfn":10,"spd":3,"flavor":"Deja una puerta abierta.","silhouette":"20x14 slab, nine through-holes, one of them ragged and much larger, a hinged flap hanging off it.","frame2":"the flap swings open 2px and a second, smaller shape shows inside the ragged hole.","root":"slab with a rectangular THROUGH-hole (background visible through the body)","moves":[{"name":"Mordisco","type":"CORRUPT","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["0000000000000000000000000000000000003fff807fffc07fffc0679c00679c007ffc007ffc007ffc007fffc07ffffe7fffde7fffcf6318c96318c96318cf6318c06318c06318c0","0000000000000000000000000000000000003fff807fffc07fffc0679c007fce007ffc007ffc007ffc007fffc07fffc07ffffe7fffde6318de6318c96318c96318cf6318c06318c0"]},{"id":52,"name":"Klavik","type":"SYSTEM","family":18,"familyName":"CRYPTO","stage":0,"rarity":0,"rarityName":"COMMON","hp":4,"atk":8,"dfn":1,"spd":3,"flavor":"Guarda tu secreto bien.","silhouette":"9x11 lozenge, a 4px semicircular shackle on top, one keyhole pixel.","frame2":"the shackle lifts 1px and drops.","root":"angular lozenge with a shackle","moves":[{"name":"Escaneo","type":"SYSTEM","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":53,"level":12,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000000000003e00007f00006300006300003e00007f0000ff8000c98000c98000ff8000e38000f78000f780007f00003e00","000000000000000000000000000000000000000000000000003e00007f00006300006300000000003e00007f0000ff8000c98000c98000ff8000e38000f78000f780007f00003e00"]},{"id":53,"name":"Cifrax","type":"SYSTEM","family":18,"familyName":"CRYPTO","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":5,"atk":10,"dfn":2,"spd":5,"flavor":"Nadie lee lo que escribe.","silhouette":"13x15 lozenge cut into four facets, a doubled shackle, the keyhole grown into a 3px slot.","frame2":"the facets shift one step around the lozenge, like a dial turning.","root":"angular lozenge with a shackle","moves":[{"name":"Núcleo","type":"SYSTEM","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":54,"level":24,"cond":"ITEM"}],"f":["000000000000000000007f0001ffc001bec001b6c001b6c001b6c001bec001ffc000f78001f7c0039ce0039ce003ffe001ffc001e3c003e3e003e3e001ffc000ff80007700003600","000000000000000000007f0001ffc001bec001b6c001b6c001b6c001bec001ffc0007f0000ff80039ce0039ce003ffe003ffe003e3e003e3e003e3e000ff80007f00007f00003e00"]},{"id":54,"name":"Ransora","type":"CORRUPT","family":18,"familyName":"CRYPTO","stage":2,"rarity":3,"rarityName":"SPECIAL","hp":6,"atk":9,"dfn":5,"spd":8,"flavor":"Te lo devuelve si pagas.","silhouette":"19x19 lozenge, the shackle snapped and hanging, the keyhole opened into a black hole with three chains dragging out.","frame2":"the chains reel in 2px and one of them snaps taut.","root":"angular lozenge with a shackle","moves":[{"name":"Bytazo","type":"CORRUPT","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Devorar","type":"CORRUPT","power":50,"acc":90,"cat":"DAMAGE"},{"name":"Frenesí","type":"CORRUPT","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["01f80001803001803001806000fec003ffc00fffe03ffff83ffc38387c783c7ff83fc3f83f81f83f00f83f00f81f80f00f99e00719c003018001998001998000018000d80000db00","01f80001803001803001806000fec003ffc00fffe03ffff83ffc38387c783c7ff83fc3f83f81f83f00f83f00f81f80f00f99e00719c0031980019980019980001800001800001800"]},{"id":55,"name":"Probix","type":"SYSTEM","family":19,"familyName":"PROBE","stage":0,"rarity":0,"rarityName":"COMMON","hp":4,"atk":4,"dfn":2,"spd":6,"flavor":"¿Hay alguien ahí?","silhouette":"two 8x6 ovals overlapping 3px, one dot eye in each.","frame2":"the two eyes blink alternately.","root":"two interlocking ovals","moves":[{"name":"Núcleo","type":"SYSTEM","power":55,"acc":95,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Cifrado","type":"SYSTEM","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":56,"level":10,"cond":"NONE"}],"f":["00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001f7c003ffe0071ff0071c70071ff003ffe001f7c0","00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001f7c003ffe007fc70071c7007fc7003ffe001f7c0"]},{"id":56,"name":"Beakon","type":"SYSTEM","family":19,"familyName":"PROBE","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":5,"atk":6,"dfn":3,"spd":8,"flavor":"Grita su nombre sin parar","silhouette":"two 11x8 ovals interlocked, one drawn solid and one hollow, a 4px stem between them.","frame2":"solid and hollow swap.","root":"two interlocking ovals","moves":[{"name":"Sobrecarga","type":"SYSTEM","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Caché","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Permisos","type":"SYSTEM","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[{"to":57,"level":20,"cond":"NONE"}],"f":["000000000000000000000000000000000000000000000000000000000000000000003c0000180000180000180000180003ffc00ffff01c18381dd8381dd8381c18380ffff003e7c0","000000000000000000000000000000000000000000000000000000000000000000003c0000180000180000180000180003ffc00ffff01c18381c1bb81c1bb81c18380ffff003e7c0"]},{"id":57,"name":"Twinix","type":"SIGNAL","family":19,"familyName":"PROBE","stage":2,"rarity":2,"rarityName":"RARE","hp":7,"atk":8,"dfn":5,"spd":8,"flavor":"Se hace pasar por tu red.","silhouette":"two 15x11 ovals overlapped into a figure-eight, the shared region left empty, four eyes in all.","frame2":"the empty shared region slides along the eight, so which twin is real keeps changing.","root":"two interlocking ovals","moves":[{"name":"Ráfaga","type":"SIGNAL","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"}],"evo":[],"f":["0000000000000000000000000000000000000000000200000300000300000300400300c00300c00fe7f03ffffc7f07fee707e7e707e7ff07ffe707e7e707e77f07fe3ffffc0fe7f0","0000000000000000000000000000000000000000000200000300000300000300400300c00300c00fe7f03ffffc7fc1fee7c1e7e7c1e7ffc1ffe7c1e7e7c1e77fc1fe3ffffc0fe7f0"]},{"id":58,"name":"Cookit","type":"SIGNAL","family":20,"familyName":"COOKIE","stage":0,"rarity":0,"rarityName":"COMMON","hp":3,"atk":5,"dfn":2,"spd":6,"flavor":"Una miga que te sigue.","silhouette":"3px stalk 9px tall, a 7px round eye on top, a small 4px base.","frame2":"the pupil tracks 1px left and right.","root":"eye on a stalk - tall and thin, never legs","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Amplificar","type":"SIGNAL","power":0,"acc":100,"cat":"OFF_BUFF"},{"name":"Antena","type":"SIGNAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":59,"level":10,"cond":"NONE"}],"f":["00000000000000000000000000000000fe0001ff0001830001b30001b30001830001830001ff0000fe00003800003800003800003800003800003800003800003800007c0000fe00","00000000000000000000000000000000fe0001ff00018300018300019b00019b0001830001ff0000fe00003800003800003800003800003800003800003800003800007c0000fe00"]},{"id":59,"name":"Trakkar","type":"SIGNAL","family":20,"familyName":"COOKIE","stage":1,"rarity":1,"rarityName":"UNCOMMON","hp":4,"atk":7,"dfn":3,"spd":8,"flavor":"Sabe por dónde has ido.","silhouette":"3px stalk 14px tall with two side stalks, three eyes of different sizes.","frame2":"the three pupils converge on one point and separate.","root":"eye on a stalk - tall and thin, never legs","moves":[{"name":"Ping","type":"SIGNAL","power":35,"acc":100,"cat":"DAMAGE"},{"name":"Choque","type":"NEUTRAL","power":50,"acc":100,"cat":"DAMAGE"},{"name":"Sandbox","type":"NEUTRAL","power":0,"acc":100,"cat":"PROTECT"},{"name":"Adelanto","type":"SIGNAL","power":40,"acc":100,"cat":"DAMAGE"}],"evo":[{"to":60,"level":20,"cond":"ACTIVITY_GE"}],"f":["000000003800007c0000e60000e60000e600007c000038000038000038001c38003e380033f8003ff8001c38000038f800399c003f9c003f9c0038f8003800003800007c0000fe00","000000003800007c0000ce0000ce0000ce00007c000038000038000038001c38003e380027f8003ff8001c38000038f80039cc003fcc003fcc0038f8003800003800007c0000fe00"]},{"id":60,"name":"Panoptix","type":"SYSTEM","family":20,"familyName":"COOKIE","stage":2,"rarity":3,"rarityName":"SPECIAL","hp":6,"atk":8,"dfn":5,"spd":9,"flavor":"Lo ve todo, siempre.","silhouette":"one 18px stalk with nine eyes on short branches filling the frame, the base dissolved into dots.","frame2":"the pupils sweep in a wave from base to tip.","root":"eye on a stalk - tall and thin, never legs","moves":[{"name":"Sobrecarga","type":"SYSTEM","power":75,"acc":85,"cat":"DAMAGE"},{"name":"Firewall","type":"SYSTEM","power":0,"acc":100,"cat":"PROTECT"},{"name":"Backup","type":"NEUTRAL","power":0,"acc":100,"cat":"DEFENSIVE"},{"name":"Apuesta","type":"NEUTRAL","power":100,"acc":55,"cat":"RISK"}],"evo":[],"f":["007c0000ce0000ce0000ce00007c001ff8001b18001f1ff80018b81ff8f81d18001f1ff80018d81ff8f81718001f1ff80018e81ff8f81b18001f1ff80018b80038f8006600019980","007c0000e60000e60000e600007c001ff8001d18001f1ff80018d81ff8f81718001f1ff80018e81ff8f81b18001f1ff80018b81ff8f81d18001f1ff80018d80038f8006600019980"]}],"attacks":[{"name":"Ping","type":"SIGNAL","cat":"DAMAGE","power":35,"acc":100,"effect":"NONE"},{"name":"Pulso","type":"SIGNAL","cat":"DAMAGE","power":55,"acc":95,"effect":"NONE"},{"name":"Ráfaga","type":"SIGNAL","cat":"DAMAGE","power":75,"acc":85,"effect":"NONE"},{"name":"Adelanto","type":"SIGNAL","cat":"DAMAGE","power":40,"acc":100,"effect":"NONE"},{"name":"Interferir","type":"SIGNAL","cat":"DAMAGE","power":35,"acc":90,"effect":"DEBUFF_SPD"},{"name":"Amplificar","type":"SIGNAL","cat":"OFF_BUFF","power":0,"acc":100,"effect":"BUFF_ATK"},{"name":"Antena","type":"SIGNAL","cat":"DEFENSIVE","power":0,"acc":100,"effect":"BUFF_DEF"},{"name":"Eco Doble","type":"SIGNAL","cat":"RISK","power":90,"acc":75,"effect":"RECOIL_PCT"},{"name":"Bytazo","type":"CORRUPT","cat":"DAMAGE","power":35,"acc":100,"effect":"NONE"},{"name":"Mordisco","type":"CORRUPT","cat":"DAMAGE","power":55,"acc":95,"effect":"NONE"},{"name":"Plaga","type":"CORRUPT","cat":"DAMAGE","power":75,"acc":85,"effect":"NONE"},{"name":"Infectar","type":"CORRUPT","cat":"DAMAGE","power":30,"acc":90,"effect":"EFF_CORRUPT"},{"name":"Infección","type":"CORRUPT","cat":"DAMAGE","power":20,"acc":100,"effect":"DOT"},{"name":"Devorar","type":"CORRUPT","cat":"DAMAGE","power":50,"acc":90,"effect":"DRAIN_PCT"},{"name":"Corromper","type":"CORRUPT","cat":"SPEED","power":0,"acc":90,"effect":"DEBUFF_DEF"},{"name":"Frenesí","type":"CORRUPT","cat":"OFF_BUFF","power":0,"acc":100,"effect":"BUFF_ATK"},{"name":"Gusano","type":"CORRUPT","cat":"RISK","power":85,"acc":80,"effect":"SELF_DEBUFF_DEF"},{"name":"Escaneo","type":"SYSTEM","cat":"DAMAGE","power":35,"acc":100,"effect":"NONE"},{"name":"Núcleo","type":"SYSTEM","cat":"DAMAGE","power":55,"acc":95,"effect":"NONE"},{"name":"Sobrecarga","type":"SYSTEM","cat":"DAMAGE","power":75,"acc":85,"effect":"NONE"},{"name":"Bloqueo","type":"SYSTEM","cat":"DAMAGE","power":30,"acc":90,"effect":"DEBUFF_ATK"},{"name":"Firewall","type":"SYSTEM","cat":"PROTECT","power":0,"acc":100,"effect":"PROTECT_HALF"},{"name":"Cifrado","type":"SYSTEM","cat":"DEFENSIVE","power":0,"acc":100,"effect":"BUFF_DEF"},{"name":"Permisos","type":"SYSTEM","cat":"OFF_BUFF","power":0,"acc":100,"effect":"BUFF_ATK"},{"name":"Reinicio","type":"SYSTEM","cat":"SPEED","power":0,"acc":100,"effect":"BUFF_SPD"},{"name":"Pánico","type":"SYSTEM","cat":"RISK","power":95,"acc":70,"effect":"SELF_STUN"},{"name":"Choque","type":"NEUTRAL","cat":"DAMAGE","power":50,"acc":100,"effect":"NONE"},{"name":"Apuesta","type":"NEUTRAL","cat":"RISK","power":100,"acc":55,"effect":"NONE"},{"name":"Defrag","type":"NEUTRAL","cat":"DEFENSIVE","power":0,"acc":100,"effect":"BUFF_DEF"},{"name":"Caché","type":"NEUTRAL","cat":"PROTECT","power":0,"acc":100,"effect":"PROTECT_HALF"},{"name":"Sandbox","type":"NEUTRAL","cat":"PROTECT","power":0,"acc":100,"effect":"PROTECT_HALF"},{"name":"Overclock","type":"NEUTRAL","cat":"SPEED","power":0,"acc":100,"effect":"BUFF_SPD"},{"name":"Backup","type":"NEUTRAL","cat":"DEFENSIVE","power":0,"acc":100,"effect":"HEAL_PCT"},{"name":"Depurar","type":"NEUTRAL","cat":"SPEED","power":0,"acc":100,"effect":"CLEANSE"}],"items":[{"name":"Bit Dulce","klass":"XP_CANDY","value":5,"rarity":"COMMON"},{"name":"Byte Dulce","klass":"XP_CANDY","value":24,"rarity":"UNCOMMON"},{"name":"Megadulce","klass":"XP_CANDY","value":100,"rarity":"RARE"},{"name":"Cebo","klass":"CAPTURE","value":15,"rarity":"COMMON"},{"name":"Jaula Hash","klass":"CAPTURE","value":45,"rarity":"RARE"},{"name":"Parche","klass":"CARE","value":40,"rarity":"COMMON"},{"name":"Antivirus","klass":"CARE","value":100,"rarity":"UNCOMMON"},{"name":"Turbo Chip","klass":"BATTLE_MOD","value":1,"rarity":"UNCOMMON"},{"name":"Llave Raíz","klass":"EVOLUTION","value":0,"rarity":"RARE"},{"name":"Escudo RAM","klass":"BATTLE_MOD","value":1,"rarity":"UNCOMMON"}],"screenAreas":[{"key":"start","label":["Encender y empezar","Switching on"],"screens":["boot_splash","intro_bugs","intro_build","intro_fail","intro_type","load_save_reading","setup_name","setup_starter","time_entry"]},{"key":"home","label":["El día a día","Day to day"],"screens":["alert_hungry","help_line","home_corrupted","home_maxed","home_no_bug","home_sick","home_sleeping","home_species","home_starter","menu_bug","menu_settings_countdown","status_a_corrupted","status_a_maxed","status_a_starter","status_b_genome","status_b_god_hold"]},{"key":"care","label":["Cuidar y jugar","Care and play"],"screens":["care_bag_empty","care_bag_two","care_list","care_list_back","mg_buffer_run","mg_delete_purged","mg_delete_run","mg_firewall_leaked","mg_firewall_run","mg_packet_flood_reroute","mg_packet_flood_run","mg_ping_lit","mg_ping_wait","mg_sequence_answer","mg_sequence_show","play_list"]},{"key":"explore","label":["Explorar y capturar","Exploring"],"screens":["capture_caught_pull","capture_caught_seal","capture_ready","encounter_item","encounter_item_film","encounter_special","encounter_wild","encounter_wild_form","encounter_wild_tear","network_scanning"]},{"key":"bugs","label":["La Caja y la wiki","The Box and the wiki"],"screens":["box_actions","box_card","box_empty","box_list","box_list_full","dex_known","dex_unknown","evolution_egg","evolution_egg_cold"]},{"key":"battle","label":["Combate","Battle"],"screens":["battle_faint","battle_hit","battle_intro","battle_menu","battle_pick","battle_protect","battle_result"]},{"key":"link","label":["Enlace y creador","Link and creator"],"screens":["creator_offline","creator_portal","link_card","link_lost","link_peers","link_searching"]},{"key":"system","label":["Ajustes y avisos","Settings and warnings"],"screens":["confirm_evolve","confirm_wipe","confirm_wipe_yes","diag_console_off","error_display","error_save_corrupt","error_save_newer","manual","settings_info","settings_list","soon_trade","wiki_qr"]}],"heroFamily":1,"manualUrl":"pmirall.github.io/Errata/uso.pdf"};
 const T = {
-  hp:["VIDA","HP"], atk:["ATAQUE","ATTACK"], dfn:["DEFENSA","DEFENCE"], spd:["VELOC.","SPEED"],
+  hp:["VIDA","HP"], atk:["ATAQUE","ATTACK"], dfn:["DEFENSA","DEFENCE"], spd:["VELOCIDAD","SPEED"],
   moves:["Ataques que aprende","Moves it learns"], chain:["Su familia","Its family"],
-  look:["Notas de dibujo","How it is drawn"], stage:["Etapa","Stage"],
-  /* THE ART NOTES ARE ENGLISH AND STAY ENGLISH. They are quoted verbatim from
-     the sprite files' own headers - the art bible, not prose written for this
-     page - so translating them would make this page the source of a rule it
-     does not own. The Spanish label says where they come from instead. */
-  looknote:["Del fichero del sprite, en inglés","From the sprite's own file"],
+  look:["Notas de dibujo","How it is drawn"],
+  looknote:["citadas del fichero del sprite, en inglés","quoted from the sprite's own file"],
   none:["Nada coincide con eso.","Nothing matches that."],
-  showing:["%d de %d","%d of %d"], lvl:["Nv %d","Lv %d"], last:["última etapa","final stage"],
-  name:["Nombre","Name"], type:["Tipo","Type"], power:["Potencia","Power"], acc:["Prec.","Acc."],
-  kind:["Clase","Kind"], value:["Valor","Value"], rarity:["Rareza","Rarity"], effect:["Efecto","Effect"]
+  showing:["%a de %b","%a of %b"], lvl:["Nv %d","Lv %d"],
+  name:["Nombre","Name"], type:["Tipo","Type"], power:["Potencia","Power"], acc:["Precisión","Accuracy"],
+  kind:["Clase","Kind"], value:["Valor","Value"], rarity:["Rareza","Rarity"], effect:["Efecto","Effect"],
+  stage:["Etapa","Stage"], fam:["Familia","Family"], search:["Buscar…","Search…"],
+  close:["Cerrar","Close"], total:["Total","Total"],
+  heroCap:["Lo mismo, tres veces, cada vez más roto","One shape, three times, breaking a little further"]
 };
-let L = 0;                                   // 0 = es, 1 = en
+let L = 0;
 const t = k => T[k][L];
-const STAGES = [["cría","joven","adulto"],["hatchling","young","adult"]];
+const STAGES = [["Cría","Joven","Adulto"],["Hatchling","Young","Adult"]];
+const HUE = {SIGNAL:"--signal", CORRUPT:"--corrupt", SYSTEM:"--system"};
 
-/* --- sprites: 24 hex rows, MSB is the leftmost pixel ------------------------ */
-function draw(cv, hex, on){
-  const g = cv.getContext('2d');
+/* ---- sprites: 24 packed hex rows, MSB is the leftmost pixel ------------- */
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const live = [];
+function paint(cv, hex){
+  const g = cv.getContext("2d");
   g.clearRect(0,0,24,24);
-  g.fillStyle = on;
+  g.fillStyle = getComputedStyle(document.body).getPropertyValue("--screen-lit").trim() || "#E8EDF0";
   for(let y=0;y<24;y++){
     const row = parseInt(hex.substr(y*6,6),16);
     for(let x=0;x<24;x++) if(row & (1<<(23-x))) g.fillRect(x,y,1,1);
   }
 }
-const ink = () => getComputedStyle(document.body).color;
-const sprites = [];                          // {cv, frames}
-function makeSprite(sp, cls){
-  const cv = document.createElement('canvas');
-  cv.width = 24; cv.height = 24; if(cls) cv.className = cls;
-  const rec = {cv, f: sp.f};
-  sprites.push(rec);
-  draw(cv, sp.f[0], ink());
-  return cv;
+function tile(sp, size){
+  const d = document.createElement("div");
+  d.className = "tile t-" + size;
+  const cv = document.createElement("canvas");
+  cv.width = 24; cv.height = 24;
+  cv.setAttribute("role","img");
+  cv.setAttribute("aria-label", sp.name);
+  d.appendChild(cv);
+  live.push({cv, f: sp.f});
+  paint(cv, sp.f[0]);
+  return d;
 }
 let phase = 0;
-setInterval(() => {
+if(!REDUCED) setInterval(() => {
   phase ^= 1;
-  const c = ink();
-  for(const s of sprites) draw(s.cv, s.f[phase], c);
-}, 420);
+  for(const s of live) paint(s.cv, s.f[phase]);
+}, 430);
 
-/* --- grid ------------------------------------------------------------------- */
+/* ---- data helpers ------------------------------------------------------- */
 const byId = Object.fromEntries(DATA.species.map(s => [s.id, s]));
-const grid = document.getElementById('grid');
-let fType = null, fQ = '';
-
-function render(){
-  sprites.length = 0;
-  grid.textContent = '';
-  const q = fQ.trim().toLowerCase();
-  const rows = DATA.species.filter(s =>
-    (!fType || s.type === fType) &&
-    (!q || s.name.toLowerCase().includes(q) || s.familyName.toLowerCase().includes(q)));
-  for(const s of rows){
-    const b = document.createElement('button');
-    b.className = 'card';
-    b.appendChild(makeSprite(s));
-    const n = document.createElement('span'); n.className = 'num';
-    n.textContent = String(s.id).padStart(2,'0'); b.appendChild(n);
-    const nm = document.createElement('span'); nm.className = 'nm';
-    nm.textContent = s.name; b.appendChild(nm);
-    const ty = document.createElement('span'); ty.className = 't ' + s.type;
-    ty.textContent = s.type; b.appendChild(ty);
-    b.addEventListener('click', () => open(s.id));
-    grid.appendChild(b);
+const families = [];
+{
+  const m = new Map();
+  for(const s of DATA.species){
+    if(!m.has(s.family)) { m.set(s.family, {id:s.family, name:s.familyName, type:s.type, members:[]}); families.push(m.get(s.family)); }
+    m.get(s.family).members.push(s);
   }
-  if(!rows.length){
-    const p = document.createElement('p'); p.className = 'lede';
-    p.textContent = t('none'); grid.appendChild(p);
-  }
-  document.getElementById('count').textContent =
-    t('showing').replace('%d', rows.length).replace('%d', DATA.species.length);
+  for(const f of families) f.members.sort((a,b) => a.stage - b.stage);
 }
-
-/* --- detail ----------------------------------------------------------------- */
-const sheet = document.getElementById('sheet'), inner = document.getElementById('sheetInner');
-function el(tag, cls, txt){
+const el = (tag, cls, txt) => {
   const e = document.createElement(tag);
   if(cls) e.className = cls;
   if(txt !== undefined) e.textContent = txt;
   return e;
+};
+const pad2 = n => String(n).padStart(2,"0");
+const tag = s => el("span", "tag " + s.type, s.type);
+
+let view = "fam", fType = null, fQ = "";
+const matches = s => (!fType || s.type === fType) &&
+  (!fQ || s.name.toLowerCase().includes(fQ) || s.familyName.toLowerCase().includes(fQ));
+
+/* ---- view: families ----------------------------------------------------- */
+function step(s, size){
+  const b = el("button", "step");
+  b.appendChild(tile(s, size));
+  b.appendChild(el("span", "nm", s.name));
+  b.appendChild(el("span", "num", "Nº " + pad2(s.id)));
+  b.addEventListener("click", () => open(s.id));
+  return b;
 }
+function renderFams(){
+  const host = document.getElementById("fams");
+  host.textContent = "";
+  let n = 0;
+  for(const f of families){
+    const hits = f.members.filter(matches);
+    if(!hits.length) continue;
+    n += hits.length;
+    const box = el("div","fam");
+    const hd = document.createElement("header");
+    hd.appendChild(el("h3", null, f.name));
+    hd.appendChild(tag(f.members[0]));
+    box.appendChild(hd);
+    const row = el("div","stages");
+    f.members.forEach((m, i) => {
+      if(i){
+        const ev = f.members[i-1].evo[0];
+        row.appendChild(el("span","arrow", ev ? t("lvl").replace("%d", ev.level) : "→"));
+      }
+      row.appendChild(step(m, 72));
+    });
+    box.appendChild(row);
+    host.appendChild(box);
+  }
+  if(!n) host.appendChild(el("p","lede", t("none")));
+  return n;
+}
+
+/* ---- view: grid --------------------------------------------------------- */
+function renderGrid(){
+  const host = document.getElementById("grid");
+  host.textContent = "";
+  const rows = DATA.species.filter(matches);
+  for(const s of rows){
+    const b = el("button","card");
+    b.appendChild(tile(s, 72));
+    b.appendChild(el("span","num","Nº " + pad2(s.id)));
+    b.appendChild(el("span","nm", s.name));
+    b.appendChild(tag(s));
+    b.addEventListener("click", () => open(s.id));
+    host.appendChild(b);
+  }
+  if(!rows.length) host.appendChild(el("p","lede", t("none")));
+  return rows.length;
+}
+
+/* ---- view: table -------------------------------------------------------- */
+let sortKey = "id", sortDir = 1;
+function renderTable(){
+  const tb = document.getElementById("tab");
+  tb.textContent = "";
+  const cols = [
+    ["id","Nº"], ["name",t("name")], ["type",t("type")], ["familyName",t("fam")],
+    ["stage",t("stage")], ["hp",t("hp")], ["atk",t("atk")], ["dfn",t("dfn")], ["spd",t("spd")], ["total",t("total")]
+  ];
+  const head = document.createElement("thead");
+  const hr = document.createElement("tr");
+  for(const [k,label] of cols){
+    const th = el("th", null, label);
+    if(k === sortKey) th.setAttribute("aria-sort", sortDir > 0 ? "ascending" : "descending");
+    th.addEventListener("click", () => {
+      if(sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
+      renderTable();
+    });
+    hr.appendChild(th);
+  }
+  head.appendChild(hr); tb.appendChild(head);
+  const body = document.createElement("tbody");
+  const rows = DATA.species.filter(matches).map(s => ({...s, total: s.hp + s.atk + s.dfn + s.spd}));
+  rows.sort((a,b) => {
+    const x = a[sortKey], y = b[sortKey];
+    return (typeof x === "string" ? x.localeCompare(y) : x - y) * sortDir;
+  });
+  for(const s of rows){
+    const tr = document.createElement("tr");
+    tr.appendChild(el("td","n", pad2(s.id)));
+    tr.appendChild(el("td", null, s.name));
+    const tt = document.createElement("td"); tt.appendChild(tag(s)); tr.appendChild(tt);
+    tr.appendChild(el("td", null, s.familyName));
+    tr.appendChild(el("td", null, STAGES[L][s.stage] || ""));
+    for(const k of ["hp","atk","dfn","spd","total"]) tr.appendChild(el("td","n", String(s[k])));
+    tr.addEventListener("click", () => open(s.id));
+    body.appendChild(tr);
+  }
+  tb.appendChild(body);
+  return rows.length;
+}
+
+/* ---- render dispatch ---------------------------------------------------- */
+function render(){
+  live.length = 0;
+  const fams = document.getElementById("fams"), grid = document.getElementById("grid"),
+        tab = document.getElementById("tabWrap");
+  fams.classList.toggle("hidden", view !== "fam");
+  grid.classList.toggle("hidden", view !== "grid");
+  tab.classList.toggle("hidden", view !== "tab");
+  let n = 0;
+  if(view === "fam") n = renderFams();
+  else if(view === "grid") n = renderGrid();
+  else n = renderTable();
+  document.getElementById("count").textContent =
+    t("showing").replace("%a", n).replace("%b", DATA.species.length);
+}
+
+/* ---- detail ------------------------------------------------------------- */
+const sheet = document.getElementById("sheet"), inner = document.getElementById("inner");
 function open(id){
   const s = byId[id];
-  sprites.length = 0;
-  inner.textContent = '';
+  live.length = 0;
+  inner.textContent = "";
 
-  const x = el('button','x','×');
-  x.setAttribute('aria-label', L ? 'close' : 'cerrar');
-  x.addEventListener('click', close);
+  const x = el("button","x","×");
+  x.setAttribute("aria-label", t("close"));
+  x.addEventListener("click", close);
   inner.appendChild(x);
 
-  const head = el('div','dhead');
-  head.appendChild(makeSprite(s));
-  const ht = el('div');
-  ht.appendChild(el('div','num mono', 'Nº ' + String(s.id).padStart(2,'0')));
-  ht.appendChild(el('h3', null, s.name));
-  const tags = el('div'); tags.style.marginTop = '6px';
-  tags.appendChild(el('span','t ' + s.type, s.type));
-  tags.appendChild(document.createTextNode(' '));
-  tags.appendChild(el('span','t', s.familyName));
-  tags.appendChild(document.createTextNode(' '));
-  tags.appendChild(el('span','t', STAGES[L][s.stage] || ''));
-  ht.appendChild(tags);
+  const head = el("div","dhead");
+  head.appendChild(tile(s, 96));
+  const ht = el("div");
+  ht.appendChild(el("div","num k","Nº " + pad2(s.id) + " / " + DATA.species.length));
+  ht.appendChild(el("h3", null, s.name));
+  const meta = el("div","dmeta");
+  meta.appendChild(tag(s));
+  meta.appendChild(el("span","tag", s.familyName));
+  meta.appendChild(el("span","tag", (STAGES[L][s.stage] || "").toUpperCase()));
+  if(s.rarityName) meta.appendChild(el("span","tag", s.rarityName));
+  ht.appendChild(meta);
   head.appendChild(ht);
   inner.appendChild(head);
 
-  if(s.flavor) inner.appendChild(el('p','quote dsec', s.flavor));
+  if(s.flavor) inner.appendChild(el("p","quote", s.flavor));
 
-  const st = el('div','stats');
-  const max = DATA.statMax;          // the roster's own ceiling, not a guess
-  for(const [k, v] of [['hp',s.hp],['atk',s.atk],['dfn',s.dfn],['spd',s.spd]]){
-    st.appendChild(el('span','k', t(k)));
-    const m = el('div','meter'); const i = el('i');
-    i.style.width = Math.min(100, v*100/max) + '%'; m.appendChild(i); st.appendChild(m);
-    st.appendChild(el('span','v', String(v)));
+  const st = el("div","stats dsec");
+  for(const [k, v] of [["hp",s.hp],["atk",s.atk],["dfn",s.dfn],["spd",s.spd]]){
+    st.appendChild(el("span","k", t(k)));
+    const m = el("div","meter"), i = el("i");
+    i.style.width = Math.max(4, Math.min(100, v*100/DATA.statMax)) + "%";
+    i.style.setProperty("--bar", "var(" + (HUE[s.type] || "--lit") + ")");
+    m.appendChild(i); st.appendChild(m);
+    st.appendChild(el("span","v", String(v)));
   }
   inner.appendChild(st);
 
-  const ms = el('div','dsec'); ms.appendChild(el('h4',null,t('moves')));
-  const mw = el('div','moves');
+  const ms = el("div","dsec"); ms.appendChild(el("h4",null,t("moves")));
+  const mw = el("div","moves");
   for(const m of s.moves){
-    const r = el('div','mv');
-    r.appendChild(el('span','t ' + m.type, m.type));
-    r.appendChild(el('span',null,m.name));
-    r.appendChild(el('span','pw', m.power ? (m.power + ' / ' + m.acc + '%') : (m.cat.toLowerCase())));
+    const r = el("div","mv");
+    r.appendChild(el("span","tag " + m.type, m.type));
+    r.appendChild(el("span",null,m.name));
+    r.appendChild(el("span","pw", m.power ? (m.power + " / " + m.acc + "%") : m.cat.toLowerCase().replace(/_/g," ")));
     mw.appendChild(r);
   }
   ms.appendChild(mw); inner.appendChild(ms);
 
-  const fam = DATA.species.filter(o => o.family === s.family).sort((a,b) => a.stage - b.stage);
-  if(fam.length > 1){
-    const cs = el('div','dsec'); cs.appendChild(el('h4',null,t('chain')));
-    const ch = el('div','chain');
-    fam.forEach((o, i) => {
-      if(i) {
-        const ev = s.evo && fam[i-1].evo && fam[i-1].evo[0];
-        ch.appendChild(el('span','arrow', ev ? ('→ ' + t('lvl').replace('%d', fam[i-1].evo[0].level)) : '→'));
+  const fam = families.find(f => f.id === s.family);
+  if(fam && fam.members.length > 1){
+    const cs = el("div","dsec"); cs.appendChild(el("h4",null,t("chain")));
+    const ch = el("div","chain");
+    fam.members.forEach((o, i) => {
+      if(i){
+        const ev = fam.members[i-1].evo[0];
+        ch.appendChild(el("span","arrow", ev ? t("lvl").replace("%d", ev.level) : "→"));
       }
-      const stp = el('div','step' + (o.id === s.id ? ' here' : ''));
-      stp.appendChild(makeSprite(o));
-      stp.appendChild(el('span','num', o.name));
-      if(o.id !== s.id) stp.addEventListener('click', () => open(o.id));
-      ch.appendChild(stp);
+      const b = el("button","step" + (o.id === s.id ? " here" : ""));
+      b.appendChild(tile(o, 48));
+      b.appendChild(el("span","nm", o.name));
+      if(o.id !== s.id) b.addEventListener("click", () => open(o.id));
+      ch.appendChild(b);
     });
     cs.appendChild(ch); inner.appendChild(cs);
   }
 
   if(s.silhouette){
-    const ls = el('div','dsec');
-    const h = el('h4',null,t('look'));
-    const note = el('span',null,'  \u00b7  ' + t('looknote'));
-    note.style.opacity = '.7'; note.style.textTransform = 'none';
-    h.appendChild(note);
-    ls.appendChild(h);
-    ls.appendChild(el('p', null, s.silhouette));
-    if(s.frame2) ls.appendChild(el('p','lede', s.frame2));
+    const ls = el("div","dsec");
+    const h = el("h4", null, t("look") + "  ·  ");
+    const n = el("span", null, t("looknote"));
+    n.style.textTransform = "none"; n.style.opacity = ".8";
+    h.appendChild(n); ls.appendChild(h);
+    ls.appendChild(el("p","note", s.silhouette));
+    if(s.frame2) ls.appendChild(el("p","note", s.frame2));
     inner.appendChild(ls);
   }
 
-  sheet.classList.add('on');
-  document.body.style.overflow = 'hidden';
+  sheet.classList.add("on");
+  document.body.style.overflow = "hidden";
   inner.scrollTop = 0;
-  location.hash = 'b' + s.id;
+  x.focus();
+  history.replaceState(null, "", "#b" + s.id);
 }
 function close(){
-  sheet.classList.remove('on');
-  document.body.style.overflow = '';
-  if(location.hash.startsWith('#b')) history.replaceState(null,'','#bichos');
+  sheet.classList.remove("on");
+  document.body.style.overflow = "";
+  if(location.hash.startsWith("#b")) history.replaceState(null, "", "#bichos");
   render();
 }
-sheet.addEventListener('click', e => { if(e.target === sheet) close(); });
-document.addEventListener('keydown', e => { if(e.key === 'Escape' && sheet.classList.contains('on')) close(); });
+sheet.addEventListener("click", e => { if(e.target === sheet) close(); });
+document.addEventListener("keydown", e => { if(e.key === "Escape" && sheet.classList.contains("on")) close(); });
 
-/* --- tables, screens -------------------------------------------------------- */
-function table(id, cols, rows){
+/* ---- tables, screens ---------------------------------------------------- */
+function simpleTable(id, cols, rows){
   const tb = document.getElementById(id);
-  tb.textContent = '';
-  const tr = document.createElement('tr');
-  for(const c of cols) tr.appendChild(el('th',null,c));
-  tb.appendChild(tr);
+  tb.textContent = "";
+  const head = document.createElement("thead"), hr = document.createElement("tr");
+  for(const c of cols){ const th = el("th", null, c); th.style.cursor = "default"; hr.appendChild(th); }
+  head.appendChild(hr); tb.appendChild(head);
+  const body = document.createElement("tbody");
   for(const r of rows){
-    const x = document.createElement('tr');
-    r.forEach((v, i) => x.appendChild(el('td', i ? 'n' : '', String(v))));
-    tb.appendChild(x);
+    const tr = document.createElement("tr");
+    tr.style.cursor = "default";
+    r.forEach((v, i) => {
+      const td = document.createElement("td");
+      if(v && v.type){ td.appendChild(el("span","tag " + v.type, v.type)); }
+      else { td.textContent = String(v); if(i) td.className = "n"; }
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
   }
+  tb.appendChild(body);
 }
-function tables(){
-  table('atk', [t('name'), t('type'), t('power'), t('acc'), t('effect')],
-    DATA.attacks.map(a => [a.name, a.type, a.power || '—', a.acc + '%',
-                           a.effect === 'NONE' ? '—' : a.effect.toLowerCase()]));
-  table('itm', [t('name'), t('kind'), t('value'), t('rarity')],
-    DATA.items.map(i => [i.name, i.klass.toLowerCase().replace(/_/g,' '), i.value || '—',
+function sideTables(){
+  simpleTable("atk", [t("name"), t("type"), t("power"), t("acc"), t("effect")],
+    DATA.attacks.map(a => [a.name, {type:a.type}, a.power || "—", a.acc + "%",
+                           a.effect === "NONE" ? "—" : a.effect.toLowerCase().replace(/_/g," ")]));
+  simpleTable("itm", [t("name"), t("kind"), t("value"), t("rarity")],
+    DATA.items.map(i => [i.name, i.klass.toLowerCase().replace(/_/g," "), i.value || "—",
                          i.rarity.toLowerCase()]));
 }
-const shots = document.getElementById('shots');
-for(const s of DATA.screens){
-  const f = document.createElement('figure'); f.className = 'shot';
-  const im = document.createElement('img');
-  im.src = 'manual/assets/screens/' + s + '.svg';
-  im.alt = s; im.loading = 'lazy'; im.width = 128; im.height = 64;
-  f.appendChild(im); f.appendChild(el('figcaption', null, s.replace(/_/g,' ')));
-  shots.appendChild(f);
+function renderShots(){
+  const host = document.getElementById("shots");
+  host.textContent = "";
+  let n = 0;
+  for(const area of DATA.screenAreas) n += area.screens.length;
+  for(const e of document.querySelectorAll(".nscr")) e.textContent = n;
+  for(const area of DATA.screenAreas){
+    const sec = el("div","area");
+    sec.appendChild(el("h3", null, area.label[L]));
+    const g = el("div","shots");
+    for(const s of area.screens){
+      const f = document.createElement("figure"); f.className = "shot";
+      const im = document.createElement("img");
+      im.src = "manual/assets/screens/" + s + ".svg";
+      im.alt = s.replace(/_/g," "); im.loading = "lazy"; im.width = 128; im.height = 64;
+      f.appendChild(im);
+      f.appendChild(el("figcaption", null, s.replace(/_/g," ")));
+      g.appendChild(f);
+    }
+    sec.appendChild(g);
+    host.appendChild(sec);
+  }
 }
-document.getElementById('nsp').textContent = DATA.species.length;
 
-/* --- language --------------------------------------------------------------- */
+/* ---- hero line ---------------------------------------------------------- */
+function renderHero(){
+  const host = document.getElementById("heroLine");
+  host.textContent = "";
+  const fam = families.find(f => f.id === DATA.heroFamily) || families[0];
+  fam.members.forEach((m, i) => {
+    if(i){
+      const ev = fam.members[i-1].evo[0];
+      host.appendChild(el("span","arrow", ev ? t("lvl").replace("%d", ev.level) : "→"));
+    }
+    const fig = document.createElement("figure");
+    fig.appendChild(tile(m, 96));
+    const cap = document.createElement("figcaption");
+    cap.appendChild(el("b", null, m.name));
+    cap.appendChild(document.createTextNode(STAGES[L][m.stage] || ""));
+    fig.appendChild(cap);
+    fig.addEventListener("click", () => open(m.id));
+    fig.style.cursor = "pointer";
+    host.appendChild(fig);
+  });
+  document.getElementById("heroCap").textContent = t("heroCap");
+}
+
+/* ---- language and wiring ------------------------------------------------- */
 function setLang(n){
   L = n;
-  document.documentElement.lang = n ? 'en' : 'es';
-  document.getElementById('es').setAttribute('aria-pressed', String(!n));
-  document.getElementById('en').setAttribute('aria-pressed', String(!!n));
-  document.getElementById('q').placeholder = n ? 'Search…' : 'Buscar…';
-  try { localStorage.setItem('errata.lang', n ? 'en' : 'es'); } catch(e){}
-  tables();
-  if(sheet.classList.contains('on')){
-    const id = parseInt(location.hash.slice(2), 10);
-    if(id) open(id); else render();
-  } else render();
+  document.documentElement.lang = n ? "en" : "es";
+  document.getElementById("es").setAttribute("aria-pressed", String(!n));
+  document.getElementById("en").setAttribute("aria-pressed", String(!!n));
+  // The label travels with the language too: an English reader on a screen
+  // reader was being told "Buscar" by a page that had switched to English.
+  document.getElementById("q").placeholder = t("search");
+  document.getElementById("q").setAttribute("aria-label", t("search"));
+  try { localStorage.setItem("errata.lang", n ? "en" : "es"); } catch(e){}
+  sideTables(); renderShots(); renderHero();
+  const openId = sheet.classList.contains("on") ? parseInt(location.hash.slice(2),10) : 0;
+  render();
+  if(openId && byId[openId]) open(openId);
 }
-document.getElementById('es').addEventListener('click', () => setLang(0));
-document.getElementById('en').addEventListener('click', () => setLang(1));
+document.getElementById("es").addEventListener("click", () => setLang(0));
+document.getElementById("en").addEventListener("click", () => setLang(1));
 
-document.getElementById('q').addEventListener('input', e => { fQ = e.target.value; render(); });
-for(const c of document.querySelectorAll('.chip[data-type]')){
-  c.addEventListener('click', () => {
-    const was = c.getAttribute('aria-pressed') === 'true';
-    for(const o of document.querySelectorAll('.chip[data-type]')) o.setAttribute('aria-pressed','false');
-    c.setAttribute('aria-pressed', String(!was));
+document.getElementById("q").addEventListener("input", e => { fQ = e.target.value.trim().toLowerCase(); render(); });
+for(const c of document.querySelectorAll(".chip[data-type]")){
+  c.addEventListener("click", () => {
+    const was = c.getAttribute("aria-pressed") === "true";
+    for(const o of document.querySelectorAll(".chip[data-type]")) o.setAttribute("aria-pressed","false");
+    c.setAttribute("aria-pressed", String(!was));
     fType = was ? null : c.dataset.type;
     render();
   });
 }
+for(const [id, v] of [["vFam","fam"],["vGrid","grid"],["vTab","tab"]]){
+  document.getElementById(id).addEventListener("click", () => {
+    view = v;
+    for(const [i2] of [["vFam"],["vGrid"],["vTab"]]) document.getElementById(i2).setAttribute("aria-pressed","false");
+    document.getElementById(id).setAttribute("aria-pressed","true");
+    render();
+  });
+}
+document.getElementById("nsp").textContent = DATA.species.length;
+document.getElementById("natk").textContent = DATA.attacks.length;
 
 let saved = null;
-try { saved = localStorage.getItem('errata.lang'); } catch(e){}
-setLang(saved === 'en' ? 1 : (saved === 'es' ? 0 : (navigator.language || '').startsWith('en') ? 1 : 0));
+try { saved = localStorage.getItem("errata.lang"); } catch(e){}
+setLang(saved === "en" ? 1 : saved === "es" ? 0 : (navigator.language || "").startsWith("en") ? 1 : 0);
 
-if(location.hash.startsWith('#b')){
+if(location.hash.startsWith("#b")){
   const id = parseInt(location.hash.slice(2), 10);
   if(byId[id]) open(id);
 }

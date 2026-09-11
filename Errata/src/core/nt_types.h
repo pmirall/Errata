@@ -61,7 +61,8 @@ enum ScreenId : uint8_t {
   SCR_NETWORK,       // Wi-Fi exploration, phase 5
   SCR_LINK,          // peer link, phase 7 (ex SCR_SOCIAL)
   SCR_CREATOR,       // the creator portal (ex SCR_QR)
-  SCR_MANUAL,        // one static QR: the user manual's address
+  SCR_MANUAL,      // one static QR: MANUAL_URL, the printed booklet as a PDF
+  SCR_WIKI,        // one static QR: WIKI_URL, the website
   SCR_DEX,           // the wiki: sixty rows and how far you have got
   SCR_SETTINGS,
   SCR_TIME,          // on-device time entry (ex SCR_CLOCK)

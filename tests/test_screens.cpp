@@ -2623,21 +2623,67 @@ TEST(snapshot_manual) {
 TEST(the_manual_qr_encodes_the_documented_address) {
   seams2_reset();
   manual_enter();
-  CHECK_STR_EQ(manual_payload(), MANUAL_URL);
+  CHECK_STR_EQ(qr_link_payload(), MANUAL_URL);
 
   // AND IT FITS QR VERSION 2, which is the whole reason MANUAL_URL is short.
   // core/config.h static_asserts the length; this asserts the consequence -
   // that the encoder really did accept it - because an assert on a #define
   // cannot see qr_encode() refusing the string for some other reason.
-  CHECK(manual_payload()[0] != '\0');
-  CHECK(strlen(manual_payload()) <= 32u);
+  CHECK(qr_link_payload()[0] != '\0');
+  CHECK(strlen(qr_link_payload()) <= 32u);
 
   // No button changes it. There is nothing here to press.
   const Gesture all[] = { GST_TAP_L, GST_TAP_R, GST_HOLD_L, GST_HOLD_R, GST_BOTH };
   for (uint8_t i = 0; i < (uint8_t)(sizeof all / sizeof all[0]); ++i) {
     manual_input(all[i]);
-    CHECK_STR_EQ(manual_payload(), MANUAL_URL);
+    CHECK_STR_EQ(qr_link_payload(), MANUAL_URL);
   }
+}
+
+// TWO ROWS, TWO DESTINATIONS, AND THE SECOND ONE IS NOT THE FIRST. P10-C11 split
+// the single QR back into a booklet row and a website row, and the whole point
+// of paying a screen and a menu row for that is that each one goes somewhere
+// different. They share a buffer, so this also pins that entering one does not
+// leave the other one's bytes lying in it.
+TEST(the_two_qr_rows_encode_two_different_addresses) {
+  seams2_reset();
+  manual_enter();
+  CHECK_STR_EQ(qr_link_payload(), MANUAL_URL);
+
+  wiki_enter();
+  CHECK_STR_EQ(qr_link_payload(), WIKI_URL);
+  CHECK(strcmp(qr_link_payload(), MANUAL_URL) != 0);   // the buffer really moved
+
+  // And back, because a shared buffer that only works in one order is a bug
+  // waiting for a player who opens the rows the other way round.
+  manual_enter();
+  CHECK_STR_EQ(qr_link_payload(), MANUAL_URL);
+
+  // Both fit the version-2 budget config.h asserts. This is the consequence:
+  // the encoder actually accepted them, which a static_assert cannot see.
+  wiki_enter();  CHECK(qr_link_payload()[0] != '\0'); CHECK(strlen(qr_link_payload()) <= 32u);
+  manual_enter(); CHECK(qr_link_payload()[0] != '\0'); CHECK(strlen(qr_link_payload()) <= 32u);
+}
+
+// AND THE MENU HAS BOTH ROWS, pointing at the two screens rather than at one.
+TEST(ajustes_offers_the_booklet_and_the_website_separately) {
+  seams2_reset();
+  settings_enter();
+  for (uint8_t i = 0; i < SET_MANUAL; ++i) settings_input(GST_TAP_L);
+  settings_input(GST_TAP_R);
+  CHECK_EQ(g_push, (uint8_t)SCR_MANUAL);
+
+  seams2_reset();
+  settings_enter();
+  for (uint8_t i = 0; i < SET_WIKI; ++i) settings_input(GST_TAP_L);
+  settings_input(GST_TAP_R);
+  CHECK_EQ(g_push, (uint8_t)SCR_WIKI);
+}
+
+TEST(snapshot_wiki_qr) {
+  seams2_reset();
+  wiki_enter();
+  snapshot(SCR_WIKI, "wiki_qr");
 }
 
 // IT IS NOT STICKY, AND THE CREATOR SCREEN IS. Copying a flag across with a
@@ -5065,6 +5111,7 @@ static void au_creator(void)  { g_ap_up = 1; creator_enter(); }
 // wrapped and the longest Spanish string in them is what would push the hint
 // into the affordance strip.
 static void au_manual(void)   { manual_enter(); }
+static void au_wiki(void)     { wiki_enter(); }
 // THE WORST CASE FOR A WIKI ROW IS THE LONGEST SPECIES NAME AT THE WIDEST
 // STATE LINE, and both are drawn beside a 24x24 body in a 96 px column. The
 // fixture marks EVERY species caught so the audit walks the discovered layout;
@@ -5163,6 +5210,7 @@ static const AuditRow kAudit[] = {
   { SCR_LINK,          "LINK",          link_render,       au_link      },
   { SCR_CREATOR,       "CREATOR",       creator_render,    au_creator   },
   { SCR_MANUAL,        "MANUAL",        manual_render,     au_manual    },
+  { SCR_WIKI,          "WIKI",          manual_render,     au_wiki      },
   { SCR_DEX,           "DEX",           dex_screen_render, au_dex       },
   { SCR_SETTINGS,      "SETTINGS",      settings_render,   au_settings  },
   { SCR_TIME,          "TIME",          time_render,       au_time      },

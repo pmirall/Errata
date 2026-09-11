@@ -677,7 +677,7 @@ const char* diag_field_name(uint8_t id)
 // -----------------------------------------------------------------------------
 static const char* const kScreenName[] = {
   "BOOT", "LOAD_SAVE", "HOME", "MENU", "CARE", "PLAY", "GAME", "BOX",
-  "STATUS", "STATUS_B", "NETWORK", "LINK", "CREATOR", "MANUAL", "DEX", "SETTINGS", "TIME",
+  "STATUS", "STATUS_B", "NETWORK", "LINK", "CREATOR", "MANUAL", "WIKI", "DEX", "SETTINGS", "TIME",
   "SETUP_NAME", "SETUP_STARTER", "CONFIRM", "ALERT", "ENCOUNTER", "CAPTURE",
   "BATTLE", "TRADE", "BREED", "EVOLUTION", "ITEM_REWARD", "ERROR", "SLEEP",
   "DIAG"

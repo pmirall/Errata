@@ -29,6 +29,86 @@ carries the developer console and ships to nobody. A number quoted without its
 variant is not a number — `docs/budget.md` §8 records a phase exit that compared
 one with the other.
 
+## [Unreleased] — two QRs, and a website with a point of view, 2026-09-11
+
+**P10-C11.** The one QR is two again, and the site it points at was rebuilt.
+
+### Changed — the split, which reverses P10-C10
+
+- **`AJUSTES → Manual`** encodes `MANUAL_URL` again: the PDF, directly.
+  **`AJUSTES → Wiki web`** is a new row and a new screen (`SCR_WIKI`) encoding
+  `WIKI_URL`, the site. The previous commit merged them on the argument that the
+  site carries the booklet anyway — true, and still the wrong product: somebody
+  who wants the booklet had to scan, land on a site, find a link and wait for
+  600 KB.
+- **Two screens, one implementation, one buffer.** They share the 165-byte
+  module array because only one can be open at a time. **+254 B of flash, 0 of
+  globals.**
+
+### Changed — the website
+
+It was generic. The brief now has a thesis: **the device is 1-bit, and the site
+is where what does not fit in 1 bit lives.** One rule follows — **colour is
+reserved for type**, because telling SIGNAL from CORRUPT from SYSTEM is exactly
+what the panel cannot do. Nothing else on the page is coloured.
+
+- The hero is the starter's three stages breaking apart, not a wordmark.
+- The bestiary has **three views**: twenty families side by side (the default,
+  because it shows "growth is damage" at a glance), a grid, and a sortable table.
+- The 85 screenshots are **grouped into eight named areas**; a capture whose
+  prefix no area claims is a hard build failure rather than an "other" bucket.
+- Every sprite sits in a small dark tile with a visible pixel grid — the panel.
+- IBM Plex Mono + IBM Plex Sans, and the template moved out of `build_wiki.py`
+  into `tools/wiki/page.html`: 600 lines of HTML in a `.py` is the blob nobody
+  reads that this repo complains about elsewhere.
+
+### Gates
+
+- Both QR destinations must exist under `docs/`, and **the two must differ** —
+  two rows and two screens of flash for one address is a bug.
+- The page's "Manual (PDF)" link is now **cut out of `MANUAL_URL`** at build
+  time instead of being a second person typing `uso.pdf`.
+- A fourth gate was written **and then deleted**, which is the more useful
+  entry. See below.
+
+### Three defects in my own work, found by the guide agent
+
+1. **I never ran `make -C tests capture`.** I re-recorded the fake-font goldens
+   and not the real-font captures, which are what the booklet is illustrated
+   from, so the manual would have printed a screenshot reading `Manual y wiki en
+   el móvil.` on the same page as prose saying otherwise.
+
+   **And my first account of this was wrong.** I wrote that no gate could see
+   it. `check.sh` rebuilds the captures before comparing them — a defence added
+   after the rename shipped a stale boot splash — so it would have caught it one
+   step later, at the stale-SVG check. The agent found it first by hand.
+
+   I then wrote a gate comparing the two golden sets by name, and tried it
+   against every way they can differ: a golden with no capture is fixed by that
+   rebuild; a capture with no golden fails on the missing SVG; an orphaned
+   capture *and* SVG fails on the wiki's screen count. Three mutations, three
+   failures, none of them from the new gate. It could not fire on any reachable
+   path, so it was deleted and the reasoning left in its place — decoration that
+   reads as coverage is worse than nothing, which is the argument this same
+   commit makes about a QR gate that sat too late in the file to ever run.
+2. `SCR_WIKI` carried the comment "the user manual's address". It encodes
+   `WIKI_URL`, and `SCR_MANUAL` had been left with none.
+3. `manualUrl` and `wikiUrl` were built into the page and read by nothing —
+   bytes that *looked* like a join between the firmware's constants and the
+   page's prose and were not one. The first is now a real join; the second is
+   gone.
+
+### And the booklet
+
+Three sentences were false: the wiki page quoted a hint that no longer exists
+and said the `Manual` QR opens the species list; the settings page described one
+row going to one place; the glossary pointed at the wrong row. All three fixed
+inside 40 pages, `pad 0`, without padding and without cutting anything true.
+
+The wiki page now also separates the two things a reader would otherwise
+conflate: the main menu's `WIKI` is the list on the device, and `Wiki web` under
+`AJUSTES` is the site.
+
 ## [Unreleased] — a wiki you can scan off the panel, 2026-09-11
 
 **P10-C10.** There is a public website now, at `pmirall.github.io/Errata`, and

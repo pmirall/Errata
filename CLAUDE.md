@@ -136,10 +136,12 @@ correcto después de borrar la función que describe no estaba describiendo nada
 - El bloque de menú de `strings_es.h` es **contiguo** y hay un `static_assert`
   que lo cuenta.
 - `ScreenDef[]` en `ui/screen_table.cpp` es **posicional y paralelo** a
-  `ScreenId`. Insertar un id por el medio dispara cuatro guardas independientes:
-  `dev/diag_core.cpp`, los tres recuentos de `screen_table.cpp`, `kAudit[]` de
-  `test_screens.cpp` y `kExits[]` de `test_statemachine.cpp`. Las cuatro son
-  correctas; hay que atender a las cuatro.
+  `ScreenId`. Insertar un id por el medio dispara **cinco** guardas
+  independientes: `dev/diag_core.cpp`, los tres recuentos de
+  `screen_table.cpp`, `kAudit[]` de `test_screens.cpp`, y en
+  `test_statemachine.cpp` **tanto `kExits[]` como `kRender[]`**. Las cinco son
+  correctas; hay que atender a las cinco. (Esta nota decía cuatro y se dejaba
+  `kRender[]` fuera — lo encontró meter `SCR_WIKI` en P10-C11.)
 - Un layout persistido **nunca se edita en su sitio**. Se añade a `reserved[]`,
   o se sube `SAVE_SCHEMA_VERSION`. Y antes de coger bytes de un `reserved[]`,
   mira qué lleva el fixture v1: lleva datos reales.

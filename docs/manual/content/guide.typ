@@ -815,13 +815,13 @@
 
 #v(1.5mm)
 #bi[
-  En #scr[AJUSTES], bajo #scr[Manual]: #scr[Manual y wiki en el móvil.] Ese QR
-  (página #pg(<sec-settings>)) abre la misma lista en la web, y allí salen las
-  sesenta desde el principio.
+  Esta #scr[WIKI] es la del aparato. La de la web es otra: el QR de
+  #scr[Wiki web], en #scr[AJUSTES] (página #pg(<sec-settings>)), abre la misma
+  lista en el móvil, y allí salen las sesenta desde el principio.
 ][
-  In #scr[AJUSTES], under #scr[Manual]: #scr[Manual y wiki en el móvil.] That
-  QR (page #pg(<sec-settings>)) opens the same list on the web, where all sixty
-  show from the start.
+  This #scr[WIKI] is the device's own. The web one is a different thing: the
+  #scr[Wiki web] QR, in #scr[AJUSTES] (page #pg(<sec-settings>)), opens the same
+  list on your phone, where all sixty show from the start.
 ]
 
 // --- 12. Evolution ------------------------------------------------------------
@@ -1064,6 +1064,13 @@
 // prose spends three words on and the one no player has to recognise - a
 // diagnostic dump that is unreadable at 30 mm anyway. The other three each
 // carry a sentence: the sound row, the QR, and the closing countdown.
+//
+// P10-C11 SPLIT THE QR ROW IN TWO AND THIS PAGE STILL SHOWS ONE PICTURE. The
+// wiki_qr capture exists and is on the website; printing it here would spend a
+// quarter of the page's width on a second symbol that differs from the first
+// only in its title, its hint and the pixels of the code itself - none of which
+// a reader can check against paper. The two rows are named in the prose
+// instead, which is the half that was actually wrong.
 #grid(columns: (1fr, 1fr, 1fr), column-gutter: 2mm,
   screen("settings_list", width: 30mm), screen("manual", width: 30mm),
   screen("menu_settings_countdown", width: 30mm),
@@ -1072,26 +1079,26 @@
 #v(1.5mm)
 #bi[
   En #scr[AJUSTES] están la hora, el sonido, el brillo, la información del
-  aparato y #scr[Manual].
+  aparato y dos códigos QR.
 
   El sonido es un anillo de cuatro: #scr[ALTO], #scr[MEDIO], #scr[BAJO] y
   #scr[OFF]. Cada toque de *B* baja un paso y da un clic a ese nivel. Desde
   #scr[ALTO], la primera pulsación no apaga: baja el volumen. El silencio
   está al final.
 
-  #scr[Manual] enseña un código QR que lleva el móvil a la página de Errata:
-  este mismo manual, al día, y la wiki de las sesenta.
+  #scr[Manual] baja este cuadernillo en PDF al móvil. #scr[Wiki web] abre la
+  página de Errata: las sesenta especies y todas las pantallas.
 ][
-  #scr[AJUSTES] holds the clock, sound, brightness, device information and
-  #scr[Manual].
+  #scr[AJUSTES] holds the clock, sound, brightness, device information and two
+  QR codes.
 
   Sound is a ring of four: #scr[ALTO] (high), #scr[MEDIO] (mid), #scr[BAJO]
   (low) and #scr[OFF]. Each tap of *B* steps down and clicks at that level.
   From #scr[ALTO] the first press does not switch it off: it turns the volume
   down. Silence is at the end.
 
-  #scr[Manual] shows a QR code that takes your phone to the Errata page: this
-  same manual, kept up to date, and the wiki of the sixty.
+  #scr[Manual] is this booklet as a PDF. #scr[Wiki web] is the Errata page:
+  the sixty species and every screen.
 ]
 
 #v(1.5mm)
@@ -1231,8 +1238,9 @@
 
   *Caja* -- donde guardas tus Bugs. Diez plazas.
 
-  *Wiki* -- la lista de las sesenta especies y de cuáles has conocido. La
-  misma lista, entera, está en la página que abre el QR de #scr[Manual].
+  *Wiki* -- la lista de las sesenta especies y de cuáles has conocido, en el
+  propio aparato. La misma lista, entera, está en la web que abre el QR de
+  #scr[Wiki web], en #scr[AJUSTES].
 
   *Seleccionado* -- el Bug que llevas encima y que cuidas.
 
@@ -1250,8 +1258,9 @@
 
   *Box* -- where you keep your Bugs. Ten slots.
 
-  *Wiki* -- the list of the sixty species, and which ones you have met. The
-  same list, complete, is on the page the #scr[Manual] QR opens.
+  *Wiki* -- the list of the sixty species, and which ones you have met, on the
+  device itself. The same list, complete, is on the web page the #scr[Wiki web]
+  QR opens, under #scr[AJUSTES].
 
   *Selected* -- the Bug you carry and care for.
 

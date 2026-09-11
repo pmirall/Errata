@@ -477,18 +477,23 @@ static_assert(PIN_PIEZO != 2 && PIN_PIEZO != 8 && PIN_PIEZO != 9,
 //  another 8 and would leave nothing at all; phone cameras resolve a bare host
 //  plus path as a URL, so the scheme buys nothing a scanner needs.
 //
-//  IT POINTS AT THE SITE, NOT AT THE PDF, AND THAT BOUGHT BACK EIGHT BYTES.
-//  It used to be ".../uso.pdf", 32 bytes against a 32-byte budget with no
-//  headroom at all. The site's front page carries the manual as its first link
-//  plus the bestiary and every screen, so the shorter URL is also the richer
-//  destination - a player who scans this gets the booklet AND the sixty, and
-//  the firmware gets eight bytes of room for the next rename.
+//  TWO LINKS, TWO SYMBOLS, TWO ROWS IN AJUSTES - and that is a reversal worth
+//  writing down. P10-C10 pointed the one QR at the site root on the argument
+//  that the site carries the manual anyway, which is true and still made the
+//  wrong product: a player who wants the booklet had to scan a QR, land on a
+//  website, find a link and then wait for a 600 KB PDF. One symbol per
+//  destination costs a screen and a menu row, and it means each QR does exactly
+//  what its row says.
 //
-//  The budget is still 32 and the static_assert is still the thing that stops a
-//  longer URL shipping as a symbol the panel cannot resolve.
-#define MANUAL_URL              "pmirall.github.io/Errata"
+//  BOTH ARE UNDER THE SAME 32-BYTE CEILING and both are asserted against it.
+//  MANUAL_URL spends all 32; WIKI_URL spends 24 and keeps eight in hand.
+#define MANUAL_URL              "pmirall.github.io/Errata/uso.pdf"
 static_assert(sizeof(MANUAL_URL) - 1 <= 32,
               "MANUAL_URL is past QR version 2's 32-byte budget: the symbol would\n               fall to one pixel per module in the 62 px box and stop being\n               scannable on a 0.96\" panel. See ui/qr.cpp's QR_VER table.");
+
+#define WIKI_URL                "pmirall.github.io/Errata"
+static_assert(sizeof(WIKI_URL) - 1 <= 32,
+              "WIKI_URL is past QR version 2's 32-byte budget: the symbol would\n               fall to one pixel per module in the 62 px box and stop being\n               scannable on a 0.96\" panel. See ui/qr.cpp's QR_VER table.");
 
 #define AP_IP_A                 192
 #define AP_IP_B                 168
