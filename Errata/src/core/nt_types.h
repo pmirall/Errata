@@ -450,7 +450,16 @@ struct Config {
   uint8_t  reserved_c;                   // 248  was tg_mode, now 0
   uint8_t  brightness;                   // 249  OLED contrast
   uint8_t  statusbar_mode;               // 250  StatusBarMode
-  uint8_t  reserved[3];                  // 251  must be 0
+  // THE VOLUME, AND ZERO IS THE LOUD END ON PURPOSE. It came out of the front
+  // of reserved[3] with no schema bump, on the argument act_day and the wiki
+  // both used: an older blob reads 0 here, and 0 has to mean what that blob
+  // actually sounded like. It did not have a volume setting, so it played at
+  // full duty - which is SND_VOL_HIGH. Numbering the enum the other way round
+  // would have made every save written before this commit open up silent.
+  // tests/fixtures/config_v1.bin carries 0 in all three bytes; checked, not
+  // assumed, because reserved_b's coordinates taught this file that lesson.
+  uint8_t  sound_vol;                    // 251  SoundVol, 0 = loudest
+  uint8_t  reserved[2];                  // 252  must be 0
   uint16_t crc16;                        // 254  over bytes 0..253
 };
 
@@ -460,6 +469,9 @@ static_assert(offsetof(Config, reserved_a)== 119, "Config.reserved_a moved");
 static_assert(offsetof(Config, tz)        == 184, "Config.tz moved");
 static_assert(offsetof(Config, reserved_b)== 224, "Config.reserved_b moved");
 static_assert(offsetof(Config, reserved_c)== 248, "Config.reserved_c moved");
+static_assert(offsetof(Config, sound_vol) == 251, "Config.sound_vol moved: it was\n"
+              "              carved out of the front of reserved[3] and every byte after\n"
+              "              it must stay where a v1 blob left it");
 static_assert(offsetof(Config, crc16)     == 254, "Config.crc16 moved");
 #define CONFIG_CRC_BYTES 254
 
@@ -483,6 +495,41 @@ static_assert(offsetof(Config, crc16)     == 254, "Config.crc16 moved");
 // -----------------------------------------------------------------------------
 static inline bool cfg_sound_muted(const Config& c) {
   return (c.flags & CF_MUTE) != 0u;
+}
+
+// -----------------------------------------------------------------------------
+//  AND HOW LOUD, WHEN IT IS NOT OFF (spec section 19 is one square-wave voice).
+//
+//  MUTE AND VOLUME ARE TWO FIELDS, NOT A FOUR-STATE ONE, and the payoff is
+//  ui/screen_home.cpp: A+B there is a panic mute that flips CF_MUTE and does
+//  not touch this byte, so pressing it twice gives back the level you had
+//  rather than full blast. A single four-state field could not do that without
+//  a second field to remember with, which is the field this is.
+//
+//  WALKING THE SETTINGS RING IS DIFFERENT AND DELIBERATELY SO. That row is
+//  ALTO -> MEDIO -> BAJO -> APAGADO -> ALTO, so coming out of APAGADO lands on
+//  ALTO because you went all the way round - not because anything was
+//  forgotten. Two ways to reach silence, two different ways back, and each is
+//  what its own gesture means.
+//
+//  The same shape as cfg_sound_muted() above and for the same reason: the join
+//  between a persisted byte and the piezo must be a function a host binary can
+//  call, or it lives in app/app.cpp where no test can reach it and every link
+//  around it is tested while the link itself is not. tools/check.sh gates the
+//  call site.
+// -----------------------------------------------------------------------------
+enum SoundVol : uint8_t {
+  SND_VOL_HIGH = 0,      // full duty - what every save before P10-C9 sounded like
+  SND_VOL_MID,
+  SND_VOL_LOW,
+  SND_VOL_COUNT
+};
+
+// Clamps rather than trusting the byte: this is read straight off flash, and a
+// corrupt or future value must land on a level that exists. It falls to HIGH,
+// which is the same answer an all-zero blob gives.
+static inline uint8_t cfg_sound_vol(const Config& c) {
+  return (c.sound_vol < (uint8_t)SND_VOL_COUNT) ? c.sound_vol : (uint8_t)SND_VOL_HIGH;
 }
 
 // -----------------------------------------------------------------------------

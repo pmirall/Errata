@@ -570,7 +570,7 @@ void link_update(uint32_t now_ms) {
       // this line - it hands off to SCR_BATTLE long before the session closes -
       // so the single LKM_LOST here was true of every case that could get to
       // it. It stopped being true the moment a trade could END on this screen,
-      // and printing "CONEXIÓN PERDIDA" over a completed exchange would be the
+      // and printing "CONEXIÃ“N PERDIDA" over a completed exchange would be the
       // same mistake as printing "has perdido" over a desync.
       s_mode = (s_end_reason == (uint8_t)SE_DONE) ? (uint8_t)LKM_ENDED
                                                   : (uint8_t)LKM_LOST;

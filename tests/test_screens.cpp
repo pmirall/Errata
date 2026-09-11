@@ -2253,13 +2253,59 @@ TEST(status_pages_flip) {
   CHECK_EQ(g_goto, (uint8_t)SCR_STATUS);
 }
 
+// THE HOME SCREEN'S PANIC MUTE KEEPS YOUR LEVEL, AND THE SETTINGS RING DOES
+// NOT - and that difference is the entire reason CF_MUTE and Config.sound_vol
+// are two fields instead of one four-state one.
+//
+// A+B on HOME is "shut up, now": it flips the bit and leaves the level alone,
+// so pressing it twice gives back what you were listening to. Walking the ring
+// out of APAGADO lands on ALTO because you went all the way ROUND. Collapse the
+// two into one field and one of these two behaviours has to go.
+TEST(the_panic_mute_keeps_your_level_and_the_ring_comes_round_to_the_loud_end) {
+  seams2_reset();
+  g_cfg.sound_vol = (uint8_t)SND_VOL_LOW;
+
+  // HOME has no enter(); home_input() is the whole seam.
+  home_input(GST_BOTH);                       // silence it from the home screen
+  CHECK(cfg_sound_muted(g_cfg));
+  CHECK_EQ((int)cfg_sound_vol(g_cfg), (int)SND_VOL_LOW);   // level untouched
+  home_input(GST_BOTH);                       // and back
+  CHECK(!cfg_sound_muted(g_cfg));
+  CHECK_EQ((int)cfg_sound_vol(g_cfg), (int)SND_VOL_LOW);   // still what you chose
+
+  // The ring is the other gesture and answers differently on purpose: from
+  // BAJO it goes to APAGADO, and out of APAGADO it comes round to ALTO.
+  settings_enter();
+  settings_input(GST_TAP_R);
+  CHECK(cfg_sound_muted(g_cfg));
+  settings_input(GST_TAP_R);
+  CHECK(!cfg_sound_muted(g_cfg));
+  CHECK_EQ((int)cfg_sound_vol(g_cfg), (int)SND_VOL_HIGH);
+}
+
 TEST(settings_toggles_persist_and_the_info_page_closes) {
   seams2_reset();
   settings_enter();
 
-  settings_input(GST_TAP_R);                    // SET_SOUND
-  CHECK_EQ((uint8_t)(g_cfg.flags & CF_MUTE), (uint8_t)CF_MUTE);
+  // SET_SOUND is a RING OF FOUR over two fields (P10-C9): ALTO -> MEDIO ->
+  // BAJO -> APAGADO -> ALTO. One press must make the device quieter rather
+  // than silent - a row that mutes on the first press is a row nobody can use
+  // to turn the volume DOWN, which is the thing people actually want.
+  CHECK(!cfg_sound_muted(g_cfg));
+  CHECK_EQ((int)cfg_sound_vol(g_cfg), (int)SND_VOL_HIGH);
+  settings_input(GST_TAP_R);
+  CHECK(!cfg_sound_muted(g_cfg));
+  CHECK_EQ((int)cfg_sound_vol(g_cfg), (int)SND_VOL_MID);
   CHECK_EQ(g_cfg_saves, 1);
+  settings_input(GST_TAP_R);
+  CHECK(!cfg_sound_muted(g_cfg));
+  CHECK_EQ((int)cfg_sound_vol(g_cfg), (int)SND_VOL_LOW);
+  settings_input(GST_TAP_R);                    // past the quiet end: OFF
+  CHECK(cfg_sound_muted(g_cfg));
+  CHECK_EQ((uint8_t)(g_cfg.flags & CF_MUTE), (uint8_t)CF_MUTE);
+  settings_input(GST_TAP_R);                    // and round to the loud end
+  CHECK(!cfg_sound_muted(g_cfg));
+  CHECK_EQ((int)cfg_sound_vol(g_cfg), (int)SND_VOL_HIGH);
 
   settings_input(GST_TAP_L);                    // SET_WEB
   settings_input(GST_TAP_R);

@@ -168,6 +168,9 @@ static bool app_retry_display(void)
 // four phases. tests/test_sound.cpp drives THIS function's body through the
 // real save_manager, and tools/check.sh gates that src/app still calls it.
 static bool app_audio_muted(void) { return cfg_sound_muted(g_cfg); }
+// Same argument, same shape: the expression belongs in the pure layer where a
+// host binary can call it, and this file is only the wiring.
+static uint8_t app_audio_vol(void) { return cfg_sound_vol(g_cfg); }
 
 static void app_led(bool on)
 {
@@ -890,6 +893,7 @@ void app_setup(void)
   // by the time we get here, and the hook re-reads it on every cue, so a mute
   // toggled in SETTINGS needs nothing to be kept in step.
   audio_bind(audio_device_sink(), &app_audio_muted);
+  audio_bind_volume(&app_audio_vol);
   audio_begin();
   net_begin();
   // The scan's per-device salt (spec section 44). gs_device_id() is drawn once
@@ -946,7 +950,7 @@ void app_setup(void)
   } else if (g_trade_toast != 0u) {
     // AN INTERRUPTED TRADE OUTRANKS THE BOOT LINE. A Bug changing hands
     // while the device was off is the most surprising thing that can have
-    // happened to this Box, and "Hola. Soy nuevo aquí." is not what to say
+    // happened to this Box, and "Hola. Soy nuevo aquÃ­." is not what to say
     // about it. NVS being dead still wins: nothing below it can be trusted.
     ui_toast(g_trade_toast);
     g_trade_toast = 0u;

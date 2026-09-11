@@ -103,6 +103,44 @@ static_assert([]{
 // -----------------------------------------------------------------------------
 static const AudioSink* s_sink     = nullptr;
 static bool           (*s_muted)(void) = nullptr;
+static uint8_t        (*s_vol)(void)   = nullptr;
+
+// -----------------------------------------------------------------------------
+//  THE VOLUME LADDER. Percent of the period the pin is driven high, indexed by
+//  SoundVol. 50 is a square wave and the loudest this circuit can be.
+//
+//  WHY THESE THREE NUMBERS. Sound POWER falls roughly with the duty, but
+//  PERCEIVED loudness follows it far more slowly - which is why the steps are
+//  not 50/33/16 but bunched hard at the quiet end. Halving the duty is barely a
+//  change; an order of magnitude is a change. 50 -> 16 -> 5 is about a half and
+//  then a third again, which should read as three distinct levels.
+//
+//  SHOULD. Nobody has heard them: no piezo is fitted to the board this firmware
+//  has run on. What the test below this file proves is that the ladder is
+//  strictly decreasing, never silent and never past a square wave - which is
+//  the part that can be wrong in a way a listener would not diagnose. The part
+//  that needs ears is on the bench list.
+// -----------------------------------------------------------------------------
+static constexpr uint8_t kVolDuty[SND_VOL_COUNT] = { 50, 16, 5 };
+
+static_assert(kVolDuty[SND_VOL_HIGH] == 50,
+              "the loudest level must be a square wave: anything less and the "
+              "device is quieter than every save written before the setting "
+              "existed, which those saves did not ask for");
+static_assert([]{
+  for (uint8_t i = 0; i < (uint8_t)SND_VOL_COUNT; ++i) {
+    if (kVolDuty[i] == 0u || kVolDuty[i] > 50u) return false;   // audible, and no louder than square
+    if (i > 0u && kVolDuty[i] >= kVolDuty[i - 1u]) return false; // strictly quieter
+  }
+  return true;
+}(), "the volume ladder is not strictly decreasing inside 1..50");
+
+// The duty the next note goes out at. A level past the table falls to the loud
+// end, which is the same answer cfg_sound_vol() gives a corrupt byte.
+uint8_t audio_duty(void) {
+  const uint8_t lv = s_vol ? s_vol() : (uint8_t)SND_VOL_HIGH;
+  return kVolDuty[(lv < (uint8_t)SND_VOL_COUNT) ? lv : (uint8_t)SND_VOL_HIGH];
+}
 
 static uint8_t  s_q[AUDIO_QUEUE_LEN];  // SfxId, oldest at s_qhead
 static uint8_t  s_qhead   = 0;
@@ -124,7 +162,11 @@ static inline void emit_off(void) {
 static inline void emit_step(const SfxStep& st) {
   if (st.hz == 0u) { emit_off(); return; }
   s_driven = true;
-  if (s_sink && s_sink->tone_on) s_sink->tone_on(st.hz);
+  // The duty is read PER NOTE and not latched at the start of the effect, so a
+  // volume change lands on the next note of an effect already in flight rather
+  // than waiting for the next effect. That is the same promise the mute rule
+  // makes one function down, and making them disagree would be arbitrary.
+  if (s_sink && s_sink->tone_on) s_sink->tone_on(st.hz, audio_duty());
 }
 
 // End whatever is in flight, with the pin idle. Called on the natural end, on
@@ -160,6 +202,8 @@ void audio_bind(const AudioSink* sink, bool (*muted)(void)) {
   s_sink   = sink;
   s_muted  = muted;
 }
+
+void audio_bind_volume(uint8_t (*vol)(void)) { s_vol = vol; }
 
 // -----------------------------------------------------------------------------
 //  5. PLAYING
@@ -263,15 +307,28 @@ static void dev_tone_off(void) {
   digitalWrite(PIN_PIEZO, LOW);
 }
 
-static void dev_tone_on(uint16_t hz) {
+static void dev_tone_on(uint16_t hz, uint8_t duty_pct) {
   if (hz == 0u) { dev_tone_off(); return; }
   if (!s_attached) {
     if (!ledcAttach(PIN_PIEZO, hz, AUDIO_PWM_BITS)) return;
     s_attached = true;
   }
-  // Sets the timer to hz and the duty to half the period: a square wave, which
-  // is all a passive piezo wants.
+  // ledcWriteTone() sets the timer to hz AND the duty to half the period. That
+  // square wave is the loudest this circuit can be, and it is the only thing
+  // this function did before P10-C9.
   ledcWriteTone(PIN_PIEZO, hz);
+  // THEN NARROW THE PULSE, which is the volume. It must come second: the call
+  // above rewrites the duty register, so overriding it first would be undone.
+  //
+  // The arithmetic is in 32 bits on purpose. AUDIO_PWM_BITS is 10, so full
+  // scale is 1023 and 1023 * 50 overflows a uint16_t at 51,150 - a silent wrap
+  // that would have handed the loudest level a duty of about 1.5 %, i.e. made
+  // the volume setting work backwards at the top.
+  if (duty_pct == 0u || duty_pct > 50u) return;          // leave the square wave
+  const uint32_t full  = (uint32_t)((1u << AUDIO_PWM_BITS) - 1u);
+  uint32_t       ticks = (full * (uint32_t)duty_pct) / 100u;
+  if (ticks == 0u) ticks = 1u;                           // never round to silence
+  ledcWrite(PIN_PIEZO, ticks);
 }
 
 static const AudioSink kDeviceSink = { dev_tone_on, dev_tone_off };

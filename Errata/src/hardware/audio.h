@@ -39,6 +39,7 @@
 #include <stdint.h>
 
 #include "../core/config.h"   // AUDIO_QUEUE_LEN, PIN_PIEZO (device half only)
+#include "../core/nt_types.h" // SoundVol - the level the hook answers with
 
 // -----------------------------------------------------------------------------
 //  THE VOCABULARY - hardware spec section 19, all seven of them and no eighth.
@@ -92,9 +93,46 @@ enum SfxId : uint8_t {
 //  construction rather than by a caller remembering.
 // -----------------------------------------------------------------------------
 struct AudioSink {
-  void (*tone_on)(uint16_t hz);
+  // duty_pct is 1..50, the fraction of the period the pin is driven high, and
+  // it is how loud the note is. See THE VOLUME below.
+  void (*tone_on)(uint16_t hz, uint8_t duty_pct);
   void (*tone_off)(void);
 };
+
+// -----------------------------------------------------------------------------
+//  THE VOLUME, AND WHY A ONE-VOICE PIEZO HAS ONE AT ALL (P10-C9).
+//
+//  A passive piezo has no amplifier and no envelope: the pin is high or it is
+//  low, at one supply voltage. What CAN be varied is how much of each period it
+//  spends high. ledcWriteTone() drives a 50 % square wave, which is the loudest
+//  thing this circuit can do; narrowing the pulse delivers less energy per
+//  cycle into a capacitive sounder and it gets quieter. That is the whole
+//  mechanism, and it is why three levels and not sixteen: the relationship is
+//  compressive and nobody can hear a hundred steps of it.
+//
+//  IT IS NOT A LINEAR VOLUME CONTROL and this header will not pretend it is.
+//  The pitch does not change - the timer frequency is untouched - but the
+//  timbre does, because a narrow pulse is harmonically richer than a square.
+//  Low will sound thinner as well as quieter.
+//
+//  NOT ONE OF THE NUMBERS BELOW HAS BEEN HEARD. No piezo is fitted to the board
+//  this firmware has run on, so kVolDuty in audio.cpp is arithmetic that a host
+//  test proves MONOTONIC and nothing has proved AUDIBLE. docs/bench.md carries
+//  the item. Expect to retune the middle one.
+//
+//  MUTE IS STILL SEPARATE. audio_play() drops while muted whatever the volume
+//  is, and a volume of SND_VOL_LOW is never silence - the row that shows the
+//  player one ring of four is ui/screen_settings.cpp's, not this file's.
+// -----------------------------------------------------------------------------
+
+// The level hook answers SoundVol (core/nt_types.h): 0 = loudest. Bound the
+// same way and for the same reason as the mute question - the value lives in a
+// Config this file must not include. nullptr reads as SND_VOL_HIGH.
+void    audio_bind_volume(uint8_t (*vol)(void));
+
+// The duty the NEXT note will be emitted at, 1..50. For tests and for DIAG;
+// nothing in the firmware needs to ask.
+uint8_t audio_duty(void);
 
 // -----------------------------------------------------------------------------
 //  LIFECYCLE

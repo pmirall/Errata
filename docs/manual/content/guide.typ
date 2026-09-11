@@ -206,10 +206,12 @@
 #v(1mm)
 #bi[
   En la pantalla de inicio no hay nada a lo que volver, así que allí *B* hace
-  una caricia y *A + B* largo abre los ajustes.
+  una caricia, *A + B* apaga y enciende el sonido, y *A + B* largo abre los
+  ajustes.
 ][
   On the home screen there is nothing to go back to, so there *B* strokes the
-  Bug and a long *A + B* opens the settings.
+  Bug, *A + B* switches the sound off and on again, and a long *A + B* opens
+  the settings.
 ]
 
 // --- 6. The home screen ------------------------------------------------------
@@ -1043,8 +1045,16 @@
 #pagebreak()
 = Ajustes y pilas / Settings and battery
 
+// THE MANUAL SCREEN MOVED UP INTO THE STRIP AND "Acerca de" LEFT IT, and the
+// second half of that is the page's rent. P10-C9 turned the sound row from two
+// states into four, which is a paragraph this page had no room for; the
+// booklet is saddle-stitched, so the alternative was 44 pages for one
+// paragraph. Of the four screens that were here, settings_info was the one the
+// prose spends three words on and the one no player has to recognise - a
+// diagnostic dump that is unreadable at 30 mm anyway. The other three each
+// carry a sentence: the sound row, the QR, and the closing countdown.
 #grid(columns: (1fr, 1fr, 1fr), column-gutter: 2mm,
-  screen("settings_list", width: 30mm), screen("settings_info", width: 30mm),
+  screen("settings_list", width: 30mm), screen("manual", width: 30mm),
   screen("menu_settings_countdown", width: 30mm),
 )
 
@@ -1053,46 +1063,49 @@
   En #scr[AJUSTES] están la hora, el sonido, el brillo, la información del
   aparato y #scr[Manual].
 
+  El sonido es un anillo de cuatro: #scr[ALTO], #scr[MEDIO], #scr[BAJO] y
+  #scr[OFF]. Cada toque de *B* baja un paso y da un clic a ese nivel. Desde
+  #scr[ALTO], la primera pulsación no apaga: baja el volumen. El silencio
+  está al final.
+
   #scr[Manual] enseña un código QR que lleva el móvil a este mismo manual, al
-  día. Es lo que hay que escanear si has perdido este cuadernillo.
+  día: escanéalo si pierdes este cuadernillo.
 ][
   #scr[AJUSTES] holds the clock, sound, brightness, device information and
   #scr[Manual].
 
+  Sound is a ring of four: #scr[ALTO] (high), #scr[MEDIO] (mid), #scr[BAJO]
+  (low) and #scr[OFF]. Each tap of *B* steps down and clicks at that level.
+  From #scr[ALTO] the first press does not switch it off: it turns the volume
+  down. Silence is at the end.
+
   #scr[Manual] shows a QR code that takes your phone to this same manual, kept
-  up to date. It is what to scan if you have lost this booklet.
+  up to date: scan it if you lose this booklet.
 ]
 
-#v(1mm)
-#align(center, screen("manual", width: 28mm))
-
-#v(1mm)
+#v(1.5mm)
 #bi[
   *Las pantallas se cierran solas.* Si dejas el aparato quieto veinte segundos
   vuelve al inicio, y antes avisa con la barrita fina de abajo. Toca cualquier
   botón y se queda donde estaba.
 
-  *Para que las pilas duren:*
+  *Para que las pilas duren.* La radio es, con diferencia, lo que más gasta:
 
   - baja el brillo;
   - usa #scr[RED] cuando de verdad vayas a explorar, no de fondo;
   - cierra el creador al terminar;
   - quita las pilas si no vas a jugar en semanas.
-
-  La radio es, con diferencia, lo que más gasta.
 ][
   *Screens close by themselves.* Leave the device for twenty seconds and it
   returns home, warning you first with the thin bar along the bottom. Press any
   button and it stays where it was.
 
-  *To make the cells last:*
+  *To make the cells last.* The radio is by far the biggest drain:
 
   - turn the brightness down;
   - use #scr[RED] when you actually mean to explore, not in the background;
   - close the creator when you finish;
   - take the cells out if you will not play for weeks.
-
-  The radio is by far the biggest drain.
 ]
 
 // --- When something goes wrong -------------------------------------------------
@@ -1114,7 +1127,8 @@
   niega a tocarla en vez de estropearla. Eso es deliberado.
 
   *En cualquier pantalla, pulsa A + B para ver qué hacen los botones ahí.* Es
-  la ayuda del propio aparato y sirve en todas.
+  la ayuda del propio aparato. La única excepción es la pantalla de inicio:
+  allí ese gesto apaga y enciende el sonido.
 ][
   The device saves your game *twice*. If it finds a damaged copy at startup --
   almost always from pulling the cells mid-save -- it restores the earlier one
@@ -1124,7 +1138,8 @@
   touch it rather than damage it. That is deliberate.
 
   *On any screen, press A + B to see what the buttons do there.* That is the
-  device's own help and it works everywhere.
+  device's own help. The one exception is the home screen: there the same
+  gesture switches the sound off and on.
 ]
 
 // --- 16. Troubleshooting -----------------------------------------------------
@@ -1163,6 +1178,17 @@
    #text(fill: luma(25%))[Cells pulled during a save]],
   [El aparato recupera la copia anterior solo \
    #text(fill: luma(25%))[The device restores its own earlier copy]],
+
+  // lang: "en" on the English halves of this row and not on the others: the
+  // table sits outside bi(), so it inherits the document's Spanish, and
+  // Spanish hyphenation breaks "home" as "ho-me". The rest of the table has
+  // the same defect and no word in it breaks badly enough to be worth
+  // reflowing six rows to prove it.
+  [No suena \ #text(fill: luma(25%), lang: "en")[No sound]],
+  [#scr[Sonido] está en #scr[OFF], o *A + B* lo apagó desde la pantalla de inicio \
+   #text(fill: luma(25%), lang: "en")[#scr[Sonido] is #scr[OFF], or *A + B* silenced it from the home screen]],
+  [En #scr[AJUSTES], pulsa *B* sobre #scr[Sonido] hasta #scr[ALTO] \
+   #text(fill: luma(25%), lang: "en")[In #scr[AJUSTES], tap *B* on #scr[Sonido] until #scr[ALTO]]],
 
   [El móvil no ve el creador \ #text(fill: luma(25%))[Phone cannot see the creator]],
   [El creador está cerrado \ #text(fill: luma(25%))[The creator is closed]],

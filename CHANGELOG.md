@@ -29,6 +29,71 @@ carries the developer console and ships to nobody. A number quoted without its
 variant is not a number — `docs/budget.md` §8 records a phase exit that compared
 one with the other.
 
+## [Unreleased] — a volume knob on a thing with no knobs, 2026-09-11
+
+**P10-C9.** The sound was ON or OFF. It now has three audible levels, so the
+device can be carried somewhere quiet without being silenced.
+
+### Added
+
+- **A volume, on a one-voice piezo.** There is no amplifier and no envelope
+  here: the pin is high or low at one supply voltage. What can be varied is how
+  much of each period it spends high. `ledcWriteTone()` drives a 50 % square
+  wave — the loudest this circuit can be — and narrowing the pulse delivers
+  less energy into a capacitive sounder. `kVolDuty` is **50 / 16 / 5 %**,
+  bunched at the quiet end because perceived loudness follows duty far more
+  slowly than power does.
+- **`AJUSTES → SONIDO` is one ring of four**: `ALTO → MEDIO → BAJO → APAGADO`.
+  Down the ladder and then out, not off-first: one press makes the device
+  *quieter*, which is what somebody reaching for a sound setting in a quiet room
+  actually wants. Pressing it plays a click **at the level just chosen**, so the
+  row demonstrates itself.
+- `audio_bind_volume()` and `audio_duty()`; `AudioSink::tone_on` now carries the
+  duty. The duty is read **per note**, so a change lands on the next note of an
+  effect already in flight — the same promise the mute rule makes.
+
+### Changed
+
+- **Mute and volume are two fields, not a four-state one.** `CF_MUTE` answers
+  "any sound at all" and `Config.sound_vol` answers "how much", and the payoff
+  is the panic mute that was already on the home screen: **A + B** there flips
+  `CF_MUTE` and leaves the level alone, so pressing it twice gives back the
+  level you had rather than full blast. A single four-state field could not do
+  that. Pinned by `muting_does_not_forget_the_level_you_had`.
+- Walking the settings ring out of `APAGADO` lands on `ALTO`, and that is not
+  the same thing forgetting: you went all the way round. Two ways to reach
+  silence, two different ways back, each meaning what its own gesture means.
+- **The home screen's A + B was undocumented.** The booklet said that gesture
+  shows the button help "everywhere"; on the home screen it has muted the
+  device since P10-C2 and the manual never said so. Found by the guide agent
+  reading the source rather than the summary it was handed.
+
+### Storage — one byte, and zero has to be the loud end
+
+`Config.sound_vol` at offset 251, out of the front of `reserved[3]`, plus two
+bits at shift 8 in `ConfigV2.flags`. **No schema bump**: an older blob reads 0
+in both, and 0 must decode as what that blob actually *sounded like*. It had no
+volume setting and played at full duty, so `SND_VOL_HIGH = 0`. Numbering the
+enum the other way round would have made every save ever written open up silent.
+
+### What the tests do NOT prove
+
+**That any of it is audible.** No piezo has been fitted to a board this
+firmware has run on. The suite proves the ladder is monotonic, that it never
+reaches silence or exceeds a square wave, that the pitch does not move with the
+volume, and that the persisted byte reaches the pin. Whether 16 % and 5 % are
+two distinguishable levels is a bench item, and the middle one should be
+expected to need retuning.
+
+### A defect the host suite could not see
+
+Taking byte 251 shrank `Config.reserved[]` from 3 to 2 and left a third store
+behind in `cfg_seal()`, writing one past the array onto the low byte of
+`crc16`. All 62 host binaries passed: at `-O1` the bound cannot be folded. The
+**firmware** build caught it at `-Os` with `-Warray-bounds`, which is the
+argument for keeping `tools/build.sh` in the gate rather than trusting a green
+suite.
+
 ## [Unreleased] — the wiki, 2026-09-09
 
 **P10-C8. A list of the sixty, and which of them you have met.** The roster was

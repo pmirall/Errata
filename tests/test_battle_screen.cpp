@@ -134,7 +134,7 @@ static int      g_tone_off = 0;
 static uint32_t g_audio_t  = 0;
 static bool     g_drain_audio = false;
 
-static void rec_tone_on(uint16_t) { ++g_tone_on; }
+static void rec_tone_on(uint16_t, uint8_t) { ++g_tone_on; }
 static void rec_tone_off(void)    { ++g_tone_off; }
 static const AudioSink kAudioRec = { rec_tone_on, rec_tone_off };
 

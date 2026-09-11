@@ -39,9 +39,15 @@ static uint16_t g_on_calls = 0;
 static uint16_t g_off_calls = 0;
 static bool     g_muted    = false;
 
-static void rec_on(uint16_t hz) {
+// The duty of every note, parallel to g_rec and only meaningful where g_rec
+// holds a frequency. Recorded rather than asserted here so a case can ask what
+// the engine actually asked the pin for.
+static uint8_t  g_duty[REC_MAX];
+static uint8_t  g_vol      = (uint8_t)SND_VOL_HIGH;
+
+static void rec_on(uint16_t hz, uint8_t duty_pct) {
   ++g_on_calls;
-  if (g_rec_n < REC_MAX) g_rec[g_rec_n++] = hz;
+  if (g_rec_n < REC_MAX) { g_duty[g_rec_n] = duty_pct; g_rec[g_rec_n++] = hz; }
 }
 static void rec_off(void) {
   ++g_off_calls;
@@ -50,6 +56,7 @@ static void rec_off(void) {
 static const AudioSink kRec = { rec_on, rec_off };
 
 static bool muted_hook(void) { return g_muted; }
+static uint8_t vol_hook(void) { return g_vol; }
 
 static void rec_clear(void) { g_rec_n = 0; g_on_calls = 0; g_off_calls = 0; }
 
@@ -58,6 +65,8 @@ static void rec_clear(void) { g_rec_n = 0; g_on_calls = 0; g_off_calls = 0; }
 // case from starting with a stray tone_off in its sequence.
 static void fresh(bool muted) {
   g_muted = muted;
+  g_vol   = (uint8_t)SND_VOL_HIGH;
+  audio_bind_volume(&vol_hook);
   audio_bind(&kRec, &muted_hook);
   audio_begin();
   rec_clear();
@@ -529,4 +538,122 @@ TEST(every_effect_is_inside_the_spec_18_band_it_was_written_for) {
     seen[kBands[i].sfx] = true;
   }
   for (uint8_t s = (uint8_t)SFX_NONE + 1u; s < (uint8_t)SFX_COUNT; ++s) CHECK(seen[s]);
+}
+
+// =============================================================================
+//  THE VOLUME (P10-C9)
+//
+//  The piezo is one square-wave voice, so "quieter" means a NARROWER PULSE at
+//  the same frequency. These cases pin the three things that can be wrong in a
+//  way nobody listening could diagnose: that the ladder goes the right way,
+//  that the pitch does not move with it, and that the quiet end is still sound.
+//
+//  What they do NOT pin is that any of it is audible. No piezo has ever been
+//  fitted to this device. docs/bench.md carries that item, and this comment is
+//  here so nobody reads a green suite as having heard something.
+// =============================================================================
+TEST(a_quieter_level_narrows_the_pulse_and_never_reaches_silence) {
+  uint8_t duty[SND_VOL_COUNT];
+  for (uint8_t lv = 0; lv < (uint8_t)SND_VOL_COUNT; ++lv) {
+    uint32_t t = 1000u;
+    fresh(false);
+    g_vol = lv;
+    CHECK(audio_play(SFX_BEEP));
+    pump(&t, 5u);
+    CHECK(g_rec_n >= 1u);
+    duty[lv] = g_duty[0];
+    CHECK(duty[lv] > 0u);      // a level in the menu is never silence
+    CHECK(duty[lv] <= 50u);    // and never louder than a square wave
+  }
+  // Strictly decreasing, which is the whole claim the row makes to a player.
+  for (uint8_t lv = 1; lv < (uint8_t)SND_VOL_COUNT; ++lv)
+    CHECK(duty[lv] < duty[lv - 1u]);
+  // The loudest level is EXACTLY what the device did before the setting
+  // existed. Any other value and every save ever written got quieter for free.
+  CHECK_EQ((int)duty[SND_VOL_HIGH], 50);
+}
+
+// THE PITCH IS NOT THE VOLUME. Narrowing the pulse must not move the timer, or
+// the setting would transpose the whole vocabulary and the quiet level would be
+// a different instrument rather than the same one further away.
+TEST(turning_it_down_does_not_change_a_single_frequency) {
+  uint16_t loud[REC_MAX];
+  uint32_t t = 1000u;
+  fresh(false);
+  g_vol = (uint8_t)SND_VOL_HIGH;
+  CHECK(audio_play(SFX_FANFARE));
+  pump(&t, (uint32_t)sfx_duration_ms(SFX_FANFARE) + 10u);
+  const uint16_t loud_n = g_rec_n;
+  CHECK(loud_n > 1u);
+  for (uint16_t i = 0; i < loud_n; ++i) loud[i] = g_rec[i];
+
+  t = 1000u;
+  fresh(false);
+  g_vol = (uint8_t)SND_VOL_LOW;
+  CHECK(audio_play(SFX_FANFARE));
+  pump(&t, (uint32_t)sfx_duration_ms(SFX_FANFARE) + 10u);
+  CHECK_EQ((int)g_rec_n, (int)loud_n);
+  for (uint16_t i = 0; i < loud_n; ++i) CHECK_EQ((int)g_rec[i], (int)loud[i]);
+}
+
+// A LEVEL CHANGE LANDS ON THE NEXT NOTE, not at the end of the effect - the
+// same promise the mute rule makes, and the reason the duty is read per note.
+TEST(a_volume_change_reaches_the_note_after_it) {
+  uint32_t t = 1000u;
+  fresh(false);
+  g_vol = (uint8_t)SND_VOL_HIGH;
+  CHECK(audio_play(SFX_RISE));            // five 40 ms steps
+  pump(&t, 5u);
+  CHECK(g_rec_n >= 1u);
+  const uint8_t first = g_duty[0];
+
+  g_vol = (uint8_t)SND_VOL_LOW;
+  pump(&t, 45u);                          // over the first step boundary
+  CHECK(g_rec_n >= 2u);
+  CHECK(g_duty[1] < first);
+}
+
+// AND AN UNBOUND HOOK IS THE LOUD END, not zero. A device whose wiring forgot
+// the volume must be audible: a silent device reads as broken, a loud one reads
+// as a setting nobody has changed yet.
+TEST(no_volume_hook_is_full_duty_and_not_silence) {
+  uint32_t t = 1000u;
+  g_muted = false;
+  audio_bind_volume(nullptr);
+  audio_bind(&kRec, &muted_hook);
+  audio_begin();
+  rec_clear();
+  CHECK_EQ((int)audio_duty(), 50);
+  CHECK(audio_play(SFX_BEEP));
+  pump(&t, 5u);
+  CHECK(g_rec_n >= 1u);
+  CHECK_EQ((int)g_duty[0], 50);
+  audio_bind_volume(&vol_hook);
+}
+
+// A CORRUPT LEVEL FALLS TO THE LOUD END rather than indexing the ladder past
+// its last entry. cfg_sound_vol() clamps on the way out of flash too; this is
+// the engine refusing to trust its own hook, which is a different link.
+TEST(a_level_past_the_ladder_falls_back_instead_of_reading_off_the_end) {
+  uint32_t t = 1000u;
+  fresh(false);
+  g_vol = 200u;
+  CHECK_EQ((int)audio_duty(), 50);
+  CHECK(audio_play(SFX_BEEP));
+  pump(&t, 5u);
+  CHECK(g_rec_n >= 1u);
+  CHECK_EQ((int)g_duty[0], 50);
+}
+
+// MUTE STILL WINS AT EVERY LEVEL. The two fields are independent, and the row
+// that shows them as one ring must not be able to produce an audible OFF.
+TEST(mute_beats_every_volume_level) {
+  for (uint8_t lv = 0; lv < (uint8_t)SND_VOL_COUNT; ++lv) {
+    uint32_t t = 1000u;
+    fresh(true);
+    g_vol = lv;
+    CHECK(!audio_play(SFX_BEEP));
+    pump(&t, 50u);
+    CHECK_EQ((int)g_on_calls, 0);
+  }
 }

@@ -54,14 +54,18 @@
 // -----------------------------------------------------------------------------
 static uint16_t g_on_calls  = 0;
 static uint16_t g_off_calls = 0;
-static void rec_on(uint16_t)  { ++g_on_calls; }
+static uint8_t  g_last_duty = 0;      // the duty of the most recent note
+static void rec_on(uint16_t, uint8_t duty_pct) { ++g_on_calls; g_last_duty = duty_pct; }
 static void rec_off(void)     { ++g_off_calls; }
 static const AudioSink kRec = { rec_on, rec_off };
 
-// THE LIVE CONFIG, exactly as app/app.cpp holds one, and the hook is the SAME
-// FUNCTION app_audio_muted() calls - not a re-statement of it.
+// THE LIVE CONFIG, exactly as app/app.cpp holds one, and the hooks are the SAME
+// FUNCTIONS app_audio_muted() and app_audio_vol() call - not re-statements of
+// them. That is the entire point of this file: the join between a byte that
+// came off flash and the pin is a thing a host binary can execute.
 static Config g_live;
-static bool   live_muted(void) { return cfg_sound_muted(g_live); }
+static bool    live_muted(void) { return cfg_sound_muted(g_live); }
+static uint8_t live_vol(void)   { return cfg_sound_vol(g_live); }
 
 static uint32_t s_ms    = 10000;
 static uint32_t s_epoch = 1700300000u;
@@ -106,8 +110,10 @@ static bool begin(void) {
   memset(&g_live, 0, sizeof g_live);
   if (gs_load(g_live) != LOAD_MIGRATED) return false;
   audio_bind(&kRec, &live_muted);
+  audio_bind_volume(&live_vol);
   audio_begin();
   g_on_calls = g_off_calls = 0;      // audio_begin() idles the pin through the sink
+  g_last_duty = 0;
   // The v1 fixture is not guaranteed to arrive unmuted, and every case below
   // starts from "sound is on".
   g_live.flags = (uint8_t)(g_live.flags & (uint8_t)~CF_MUTE);
@@ -120,6 +126,7 @@ static LoadResult boot(void) {
   memset(&g_live, 0, sizeof g_live);
   const LoadResult r = gs_load(g_live);
   audio_bind(&kRec, &live_muted);
+  audio_bind_volume(&live_vol);
   audio_begin();
   g_on_calls = g_off_calls = 0;
   return r;
@@ -229,6 +236,84 @@ TEST(the_sound_bit_survives_beside_the_other_settings_it_shares_a_byte_with) {
 //  buzzer. A board without a piezo must behave like a board with a silent one:
 //  the queue runs, the step clock runs, nothing crashes, and no game rule
 //  anywhere had to know. That is why there is no audio_null.cpp.
+// =============================================================================
+//  2b. AND HOW LOUD SURVIVES THE SAME TRIP (P10-C9)
+//
+//  Everything §1 says about the mute bit applies word for word to the volume,
+//  and for the same reason: tests/test_audio.cpp drives the ladder through a
+//  hook the TEST owns, so it passes whatever the firmware persists or fails to
+//  persist. This file is the only one that runs a real save through the real
+//  save_manager and asks the real predicate what the pin should do.
+// =============================================================================
+TEST(the_volume_saved_to_flash_still_reaches_the_piezo_after_a_reboot) {
+  BEGIN();
+
+  // A v1 save has no volume field at all, and the byte it maps from is zero.
+  // That has to arrive as the LOUD end, because full duty is what that save
+  // actually sounded like on the firmware that wrote it.
+  CHECK_EQ((int)cfg_sound_vol(g_live), (int)SND_VOL_HIGH);
+  CHECK(audio_play(SFX_BEEP));
+  audio_service(s_ms);
+  CHECK_EQ((int)g_on_calls, 1);
+  CHECK_EQ((int)g_last_duty, 50);
+
+  g_live.sound_vol = (uint8_t)SND_VOL_LOW;
+  CHECK(gs_save_cfg(g_live));
+
+  // THE REBOOT. Nothing in RAM survives; the store does.
+  const LoadResult r = boot();
+  CHECK(r == LOAD_OK || r == LOAD_MIGRATED);
+  CHECK_EQ((int)cfg_sound_vol(g_live), (int)SND_VOL_LOW);
+  CHECK(!cfg_sound_muted(g_live));           // quiet is not off
+
+  audio_stop();
+  g_on_calls = 0; g_last_duty = 0;
+  CHECK(audio_play(SFX_BEEP));
+  audio_service(s_ms);
+  CHECK_EQ((int)g_on_calls, 1);              // still audible
+  CHECK(g_last_duty > 0u);
+  CHECK(g_last_duty < 50u);                  // and quieter than it was
+}
+
+// THE TWO FIELDS DO NOT CLOBBER EACH OTHER ACROSS A SAVE. They live in the same
+// ConfigV2.flags word - MUTE at bit 0, the level at bits 8-9 - so a writer that
+// masked the wrong bits would take the level out with the mute, and the player
+// would find the sound back at full blast every time they un-muted it.
+TEST(muting_does_not_forget_the_level_you_had) {
+  BEGIN();
+  g_live.sound_vol = (uint8_t)SND_VOL_MID;
+  g_live.flags     = (uint8_t)(g_live.flags | CF_MUTE);
+  CHECK(gs_save_cfg(g_live));
+
+  CHECK(boot() != LOAD_FRESH);
+  CHECK(cfg_sound_muted(g_live));
+  CHECK_EQ((int)cfg_sound_vol(g_live), (int)SND_VOL_MID);   // remembered while off
+
+  // Un-mute, and the level is still the one that was chosen.
+  g_live.flags = (uint8_t)(g_live.flags & (uint8_t)~CF_MUTE);
+  CHECK(gs_save_cfg(g_live));
+  CHECK(boot() != LOAD_FRESH);
+  CHECK(!cfg_sound_muted(g_live));
+  CHECK_EQ((int)cfg_sound_vol(g_live), (int)SND_VOL_MID);
+}
+
+// AND NEITHER DISTURBS THE SETTINGS THAT SHARE THE WORD WITH THEM, which is the
+// same guard §4 puts on the mute bit, extended to the two bits added beside it.
+TEST(the_volume_survives_beside_the_other_settings_it_shares_a_word_with) {
+  BEGIN();
+  g_live.sound_vol      = (uint8_t)SND_VOL_LOW;
+  g_live.brightness     = 200u;
+  g_live.statusbar_mode = (uint8_t)SBAR_TEXT;
+  g_live.flags          = (uint8_t)(g_live.flags | CF_WEB_ENABLED);
+  CHECK(gs_save_cfg(g_live));
+
+  CHECK(boot() != LOAD_FRESH);
+  CHECK_EQ((int)cfg_sound_vol(g_live),   (int)SND_VOL_LOW);
+  CHECK_EQ((int)g_live.brightness,       200);
+  CHECK_EQ((int)g_live.statusbar_mode,   (int)SBAR_TEXT);
+  CHECK((g_live.flags & CF_WEB_ENABLED) != 0u);
+}
+
 // =============================================================================
 TEST(a_board_with_no_buzzer_runs_the_whole_engine_and_changes_no_game_rule) {
   BEGIN();

@@ -55,9 +55,18 @@ static uint32_t box_signature(const BoxHeader& b) {
 static void cfg_seal(Config& c) {
   c.magic       = NT_CFG_MAGIC;
   c.version     = NT_CFG_VERSION;
+  // reserved[] SHRANK FROM 3 TO 2 when sound_vol took byte 251 (P10-C9), and
+  // the third store here was left behind: it wrote one past the array, onto the
+  // low byte of crc16 - harmless only because the line below overwrites it, and
+  // undefined behaviour either way. The HOST suite never saw it (-O1 cannot
+  // fold the bound); the firmware build's -Warray-bounds at -Os did, which is
+  // the one argument for keeping tools/build.sh in the gate rather than
+  // trusting 62 green binaries.
+  //
+  // sound_vol is deliberately NOT zeroed here. cfg_seal() runs on every save,
+  // so clearing it would reset the player's volume to full on every write.
   c.reserved[0] = 0;
   c.reserved[1] = 0;
-  c.reserved[2] = 0;
   c.wifi_ssid[sizeof(c.wifi_ssid) - 1] = '\0';
   c.wifi_pass[sizeof(c.wifi_pass) - 1] = '\0';
   c.pet_name[sizeof(c.pet_name) - 1]   = '\0';
@@ -80,6 +89,12 @@ static void cfg_from_v2(const ConfigV2& v2, Config& out) {
 
   const uint8_t sbar = (uint8_t)((v2.flags & CFGV2_F_SBAR_MASK) >> CFGV2_F_SBAR_SH);
   out.statusbar_mode = (sbar < (uint8_t)SBAR_COUNT) ? sbar : (uint8_t)SBAR_ICONS;
+
+  // The volume, clamped on the way in exactly as the status bar above is: two
+  // bits can hold a fourth value the enum does not have, and it must land on a
+  // level that exists rather than index the ladder past its end.
+  const uint8_t vol = (uint8_t)((v2.flags & CFGV2_F_VOL_MASK) >> CFGV2_F_VOL_SH);
+  out.sound_vol = (vol < (uint8_t)SND_VOL_COUNT) ? vol : (uint8_t)SND_VOL_HIGH;
 
   uint8_t f = 0;
   if (v2.flags & CFGV2_F_MUTE) f |= CF_MUTE;
@@ -123,13 +138,15 @@ static void cfg_to_v2(const Config& c, ConfigV2& v2) {
 
   uint16_t f = (uint16_t)(v2.flags & (uint16_t)~(CFGV2_F_MUTE | CFGV2_F_WEB |
                                                  CFGV2_F_BLE | CFGV2_F_SBAR_MASK |
-                                                 CFGV2_F_SETUP_MASK));
+                                                 CFGV2_F_SETUP_MASK |
+                                                 CFGV2_F_VOL_MASK));
   if (c.flags & CF_MUTE)        f |= CFGV2_F_MUTE;
   if (c.flags & CF_WEB_ENABLED) f |= CFGV2_F_WEB;
   if (c.flags & CF_RESERVED_BLE) f |= CFGV2_F_BLE;
   f |= (uint16_t)((((uint16_t)((c.flags & CF_SETUP_MASK) >> CF_SETUP_SH))
                    << CFGV2_F_SETUP_SH) & CFGV2_F_SETUP_MASK);
   f |= (uint16_t)(((uint16_t)c.statusbar_mode << CFGV2_F_SBAR_SH) & CFGV2_F_SBAR_MASK);
+  f |= (uint16_t)(((uint16_t)cfg_sound_vol(c) << CFGV2_F_VOL_SH) & CFGV2_F_VOL_MASK);
   v2.flags = f;
 
   size_t n = 0;

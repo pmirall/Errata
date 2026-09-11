@@ -260,6 +260,14 @@ static_assert(BOX_SLOTS <= 16, "slot_mask is 16 bits");
 #define CFGV2_F_BLE             0x0020u   // the short-range radio may be brought up
 #define CFGV2_F_SETUP_MASK      0x00C0u   // first-boot step, 2 bits at shift 6
 #define CFGV2_F_SETUP_SH        6         // 0 = finished (app/onboarding.h)
+// THE VOLUME (P10-C9), 2 bits at shift 8, and ZERO IS THE LOUD END for the same
+// reason CF_SETUP's zero is "finished": a blob written by any earlier firmware
+// reads 0 here, and 0 has to decode as what that blob actually sounded like.
+// It had no volume setting and played at full duty, so 0 is SND_VOL_HIGH.
+// Numbering it the other way round would have made every existing save open
+// up silent. NO SCHEMA BUMP - these bits were required-zero and unread.
+#define CFGV2_F_VOL_MASK        0x0300u
+#define CFGV2_F_VOL_SH          8
 
 struct ConfigV2 {
   uint16_t magic;                        //   0  CFGV2_MAGIC

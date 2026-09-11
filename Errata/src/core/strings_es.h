@@ -869,6 +869,11 @@ enum StrId : uint16_t {
   STR_DEX_SEEN,
   STR_DEX_HELD,
   STR_DEX_MISSING,
+  // The three audible steps of the sound row. OFF is STR_OFF, which already
+  // exists: a fourth word for it would be a second thing to translate.
+  STR_VOL_HIGH,
+  STR_VOL_MID,
+  STR_VOL_LOW,
   STR_HLP_DEX_ROW,
   // The MANUAL screen (P10-C7). Two blocks beside one static QR.
   STR_MAN_TITLE,
@@ -1162,7 +1167,7 @@ inline constexpr const char* const ES[] = {
   /* STR_HLP_BOX */               "Tus Bugs guardados.",
   /* STR_HLP_NETWORK */           "Salir a explorar la red.",
   /* STR_HLP_SETTINGS */          "Cosas de mayores.",
-  /* STR_HLP_SOUND */             "Zumbido al avisar.",
+  /* STR_HLP_SOUND */             "Volumen del zumbido.",
   /* STR_HLP_WEB */               "Página y QR en el móvil.",
   /* STR_HLP_BRIGHT */            "Brillo de la pantalla.",
   /* STR_HLP_INFO */              "Versión, red y memoria.",
@@ -1611,6 +1616,9 @@ inline constexpr const char* const ES[] = {
   , /* STR_DEX_SEEN */             "VISTO"
   , /* STR_DEX_HELD */             "EN LA CAJA"
   , /* STR_DEX_MISSING */          "SIN VER"
+  , /* STR_VOL_HIGH */             "ALTO"
+  , /* STR_VOL_MID */              "MEDIO"
+  , /* STR_VOL_LOW */              "BAJO"
   , /* STR_HLP_DEX_ROW */          "Los bugs que has visto."
   , /* STR_MAN_TITLE */           "MANUAL"
   , /* STR_MAN_HINT */            "Escanea para leerlo en el móvil."

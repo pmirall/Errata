@@ -51,9 +51,23 @@ static bool cfg_flag(uint8_t bit) {
   return c && (c->flags & bit) != 0;
 }
 
+// ONE RING OF FOUR, OVER TWO FIELDS. CF_MUTE answers "any sound at all" and
+// Config.sound_vol answers "how much"; the player sees one row because to them
+// it is one control. Keeping them apart underneath is what makes turning the
+// sound off and back on return the level you had rather than full blast.
+static const uint16_t kVolLabel[SND_VOL_COUNT] = {
+  STR_VOL_HIGH, STR_VOL_MID, STR_VOL_LOW
+};
+static_assert(NT_ARRAY_LEN(kVolLabel) == (size_t)SND_VOL_COUNT,
+              "a volume level has no label, or a label has no level");
+
 static const char* set_value(uint8_t row) {
   switch (row) {
-    case SET_SOUND: return cfg_flag(CF_MUTE)        ? S(STR_OFF) : S(STR_ON);
+    case SET_SOUND: {
+      if (cfg_flag(CF_MUTE)) return S(STR_OFF);
+      const Config* c = ui_cfg();
+      return S(kVolLabel[c ? cfg_sound_vol(*c) : (uint8_t)SND_VOL_HIGH]);
+    }
     case SET_WEB:   return cfg_flag(CF_WEB_ENABLED) ? S(STR_ON)  : S(STR_OFF);
     default: return nullptr;
   }
@@ -98,7 +112,25 @@ static void settings_select(void) {
   Config* c = ui_cfg();
   if (!c) { ui_toast(STR_ERR_BUSY); return; }
   switch (s_cur) {
-    case SET_SOUND: c->flags = (uint8_t)(c->flags ^ CF_MUTE);        break;
+    case SET_SOUND:
+      // ALTO -> MEDIO -> BAJO -> APAGADO -> ALTO. Down the ladder and then out,
+      // rather than off-first: the row starts where every existing save already
+      // is, so pressing it once makes the device QUIETER, which is what a
+      // player reaching for a sound setting in a quiet room wants.
+      if (cfg_sound_muted(*c)) {
+        c->flags    = (uint8_t)(c->flags & ~CF_MUTE);
+        c->sound_vol = (uint8_t)SND_VOL_HIGH;
+      } else if (cfg_sound_vol(*c) + 1u < (uint8_t)SND_VOL_COUNT) {
+        c->sound_vol = (uint8_t)(cfg_sound_vol(*c) + 1u);
+      } else {
+        c->flags = (uint8_t)(c->flags | CF_MUTE);
+      }
+      // AND YOU HEAR WHAT YOU PICKED. The click this queues is emitted at the
+      // duty the new level names, so the row demonstrates itself instead of
+      // asking the player to go and find a sound somewhere else. Muted, it is
+      // dropped by audio_play(), which is the correct demonstration of OFF.
+      audio_play(SFX_BEEP);
+      break;
     case SET_WEB:   c->flags = (uint8_t)(c->flags ^ CF_WEB_ENABLED); break;
     case SET_BRIGHT: {
       uint8_t i = 0;

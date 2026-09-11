@@ -1503,6 +1503,24 @@ if [ -f "$ROOT/tests/test_statemachine.cpp" ]; then
   done
 fi
 
+# --- P10-C9: EVERY SOURCE FILE IS VALID UTF-8 -------------------------------
+# core/strings_es.h being UTF-8 is gated elsewhere and by a recorder that
+# catches a bad byte the moment it is DRAWN. Nothing gated the rest of the tree,
+# and app/app.cpp carried a Latin-1 0xED - "aqui" with an accent - inside a
+# comment for months. A comment does not ship, so nothing was broken on the
+# device; what broke was every tool that reads the tree as text, which is how it
+# was finally found. One byte, one grep, and it can never come back quietly.
+bad_enc=""
+while IFS= read -r f; do
+  python3 - "$f" <<'PYEOF' || bad_enc="$bad_enc $f"
+import sys
+open(sys.argv[1], encoding="utf-8").read()
+PYEOF
+done <<EOF2
+$(find "$SKETCH/src" "$ROOT/tests" -type f \( -name '*.c' -o -name '*.cpp' -o -name '*.h' -o -name '*.ino' \) 2>/dev/null | sort)
+EOF2
+[ -z "$bad_enc" ] || fail "source file(s) are not valid UTF-8:$bad_enc - the tree is read as text by pbm2svg.py, the string gates and every editor, and a stray Latin-1 byte in a comment breaks them silently"
+
 # --- P10-C2: THE SOUND SETTING REACHES THE PIEZO THROUGH ONE PREDICATE ------
 # core/nt_types.h's cfg_sound_muted() exists because app/app.cpp is compiled by
 # NO host binary: with the expression written inline in app_audio_muted(), every
@@ -1522,6 +1540,14 @@ if [ -f "$SKETCH/src/hardware/audio.cpp" ]; then
   [ "${n:-0}" -ge 1 ] || fail "cfg_sound_muted() has NO caller in src/app ($n) - the persisted CF_MUTE would stop reaching the piezo and no host test could see it (core/nt_types.h, tests/test_sound.cpp)"
   n=$( printf '%s\n' "$app_txt" | { grep -cE '\baudio_bind[[:space:]]*\([^)]' || true; } )
   [ "${n:-0}" -ge 1 ] || fail "audio_bind() has NO caller in src/app ($n) - the tone engine would run with no sink and no mute hook (hardware/audio.h)"
+  # P10-C9: the VOLUME travels the same road and can go stale the same way. An
+  # unbound hook is deliberately the LOUD end rather than silence, so losing
+  # this wiring makes the setting do nothing at all while the device still
+  # beeps - the failure mode a listener would never diagnose as "not wired".
+  n=$( printf '%s\n' "$app_txt" | { grep -cE '\bcfg_sound_vol[[:space:]]*\([^)]' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "cfg_sound_vol() has NO caller in src/app ($n) - the persisted volume would stop reaching the piezo and the device would beep at full duty forever (core/nt_types.h, tests/test_sound.cpp)"
+  n=$( printf '%s\n' "$app_txt" | { grep -cE '\baudio_bind_volume[[:space:]]*\([^)]' || true; } )
+  [ "${n:-0}" -ge 1 ] || fail "audio_bind_volume() has NO caller in src/app ($n) - the tone engine would never learn the level (hardware/audio.h)"
 fi
 
 # --- P10-C3: THE ANIMATION PASS, SIX GATES ----------------------------------
